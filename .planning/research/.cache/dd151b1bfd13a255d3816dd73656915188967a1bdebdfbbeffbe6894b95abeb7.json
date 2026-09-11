@@ -1,0 +1,1 @@
+{"content":"Vitest 5.0.0 (2026-09-03) requires Node ^22.12 || ^24 and Vite ^6.4||^7||^8; breaking: config lookup no longer walks ancestors, vi.mock outside top level throws, @vitest/runner inlined, browser mode changes.","source":"web","provider":"websearch","confidence":"LOW","fetched_at":"2026-09-11T15:43:03.091Z","ttl":86400000,"kind":"web"}
