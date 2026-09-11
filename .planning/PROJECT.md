@@ -106,11 +106,16 @@ A tenant's members open one branded app and feel it is *their organization's* co
 - The user works in Portuguese; planning artifacts are written in English for agent consumption. Domain terms kept as the user named them: `super_admin`, `admin_tenant`.
 - "Modularize everything" is a stated architectural goal: each feature (feed, stories, communities, events, chat, notifications) should be a self-contained module (DB schema, API routes, UI) that can be reused in other TRIA products and toggled per tenant.
 - Expected usage is predominantly mobile browser / PWA; desktop is secondary but must work.
+- **Design prototype exists**: the design team built a mocked frontend at `github.com/tria-company/social-igor` (private; cloned read-only to `reference/frontend-design/`, git-ignored). Stack: Next.js 16, React 19, Tailwind v4, framer-motion, lucide-react, Manrope font. 34 screens, 66 components, all `"use client"` reading `lib/mock/*`. It is the **visual/UX source of truth** but was not built for the modular architecture: brand colors are hex literals, nav is hardcoded, desktop is an iPhone mockup, there are no stories, events are modeled as paid tickets, chat is a ticket helpdesk, and ~1/3 of screens are out of scope (reels, LMS "membros" area, forum, explore, follow graph, reputation). Full analysis in `.planning/research/PROTOTYPE.md`. Decision: port presentational components and design language into module packages phase by phase; rewrite containers, data model and theming; never refactor the prototype in place.
+- Research (2026-09-11) is in `.planning/research/` (STACK, FEATURES, ARCHITECTURE, PITFALLS, PROTOTYPE, SUMMARY).
 
 ## Constraints
 
 - **Tech stack**: Next.js frontend deployed on Vercel — user decision, mobile-first PWA
-- **Tech stack**: Backend API in Node/TypeScript deployed on GCP (Cloud Run) — user decision; all business logic goes through this API, the frontend does not talk to Supabase directly
+- **Tech stack**: Backend API in Node/TypeScript deployed on GCP (Cloud Run) — user decision; all business logic goes through this API. Two confirmed exceptions where the frontend talks to Supabase directly: (1) Supabase Auth login/refresh/recovery via `@supabase/ssr` in the Next.js server, (2) read-only Supabase Realtime Broadcast subscriptions for chat/notification signals (data is always fetched through the API)
+- **Modularity**: each feature is a self-contained package (schema, API, UI) depending only on a kernel and on other modules' published contracts, toggled per tenant and reusable in other TRIA projects — user decision, see MOD-01..05
+- **Design**: UI follows the design team's prototype (`reference/frontend-design/`); components are ported into module packages, not refactored in place — see PROTOTYPE.md
+- **Infra plan**: Supabase Free plan for the pilot (no native image transforms, 50 MB per file, Realtime quotas) — user decision; image resizing done in the worker; upgrade to Pro is a V2 item
 - **Tech stack**: Supabase (Postgres, Auth, Storage, Realtime) as the database/platform — user decision
 - **Tech stack**: GitHub as source of truth, with automated deploy triggers to Vercel and GCP — user decision
 - **Architecture**: Multi-tenant from day one with tenant-scoped data and RLS/defense-in-depth isolation — core value depends on it
@@ -134,6 +139,15 @@ A tenant's members open one branded app and feel it is *their organization's* co
 | Share = internal deep link requiring login | Content stays private to the tenant; no public pages in V1 | — Pending |
 | Plain "like" only, pt-BR only, no billing, no custom domains in V1 | Assumed simplest option where user did not specify; revisit if pilot demands | ⚠️ Revisit |
 | Notifications: in-app bell + Web Push (PWA) | User choice; email/WhatsApp deferred | — Pending |
+| Realtime via Supabase Broadcast (read-only frontend subscription) | Cloud Run WebSockets: 60-min cap, Redis, always-on billing; Broadcast scales and keeps data authority in the API | — Pending |
+| Supabase Auth via `@supabase/ssr` in Next.js; API verifies JWT (JWKS) | Official pattern, less code; API resolves tenant/role per request from DB | — Pending |
+| Identity ≠ membership (`memberships` table, not `profiles.tenant_id`) | Supabase Auth has global email uniqueness; multi-tenant users in V2 become a constraint change | — Pending |
+| Video through a streaming vendor (Mux or Cloudflare Stream) | Supabase Storage does not transcode; iPhone HEVC fails on Android | — Pending |
+| Pinned stories outlive the 24 h expiry in their community | Instagram Highlights model; user confirmed | — Pending |
+| Supabase Free plan for the pilot | User choice to control cost; image resize in worker, 50 MB cap accepted | ⚠️ Revisit |
+| Communities: all members see all communities in V1 | Simplest for pilot; `community_members` table exists for V2 private communities | — Pending |
+| Design prototype is UI source of truth; port, don't refactor | Prototype is mocked and non-modular; presentational components port cleanly, containers/data/theme must be rewritten | — Pending |
+| Structure: vertical MVP slices | Each phase delivers an end-to-end capability; earliest working app for the pilot | — Pending |
 | Events: RSVP before + check-in on the day, admin sees attendance | User choice; gives attendance list without QR hardware | — Pending |
 
 ## Evolution
