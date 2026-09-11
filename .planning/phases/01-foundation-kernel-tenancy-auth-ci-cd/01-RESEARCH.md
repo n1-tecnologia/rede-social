@@ -965,17 +965,19 @@ await withAdminTx(async (tx) => {
 | A16 | Revoking `anon` grants / hiding `public` from the Data API does not break Supabase Auth or Storage internals | Anti-patterns | Verify on staging before prod; RLS alone already prevents leakage |
 | A17 | pg-boss's Drizzle adapter accepts a Drizzle `tx` from `drizzle-orm/postgres-js` with `prepare:false` (docs say postgres-js supported) | Pattern 9 | Enqueue outside the tx with an idempotency key |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **GitHub plan / account shape for D-11 and D-12**
+Every question below is answered by a planned task (planning pass of 2026-09-11); none blocks execution. The resolving plan/task is marked on each item.
+
+1. **GitHub plan / account shape for D-11 and D-12** — **RESOLVED by 01-10 Task 1** (`checkpoint:decision`: org-team / user-pro / free-dispatch / public-repo) **and 01-10 Task 3** (repo under `tria-company`, `main`, environments; the `workflow_dispatch` fallback is recorded in `docs/DEPLOY.md` if protection rules are unavailable).
    - What we know: `tria-company` is a User account (not an org) with private repos (`Agent-post-auton`, `Agent-Roberth`); protected Environments on private repos need Pro (user) or Team (org).
    - What's unclear: current plan of `tria-company`; whether TRIA wants a real organisation.
    - Recommendation: create a GitHub **organisation** `tria-company-org` (or upgrade the user to Pro) before the CI plan; otherwise implement the prod gate as `workflow_dispatch` and record the deviation from D-12.
-2. **Vercel team** — CLI is logged in as `hiperautomacao` with team `PSW` only. Which Vercel team hosts `rede-social`? Team slug also defines the preview URL pattern for the Supabase redirect allow-list.
-3. **GCP project** — `gcloud` active account belongs to an unrelated project; `ferramentas@triacompany.com.br` is credentialed but its token needs re-auth (`gcloud auth login`). Which GCP project/billing account hosts Cloud Run, Artifact Registry, Secret Manager and the WIF pool?
-4. **Supabase organisation** — only "igor.vboas@gmail.com's Org" exists (0 projects). Create a TRIA org (Free) for `rede-social-staging`/`rede-social-prod` so ownership is not personal.
-5. **Resend domain** — who controls DNS for `seusistema.com` (for `mail.seusistema.com` SPF/DKIM) and the `app.seusistema.com` A/CNAME for Vercel?
-6. **Local pooler for the spike** — `config.toml [db.pooler]` is PgBouncer, not Supavisor; the spike must also run against the staging Supavisor URL (needs staging project first). Plan the spike as two runs.
+2. **Vercel team** — **RESOLVED by 01-10 Task 2** (human-action: team slug confirmed) **and 01-11 Task 2** (project linked, env vars, domain; the slug feeds the staging redirect allow-list in `supabase/config.toml`). Original question: CLI is logged in as `hiperautomacao` with team `PSW` only. Which Vercel team hosts `rede-social`? Team slug also defines the preview URL pattern for the Supabase redirect allow-list.
+3. **GCP project** — **RESOLVED by 01-10 Task 2** (`gcloud auth login ferramentas@triacompany.com.br`, project id + billing confirmed) **and 01-11 Task 1** (APIs, Artifact Registry, service accounts, WIF, Secret Manager). Original question: `gcloud` active account belongs to an unrelated project; `ferramentas@triacompany.com.br` is credentialed but its token needs re-auth (`gcloud auth login`). Which GCP project/billing account hosts Cloud Run, Artifact Registry, Secret Manager and the WIF pool?
+4. **Supabase organisation** — **RESOLVED by 01-10 Task 2** (TRIA org named/created, access token provided) **and 01-10 Task 3** (`rede-social-staging`/`rede-social-prod` created in `sa-east-1`). Original question: only "igor.vboas@gmail.com's Org" exists (0 projects). Create a TRIA org (Free) for `rede-social-staging`/`rede-social-prod` so ownership is not personal.
+5. **Resend domain** — **RESOLVED by 01-10 Task 2** (DNS control for `seusistema.com` confirmed) **and 01-11 Tasks 2–3** (Resend domain + sending key created; SPF/DKIM and the `app.` CNAME added and verified at the human checkpoint). Original question: who controls DNS for `seusistema.com` (for `mail.seusistema.com` SPF/DKIM) and the `app.seusistema.com` A/CNAME for Vercel?
+6. **Local pooler for the spike** — **RESOLVED as two runs: 01-03 Task 1** (local PgBouncer transaction mode, `pnpm spike:supavisor`, LOCAL-settings guard, fallback doc) **and 01-12 Task 1 step 4** (staging Supavisor `:6543`, with the `:5432` session-pooler fallback applied via Secret Manager and recorded in `docs/DEPLOY.md` if it fails). Original question: `config.toml [db.pooler]` is PgBouncer, not Supavisor; the spike must also run against the staging Supavisor URL (needs staging project first). Plan the spike as two runs.
 
 ## Environment Availability
 
