@@ -206,13 +206,90 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by roadmap) | | |
+| TENANT-01 | Phase 1 | Pending |
+| TENANT-02 | Phase 2 | Pending |
+| TENANT-03 | Phase 1 | Pending |
+| TENANT-04 | Phase 3 | Pending |
+| TENANT-05 | Phase 1 | Pending |
+| TENANT-06 | Phase 2 | Pending |
+| MOD-01 | Phase 1 | Pending |
+| MOD-02 | Phase 1 | Pending |
+| MOD-03 | Phase 4 | Pending |
+| MOD-04 | Phase 2 | Pending |
+| MOD-05 | Phase 8 | Pending |
+| ROLE-01 | Phase 1 | Pending |
+| ROLE-02 | Phase 1 | Pending |
+| ROLE-03 | Phase 2 | Pending |
+| ROLE-04 | Phase 2 | Pending |
+| ROLE-05 | Phase 2 | Pending |
+| ROLE-06 | Phase 1 | Pending |
+| AUTH-01 | Phase 1 | Pending |
+| AUTH-02 | Phase 1 | Pending |
+| AUTH-03 | Phase 1 | Pending |
+| AUTH-04 | Phase 1 | Pending |
+| AUTH-05 | Phase 1 | Pending |
+| AUTH-06 | Phase 1 | Pending |
+| PROF-01 | Phase 3 | Pending |
+| PROF-02 | Phase 3 | Pending |
+| PROF-03 | Phase 3 | Pending |
+| FEED-01 | Phase 4 | Pending |
+| FEED-02 | Phase 4 | Pending |
+| FEED-03 | Phase 4 | Pending |
+| FEED-04 | Phase 4 | Pending |
+| FEED-05 | Phase 4 | Pending |
+| FEED-06 | Phase 4 | Pending |
+| FEED-07 | Phase 4 | Pending |
+| FEED-08 | Phase 4 | Pending |
+| COMM-01 | Phase 5 | Pending |
+| COMM-02 | Phase 5 | Pending |
+| COMM-03 | Phase 5 | Pending |
+| COMM-04 | Phase 5 | Pending |
+| STORY-01 | Phase 5 | Pending |
+| STORY-02 | Phase 5 | Pending |
+| STORY-03 | Phase 5 | Pending |
+| STORY-04 | Phase 5 | Pending |
+| STORY-05 | Phase 5 | Pending |
+| EVENT-01 | Phase 6 | Pending |
+| EVENT-02 | Phase 6 | Pending |
+| EVENT-03 | Phase 6 | Pending |
+| EVENT-04 | Phase 6 | Pending |
+| EVENT-05 | Phase 6 | Pending |
+| EVENT-06 | Phase 6 | Pending |
+| EVENT-07 | Phase 7 | Pending |
+| CHAT-01 | Phase 7 | Pending |
+| CHAT-02 | Phase 7 | Pending |
+| CHAT-03 | Phase 7 | Pending |
+| CHAT-04 | Phase 7 | Pending |
+| CHAT-05 | Phase 7 | Pending |
+| NOTIF-01 | Phase 7 | Pending |
+| NOTIF-02 | Phase 7 | Pending |
+| NOTIF-03 | Phase 7 | Pending |
+| NOTIF-04 | Phase 7 | Pending |
+| MODER-01 | Phase 8 | Pending |
+| MODER-02 | Phase 8 | Pending |
+| MODER-03 | Phase 8 | Pending |
+| ADMIN-01 | Phase 8 | Pending |
+| ADMIN-02 | Phase 8 | Pending |
+| ADMIN-03 | Phase 8 | Pending |
+| ADMIN-04 | Phase 8 | Pending |
+| MEDIA-01 | Phase 3 | Pending |
+| MEDIA-02 | Phase 3 | Pending |
+| MEDIA-03 | Phase 3 | Pending |
+| MEDIA-04 | Phase 4 | Pending |
+| UI-01 | Phase 2 | Pending |
+| UI-02 | Phase 4 | Pending |
+| UI-03 | Phase 2 | Pending |
+| UI-04 | Phase 2 | Pending |
+| PWA-01 | Phase 2 | Pending |
+| PWA-02 | Phase 7 | Pending |
+| PWA-03 | Phase 2 | Pending |
+| PWA-04 | Phase 1 | Pending |
 
 **Coverage:**
 - v1 requirements: 78 total
-- Mapped to phases: 0
-- Unmapped: 78 ⚠️
+- Mapped to phases: 78
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-11*
-*Last updated: 2026-09-11 after initial definition*
+*Last updated: 2026-09-11 after roadmap creation (traceability filled)*
