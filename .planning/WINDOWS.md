@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 6
+open_count: 7
 waived_count: 0
 fixed_count: 0
-total_count: 6
-last_updated: 2026-09-12T21:16:10.151Z
+total_count: 7
+last_updated: 2026-09-12T21:34:49.618Z
 ---
 
 # Broken Windows Ledger
@@ -21,6 +21,7 @@ last_updated: 2026-09-12T21:16:10.151Z
 | 4 | 01 | stub | apps/web/app/(app)/layout.tsx |  | Only 401 handled in the bootstrap catch; 403 codes (MEMBERSHIP_BLOCKED/NO_MEMBERSHIP/TENANT_HOST_MISMATCH) rethrow until plan 01-05 | open |  | 2026-09-12T13:28:27.571Z |  |
 | 5 | 01 | stub | packages/core/db/schema/chat-stubs.ts |  | Chat stub tables have no triggers, Realtime wiring or routes — intentional shape-only Foundation deliverable, resolved by Phase 7 | open |  | 2026-09-12T21:16:10.084Z |  |
 | 6 | 01 | stub | packages/core/db/schema/notification-stubs.ts |  | notifications stub has no producer or fan-out worker — resolved by Phase 7 | open |  | 2026-09-12T21:16:10.151Z |  |
+| 7 | 01 | unrun-verify | .github/workflows/ci.yml |  | ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01 | open |  | 2026-09-12T21:34:49.618Z |  |
 
 ````json
 [
@@ -94,6 +95,18 @@ last_updated: 2026-09-12T21:16:10.151Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-12T21:16:10.151Z",
+    "resolved_at": null
+  },
+  {
+    "id": 7,
+    "kind": "unrun-verify",
+    "phase": "01",
+    "file": ".github/workflows/ci.yml",
+    "line": null,
+    "description": "ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-12T21:34:49.618Z",
     "resolved_at": null
   }
 ]
