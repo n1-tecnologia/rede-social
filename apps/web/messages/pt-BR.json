@@ -36,7 +36,12 @@
       "weak": "Fraca",
       "ok": "Boa",
       "strong": "Forte"
-    }
+    },
+    "viewRules": "ver regras",
+    "closeRules": "Fechar",
+    "termsLink": "Termos de Uso",
+    "privacyLink": "Política de Privacidade",
+    "invalid": "Confira os campos destacados e tente novamente."
   },
   "forgot": {
     "title": "Recuperar senha",
@@ -80,5 +85,9 @@
     },
     "modules": "Módulos ativos",
     "none": "Nenhum módulo ativo"
+  },
+  "legal": {
+    "version": "Versão {version}",
+    "back": "Voltar"
   }
 }

@@ -1,14 +1,8 @@
 'use server';
 
+import { loginSchema } from '@tria/contracts';
 import { redirect } from 'next/navigation';
-import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-
-// Plan 01-04 moves this to the shared `loginSchema` in @tria/contracts; the rule (min 8) is the same.
-const loginInput = z.object({
-  email: z.email(),
-  password: z.string().min(8),
-});
 
 /**
  * E-mail + password login in the web tier (AUTH-02, D-07). `@supabase/ssr` writes the HttpOnly
@@ -17,7 +11,7 @@ const loginInput = z.object({
  * answers 403 TENANT_HOST_MISMATCH and plan 01-05 renders the host-mismatch screen (D-23).
  */
 export async function login(formData: FormData): Promise<void> {
-  const parsed = loginInput.safeParse({
+  const parsed = loginSchema.safeParse({
     email: formData.get('email'),
     password: formData.get('password'),
   });
