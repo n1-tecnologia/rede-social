@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: Foundation - Kernel, Tenancy, Auth & CI/CD
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-09-12T13:28:28.429Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-09-12T21:12:54.751Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 01 execution started
-state_head: ab5896a2256ad65fcb98e6be618d686f17847267
+state_head: 48c6da5eff5277a230728bc0578c26f7ee836fe2
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 12
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
 Last activity: 2026-09-11 — Phase 01 execution started
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 |------|----------|-------|-------|
 | Phase 01 P01 | 7 min | 2 tasks | 84 files |
 | Phase 01 P02 | 1h 34m | 3 tasks | 37 files |
+| Phase 01 P03 | 12min | 2 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,10 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-02: session cookies HttpOnly+SameSite=Lax (+Secure in production) via lib/supabase/cookie-options.ts (@supabase/ssr defaults httpOnly:false)
 - [Phase 01]: 01-02: next@16.3.5 installed (RESEARCH pin); CLAUDE.md stack table still says 16.3.4 - user to reconcile
 - [Phase 01]: 01-02: mobile-chromium = iPhone 14 preset on Chromium; next-env.d.ts git-ignored (typecheck runs next typegen first); apps/web AGENTS.md+CLAUDE.md from next dev committed
+- [Phase 01]: 01-03: local Supavisor still refuses api_user (ENOIDENTIFIER / ENOTFOUND) — the lane spike ran on the direct port 54322 with max:2; the staging Supavisor run in 01-12 is now the SINGLE authoritative transaction-pooler proof for TENANT-03
+- [Phase 01]: 01-03: the pooler fallback is a DATABASE_URL switch to the session pooler (5432) with withTenantTx unchanged; the per-request PostgREST client (fallback #2) is rejected as a code fork
+- [Phase 01]: 01-03: platform_admins is invisible to tenant lanes through RLS-with-no-policy (not a per-table revoke); 01-08's coverage test should assert pg_policy count = 0 for it
+- [Phase 01]: 01-03: chat/notification stub column shapes (kind, seq bigint, role, last_read_at, payload, event_id) are fixed for Phase 7; open question is whether chat_conversations gains a status column and a widened one-support-per-member index
 
 ### Pending Todos
 
@@ -105,6 +110,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-12T13:28:28.416Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-09-12T21:12:43.428Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None

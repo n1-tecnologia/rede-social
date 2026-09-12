@@ -11,7 +11,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 - [x] **TENANT-01**: A single deployment serves every tenant on that tenant's own custom domain (a hostname the customer owns, registered in `tenant_domains`), while the platform domain serves TRIA's `super_admin`; the host only selects the tenant's public shell (login, sign-up, branding) and after login the app resolves tenant, role and modules from the user's membership, rejecting a session whose membership does not belong to the host's tenant
 - [ ] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
-- [ ] **TENANT-03**: Every tenant-owned row carries `tenant_id`; the API runs tenant requests under a database role subject to Row Level Security (no service-role key for user traffic), so cross-tenant reads/writes are blocked at the DB even if application code has a bug
+- [x] **TENANT-03**: Every tenant-owned row carries `tenant_id`; the API runs tenant requests under a database role subject to Row Level Security (no service-role key for user traffic), so cross-tenant reads/writes are blocked at the DB even if application code has a bug
 - [ ] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
 - [ ] **TENANT-05**: An automated isolation test suite with at least two tenants proves that lists, detail pages, search, notifications, chat and storage never return another tenant's data
 - [ ] **TENANT-06**: Authentication e-mails (password recovery, confirmation) are sent with the tenant's display name and logo, not TRIA's
@@ -27,7 +27,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Roles & Platform Panel
 
-- [ ] **ROLE-01**: Four roles exist: `super_admin` (TRIA staff, cross-tenant), `admin_tenant`, `support_tenant`, `member`; roles are stored per tenant membership, not on the global user
+- [x] **ROLE-01**: Four roles exist: `super_admin` (TRIA staff, cross-tenant), `admin_tenant`, `support_tenant`, `member`; roles are stored per tenant membership, not on the global user
 - [ ] **ROLE-02**: Identity is separate from membership: a user record can be linked to a tenant through a membership row carrying role and status, with V1 enforcing one membership per user via a constraint that can be relaxed for V2
 - [ ] **ROLE-03**: `super_admin` can create a tenant in a platform panel: name, slug, initial branding, enabled modules and the first `admin_tenant` (by e-mail invitation)
 - [ ] **ROLE-04**: `super_admin` can enable/disable feature modules per tenant, and the change is reflected in the tenant's navigation and API access without a redeploy
@@ -209,7 +209,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | TENANT-01 | Phase 1 | Complete |
 | TENANT-02 | Phase 2 | Pending |
-| TENANT-03 | Phase 1 | Pending |
+| TENANT-03 | Phase 1 | Complete |
 | TENANT-04 | Phase 3 | Pending |
 | TENANT-05 | Phase 1 | Pending |
 | TENANT-06 | Phase 2 | Pending |
@@ -219,7 +219,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MOD-03 | Phase 4 | Pending |
 | MOD-04 | Phase 2 | Pending |
 | MOD-05 | Phase 8 | Pending |
-| ROLE-01 | Phase 1 | Pending |
+| ROLE-01 | Phase 1 | Complete |
 | ROLE-02 | Phase 1 | Pending |
 | ROLE-03 | Phase 2 | Pending |
 | ROLE-04 | Phase 2 | Pending |
