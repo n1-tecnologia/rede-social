@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "files": [
+    "src",
+    "legal"
+  ],
   "description": "Zod schemas, error codes, module keys and API types shared by every @tria app and module",
   "exports": {
     ".": "./src/index.ts"

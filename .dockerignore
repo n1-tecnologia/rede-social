@@ -1,0 +1,33 @@
+# Everything the Cloud Run image must never see (context is the repo root, see apps/api/Dockerfile).
+# Build inputs are re-created inside the image: `turbo prune` reads package.json files and sources only.
+
+# Dependencies and build output — reinstalled/rebuilt in the builder stage
+node_modules
+**/node_modules
+.turbo
+**/.turbo
+**/dist
+**/.next
+**/coverage
+**/playwright-report
+**/test-results
+out
+
+# VCS and agent/planning artefacts
+.git
+.github
+.gsd
+.planning
+.claude
+reference
+
+# Secrets and local state (never in an image layer)
+.env*
+!.env.example
+supabase/.temp
+supabase/signing_keys.json
+.vercel
+
+# Not needed by the API image
+docs
+apps/web
