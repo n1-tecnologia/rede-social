@@ -1,0 +1,88 @@
+# Mirrors the local exit gate (plan 01-08) step for step. `workflow_call` makes this same file the
+# `checks` job of deploy-api.yml, so the production gate runs the identical checks for the exact
+# `main` SHA it is about to deploy — there is never a second, drifting copy of these steps (D-12).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: lint, typecheck, tests, pgTAP, integration, e2e
+    runs-on: ubuntu-latest
+    # Job-level so the group is the same whether this file runs directly or is called by
+    # deploy-api.yml; `github.workflow` keeps the two groups apart.
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      # Local-stack-only credentials: the Supabase instance lives and dies inside this runner.
+      # Real environments get these from GitHub environment secrets (see docs/DEPLOY.md).
+      SEED_PASSWORD: ci-only-Segredo123
+      SUPER_ADMIN_PASSWORD: ci-only-SuperSegredo123
+      SUPER_ADMIN_EMAIL: ferramentas@triacompany.com.br
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint, typecheck, build, unit tests
+        run: pnpm turbo lint typecheck build test
+
+      - name: Module boundaries
+        run: pnpm boundaries
+      - name: Module boundaries (negative fixture must fail)
+        run: pnpm boundaries:negative
+      - name: Lane guard (no non-LOCAL role switch or session-scoped claims)
+        run: pnpm guard:lanes
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.117.0
+
+      - name: Generate ES256 signing keys for the local stack
+        run: supabase gen signing-key --algorithm ES256 -o json > supabase/signing_keys.json
+      - name: Start the local Supabase stack
+        run: supabase start
+      - name: Apply migrations
+        run: supabase db reset
+      - name: Give api_user a local login password
+        run: bash scripts/db-local-role.sh
+
+      - name: pgTAP (RLS and tenant isolation)
+        run: supabase test db
+
+      - name: Write .env.local for the API and the web app
+        run: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
+      - name: Seed the two tenants
+        run: pnpm db:seed
+
+      - name: API integration suite
+        run: pnpm test:integration
+      - name: Pooler lane spike (local contingency port; staging proof is plan 01-12)
+        run: pnpm spike:supavisor
+
+      - name: Install Chromium for Playwright
+        run: pnpm --filter @tria/web exec playwright install --with-deps chromium
+      - name: End-to-end (mobile + desktop)
+        run: pnpm e2e
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
