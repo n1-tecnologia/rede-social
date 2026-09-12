@@ -30,6 +30,7 @@
     "@types/node": "24.13.4",
     "@vitest/coverage-v8": "5.0.0",
     "drizzle-orm": "0.45.2",
+    "postgres": "3.4.9",
     "supabase": "2.117.0",
     "tsx": "4.23.13",
     "turbo": "2.10.12",
