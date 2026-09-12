@@ -1,0 +1,36 @@
+{
+  "name": "@tria/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Next.js 16 PWA shell and BFF (Supabase Auth cookies, host -> tenant shell, pt-BR catalog) deployed to Vercel",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "biome check .",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.116.0",
+    "@t3-oss/env-nextjs": "0.13.11",
+    "@tria/contracts": "workspace:*",
+    "hono": "4.13.7",
+    "next": "16.3.5",
+    "next-intl": "4.14.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tria/api": "workspace:*",
+    "@tria/config": "workspace:*",
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2"
+  }
+}

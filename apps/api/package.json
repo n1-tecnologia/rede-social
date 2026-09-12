@@ -8,7 +8,7 @@
     "./types": "./src/app-type.ts"
   },
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch --env-file-if-exists=.env.local src/main.ts",
     "build": "tsup",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",

@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # Prints an `.env.local` block for apps/api and apps/web from the running local Supabase stack.
 # Usage: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
+#        bash scripts/local-env.sh --write   # writes both files in one go (values never printed)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+if [ "${1:-}" = "--write" ]; then
+  for app in api web; do
+    bash "$0" > "apps/$app/.env.local"
+    echo "local-env: wrote apps/$app/.env.local" >&2
+  done
+  exit 0
+fi
 
 STATUS="$(pnpm --silent supabase status -o env)"
 
