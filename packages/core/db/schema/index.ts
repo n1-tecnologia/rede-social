@@ -1,4 +1,5 @@
 export * from './chat-stubs';
+export * from './consent-records';
 export * from './memberships';
 export * from './notification-stubs';
 export * from './platform-admins';
