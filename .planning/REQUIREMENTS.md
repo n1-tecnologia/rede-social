@@ -9,12 +9,13 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Tenancy & Branding
 
-- [ ] **TENANT-01**: A single deployment at one URL serves all tenants; after login the app resolves the user's tenant from their account (not the hostname)
+- [ ] **TENANT-01**: A single deployment serves every tenant on that tenant's own custom domain (a hostname the customer owns, registered in `tenant_domains`), while the platform domain serves TRIA's `super_admin`; the host only selects the tenant's public shell (login, sign-up, branding) and after login the app resolves tenant, role and modules from the user's membership, rejecting a session whose membership does not belong to the host's tenant
 - [ ] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
 - [ ] **TENANT-03**: Every tenant-owned row carries `tenant_id`; the API runs tenant requests under a database role subject to Row Level Security (no service-role key for user traffic), so cross-tenant reads/writes are blocked at the DB even if application code has a bug
 - [ ] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
 - [ ] **TENANT-05**: An automated isolation test suite with at least two tenants proves that lists, detail pages, search, notifications, chat and storage never return another tenant's data
 - [ ] **TENANT-06**: Authentication e-mails (password recovery, confirmation) are sent with the tenant's display name and logo, not TRIA's
+- [ ] **TENANT-07**: `super_admin` can attach a custom domain to a tenant from the platform panel; the platform registers it with the hosting provider and the auth redirect allow-list, shows the DNS records the customer must create, and reports verification status (pilot/seed tenants get their domains from the provisioning script)
 
 ### Modularity (architecture requirement)
 
@@ -184,7 +185,7 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| Custom domain per tenant | TLS/DNS automation and cookie changes; single URL in V1, tenant resolution is already hostname-independent |
+| Tenant subdomains under the platform domain, or DNS automation on the customer's behalf | Every tenant brings a domain it owns (TENANT-01/07); the customer creates the CNAME/A records from the panel's instructions and TLS is issued by the host once verified |
 | Billing / subscription checkout | Tenants provisioned by TRIA; plan/status fields exist on the tenant record for later |
 | Public (logged-out) post pages / SEO | Breaks the private-community promise and leaks tenant content; internal deep links only |
 | Native iOS/Android apps | PWA covers mobile in V1 |
@@ -212,6 +213,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-04 | Phase 3 | Pending |
 | TENANT-05 | Phase 1 | Pending |
 | TENANT-06 | Phase 2 | Pending |
+| TENANT-07 | Phase 2 | Pending |
 | MOD-01 | Phase 1 | Pending |
 | MOD-02 | Phase 1 | Pending |
 | MOD-03 | Phase 4 | Pending |

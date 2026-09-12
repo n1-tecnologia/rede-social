@@ -66,6 +66,7 @@ Recent decisions affecting current work:
 - [Roadmap]: EVENT-07 (reminders) mapped to Phase 7, not Phase 6 - delivery needs the notification module; Phase 6 only emits event domain events.
 - [Roadmap]: MEDIA-04 (link unfurl) mapped to Phase 4 (Feed) where it is user-observable; Phase 3 owns uploads/images/video only.
 - [Roadmap]: Auth UI ships functional-minimal in Phase 1; visual port with the shared UI package in Phase 2.
+- [2026-09-11, user]: Each tenant on its own custom domain (customer-owned host, `tenant_domains`, host -> tenant in `proxy.ts`, membership must match host: 403 `TENANT_HOST_MISMATCH`); platform domain reserved for TRIA `super_admin`; TENANT-01 reworded, TENANT-07 (domain management in the platform panel) added to Phase 2; Phase 1 plans revised accordingly (D-20..D-24).
 - [PROJECT]: Supabase Free plan for the pilot (worker image resize, 50 MB cap); Realtime via Broadcast (read-only browser subscription); `@supabase/ssr` for session; identity != membership (`memberships` table); video via Mux/Cloudflare Stream (choose in Phase 3).
 
 ### Pending Todos

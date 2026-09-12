@@ -18,6 +18,9 @@
 | `signOut({ scope: 'local' })` | INTEGRATE | |
 | `signOut({ scope: 'global' })` | OPT-OUT | "Sair de todos os aparelhos" deferred to Phase 8 (CONTEXT Deferred Ideas) |
 | JWKS endpoint `/auth/v1/.well-known/jwks.json` (API verification with jose) | INTEGRATE | |
+| Redirect allow-list per remote (`additional_redirect_urls`): local `http://localhost:3000/**` + `http://*.localhost:3000/**`; staging = Preview wildcard + localhost + `*.localhost`; production = platform host + the two seed tenant hosts, exact entries | INTEGRATE | D-22 derives `redirect_to` from the request origin, so every served host is listed (D-24); staging never lists production hosts (Pitfall 8) |
+| `redirect_to` from a fixed `SITE_URL` | OPT-OUT | replaced by origin-derived URLs (D-22); no `SITE_URL` variable exists in the web env |
+| Wildcard tenant-domain entries in the production allow-list | OPT-OUT | customer domains are appended one by one when attached in Phase 2 (TENANT-07) |
 | `signUp` (client-side self sign-up) | OPT-OUT | sign-up provisioning must go through the API admin lane so identity is bound to a tenant atomically (C1, Pattern 4) |
 | E-mail confirmation flow (`type=signup` OTP) | OPT-OUT | autoconfirm on in the pilot (D-04); per-tenant toggle deferred |
 | OAuth / magic link / phone / MFA / anonymous sign-in | OPT-OUT | not in V1 requirements (AUTH-01..06 are e-mail + password only) |
@@ -60,7 +63,10 @@
 | Project settings: Root Directory `apps/web`, Ignored Build Step `turbo-ignore` | INTEGRATE | |
 | Environment variables per environment (`vercel env add`) | INTEGRATE | |
 | Remote cache (Turborepo) | INTEGRATE | |
-| Custom domain `app.seusistema.com` | INTEGRATE | requires DNS control (Open Question 5); Vercel `domains add` + CNAME |
+| `vercel domains add` for the platform host + the two seed tenant hosts (`app.`/`demo.`/`lab.` placeholders; real names from the 01-10 Hosts table) | INTEGRATE | D-21/D-24; requires DNS control (Open Question 5); three CNAMEs at the DNS checkpoint |
+| `vercel domains inspect` (per-host configuration check after DNS) | INTEGRATE | 01-11 Task 3 verification |
+| Vercel Domains REST API (`POST /v10/projects/{id}/domains`, `GET …/domains/{domain}/config` verification polling) for customer domains | OPT-OUT | Phase 2 platform panel (TENANT-07); documented in `docs/DEPLOY.md` "Custom domains" by 01-11, not implemented |
+| Preview branch domains (stable staging hostname) | OPT-OUT | D-11 has no long-lived staging branch; staging web = Preview URL (generic host, slug/cookie fallback per D-21) |
 | Deployment protection bypass for Playwright | OPT-OUT | e2e runs against the local stack in CI in Phase 1; preview smoke is manual (VALIDATION manual-only row) |
 | Vercel Blob/KV/Postgres, Edge Config, Cron | OPT-OUT | data lives in Supabase; jobs in pg-boss |
 

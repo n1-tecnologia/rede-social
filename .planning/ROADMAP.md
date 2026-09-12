@@ -2,9 +2,9 @@
 
 ## Overview
 
-TRIA Rede Social is a multi-tenant, white-label community PWA: one URL, one deployment, each organization's members see their own brand and only their own content. The roadmap follows the dependency spine the research identified (kernel + tenancy + auth -> branded shell + platform panel -> media broker + profiles) and then ships content modules in the order that lets each one reuse the conventions of the previous (feed establishes likes/comments/pagination/domain events; communities and stories build on posts; events introduce scheduled jobs). The realtime layer (notifications, Web Push, support chat) comes after all event producers exist, and the last phase gives the tenant admin their moderation and admin panel while running the pilot go-live gate. Eight phases, each a deployable vertical slice (schema + API + UI) except the unavoidable foundation phase, which still ends with a real login against a real tenant.
+TRIA Rede Social is a multi-tenant, white-label community PWA: one deployment, each organization reached on its own custom domain (the platform domain serves TRIA's `super_admin`), each organization's members see their own brand and only their own content. The roadmap follows the dependency spine the research identified (kernel + tenancy + auth -> branded shell + platform panel -> media broker + profiles) and then ships content modules in the order that lets each one reuse the conventions of the previous (feed establishes likes/comments/pagination/domain events; communities and stories build on posts; events introduce scheduled jobs). The realtime layer (notifications, Web Push, support chat) comes after all event producers exist, and the last phase gives the tenant admin their moderation and admin panel while running the pilot go-live gate. Eight phases, each a deployable vertical slice (schema + API + UI) except the unavoidable foundation phase, which still ends with a real login against a real tenant.
 
-**Structure:** Vertical MVP slices (`PROJECT_MODE=mvp`). **Granularity:** standard (8 phases, 3-5 plans each). **Requirement coverage:** 78/78 v1 requirements mapped, each to exactly one phase.
+**Structure:** Vertical MVP slices (`PROJECT_MODE=mvp`). **Granularity:** standard (8 phases, 3-5 plans each). **Requirement coverage:** 79/79 v1 requirements mapped, each to exactly one phase.
 
 **Cross-cutting rules carried by every phase after the one that creates them:**
 
@@ -43,8 +43,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Requirements**: TENANT-01, TENANT-03, TENANT-05, MOD-01, MOD-02, ROLE-01, ROLE-02, ROLE-06, AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, AUTH-06, PWA-04
 **Success Criteria** (what must be TRUE):
 
-  1. A user who signs up through tenant A's public sign-up link (accepting A's community rules and TRIA's terms, recorded with a timestamp) becomes a `member` of tenant A, can log in with e-mail and password, stays logged in after closing and reopening the browser, can recover a forgotten password via e-mail link, and can log out; the sign-up link survives the register -> login round-trip.
-  2. After login, `GET /me/bootstrap` returns the user's tenant, role and enabled modules resolved from their membership row (never from the hostname); a member whose membership is set to blocked receives 401/403 on their very next API request without redeploy or re-login.
+  1. A user who signs up through tenant A's public sign-up link on tenant A's own domain (accepting A's community rules and TRIA's terms, recorded with a timestamp) becomes a `member` of tenant A, can log in with e-mail and password, stays logged in after closing and reopening the browser, can recover a forgotten password via e-mail link, and can log out; the sign-up link survives the register -> login round-trip.
+  2. After login, `GET /me/bootstrap` returns the user's tenant, role and enabled modules resolved from their membership row (the hostname only selects the public shell; a session whose membership does not belong to the host's tenant gets 403 `TENANT_HOST_MISMATCH`); a member whose membership is set to blocked receives 401/403 on their very next API request without redeploy or re-login.
   3. The automated two-tenant isolation suite (pgTAP + API integration tests) passes: every tenant-owned table carries `tenant_id` with RLS enabled, the API's tenant lane runs under a non-service database role inside a per-request transaction, no list or detail endpoint returns another tenant's rows, and routes of a module disabled for the tenant return 404.
   4. A push to `main` deploys the web app to Vercel and the API + worker to Cloud Run through GitHub Actions with separate preview/staging and production environments (two Supabase projects, migrations applied only by CI); the monorepo has a kernel package, a feature-module package template and lint/dependency rules that fail the build when a module imports another module's internals.
 
@@ -53,22 +53,22 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Walking skeleton: toolchain + @tria monorepo scaffold (all packages except `apps/web`); tracer JWT → JWKS auth → membership → RLS tenant lane → `GET /v1/me/bootstrap`
+- [ ] 01-01-PLAN.md — Walking skeleton: toolchain + @tria monorepo scaffold (all packages except `apps/web`); tracer JWT → JWKS auth → membership → RLS tenant lane → `GET /v1/me/bootstrap`; `tenant_domains` + `GET /v1/public/tenants/by-host` + host/membership match (403 `TENANT_HOST_MISMATCH`) + seeded tenant hosts (D-20/D-23/D-24)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — `@tria/web` scaffold + browser login/logout slice: `@supabase/ssr` proxy.ts session, pt-BR catalog, `/entrar`, `/inicio`, "Sair", Playwright on iPhone 14
+- [ ] 01-02-PLAN.md — `@tria/web` scaffold + browser login/logout slice: host → tenant resolution in proxy.ts (tenant / platform / generic hosts, D-20/D-21), `@supabase/ssr` session, pt-BR catalog, `/entrar` (tenant name from the host, D-22), `/inicio`, "Sair", Playwright on iPhone 14 against `tria-demo.localhost`
 - [ ] 01-03-PLAN.md — Supavisor/PgBouncer lane spike + LOCAL-settings guard + fallback doc; `platform_admins`, chat/notification stubs, SCHEMA-CONVENTIONS.md
 - [ ] 01-09-PLAN.md — Pipeline as code: Dockerfile (API + worker), ci.yml, deploy-api.yml (staging on PR, gated prod on main), seed-prod, keep-alive, DEPLOY.md
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-04-PLAN.md — Sign-up slice: `/cadastro/{slug}`, two consents → `consent_records`, `POST /v1/public/signup/:slug` (admin lane, duplicate 409), legal texts
-- [ ] 01-05-PLAN.md — Password recovery (Mailpit e2e, `/auth/confirm` guard) and blocked-member contract (403 on next request, "acesso suspenso")
+- [ ] 01-04-PLAN.md — Sign-up slice: `https://{tenant-domain}/cadastro` (slug from the host) + `/cadastro/{slug}` on generic hosts (D-22), two consents → `consent_records`, `POST /v1/public/signup/:slug` (admin lane, duplicate 409), legal texts
+- [ ] 01-05-PLAN.md — Password recovery (origin-derived links, Mailpit e2e, `/auth/confirm` guard), blocked-member contract (403 on next request, "acesso suspenso") and host-mismatch screen ("Este endereço não pertence à sua comunidade.", D-23)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 01-06-PLAN.md — Module registry, `tenant_modules`, flags cache, `requireModule`/`requireRole`/`requireSuperAdmin`, bootstrap modules + permissions, seed per D-17
+- [ ] 01-06-PLAN.md — Module registry, `tenant_modules`, flags cache, `requireModule`/`requireRole`/`requireSuperAdmin` (platform sessions only off tenant hosts, D-23), bootstrap modules + permissions, platform-host `/inicio` for the super_admin (D-21), seed per D-17 (hosts kept)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -76,7 +76,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 01-08-PLAN.md — Two-tenant isolation suite (pgTAP + API), boundary negative fixture, [BLOCKING] clean `supabase db reset` + full suite
+- [ ] 01-08-PLAN.md — Two-tenant isolation suite (pgTAP + API, incl. `tenant_domains` and "session of A on B's host → 403 `TENANT_HOST_MISMATCH`"), boundary negative fixture, [BLOCKING] clean `supabase db reset` + full suite
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
@@ -84,31 +84,31 @@ Plans:
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 01-11-PLAN.md — Provision GCP (WIF, Artifact Registry, Secret Manager), Vercel project/env/domain, Resend SMTP; DNS + ES256 key checkpoint
+- [ ] 01-11-PLAN.md — Provision GCP (WIF, Artifact Registry, Secret Manager), Vercel project/env + platform domain + two seed tenant domains, per-host auth allow-lists, Resend SMTP, Phase 2 custom-domain runbook; DNS (three CNAMEs) + ES256 key checkpoint
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 01-12-PLAN.md — First PR → Preview + staging, staging Supavisor spike, remote smoke, merge → production approval, seed-prod, real e-mail check
+- [ ] 01-12-PLAN.md — First PR → Preview + staging, staging Supavisor spike, remote smoke (Preview keeps the slug/cookie fallback), merge → production approval, seed-prod, production smokes on the seed tenant host (member) and the platform host (super_admin), real e-mail check
 
 **Research needed**: Supavisor transaction pooling with `set_config(..., true)` + `SET LOCAL ROLE authenticated` (verify with a spike before schema freeze; fallback is a per-request Supabase client with the user JWT); dedicated `api_user` role grants; pg-boss transactional enqueue with Drizzle; Supabase asymmetric signing keys + `@supabase/ssr` cookie flow in Next 16 `proxy.ts`; TypeScript 7 tooling at repo bootstrap.
-**Notes**: Auth routes in this phase are functional-minimal (plain forms); their visual port to the prototype's design lands in Phase 2 with the shared UI package. Chat and notification table stubs and the "schema conventions" doc are Foundation deliverables so later modules are reviewed against V2-safe shapes. Tenants are seeded by script/migration until the platform panel exists in Phase 2.
+**Notes**: Auth routes in this phase are functional-minimal (plain forms); their visual port to the prototype's design lands in Phase 2 with the shared UI package. Chat and notification table stubs and the "schema conventions" doc are Foundation deliverables so later modules are reviewed against V2-safe shapes. Tenants are seeded by script/migration until the platform panel exists in Phase 2. Each tenant is served on its own custom domain (`tenant_domains`, host -> tenant lookup in `proxy.ts`); the platform domain hosts TRIA's `super_admin`; the seed tenants use TRIA-owned hostnames so staging/production smoke tests run on real tenant domains.
 
 ### Phase 2: Tenant Shell, Branding & Platform Panel
 
-**Goal**: Members open one URL and see their own organization's branded, installable app on phone and desktop; TRIA can provision a tenant end-to-end (branding, modules, first admin) from the platform panel without touching the database.
+**Goal**: Members open their organization's own domain and see its branded, installable app on phone and desktop, branded already on the login page; TRIA can provision a tenant end-to-end (branding, modules, custom domain, first admin) from the platform panel on the platform domain without touching the database.
 **Mode:** mvp
 **Depends on**: Phase 1
-**Requirements**: TENANT-02, TENANT-06, MOD-04, ROLE-03, ROLE-04, ROLE-05, UI-01, UI-03, UI-04, PWA-01, PWA-03
+**Requirements**: TENANT-02, TENANT-06, TENANT-07, MOD-04, ROLE-03, ROLE-04, ROLE-05, UI-01, UI-03, UI-04, PWA-01, PWA-03
 **Success Criteria** (what must be TRUE):
 
-  1. After login, a member of tenant A sees A's logo, colors, favicon and display name server-rendered in the whole app shell (top bar, bottom navigation, theme-color) with no default-brand flash, on a phone and in a real desktop layout; a member of tenant B logging in on the same URL sees only B's brand (verified by the two-tenant smoke test and a build-output check that no authenticated route is static).
-  2. `super_admin` can create a tenant in the platform panel (name, slug, initial branding, enabled modules, first `admin_tenant` invited by e-mail), list all tenants with status, open any tenant's settings, and toggle a module; the change appears in that tenant's navigation and its API routes (404 when disabled) without a redeploy.
+  1. After login, a member of tenant A sees A's logo, colors, favicon and display name server-rendered in the whole app shell (top bar, bottom navigation, theme-color) with no default-brand flash, on a phone and in a real desktop layout; a member of tenant B logging in on B's domain sees only B's brand, and the login page of each domain already carries that tenant's brand before authentication (verified by the two-tenant smoke test and a build-output check that no authenticated route is static).
+  2. `super_admin` can create a tenant in the platform panel (name, slug, initial branding, enabled modules, first `admin_tenant` invited by e-mail), list all tenants with status, open any tenant's settings, toggle a module, and attach a custom domain (registered with the hosting provider and the auth redirect allow-list automatically, with the DNS records to create and the verification status shown); the module change appears in that tenant's navigation and its API routes (404 when disabled) without a redeploy.
   3. The prototype's shared primitives (Button, IconButton, Avatar, Badge, BottomSheet, ConfirmDialog, EmptyState, Input, Skeleton, Tabs, Toast, TopBar, BottomNav, PullToRefresh, SafeAreaWrapper) and design tokens live in the kernel shared-UI package; hardcoded brand hex literals, "Igor Alves" strings and `lib/nav.ts` are replaced by tenant theme variables, tenant display name and registry-driven navigation; the platform-panel screens (which the prototype lacks) are designed in the prototype's language and reviewed with the design team.
   4. The app is installable as a PWA (manifest + service worker) and runs in standalone mode on iOS and Android; password-recovery and confirmation e-mails show the tenant's display name and logo; every shell and auth string is pt-BR and comes from a central message catalog.
 
 **Plans**: TBD
 **UI hint**: yes
-**Research needed**: `@serwist/turbopack` service-worker setup under Next 16.3; branded auth e-mails on Supabase (per-project templates vs Send Email hook) - decide here; the rest (Tailwind `@theme inline`, dynamic manifest route handlers, `force-dynamic` segments) is well documented and needs a review gate, not research.
+**Research needed**: Vercel Domains REST API + verification flow for customer-owned domains (add domain, read DNS/verification records, poll status) and Supabase redirect allow-list updates per domain; `@serwist/turbopack` service-worker setup under Next 16.3; branded auth e-mails on Supabase (per-project templates vs Send Email hook) - decide here; the rest (Tailwind `@theme inline`, dynamic manifest route handlers, `force-dynamic` segments) is well documented and needs a review gate, not research.
 **Notes**: Establishes the UI-SPEC review pattern for prototype-less screens that Phases 4-8 reuse (admin composers, stories viewer, support inbox, admin panel, moderation). Per-tenant manifest/icons are served from `no-store` route handlers; the iOS "Adicionar a Tela de Inicio" hint component is built here but only wired to push in Phase 7.
 
 ### Phase 3: Media Pipeline & Member Profiles

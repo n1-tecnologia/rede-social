@@ -4,7 +4,7 @@
 
 **TRIA Rede Social (white-label community platform)**
 
-A multi-tenant, white-label "social network" SaaS built by TRIA. Organizations (creators, companies, institutions, any group with a member base) get their own branded community inside a single web app at one URL (`app.seusistema.com`): after login the app identifies the user's tenant and applies that tenant's logo, colors, favicon and display name. It is mobile-first (installable PWA) and fully responsive on desktop.
+A multi-tenant, white-label "social network" SaaS built by TRIA. Organizations (creators, companies, institutions, any group with a member base) get their own branded community inside a single deployment, each tenant reached on its own custom domain (e.g. `comunidade.cliente.com.br`) while the platform domain (`app.seusistema.com`) serves TRIA's `super_admin`: the host selects the tenant's public shell and, after login, the app confirms the user's tenant from their membership and applies that tenant's logo, colors, favicon and display name. It is mobile-first (installable PWA) and fully responsive on desktop.
 
 In V1 only the tenant's admin publishes content (feed posts, stories, communities, events); members consume, like, comment, share, RSVP/check-in to events, and talk to the tenant's support team via chat. The data model is born ready for V2, where any member can post, create communities and chat with other members.
 
@@ -70,7 +70,7 @@ In V1 only the tenant's admin publishes content (feed posts, stories, communitie
 | **React** | 19.3.0 | UI | Ships with Next 16.3; View Transitions, `useEffectEvent`, `<Activity>`. | HIGH |
 | **Hono** | 4.13.7 | API framework on Cloud Run (`@hono/node-server` 2.1.1) | Web-standard `Request`/`Response`, tiny cold start (matters on Cloud Run scale-to-zero), first-class Zod 4 validation, **built-in RPC client (`hono/client` `hc<AppType>`)** that gives the Next.js app end-to-end types with no codegen, and `@hono/zod-openapi` 1.6.3 (peer: `zod ^4`, `hono >=4.10`) to emit OpenAPI from the same schemas. Route groups map 1:1 to the "feature module" architecture (`feed`, `stories`, `communities`, `events`, `chat`, `notifications`), each a self-contained `new Hono()` mounted with `app.route('/feed', feed)`. See "Alternatives" for Fastify/NestJS. | MEDIUM |
 | **Zod** | 4.6.2 | Runtime validation + shared contracts | Single schema language across API validators, OpenAPI, forms (`@hookform/resolvers`), and DB inserts (`drizzle-zod` 0.8.3 supports zod ^4). | HIGH |
-| **Drizzle ORM / drizzle-kit** | 0.45.2 / 0.31.10 | Schema, queries, RLS policies, migration generation | SQL-shaped (no hidden query planner), and the only mainstream TS ORM with first-class Supabase RLS helpers: `pgTable(...).withRLS()`, `pgPolicy()`, and `drizzle-orm/supabase` exports (`authenticatedRole`, `serviceRole`, `authUid`, `realtimeTopic`, `realtimeMessages.link()`). Policies live next to the tables they protect, so tenant isolation is code-reviewed with the schema. `drizzle-kit generate` emits reviewable SQL. | MEDIUM |
+| **Drizzle ORM / drizzle-kit** | 0.45.2 / 0.31.10 | Schema, queries, RLS policies, migration generation | SQL-shaped (no hidden query planner), and the only mainstream TS ORM with first-class Supabase RLS helpers: `pgTable(...).enableRLS()` (drizzle-orm 0.45.2; `withRLS` does not exist in this version), `pgPolicy()`, and `drizzle-orm/supabase` exports (`authenticatedRole`, `serviceRole`, `authUid`, `realtimeTopic`, `realtimeMessages.link()`). Policies live next to the tables they protect, so tenant isolation is code-reviewed with the schema. `drizzle-kit generate` emits reviewable SQL. | MEDIUM |
 | **postgres (postgres.js)** | 3.4.9 | DB driver | Drizzle's documented driver for Supabase. Connect through the Supavisor **transaction pooler** (port 6543) with `{ prepare: false }` (prepared statements unsupported in transaction mode). The pooler is IPv4, which sidesteps Supabase direct-connection IPv6 requirements from Cloud Run. Autoscaling Cloud Run instances × pooled connections stays bounded. | MEDIUM |
 | **Supabase CLI** | 2.117.0 | Local stack (`supabase start`), applying migrations (`supabase db push`), `config.toml` (auth settings, hooks, buckets), pgTAP tests | Fixed platform; the CLI is the deploy/config tool of record. | HIGH |
 | **Tailwind CSS** | 4.3.3 | Styling | CSS-first config; theme tokens compile to CSS variables. `@theme inline` is the documented mechanism for tokens that reference runtime-changing variables, which is exactly what per-tenant branding needs (see "Stack Patterns → White-label theming"). | HIGH |
@@ -156,7 +156,7 @@ In V1 only the tenant's admin publishes content (feed posts, stories, communitie
 
 ### 3. ORM, migrations, RLS ownership
 
-- **Schema source of truth:** Drizzle TS in `packages/db/schema/<module>.ts`, including `.withRLS()` and `pgPolicy(...)` per table, and `realtimeMessages.link(...)` / `storage.objects` policies from `drizzle-orm/supabase`.
+- **Schema source of truth:** Drizzle TS in `packages/db/schema/<module>.ts`, including `.enableRLS()` and `pgPolicy(...)` per table, and `realtimeMessages.link(...)` / `storage.objects` policies from `drizzle-orm/supabase`.
 - **Migrations:** `drizzle-kit generate` with `out: './supabase/migrations'` and `migrations: { prefix: 'supabase' }` so files are `YYYYMMDDHHmmss_name.sql`; review the SQL in PR; apply with `supabase db push` in CI (prod) and `supabase db reset` locally. One migration folder, one tool applying, Supabase CLI keeping the history table. Do not also run `drizzle-kit migrate` (two history tables = drift). Hand-written SQL (the auth hook function, triggers for `realtime.broadcast_changes`, `pg-boss` schema grants) goes in `--custom` migrations.
 - **Runtime DB role:** create `api_user` (`LOGIN`, `NOBYPASSRLS`) with `GRANT authenticated, service_role TO api_user` and grants on `public` tables; the API's `DATABASE_URL` uses this role through the pooler. Migrations use the `postgres` connection string only in CI. Rationale: Supabase's `postgres` role can bypass RLS, which would silently neutralise layer 3 above.
 - **Seed/local:** `supabase start` + `supabase db reset` + a `seed.ts` using Drizzle for a demo tenant, admin, members.
@@ -239,7 +239,7 @@ In V1 only the tenant's admin publishes content (feed posts, stories, communitie
 | `beforeinstallprompt`-only install UX | Not supported on iOS Safari | Manifest + HTTPS + iOS coach mark |
 | typescript-eslint with `typescript@7.0` | TS 7.0 package has no JS compiler API until 7.1 | Biome, or TS 6 alias |
 | Redis/Memorystore in V1 | Extra managed service, VPC connector, cost — nothing in V1 needs it | pg-boss on Postgres, Realtime for fan-out |
-| Custom-domain-per-tenant logic in V1 | Out of scope; keep tenant resolution from the JWT claim | `tenant_id` claim; hostname resolution can be layered in `proxy.ts` later |
+| Tenant authority taken from the hostname alone | The host only selects the public shell; a session whose membership does not belong to the host's tenant must be rejected | `tenant_domains` lookup in `proxy.ts` (cached) + membership/host match in the API (`TENANT_HOST_MISMATCH`) |
 
 ## Version Compatibility
 
@@ -251,7 +251,7 @@ In V1 only the tenant's admin publishes content (feed posts, stories, communitie
 | `@hono/zod-openapi@1.6.3` | `zod ^4.0.0`, `hono >=4.10.0` | Zod 3 not supported by 1.x. |
 | `@hono/node-server@2.1.1` | `hono ^4`, Node ≥ 20 | Returns the `node:http` server (you manage `close()` for graceful Cloud Run shutdown on SIGTERM). |
 | `drizzle-zod@0.8.3` | `zod ^3.25 \|\| ^4`, `drizzle-orm >=0.36` | OK with Zod 4.6. |
-| `drizzle-orm@0.45.2` | `postgres@3.4.9`, `drizzle-kit@0.31.10` | RLS API (`withRLS`, `pgPolicy`, `drizzle-orm/supabase`). |
+| `drizzle-orm@0.45.2` | `postgres@3.4.9`, `drizzle-kit@0.31.10` | RLS API (`enableRLS`, `pgPolicy`, `drizzle-orm/supabase`). |
 | `@supabase/supabase-js@2.116.0` | Node ≥ 22 | Same version line for `realtime-js`/`storage-js` 2.116.0. |
 | `vitest@5.0.0` | Node ^22.12 \|\| ^24, `vite ^6.4 \|\| ^7 \|\| ^8` (8.3.0 current), `@vitest/coverage-v8@5.0.0` | Released 2026-09-03; config lookup no longer walks up directories — give each package its own `vitest.config.ts` or use workspace projects. |
 | `tailwindcss@4.3.3` | `@tailwindcss/postcss@4.3.3`, shadcn CLI 4.21.0 | Tailwind v4 theme variables required for the theming pattern. |

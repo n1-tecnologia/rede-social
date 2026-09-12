@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A multi-tenant, white-label "social network" SaaS built by TRIA. Organizations (creators, companies, institutions, any group with a member base) get their own branded community inside a single web app at one URL (`app.seusistema.com`): after login the app identifies the user's tenant and applies that tenant's logo, colors, favicon and display name. It is mobile-first (installable PWA) and fully responsive on desktop.
+A multi-tenant, white-label "social network" SaaS built by TRIA. Organizations (creators, companies, institutions, any group with a member base) get their own branded community inside a single deployment, each tenant reached on its own custom domain (e.g. `comunidade.cliente.com.br`) while the platform domain (`app.seusistema.com`) serves TRIA's `super_admin`: the host selects the tenant's public shell and, after login, the app confirms the user's tenant from their membership and applies that tenant's logo, colors, favicon and display name. It is mobile-first (installable PWA) and fully responsive on desktop.
 
 In V1 only the tenant's admin publishes content (feed posts, stories, communities, events); members consume, like, comment, share, RSVP/check-in to events, and talk to the tenant's support team via chat. The data model is born ready for V2, where any member can post, create communities and chat with other members.
 
@@ -26,7 +26,7 @@ A tenant's members open one branded app and feel it is *their organization's* co
 ### Active
 
 **Tenancy & branding**
-- [ ] Single deployment, single URL serves all tenants; tenant is resolved from the logged-in user's account
+- [ ] Single deployment serves every tenant on that tenant's own custom domain; the host picks the public shell, the logged-in user's membership is the authority and must match the host's tenant; the platform domain is reserved for TRIA's `super_admin`
 - [ ] Each tenant has customizable branding: logo, color palette, favicon, display name, applied after login
 - [ ] Feature modules (feed, communities, stories, events, chat, notifications) can be enabled/disabled per tenant and drive the app navigation
 - [ ] Strict data isolation between tenants (every query scoped by tenant, enforced at DB level)
@@ -90,7 +90,7 @@ A tenant's members open one branded app and feel it is *their organization's* co
 
 - Members creating posts or communities — V2; schema supports it, UI/permissions do not expose it in V1
 - Member-to-member chat — V2; V1 chat is member ↔ support only, on the same schema
-- Custom domain per tenant (`app.cliente.com`) — single URL in V1; keep tenant resolution decoupled from hostname so this can be added
+- Tenant subdomains under the platform domain, and DNS automation on the customer's behalf — each tenant brings a domain it owns; the customer creates the DNS records from the platform panel's instructions
 - Billing / subscription checkout — tenants are provisioned by TRIA; plan/status fields exist but no payment integration
 - Varied reactions (emoji) — plain "like" only
 - Native iOS/Android apps — PWA covers mobile in V1
@@ -127,7 +127,7 @@ A tenant's members open one branded app and feel it is *their organization's* co
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Single URL, tenant resolved from the user's account | Simplest onboarding; no DNS per tenant; custom domains can be layered later | — Pending |
+| Each tenant on its own custom domain; platform domain reserved for TRIA `super_admin` (2026-09-11, supersedes "single URL") | Tenants want their own address and branding before login; the membership stays the authority and must match the host's tenant | — Pending |
 | One admin per tenant publishes all V1 content | Validates the community product with controlled content before opening posting to members | — Pending |
 | Feature flags per tenant (not plans) | TRIA super_admin toggles modules directly; plans can map to flag sets later | — Pending |
 | Central API on GCP, frontend never hits Supabase directly | User wants business logic centralized and reusable; Supabase used as managed Postgres/Auth/Storage | — Pending |
@@ -137,7 +137,7 @@ A tenant's members open one branded app and feel it is *their organization's* co
 | Stories are soft-expired (hidden after 24 h, never deleted) | Admin may want history; pinned stories in communities need the record | — Pending |
 | Comments allow one reply level on posts, none on stories | User-specified interaction depth | — Pending |
 | Share = internal deep link requiring login | Content stays private to the tenant; no public pages in V1 | — Pending |
-| Plain "like" only, pt-BR only, no billing, no custom domains in V1 | Assumed simplest option where user did not specify; revisit if pilot demands | ⚠️ Revisit |
+| Plain "like" only, pt-BR only, no billing in V1 | Assumed simplest option where user did not specify; revisit if pilot demands | ⚠️ Revisit |
 | Notifications: in-app bell + Web Push (PWA) | User choice; email/WhatsApp deferred | — Pending |
 | Realtime via Supabase Broadcast (read-only frontend subscription) | Cloud Run WebSockets: 60-min cap, Redis, always-on billing; Broadcast scales and keeps data authority in the API | — Pending |
 | Supabase Auth via `@supabase/ssr` in Next.js; API verifies JWT (JWKS) | Official pattern, less code; API resolves tenant/role per request from DB | — Pending |
