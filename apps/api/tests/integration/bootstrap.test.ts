@@ -6,7 +6,7 @@ import { withTenantTx } from '@tria/core/db/tenant-tx';
 import { sql } from 'drizzle-orm';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 type Envelope = { error: { code: string; message: string; details?: unknown; requestId: string } };
 type Loose = { user: { id: string }; tenant: { id: string; slug: string } };
@@ -126,6 +126,64 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
     const res = await bootstrap({ 'x-tenant-host': 'preview.example' });
     expect(res.status).toBe(200);
     expect(((await res.json()) as Loose).tenant.slug).toBe('tria-demo');
+  });
+});
+
+describe('TENANT-01 — the membership is the tenant of record; cookie and Host never select data', () => {
+  const NO_MEMBERSHIP_EMAIL = 'no-membership@tria-test.local';
+  let orphanId: string | null = null;
+
+  afterAll(async () => {
+    if (orphanId) {
+      await authAdmin().deleteUser(orphanId);
+      await adminSql`delete from public.users where id = ${orphanId}::uuid`;
+    }
+  });
+
+  it('12. adjacency: tenant_slug cookie, Host and X-Forwarded-Host of another tenant are ignored (D-23)', async () => {
+    const spoofed = {
+      cookie: 'tenant_slug=tria-lab',
+      host: 'tria-lab.example',
+      'x-forwarded-host': 'tria-lab.example',
+    };
+    const res = await bootstrap(spoofed);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Loose).tenant.slug).toBe('tria-demo');
+
+    // An UNREGISTERED x-tenant-host is a generic host: the membership wins (D-21). The registered-host
+    // denial (x-tenant-host = tria-lab's real host -> 403 TENANT_HOST_MISMATCH) is case 7 above.
+    const generic = await bootstrap({ ...spoofed, 'x-tenant-host': 'tria-lab.example' });
+    expect(generic.status).toBe(200);
+    expect(((await generic.json()) as Loose).tenant.slug).toBe('tria-demo');
+  });
+
+  it('13. empty: a valid token without a membership row gets 403 NO_MEMBERSHIP, never an empty tenant', async () => {
+    const password = `Orphan-${SEED_PASSWORD}`;
+    const { data, error } = await authAdmin().createUser({
+      email: NO_MEMBERSHIP_EMAIL,
+      password,
+      email_confirm: true,
+      user_metadata: { name: 'Sem Comunidade' },
+    });
+    if (error || !data.user) throw new Error(`createUser failed: ${error?.message}`);
+    orphanId = data.user.id;
+
+    const orphanToken = await signInAs(NO_MEMBERSHIP_EMAIL, password);
+    const res = await api.request('/v1/me/bootstrap', {
+      headers: { authorization: `Bearer ${orphanToken}` },
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NO_MEMBERSHIP');
+    expect(body).not.toHaveProperty('tenant');
+  });
+
+  it('14. ordering: app.membership_for_user resolves deterministically (order by joined_at limit 1)', async () => {
+    const rows = await adminSql<{ def: string }[]>`
+      select pg_get_functiondef('app.membership_for_user(uuid)'::regprocedure) as def`;
+    const def = rows[0]?.def.toLowerCase() ?? '';
+    expect(def).toContain('order by m.joined_at');
+    expect(def).toContain('limit 1');
   });
 });
 

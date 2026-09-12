@@ -30,6 +30,9 @@ export const hosts = {
 /** Specs that need the local generic/lab/platform hosts call `test.skip(isRemote, 'local stack only')`. */
 export const isRemote = Boolean(process.env.PLAYWRIGHT_BASE_URL);
 
+/** Absolute origin of the tenant under test (for contexts created with `browser.newContext()`). */
+export const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? hosts.demo;
+
 /** Fills the `/entrar` form and waits for the landing path (`/inicio` by default). */
 export async function login(
   page: Page,

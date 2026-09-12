@@ -29,6 +29,16 @@ export async function signInAs(email: string, password: string): Promise<string>
   return data.session.access_token;
 }
 
+/**
+ * GoTrue admin API for throwaway fixtures (service key). Built here on purpose instead of importing
+ * `@tria/core/server/supabase-admin`, which Biome restricts to the kernel's admin lane.
+ */
+export function authAdmin() {
+  return createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_KEY'), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  }).auth.admin;
+}
+
 /** Superuser-ish connection for fixtures only (never used by application code). */
 export const adminSql = postgres('postgres://postgres:postgres@127.0.0.1:54322/postgres', {
   prepare: false,
