@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Redefinir sua senha</title>
+  </head>
+  <body style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color: #1f2937; line-height: 1.5;">
+    <h2>Redefinir sua senha</h2>
+    <p>Recebemos um pedido para redefinir a senha da sua conta.</p>
+    <p>
+      <a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery">Clique aqui para escolher uma nova senha</a>
+    </p>
+    <p>Se você não pediu isso, ignore este e-mail. O link expira em breve.</p>
+    <p style="color: #6b7280; font-size: 12px;">TRIA</p>
+  </body>
+</html>

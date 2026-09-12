@@ -1,0 +1,38 @@
+{
+  "name": "tria-rede-social",
+  "private": true,
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "boundaries": "turbo boundaries --filter='!@tria/boundary-fixture'",
+    "boundaries:negative": "bash scripts/check-boundaries.sh",
+    "guard:lanes": "bash scripts/guard-local-settings.sh",
+    "db:generate": "pnpm --filter @tria/api exec drizzle-kit generate",
+    "db:reset": "supabase db reset && bash scripts/db-local-role.sh",
+    "db:seed": "tsx scripts/seed.ts",
+    "spike:supavisor": "vitest run --config scripts/vitest.config.ts",
+    "test:integration": "pnpm --filter @tria/api test:integration",
+    "e2e": "pnpm --filter @tria/web e2e",
+    "supabase": "supabase"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "@playwright/test": "1.63.0",
+    "@tria/contracts": "workspace:*",
+    "@tria/core": "workspace:*",
+    "@types/node": "24.13.4",
+    "@vitest/coverage-v8": "5.0.0",
+    "drizzle-orm": "0.45.2",
+    "supabase": "2.117.0",
+    "tsx": "4.23.13",
+    "turbo": "2.10.12",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
+  }
+}

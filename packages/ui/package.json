@@ -1,0 +1,17 @@
+{
+  "name": "@tria/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared UI primitives (Phase 2 ports the design prototype here)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4"
+  }
+}

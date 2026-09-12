@@ -1,0 +1,62 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "globalEnv": ["CI", "NODE_ENV"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "env": ["NEXT_PUBLIC_*", "API_URL", "DATABASE_URL", "SUPABASE_*"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "lint": {},
+    "test": {
+      "env": ["NEXT_PUBLIC_*", "API_URL", "DATABASE_URL", "SUPABASE_*"]
+    },
+    "test:integration": {
+      "cache": false,
+      "env": [
+        "NEXT_PUBLIC_*",
+        "API_URL",
+        "DATABASE_URL",
+        "SUPABASE_*",
+        "SEED_PASSWORD",
+        "TENANT_*",
+        "PLATFORM_HOST"
+      ]
+    },
+    "e2e": {
+      "cache": false,
+      "env": [
+        "NEXT_PUBLIC_*",
+        "API_URL",
+        "DATABASE_URL",
+        "SUPABASE_*",
+        "SEED_PASSWORD",
+        "TENANT_*",
+        "PLATFORM_HOST"
+      ]
+    }
+  },
+  "boundaries": {
+    "tags": {
+      "module": {
+        "dependencies": { "allow": ["kernel", "contracts", "tooling"] },
+        "dependents": { "deny": ["module"] }
+      },
+      "kernel": {
+        "dependencies": { "deny": ["module", "app"] }
+      },
+      "contracts": {
+        "dependencies": { "allow": ["tooling"] }
+      },
+      "app": {
+        "dependencies": { "allow": ["kernel", "contracts", "module", "tooling", "app"] }
+      },
+      "tooling": {
+        "dependencies": { "allow": ["tooling"] }
+      }
+    }
+  }
+}

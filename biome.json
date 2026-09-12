@@ -1,0 +1,126 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
+  "root": true,
+  "extends": [
+    "./packages/config/biome.base.json"
+  ],
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!.gsd/**",
+      "!.planning/**",
+      "!.claude/**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/.next",
+      "!**/.turbo",
+      "!**/coverage",
+      "!supabase/migrations",
+      "!supabase/.temp",
+      "!packages/boundary-fixture",
+      "!reference"
+    ]
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**",
+        "!packages/core/server/tenancy/**",
+        "!packages/core/server/platform/**",
+        "!scripts/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@tria/core/db/admin-tx",
+                      "@tria/core/server/supabase-admin"
+                    ],
+                    "message": "Admin lane is kernel-only"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "packages/modules/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@tria/module-*/src/**",
+                      "@tria/core/src/**",
+                      "../../../core/**"
+                    ],
+                    "message": "Import published entry points only"
+                  },
+                  {
+                    "group": [
+                      "@tria/core/db/admin-tx",
+                      "@tria/core/server/supabase-admin"
+                    ],
+                    "message": "Admin lane is kernel-only"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/web/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@tria/core/db/*",
+                      "@tria/core/server/*",
+                      "@tria/api/*",
+                      "!@tria/api/types"
+                    ],
+                    "message": "Web imports contracts, module ui and API types only"
+                  },
+                  {
+                    "group": [
+                      "@tria/core/db/admin-tx",
+                      "@tria/core/server/supabase-admin"
+                    ],
+                    "message": "Admin lane is kernel-only"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@tria/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hono API (ROLE=api) and pg-boss worker (ROLE=worker) deployed to Cloud Run from one image",
+  "exports": {
+    "./types": "./src/app-type.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsup",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "@hono/zod-openapi": "1.6.3",
+    "@t3-oss/env-core": "0.13.11",
+    "@tria/contracts": "workspace:*",
+    "@tria/core": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.7",
+    "pino": "10.3.1",
+    "pino-http": "11.0.0",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "2.116.0",
+    "@tria/config": "workspace:*",
+    "@types/node": "24.13.4",
+    "drizzle-kit": "0.31.10",
+    "jose": "6.2.12",
+    "postgres": "3.4.9",
+    "tsup": "8.5.1",
+    "vitest": "5.0.0"
+  }
+}

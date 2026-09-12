@@ -1,0 +1,23 @@
+{
+  "name": "@tria/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared tooling configuration (tsconfig, vitest, biome) for the @tria workspace",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./vitest.base": "./vitest.base.ts",
+    "./biome.base.json": "./biome.base.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "peerDependencies": {
+    "vitest": "5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4",
+    "vitest": "5.0.0"
+  }
+}

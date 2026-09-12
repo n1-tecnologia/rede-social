@@ -1,0 +1,3 @@
+-- Intentionally empty. Seeding is done by `pnpm db:seed` (scripts/seed.ts, D-14):
+-- tenants, users and memberships are created through the admin lane + Supabase Auth admin API,
+-- never through SQL, so passwords and e-mails never live in this repository.

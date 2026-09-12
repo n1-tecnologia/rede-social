@@ -1,0 +1,33 @@
+{
+  "name": "@tria/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Kernel: database client, tenant/admin transaction lanes, core schema, auth and tenancy middleware",
+  "exports": {
+    "./db": "./db/client.ts",
+    "./db/schema": "./db/schema/index.ts",
+    "./db/tenant-tx": "./db/tenant-tx.ts",
+    "./db/admin-tx": "./db/admin-tx.ts",
+    "./db/rls": "./db/rls.ts",
+    "./server/*": "./server/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.116.0",
+    "@t3-oss/env-core": "0.13.11",
+    "@tria/contracts": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.7",
+    "jose": "6.2.12",
+    "pino": "10.3.1",
+    "postgres": "3.4.9",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4"
+  }
+}

@@ -1,0 +1,68 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { vitestBase } from '@tria/config/vitest.base';
+import { defineConfig, mergeConfig } from 'vitest/config';
+
+/**
+ * Minimal `.env.local` reader (no dotenv dependency). `scripts/local-env.sh` generates the file
+ * from `supabase status`; CI passes the same variables through the process environment.
+ */
+function readEnvFile(): Record<string, string> {
+  const file = fileURLToPath(new URL('.env.local', import.meta.url));
+  if (!existsSync(file)) return {};
+  const out: Record<string, string> = {};
+  for (const raw of readFileSync(file, 'utf8').split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+const KEYS = [
+  'DATABASE_URL',
+  'SUPABASE_URL',
+  'SUPABASE_SERVICE_KEY',
+  'SUPABASE_PUBLISHABLE_KEY',
+  'SEED_PASSWORD',
+  'TENANT_DEMO_HOST',
+  'TENANT_LAB_HOST',
+  'PLATFORM_HOST',
+] as const;
+
+/** Placeholders keep the unit suite hermetic; integration tests need the real local values. */
+const defaults: Record<string, string> = {
+  DATABASE_URL: 'postgres://api_user:postgres@127.0.0.1:54329/postgres',
+  SUPABASE_URL: 'http://127.0.0.1:54321',
+  SUPABASE_SERVICE_KEY: 'local-placeholder',
+  SUPABASE_PUBLISHABLE_KEY: 'local-placeholder',
+};
+
+const fromProcess: Record<string, string> = {};
+for (const key of KEYS) {
+  const value = process.env[key];
+  if (value) fromProcess[key] = value;
+}
+
+export default mergeConfig(
+  vitestBase,
+  defineConfig({
+    test: {
+      include: ['tests/**/*.test.ts'],
+      env: { ...defaults, ...readEnvFile(), ...fromProcess },
+      fileParallelism: false,
+      testTimeout: 30_000,
+      hookTimeout: 60_000,
+    },
+  }),
+);
