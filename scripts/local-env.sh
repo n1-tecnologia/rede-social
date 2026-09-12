@@ -28,7 +28,10 @@ SUPABASE_SERVICE_KEY=${SERVICE_KEY}
 SUPABASE_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}
 NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}
-DATABASE_URL=postgres://api_user:postgres@127.0.0.1:54329/postgres
+# Local fallback (development only, recorded in 01-01-SUMMARY): the local Supavisor (54329) only knows its
+# own pooler user (api_user -> ENOIDENTIFIER, api_user.rede-social -> ENOTFOUND), so api_user connects on
+# the direct port. Hosted environments always use the transaction pooler URL from Secret Manager.
+DATABASE_URL=postgres://api_user:postgres@127.0.0.1:54322/postgres
 API_URL=http://localhost:8787
 PLATFORM_HOST=tria.localhost
 TENANT_DEMO_HOST=tria-demo.localhost

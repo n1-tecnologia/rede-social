@@ -42,7 +42,8 @@ const KEYS = [
 
 /** Placeholders keep the unit suite hermetic; integration tests need the real local values. */
 const defaults: Record<string, string> = {
-  DATABASE_URL: 'postgres://api_user:postgres@127.0.0.1:54329/postgres',
+  // Direct port: the local Supavisor refuses api_user (see scripts/local-env.sh); hosted uses the pooler.
+  DATABASE_URL: 'postgres://api_user:postgres@127.0.0.1:54322/postgres',
   SUPABASE_URL: 'http://127.0.0.1:54321',
   SUPABASE_SERVICE_KEY: 'local-placeholder',
   SUPABASE_PUBLISHABLE_KEY: 'local-placeholder',

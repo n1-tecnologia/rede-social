@@ -1,0 +1,51 @@
+import { z } from 'zod';
+import { TENANT_ROLES, TOGGLEABLE_MODULES } from './modules';
+
+/** `GET /v1/me/bootstrap` (ARCHITECTURE §Pattern 3). `modules`/`permissions` are filled by plan 01-06. */
+export const bootstrapSchema = z.object({
+  user: z.object({
+    id: z.uuid(),
+    email: z.string(),
+    name: z.string(),
+  }),
+  membership: z.object({
+    tenantId: z.uuid(),
+    role: z.enum(TENANT_ROLES),
+    status: z.enum(['active', 'blocked', 'invited']),
+    profile: z.object({
+      displayName: z.string(),
+      avatarUrl: z.string().nullable(),
+      bio: z.string().nullable(),
+    }),
+  }),
+  tenant: z.object({
+    id: z.uuid(),
+    slug: z.string(),
+    displayName: z.string(),
+    branding: z.object({
+      logoUrl: z.string().nullable(),
+      faviconUrl: z.string().nullable(),
+      colors: z.record(z.string(), z.string()),
+    }),
+  }),
+  modules: z.array(
+    z.object({
+      key: z.enum(TOGGLEABLE_MODULES),
+      nav: z
+        .object({
+          label: z.string(),
+          icon: z.string(),
+          href: z.string(),
+          order: z.number(),
+        })
+        .optional(),
+      settings: z.record(z.string(), z.unknown()),
+    }),
+  ),
+  permissions: z.array(z.string()),
+  counters: z.object({
+    unreadNotifications: z.number(),
+    unreadConversations: z.number(),
+  }),
+});
+export type Bootstrap = z.infer<typeof bootstrapSchema>;
