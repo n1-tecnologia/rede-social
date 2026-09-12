@@ -21,7 +21,8 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'mobile-chromium', use: { ...devices['iPhone 14'] } },
+    // iPhone 14 viewport/UA/touch on Chromium (the device preset defaults to WebKit).
+    { name: 'mobile-chromium', use: { ...devices['iPhone 14'], browserName: 'chromium' } },
     { name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: [

@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { env } from '@/lib/env';
+import { sessionCookieOptions } from '@/lib/supabase/cookie-options';
 
 /**
  * Server-side Supabase Auth client bound to the request cookies (Next 16: `await cookies()`).
@@ -13,6 +14,7 @@ export async function createClient() {
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     {
+      cookieOptions: sessionCookieOptions,
       cookies: {
         getAll() {
           return cookieStore.getAll();
