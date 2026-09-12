@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: Foundation - Kernel, Tenancy, Auth & CI/CD
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-09-12T11:47:32.134Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-09-12T13:28:28.429Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 01 execution started
-state_head: 2b2991ea1478db40b3e568bc0784fd1de85366ca
+state_head: ab5896a2256ad65fcb98e6be618d686f17847267
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 12
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
-Plan: 2 of 12
+Plan: 3 of 12
 Status: Ready to execute
 Last activity: 2026-09-11 — Phase 01 execution started
 
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 7 min | 2 tasks | 84 files |
+| Phase 01 P02 | 1h 34m | 3 tasks | 37 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,11 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-01: root package.json is ESM (type: module) so tsx runs scripts/seed.ts with top-level await
 - [Phase 01]: 01-01: jwtVerify keeps audience 'authenticated' (A1 held); TS 6 alias not needed (A5)
 - [Phase 01]: 01-01: public by-host lookup runs through the admin lane in tenant-host.ts with a 60 s positive+negative cache, answering slug + displayName only
+- [Phase 01]: 01-02: *.vercel.app hosts are generic wherever PLATFORM_HOST is unset (Preview/local); production proxy.ts 307s them to https://PLATFORM_HOST (D-20/D-21)
+- [Phase 01]: 01-02: proxy.ts host cache = module Map keyed by normalised host, 300 s hit / 60 s 404 / 10 s error, fail-open to generic; unregistered hosts render the neutral shell
+- [Phase 01]: 01-02: session cookies HttpOnly+SameSite=Lax (+Secure in production) via lib/supabase/cookie-options.ts (@supabase/ssr defaults httpOnly:false)
+- [Phase 01]: 01-02: next@16.3.5 installed (RESEARCH pin); CLAUDE.md stack table still says 16.3.4 - user to reconcile
+- [Phase 01]: 01-02: mobile-chromium = iPhone 14 preset on Chromium; next-env.d.ts git-ignored (typecheck runs next typegen first); apps/web AGENTS.md+CLAUDE.md from next dev committed
 
 ### Pending Todos
 
@@ -99,6 +105,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-12T11:47:32.120Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-09-12T13:28:28.416Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None

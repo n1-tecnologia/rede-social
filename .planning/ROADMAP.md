@@ -48,7 +48,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The automated two-tenant isolation suite (pgTAP + API integration tests) passes: every tenant-owned table carries `tenant_id` with RLS enabled, the API's tenant lane runs under a non-service database role inside a per-request transaction, no list or detail endpoint returns another tenant's rows, and routes of a module disabled for the tenant return 404.
   4. A push to `main` deploys the web app to Vercel and the API + worker to Cloud Run through GitHub Actions with separate preview/staging and production environments (two Supabase projects, migrations applied only by CI); the monorepo has a kernel package, a feature-module package template and lint/dependency rules that fail the build when a module imports another module's internals.
 
-**Plans**: 1/12 plans executed
+**Plans**: 2/12 plans executed
 
 Plans:
 **Wave 1**
@@ -57,7 +57,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — `@tria/web` scaffold + browser login/logout slice: host → tenant resolution in proxy.ts (tenant / platform / generic hosts, D-20/D-21), `@supabase/ssr` session, pt-BR catalog, `/entrar` (tenant name from the host, D-22), `/inicio`, "Sair", Playwright on iPhone 14 against `tria-demo.localhost`
+- [x] 01-02-PLAN.md — `@tria/web` scaffold + browser login/logout slice: host → tenant resolution in proxy.ts (tenant / platform / generic hosts, D-20/D-21), `@supabase/ssr` session, pt-BR catalog, `/entrar` (tenant name from the host, D-22), `/inicio`, "Sair", Playwright on iPhone 14 against `tria-demo.localhost`
 - [ ] 01-03-PLAN.md — Supavisor/PgBouncer lane spike + LOCAL-settings guard + fallback doc; `platform_admins`, chat/notification stubs, SCHEMA-CONVENTIONS.md
 - [ ] 01-09-PLAN.md — Pipeline as code: Dockerfile (API + worker), ci.yml, deploy-api.yml (staging on PR, gated prod on main), seed-prod, keep-alive, DEPLOY.md
 
@@ -227,7 +227,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 1/12 | In Progress|  |
+| 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 2/12 | In Progress|  |
 | 2. Tenant Shell, Branding & Platform Panel | 0/TBD | Not started | - |
 | 3. Media Pipeline & Member Profiles | 0/TBD | Not started | - |
 | 4. Feed | 0/TBD | Not started | - |

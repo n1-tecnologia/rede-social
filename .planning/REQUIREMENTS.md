@@ -9,7 +9,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Tenancy & Branding
 
-- [ ] **TENANT-01**: A single deployment serves every tenant on that tenant's own custom domain (a hostname the customer owns, registered in `tenant_domains`), while the platform domain serves TRIA's `super_admin`; the host only selects the tenant's public shell (login, sign-up, branding) and after login the app resolves tenant, role and modules from the user's membership, rejecting a session whose membership does not belong to the host's tenant
+- [x] **TENANT-01**: A single deployment serves every tenant on that tenant's own custom domain (a hostname the customer owns, registered in `tenant_domains`), while the platform domain serves TRIA's `super_admin`; the host only selects the tenant's public shell (login, sign-up, branding) and after login the app resolves tenant, role and modules from the user's membership, rejecting a session whose membership does not belong to the host's tenant
 - [ ] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
 - [ ] **TENANT-03**: Every tenant-owned row carries `tenant_id`; the API runs tenant requests under a database role subject to Row Level Security (no service-role key for user traffic), so cross-tenant reads/writes are blocked at the DB even if application code has a bug
 - [ ] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
@@ -37,10 +37,10 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### Onboarding & Auth
 
 - [ ] **AUTH-01**: Each tenant has a public sign-up link; a user who signs up through it becomes a `member` of that tenant, and the link survives the register/login round-trip
-- [ ] **AUTH-02**: User can sign up and log in with e-mail and password (Supabase Auth via the Next.js server), and stay logged in across browser/PWA restarts
+- [x] **AUTH-02**: User can sign up and log in with e-mail and password (Supabase Auth via the Next.js server), and stay logged in across browser/PWA restarts
 - [ ] **AUTH-03**: User can recover a forgotten password via e-mail link
 - [ ] **AUTH-04**: At sign-up the user must accept the tenant's community rules (editable by `admin_tenant`) and TRIA's terms/privacy policy; acceptance is recorded with timestamp
-- [ ] **AUTH-05**: User can log out from any page
+- [x] **AUTH-05**: User can log out from any page
 - [ ] **AUTH-06**: The API verifies the Supabase JWT (asymmetric keys / JWKS) and resolves tenant, role and membership status per request from the database, so a blocked member is cut off immediately
 
 ### Member Profile
@@ -207,7 +207,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TENANT-01 | Phase 1 | Pending |
+| TENANT-01 | Phase 1 | Complete |
 | TENANT-02 | Phase 2 | Pending |
 | TENANT-03 | Phase 1 | Pending |
 | TENANT-04 | Phase 3 | Pending |
@@ -226,10 +226,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ROLE-05 | Phase 2 | Pending |
 | ROLE-06 | Phase 1 | Pending |
 | AUTH-01 | Phase 1 | Pending |
-| AUTH-02 | Phase 1 | Pending |
+| AUTH-02 | Phase 1 | Complete |
 | AUTH-03 | Phase 1 | Pending |
 | AUTH-04 | Phase 1 | Pending |
-| AUTH-05 | Phase 1 | Pending |
+| AUTH-05 | Phase 1 | Complete |
 | AUTH-06 | Phase 1 | Pending |
 | PROF-01 | Phase 3 | Pending |
 | PROF-02 | Phase 3 | Pending |
@@ -288,6 +288,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PWA-04 | Phase 1 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 78 total
 - Mapped to phases: 78
 - Unmapped: 0 ✓
