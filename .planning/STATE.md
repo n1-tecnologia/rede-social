@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 1
+current_phase: 01
 current_phase_name: Foundation - Kernel, Tenancy, Auth & CI/CD
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-09-11T21:26:11.446Z"
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-09-12T11:47:32.134Z"
 last_activity: 2026-09-11
-last_activity_desc: Roadmap created (8 phases, 78/78 v1 requirements mapped)
-state_head: fa6af7963f2b1b1d2a72248a514afc45228ad667
+last_activity_desc: Phase 01 execution started
+state_head: 2b2991ea1478db40b3e568bc0784fd1de85366ca
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 12
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-11)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 1 - Foundation - Kernel, Tenancy, Auth & CI/CD
+**Current focus:** Phase 01 — Foundation - Kernel, Tenancy, Auth & CI/CD
 
 ## Current Position
 
-Phase: 1 (Foundation - Kernel, Tenancy, Auth & CI/CD) — READY TO EXECUTE
-Plan: 0 of TBD in current phase
+Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
-Last activity: 2026-09-11 — Roadmap created (8 phases, 78/78 v1 requirements mapped)
+Last activity: 2026-09-11 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -54,6 +54,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 7 min | 2 tasks | 84 files |
 
 ## Accumulated Context
 
@@ -68,6 +73,10 @@ Recent decisions affecting current work:
 - [Roadmap]: Auth UI ships functional-minimal in Phase 1; visual port with the shared UI package in Phase 2.
 - [2026-09-11, user]: Each tenant on its own custom domain (customer-owned host, `tenant_domains`, host -> tenant in `proxy.ts`, membership must match host: 403 `TENANT_HOST_MISMATCH`); platform domain reserved for TRIA `super_admin`; TENANT-01 reworded, TENANT-07 (domain management in the platform panel) added to Phase 2; Phase 1 plans revised accordingly (D-20..D-24).
 - [PROJECT]: Supabase Free plan for the pilot (worker image resize, 50 MB cap); Realtime via Broadcast (read-only browser subscription); `@supabase/ssr` for session; identity != membership (`memberships` table); video via Mux/Cloudflare Stream (choose in Phase 3).
+- [Phase 01]: 01-01: local DATABASE_URL on the direct port 54322 - the local Supavisor refuses api_user (ENOIDENTIFIER) and api_user.rede-social (ENOTFOUND); pooler proof deferred to the 01-03 spike and the 01-12 hosted run
+- [Phase 01]: 01-01: root package.json is ESM (type: module) so tsx runs scripts/seed.ts with top-level await
+- [Phase 01]: 01-01: jwtVerify keeps audience 'authenticated' (A1 held); TS 6 alias not needed (A5)
+- [Phase 01]: 01-01: public by-host lookup runs through the admin lane in tenant-host.ts with a 60 s positive+negative cache, answering slug + displayName only
 
 ### Pending Todos
 
@@ -90,6 +99,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-11T18:46:03.809Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-foundation-kernel-tenancy-auth-ci-cd/01-CONTEXT.md
+Last session: 2026-09-12T11:47:32.120Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
