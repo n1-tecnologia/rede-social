@@ -1,11 +1,8 @@
-import type { TenantRole } from '@tria/contracts';
+import type { DomainEventRecord, TenantRole } from '@tria/contracts';
 import type { Logger } from 'pino';
 
-/** A domain event collected during a request and dispatched after commit (bus lands in plan 01-07). */
-export type DomainEventRecord = {
-  name: string;
-  payload: unknown;
-};
+// `DomainEventRecord` now lives in `@tria/contracts` (01-07) next to the `EventMap` modules augment.
+export type { DomainEventRecord };
 
 /** Set by `requireAuth`. `tenantId` ALWAYS comes from the membership row, never from a host or cookie (TENANT-01). */
 export type RequestContext = {

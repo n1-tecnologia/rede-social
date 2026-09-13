@@ -4,6 +4,7 @@ export const CONTRACTS_VERSION = 1;
 export * from './auth';
 export * from './bootstrap';
 export * from './errors';
+export * from './events';
 export * from './hosts';
 // SERVER-ONLY (`node:fs`): never import `@tria/contracts` from a client component that would pull this in.
 export * from './legal';

@@ -30,10 +30,3 @@ export type TenantRole = (typeof TENANT_ROLES)[number];
  * land after every navigable module, ordered by key.
  */
 export const MODULE_KEY_ORDER_FALLBACK = 1000;
-
-/**
- * Domain event payloads, declaration-merged by each module (plan 01-07 moves this to `events.ts` and
- * adds the first entries). Empty on purpose: the kernel must not know any module's events.
- */
-// biome-ignore lint/suspicious/noEmptyInterface: extension point — modules declaration-merge into it
-export interface EventMap {}

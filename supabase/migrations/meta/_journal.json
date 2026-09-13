@@ -50,6 +50,13 @@
       "when": 1789310161811,
       "tag": "20260913143601_tenant_modules",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789311765518,
+      "tag": "20260913150245_pgboss_schema",
+      "breakpoints": true
     }
   ]
 }
