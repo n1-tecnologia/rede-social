@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: Foundation - Kernel, Tenancy, Auth & CI/CD
 status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-09-13T14:27:48.194Z"
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-09-13T14:55:26.503Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 01 execution started
-state_head: b9e4c5c125ed0c1afc2321fe4c3e92a1d2dc7e1a
+state_head: 5681cf35e2954c3002fbc45c8399a62c9b059bd6
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 12
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
-Plan: 7 of 12
+Plan: 8 of 12
 Status: Ready to execute
 Last activity: 2026-09-11 — Phase 01 execution started
 
@@ -64,6 +64,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P09 | 21 min | 2 tasks | 12 files |
 | Phase 01 P04 | 25 min | 3 tasks | 32 files |
 | Phase 01 P05 | 17min | 2 tasks | 20 files |
+| Phase 01 P06 | 22 min | 3 tasks | 36 files |
 
 ## Accumulated Context
 
@@ -99,6 +100,10 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-05: /endereco-invalido takes no props and reads no cookie, header or search param — D-23 privacy is structural, not a review note
 - [Phase 01]: 01-05: e2e fixtures send recovery mail from one throwaway user per case — GoTrue throttles recovery mail per user (max_frequency)
 - [Phase 01]: 01-05: postgres@3.4.9 added as a @tria/web devDependency so e2e/admin.ts can write membership rows (fixtures only, never app code)
+- [Phase 01]: Cross-tenant admin-lane reads live in packages/core/server/platform/* (Biome confines withAdminTx to the kernel's tenancy/platform lanes and scripts/), so API routes never bypass RLS directly
+- [Phase 01]: moduleFlags is a factory with an injectable loader and clock plus one process-wide instance: TTL and tenant-isolation behaviour is unit-tested without a database and without test-only setters in production code
+- [Phase 01]: permissionsFor(role, enabledKeys) applies a module's defaultRolePermissions only while its flag is on, so disabling a module revokes what it granted
+- [Phase 01]: The D-21 platform host is authorised by the API (a 200 from GET /v1/platform/tenants), never by JWT claims; FORBIDDEN and TENANT_HOST_MISMATCH reuse the /auth/host-mismatch sign-out handler
 
 ### Pending Todos
 
@@ -121,6 +126,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T14:27:48.179Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-09-13T14:55:17.436Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None
