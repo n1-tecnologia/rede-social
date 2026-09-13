@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 6
+open_count: 4
 waived_count: 0
-fixed_count: 3
+fixed_count: 5
 total_count: 9
-last_updated: 2026-09-13T15:21:32.750Z
+last_updated: 2026-09-13T16:00:54.360Z
 ---
 
 # Broken Windows Ledger
@@ -21,8 +21,8 @@ last_updated: 2026-09-13T15:21:32.750Z
 | 4 | 01 | stub | apps/web/app/(app)/layout.tsx |  | Only 401 handled in the bootstrap catch; 403 codes (MEMBERSHIP_BLOCKED/NO_MEMBERSHIP/TENANT_HOST_MISMATCH) rethrow until plan 01-05 | fixed |  | 2026-09-12T13:28:27.571Z | 2026-09-13T14:24:42.696Z |
 | 5 | 01 | stub | packages/core/db/schema/chat-stubs.ts |  | Chat stub tables have no triggers, Realtime wiring or routes — intentional shape-only Foundation deliverable, resolved by Phase 7 | open |  | 2026-09-12T21:16:10.084Z |  |
 | 6 | 01 | stub | packages/core/db/schema/notification-stubs.ts |  | notifications stub has no producer or fan-out worker — resolved by Phase 7 | open |  | 2026-09-12T21:16:10.151Z |  |
-| 7 | 01 | unrun-verify | .github/workflows/ci.yml |  | ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01 | open |  | 2026-09-12T21:34:49.618Z |  |
-| 8 | 01 | stub | apps/api/src/modules/registry.ts |  | MODULE_REGISTRY is empty until 01-07 registers @tria/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels | open |  | 2026-09-13T14:52:56.229Z |  |
+| 7 | 01 | unrun-verify | .github/workflows/ci.yml |  | ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01 | fixed |  | 2026-09-12T21:34:49.618Z | 2026-09-13T16:00:54.291Z |
+| 8 | 01 | stub | apps/api/src/modules/registry.ts |  | MODULE_REGISTRY is empty until 01-07 registers @tria/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels | fixed |  | 2026-09-13T14:52:56.229Z | 2026-09-13T16:00:54.360Z |
 | 9 | 01 | stub | packages/modules/example/module.ts |  | throwaway reference module @tria/module-example (D-19) — must be deleted with its table and registry entry in Phase 4 | open |  | 2026-09-13T15:21:32.750Z |  |
 
 ````json
@@ -106,10 +106,10 @@ last_updated: 2026-09-13T15:21:32.750Z
     "file": ".github/workflows/ci.yml",
     "line": null,
     "description": "ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-12T21:34:49.618Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-13T16:00:54.291Z"
   },
   {
     "id": 8,
@@ -118,10 +118,10 @@ last_updated: 2026-09-13T15:21:32.750Z
     "file": "apps/api/src/modules/registry.ts",
     "line": null,
     "description": "MODULE_REGISTRY is empty until 01-07 registers @tria/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-13T14:52:56.229Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-13T16:00:54.360Z"
   },
   {
     "id": 9,

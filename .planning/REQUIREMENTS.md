@@ -13,14 +13,14 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [ ] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
 - [x] **TENANT-03**: Every tenant-owned row carries `tenant_id`; the API runs tenant requests under a database role subject to Row Level Security (no service-role key for user traffic), so cross-tenant reads/writes are blocked at the DB even if application code has a bug
 - [ ] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
-- [ ] **TENANT-05**: An automated isolation test suite with at least two tenants proves that lists, detail pages, search, notifications, chat and storage never return another tenant's data
+- [x] **TENANT-05**: An automated isolation test suite with at least two tenants proves that lists, detail pages, search, notifications, chat and storage never return another tenant's data
 - [ ] **TENANT-06**: Authentication e-mails (password recovery, confirmation) are sent with the tenant's display name and logo, not TRIA's
 - [ ] **TENANT-07**: `super_admin` can attach a custom domain to a tenant from the platform panel; the platform registers it with the hosting provider and the auth redirect allow-list, shows the DNS records the customer must create, and reports verification status (pilot/seed tenants get their domains from the provisioning script)
 
 ### Modularity (architecture requirement)
 
 - [x] **MOD-01**: The codebase is a monorepo where each feature (feed, communities, stories, events, chat, notifications, moderation, profiles) is a self-contained module package containing its own DB schema/migrations, API routes, domain logic and UI components
-- [ ] **MOD-02**: A core kernel package provides tenancy, auth/session, roles, feature flags, media broker and shared UI primitives; feature modules depend only on the kernel and on published contracts of other modules, never on another module's internals (enforced by lint/dependency rules)
+- [x] **MOD-02**: A core kernel package provides tenancy, auth/session, roles, feature flags, media broker and shared UI primitives; feature modules depend only on the kernel and on published contracts of other modules, never on another module's internals (enforced by lint/dependency rules)
 - [ ] **MOD-03**: Modules communicate through domain events (e.g. `post.liked`, `event.rsvp`) consumed by other modules (e.g. notifications) so a module can be removed or replaced without touching the others
 - [ ] **MOD-04**: Each module is registered in a module registry that declares its routes, navigation entries, feature-flag key and event subscriptions; the API mounts and the app renders only registered, enabled modules
 - [ ] **MOD-05**: A module can be reused in another TRIA project by copying/publishing its package and providing the kernel contracts, documented in a per-module README with its public interface
@@ -28,7 +28,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### Roles & Platform Panel
 
 - [x] **ROLE-01**: Four roles exist: `super_admin` (TRIA staff, cross-tenant), `admin_tenant`, `support_tenant`, `member`; roles are stored per tenant membership, not on the global user
-- [ ] **ROLE-02**: Identity is separate from membership: a user record can be linked to a tenant through a membership row carrying role and status, with V1 enforcing one membership per user via a constraint that can be relaxed for V2
+- [x] **ROLE-02**: Identity is separate from membership: a user record can be linked to a tenant through a membership row carrying role and status, with V1 enforcing one membership per user via a constraint that can be relaxed for V2
 - [ ] **ROLE-03**: `super_admin` can create a tenant in a platform panel: name, slug, initial branding, enabled modules and the first `admin_tenant` (by e-mail invitation)
 - [ ] **ROLE-04**: `super_admin` can enable/disable feature modules per tenant, and the change is reflected in the tenant's navigation and API access without a redeploy
 - [ ] **ROLE-05**: `super_admin` can list all tenants with status and open any tenant's settings
@@ -211,16 +211,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-02 | Phase 2 | Pending |
 | TENANT-03 | Phase 1 | Complete |
 | TENANT-04 | Phase 3 | Pending |
-| TENANT-05 | Phase 1 | Pending |
+| TENANT-05 | Phase 1 | Complete |
 | TENANT-06 | Phase 2 | Pending |
 | TENANT-07 | Phase 2 | Pending |
 | MOD-01 | Phase 1 | Complete |
-| MOD-02 | Phase 1 | Pending |
+| MOD-02 | Phase 1 | Complete |
 | MOD-03 | Phase 4 | Pending |
 | MOD-04 | Phase 2 | Pending |
 | MOD-05 | Phase 8 | Pending |
 | ROLE-01 | Phase 1 | Complete |
-| ROLE-02 | Phase 1 | Pending |
+| ROLE-02 | Phase 1 | Complete |
 | ROLE-03 | Phase 2 | Pending |
 | ROLE-04 | Phase 2 | Pending |
 | ROLE-05 | Phase 2 | Pending |
