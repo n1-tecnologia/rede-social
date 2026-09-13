@@ -2,6 +2,14 @@
 # Prints an `.env.local` block for apps/api and apps/web from the running local Supabase stack.
 # Usage: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
 #        bash scripts/local-env.sh --write   # writes both files in one go (values never printed)
+#
+# The seed credentials below are LOCAL-STACK-ONLY throwaways, emitted so that a clean machine can run
+# `pnpm supabase start` -> `pnpm db:reset` -> `bash scripts/local-env.sh --write` -> `pnpm db:seed`
+# and then the whole suite, without having to discover from a stack trace that `pnpm db:seed`, the API
+# integration suite and the platform e2e all require them (plan 01-06 made them mandatory; 01-08
+# closed the gap). Export SEED_PASSWORD / SUPER_ADMIN_PASSWORD before running this script to override
+# them; hosted environments get theirs from GitHub environment secrets and GCP Secret Manager and
+# never from this file (see docs/DEPLOY.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -45,4 +53,9 @@ API_URL=http://localhost:8787
 PLATFORM_HOST=tria.localhost
 TENANT_DEMO_HOST=tria-demo.localhost
 TENANT_LAB_HOST=tria-lab.localhost
+# Local-stack-only seed credentials. Required by \`pnpm db:seed\`, apps/api's integration suite and
+# apps/web's platform e2e; override by exporting them before running this script.
+SEED_PASSWORD=${SEED_PASSWORD:-Segredo123}
+SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL:-ferramentas@triacompany.com.br}
+SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD:-SuperSegredo123}
 ENV

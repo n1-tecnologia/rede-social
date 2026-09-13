@@ -141,18 +141,30 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17, D-19)'
     const demo = await bootstrap(tokens.demoMember);
     expect(demo.status).toBe(200);
     const demoBody = (await demo.json()) as BootstrapBody;
-    // No manifest exists yet, so every key sits in the fallback bucket and sorts by key ascending.
+    // ROLE-06 ordering: `nav.order` ascending first, then key ascending among the manifest-less keys
+    // (MODULE_KEY_ORDER_FALLBACK = 1000). `example` is the only module with a manifest so far
+    // (01-07, nav.order 90), so it leads and the remaining six stay alphabetical. When Phase 4
+    // deletes @tria/module-example this list loses `example`, not its ordering rule.
     expect(demoBody.modules.map((m) => m.key)).toEqual([
+      'example',
       'chat',
       'communities',
       'events',
-      'example',
       'feed',
       'notifications',
       'stories',
     ]);
     for (const m of demoBody.modules) {
-      expect(m.nav).toBeUndefined();
+      // A key enabled for the tenant but not yet implemented appears WITHOUT nav — that is what
+      // makes /me/bootstrap honest about what the tenant bought.
+      if (m.key === 'example')
+        expect(m.nav).toEqual({
+          label: 'Exemplo',
+          icon: 'sparkles',
+          href: '/inicio#exemplo',
+          order: 90,
+        });
+      else expect(m.nav).toBeUndefined();
       expect(m.settings).toEqual({});
     }
 
