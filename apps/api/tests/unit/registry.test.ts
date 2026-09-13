@@ -46,8 +46,9 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       expect(MODULE_REGISTRY[key]?.key).toBe(key);
       expect(TOGGLEABLE_MODULES).toContain(key);
     }
-    // 01-07 registers `example`; until then composition is empty and every key is manifest-less.
-    expect(keys).toEqual([]);
+    // 01-07 registered the throwaway reference module (D-19); Phase 4 removes it with the package.
+    expect(keys).toEqual(['example']);
+    expect(MODULE_REGISTRY.example?.nav?.order).toBe(90);
   });
 
   it('2. defineModule accepts a manifest with only a key, and it lists without nav (MOD-01 empty)', () => {

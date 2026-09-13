@@ -15,11 +15,20 @@ export interface ModuleNav {
   order: number;
 }
 
-/** A pg-boss job a module owns (registered by the worker in a later phase). */
+/** A pg-boss job a module owns; `P` is the payload shape the module's own handler expects. */
 export interface JobDefinition<P = unknown> {
   name: string;
   handler: (payload: P) => Promise<void>;
 }
+
+/**
+ * Payload-erased view used by the manifest's `jobs` list and by the worker. A handler's parameter
+ * is contravariant, so a `JobDefinition<ExampleProcessJob>` does not fit a `JobDefinition<unknown>`
+ * list; the kernel genuinely does not know (and must not know) any module's payload shape. pg-boss
+ * hands back whatever JSON was enqueued, and the module that enqueued it owns the shape.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: deliberate payload erasure — see the note above
+export type AnyJobDefinition = JobDefinition<any>;
 
 /** A domain-event subscription; `EventMap` is declaration-merged by the modules (01-07). */
 export interface EventSubscription<K extends keyof EventMap = keyof EventMap> {
@@ -36,7 +45,7 @@ export interface ModuleManifest {
   key: ModuleKey;
   nav?: ModuleNav;
   routes?: () => Promise<Hono<AppEnv>>;
-  jobs?: JobDefinition[];
+  jobs?: AnyJobDefinition[];
   events?: EventSubscription[];
   defaultRolePermissions?: Partial<Record<TenantRole, string[]>>;
 }

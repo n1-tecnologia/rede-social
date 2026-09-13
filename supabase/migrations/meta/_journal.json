@@ -57,6 +57,13 @@
       "when": 1789311765518,
       "tag": "20260913150245_pgboss_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789312280122,
+      "tag": "20260913151120_example_items",
+      "breakpoints": true
     }
   ]
 }

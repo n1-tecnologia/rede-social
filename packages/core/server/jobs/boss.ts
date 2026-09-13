@@ -90,6 +90,13 @@ async function startedBoss(): Promise<PgBoss> {
  * Enqueue INSIDE the caller's transaction (A17: `fromDrizzle(tx, sql)`, verified against
  * pg-boss 12.31.0 `dist/adapters/drizzle.d.ts`). Use `singletonKey` for natural idempotency —
  * the example module keys on the item id (threat T-07-04).
+ *
+ * The role dance is deliberate. `withTenantTx` runs as `authenticated`, and `authenticated` has NO
+ * privileges on schema `pgboss` (the migration revokes them): a queue row is infrastructure, not
+ * tenant data, and nothing reachable from the tenant lane should be able to read other tenants' job
+ * payloads. So the enqueue — and only the enqueue — switches to the connection role that the
+ * migration did grant, then restores whatever role the caller was in. Both switches are `LOCAL`, so
+ * they die with the transaction, and the insert still rolls back with the caller's write.
  */
 export async function enqueueInTx(
   tx: Tx,
@@ -98,7 +105,18 @@ export async function enqueueInTx(
   opts: { singletonKey?: string } = {},
 ): Promise<string | null> {
   const boss = await startedBoss();
-  return boss.send(name, payload, { db: fromDrizzle(tx, sql), ...opts });
+  const rows = (await tx.execute(sql`select current_role as role`)) as unknown as {
+    role: string;
+  }[];
+  const callerRole = rows[0]?.role;
+  await tx.execute(sql`set local role api_user`);
+  try {
+    return await boss.send(name, payload, { db: fromDrizzle(tx, sql), ...opts });
+  } finally {
+    if (callerRole && callerRole !== 'api_user') {
+      await tx.execute(sql`set local role ${sql.identifier(callerRole)}`);
+    }
+  }
 }
 
 /** Stops the lazily-started API instance (tests and graceful shutdown). */

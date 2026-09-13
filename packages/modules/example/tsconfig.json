@@ -1,0 +1,16 @@
+{
+  "extends": "../../config/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "jsx": "react-jsx",
+    "types": ["node", "react"]
+  },
+  "include": [
+    "module.ts",
+    "db/**/*.ts",
+    "contracts/**/*.ts",
+    "server/**/*.ts",
+    "ui/**/*.tsx",
+    "ui/**/*.ts"
+  ]
+}

@@ -1,6 +1,8 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@tria/core/server/auth/context';
+import { flushEventsAfterResponse } from '@tria/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@tria/core/server/http/api-error';
+import { exampleRoutes } from '@tria/module-example/server';
 import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
 import { healthRoutes } from './routes/health';
@@ -12,6 +14,9 @@ const app = new OpenAPIHono<AppEnv>();
 
 app.use(requestIdMiddleware());
 app.use(logger());
+// Domain events emitted by a handler are delivered AFTER it returns, i.e. after its transaction
+// committed. Mounted here so every route group gets it without remembering to.
+app.use(flushEventsAfterResponse);
 
 /** Stable envelope every client switches on: `{ error: { code, message, details?, requestId } }`. */
 app.onError((err, c) => {
@@ -36,7 +41,10 @@ const routes = app
   .route('/v1/health', healthRoutes)
   .route('/v1/public', publicRoutes)
   .route('/v1/me', meRoutes)
-  .route('/v1/platform', platformRoutes);
+  .route('/v1/platform', platformRoutes)
+  // The module carries its own `requireAuth` + `requireModule('example')` + `requireRole` chain
+  // (packages/modules/example/server/routes.ts), so the mount cannot forget a guard.
+  .route('/v1/example', exampleRoutes);
 
 export type AppType = typeof routes;
 export { app };

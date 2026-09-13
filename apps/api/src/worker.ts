@@ -1,5 +1,5 @@
 import { createBoss } from '@tria/core/server/jobs/boss';
-import type { JobDefinition } from '@tria/core/server/modules/manifest';
+import type { AnyJobDefinition } from '@tria/core/server/modules/manifest';
 import { env } from './env';
 import { rootLogger } from './http/logger';
 import { MODULE_REGISTRY } from './modules/registry';
@@ -15,7 +15,7 @@ import { MODULE_REGISTRY } from './modules/registry';
  * on the same queue row.
  */
 export async function startWorker(): Promise<void> {
-  const jobs: JobDefinition[] = Object.values(MODULE_REGISTRY).flatMap(
+  const jobs: AnyJobDefinition[] = Object.values(MODULE_REGISTRY).flatMap(
     (manifest) => manifest?.jobs ?? [],
   );
 
