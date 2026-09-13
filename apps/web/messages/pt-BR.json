@@ -47,6 +47,7 @@
     "title": "Recuperar senha",
     "help": "Informe seu email e enviaremos um link para redefinir sua senha.",
     "submit": "Enviar link",
+    "pending": "Enviando...",
     "sent": "Se existir uma conta com este e-mail, enviamos um link.",
     "invalidLink": "Link inválido ou expirado. Solicite um novo."
   },
