@@ -48,7 +48,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The automated two-tenant isolation suite (pgTAP + API integration tests) passes: every tenant-owned table carries `tenant_id` with RLS enabled, the API's tenant lane runs under a non-service database role inside a per-request transaction, no list or detail endpoint returns another tenant's rows, and routes of a module disabled for the tenant return 404.
   4. A push to `main` deploys the web app to Vercel and the API + worker to Cloud Run through GitHub Actions with separate preview/staging and production environments (two Supabase projects, migrations applied only by CI); the monorepo has a kernel package, a feature-module package template and lint/dependency rules that fail the build when a module imports another module's internals.
 
-**Plans**: 7/12 plans executed
+**Plans**: 8/12 plans executed
 
 Plans:
 **Wave 1**
@@ -72,7 +72,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 01-07-PLAN.md — `@tria/module-example` (D-19): table + guarded routes + typed event + transactional pg-boss job + worker role + widget on `/inicio`
+- [x] 01-07-PLAN.md — `@tria/module-example` (D-19): table + guarded routes + typed event + transactional pg-boss job + worker role + widget on `/inicio`
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -227,7 +227,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 7/12 | In Progress|  |
+| 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 8/12 | In Progress|  |
 | 2. Tenant Shell, Branding & Platform Panel | 0/TBD | Not started | - |
 | 3. Media Pipeline & Member Profiles | 0/TBD | Not started | - |
 | 4. Feed | 0/TBD | Not started | - |

@@ -19,7 +19,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Modularity (architecture requirement)
 
-- [ ] **MOD-01**: The codebase is a monorepo where each feature (feed, communities, stories, events, chat, notifications, moderation, profiles) is a self-contained module package containing its own DB schema/migrations, API routes, domain logic and UI components
+- [x] **MOD-01**: The codebase is a monorepo where each feature (feed, communities, stories, events, chat, notifications, moderation, profiles) is a self-contained module package containing its own DB schema/migrations, API routes, domain logic and UI components
 - [ ] **MOD-02**: A core kernel package provides tenancy, auth/session, roles, feature flags, media broker and shared UI primitives; feature modules depend only on the kernel and on published contracts of other modules, never on another module's internals (enforced by lint/dependency rules)
 - [ ] **MOD-03**: Modules communicate through domain events (e.g. `post.liked`, `event.rsvp`) consumed by other modules (e.g. notifications) so a module can be removed or replaced without touching the others
 - [ ] **MOD-04**: Each module is registered in a module registry that declares its routes, navigation entries, feature-flag key and event subscriptions; the API mounts and the app renders only registered, enabled modules
@@ -32,7 +32,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [ ] **ROLE-03**: `super_admin` can create a tenant in a platform panel: name, slug, initial branding, enabled modules and the first `admin_tenant` (by e-mail invitation)
 - [ ] **ROLE-04**: `super_admin` can enable/disable feature modules per tenant, and the change is reflected in the tenant's navigation and API access without a redeploy
 - [ ] **ROLE-05**: `super_admin` can list all tenants with status and open any tenant's settings
-- [ ] **ROLE-06**: Authorization is enforced in the API for every route based on role and enabled modules (a disabled module's routes return 404 for that tenant)
+- [x] **ROLE-06**: Authorization is enforced in the API for every route based on role and enabled modules (a disabled module's routes return 404 for that tenant)
 
 ### Onboarding & Auth
 
@@ -214,7 +214,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-05 | Phase 1 | Pending |
 | TENANT-06 | Phase 2 | Pending |
 | TENANT-07 | Phase 2 | Pending |
-| MOD-01 | Phase 1 | Pending |
+| MOD-01 | Phase 1 | Complete |
 | MOD-02 | Phase 1 | Pending |
 | MOD-03 | Phase 4 | Pending |
 | MOD-04 | Phase 2 | Pending |
@@ -224,7 +224,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ROLE-03 | Phase 2 | Pending |
 | ROLE-04 | Phase 2 | Pending |
 | ROLE-05 | Phase 2 | Pending |
-| ROLE-06 | Phase 1 | Pending |
+| ROLE-06 | Phase 1 | Complete |
 | AUTH-01 | Phase 1 | Complete |
 | AUTH-02 | Phase 1 | Complete |
 | AUTH-03 | Phase 1 | Complete |

@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 5
+open_count: 6
 waived_count: 0
 fixed_count: 3
-total_count: 8
-last_updated: 2026-09-13T14:52:56.229Z
+total_count: 9
+last_updated: 2026-09-13T15:21:32.750Z
 ---
 
 # Broken Windows Ledger
@@ -23,6 +23,7 @@ last_updated: 2026-09-13T14:52:56.229Z
 | 6 | 01 | stub | packages/core/db/schema/notification-stubs.ts |  | notifications stub has no producer or fan-out worker — resolved by Phase 7 | open |  | 2026-09-12T21:16:10.151Z |  |
 | 7 | 01 | unrun-verify | .github/workflows/ci.yml |  | ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01 | open |  | 2026-09-12T21:34:49.618Z |  |
 | 8 | 01 | stub | apps/api/src/modules/registry.ts |  | MODULE_REGISTRY is empty until 01-07 registers @tria/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels | open |  | 2026-09-13T14:52:56.229Z |  |
+| 9 | 01 | stub | packages/modules/example/module.ts |  | throwaway reference module @tria/module-example (D-19) — must be deleted with its table and registry entry in Phase 4 | open |  | 2026-09-13T15:21:32.750Z |  |
 
 ````json
 [
@@ -120,6 +121,18 @@ last_updated: 2026-09-13T14:52:56.229Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-13T14:52:56.229Z",
+    "resolved_at": null
+  },
+  {
+    "id": 9,
+    "kind": "stub",
+    "phase": "01",
+    "file": "packages/modules/example/module.ts",
+    "line": null,
+    "description": "throwaway reference module @tria/module-example (D-19) — must be deleted with its table and registry entry in Phase 4",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-13T15:21:32.750Z",
     "resolved_at": null
   }
 ]

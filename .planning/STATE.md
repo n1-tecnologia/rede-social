@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: Foundation - Kernel, Tenancy, Auth & CI/CD
 status: executing
-stopped_at: Completed 01-06-PLAN.md
-last_updated: "2026-09-13T14:55:26.503Z"
+stopped_at: Completed 01-07-PLAN.md
+last_updated: "2026-09-13T15:24:16.125Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 01 execution started
-state_head: 5681cf35e2954c3002fbc45c8399a62c9b059bd6
+state_head: d1f78d69a6c86fca5da16434b59acce10c41780e
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 12
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
-Plan: 8 of 12
+Plan: 9 of 12
 Status: Ready to execute
 Last activity: 2026-09-11 — Phase 01 execution started
 
@@ -65,6 +65,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P04 | 25 min | 3 tasks | 32 files |
 | Phase 01 P05 | 17min | 2 tasks | 20 files |
 | Phase 01 P06 | 22 min | 3 tasks | 36 files |
+| Phase 01 P07 | 25 min | 3 tasks | 42 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,9 @@ Recent decisions affecting current work:
 - [Phase 01]: moduleFlags is a factory with an injectable loader and clock plus one process-wide instance: TTL and tenant-isolation behaviour is unit-tested without a database and without test-only setters in production code
 - [Phase 01]: permissionsFor(role, enabledKeys) applies a module's defaultRolePermissions only while its flag is on, so disabling a module revokes what it granted
 - [Phase 01]: The D-21 platform host is authorised by the API (a 200 from GET /v1/platform/tenants), never by JWT claims; FORBIDDEN and TENANT_HOST_MISMATCH reuse the /auth/host-mismatch sign-out handler
+- [Phase 01]: enqueueInTx switches to api_user for the enqueue only, so the tenant lane (authenticated) holds no privileges on schema pgboss and cannot read another tenant's job payloads
+- [Phase 01]: Queue names travel app-tier to kernel via registerJobQueues; the kernel never imports a module (MOD-02)
+- [Phase 01]: pg-boss is declared in both @tria/core and @tria/api: tsup externalises only declared deps, and bundling pg-boss broke the ESM build
 
 ### Pending Todos
 
@@ -126,6 +130,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T14:55:17.436Z
-Stopped at: Completed 01-06-PLAN.md
+Last session: 2026-09-13T15:24:07.690Z
+Stopped at: Completed 01-07-PLAN.md
 Resume file: None
