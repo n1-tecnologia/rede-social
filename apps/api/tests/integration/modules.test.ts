@@ -50,8 +50,16 @@ guarded.use(
 );
 guarded.get('/v1/__test/chat-admin', (c) => c.json({ ok: 'admin' }));
 
-const tokens: Record<string, string> = {};
-const tenantIds: Record<string, string> = {};
+/** Concrete keys (not a Record): `noUncheckedIndexedAccess` would otherwise widen every read. */
+const tokens = {
+  demoMember: '',
+  demoAdmin: '',
+  labMember: '',
+  labAdmin: '',
+  superAdmin: '',
+  emptyMember: '',
+};
+const tenantIds = { demo: '', lab: '' };
 let emptyTenantId = '';
 let emptyUserId = '';
 const EMPTY_SLUG = `e2e-empty-${Date.now()}`.slice(0, 40);
@@ -75,7 +83,7 @@ const code = async (res: Response) => ((await res.json()) as Envelope).error.cod
 
 /** Drops every cached flag entry so a DB change made by a test is read on the next call. */
 function invalidateAll(): void {
-  for (const id of [...Object.values(tenantIds), emptyTenantId]) {
+  for (const id of [tenantIds.demo, tenantIds.lab, emptyTenantId]) {
     if (id) moduleFlags.invalidate(id);
   }
 }
@@ -89,11 +97,15 @@ beforeAll(async () => {
   tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
   tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
   tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
+  tokens.labAdmin = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
   tokens.superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
     select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
-  for (const row of rows) tenantIds[row.slug] = row.id;
+  for (const row of rows) {
+    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
+    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+  }
 
   // A tenant with NO tenant_modules rows at all (the ROLE-06 "empty" case).
   const created = await adminSql<{ id: string }[]>`
@@ -183,7 +195,7 @@ describe('requireModule — 404 MODULE_DISABLED, and the fixed middleware order'
   });
 
   it('5. adjacency: a MISSING row and enabled = false are the same 404', async () => {
-    const labId = tenantIds['tria-lab'];
+    const labId = tenantIds.lab;
 
     // The row is deleted entirely — "no such flag" must not read as "enabled".
     await adminSql`delete from public.tenant_modules
@@ -224,14 +236,13 @@ describe('requireModule — 404 MODULE_DISABLED, and the fixed middleware order'
     expect(await admin.json()).toEqual({ ok: 'admin' });
 
     // …and on a DISABLED module the role never gets a say: still 404.
-    const labAdminToken = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
-    const labAdmin = await testRoute('chat-admin', labAdminToken);
+    const labAdmin = await testRoute('chat-admin', tokens.labAdmin);
     expect(labAdmin.status).toBe(404);
     expect(await code(labAdmin)).toBe('MODULE_DISABLED');
   });
 
   it('8. concurrency: a flag flipped in the DB is stale until the TTL or invalidate(tenantId)', async () => {
-    const labId = tenantIds['tria-lab'];
+    const labId = tenantIds.lab;
 
     // Warm the entry, then flip the row behind the cache's back.
     expect((await testRoute('chat', tokens.labMember)).status).toBe(404);
