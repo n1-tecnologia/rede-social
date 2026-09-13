@@ -1,0 +1,216 @@
+begin;
+-- 020-tenant-isolation.sql — T-08-02, the core value proved inside Postgres.
+--
+-- Two tenants are seeded with IDENTICAL-LOOKING content: the same item title ('x'), the same
+-- notification kind, the same message body, the same `member@…` local part. A leak that matched on a
+-- value instead of on tenant_id therefore cannot hide behind "the rows look different anyway" —
+-- every assertion is about WHICH tenant's row came back, not about what it contained (TENANT-05
+-- adjacency).
+--
+-- Ids are fixed literals on purpose: a temp table or temp view holding them would live in pg_temp,
+-- which `authenticated` cannot read once the lane is open.
+--
+-- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
+-- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
+select plan(25);
+
+-- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
+select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
+select tests.tenant('pgtap-b', 'Comunidade B', '0b000000-0000-4000-8000-000000000001');
+select tests.auth_user('member@a.local', '0a000000-0000-4000-8000-000000000002');
+select tests.auth_user('member@b.local', '0b000000-0000-4000-8000-000000000002');
+select tests.member('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
+select tests.member('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
+
+insert into public.tenant_modules (tenant_id, module_key, enabled) values
+  ('0a000000-0000-4000-8000-000000000001', 'example', true),
+  ('0b000000-0000-4000-8000-000000000001', 'example', true);
+
+-- D-20: one primary, verified host each, registered on both sides so a host lookup through the lane
+-- has something to (fail to) find.
+insert into public.tenant_domains (tenant_id, host, is_primary, verified_at) values
+  ('0a000000-0000-4000-8000-000000000001', 'a.test', true, now()),
+  ('0b000000-0000-4000-8000-000000000001', 'b.test', true, now());
+
+insert into public.example_items (id, tenant_id, title, created_by_user_id) values
+  ('0a000000-0000-4000-8000-000000000003', '0a000000-0000-4000-8000-000000000001', 'x',
+   '0a000000-0000-4000-8000-000000000002'),
+  ('0b000000-0000-4000-8000-000000000003', '0b000000-0000-4000-8000-000000000001', 'x',
+   '0b000000-0000-4000-8000-000000000002');
+
+insert into public.notifications (tenant_id, user_id, kind) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'k'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'k');
+
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values
+  ('0a000000-0000-4000-8000-000000000004', '0a000000-0000-4000-8000-000000000001', 'support',
+   '0a000000-0000-4000-8000-000000000002'),
+  ('0b000000-0000-4000-8000-000000000004', '0b000000-0000-4000-8000-000000000001', 'support',
+   '0b000000-0000-4000-8000-000000000002');
+
+insert into public.chat_participants (conversation_id, tenant_id, user_id, role) values
+  ('0a000000-0000-4000-8000-000000000004', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', 'member'),
+  ('0b000000-0000-4000-8000-000000000004', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-000000000002', 'member');
+
+insert into public.chat_messages (tenant_id, conversation_id, seq, author_user_id, body) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000004', 1,
+   '0a000000-0000-4000-8000-000000000002', 'oi'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000004', 1,
+   '0b000000-0000-4000-8000-000000000002', 'oi');
+
+insert into public.consent_records (tenant_id, user_id, kind, text_version) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'tenant_rules', 1),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'tenant_rules', 1);
+
+-- A platform admin really exists: the lane must still see nothing (RLS with ZERO policies, 01-03).
+insert into public.platform_admins (user_id) values ('0a000000-0000-4000-8000-000000000002');
+
+-- ── tenant A's lane ─────────────────────────────────────────────────────────────────────────────
+select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
+
+select is(current_user::text, 'authenticated', 'the lane runs as authenticated, never as the connection role');
+
+select results_eq(
+  $$ select count(*)::int from public.example_items
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own example_items row'
+);
+select results_eq(
+  $$ select count(*)::int from public.example_items where title = 'x' $$,
+  ARRAY[1],
+  'adjacency: both tenants have an item titled x, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.example_items where title = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the one it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.example_items where id = '0b000000-0000-4000-8000-000000000003' $$,
+  'detail by id: B''s item is not found through A''s lane'
+);
+
+select throws_ok(
+  $$ insert into public.example_items (tenant_id, title, created_by_user_id)
+     values ('0b000000-0000-4000-8000-000000000001', 'y',
+             '0a000000-0000-4000-8000-000000000002') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a row stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with u as (
+       update public.example_items set title = 'y'
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: an update aimed at B''s rows touches nothing'
+);
+
+select is_empty(
+  $$ select id from public.memberships
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'memberships: B''s rows are invisible'
+);
+select results_eq(
+  $$ select count(*)::int from public.memberships $$,
+  ARRAY[1],
+  'memberships: exactly A''s own row is visible'
+);
+
+select is_empty(
+  $$ select module_key from public.tenant_modules
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'tenant_modules: B''s flags are invisible'
+);
+select results_eq(
+  $$ select count(*)::int from public.tenant_modules $$,
+  ARRAY[1],
+  'tenant_modules: exactly A''s own flag row is visible'
+);
+
+select results_eq(
+  $$ select host::text from public.tenant_domains $$,
+  ARRAY['a.test'],
+  'tenant_domains: only A''s host is listed'
+);
+select is_empty(
+  $$ select host::text from public.tenant_domains where host = 'B.TEST' $$,
+  'tenant_domains: the citext lookup of B''s host is still tenant-scoped (case-insensitive, not a bypass)'
+);
+select throws_ok(
+  $$ insert into public.tenant_domains (tenant_id, host, is_primary)
+     values ('0a000000-0000-4000-8000-000000000001', 'a2.test', false) $$,
+  '42501',
+  null,
+  'tenant_domains is select-only in the lane: attaching a host is an admin-lane operation (D-20)'
+);
+
+select is_empty(
+  $$ select id from public.consent_records
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'consent_records: B''s rows are invisible'
+);
+select results_eq(
+  $$ select count(*)::int from public.consent_records $$,
+  ARRAY[1],
+  'consent_records: only the signed-in user''s own record is visible'
+);
+
+select is_empty(
+  $$ select id from public.chat_messages
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'chat_messages: B''s messages are invisible'
+);
+select results_eq(
+  $$ select count(*)::int from public.chat_messages where body = 'oi' $$,
+  ARRAY[1],
+  'adjacency: identical message bodies, one row'
+);
+select is_empty(
+  $$ select id from public.chat_conversations
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'chat_conversations: B''s rows are invisible'
+);
+select is_empty(
+  $$ select user_id from public.chat_participants
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'chat_participants: B''s rows are invisible'
+);
+select is_empty(
+  $$ select id from public.notifications
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'notifications: B''s rows are invisible'
+);
+
+select results_eq(
+  $$ select count(*)::int from public.platform_admins $$,
+  ARRAY[0],
+  'platform_admins: a real row is invisible to a tenant lane (RLS, zero policies)'
+);
+
+-- ── tenant B's lane: the symmetric half, so nothing above is an artefact of who went first ──────
+reset role;
+select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
+
+select results_eq(
+  $$ select tenant_id::text from public.example_items where title = 'x' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s item for the same title'
+);
+select is_empty(
+  $$ select id from public.example_items where id = '0a000000-0000-4000-8000-000000000003' $$,
+  'symmetry: A''s item is not found through B''s lane'
+);
+select results_eq(
+  $$ select host::text from public.tenant_domains $$,
+  ARRAY['b.test'],
+  'symmetry: only B''s host is listed'
+);
+
+reset role;
+select * from finish();
+rollback;
