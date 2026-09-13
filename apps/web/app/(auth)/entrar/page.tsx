@@ -15,7 +15,8 @@ type Shell = {
   signupHref: string | null;
 };
 
-// Plan 01-04 defines `GET /v1/public/tenants/{slug}`; until then any non-2xx simply means "no hint".
+// `GET /v1/public/tenants/{slug}` now exists (01-04). Kept deliberately loose and non-fatal: any
+// non-2xx or unparsable body simply means "no hint", never a broken login page.
 const publicTenantSchema = z.object({ displayName: z.string() }).loose();
 
 /**
