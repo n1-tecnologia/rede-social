@@ -43,6 +43,13 @@
       "when": 1789249469586,
       "tag": "20260912214429_consent_records",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789310161811,
+      "tag": "20260913143601_tenant_modules",
+      "breakpoints": true
     }
   ]
 }

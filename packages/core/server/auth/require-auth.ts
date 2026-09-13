@@ -2,17 +2,20 @@ import { normalizeHost, TENANT_HOST_HEADER } from '@tria/contracts';
 import { createMiddleware } from 'hono/factory';
 import { type JWTPayload, jwtVerify } from 'jose';
 import { ApiError } from '../http/api-error';
+import { isPlatformAdmin } from '../platform/platform-admins';
 import { membershipForUser } from '../tenancy/membership';
 import { resolveTenantHost } from '../tenancy/tenant-host';
 import type { AppEnv } from './context';
 import { JWKS, JWT_ISSUER } from './jwks';
 
 /**
- * Order is fixed: verify -> membership -> blocked -> host. A blocked member on the wrong host still gets
- * MEMBERSHIP_BLOCKED. The host header can only DENY a session (403 TENANT_HOST_MISMATCH); the tenant of
- * record is always the membership (TENANT-01, D-23). `Host`/`X-Forwarded-Host` are never read.
+ * Bearer parse + ES256 verification against the Supabase JWKS. Shared by `requireAuth` (tenant lane)
+ * and `requireSuperAdmin` (platform lane) so both reject an absent, forged, expired or wrongly-signed
+ * token identically — one implementation, one set of failure codes.
  */
-export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
+export async function verifyBearer(c: {
+  req: { header(name: string): string | undefined };
+}): Promise<JWTPayload & { sub: string }> {
   const token = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1];
   if (!token) throw new ApiError(401, 'UNAUTHENTICATED');
 
@@ -22,12 +25,35 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   } catch {
     throw new ApiError(401, 'INVALID_TOKEN');
   }
+  if (!payload.sub) throw new ApiError(401, 'INVALID_TOKEN');
+  return payload as JWTPayload & { sub: string };
+}
+
+/**
+ * Order is fixed: verify -> membership -> blocked -> host. A blocked member on the wrong host still gets
+ * MEMBERSHIP_BLOCKED. The host header can only DENY a session (403 TENANT_HOST_MISMATCH); the tenant of
+ * record is always the membership (TENANT-01, D-23). `Host`/`X-Forwarded-Host` are never read.
+ */
+export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
+  const payload = await verifyBearer(c);
   const userId = payload.sub;
-  if (!userId) throw new ApiError(401, 'INVALID_TOKEN');
 
   // Per request, no cache (AUTH-06, D-09).
   const membership = await membershipForUser(userId);
-  if (!membership) throw new ApiError(403, 'NO_MEMBERSHIP');
+  if (!membership) {
+    // D-23: a platform admin has no membership by design. On a REGISTERED TENANT HOST that is a host
+    // mismatch (platform sessions live on the platform host), not an orphan identity — so the web app
+    // shows "Este endereço não pertence à sua comunidade." instead of /sem-comunidade. Only this rare
+    // branch pays for the `platform_admins` lookup; an ordinary member still makes one query in total.
+    const rawHost = normalizeHost(c.req.header(TENANT_HOST_HEADER));
+    if (rawHost) {
+      const resolved = await resolveTenantHost(rawHost);
+      if (resolved.kind === 'tenant' && (await isPlatformAdmin(userId))) {
+        throw new ApiError(403, 'TENANT_HOST_MISMATCH');
+      }
+    }
+    throw new ApiError(403, 'NO_MEMBERSHIP');
+  }
   if (membership.status === 'blocked' || membership.tenantStatus !== 'active') {
     throw new ApiError(403, 'MEMBERSHIP_BLOCKED', { tenantName: membership.tenantDisplayName });
   }
@@ -48,5 +74,8 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
     requestId: c.get('requestId'),
     events: [],
   });
+  // Every later log line of this request carries who and which tenant (observability, D-discretion).
+  const log = c.get('logger');
+  if (log) c.set('logger', log.child({ tenantId: membership.tenantId, userId }));
   await next();
 });
