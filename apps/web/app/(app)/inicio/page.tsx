@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { getBootstrap } from '@/lib/bootstrap';
+import { getPlatformTenants } from '@/lib/platform';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
 
@@ -18,13 +19,29 @@ export default async function InicioPage() {
 
   if (hostTenant.mode === 'platform') {
     const supabase = await createClient();
-    const { data } = await supabase.auth.getClaims();
+    const [{ data }, platform] = await Promise.all([
+      supabase.auth.getClaims(),
+      // Deduped with the layout by React `cache`: the layout already proved this session may read it.
+      getPlatformTenants(),
+    ]);
     const email = typeof data?.claims.email === 'string' ? data.claims.email : null;
     return (
       <>
         <h1>{tp('title')}</h1>
         <p>{tp('placeholder')}</p>
         {email ? <p>{email}</p> : null}
+
+        <section aria-labelledby="tenants-heading">
+          <h2 id="tenants-heading">{tp('tenants')}</h2>
+          <ul>
+            {platform.tenants.map((tenant) => (
+              <li key={tenant.id}>
+                {tenant.slug} — {tenant.displayName} (
+                {tp('modulesCount', { count: tenant.enabledModules.length })})
+              </li>
+            ))}
+          </ul>
+        </section>
       </>
     );
   }

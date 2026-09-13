@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { ApiClientError, getBootstrap } from '@/lib/bootstrap';
+import { getPlatformTenants } from '@/lib/platform';
 import { getHostTenant } from '@/lib/tenant-host';
 import { logout } from './actions';
 
@@ -38,6 +39,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   ]);
 
   if (hostTenant.mode === 'platform') {
+    // D-21/D-23: the platform host is authorised by the API, never by claims. A 200 from
+    // `/v1/platform/tenants` IS the proof this session is a platform_admin on the right host; a member
+    // (403 FORBIDDEN) or a platform session that wandered onto a tenant host (403 TENANT_HOST_MISMATCH)
+    // is signed out by the same route handler the tenant branch uses, and sees no tenant details.
+    try {
+      await getPlatformTenants();
+    } catch (error) {
+      if (error instanceof ApiClientError) {
+        if (error.status === 401) redirect('/entrar');
+        if (error.code === 'FORBIDDEN' || error.code === 'TENANT_HOST_MISMATCH') {
+          redirect('/auth/host-mismatch');
+        }
+      }
+      throw error;
+    }
     return (
       <>
         <TopBar label={tp('title')} logoutLabel={t('logout')} />
