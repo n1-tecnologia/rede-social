@@ -284,6 +284,9 @@ importers:
       '@tria/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@tria/module-example':
+        specifier: workspace:*
+        version: link:../../packages/modules/example
       hono:
         specifier: 4.13.7
         version: 4.13.7

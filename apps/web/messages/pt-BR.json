@@ -88,6 +88,13 @@
     "modules": "Módulos ativos",
     "none": "Nenhum módulo ativo"
   },
+  "example": {
+    "title": "Exemplo",
+    "empty": "Nenhum item ainda.",
+    "add": "Adicionar",
+    "placeholder": "Título do item",
+    "processed": "processado"
+  },
   "legal": {
     "version": "Versão {version}",
     "back": "Voltar"

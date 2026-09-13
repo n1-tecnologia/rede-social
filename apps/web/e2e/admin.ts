@@ -126,3 +126,8 @@ export async function deleteUserByEmail(email: string): Promise<void> {
     headers: authHeaders(),
   });
 }
+
+/** Removes the throwaway example items a spec created (01-07; the module is deleted in Phase 4). */
+export async function deleteExampleItemsLike(pattern: string): Promise<void> {
+  await sql()`delete from public.example_items where title like ${pattern}`;
+}

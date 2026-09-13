@@ -1,8 +1,23 @@
+import { exampleItemsSchema } from '@tria/module-example/contracts';
+import { ExampleWidget } from '@tria/module-example/ui';
 import { getTranslations } from 'next-intl/server';
+import { apiFetch } from '@/lib/api';
 import { getBootstrap } from '@/lib/bootstrap';
 import { getPlatformTenants } from '@/lib/platform';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
+import { createExampleItem } from './example-actions';
+
+/**
+ * The module's data, fetched only when the tenant HAS the module (D-19). An enabled key in
+ * `bootstrap.modules` is the single source of truth here: the page never hardcodes "example
+ * exists", so a tenant without the flag renders nothing and makes no request.
+ */
+async function getExampleItems() {
+  const res = await apiFetch('/v1/example/items');
+  if (!res.ok) return [];
+  return exampleItemsSchema.parse(await res.json()).items;
+}
 
 /**
  * `/inicio` placeholder (D-07): tenant name, who you are, your role and the enabled modules from
@@ -47,7 +62,14 @@ export default async function InicioPage() {
   }
 
   const bootstrap = await getBootstrap();
-  const { user, membership, tenant, modules } = bootstrap;
+  const { user, membership, tenant, modules, permissions } = bootstrap;
+
+  // 01-07: the throwaway reference module's widget (D-19). Phase 4 removes these three lines with
+  // the package. `canCreate` comes from the bootstrap permissions, which already account for the
+  // role AND the flag — the API re-checks it on every write regardless.
+  const hasExample = modules.some((m) => m.key === 'example');
+  const exampleItems = hasExample ? await getExampleItems() : [];
+  const te = await getTranslations('example');
 
   return (
     <>
@@ -69,6 +91,21 @@ export default async function InicioPage() {
           </ul>
         )}
       </section>
+
+      {hasExample ? (
+        <ExampleWidget
+          items={exampleItems}
+          canCreate={permissions.includes('example.create')}
+          createAction={createExampleItem}
+          labels={{
+            title: te('title'),
+            empty: te('empty'),
+            add: te('add'),
+            placeholder: te('placeholder'),
+            processed: te('processed'),
+          }}
+        />
+      ) : null}
     </>
   );
 }
