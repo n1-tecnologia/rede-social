@@ -8,3 +8,4 @@ export * from './hosts';
 // SERVER-ONLY (`node:fs`): never import `@tria/contracts` from a client component that would pull this in.
 export * from './legal';
 export * from './modules';
+export * from './platform';

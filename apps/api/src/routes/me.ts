@@ -4,8 +4,10 @@ import { memberships, tenants, users } from '@tria/core/db/schema';
 import { withTenantTx } from '@tria/core/db/tenant-tx';
 import { requireAuth } from '@tria/core/server/auth/require-auth';
 import { ApiError } from '@tria/core/server/http/api-error';
+import { moduleFlags } from '@tria/core/server/modules/flags-cache';
 import { eq } from 'drizzle-orm';
 import { createOpenApiApp } from '../http/openapi';
+import { enabledModulesForBootstrap, permissionsFor } from '../modules/registry';
 
 const me = createOpenApiApp();
 me.use('*', requireAuth);
@@ -29,6 +31,9 @@ export const meRoutes = me.openapi(
   }),
   async (c) => {
     const ctx = c.get('ctx');
+
+    // The flags come from the same tenant lane, through the 30 s cache (ROLE-06 concurrency).
+    const flags = await moduleFlags.flags(ctx);
 
     const data = await withTenantTx(ctx, async (tx) => {
       const [tenant] = await tx
@@ -78,9 +83,9 @@ export const meRoutes = me.openapi(
           colors: tenant.branding.colors ?? {},
         },
       },
-      // Plan 01-06 fills modules/permissions from tenant_modules + the module registry.
-      modules: [],
-      permissions: [],
+      // Enabled keys from `tenant_modules`, decorated by the registry and sorted by nav order.
+      modules: enabledModulesForBootstrap(flags.keys, flags.settings),
+      permissions: permissionsFor(membership.role, flags.keys),
       counters: { unreadNotifications: 0, unreadConversations: 0 },
     };
     return c.json(body, 200);

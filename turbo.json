@@ -3,7 +3,13 @@
   "globalEnv": ["CI", "NODE_ENV"],
   // Spike-only inputs (`pnpm spike:supavisor`, plan 01-03/01-12). They never feed a turbo task, so
   // they are passed through instead of hashed; declaring them keeps Biome's noUndeclaredEnvVars quiet.
-  "globalPassThroughEnv": ["SPIKE_*", "TENANT_A", "TENANT_B", "SEED_PASSWORD"],
+  "globalPassThroughEnv": [
+    "SPIKE_*",
+    "TENANT_A",
+    "TENANT_B",
+    "SEED_PASSWORD",
+    "SUPER_ADMIN_*"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

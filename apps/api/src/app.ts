@@ -5,6 +5,7 @@ import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
+import { platformRoutes } from './routes/platform';
 import { publicRoutes } from './routes/public';
 
 const app = new OpenAPIHono<AppEnv>();
@@ -29,10 +30,13 @@ app.doc('/v1/openapi.json', {
 
 // Keep the chained `.route()` style: `AppType` must carry every mounted route for `hc<AppType>()`.
 // `/v1/public` is mounted BEFORE `/v1/me` and carries no auth middleware (D-20 public host lookup).
+// `/v1/platform` carries `requireSuperAdmin()` (applied inside the route group) and deliberately NOT
+// `requireAuth`: a super_admin has no membership, so requireAuth would 403 NO_MEMBERSHIP first (ROLE-01).
 const routes = app
   .route('/v1/health', healthRoutes)
   .route('/v1/public', publicRoutes)
-  .route('/v1/me', meRoutes);
+  .route('/v1/me', meRoutes)
+  .route('/v1/platform', platformRoutes);
 
 export type AppType = typeof routes;
 export { app };
