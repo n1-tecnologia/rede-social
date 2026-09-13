@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: Foundation - Kernel, Tenancy, Auth & CI/CD
 status: executing
-stopped_at: Completed 01-09-PLAN.md
-last_updated: "2026-09-12T21:35:04.304Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-09-13T14:03:48.038Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 01 execution started
-state_head: 5bee2fab64b8915a81e4113403dc743758837b45
+state_head: cca7d3949a51973defaccd583e6f4a1ef1a8fcb5
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 12
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
-Plan: 5 of 12
+Plan: 6 of 12
 Status: Ready to execute
 Last activity: 2026-09-11 — Phase 01 execution started
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P02 | 1h 34m | 3 tasks | 37 files |
 | Phase 01 P03 | 12min | 2 tasks | 15 files |
 | Phase 01 P09 | 21 min | 2 tasks | 12 files |
+| Phase 01 P04 | 25 min | 3 tasks | 32 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-03: the pooler fallback is a DATABASE_URL switch to the session pooler (5432) with withTenantTx unchanged; the per-request PostgREST client (fallback #2) is rejected as a code fork
 - [Phase 01]: 01-03: platform_admins is invisible to tenant lanes through RLS-with-no-policy (not a per-table revoke); 01-08's coverage test should assert pg_policy count = 0 for it
 - [Phase 01]: 01-03: chat/notification stub column shapes (kind, seq bigint, role, last_read_at, payload, event_id) are fixed for Phase 7; open question is whether chat_conversations gains a status column and a widened one-support-per-member index
+- [Phase 01]: GoTrue duplicate e-mail is matched on code 'email_exists', code 'user_already_exists' or a 422 message containing 'already been registered'; the concurrent loser gets an opaque 500 and is reclassified as 409 only after auth.users confirms the e-mail exists — A genuine GoTrue outage must still answer 500, so the race path re-queries instead of assuming duplication; this also made the AUTH-01 concurrency test keepable rather than skipped
+- [Phase 01]: apps/web/proxy.ts resolves the host tenant from x-forwarded-host first, falling back to host — Next re-requests the destination of a Server Action redirect() on the server own origin, carrying the browser-facing host only in x-forwarded-host; reading host first dropped the tenant shell after every sign-up. Vercel/Cloud Run overwrite the header at the edge and the host only selects the public shell (D-20/D-23), so trusting it cannot leak another tenant data
+- [Phase 01]: consent_records is append-only by construction: RLS on with a single select-only policy and no insert/update/delete policy at all — Writes exist only through the admin lane, so the absence of a write policy is the tamper-resistance mechanism for LGPD evidence (T-04-02)
 
 ### Pending Todos
 
@@ -111,6 +115,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-12T21:35:04.289Z
-Stopped at: Completed 01-09-PLAN.md
+Last session: 2026-09-13T14:03:20.175Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
