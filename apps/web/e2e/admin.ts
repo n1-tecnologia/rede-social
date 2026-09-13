@@ -105,6 +105,17 @@ export async function setMembershipStatus(
   if (updated.length === 0) throw new Error(`no membership for ${email}`);
 }
 
+/**
+ * Deletes the membership row while leaving the identity (and its live session) alone — the "orphan
+ * identity" the API answers with 403 `NO_MEMBERSHIP`.
+ */
+export async function removeMembership(email: string): Promise<void> {
+  await sql()`
+    delete from public.memberships m
+     using public.users u
+     where u.id = m.user_id and u.email = ${email}`;
+}
+
 /** Removes the throwaway identity; `public.users` and `memberships` cascade. */
 export async function deleteUserByEmail(email: string): Promise<void> {
   const rows = await sql()<{ id: string }[]>`select id from auth.users where email = ${email}`;

@@ -50,9 +50,32 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   try {
     tenantName = (await getBootstrap()).tenant.displayName;
   } catch (error) {
-    // Expired/invalid session between proxy.ts and the API: back to login.
-    // 403 codes (MEMBERSHIP_BLOCKED, NO_MEMBERSHIP, TENANT_HOST_MISMATCH) are handled by plan 01-05.
-    if (error instanceof ApiClientError && error.status === 401) redirect('/entrar');
+    // The layout is a Server Component, so it cannot clear cookies itself: each 403 is routed to a
+    // Route Handler under /auth/* that signs the device out and then lands on the public screen.
+    if (error instanceof ApiClientError) {
+      // Expired/invalid session between proxy.ts and the API: back to login.
+      if (error.status === 401) redirect('/entrar');
+
+      switch (error.code) {
+        // AUTH-06 / D-09: the block takes effect on the very next request. The tenant display name is
+        // the only detail the 403 carries and the only one the screen shows.
+        case 'MEMBERSHIP_BLOCKED': {
+          const tenant = String(error.details?.tenantName ?? '');
+          redirect(`/auth/blocked?t=${encodeURIComponent(tenant)}`);
+          break;
+        }
+        // TENANT-01 / D-23: no query parameters — the screen must not name either tenant.
+        case 'TENANT_HOST_MISMATCH':
+          redirect('/auth/host-mismatch');
+          break;
+        // Orphan identity: a session with no membership row.
+        case 'NO_MEMBERSHIP':
+          redirect('/sem-comunidade');
+          break;
+        default:
+          break;
+      }
+    }
     throw error;
   }
 
