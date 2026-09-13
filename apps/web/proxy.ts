@@ -55,7 +55,17 @@ function withCookies(target: NextResponse, source: NextResponse): NextResponse {
 export async function proxy(request: NextRequest) {
   // 1. Host -> public shell (D-20/D-21). Runs BEFORE the Supabase client so the
   //    "nothing between createServerClient and getClaims()" rule stays intact.
-  const hostTenant = await resolveHostTenant(request.headers.get('host'));
+  //
+  //    `x-forwarded-host` FIRST, `host` only as the fallback: when a Server Action calls `redirect()`,
+  //    Next re-requests the destination through this proxy on the SERVER's own origin
+  //    (`host: localhost:3000`) and carries the browser-facing host in `x-forwarded-host` — verified in
+  //    both `next dev` and `next start`. Reading `host` there would classify every post-action page as
+  //    a generic host and silently drop the tenant from the public shell. Vercel and Cloud Run set
+  //    `x-forwarded-host` themselves (a client-supplied value is overwritten at the edge), and per
+  //    D-20/D-23 the host only SELECTS the public shell — the API still re-resolves it and can only
+  //    DENY a session — so trusting it here cannot leak another tenant's data.
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const hostTenant = await resolveHostTenant(forwardedHost || request.headers.get('host'));
   let requestHeaders = buildRequestHeaders(request, hostTenant);
 
   // Vercel Production only (01-11 sets PLATFORM_HOST there, never on Preview): the deployment alias
