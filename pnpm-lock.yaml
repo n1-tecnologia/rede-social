@@ -331,6 +331,15 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  packages/boundary-fixture:
+    dependencies:
+      '@tria/api':
+        specifier: workspace:*
+        version: link:../../apps/api
+      '@tria/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/config:
     devDependencies:
       '@types/node':

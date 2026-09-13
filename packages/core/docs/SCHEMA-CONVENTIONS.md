@@ -147,13 +147,30 @@ settings change plus UI, not a migration that rewrites tables.
 
 ## (j) Test gate
 
-Every new tenant-owned table must, in the same PR:
+The gate is six files. Five run inside Postgres (`pnpm supabase test db`), one runs against the live
+API (`pnpm test:integration`); CI runs them in this order on every push (`.github/workflows/ci.yml`).
 
-1. pass `supabase/tests/010-rls-coverage.sql` — the pgTAP test that fails when any table in `public`
-   lacks RLS or lacks an isolation policy (01-08);
-2. add a case to `supabase/tests/020-tenant-isolation.sql` — tenant A's lane must see its own rows
-   and **zero** rows of tenant B, for this table specifically;
-3. keep `supabase/tests/030-lanes.sql` green (lane reads work, bare reads raise `42501`).
+| File | What it refuses to let through |
+|---|---|
+| `supabase/tests/000-helpers.sql` | Installs pgTAP and the `tests` schema (fixtures + lane helpers). The **only** file that commits; 010–040 each undo their own transaction, so order never changes a result. |
+| `supabase/tests/010-rls-coverage.sql` | Any table in `public` without RLS, and any table with a `tenant_id` column without at least one policy. Catalogue-only, so it covers tables that do not exist yet. |
+| `supabase/tests/020-tenant-isolation.sql` | Cross-tenant read or write through the tenant lane, per table, with **identical-looking content on both sides**. |
+| `supabase/tests/030-lanes.sql` | Privilege creep on `api_user`: it owns nothing until it opens a lane (`42501`), a claimless lane returns zero rows, and no runtime role has `rolbypassrls`. |
+| `supabase/tests/040-schema-conventions.sql` | The rules on this page: no `tenant_id`/`role` on `users`, `super_admin` is not a membership role, `platform_admins` has zero policies, `consent_records` is append-only, every tenant table is indexed tenant-first, `tenant_domains` is case-proof and lane-read-only. |
+| `apps/api/tests/integration/isolation.test.ts` | The same isolation one layer up: list, detail, empty, disabled module, a member blocked between two requests, a session presented on another tenant's host, the platform identity, and the public host lookup. |
+
+**The two rules that keep the gate honest:**
+
+1. **Every new tenant-owned table adds a case to `020-tenant-isolation.sql`** — tenant A's lane must
+   see its own row and **zero** rows of tenant B, for that table specifically. 010 will already fail
+   if the table has no RLS or no policy; 020 is what proves the policy is the *right* one.
+2. **Every new endpoint adds a cross-tenant case to `apps/api/tests/integration/isolation.test.ts`** —
+   at minimum: the other tenant's id is `404 NOT_FOUND` (never `403`), and a session of tenant A on
+   tenant B's registered host is `403 TENANT_HOST_MISMATCH` with no row and no tenant name in the body.
+
+Both files seed **identical-looking** data in the two tenants (same title, same message body, same
+`member@…` local part) on purpose: a query that filtered on a value instead of on `tenant_id` would
+otherwise pass by returning something that merely looks right. Every assertion compares ids.
 
 The two-tenant isolation suite is the **exit gate of every phase** (TENANT-05), not a Phase 1
 artifact.

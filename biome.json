@@ -23,7 +23,6 @@
       "!**/coverage",
       "!supabase/migrations",
       "!supabase/.temp",
-      "!packages/boundary-fixture",
       "!reference"
     ]
   },
@@ -58,7 +57,8 @@
     },
     {
       "includes": [
-        "packages/modules/**"
+        "packages/modules/**",
+        "packages/boundary-fixture/**"
       ],
       "linter": {
         "rules": {
@@ -69,6 +69,10 @@
                 "patterns": [
                   {
                     "group": [
+                      "@tria/module-*/server/*",
+                      "@tria/module-*/db/*",
+                      "@tria/module-*/ui/*",
+                      "@tria/module-*/contracts/*",
                       "@tria/module-*/src/**",
                       "@tria/core/src/**",
                       "../../../core/**"
@@ -81,6 +85,13 @@
                       "@tria/core/server/supabase-admin"
                     ],
                     "message": "Admin lane is kernel-only"
+                  },
+                  {
+                    "group": [
+                      "@tria/api",
+                      "@tria/api/*"
+                    ],
+                    "message": "A module may not import an app package"
                   }
                 ]
               }

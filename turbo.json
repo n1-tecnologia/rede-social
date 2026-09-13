@@ -48,23 +48,33 @@
       ]
     }
   },
+  // MOD-02 layer 1 of 3 (the other two are Biome `noRestrictedImports` and the module package's own
+  // `exports` map). `pnpm boundaries:negative` proves this layer still bites, by requiring
+  // @tria/boundary-fixture — a `module`-tagged package that depends on an `app` and on another
+  // module — to FAIL `turbo boundaries`.
+  //
+  // `contracts` and `tooling` carry no rule block on purpose (01-08). turbo 2.10.12 mis-attributes
+  // `dependencies` edges for those two leaf tags: with a rule on either of them it reports
+  // `@tria/config` — a package whose package.json and lockfile importer declare ZERO workspace
+  // dependencies — as depending on both @tria/core and @tria/contracts, so any rule written there
+  // fails on the correct graph and teaches nothing. Both packages are leaves (contracts depends only
+  // on zod, config on nothing), so the layer loses no real coverage: what a module or an app may
+  // reach is still stated below, and the import-level lanes are Biome's job.
   "boundaries": {
     "tags": {
+      // A module may reach the kernel, the shared contracts and tooling — never another module and
+      // never an app. There is no `dependents.deny: ["module"]` twin: it is redundant (the same
+      // module -> module edge already fails this allowlist, reported against the importing package)
+      // and it is the one rule the negative fixture cannot exercise without turning the POSITIVE run
+      // red, because `--filter` excludes a package from being checked but not from the graph.
       "module": {
-        "dependencies": { "allow": ["kernel", "contracts", "tooling"] },
-        "dependents": { "deny": ["module"] }
+        "dependencies": { "allow": ["kernel", "contracts", "tooling"] }
       },
       "kernel": {
         "dependencies": { "deny": ["module", "app"] }
       },
-      "contracts": {
-        "dependencies": { "allow": ["tooling"] }
-      },
       "app": {
         "dependencies": { "allow": ["kernel", "contracts", "module", "tooling", "app"] }
-      },
-      "tooling": {
-        "dependencies": { "allow": ["tooling"] }
       }
     }
   }
