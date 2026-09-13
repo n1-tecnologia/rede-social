@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 6
+open_count: 5
 waived_count: 0
-fixed_count: 1
+fixed_count: 2
 total_count: 7
-last_updated: 2026-09-13T14:03:19.772Z
+last_updated: 2026-09-13T14:24:42.696Z
 ---
 
 # Broken Windows Ledger
@@ -18,7 +18,7 @@ last_updated: 2026-09-13T14:03:19.772Z
 | 1 | 01 | stub | apps/api/src/routes/me.ts |  | bootstrap returns modules: [] and permissions: [] until plan 01-06 fills them from tenant_modules | open |  | 2026-09-12T11:47:31.307Z |  |
 | 2 | 01 | stub | apps/api/src/routes/me.ts |  | bootstrap counters are zero until Phase 7 (notifications/chat) | open |  | 2026-09-12T11:47:31.375Z |  |
 | 3 | 01 | stub | apps/web/app/(auth)/entrar/page.tsx |  | Generic-host tenant hint waits for GET /v1/public/tenants/{slug} (plan 01-04); link shown, hint absent until then | fixed |  | 2026-09-12T13:28:27.502Z | 2026-09-13T14:03:19.772Z |
-| 4 | 01 | stub | apps/web/app/(app)/layout.tsx |  | Only 401 handled in the bootstrap catch; 403 codes (MEMBERSHIP_BLOCKED/NO_MEMBERSHIP/TENANT_HOST_MISMATCH) rethrow until plan 01-05 | open |  | 2026-09-12T13:28:27.571Z |  |
+| 4 | 01 | stub | apps/web/app/(app)/layout.tsx |  | Only 401 handled in the bootstrap catch; 403 codes (MEMBERSHIP_BLOCKED/NO_MEMBERSHIP/TENANT_HOST_MISMATCH) rethrow until plan 01-05 | fixed |  | 2026-09-12T13:28:27.571Z | 2026-09-13T14:24:42.696Z |
 | 5 | 01 | stub | packages/core/db/schema/chat-stubs.ts |  | Chat stub tables have no triggers, Realtime wiring or routes — intentional shape-only Foundation deliverable, resolved by Phase 7 | open |  | 2026-09-12T21:16:10.084Z |  |
 | 6 | 01 | stub | packages/core/db/schema/notification-stubs.ts |  | notifications stub has no producer or fan-out worker — resolved by Phase 7 | open |  | 2026-09-12T21:16:10.151Z |  |
 | 7 | 01 | unrun-verify | .github/workflows/ci.yml |  | ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01 | open |  | 2026-09-12T21:34:49.618Z |  |
@@ -68,10 +68,10 @@ last_updated: 2026-09-13T14:03:19.772Z
     "file": "apps/web/app/(app)/layout.tsx",
     "line": null,
     "description": "Only 401 handled in the bootstrap catch; 403 codes (MEMBERSHIP_BLOCKED/NO_MEMBERSHIP/TENANT_HOST_MISMATCH) rethrow until plan 01-05",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-12T13:28:27.571Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-13T14:24:42.696Z"
   },
   {
     "id": 5,

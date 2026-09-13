@@ -38,10 +38,10 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 - [x] **AUTH-01**: Each tenant has a public sign-up link; a user who signs up through it becomes a `member` of that tenant, and the link survives the register/login round-trip
 - [x] **AUTH-02**: User can sign up and log in with e-mail and password (Supabase Auth via the Next.js server), and stay logged in across browser/PWA restarts
-- [ ] **AUTH-03**: User can recover a forgotten password via e-mail link
+- [x] **AUTH-03**: User can recover a forgotten password via e-mail link
 - [x] **AUTH-04**: At sign-up the user must accept the tenant's community rules (editable by `admin_tenant`) and TRIA's terms/privacy policy; acceptance is recorded with timestamp
 - [x] **AUTH-05**: User can log out from any page
-- [ ] **AUTH-06**: The API verifies the Supabase JWT (asymmetric keys / JWKS) and resolves tenant, role and membership status per request from the database, so a blocked member is cut off immediately
+- [x] **AUTH-06**: The API verifies the Supabase JWT (asymmetric keys / JWKS) and resolves tenant, role and membership status per request from the database, so a blocked member is cut off immediately
 
 ### Member Profile
 
@@ -227,10 +227,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ROLE-06 | Phase 1 | Pending |
 | AUTH-01 | Phase 1 | Complete |
 | AUTH-02 | Phase 1 | Complete |
-| AUTH-03 | Phase 1 | Pending |
+| AUTH-03 | Phase 1 | Complete |
 | AUTH-04 | Phase 1 | Complete |
 | AUTH-05 | Phase 1 | Complete |
-| AUTH-06 | Phase 1 | Pending |
+| AUTH-06 | Phase 1 | Complete |
 | PROF-01 | Phase 3 | Pending |
 | PROF-02 | Phase 3 | Pending |
 | PROF-03 | Phase 3 | Pending |

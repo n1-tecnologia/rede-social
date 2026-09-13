@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: Foundation - Kernel, Tenancy, Auth & CI/CD
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-09-13T14:03:48.038Z"
+stopped_at: Completed 01-05-PLAN.md
+last_updated: "2026-09-13T14:27:48.194Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 01 execution started
-state_head: cca7d3949a51973defaccd583e6f4a1ef1a8fcb5
+state_head: b9e4c5c125ed0c1afc2321fe4c3e92a1d2dc7e1a
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 12
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
-Plan: 6 of 12
+Plan: 7 of 12
 Status: Ready to execute
 Last activity: 2026-09-11 — Phase 01 execution started
 
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P03 | 12min | 2 tasks | 15 files |
 | Phase 01 P09 | 21 min | 2 tasks | 12 files |
 | Phase 01 P04 | 25 min | 3 tasks | 32 files |
+| Phase 01 P05 | 17min | 2 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,11 @@ Recent decisions affecting current work:
 - [Phase 01]: GoTrue duplicate e-mail is matched on code 'email_exists', code 'user_already_exists' or a 422 message containing 'already been registered'; the concurrent loser gets an opaque 500 and is reclassified as 409 only after auth.users confirms the e-mail exists — A genuine GoTrue outage must still answer 500, so the race path re-queries instead of assuming duplication; this also made the AUTH-01 concurrency test keepable rather than skipped
 - [Phase 01]: apps/web/proxy.ts resolves the host tenant from x-forwarded-host first, falling back to host — Next re-requests the destination of a Server Action redirect() on the server own origin, carrying the browser-facing host only in x-forwarded-host; reading host first dropped the tenant shell after every sign-up. Vercel/Cloud Run overwrite the header at the edge and the host only selects the public shell (D-20/D-23), so trusting it cannot leak another tenant data
 - [Phase 01]: consent_records is append-only by construction: RLS on with a single select-only policy and no insert/update/delete policy at all — Writes exist only through the admin lane, so the absence of a write policy is the tamper-resistance mechanism for LGPD evidence (T-04-02)
+- [Phase 01]: 01-05: recovery redirectTo is derived only from the request origin (x-forwarded-host before host) — no SITE_URL, no env fallback (D-22)
+- [Phase 01]: 01-05: the (app) layout routes every 403 envelope code to a Route Handler under /auth/* because only a Route Handler may clear the session cookies
+- [Phase 01]: 01-05: /endereco-invalido takes no props and reads no cookie, header or search param — D-23 privacy is structural, not a review note
+- [Phase 01]: 01-05: e2e fixtures send recovery mail from one throwaway user per case — GoTrue throttles recovery mail per user (max_frequency)
+- [Phase 01]: 01-05: postgres@3.4.9 added as a @tria/web devDependency so e2e/admin.ts can write membership rows (fixtures only, never app code)
 
 ### Pending Todos
 
@@ -115,6 +121,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-13T14:03:20.175Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-09-13T14:27:48.179Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None
