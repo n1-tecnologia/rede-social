@@ -77,6 +77,20 @@ export async function waitForRecoveryMail(email: string, timeoutMs = 20_000): Pr
   );
 }
 
+/**
+ * Asserts that NO recovery e-mail reaches `email` within `windowMs` (WR-09: a refused origin must
+ * send nothing). The window is generous relative to the local mailer, which delivers in ~1 s.
+ */
+export async function expectNoRecoveryMail(email: string, windowMs = 6_000): Promise<void> {
+  const kind = await detectFlavour();
+  const deadline = Date.now() + windowMs;
+  while (Date.now() < deadline) {
+    const link = kind === 'mailpit' ? await mailpitLatest(email) : await inbucketLatest(email);
+    if (link) throw new Error(`A recovery e-mail reached ${email} although the origin was refused`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 /** Deletes every stored message so a spec never reads a previous run's e-mail. */
 export async function clearMailbox(): Promise<void> {
   const kind = await detectFlavour();

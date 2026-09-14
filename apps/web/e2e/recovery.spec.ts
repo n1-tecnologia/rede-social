@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { closeAdmin, createMember, deleteUserByEmail } from './admin';
-import { hosts } from './fixtures';
-import { clearMailbox, waitForRecoveryMail } from './mail';
+import { hosts, isRemote } from './fixtures';
+import { clearMailbox, expectNoRecoveryMail, waitForRecoveryMail } from './mail';
 
 /**
  * AUTH-03 / D-10 password recovery on a phone viewport (`mobile-chromium`), end to end through the
@@ -97,6 +97,30 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     await expect(page).toHaveURL(/\/esqueci-senha\?erro=link-invalido$/);
     expect(page.url().startsWith(hosts.demo)).toBe(true);
     await expect(page.locator('p[role="alert"]')).toBeVisible();
+  });
+
+  test('6. WR-09: a host this deployment does not serve as a tenant/platform gets NO e-mail', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    // The action derives the recovery origin from X-Forwarded-Host/Host (D-22). A forged forwarded
+    // host from a browser never reaches the action (Next's Server Actions Origin check), but an
+    // attacker-sent request whose Host and Origin agree does — classic reset-link host poisoning.
+    // Same shape here: `127.0.0.1` reaches the dev server, is neither a registered tenant host nor
+    // PLATFORM_HOST nor `*.localhost`, so the action refuses to build a link for it.
+    const email = await newMember('unserved-host');
+    await clearMailbox();
+    const unserved = new URL(hosts.demo);
+    unserved.hostname = '127.0.0.1';
+    const context = await browser.newContext({ baseURL: unserved.origin });
+    const page = await context.newPage();
+    try {
+      // Constant D-10 answer regardless of the refusal (the refusal is not enumerable either).
+      await requestLink(page, email);
+      await expectNoRecoveryMail(email);
+    } finally {
+      await context.close();
+    }
   });
 
   test('5. T-05-01: a protocol-relative `next` on a VALID link falls back to /inicio', async ({

@@ -102,6 +102,16 @@ No `SITE_URL` anywhere: every absolute URL, including the password-recovery `red
 from the request origin (D-22). Only publishable keys ever reach Vercel — the service key lives in
 Secret Manager and GitHub environment secrets.
 
+**Password-recovery origin (WR-09).** `apps/web/app/(auth)/esqueci-senha/actions.ts` builds the
+`redirect_to` from `X-Forwarded-Host`/`Host`, but honours it only when `proxy.ts` classified the host
+as a registered tenant domain or as `PLATFORM_HOST` (plus `localhost`/`*.localhost` outside
+production). Any other host — a `*.vercel.app` preview alias included — sends no e-mail (the browser
+still gets the constant answer). The hosted project's `[auth] additional_redirect_urls` is the second,
+independent guard and must therefore be an **explicit per-domain list**
+(`https://comunidade.cliente.com.br/auth/confirm**`, `https://app.seusistema.com/auth/confirm**`, …),
+never a wildcard host such as `https://**` — review it whenever a tenant domain is attached and
+whenever `supabase config push` runs.
+
 ## Production gate (D-12)
 
 Three conditions must hold **on the same `main` SHA** before a single production migration runs:
