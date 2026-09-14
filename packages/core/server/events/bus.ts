@@ -65,8 +65,8 @@ export function subscribe<K extends DomainEventName>(
  * `logger` is the request's child (`requestId`, `tenantId`, `userId`) when called from the
  * middleware, so a failed subscriber is attributable to the request that produced the event.
  */
-export async function flush(ctx: RequestContext, logger: Logger = busLogger): Promise<void> {
-  const log = logger.child({ name: 'events' });
+export async function flush(ctx: RequestContext, logger?: Logger): Promise<void> {
+  const log = logger ? logger.child({ name: 'events' }) : busLogger;
   while (ctx.events.length > 0) {
     const batch = ctx.events.splice(0, ctx.events.length);
     for (const record of batch) {
@@ -112,5 +112,5 @@ export const flushEventsAfterHandler = createMiddleware<AppEnv>(async (c, next) 
     ctx.events.length = 0;
     return;
   }
-  await flush(ctx, c.get('logger') ?? busLogger);
+  await flush(ctx, c.get('logger'));
 });

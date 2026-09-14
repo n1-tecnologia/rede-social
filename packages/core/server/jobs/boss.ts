@@ -79,12 +79,13 @@ export async function createQueues(boss: PgBoss, names: readonly string[]): Prom
   }
   if (names.length === 0) return;
   const queues = await boss.getQueues([...names]);
-  const wrong = queues.filter((queue) => queue.policy !== QUEUE_POLICY);
+  const wrong = queues
+    .filter((queue) => queue.policy !== QUEUE_POLICY)
+    .map((queue) => `${queue.name} is '${queue.policy}'`);
   if (wrong.length > 0) {
     throw new Error(
-      `pg-boss queue policy mismatch: ${wrong
-        .map((queue) => `${queue.name} is '${queue.policy}'`)
-        .join(', ')} (expected '${QUEUE_POLICY}'). A policy cannot be changed after creation: delete the queue row and restart.`,
+      `pg-boss queue policy mismatch: ${wrong.join(', ')} (expected '${QUEUE_POLICY}'). ` +
+        'A policy cannot be changed after creation: delete the queue row and restart.',
     );
   }
 }
