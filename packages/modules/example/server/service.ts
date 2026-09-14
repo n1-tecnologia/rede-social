@@ -58,7 +58,9 @@ export async function getItem(ctx: RequestContext, id: string): Promise<ExampleI
  * - `createdByUserId` comes from `ctx`, never from the body (T-07-01).
  * - `enqueueInTx` writes the pg-boss job through the SAME Drizzle transaction, so a rollback takes
  *   the job with it — there is no window where the item exists without its job, or the reverse.
- * - `singletonKey = itemId` makes a retried request idempotent at the queue (T-07-04).
+ * - `singletonKey = itemId` makes a retried request idempotent at the queue (T-07-04) — because
+ *   the kernel creates every queue with the `short` policy (`QUEUE_POLICY` in
+ *   `@tria/core/server/jobs/boss`); on a `standard` queue the key would enforce nothing.
  * - `emit` runs only after `withTenantTx` RESOLVES, and even then only queues the event; the bus
  *   delivers it after the response handler returns. A subscriber can never see an uncommitted row.
  */

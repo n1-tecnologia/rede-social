@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import { createBoss } from '@tria/core/server/jobs/boss';
+import { createBoss, createQueues } from '@tria/core/server/jobs/boss';
 import type { AnyJobDefinition } from '@tria/core/server/modules/manifest';
 import { Hono } from 'hono';
 import { env } from './env';
@@ -12,7 +12,7 @@ import { MODULE_REGISTRY } from './modules/registry';
  * so the request-serving role stays stateless and scale-to-zero friendly.
  *
  * Queue creation happens HERE at start, for every `JobDefinition` any registered module declares.
- * `createQueue` is idempotent, which is what makes the concurrent cases safe: two worker instances
+ * `createQueues` is idempotent, which is what makes the concurrent cases safe: two worker instances
  * booting together, or a worker booting while the API performs its first lazy enqueue, all converge
  * on the same queue row.
  *
@@ -37,8 +37,11 @@ export async function startWorker(): Promise<void> {
 
   await boss.start();
 
+  await createQueues(
+    boss,
+    jobs.map((job) => job.name),
+  );
   for (const job of jobs) {
-    await boss.createQueue(job.name);
     await boss.work(job.name, async (batch) => {
       for (const item of batch) await job.handler(item.data);
     });

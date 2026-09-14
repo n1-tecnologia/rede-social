@@ -53,6 +53,42 @@ export function createBoss(opts: CreateBossOptions): PgBoss {
   });
 }
 
+/**
+ * The ONE queue policy in this codebase. `singletonKey` is only enforced through policy-specific
+ * partial unique indexes (`job_i1` for `short`, …); on the default `standard` policy a key hits no
+ * index and two `send` calls with the same key produce two jobs (phase-1 review WR-03). `short`
+ * means: at most ONE job per `(queue, singletonKey)` in the `created` state — a retried request
+ * that re-enqueues the same key while the first job is still waiting is a no-op (`send` returns
+ * `null`). Once the job is active or done, the same key may be enqueued again.
+ */
+export const QUEUE_POLICY = 'short' as const;
+
+/**
+ * Creates every queue with `QUEUE_POLICY`, from the ONE place both processes call (the worker at
+ * start, the API on its first lazy enqueue). `createQueue` is idempotent — pg-boss's `create_queue`
+ * is `INSERT … ON CONFLICT DO NOTHING` — which is what makes two workers booting together safe.
+ *
+ * That same `DO NOTHING` is why the policy is verified afterwards: a queue row created earlier with
+ * another policy silently keeps it, pg-boss refuses to change a policy after creation, and the
+ * idempotency `enqueueInTx` documents would then not exist. Failing here is loud on purpose: the fix
+ * is `boss.deleteQueue(name)` (or `delete from pgboss.queue where name = …`) and a restart.
+ */
+export async function createQueues(boss: PgBoss, names: readonly string[]): Promise<void> {
+  for (const name of names) {
+    await boss.createQueue(name, { policy: QUEUE_POLICY });
+  }
+  if (names.length === 0) return;
+  const queues = await boss.getQueues([...names]);
+  const wrong = queues.filter((queue) => queue.policy !== QUEUE_POLICY);
+  if (wrong.length > 0) {
+    throw new Error(
+      `pg-boss queue policy mismatch: ${wrong
+        .map((queue) => `${queue.name} is '${queue.policy}'`)
+        .join(', ')} (expected '${QUEUE_POLICY}'). A policy cannot be changed after creation: delete the queue row and restart.`,
+    );
+  }
+}
+
 let apiBoss: PgBoss | null = null;
 let apiBossStarted: Promise<PgBoss> | null = null;
 
@@ -72,7 +108,7 @@ export function getBoss(): PgBoss {
 
 /**
  * Started on FIRST enqueue, never at boot. The queue creation here is the API's half of the
- * concurrency story: `createQueue` is idempotent, so the worker doing the same at its own start
+ * concurrency story: `createQueues` is idempotent, so the worker doing the same at its own start
  * (and a second worker instance booting simultaneously) is safe, and `send` can never target a
  * queue that does not exist yet.
  */
@@ -80,7 +116,7 @@ async function startedBoss(): Promise<PgBoss> {
   apiBossStarted ??= (async () => {
     const boss = getBoss();
     await boss.start();
-    for (const name of queueNames) await boss.createQueue(name);
+    await createQueues(boss, [...queueNames]);
     return boss;
   })();
   return apiBossStarted;
@@ -89,7 +125,10 @@ async function startedBoss(): Promise<PgBoss> {
 /**
  * Enqueue INSIDE the caller's transaction (A17: `fromDrizzle(tx, sql)`, verified against
  * pg-boss 12.31.0 `dist/adapters/drizzle.d.ts`). Use `singletonKey` for natural idempotency —
- * the example module keys on the item id (threat T-07-04).
+ * the example module keys on the item id (threat T-07-04). That idempotency exists ONLY because
+ * every queue is created with `QUEUE_POLICY = 'short'` (see `createQueues`): the second enqueue of
+ * a key whose job is still `created` is dropped by the `job_i1` partial unique index and `send`
+ * returns `null`. On a `standard` queue the same call would insert a second job.
  *
  * The role dance is deliberate. `withTenantTx` runs as `authenticated`, and `authenticated` has NO
  * privileges on schema `pgboss` (the migration revokes them): a queue row is infrastructure, not
