@@ -37,11 +37,17 @@ export const memberships = pgTable(
     index('memberships_tenant_role_idx').on(t.tenantId, t.role),
     check('memberships_role_chk', sql`${t.role} in ('admin_tenant','support_tenant','member')`),
     check('memberships_status_chk', sql`${t.status} in ('active','blocked','invited')`),
-    pgPolicy('memberships_tenant_isolation', {
-      for: 'all',
+    // SELECT-ONLY from the tenant lane, like every other core table (phase-1 review WR-07). This row
+    // carries `role` and `status` — the authorization source of truth — so a `FOR ALL` policy would
+    // let any request in the lane `update memberships set role = 'admin_tenant'` for itself or any
+    // member of its tenant the day a route forgets to exclude those columns. Membership writes
+    // (sign-up, block, role change) happen in the admin lane behind explicit guards. If a tenant-lane
+    // write is ever needed, add a NARROW `update` policy whose WITH CHECK pins `role`/`status`, never
+    // widen this one. `supabase/tests/020` and `040` assert the shape.
+    pgPolicy('memberships_tenant_select', {
+      for: 'select',
       to: authenticatedRole,
       using: sql`tenant_id = app.tenant_id()`,
-      withCheck: sql`tenant_id = app.tenant_id()`,
     }),
   ],
 ).enableRLS();

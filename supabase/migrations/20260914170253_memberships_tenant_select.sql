@@ -1,0 +1,2 @@
+DROP POLICY "memberships_tenant_isolation" ON "memberships" CASCADE;--> statement-breakpoint
+CREATE POLICY "memberships_tenant_select" ON "memberships" AS PERMISSIVE FOR SELECT TO "authenticated" USING (tenant_id = app.tenant_id());

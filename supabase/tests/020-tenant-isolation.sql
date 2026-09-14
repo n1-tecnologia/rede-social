@@ -12,13 +12,16 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(25);
+select plan(27);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
 select tests.tenant('pgtap-b', 'Comunidade B', '0b000000-0000-4000-8000-000000000001');
 select tests.auth_user('member@a.local', '0a000000-0000-4000-8000-000000000002');
 select tests.auth_user('member@b.local', '0b000000-0000-4000-8000-000000000002');
+-- An identity with NO membership anywhere: the lane's INSERT attempt below must fail on RLS (42501),
+-- never on the one-tenant-per-user index, so the reason is unambiguous.
+select tests.auth_user('orphan@a.local', '0a000000-0000-4000-8000-000000000009');
 select tests.member('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
 select tests.member('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
 
@@ -119,6 +122,24 @@ select results_eq(
   $$ select count(*)::int from public.memberships $$,
   ARRAY[1],
   'memberships: exactly A''s own row is visible'
+);
+-- WR-07 (phase-1 review): memberships is SELECT-ONLY from the lane. `role` and `status` are the
+-- authorization source of truth; they change only through the admin lane behind explicit guards.
+select results_eq(
+  $$ with u as (
+       update public.memberships set role = 'admin_tenant'
+        where tenant_id = '0a000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'memberships: the lane cannot promote itself — an UPDATE on its own tenant''s rows touches nothing'
+);
+select throws_ok(
+  $$ insert into public.memberships (tenant_id, user_id, role, status)
+     values ('0a000000-0000-4000-8000-000000000001',
+             '0a000000-0000-4000-8000-000000000009', 'member', 'active') $$,
+  '42501',
+  null,
+  'memberships: the lane cannot add a member — joining is an admin-lane operation'
 );
 
 select is_empty(

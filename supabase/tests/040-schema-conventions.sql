@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(26);
+select plan(27);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -59,6 +59,14 @@ select results_eq(
       where polrelid = 'public.consent_records'::regclass and polcmd in ('w', 'd', '*') $$,
   ARRAY[0],
   'consent_records has no update/delete policy: a consent record cannot be altered from a tenant lane'
+);
+
+-- ── memberships is the authorization source of truth: the lane may read, never write ───────────
+select results_eq(
+  $$ select count(*)::int from pg_policy
+      where polrelid = 'public.memberships'::regclass and polcmd in ('a', 'w', 'd', '*') $$,
+  ARRAY[0],
+  'memberships has no insert/update/delete policy: role and status change only in the admin lane (WR-07)'
 );
 
 -- ── every tenant table is indexed tenant-first ───────────────────────────────────────────────────
