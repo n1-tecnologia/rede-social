@@ -18,7 +18,7 @@
 | `signOut({ scope: 'local' })` | INTEGRATE | |
 | `signOut({ scope: 'global' })` | OPT-OUT | "Sair de todos os aparelhos" deferred to Phase 8 (CONTEXT Deferred Ideas) |
 | JWKS endpoint `/auth/v1/.well-known/jwks.json` (API verification with jose) | INTEGRATE | |
-| Redirect allow-list per remote (`additional_redirect_urls`): local `http://localhost:3000/**` + `http://*.localhost:3000/**`; staging = Preview wildcard + localhost + `*.localhost`; production = platform host + the two seed tenant hosts, exact entries | INTEGRATE | D-22 derives `redirect_to` from the request origin, so every served host is listed (D-24); staging never lists production hosts (Pitfall 8) |
+| Per-remote redirect allow-list (`additional_redirect_urls`), exact hosts per env | INTEGRATE | D-22 derives `redirect_to` from the request origin, so every served host is listed (D-24); staging never lists production hosts (Pitfall 8) |
 | `redirect_to` from a fixed `SITE_URL` | OPT-OUT | replaced by origin-derived URLs (D-22); no `SITE_URL` variable exists in the web env |
 | Wildcard tenant-domain entries in the production allow-list | OPT-OUT | customer domains are appended one by one when attached in Phase 2 (TENANT-07) |
 | `signUp` (client-side self sign-up) | OPT-OUT | sign-up provisioning must go through the API admin lane so identity is bound to a tenant atomically (C1, Pattern 4) |
@@ -32,7 +32,7 @@
 | capability | decision | reason |
 |---|---|---|
 | Supavisor transaction pooler (6543) as the API lane | INTEGRATE | |
-| Supavisor session pooler (5432) for the pg-boss worker and as documented fallback | INTEGRATE | |
+| Supavisor session pooler (5432) for the pg-boss worker and as fallback | INTEGRATE | |
 | `supabase start` / `db reset` / `migration up` (local) | INTEGRATE | |
 | `supabase db push --include-roles` (CI) | INTEGRATE | |
 | `supabase test db` (pgTAP) | INTEGRATE | |
@@ -49,7 +49,7 @@
 
 | capability | decision | reason |
 |---|---|---|
-| Custom SMTP (`smtp.resend.com:465`, user `resend`, API key) on staging + production | INTEGRATE | |
+| Custom SMTP (`smtp.resend.com:465`, API key) on staging + production | INTEGRATE | |
 | Domain creation + DNS verification (`POST /domains`, `GET /domains/:id/verify`) | INTEGRATE | |
 | API key creation (`POST /api-keys`) | INTEGRATE | |
 | Transactional e-mail API (`POST /emails`) from the API/worker | OPT-OUT | Phase 1 sends only Supabase Auth e-mails through SMTP; app-originated e-mail (notifications) is Phase 7 |
@@ -63,9 +63,9 @@
 | Project settings: Root Directory `apps/web`, Ignored Build Step `turbo-ignore` | INTEGRATE | |
 | Environment variables per environment (`vercel env add`) | INTEGRATE | |
 | Remote cache (Turborepo) | INTEGRATE | |
-| `vercel domains add` for the platform host + the two seed tenant hosts (`app.`/`demo.`/`lab.` placeholders; real names from the 01-10 Hosts table) | INTEGRATE | D-21/D-24; requires DNS control (Open Question 5); three CNAMEs at the DNS checkpoint |
+| `vercel domains add` for the platform host + the two seed tenant hosts | INTEGRATE | D-21/D-24; requires DNS control (Open Question 5); three CNAMEs at the DNS checkpoint |
 | `vercel domains inspect` (per-host configuration check after DNS) | INTEGRATE | 01-11 Task 3 verification |
-| Vercel Domains REST API (`POST /v10/projects/{id}/domains`, `GET …/domains/{domain}/config` verification polling) for customer domains | OPT-OUT | Phase 2 platform panel (TENANT-07); documented in `docs/DEPLOY.md` "Custom domains" by 01-11, not implemented |
+| Vercel Domains REST API (add domain + verification polling) for customer domains | OPT-OUT | Phase 2 platform panel (TENANT-07); documented in `docs/DEPLOY.md` "Custom domains" by 01-11, not implemented |
 | Preview branch domains (stable staging hostname) | OPT-OUT | D-11 has no long-lived staging branch; staging web = Preview URL (generic host, slug/cookie fallback per D-21) |
 | Deployment protection bypass for Playwright | OPT-OUT | e2e runs against the local stack in CI in Phase 1; preview smoke is manual (VALIDATION manual-only row) |
 | Vercel Blob/KV/Postgres, Edge Config, Cron | OPT-OUT | data lives in Supabase; jobs in pg-boss |
@@ -77,8 +77,8 @@
 | Workload Identity Federation pool + provider for `tria-company/rede-social` | INTEGRATE | |
 | Deploy service account + IAM bindings (Cloud Run Admin, SA User, AR Writer) | INTEGRATE | |
 | Artifact Registry Docker repo `rede-social` (southamerica-east1) | INTEGRATE | |
-| Cloud Run services `api-staging`, `worker-staging`, `api`, `worker` (`deploy-cloudrun@v3`) | INTEGRATE | |
-| Secret Manager secrets mounted as env (`DATABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_URL`) | INTEGRATE | |
+| Cloud Run services api/worker x staging/prod (`deploy-cloudrun@v3`) | INTEGRATE | |
+| Secret Manager secrets mounted as env (DB URL, Supabase URL + service key) | INTEGRATE | |
 | Cloud Run min-instances / cpu-throttling flags | INTEGRATE | |
 | Cloud SQL, Memorystore, Pub/Sub, Cloud Tasks | OPT-OUT | Supabase + pg-boss cover data and jobs in V1 |
 | Cloud Run custom domain for the API | OPT-OUT | the web tier calls the `*.run.app` URL server-side; no public API hostname needed in the pilot |
@@ -88,8 +88,8 @@
 
 | capability | decision | reason |
 |---|---|---|
-| Repository creation under `tria-company`, default branch `main`, branch protection | INTEGRATE | |
-| Actions workflows (`ci.yml`, `deploy-api.yml`, `seed-prod.yml`, `keepalive-staging.yml`) | INTEGRATE | |
+| Repository under `tria-company`, default branch `main`, branch protection | INTEGRATE | |
+| Actions workflows (ci, deploy-api, seed-prod, keepalive-staging) | INTEGRATE | |
 | Environments (`production` with one required reviewer) | INTEGRATE | conditional on the account plan (Open Question 1); `workflow_dispatch` fallback recorded in plan 01-10 |
 | Repository/environment secrets and variables | INTEGRATE | |
 | Dependabot / CodeQL | OPT-OUT | not required by PWA-04; revisit in Phase 8 hardening |
