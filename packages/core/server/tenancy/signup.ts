@@ -153,12 +153,17 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
     // answers 500. The winner's row is committed by the time the loser's insert conflicts.
     const existing = await existingIdentityForEmail(body.email);
     if (duplicate || existing) {
+      // `ip`/`userAgent` make probing visible (WR-05): the 409-vs-201 answer is an e-mail existence
+      // oracle by design (D-04), so at minimum every hit is attributable in the logs. Rate limiting
+      // and/or a CAPTCHA in front of this route are a pending product decision.
       log.warn(
         {
           event: 'signup.duplicate_email',
           existingTenantId: existing?.tenantId ?? null,
           attemptedTenantId: tenantId,
           raced: !duplicate,
+          ip,
+          userAgent,
         },
         'e-mail already registered',
       );
