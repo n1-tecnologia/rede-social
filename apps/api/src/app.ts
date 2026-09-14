@@ -1,6 +1,6 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@tria/core/server/auth/context';
-import { flushEventsAfterResponse } from '@tria/core/server/events/bus';
+import { flushEventsAfterHandler } from '@tria/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@tria/core/server/http/api-error';
 import { exampleRoutes } from '@tria/module-example/server';
 import { logger } from './http/logger';
@@ -15,8 +15,9 @@ const app = new OpenAPIHono<AppEnv>();
 app.use(requestIdMiddleware());
 app.use(logger());
 // Domain events emitted by a handler are delivered AFTER it returns, i.e. after its transaction
-// committed. Mounted here so every route group gets it without remembering to.
-app.use(flushEventsAfterResponse);
+// committed — and dropped when the handler threw (`c.error`), since then nothing committed.
+// Mounted here so every route group gets it without remembering to.
+app.use(flushEventsAfterHandler);
 
 /** Stable envelope every client switches on: `{ error: { code, message, details?, requestId } }`. */
 app.onError((err, c) => {

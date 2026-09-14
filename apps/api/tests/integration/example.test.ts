@@ -112,7 +112,7 @@ describe('@tria/module-example — routes, isolation, jobs and events', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]?.data.tenantId).toBe(tenantIds.demo);
 
-    // Delivered by `flushEventsAfterResponse`, i.e. after the handler's transaction committed.
+    // Delivered by `flushEventsAfterHandler`, i.e. after the handler's transaction committed.
     expect(events.filter((e) => e.itemId === item.id)).toHaveLength(1);
   });
 

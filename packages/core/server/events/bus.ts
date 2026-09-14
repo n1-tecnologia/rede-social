@@ -92,10 +92,24 @@ export async function flush(ctx: RequestContext): Promise<void> {
 
 /**
  * Mount once, right after the logger: `await next()` runs the whole handler chain (including its
- * transaction), and only then are the collected events delivered.
+ * transaction), and only then are the collected events delivered. It runs in the request's
+ * critical path, BEFORE the response is sent — hence the name.
+ *
+ * Rule 1 is enforced here by construction, not by convention (phase-1 review WR-01): in Hono's
+ * `compose()`, an error thrown by the handler is caught at the handler's own dispatch level and
+ * turned into a response by `app.onError`, so this middleware's `await next()` resolves NORMALLY.
+ * `c.error` is the only signal that the handler failed — and a failed handler means its
+ * `withTenantTx` rolled back, so whatever it pushed to `ctx.events` before throwing describes rows
+ * that no longer exist. Those events are dropped, never delivered.
  */
-export const flushEventsAfterResponse = createMiddleware<AppEnv>(async (c, next) => {
+export const flushEventsAfterHandler = createMiddleware<AppEnv>(async (c, next) => {
   await next();
   const ctx = c.get('ctx');
-  if (ctx) await flush(ctx);
+  if (!ctx) return;
+  if (c.error) {
+    // Handler failed: nothing committed, so nothing may be announced.
+    ctx.events.length = 0;
+    return;
+  }
+  await flush(ctx);
 });

@@ -1,6 +1,7 @@
+import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import type { RequestContext } from '../server/auth/context';
-import { emit, flush, subscribe } from '../server/events/bus';
+import type { AppEnv, RequestContext } from '../server/auth/context';
+import { emit, flush, flushEventsAfterHandler, subscribe } from '../server/events/bus';
 
 /**
  * The kernel's `EventMap` is empty by design (MOD-02), so the suite declares its own entries the
@@ -104,5 +105,57 @@ describe('domain event bus', () => {
     emit(c, 'test.two', { value: 42 });
     await expect(flush(c)).resolves.toBeUndefined();
     expect(c.events).toHaveLength(0);
+  });
+
+  /**
+   * WR-01 (phase-1 review): the middleware, mounted the way `apps/api/src/app.ts` mounts it, with a
+   * handler that emits and THEN throws. Hono's `compose()` turns the throw into `app.onError`'s
+   * response and resolves the middleware's `await next()` normally — so the only thing standing
+   * between a rolled-back transaction and a delivered event is the `c.error` check.
+   */
+  const appWith = (handler: (c: RequestContext) => Promise<void>) => {
+    const app = new Hono<AppEnv>();
+    app.onError((_err, c) => c.json({ error: 'boom' }, 500));
+    app.use(async (c, next) => {
+      c.set('ctx', ctx());
+      await next();
+    });
+    app.use(flushEventsAfterHandler);
+    app.get('/', async (c) => {
+      await handler(c.get('ctx'));
+      return c.json({ ok: true });
+    });
+    return app;
+  };
+
+  it('6. a handler that emits and then throws delivers NOTHING (its transaction rolled back)', async () => {
+    const seen: number[] = [];
+    const off = subscribe('test.one', async (p) => {
+      seen.push(p.value);
+    });
+
+    const app = appWith(async (c) => {
+      emit(c, 'test.one', { value: 1 });
+      throw new Error('handler failed after emit');
+    });
+    const res = await app.request('/');
+    expect(res.status).toBe(500);
+    expect(seen).toEqual([]);
+    off();
+  });
+
+  it('7. …and the same handler without the throw delivers, so (6) tested the guard, not the wiring', async () => {
+    const seen: number[] = [];
+    const off = subscribe('test.one', async (p) => {
+      seen.push(p.value);
+    });
+
+    const app = appWith(async (c) => {
+      emit(c, 'test.one', { value: 2 });
+    });
+    const res = await app.request('/');
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([2]);
+    off();
   });
 });
