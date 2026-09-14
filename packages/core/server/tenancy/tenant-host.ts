@@ -1,4 +1,4 @@
-import { normalizeHost } from '@tria/contracts';
+import { createBoundedTtlCache, isRegistrableHost, normalizeHost } from '@tria/contracts';
 import { and, eq } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantDomains, tenants } from '../../db/schema';
@@ -8,20 +8,29 @@ export type TenantHostResolution =
   | { kind: 'unknown' };
 
 const TTL_MS = 60_000;
-const cache = new Map<string, { value: TenantHostResolution; expiresAt: number }>();
+/**
+ * Hard bound (WR-06): `GET /v1/public/tenants/by-host` is unauthenticated and the key is whatever
+ * host the client sent, negative answers included. 1,000 entries is far above any real number of
+ * tenant domains and keeps a random-hostname storm at a fixed memory cost; the LRU eviction means a
+ * storm can at worst evict the real hosts' cached answers, never grow the map.
+ */
+const MAX_ENTRIES = 1_000;
+const cache = createBoundedTtlCache<TenantHostResolution>(MAX_ENTRIES);
 
 /**
  * host -> tenant (D-20/D-23). Cached in-process for 60 s for BOTH outcomes: negative caching keeps an
  * unknown-host storm off the database; a domain attached later becomes visible within a minute or at
  * once via `invalidateTenantHost`. Caches the host mapping only — never anything about a membership.
+ *
+ * A host that cannot possibly be registered (`isRegistrableHost`, the `tenant_domains_host_chk`
+ * predicate) is answered `unknown` before the cache and before the admin-lane query.
  */
 export async function resolveTenantHost(rawHost: string): Promise<TenantHostResolution> {
   const host = normalizeHost(rawHost);
-  if (!host) return { kind: 'unknown' };
+  if (!host || !isRegistrableHost(host)) return { kind: 'unknown' };
 
-  const now = Date.now();
   const hit = cache.get(host);
-  if (hit && hit.expiresAt > now) return hit.value;
+  if (hit) return hit;
 
   const value = await withAdminTx<TenantHostResolution>(async (tx) => {
     const rows = await tx
@@ -34,7 +43,7 @@ export async function resolveTenantHost(rawHost: string): Promise<TenantHostReso
     return row ? { kind: 'tenant', ...row } : { kind: 'unknown' };
   });
 
-  cache.set(host, { value, expiresAt: now + TTL_MS });
+  cache.set(host, value, TTL_MS);
   return value;
 }
 
@@ -42,4 +51,9 @@ export async function resolveTenantHost(rawHost: string): Promise<TenantHostReso
 export function invalidateTenantHost(rawHost: string): void {
   const host = normalizeHost(rawHost);
   if (host) cache.delete(host);
+}
+
+/** Test seam: how many hosts are cached right now (never more than the bound). */
+export function cachedTenantHostCount(): number {
+  return cache.size;
 }

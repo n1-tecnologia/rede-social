@@ -22,6 +22,65 @@ export function normalizeHost(raw: string | null | undefined): string | null {
   return host.length === 0 ? null : host;
 }
 
+/**
+ * The shape a host must have to be looked up or cached at all — the SAME predicate as the database
+ * check `tenant_domains_host_chk` (`^[a-z0-9.-]{1,253}$`, on the already-normalised value).
+ * Anything else (IPv6 literals, underscores, control characters, > 253 chars) can never match a
+ * registered domain, so it is answered "unknown" before it touches a cache key or a query
+ * (phase-1 review WR-06: caches keyed by attacker-controlled input must only admit values that
+ * could exist).
+ */
+export const HOST_SHAPE = /^[a-z0-9.-]{1,253}$/;
+export const isRegistrableHost = (host: string): boolean => HOST_SHAPE.test(host);
+
+export type BoundedTtlCache<V> = {
+  /** The value if present and not expired; an expired entry is dropped on read. */
+  get(key: string): V | undefined;
+  /** Stores `value` for `ttlMs`; evicts the least recently used entry when the bound is reached. */
+  set(key: string, value: V, ttlMs: number): void;
+  delete(key: string): void;
+  readonly size: number;
+};
+
+/**
+ * A `Map`-backed LRU with per-entry expiry and a hard `max`. The host caches in the API
+ * (`resolveTenantHost`) and the web BFF (`resolveHostTenant`) are keyed by a client-supplied host
+ * and remember negative answers too, so without a bound a client iterating random hostnames grows
+ * them for the life of the instance (WR-06). Insertion order is the LRU order: a hit re-inserts.
+ */
+export function createBoundedTtlCache<V>(max: number): BoundedTtlCache<V> {
+  if (!Number.isInteger(max) || max < 1) throw new Error('bounded cache: max must be >= 1');
+  const store = new Map<string, { value: V; expiresAt: number }>();
+  return {
+    get(key) {
+      const hit = store.get(key);
+      if (!hit) return undefined;
+      if (hit.expiresAt <= Date.now()) {
+        store.delete(key);
+        return undefined;
+      }
+      // Re-insert so the most recently used key is last in iteration order.
+      store.delete(key);
+      store.set(key, hit);
+      return hit.value;
+    },
+    set(key, value, ttlMs) {
+      store.delete(key);
+      if (store.size >= max) {
+        const oldest = store.keys().next();
+        if (!oldest.done) store.delete(oldest.value);
+      }
+      store.set(key, { value, expiresAt: Date.now() + ttlMs });
+    },
+    delete(key) {
+      store.delete(key);
+    },
+    get size() {
+      return store.size;
+    },
+  };
+}
+
 /** Body of `GET /v1/public/tenants/by-host` — exactly these two keys, nothing else (D-20). */
 export const hostTenantSchema = z
   .object({

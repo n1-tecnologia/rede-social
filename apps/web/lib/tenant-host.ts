@@ -1,4 +1,9 @@
-import { hostTenantSchema, normalizeHost } from '@tria/contracts';
+import {
+  createBoundedTtlCache,
+  hostTenantSchema,
+  isRegistrableHost,
+  normalizeHost,
+} from '@tria/contracts';
 import { headers } from 'next/headers';
 import { env } from '@/lib/env';
 
@@ -26,7 +31,11 @@ const TTL_MISS_MS = 60_000; // 404 TENANT_NOT_FOUND
 const TTL_ERROR_MS = 10_000; // network error / 5xx (fail-open to generic, logged)
 
 // Module-level, per instance, keyed by the normalised host. Recorded discretion (plan 01-02 truths).
-const cache = new Map<string, { value: HostTenant; expiresAt: number }>();
+// Bounded LRU (WR-06): on Vercel the Host is constrained to project domains, but on any other
+// runtime it is client-supplied, and negative answers are cached too — the bound keeps a
+// random-hostname storm at a fixed memory cost.
+const MAX_ENTRIES = 1_000;
+const cache = createBoundedTtlCache<HostTenant>(MAX_ENTRIES);
 
 function isGenericFastPath(host: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.vercel.app');
@@ -43,10 +52,12 @@ export async function resolveHostTenant(rawHost: string | null | undefined): Pro
     return { mode: 'platform', host };
   }
   if (isGenericFastPath(host)) return { mode: 'generic', host };
+  // A host that cannot be registered (`tenant_domains_host_chk` shape) is generic without a lookup
+  // and without occupying a cache slot.
+  if (!isRegistrableHost(host)) return { mode: 'generic', host };
 
-  const now = Date.now();
   const hit = cache.get(host);
-  if (hit && hit.expiresAt > now) return hit.value;
+  if (hit) return hit;
 
   let value: HostTenant = { mode: 'generic', host };
   let ttl = TTL_ERROR_MS;
@@ -72,7 +83,7 @@ export async function resolveHostTenant(rawHost: string | null | undefined): Pro
     console.error('tenant-host.lookup_failed', { host, error: String(error) });
   }
 
-  cache.set(host, { value, expiresAt: now + ttl });
+  cache.set(host, value, ttl);
   return value;
 }
 
