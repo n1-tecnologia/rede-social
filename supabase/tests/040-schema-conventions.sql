@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(27);
+select plan(30);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -195,6 +195,27 @@ select is(
     where n.nspname = 'app' and p.proname = 'membership_for_user'),
   true,
   'app.membership_for_user is SECURITY DEFINER: requireAuth resolves a membership before a lane exists'
+);
+
+-- ── WR-08: the lookup honours the lifecycle columns, so requireAuth cannot forget them ──────────
+-- The membership created above (tenant 0d…01, user 0d…02) is active with neither column set.
+select results_eq(
+  $$ select status from app.membership_for_user('0d000000-0000-4000-8000-000000000002') $$,
+  ARRAY['active'],
+  'membership_for_user: an untouched active membership reports status active'
+);
+update public.memberships set blocked_at = now()
+ where user_id = '0d000000-0000-4000-8000-000000000002';
+select results_eq(
+  $$ select status from app.membership_for_user('0d000000-0000-4000-8000-000000000002') $$,
+  ARRAY['blocked'],
+  'membership_for_user: blocked_at set (status column untouched) is reported as blocked'
+);
+update public.memberships set blocked_at = null, deleted_at = now()
+ where user_id = '0d000000-0000-4000-8000-000000000002';
+select is_empty(
+  $$ select * from app.membership_for_user('0d000000-0000-4000-8000-000000000002') $$,
+  'membership_for_user: a soft-deleted membership returns no row (requireAuth -> NO_MEMBERSHIP)'
 );
 
 select * from finish();

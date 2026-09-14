@@ -35,6 +35,11 @@ const setStatus = (email: string, status: string) => adminSql`
   update public.memberships m set status = ${status}
     from public.users u where u.id = m.user_id and u.email = ${email}`;
 
+/** Lifecycle columns (WR-08): set/clear `blocked_at` or `deleted_at` WITHOUT touching `status`. */
+const setLifecycle = (email: string, column: 'blocked_at' | 'deleted_at', on: boolean) => adminSql`
+  update public.memberships m set ${adminSql(column)} = ${on ? new Date() : null}
+    from public.users u where u.id = m.user_id and u.email = ${email}`;
+
 /** Creates a confirmed identity plus an active membership in `slug`; returns the user id. */
 async function createMember(email: string, slug: string): Promise<string> {
   const { data, error } = await authAdmin().createUser({
@@ -160,6 +165,29 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
 
     await adminSql`update public.tenants set status = 'active' where slug = ${SUSPENDED_SLUG}`;
     expect((await bootstrap(suspendedToken)).status).toBe(200);
+  });
+
+  it('c2. WR-08: blocked_at set with status still active -> MEMBERSHIP_BLOCKED on the next request', async () => {
+    expect((await bootstrap(memberToken)).status).toBe(200);
+    await setLifecycle(MEMBER, 'blocked_at', true);
+
+    const res = await bootstrap(memberToken);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as Envelope).error.code).toBe('MEMBERSHIP_BLOCKED');
+
+    await setLifecycle(MEMBER, 'blocked_at', false);
+    expect((await bootstrap(memberToken)).status).toBe(200);
+  });
+
+  it('c3. WR-08: deleted_at set (soft delete) -> NO_MEMBERSHIP, as if the row were gone', async () => {
+    await setLifecycle(MEMBER, 'deleted_at', true);
+
+    const res = await bootstrap(memberToken);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as Envelope).error.code).toBe('NO_MEMBERSHIP');
+
+    await setLifecycle(MEMBER, 'deleted_at', false);
+    expect((await bootstrap(memberToken)).status).toBe(200);
   });
 
   it('d. an EXPIRED token signed by the real local key -> 401 INVALID_TOKEN', async () => {

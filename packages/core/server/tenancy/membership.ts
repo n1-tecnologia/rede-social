@@ -32,6 +32,11 @@ const isStatus = (value: string): value is MembershipStatus =>
  * Reads the membership row for a user on EVERY request — never cached — so a block takes effect on the
  * very next request (D-09). Runs `app.membership_for_user()` (security definer) on the bare `api_user`
  * connection: the role may execute that function without opening a lane.
+ *
+ * The function is the single source of truth for the lifecycle columns (WR-08): a membership with
+ * `deleted_at` set yields NO row (-> `NO_MEMBERSHIP`), and one with `blocked_at` set is reported with
+ * `status = 'blocked'` whatever the `status` column says, so `requireAuth`'s status check fires.
+ * Nothing here needs to know about those columns — do not re-implement the rule in TypeScript.
  */
 export async function membershipForUser(userId: string): Promise<Membership | null> {
   const rows = await db.execute<Row>(
