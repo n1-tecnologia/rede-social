@@ -21,7 +21,11 @@ A tenant's members open one branded app and feel it is *their organization's* co
 
 ### Validated
 
-(None yet — ship to validate)
+Validated in Phase 1: Foundation (2026-09-14, local stack; hosted evidence lands in Phase 01.1):
+- Two isolated tenants on one deployment; the host only selects the public shell, the logged-in user's membership is the authority and must match the host's tenant (403 `TENANT_HOST_MISMATCH`) — TENANT-01, TENANT-03, TENANT-05 (pgTAP 77 + API isolation suite)
+- Kernel package + feature-module package template + lint/dependency rules that fail the build on cross-module internals — MOD-01, MOD-02
+- `super_admin` platform lane, `admin_tenant`/`member` roles, `requireRole`/`requireModule` guards — ROLE-01, ROLE-02, ROLE-06
+- Public per-tenant sign-up with two recorded consents, login, persistent session, password recovery by e-mail, logout, blocked-member revocation on the next request — AUTH-01..AUTH-06
 
 ### Active
 
@@ -168,4 +172,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-11 after initialization*
+*Last updated: 2026-09-14 after Phase 1 completion (cloud provisioning split into Phase 01.1; Phases 2-8 proceed on the local stack)*
