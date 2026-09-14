@@ -3,12 +3,28 @@ import { redirect } from 'next/navigation';
 import type { NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
+/** Where a successful confirmation lands when `next` is absent or unsafe. */
+const DEFAULT_NEXT = '/inicio';
+
 /**
- * Open-redirect guard (T-05-01). `next` is honoured ONLY as a same-origin relative path: it must start
- * with a single `/`. The negative lookahead rejects `//evil.example`, which browsers resolve as the
- * protocol-relative absolute URL `https://evil.example`. Everything else falls back to `/inicio`.
+ * Open-redirect guard (T-05-01, phase-1 review WR-10). `next` is honoured ONLY as a same-origin
+ * path. The check is done by the URL parser, not by a regex: `new URL(next, origin)` resolves
+ * `next` exactly the way the browser will resolve the `Location` header, so every spelling of an
+ * absolute or scheme-relative URL — `https://evil.example`, `//evil.example`, and the WHATWG
+ * backslash form `/\evil.example` that a `^\/(?!\/)` regex let through — lands on a different
+ * origin and falls back. What survives is re-emitted as `pathname + search` (never the raw input),
+ * so the redirect can only ever be a path on this origin.
  */
-const RELATIVE_PATH = /^\/(?!\/)/;
+function sameOriginPath(next: string, origin: string): string {
+  if (!next.startsWith('/')) return DEFAULT_NEXT;
+  try {
+    const url = new URL(next, origin);
+    if (url.origin !== origin) return DEFAULT_NEXT;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return DEFAULT_NEXT;
+  }
+}
 
 /** The OTP types this route accepts; anything else is treated as an invalid link. */
 const OTP_TYPES: readonly EmailOtpType[] = ['recovery', 'email', 'signup', 'invite', 'magiclink'];
@@ -30,8 +46,7 @@ export async function GET(request: NextRequest): Promise<never> {
   const search = request.nextUrl.searchParams;
   const tokenHash = search.get('token_hash');
   const type = search.get('type');
-  const next = search.get('next') ?? '';
-  const safeNext = RELATIVE_PATH.test(next) ? next : '/inicio';
+  const safeNext = sameOriginPath(search.get('next') ?? '', request.nextUrl.origin);
 
   if (tokenHash && isOtpType(type)) {
     const supabase = await createClient();

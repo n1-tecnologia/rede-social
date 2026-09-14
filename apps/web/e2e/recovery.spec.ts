@@ -114,4 +114,22 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
     expect(page.url().startsWith(hosts.demo)).toBe(true);
   });
+
+  test('7. WR-10: the backslash form `/\\evil.example` on a VALID link also falls back to /inicio', async ({
+    page,
+  }) => {
+    // WHATWG: for special schemes a backslash is a slash, so a `Location: /\evil.example` header is
+    // followed as `//evil.example`. The old `^\/(?!\/)` regex accepted it; the URL parser does not.
+    const email = await newMember('backslash');
+    await clearMailbox();
+    await requestLink(page, email);
+
+    const link = await waitForRecoveryMail(email);
+    const hijacked = new URL(link);
+    hijacked.searchParams.set('next', '/\\evil.example');
+
+    await page.goto(hijacked.toString());
+    await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
+    expect(page.url().startsWith(hosts.demo)).toBe(true);
+  });
 });
