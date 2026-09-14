@@ -88,6 +88,12 @@
                   },
                   {
                     "group": [
+                      "@tria/core/db"
+                    ],
+                    "message": "A module reaches data only through withTenantTx (@tria/core/db/tenant-tx); the raw db/sqlClient could switch roles outside the lane guard"
+                  },
+                  {
+                    "group": [
                       "@tria/api",
                       "@tria/api/*"
                     ],

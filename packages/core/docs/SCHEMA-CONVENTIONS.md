@@ -135,7 +135,9 @@ settings change plus UI, not a migration that rewrites tables.
    Never query the `db` client directly from a route.
 2. **`withAdminTx(fn)` (`service_role`, bypasses RLS) is kernel-only** — importable from
    `packages/core/server/{tenancy,platform}` and `scripts/` (Biome `noRestrictedImports` enforces
-   it). Every use is a deliberate, reviewed exception.
+   it). Every use is a deliberate, reviewed exception. It is defined in `packages/core/db/admin-tx.ts`
+   and nowhere else: the public `@tria/core/db/tenant-tx` entry point must never re-export it, and a
+   module may not import the raw client `@tria/core/db` either (Biome, `packages/modules/**`).
 3. **Every setting is LOCAL.** `set_config(..., false)` and `set role` without `LOCAL` survive on
    the pooled connection and leak into the next request — possibly another tenant's.
    `pnpm guard:lanes` (`scripts/guard-local-settings.sh`) fails CI on both shapes.

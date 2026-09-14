@@ -11,7 +11,7 @@ switch roles or inject claims. This is the TENANT-03 contract; `scripts/guard-lo
 | Lane | Function | What it does | Who may import it |
 |------|----------|--------------|-------------------|
 | Tenant lane | `withTenantTx(ctx, fn)` (`@tria/core/db/tenant-tx`) | One transaction: bound `select set_config('request.jwt.claims', $1, true)` + `set local role authenticated`; RLS policies read `app.tenant_id()` / `app.user_id()` / `app.tenant_role()` from those claims | Every request handler and module service. This is the default and only lane for tenant data. |
-| Admin lane | `withAdminTx(fn)` (`@tria/core/db/admin-tx`) | One transaction: `set local role service_role` (bypasses RLS for that transaction only) | Kernel only: `packages/core/server/tenancy/**`, `packages/core/server/platform/**` and `scripts/**` (Biome `noRestrictedImports` rejects it anywhere else). |
+| Admin lane | `withAdminTx(fn)` (`@tria/core/db/admin-tx` — defined there and **only** there; `tenant-tx` never re-exports it) | One transaction: `set local role service_role` (bypasses RLS for that transaction only) | Kernel only: `packages/core/server/tenancy/**`, `packages/core/server/platform/**` and `scripts/**` (Biome `noRestrictedImports` rejects it anywhere else; `pnpm boundaries:negative` proves the rejection through both entry points). |
 
 Both settings are **LOCAL** (`is_local = true`, `SET LOCAL`), so they die with the transaction —
 before the pooler hands the physical connection to the next request. Outside a lane `api_user` has

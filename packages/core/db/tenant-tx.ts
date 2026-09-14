@@ -35,13 +35,6 @@ export async function withTenantTx<T>(
   });
 }
 
-/**
- * Admin lane: `service_role` bypasses RLS for this transaction only. Importable ONLY from
- * `packages/core/server/{tenancy,platform}` and `scripts/` (Biome `noRestrictedImports`).
- */
-export async function withAdminTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`set local role service_role`);
-    return fn(tx);
-  });
-}
+// The admin lane (`withAdminTx`, `set local role service_role`) lives ONLY in `./admin-tx.ts`, whose
+// entry point Biome restricts to the kernel. It must never be defined or re-exported here: this file
+// is the public `@tria/core/db/tenant-tx` every module imports (phase-1 review CR-03).
