@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
 Plan: 9 of 9 in current phase
 Status: Ready to execute
-Last activity: 2026-09-11 — Phase 01 execution started
+Last activity: 2026-09-14 — Completed quick task 260914-mfk: requireBootstrap() helper (false ApiClientError log on 401/403 redirects)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -120,6 +120,12 @@ None yet.
 - [Phase 3]: Video vendor (Mux vs Cloudflare Stream) pricing is LOW confidence; verify at phase start, decide whether the pilot can defer video.
 - [Phase 7]: Realtime connection quota on the Free plan (200) and "new post to every member" fan-out strategy need pilot member count.
 - [Phase 8]: LGPD legal review is out of research scope; flag to user before pilot go-live.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260914-mfk | Route bootstrap 401/403 to redirects through one requireBootstrap()/requirePlatformTenants() helper so concurrently rendered segments no longer log a false ApiClientError | 2026-09-14 | 43db3cd | [260914-mfk-move-the-bootstrap-error-to-redirect-map](./quick/260914-mfk-move-the-bootstrap-error-to-redirect-map/) |
 
 ### Roadmap Evolution
 
