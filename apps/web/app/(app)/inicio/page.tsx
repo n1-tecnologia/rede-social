@@ -2,8 +2,8 @@ import { exampleItemsSchema } from '@tria/module-example/contracts';
 import { ExampleWidget } from '@tria/module-example/ui';
 import { getTranslations } from 'next-intl/server';
 import { apiFetch } from '@/lib/api';
-import { getBootstrap } from '@/lib/bootstrap';
-import { getPlatformTenants } from '@/lib/platform';
+import { requireBootstrap } from '@/lib/bootstrap';
+import { requirePlatformTenants } from '@/lib/platform';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
 import { createExampleItem } from './example-actions';
@@ -37,7 +37,7 @@ export default async function InicioPage() {
     const [{ data }, platform] = await Promise.all([
       supabase.auth.getClaims(),
       // Deduped with the layout by React `cache`: the layout already proved this session may read it.
-      getPlatformTenants(),
+      requirePlatformTenants(),
     ]);
     const email = typeof data?.claims.email === 'string' ? data.claims.email : null;
     return (
@@ -61,7 +61,7 @@ export default async function InicioPage() {
     );
   }
 
-  const bootstrap = await getBootstrap();
+  const bootstrap = await requireBootstrap();
   const { user, membership, tenant, modules, permissions } = bootstrap;
 
   // 01-07: the throwaway reference module's widget (D-19). Phase 4 removes these three lines with
