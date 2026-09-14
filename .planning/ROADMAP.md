@@ -24,7 +24,8 @@ TRIA Rede Social is a multi-tenant, white-label community PWA: one deployment, e
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation - Kernel, Tenancy, Auth & CI/CD** - Monorepo + kernel, core schema with RLS tenant lane, JWKS auth with per-request membership, sign-up link / login / recovery, module registry guard, two-tenant isolation suite, GitHub -> Vercel + Cloud Run pipelines
+- [ ] **Phase 1: Foundation - Kernel, Tenancy, Auth & CI/CD** - Monorepo + kernel, core schema with RLS tenant lane, JWKS auth with per-request membership, sign-up link / login / recovery, module registry guard, two-tenant isolation suite, GitHub -> Vercel + Cloud Run pipelines as code (local stack)
+- [ ] **Phase 01.1: Cloud Provisioning & First Release (INSERTED)** - Account decisions, GitHub repo + environments, two Supabase projects, GCP/Vercel/Resend provisioning, DNS, first PR -> staging -> production; deferred until the accounts exist, does not block Phases 2-8
 - [ ] **Phase 2: Tenant Shell, Branding & Platform Panel** - Ported design system + responsive app shell rendering the tenant's brand server-side, flag-driven navigation, per-tenant PWA install, pt-BR catalog, branded auth e-mails, super_admin platform panel to provision tenants
 - [ ] **Phase 3: Media Pipeline & Member Profiles** - Signed direct-to-Storage uploads under tenant paths, worker image resizing, streaming-vendor video, member profile (photo, name, bio), other members' profiles and searchable directory
 - [ ] **Phase 4: Feed** - Admin rich-post composer (images, video, embeds, files), member feed with likes / comments / one-level replies / comment likes, edit + soft delete, share deep links, domain event bus
@@ -37,18 +38,18 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 ### Phase 1: Foundation - Kernel, Tenancy, Auth & CI/CD
 
-**Goal**: Two isolated tenants exist on a deployed staging + production stack; a person can sign up through a tenant's public link, log in, stay logged in, recover their password and log out, and the API serves only their tenant's data through an RLS-protected database lane.
+**Goal**: Two isolated tenants exist on the local Supabase stack, with the deploy pipeline written as code (the hosted staging + production stack lands in Phase 01.1); a person can sign up through a tenant's public link, log in, stay logged in, recover their password and log out, and the API serves only their tenant's data through an RLS-protected database lane.
 **Mode:** mvp
 **Depends on**: Nothing (first phase)
-**Requirements**: TENANT-01, TENANT-03, TENANT-05, MOD-01, MOD-02, ROLE-01, ROLE-02, ROLE-06, AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, AUTH-06, PWA-04
+**Requirements**: TENANT-01, TENANT-03, TENANT-05, MOD-01, MOD-02, ROLE-01, ROLE-02, ROLE-06, AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, AUTH-06
 **Success Criteria** (what must be TRUE):
 
   1. A user who signs up through tenant A's public sign-up link on tenant A's own domain (accepting A's community rules and TRIA's terms, recorded with a timestamp) becomes a `member` of tenant A, can log in with e-mail and password, stays logged in after closing and reopening the browser, can recover a forgotten password via e-mail link, and can log out; the sign-up link survives the register -> login round-trip.
   2. After login, `GET /me/bootstrap` returns the user's tenant, role and enabled modules resolved from their membership row (the hostname only selects the public shell; a session whose membership does not belong to the host's tenant gets 403 `TENANT_HOST_MISMATCH`); a member whose membership is set to blocked receives 401/403 on their very next API request without redeploy or re-login.
   3. The automated two-tenant isolation suite (pgTAP + API integration tests) passes: every tenant-owned table carries `tenant_id` with RLS enabled, the API's tenant lane runs under a non-service database role inside a per-request transaction, no list or detail endpoint returns another tenant's rows, and routes of a module disabled for the tenant return 404.
-  4. A push to `main` deploys the web app to Vercel and the API + worker to Cloud Run through GitHub Actions with separate preview/staging and production environments (two Supabase projects, migrations applied only by CI); the monorepo has a kernel package, a feature-module package template and lint/dependency rules that fail the build when a module imports another module's internals.
+  4. The monorepo has a kernel package, a feature-module package template and lint/dependency rules that fail the build when a module imports another module's internals; the delivery pipeline exists as code (Cloud Run image for API + worker, `ci.yml` mirroring the local exit gate, `deploy-api.yml` with staging on PR and a gated production job, `docs/DEPLOY.md` listing every secret) and is validated locally (YAML, grep assertions, Docker build/run). Running it against real accounts is Phase 01.1.
 
-**Plans**: 9/12 plans executed
+**Plans**: 9/9 plans executed
 
 Plans:
 **Wave 1**
@@ -78,20 +79,37 @@ Plans:
 
 - [x] 01-08-PLAN.md — Two-tenant isolation suite (pgTAP + API, incl. `tenant_domains` and "session of A on B's host → 403 `TENANT_HOST_MISMATCH`"), boundary negative fixture, [BLOCKING] clean `supabase db reset` + full suite
 
-**Wave 7** *(blocked on Wave 6 completion)*
-
-- [ ] 01-10-PLAN.md — Account decisions (GitHub plan, Vercel team, GCP, Supabase org, DNS) + provision GitHub repo/`main`/environments and the two Supabase projects
-
-**Wave 8** *(blocked on Wave 7 completion)*
-
-- [ ] 01-11-PLAN.md — Provision GCP (WIF, Artifact Registry, Secret Manager), Vercel project/env + platform domain + two seed tenant domains, per-host auth allow-lists, Resend SMTP, Phase 2 custom-domain runbook; DNS (three CNAMEs) + ES256 key checkpoint
-
-**Wave 9** *(blocked on Wave 8 completion)*
-
-- [ ] 01-12-PLAN.md — First PR → Preview + staging, staging Supavisor spike, remote smoke (Preview keeps the slug/cookie fallback), merge → production approval, seed-prod, production smokes on the seed tenant host (member) and the platform host (super_admin), real e-mail check
-
 **Research needed**: Supavisor transaction pooling with `set_config(..., true)` + `SET LOCAL ROLE authenticated` (verify with a spike before schema freeze; fallback is a per-request Supabase client with the user JWT); dedicated `api_user` role grants; pg-boss transactional enqueue with Drizzle; Supabase asymmetric signing keys + `@supabase/ssr` cookie flow in Next 16 `proxy.ts`; TypeScript 7 tooling at repo bootstrap.
 **Notes**: Auth routes in this phase are functional-minimal (plain forms); their visual port to the prototype's design lands in Phase 2 with the shared UI package. Chat and notification table stubs and the "schema conventions" doc are Foundation deliverables so later modules are reviewed against V2-safe shapes. Tenants are seeded by script/migration until the platform panel exists in Phase 2. Each tenant is served on its own custom domain (`tenant_domains`, host -> tenant lookup in `proxy.ts`); the platform domain hosts TRIA's `super_admin`; the seed tenants use TRIA-owned hostnames so staging/production smoke tests run on real tenant domains.
+
+### Phase 01.1: Cloud Provisioning & First Release (INSERTED)
+
+**Goal**: The Phase 1 codebase runs on a deployed staging + production stack: the accounts exist, the pipeline written in Phase 1 is wired to them, and a push to `main` deploys the web app to Vercel and the API + worker to Cloud Run through GitHub Actions with separate preview/staging and production environments (two Supabase projects, migrations applied only by CI).
+**Mode:** mvp
+**Depends on**: Phase 1 (plans 01-08 and 01-09). Does NOT block Phases 2-8, which are developed against the local stack; run this phase as soon as the GitHub, Supabase, GCP, Vercel and Resend accounts and DNS control exist.
+**Requirements**: PWA-04 (plus hosted evidence for TENANT-03 and AUTH-03: the staging Supavisor transaction-pooler spike and a real recovery e-mail through Resend)
+**Success Criteria** (what must be TRUE):
+
+  1. The account shape for D-11/D-12 is decided and recorded in `docs/DEPLOY.md`; the repository exists under `tria-company` with `main` protected and `staging`/`production` environments; two Supabase projects (`rede-social-staging`, `rede-social-prod`) exist and their credentials are GitHub environment secrets.
+  2. GCP (Cloud Run prerequisites, Artifact Registry, Secret Manager, WIF), Vercel (project, Git integration, env vars, platform domain + two seed tenant domains) and Resend (domain + API key) are provisioned; per-remote Supabase auth/SMTP config with per-host redirect allow-lists is committed; DNS records exist.
+  3. The first pull request produces a Vercel Preview and a staging deploy; the staging Supavisor spike passes (the authoritative transaction-pooler proof for TENANT-03); a remote Playwright smoke passes on the Preview URL; the merge to `main` goes through the production approval, the one-time production seed runs, and a real recovery e-mail arrives through Resend.
+
+**Plans**: 3 plans (all `autonomous: false` — every plan stops for account decisions, CLI logins, tokens, DNS records or the production approval)
+
+Plans:
+**Wave 1**
+
+- [ ] 01.1-01-PLAN.md — Account decisions (GitHub plan, Vercel team, GCP, Supabase org, DNS) + provision GitHub repo/`main`/environments and the two Supabase projects
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 01.1-02-PLAN.md — Provision GCP (WIF, Artifact Registry, Secret Manager), Vercel project/env + platform domain + two seed tenant domains, per-host auth allow-lists, Resend SMTP, Phase 2 custom-domain runbook; DNS (three CNAMEs) + ES256 key checkpoint
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 01.1-03-PLAN.md — First PR → Preview + staging, staging Supavisor spike, remote smoke (Preview keeps the slug/cookie fallback), merge → production approval, seed-prod, production smokes on the seed tenant host (member) and the platform host (super_admin), real e-mail check
+
+**Notes**: These three plans were originally Phase 1 waves 7-9 (01-10, 01-11, 01-12). They were split out on 2026-09-14 because the accounts did not exist yet and every other phase can be built locally; the plan bodies are unchanged apart from renumbering. Until this phase runs, the local Supavisor's refusal of `api_user` means TENANT-03's transaction-pooler proof rests on the direct-port spike from plan 01-03 only.
 
 ### Phase 2: Tenant Shell, Branding & Platform Panel
 
@@ -223,11 +241,12 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 depends only on Phase 4 and may be planned in parallel with Phase 5).
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 depends only on Phase 4 and may be planned in parallel with Phase 5). Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 9/12 | In Progress|  |
+| 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 9/9 | In Progress|  |
+| 01.1. Cloud Provisioning & First Release (INSERTED) | 0/3 | Deferred (needs accounts) | - |
 | 2. Tenant Shell, Branding & Platform Panel | 0/TBD | Not started | - |
 | 3. Media Pipeline & Member Profiles | 0/TBD | Not started | - |
 | 4. Feed | 0/TBD | Not started | - |

@@ -285,7 +285,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PWA-01 | Phase 2 | Pending |
 | PWA-02 | Phase 7 | Pending |
 | PWA-03 | Phase 2 | Pending |
-| PWA-04 | Phase 1 | Pending |
+| PWA-04 | Phase 01.1 | Pending |
 
 **Coverage:**
 

@@ -4,12 +4,12 @@ current_phase: 01
 current_phase_name: Foundation - Kernel, Tenancy, Auth & CI/CD
 status: executing
 stopped_at: Completed 01-08-PLAN.md
-last_updated: "2026-09-13T16:03:45.406Z"
+last_updated: "2026-09-14T15:34:49.323Z"
 last_activity: 2026-09-11
 last_activity_desc: Phase 01 execution started
-state_head: 71a03ec81358a04932a46a425dd7dc25b2f1a173
+state_head: e3894a1e2181aed436c3b61c2dfad90e53970ed5
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 0
   total_plans: 12
   completed_plans: 9
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 01 (Foundation - Kernel, Tenancy, Auth & CI/CD) — EXECUTING
-Plan: 10 of 12
+Plan: 9 of 9 in current phase
 Status: Ready to execute
 Last activity: 2026-09-11 — Phase 01 execution started
 
@@ -120,6 +120,10 @@ None yet.
 - [Phase 3]: Video vendor (Mux vs Cloudflare Stream) pricing is LOW confidence; verify at phase start, decide whether the pilot can defer video.
 - [Phase 7]: Realtime connection quota on the Free plan (200) and "new post to every member" fan-out strategy need pilot member count.
 - [Phase 8]: LGPD legal review is out of research scope; flag to user before pilot go-live.
+
+### Roadmap Evolution
+
+- Phase 01.1 inserted after Phase 1: Cloud Provisioning & First Release: plans 01-10/01-11/01-12 moved out of Phase 1 as 01.1-01..03 because the cloud accounts do not exist yet; Phase 1 closes on the local stack and Phases 2-8 proceed locally. PWA-04 moved to 01.1.
 
 ## Deferred Items
 
