@@ -223,8 +223,11 @@ web3 = 30
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
-# false — see `[auth] enable_signup` above (CR-02); `admin.createUser` does not read this flag.
-enable_signup = false
+# MUST stay true (CR-02 follow-up): this key maps to GOTRUE_EXTERNAL_EMAIL_ENABLED, i.e. the whole
+# e-mail provider — false disables password LOGINS too ("Email logins are disabled"), not just
+# sign-ups. The public sign-up endpoint is closed by `[auth] enable_signup = false` alone
+# (GOTRUE_DISABLE_SIGNUP), which `apps/api/tests/integration/gotrue-signup-disabled.test.ts` pins.
+enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
