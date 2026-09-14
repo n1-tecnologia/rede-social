@@ -97,6 +97,13 @@ async function startedBoss(): Promise<PgBoss> {
  * payloads. So the enqueue — and only the enqueue — switches to the connection role that the
  * migration did grant, then restores whatever role the caller was in. Both switches are `LOCAL`, so
  * they die with the transaction, and the insert still rolls back with the caller's write.
+ *
+ * The restore runs on the SUCCESS path only (phase-1 review WR-02). If `boss.send` failed because
+ * Postgres rejected the insert (constraint, missing queue, privilege), the transaction is already in
+ * the aborted state: a `set local role` there fails with `current transaction is aborted` and that
+ * second error would replace the real one on its way to the caller and the logs. Nothing needs
+ * restoring on that path either — the caller's transaction is being rolled back and the LOCAL
+ * setting dies with it.
  */
 export async function enqueueInTx(
   tx: Tx,
@@ -110,13 +117,13 @@ export async function enqueueInTx(
   }[];
   const callerRole = rows[0]?.role;
   await tx.execute(sql`set local role api_user`);
-  try {
-    return await boss.send(name, payload, { db: fromDrizzle(tx, sql), ...opts });
-  } finally {
-    if (callerRole && callerRole !== 'api_user') {
-      await tx.execute(sql`set local role ${sql.identifier(callerRole)}`);
-    }
+  // No try/finally on purpose: on failure the transaction is aborted, so the original error must
+  // propagate untouched (see the docblock).
+  const id = await boss.send(name, payload, { db: fromDrizzle(tx, sql), ...opts });
+  if (callerRole && callerRole !== 'api_user') {
+    await tx.execute(sql`set local role ${sql.identifier(callerRole)}`);
   }
+  return id;
 }
 
 /** Stops the lazily-started API instance (tests and graceful shutdown). */
