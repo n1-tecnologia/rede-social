@@ -24,7 +24,7 @@ TRIA Rede Social is a multi-tenant, white-label community PWA: one deployment, e
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation - Kernel, Tenancy, Auth & CI/CD** - Monorepo + kernel, core schema with RLS tenant lane, JWKS auth with per-request membership, sign-up link / login / recovery, module registry guard, two-tenant isolation suite, GitHub -> Vercel + Cloud Run pipelines as code (local stack)
+- [x] **Phase 1: Foundation - Kernel, Tenancy, Auth & CI/CD** - Monorepo + kernel, core schema with RLS tenant lane, JWKS auth with per-request membership, sign-up link / login / recovery, module registry guard, two-tenant isolation suite, GitHub -> Vercel + Cloud Run pipelines as code (local stack) (completed 2026-09-14)
 - [ ] **Phase 01.1: Cloud Provisioning & First Release (INSERTED)** - Account decisions, GitHub repo + environments, two Supabase projects, GCP/Vercel/Resend provisioning, DNS, first PR -> staging -> production; deferred until the accounts exist, does not block Phases 2-8
 - [ ] **Phase 2: Tenant Shell, Branding & Platform Panel** - Ported design system + responsive app shell rendering the tenant's brand server-side, flag-driven navigation, per-tenant PWA install, pt-BR catalog, branded auth e-mails, super_admin platform panel to provision tenants
 - [ ] **Phase 3: Media Pipeline & Member Profiles** - Signed direct-to-Storage uploads under tenant paths, worker image resizing, streaming-vendor video, member profile (photo, name, bio), other members' profiles and searchable directory
@@ -245,7 +245,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 9/9 | In Progress|  |
+| 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 9/9 | Complete    | 2026-09-14 |
 | 01.1. Cloud Provisioning & First Release (INSERTED) | 0/3 | Deferred (needs accounts) | - |
 | 2. Tenant Shell, Branding & Platform Panel | 0/TBD | Not started | - |
 | 3. Media Pipeline & Member Profiles | 0/TBD | Not started | - |
