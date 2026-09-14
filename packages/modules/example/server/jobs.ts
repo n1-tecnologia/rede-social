@@ -1,13 +1,10 @@
+import { moduleLogger } from '@tria/core/server/logging';
 import type { JobDefinition } from '@tria/core/server/modules/manifest';
-import pino from 'pino';
 import { EXAMPLE_PROCESS_QUEUE, type ExampleProcessJob } from '../contracts/index';
 import { markProcessed } from './service';
 
-const log = pino({
-  name: 'module-example',
-  messageKey: 'message',
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
+// A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
+const log = moduleLogger('module-example');
 
 /**
  * The module's single pg-boss job, declared as data. The worker (`apps/api/src/worker.ts`) creates

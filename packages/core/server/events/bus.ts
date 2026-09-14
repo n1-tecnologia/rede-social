@@ -1,7 +1,7 @@
 import type { DomainEventName, EventMap } from '@tria/contracts';
 import { createMiddleware } from 'hono/factory';
-import pino from 'pino';
 import type { AppEnv, RequestContext } from '../auth/context';
+import { type Logger, moduleLogger } from '../logging';
 
 /**
  * In-process domain event bus (MOD-03 shape, discretion item resolved in 01-07).
@@ -23,11 +23,8 @@ type AnyHandler = (payload: never) => Promise<void>;
 
 const handlers = new Map<DomainEventName, Set<AnyHandler>>();
 
-const busLogger = pino({
-  name: 'events',
-  messageKey: 'message',
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
+/** Fallback for flushes outside a request (tests, jobs); requests pass their own child logger. */
+const busLogger = moduleLogger('events');
 
 /** Queue an event on the request context. Delivery happens in `flush`, after the transaction commits. */
 export function emit<K extends DomainEventName>(
@@ -64,8 +61,12 @@ export function subscribe<K extends DomainEventName>(
  * Drain `ctx.events` and deliver each record to every subscriber, sequentially. The array is
  * emptied FIRST, so a handler that emits again during the flush cannot spin the loop forever —
  * its events land in the (now empty) array and are picked up by the next iteration.
+ *
+ * `logger` is the request's child (`requestId`, `tenantId`, `userId`) when called from the
+ * middleware, so a failed subscriber is attributable to the request that produced the event.
  */
-export async function flush(ctx: RequestContext): Promise<void> {
+export async function flush(ctx: RequestContext, logger: Logger = busLogger): Promise<void> {
+  const log = logger.child({ name: 'events' });
   while (ctx.events.length > 0) {
     const batch = ctx.events.splice(0, ctx.events.length);
     for (const record of batch) {
@@ -75,7 +76,7 @@ export async function flush(ctx: RequestContext): Promise<void> {
         } catch (err) {
           // Never throws: the write already committed; a broken subscriber is an operational
           // problem, not a failed request.
-          busLogger.error(
+          log.error(
             {
               err,
               event: 'domain_event.handler_failed',
@@ -111,5 +112,5 @@ export const flushEventsAfterHandler = createMiddleware<AppEnv>(async (c, next) 
     ctx.events.length = 0;
     return;
   }
-  await flush(ctx);
+  await flush(ctx, c.get('logger') ?? busLogger);
 });

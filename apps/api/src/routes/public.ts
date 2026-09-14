@@ -111,6 +111,7 @@ export const publicRoutes = createOpenApiApp()
         body: c.req.valid('json'),
         ip: c.req.header(CLIENT_IP_HEADER) ?? null,
         userAgent: c.req.header('User-Agent') ?? null,
+        logger: c.get('logger'),
       });
       c.header('Cache-Control', 'no-store');
       return c.json(result, 201);

@@ -1,19 +1,16 @@
 import { isIP } from 'node:net';
 import { type SignupBody, type SignupResponse, TRIA_TERMS_VERSION } from '@tria/contracts';
 import { eq, sql } from 'drizzle-orm';
-import pino from 'pino';
 import { withAdminTx } from '../../db/admin-tx';
 import { consentRecords, memberships, users } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
 import { ApiError } from '../http/api-error';
+import { type Logger, moduleLogger } from '../logging';
 import { supabaseAdmin } from '../supabase-admin';
 import { getPublicTenant, getTenantIdBySlug } from './public-tenant';
 
-const log = pino({
-  name: 'signup',
-  messageKey: 'message',
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
+/** Fallback when no request logger is passed (scripts, tests); routes pass `c.get('logger')`. */
+const baseLog = moduleLogger('signup');
 
 export type SignupInput = {
   slug: string;
@@ -21,6 +18,8 @@ export type SignupInput = {
   /** From `X-Client-IP`, set by the web server action only (T-04-03). Stored as `inet` when valid. */
   ip: string | null;
   userAgent: string | null;
+  /** The request's child logger, so `signup.*` lines carry `requestId` (WR-12). */
+  logger?: Logger;
 };
 
 type ConsentRow = {
@@ -127,6 +126,7 @@ async function existingIdentityForEmail(email: string): Promise<ExistingIdentity
 export async function signupMember(input: SignupInput): Promise<SignupResponse> {
   const { slug, body, userAgent } = input;
   const ip = asInet(input.ip);
+  const log = input.logger ? input.logger.child({ name: 'signup' }) : baseLog;
 
   const tenant = await getPublicTenant(slug);
   const tenantId = await getTenantIdBySlug(slug);

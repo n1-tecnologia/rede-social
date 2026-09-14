@@ -1,26 +1,12 @@
 import type { AppEnv } from '@tria/core/server/auth/context';
+import { rootLogger } from '@tria/core/server/logging';
 import { createMiddleware } from 'hono/factory';
-import pino from 'pino';
-import { env } from '../env';
 
-/** pino level → Cloud Logging severity, so Cloud Run parses the JSON lines natively. */
-const SEVERITY: Record<string, string> = {
-  trace: 'DEBUG',
-  debug: 'DEBUG',
-  info: 'INFO',
-  warn: 'WARNING',
-  error: 'ERROR',
-  fatal: 'CRITICAL',
-};
-
-export const rootLogger = pino({
-  level: env.LOG_LEVEL,
-  messageKey: 'message',
-  timestamp: pino.stdTimeFunctions.isoTime,
-  formatters: {
-    level: (label) => ({ severity: SEVERITY[label] ?? label.toUpperCase() }),
-  },
-});
+/**
+ * The kernel owns the one configured root (`severity` formatter, `LOG_LEVEL`); the API re-exports it
+ * for `main.ts`/`worker.ts` and derives the per-request child below (WR-12).
+ */
+export { rootLogger };
 
 /** Child logger per request; later plans add `tenantId`/`userId` once `requireAuth` has run. */
 export const logger = () =>

@@ -1,12 +1,9 @@
+import { moduleLogger } from '@tria/core/server/logging';
 import { defineModule } from '@tria/core/server/modules/manifest';
-import pino from 'pino';
 import { exampleProcessJob } from './server/jobs';
 
-const log = pino({
-  name: 'module-example',
-  messageKey: 'message',
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
+// A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
+const log = moduleLogger('module-example');
 
 /**
  * The manifest: everything the kernel needs to know about this module, as data (MOD-01).
