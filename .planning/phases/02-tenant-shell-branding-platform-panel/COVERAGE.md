@@ -3,11 +3,11 @@
 > Full coverage by default. Opt-outs are explicit, reasoned decisions. One section per external
 > service; each service starts from its own full-coverage baseline. Capability surfaces are taken
 > from `02-RESEARCH.md` §Pattern 5 / §Pattern 6 / §Standard Stack and from the services' official
-> documentation cited there. Plans that implement a surface reference this file: `02-04-PLAN.md`
-> (Resend, Supabase Auth Send Email Hook), `02-07-PLAN.md` (Vercel Project Domains, Supabase
+> documentation cited there. Plans that implement a surface reference this file: `02-06-PLAN.md`
+> (Resend, Supabase Auth Send Email Hook), `02-09-PLAN.md` (Vercel Project Domains, Supabase
 > Management API).
 
-## Vercel REST API — Project Domains (`02-07-PLAN.md`, adapter `packages/core/server/domains/vercel.ts`)
+## Vercel REST API — Project Domains (`02-09-PLAN.md`, adapter `packages/core/server/domains/vercel.ts`)
 
 | capability | decision | reason |
 |---|---|---|
@@ -24,7 +24,7 @@
 | `GET /v6/domains/{domain}` / `GET /v5/domains` (account-level domain info/list) | OPT-OUT | not needed — project-level status carries everything the panel shows |
 | Webhooks (`domain.created` / verification events) | OPT-OUT | not needed yet — CONTEXT.md Deferred Ideas: "Vercel domain-verified webhook instead of polling — revisit if polling proves noisy" |
 
-## Supabase Management API — Auth service config (`02-07-PLAN.md`, adapter `packages/core/server/domains/auth-allow-list.ts`)
+## Supabase Management API — Auth service config (`02-09-PLAN.md`, adapter `packages/core/server/domains/auth-allow-list.ts`)
 
 | capability | decision | reason |
 |---|---|---|
@@ -37,7 +37,7 @@
 | `PATCH /v1/projects/{ref}/config/auth` — SMTP / e-mail templates | OPT-OUT | not needed — branding travels through the Send Email Hook (D-37); Custom SMTP stays the static fallback |
 | Other Management API resources (projects, secrets, storage config, database branches) | OPT-OUT | explicitly out of scope — provisioning of projects/secrets is Phase 01.1 |
 
-## Supabase Auth Hooks — Send Email Hook, inbound (`02-04-PLAN.md`, route `apps/api/src/routes/hooks.ts`)
+## Supabase Auth Hooks — Send Email Hook, inbound (`02-06-PLAN.md`, route `apps/api/src/routes/hooks.ts`)
 
 | capability | decision | reason |
 |---|---|---|
@@ -50,7 +50,7 @@
 | Retry-able answers (429/503) | OPT-OUT | explicitly out of scope — RESEARCH Pitfall 6: GoTrue retries inside the same 5 s budget, so retry-able codes only produce duplicate sends |
 | Other auth hooks (`custom_access_token`, `before_user_created`, `send_sms`, `mfa_verification_attempt`, `password_verification_attempt`) | OPT-OUT | not needed — no requirement in this phase uses them (the custom access token hook is a later-phase concern per STACK.md) |
 
-## Resend HTTP API (`02-04-PLAN.md`, transport `packages/core/server/mail/resend.ts`)
+## Resend HTTP API (`02-06-PLAN.md`, transport `packages/core/server/mail/resend.ts`)
 
 | capability | decision | reason |
 |---|---|---|
