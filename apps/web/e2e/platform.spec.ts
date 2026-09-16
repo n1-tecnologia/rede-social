@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
+import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
 
 /**
  * D-21 + D-23 on a phone viewport (`mobile-chromium`): the platform host is TRIA's `super_admin`
@@ -56,9 +56,16 @@ test.describe('D-21 — the platform host serves the super_admin and only the su
     // The module counts come from the API (7 for tria-demo, 2 for tria-lab).
     await expect(body).toContainText('módulos');
 
-    // "Sair" works from the platform chrome too (D-08).
-    await page.getByRole('button', { name: 'Sair' }).click();
-    await expect(page).toHaveURL(/\/entrar$/, { timeout: 30_000 });
+    // D-21/D-42: the neutral shell's single tab points at the platform panel (02-12), reachable with
+    // one tap from the landing — asserted by href (the label is re-valued by 02-12), never clicked here.
+    await expect(
+      page
+        .locator('[data-shell-nav="bottom"]:visible, [data-shell-nav="rail"]:visible')
+        .locator('a[href="/plataforma"]'),
+    ).toHaveCount(1);
+
+    // "Sair" works from the platform chrome too (D-08): the settings page shows Preferências + Sair.
+    await signOut(page, hosts.platform);
 
     await context.close();
   });

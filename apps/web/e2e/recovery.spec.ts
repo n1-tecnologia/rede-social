@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { closeAdmin, createMember, deleteUserByEmail } from './admin';
-import { hosts, isRemote } from './fixtures';
+import { hosts, isRemote, signOut } from './fixtures';
 import { clearMailbox, expectNoRecoveryMail, waitForRecoveryMail } from './mail';
 
 /**
@@ -77,13 +77,12 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     await page.locator('#password').fill(NEW_PASSWORD);
     await page.getByRole('button', { name: 'Salvar nova senha' }).click();
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
       timeout: 20_000,
     });
 
     // The new password is the one that works from now on.
-    await page.getByRole('button', { name: 'Sair' }).click();
-    await expect(page).toHaveURL(/\/entrar$/);
+    await signOut(page, hosts.demo);
     await page.locator('#email').fill(email);
     await page.locator('#password').fill(NEW_PASSWORD);
     await page.getByRole('button', { name: 'Entrar' }).click();

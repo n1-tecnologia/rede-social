@@ -69,7 +69,7 @@ test('AUTH-06/D-09 — blocked on the next request, session cleared, same screen
   await page.locator('#password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo', {
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
     timeout: 20_000,
   });
 });

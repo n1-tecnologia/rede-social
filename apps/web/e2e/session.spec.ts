@@ -18,14 +18,14 @@ test.describe('AUTH-02 — session persistence', () => {
     const response = await reopenedPage.goto(`${baseURL}/inicio`);
     expect(response?.status()).toBe(200);
     await expect(reopenedPage).toHaveURL(/\/inicio$/);
-    await expect(reopenedPage.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo');
+    await expect(reopenedPage.getByRole('heading', { level: 1 })).toContainText('TRIA Demo');
 
     // proxy.ts runs getClaims() on every request: a later reload is still served, never /entrar.
     await reopenedPage.waitForTimeout(2000);
     const reload = await reopenedPage.reload();
     expect(reload?.status()).toBe(200);
     await expect(reopenedPage).toHaveURL(/\/inicio$/);
-    await expect(reopenedPage.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo');
+    await expect(reopenedPage.getByRole('heading', { level: 1 })).toContainText('TRIA Demo');
     await reopened.close();
   });
 });

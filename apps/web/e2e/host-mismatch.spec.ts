@@ -61,7 +61,7 @@ test.describe('TENANT-01/D-23 — a session on another tenant’s host', () => {
 
     await signIn(page, hosts.generic);
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
       timeout: 20_000,
     });
 
@@ -76,7 +76,7 @@ test.describe('TENANT-01/D-23 — a session on another tenant’s host', () => {
 
     await signIn(page, hosts.demo);
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
       timeout: 20_000,
     });
 

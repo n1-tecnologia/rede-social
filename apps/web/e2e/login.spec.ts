@@ -27,7 +27,9 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     context,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo');
+    // D-42: role and e-mail live on the profile page (the Perfil tab), not on the home.
+    await page.goto('/perfil');
     await expect(page.getByText('Membro', { exact: true })).toBeVisible();
     await expect(page.getByText(users.demoMember)).toBeVisible();
 
@@ -56,6 +58,6 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveCount(0);
 
     await login(page, users.demoMember, SEED_PASSWORD, hosts.generic);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo');
   });
 });

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
-import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
+import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
 
 /**
  * AUTH-01 / AUTH-04 sign-up on a phone viewport (`mobile-chromium`, iPhone 14).
@@ -110,9 +110,11 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.getByRole('button', { name: 'Cadastrar' }).click();
 
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
       timeout: 20_000,
     });
+    // D-42: the role lives on the profile page now, not on the home.
+    await page.goto('/perfil');
     await expect(page.getByText('Membro', { exact: true })).toBeVisible();
   });
 
@@ -126,8 +128,7 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.getByRole('button', { name: 'Cadastrar' }).click();
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
 
-    await page.getByRole('button', { name: 'Sair' }).click();
-    await expect(page).toHaveURL(/\/entrar$/);
+    await signOut(page);
     await expect(page.getByText('Comunidade: TRIA Demo')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveAttribute(
       'href',
@@ -141,7 +142,7 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.locator('#password').fill(PASSWORD);
     await page.getByRole('button', { name: 'Entrar' }).click();
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
       timeout: 20_000,
     });
   });
@@ -211,8 +212,7 @@ test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
 
     // D-06: on a generic host the COOKIE carries the tenant across the round trip.
-    await page.getByRole('button', { name: 'Sair' }).click();
-    await expect(page).toHaveURL(/\/entrar$/);
+    await signOut(page, hosts.generic);
     await expect(page.getByText('Comunidade: TRIA Demo')).toBeVisible({ timeout: 20_000 });
     const href = await page.getByRole('link', { name: 'Criar nova conta' }).getAttribute('href');
     expect(href?.endsWith('/cadastro/tria-demo')).toBe(true);
