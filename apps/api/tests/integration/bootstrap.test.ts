@@ -195,7 +195,8 @@ describe('GET /v1/public/tenants/by-host — D-20 public lookup', () => {
     expect(ok.status).toBe(200);
     expect(ok.headers.get('cache-control')).toBe('no-store');
     const body = hostTenantSchema.strict().parse(await ok.json());
-    expect(body).toEqual({ slug: 'tria-demo', displayName: 'TRIA Demo' });
+    // Brand/host facts since 02-01 (exact key set pinned in hosts.test.ts).
+    expect(body).toMatchObject({ slug: 'tria-demo', displayName: 'TRIA Demo' });
 
     const shouty = await api.request(
       `/v1/public/tenants/by-host?host=${encodeURIComponent(`${HOSTS.demo.toUpperCase()}:3000`)}`,

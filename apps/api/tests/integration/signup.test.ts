@@ -138,7 +138,7 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     // Registration order: the literal path must not be swallowed by `/tenants/{slug}`.
     const byHost = await api.request('/v1/public/tenants/by-host?host=tria-demo.localhost');
     expect(byHost.status).toBe(200);
-    expect(await byHost.json()).toEqual({ slug: 'tria-demo', displayName: 'TRIA Demo' });
+    expect(await byHost.json()).toMatchObject({ slug: 'tria-demo', displayName: 'TRIA Demo' });
   });
 
   it('3. boundary: a 7-character password is 400, exactly 8 is 201', async () => {

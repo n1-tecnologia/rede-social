@@ -128,7 +128,8 @@ beforeAll(async () => {
     insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
     values (${tenantIds.empty}::uuid, ${EMPTY_HOST}, true, now())`;
 
-  // A SUSPENDED tenant with a registered host: the public host lookup must not resolve it (D-20).
+  // A SUSPENDED tenant with a verified host: the public host lookup STILL resolves it, carrying
+  // status 'suspended' so the "indisponível" screen is branded (D-32); members are refused by requireAuth.
   const [suspended] = await adminSql<{ id: string }[]>`
     insert into public.tenants (slug, display_name, rules_text, rules_version, status)
     values (${SUSPENDED_SLUG}, 'Comunidade Suspensa', 'Regras de teste.', 1, 'suspended')
@@ -302,20 +303,26 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     expect(body.tenant.id).toBe(tenantIds.lab);
   });
 
-  it('i. the public host lookup answers about one tenant only, and never about a suspended one (D-20)', async () => {
+  it('i. the public host lookup answers about one tenant only; a suspended host answers with its status (D-20, D-32)', async () => {
     const lab = await api.request(
       `/v1/public/tenants/by-host?host=${encodeURIComponent(HOSTS.lab)}`,
     );
     expect(lab.status).toBe(200);
     const labText = await lab.text();
-    expect((JSON.parse(labText) as { slug: string }).slug).toBe('tria-lab');
+    // Brand and host facts (02-01); the exact key set is pinned in hosts.test.ts.
+    expect(JSON.parse(labText)).toMatchObject({ slug: 'tria-lab', displayName: 'TRIA Lab' });
     // Unauthenticated and pre-login: it may name the tenant on THIS host and nothing else.
     expect(labText).not.toContain('tria-demo');
+    expect(labText).not.toContain('#7c3aed');
 
+    // D-32: the public shell still resolves a suspended tenant's host — branded screen, no login.
     const suspended = await api.request(
       `/v1/public/tenants/by-host?host=${encodeURIComponent(SUSPENDED_HOST)}`,
     );
-    expect(suspended.status).toBe(404);
-    expect(await code(suspended)).toBe('TENANT_NOT_FOUND');
+    expect(suspended.status).toBe(200);
+    expect(await suspended.json()).toMatchObject({
+      slug: SUSPENDED_SLUG,
+      status: 'suspended',
+    });
   });
 });
