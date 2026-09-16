@@ -125,6 +125,24 @@ Plans:
   4. The app is installable as a PWA (manifest + service worker) and runs in standalone mode on iOS and Android; password-recovery and confirmation e-mails show the tenant's display name and logo; every shell and auth string is pt-BR and comes from a central message catalog.
 
 **Plans**: TBD
+
+- [x] 02-01-PLAN.md
+- [ ] 02-02-PLAN.md
+- [ ] 02-03-PLAN.md
+- [ ] 02-04-PLAN.md
+- [ ] 02-05-PLAN.md
+- [ ] 02-06-PLAN.md
+- [ ] 02-07-PLAN.md
+- [ ] 02-08-PLAN.md
+- [ ] 02-09-PLAN.md
+- [ ] 02-10-PLAN.md
+- [ ] 02-11-PLAN.md
+- [ ] 02-12-PLAN.md
+- [ ] 02-13-PLAN.md
+- [ ] 02-14-PLAN.md
+- [ ] 02-15-PLAN.md
+- [ ] 02-16-PLAN.md
+
 **UI hint**: yes
 **Research needed**: Vercel Domains REST API + verification flow for customer-owned domains (add domain, read DNS/verification records, poll status) and Supabase redirect allow-list updates per domain; `@serwist/turbopack` service-worker setup under Next 16.3; branded auth e-mails on Supabase (per-project templates vs Send Email hook) - decide here; the rest (Tailwind `@theme inline`, dynamic manifest route handlers, `force-dynamic` segments) is well documented and needs a review gate, not research.
 **Notes**: Establishes the UI-SPEC review pattern for prototype-less screens that Phases 4-8 reuse (admin composers, stories viewer, support inbox, admin panel, moderation). Per-tenant manifest/icons are served from `no-store` route handlers; the iOS "Adicionar a Tela de Inicio" hint component is built here but only wired to push in Phase 7.
@@ -247,7 +265,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 |-------|----------------|--------|-----------|
 | 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 9/9 | Complete    | 2026-09-14 |
 | 01.1. Cloud Provisioning & First Release (INSERTED) | 0/3 | Deferred (needs accounts) | - |
-| 2. Tenant Shell, Branding & Platform Panel | 0/TBD | Not started | - |
+| 2. Tenant Shell, Branding & Platform Panel | 1/16 | In Progress|  |
 | 3. Media Pipeline & Member Profiles | 0/TBD | Not started | - |
 | 4. Feed | 0/TBD | Not started | - |
 | 5. Communities & Stories | 0/TBD | Not started | - |

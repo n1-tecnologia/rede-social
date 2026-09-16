@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 2
+current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Phase 2 UI-SPEC approved
-last_updated: "2026-09-16T13:07:39.473Z"
-last_activity: 2026-09-14
-last_activity_desc: Phase 01 complete, transitioned to Phase 01.1
-state_head: c95b6e457982a262f67189e6859f6bda1e874260
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-09-16T15:17:39.477Z"
+last_activity: 2026-09-16
+last_activity_desc: Phase 02 execution started
+state_head: e6d0b18335ae17391404d214ccdae92e55d23937
 progress:
   total_phases: 9
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 28
-  completed_plans: 9
-  percent: 11
+  completed_plans: 10
+  percent: 0
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-11)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 01 — Foundation - Kernel, Tenancy, Auth & CI/CD
+**Current focus:** Phase 02 — Tenant Shell, Branding & Platform Panel
 
 ## Current Position
 
-Phase: 2 (Tenant Shell, Branding & Platform Panel) — READY TO EXECUTE
-Plan: Not started
+Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
+Plan: 2 of 16
 Status: Ready to execute
-Last activity: 2026-09-14 — Phase 01 complete, transitioned to Phase 01.1
+Last activity: 2026-09-16 — Phase 02 execution started
 
-Progress: [█░░░░░░░░░] 11%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 01 P06 | 22 min | 3 tasks | 36 files |
 | Phase 01 P07 | 25 min | 3 tasks | 42 files |
 | Phase 01 P08 | 78 min | 3 tasks | 18 files |
+| Phase 02 P01 | 95 min | 2 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -109,6 +110,10 @@ Recent decisions affecting current work:
 - [Phase 01]: enqueueInTx switches to api_user for the enqueue only, so the tenant lane (authenticated) holds no privileges on schema pgboss and cannot read another tenant's job payloads
 - [Phase 01]: Queue names travel app-tier to kernel via registerJobQueues; the kernel never imports a module (MOD-02)
 - [Phase 01]: pg-boss is declared in both @tria/core and @tria/api: tsup externalises only declared deps, and bundling pg-boss broke the ESM build
+- [Phase 02]: 02-01: resolveBranding throws on a malformed stored hex instead of falling back to the neutral brand — a corrupt tenants.branding row fails loud (500 → generic shell), never renders TRIA blue to a configured tenant; the panel validates with the same schema before saving
+- [Phase 02]: 02-01: apps/web splits HostTenant (full by-host answer from resolveHostTenant: status, isPrimary, primaryHost, branding) from HostShell (the four size-limited x-tenant-* headers from getHostTenant); the brand always comes from the cached fetch (getHostBrand), never a header
+- [Phase 02]: 02-01: resolveTenantHost resolves VERIFIED hosts only (isNotNull verified_at, D-36) and returns tenants.status instead of filtering on it (D-32); a suspended tenant's host answers 200 status 'suspended' so its screens stay branded — requireAuth still refuses its members
+- [Phase 02]: 02-01: TTL_HIT_MS on the web host cache lowered 300 s → 60 s; with no cross-instance invalidation on Vercel the TTL IS the brand cache bust (≤ 60 s web + 60 s API)
 
 ### Pending Todos
 
@@ -141,6 +146,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-15T02:10:09.487Z
-Stopped at: Phase 2 UI-SPEC approved
-Resume file: .planning/phases/02-tenant-shell-branding-platform-panel/02-UI-SPEC.md
+Last session: 2026-09-16T15:16:48.871Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None
