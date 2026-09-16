@@ -1,0 +1,7 @@
+@import "tailwindcss";
+@import "@tria/ui/styles/tokens.css";
+
+/* Shared packages render classes that never appear under apps/web — scan them explicitly.
+   Tailwind ignores a missing @source directory, so packages/core/ui may land later (02-07). */
+@source "../../../packages/ui/src";
+@source "../../../packages/core/ui";

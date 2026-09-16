@@ -70,8 +70,12 @@ describe('tokens.css — neutral fallback brand and the two theme layers', () =>
     expect(root).toContain('--brand-on-primary-dark: #0f1118');
     expect(root).toContain('--brand-accent: var(--brand-primary)');
     expect(root).toContain('--brand-on-accent: var(--brand-on-primary)');
-    expect(root).toContain('--brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%)');
-    expect(root).toContain('--brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%)');
+    expect(root).toContain(
+      '--brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%)',
+    );
+    expect(root).toContain(
+      '--brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%)',
+    );
     expect(root).toContain('--brand-gradient: linear-gradient(135deg');
     expect(root).toContain('--theme-bg: #f5f7fb');
   });
@@ -81,7 +85,9 @@ describe('tokens.css — neutral fallback brand and the two theme layers', () =>
     expect(dark).toContain('--theme-bg: #0f1118');
     expect(dark).toContain('--brand-accent: var(--brand-primary-dark)');
     expect(dark).toContain('--brand-on-accent: var(--brand-on-primary-dark)');
-    expect(dark).toContain('--brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%)');
+    expect(dark).toContain(
+      '--brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%)',
+    );
   });
 
   it('ships the device/safe-area contract and the glass bar', () => {
@@ -95,7 +101,17 @@ describe('tokens.css — neutral fallback brand and the two theme layers', () =>
   });
 
   it('does not carry the prototype legacy brand aliases', () => {
-    for (const forbidden of ['gold', 'emerald', 'forest', 'teal', 'sage', 'mist', 'btn-gold', 'brand-ig-mark', 'pill-']) {
+    for (const forbidden of [
+      'gold',
+      'emerald',
+      'forest',
+      'teal',
+      'sage',
+      'mist',
+      'btn-gold',
+      'brand-ig-mark',
+      'pill-',
+    ]) {
       expect(css, `${forbidden} absent`).not.toContain(forbidden);
     }
   });

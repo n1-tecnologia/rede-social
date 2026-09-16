@@ -1,7 +1,16 @@
 import { render, screen } from '@testing-library/react';
 import { Bell, Mail } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
-import { Badge, Button, Card, Chip, IconButton, Input, SectionTitle, StatusPill } from '../src/index';
+import {
+  Badge,
+  Button,
+  Card,
+  Chip,
+  IconButton,
+  Input,
+  SectionTitle,
+  StatusPill,
+} from '../src/index';
 
 describe('Button', () => {
   it('renders the brand variant with the tenant-bound utilities', () => {

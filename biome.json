@@ -9,6 +9,11 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
   "files": {
     "includes": [
       "**",
@@ -138,6 +143,14 @@
             }
           }
         }
+      }
+    },
+    {
+      "includes": [
+        "packages/ui/src/styles/tokens.css"
+      ],
+      "formatter": {
+        "enabled": false
       }
     }
   ]

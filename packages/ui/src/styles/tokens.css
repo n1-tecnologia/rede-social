@@ -1,0 +1,213 @@
+/*
+ * @tria/ui design tokens (UI-01, D-25, D-41).
+ *
+ * The ONLY file in the monorepo where brand or neutral hex literals may appear. Two layers:
+ *
+ *  1. Raw values — neutral `--theme-*` (light on the root, dark under the dark theme attribute) ported
+ *     verbatim from the design prototype, plus the tenant `--brand-*` fallbacks (the neutral TRIA brand,
+ *     visible only on generic hosts and the platform host). The layouts overwrite the five fixed
+ *     `--brand-primary|secondary|on-primary|primary-dark|on-primary-dark` keys per tenant via
+ *     `brandStyleVars` (@tria/contracts/branding); everything else is derived here with color-mix.
+ *
+ *  2. Tailwind aliases — declared inline in the theme block so `bg-brand` compiles to
+ *     `background-color: var(--brand-accent)` and resolves ON THE ELEMENT: a `--brand-primary` set on
+ *     any ancestor (and a nested theme attribute) repaints the subtree with no alias re-declaration.
+ *
+ * Legacy prototype aliases (the colour-named ones, the CTA/label/gradient-text classes, the IG mark)
+ * are deliberately NOT carried — UI-03 replaces them with tenant tokens.
+ */
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* ===== Layer 1 — light (default) ===== */
+:root {
+  --theme-bg: #f5f7fb;
+  --theme-bg-secondary: #ffffff;
+  --theme-bg-tertiary: #e9eef7;
+  --theme-bg-input: #eef2f9;
+  --theme-bg-hover: rgba(31, 58, 95, 0.04);
+  --theme-bg-active: rgba(31, 58, 95, 0.08);
+
+  --theme-text: #16233b;
+  --theme-text-secondary: #51617c;
+  --theme-text-tertiary: #8595ad;
+  --theme-text-inverse: #ffffff;
+
+  --theme-border: rgba(22, 35, 59, 0.1);
+  --theme-border-secondary: rgba(22, 35, 59, 0.16);
+  --theme-divider: rgba(22, 35, 59, 0.06);
+
+  --theme-card: #ffffff;
+  --theme-card-hover: #f8fafd;
+
+  --theme-overlay: rgba(10, 18, 32, 0.4);
+  --theme-handle: #c3cede;
+
+  /* floating glass bar: in light mode the rim is ink, not light */
+  --theme-glass-bar: rgba(255, 255, 255, 0.82);
+  --theme-rim-strong: rgba(22, 35, 59, 0.22);
+  --theme-rim-faint: rgba(22, 35, 59, 0.06);
+  --theme-bar-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -1px 0 rgba(255, 255, 255, 0.3),
+    0 12px 32px rgba(15, 23, 42, 0.16);
+  --theme-chip: rgba(22, 35, 59, 0.06);
+
+  /* neutral TRIA brand — overwritten per tenant by the layouts */
+  --brand-primary: #2e6fd0;
+  --brand-secondary: #5b9cf8;
+  --brand-on-primary: #ffffff;
+  --brand-primary-dark: #5b9cf8;
+  --brand-on-primary-dark: #0f1118;
+
+  /* derived — never enumerated per tenant (D-25) */
+  --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+
+  /* device / safe-area / shell contract (the shell may override inline) */
+  --screen-w: 100vw;
+  --screen-h: 100dvh;
+  --safe-top: max(env(safe-area-inset-top), 12px);
+  --safe-bottom: max(env(safe-area-inset-bottom), 8px);
+  --nav-height: 64px;
+}
+
+/* ===== Layer 1 — dark (brand navy, not pure black) ===== */
+[data-theme="dark"] {
+  --theme-bg: #0f1118;
+  --theme-bg-secondary: #181c26;
+  --theme-bg-tertiary: #232937;
+  --theme-bg-input: #232937;
+  --theme-bg-hover: rgba(255, 255, 255, 0.06);
+  --theme-bg-active: rgba(255, 255, 255, 0.1);
+
+  --theme-text: #f2f5fa;
+  --theme-text-secondary: #a6b1c4;
+  --theme-text-tertiary: #64718a;
+  --theme-text-inverse: #0f1118;
+
+  --theme-border: rgba(255, 255, 255, 0.08);
+  --theme-border-secondary: rgba(255, 255, 255, 0.12);
+  --theme-divider: rgba(255, 255, 255, 0.05);
+
+  --theme-card: #181c26;
+  --theme-card-hover: #232937;
+
+  --theme-overlay: rgba(0, 0, 0, 0.7);
+  --theme-handle: #3c4658;
+
+  --theme-glass-bar: rgba(24, 28, 38, 0.82);
+  --theme-rim-strong: rgba(255, 255, 255, 0.22);
+  --theme-rim-faint: rgba(255, 255, 255, 0.04);
+  --theme-bar-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(255, 255, 255, 0.03),
+    0 12px 32px rgba(0, 0, 0, 0.55);
+  --theme-chip: rgba(255, 255, 255, 0.1);
+
+  /* the accent pair flips to the dark-surface derivation (D-41) */
+  --brand-accent: var(--brand-primary-dark);
+  --brand-on-accent: var(--brand-on-primary-dark);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
+}
+
+/* ===== Layer 2 — Tailwind utilities bound to the runtime variables ===== */
+@theme inline {
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+
+  --color-bg: var(--theme-bg);
+  --color-bg-secondary: var(--theme-bg-secondary);
+  --color-bg-tertiary: var(--theme-bg-tertiary);
+  --color-bg-input: var(--theme-bg-input);
+  --color-bg-hover: var(--theme-bg-hover);
+  --color-bg-active: var(--theme-bg-active);
+  --color-card: var(--theme-card);
+  --color-card-hover: var(--theme-card-hover);
+
+  --color-text: var(--theme-text);
+  --color-text-secondary: var(--theme-text-secondary);
+  --color-text-tertiary: var(--theme-text-tertiary);
+  --color-text-inverse: var(--theme-text-inverse);
+
+  --color-border: var(--theme-border);
+  --color-border-secondary: var(--theme-border-secondary);
+  --color-divider: var(--theme-divider);
+  --color-handle: var(--theme-handle);
+
+  --color-brand: var(--brand-accent);
+  --color-on-brand: var(--brand-on-accent);
+  --color-brand-soft: var(--brand-primary-soft);
+  --color-brand-hover: var(--brand-primary-hover);
+
+  --color-success: #16a34a;
+  --color-danger: #ef4444;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
+
+  --animate-shimmer: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ===== Shell helpers ===== */
+
+/* The app's single scroll root (the shell owns it; PullToRefresh reads it via context) */
+.app-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.app-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.pb-safe {
+  padding-bottom: var(--safe-bottom, 0px);
+}
+.pt-safe {
+  padding-top: var(--safe-top, 0px);
+}
+
+/* Floating glass bar: glass fill in padding-box + a light rim in border-box. The lighter blur is the
+   fallback for engines without the SVG refraction filter (mounted once by the shell). The @supports
+   block is kept separate on purpose: Lightning CSS deduplicates same-property declarations. */
+.glass-bar {
+  background:
+    linear-gradient(var(--theme-glass-bar), var(--theme-glass-bar)) padding-box,
+    linear-gradient(
+      125deg,
+      var(--theme-rim-strong) 0%,
+      var(--theme-rim-faint) 32%,
+      var(--theme-rim-faint) 68%,
+      var(--theme-rim-strong) 100%
+    )
+    border-box;
+  border: 1px solid transparent;
+  -webkit-backdrop-filter: blur(2px) saturate(1.5);
+  backdrop-filter: blur(2px) saturate(1.5);
+  box-shadow: var(--theme-bar-shadow);
+}
+@supports (backdrop-filter: url("#liquid-glass")) {
+  .glass-bar {
+    -webkit-backdrop-filter: url("#liquid-glass");
+    backdrop-filter: url("#liquid-glass");
+  }
+}
+
+/* Reduced motion: no shimmer. Overlays read `useReducedMotion()` from motion/react and fall back to
+   instant opacity, so there is no blanket animation reset here. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer {
+    animation: none;
+  }
+}
