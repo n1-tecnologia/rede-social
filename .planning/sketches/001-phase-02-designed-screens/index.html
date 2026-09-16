@@ -1,0 +1,1110 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIA — Fase 2 · telas [designed] (mockup estático para revisão do time de design)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+/* =====================================================================================
+   1. TOKENS — packages/ui/src/styles/tokens.css compiled to plain CSS custom properties.
+      Same names, same values, same two layers (neutral --theme-* per theme, tenant --brand-*
+      with color-mix derivations re-evaluated per element). The @theme inline aliases of the
+      real file are Tailwind-only; here the utility classes below read the variables directly.
+   ===================================================================================== */
+/* [data-theme="light"] is a mockup-only addition: the BrandPreview mini-shells nest a light scope
+   inside a dark page. The real file declares the light layer on :root only. */
+:root, [data-theme="light"] {
+  --theme-bg: #f5f7fb;
+  --theme-bg-secondary: #ffffff;
+  --theme-bg-tertiary: #e9eef7;
+  --theme-bg-input: #eef2f9;
+  --theme-bg-hover: rgba(31, 58, 95, 0.04);
+  --theme-bg-active: rgba(31, 58, 95, 0.08);
+  --theme-text: #16233b;
+  --theme-text-secondary: #51617c;
+  --theme-text-tertiary: #8595ad;
+  --theme-text-inverse: #ffffff;
+  --theme-border: rgba(22, 35, 59, 0.1);
+  --theme-border-secondary: rgba(22, 35, 59, 0.16);
+  --theme-divider: rgba(22, 35, 59, 0.06);
+  --theme-card: #ffffff;
+  --theme-card-hover: #f8fafd;
+  --theme-overlay: rgba(10, 18, 32, 0.4);
+  --theme-handle: #c3cede;
+  --theme-glass-bar: rgba(255, 255, 255, 0.82);
+  --theme-rim-strong: rgba(22, 35, 59, 0.22);
+  --theme-rim-faint: rgba(22, 35, 59, 0.06);
+  --theme-bar-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -1px 0 rgba(255, 255, 255, 0.3), 0 12px 32px rgba(15, 23, 42, 0.16);
+  --theme-chip: rgba(22, 35, 59, 0.06);
+}
+:root {
+  /* neutral TRIA brand — overwritten per tenant (here: by the picker on [data-brand-scope]) */
+  --brand-primary: #2e6fd0;
+  --brand-secondary: #5b9cf8;
+  --brand-on-primary: #ffffff;
+  --brand-primary-dark: #5b9cf8;
+  --brand-on-primary-dark: #0f1118;
+
+  --color-success: #16a34a;
+  --color-danger: #ef4444;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
+
+  --screen-w: 100vw;
+  --screen-h: 100dvh;
+  --safe-top: 12px;
+  --safe-bottom: 8px;
+  --nav-height: 64px;
+}
+[data-theme="dark"] {
+  --theme-bg: #0f1118;
+  --theme-bg-secondary: #181c26;
+  --theme-bg-tertiary: #232937;
+  --theme-bg-input: #232937;
+  --theme-bg-hover: rgba(255, 255, 255, 0.06);
+  --theme-bg-active: rgba(255, 255, 255, 0.1);
+  --theme-text: #f2f5fa;
+  --theme-text-secondary: #a6b1c4;
+  --theme-text-tertiary: #64718a;
+  --theme-text-inverse: #0f1118;
+  --theme-border: rgba(255, 255, 255, 0.08);
+  --theme-border-secondary: rgba(255, 255, 255, 0.12);
+  --theme-divider: rgba(255, 255, 255, 0.05);
+  --theme-card: #181c26;
+  --theme-card-hover: #232937;
+  --theme-overlay: rgba(0, 0, 0, 0.7);
+  --theme-handle: #3c4658;
+  --theme-glass-bar: rgba(24, 28, 38, 0.82);
+  --theme-rim-strong: rgba(255, 255, 255, 0.22);
+  --theme-rim-faint: rgba(255, 255, 255, 0.04);
+  --theme-bar-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(255, 255, 255, 0.03), 0 12px 32px rgba(0, 0, 0, 0.55);
+  --theme-chip: rgba(255, 255, 255, 0.1);
+}
+/* derived brand tokens — never enumerated per tenant (D-25); re-evaluated on every element so a
+   --brand-* set on any ancestor recolours the subtree and a nested [data-theme] flips the pair */
+* {
+  --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+}
+[data-theme="dark"], [data-theme="dark"] * {
+  --brand-accent: var(--brand-primary-dark);
+  --brand-on-accent: var(--brand-on-primary-dark);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
+}
+/* mockup-only: the BrandPreview nests a light mini-shell inside a dark page (and vice-versa). The
+   ancestor rule above cannot tell "nearest" from "any" themed ancestor, so a style container query
+   (Chromium 111+, Safari 18+) re-derives the accent pair from the NEAREST [data-theme]. Browsers
+   without style queries keep the one-level behaviour of the rules above. */
+[data-theme="light"] { --tria-theme: light; }
+[data-theme="dark"] { --tria-theme: dark; }
+@container style(--tria-theme: light) {
+  [data-theme] * { --brand-accent: var(--brand-primary); --brand-on-accent: var(--brand-on-primary); --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%); }
+}
+@container style(--tria-theme: dark) {
+  [data-theme] * { --brand-accent: var(--brand-primary-dark); --brand-on-accent: var(--brand-on-primary-dark); --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%); }
+}
+
+/* =====================================================================================
+   2. BASE + MOCKUP CHROME (toolbar, section headers) — not part of the product
+   ===================================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { font-family: Manrope, system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--theme-bg); color: var(--theme-text); font-size: 14px; line-height: 1.5; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.i-18 { width: 18px; height: 18px; } .i-20 { width: 20px; height: 20px; } .i-22 { width: 22px; height: 22px; } .i-16 { width: 16px; height: 16px; } .i-28 { width: 28px; height: 28px; } .i-14 { width: 14px; height: 14px; } .i-23 { width: 23px; height: 23px; }
+.stroke-bold { stroke-width: 2.3; }
+
+.toolbar { position: sticky; top: 0; z-index: 200; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 24px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); }
+.toolbar .brandname { font-weight: 800; letter-spacing: -0.02em; font-size: 16px; }
+.toolbar .brandname small { font-weight: 400; color: var(--theme-text-secondary); margin-left: 8px; font-size: 12px; }
+.toolbar label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--theme-text-secondary); }
+.toolbar input[type="color"] { width: 32px; height: 32px; padding: 0; border: 1px solid var(--theme-border); border-radius: 8px; background: none; }
+.toolbar .preset { height: 32px; padding: 0 12px; border-radius: 999px; background: var(--theme-bg-input); font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); }
+.toolbar .preset:hover { background: var(--theme-bg-tertiary); }
+.toolbar .toggle { height: 32px; padding: 0 12px; border-radius: 999px; background: var(--theme-bg-tertiary); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
+.toolbar nav { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; width: 100%; }
+.toolbar nav a { color: var(--theme-text-tertiary); } .toolbar nav a:hover { color: var(--brand-accent); }
+.readout { font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+
+main.sheet { max-width: 1280px; margin: 0 auto; padding: 24px 24px 120px; }
+section.screen { padding: 40px 0; border-bottom: 1px solid var(--theme-divider); }
+section.screen > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+section.screen > header h2 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
+section.screen > header code { font-size: 12px; color: var(--theme-text-tertiary); background: var(--theme-bg-input); padding: 2px 8px; border-radius: 6px; }
+section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(--theme-text-secondary); max-width: 900px; }
+.frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.note { font-size: 12px; color: var(--theme-text-tertiary); margin: 8px 0 0; }
+
+/* =====================================================================================
+   3. DEVICE FRAMES — desktop shell (240px rail + column) and a 390px phone
+   ===================================================================================== */
+.desktop { width: 100%; max-width: 1180px; min-height: 640px; border: 1px solid var(--theme-border-secondary); border-radius: 16px; overflow: hidden; background: var(--theme-bg); display: grid; grid-template-columns: 240px 1fr; }
+.rail { background: var(--theme-bg-secondary); border-right: 1px solid var(--theme-border); display: flex; flex-direction: column; padding: 24px 12px; min-height: 100%; }
+.rail .logo-box { height: 48px; padding: 0 8px; display: flex; align-items: center; }
+.rail .logo-box img { max-height: 32px; max-width: 160px; object-fit: contain; }
+.rail .display-name { font-size: 16px; font-weight: 700; padding: 0 8px; margin-top: 4px; letter-spacing: -0.01em; }
+.rail nav { margin-top: 32px; display: flex; flex-direction: column; gap: 4px; }
+.rail .bottom { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--theme-divider); display: flex; flex-direction: column; gap: 4px; }
+.rail-item { height: 44px; border-radius: 12px; padding: 0 12px; display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--theme-text-secondary); font-weight: 400; position: relative; width: 100%; text-align: left; }
+.rail-item:hover { background: var(--theme-bg-hover); }
+.rail-item.active { background: var(--theme-chip); color: var(--brand-accent); font-weight: 700; }
+.rail-item.active svg { stroke-width: 2.3; }
+.rail-item.danger:hover { color: var(--color-danger); }
+.rail-item .spacer { flex: 1; }
+.desktop main { min-width: 0; display: flex; justify-content: center; padding: 48px 24px 64px; overflow: auto; }
+.desktop main > .column { width: 100%; max-width: 680px; }
+.desktop main > .column.wide { max-width: 1040px; }
+
+.phone { width: 390px; height: 780px; border: 1px solid var(--theme-border-secondary); border-radius: 40px; overflow: hidden; background: var(--theme-bg); position: relative; flex: none; display: flex; flex-direction: column; }
+.phone .topbar { flex: none; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); padding-top: var(--safe-top); }
+.phone .topbar .row { height: 48px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; }
+.phone .topbar .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.phone .topbar .brand img { height: 28px; max-width: 120px; object-fit: contain; }
+.phone .topbar .brand span { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone .topbar .actions { display: flex; align-items: center; gap: 12px; }
+.phone .body { flex: 1; overflow: auto; padding: 16px 16px calc(var(--safe-bottom) + 84px); }
+.phone .body.flush { padding: 0 0 calc(var(--safe-bottom) + 84px); }
+.phone .bottomnav { position: absolute; left: 14px; width: calc(100% - 28px); bottom: calc(var(--safe-bottom) + 8px); border-radius: 999px; padding: 4px 6px; display: flex; z-index: 50; }
+.bottomnav a { flex: 1; display: grid; place-items: center; padding: 6px 0; }
+.bottomnav .chip { width: 50px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.bottomnav a[aria-current="page"] .chip { background: var(--theme-chip); color: var(--brand-accent); }
+.bottomnav a[aria-current="page"] .chip svg { stroke-width: 2.3; }
+.glass-bar { background: linear-gradient(var(--theme-glass-bar), var(--theme-glass-bar)) padding-box, linear-gradient(125deg, var(--theme-rim-strong) 0%, var(--theme-rim-faint) 32%, var(--theme-rim-faint) 68%, var(--theme-rim-strong) 100%) border-box; border: 1px solid transparent; -webkit-backdrop-filter: blur(2px) saturate(1.5); backdrop-filter: blur(2px) saturate(1.5); box-shadow: var(--theme-bar-shadow); }
+
+/* =====================================================================================
+   4. PRIMITIVES — the @tria/ui geometry (Button, IconButton, Input, Chip, StatusPill, Card,
+      SectionTitle, Avatar, Badge, Switch, Tabs, EmptyState, FileDropZone, DataTable, overlays)
+   ===================================================================================== */
+.avatar { border-radius: 999px; background: var(--theme-bg-tertiary); display: inline-grid; place-items: center; color: var(--theme-text-tertiary); overflow: hidden; flex: none; border: 2px solid transparent; }
+.avatar.sm { width: 32px; height: 32px; } .avatar.md { width: 40px; height: 40px; } .avatar.lg { width: 56px; height: 56px; }
+.avatar.on-profile { border-color: var(--brand-accent); }
+.icon-btn { width: 44px; height: 44px; min-width: 44px; border-radius: 999px; display: inline-grid; place-items: center; position: relative; color: var(--theme-text); }
+.icon-btn:hover { background: var(--theme-bg-hover); }
+.icon-btn .badge { position: absolute; top: -2px; right: -2px; }
+.badge { min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: var(--color-danger); color: #ffffff; font-size: 10px; font-weight: 700; display: inline-grid; place-items: center; line-height: 1; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; font-weight: 700; white-space: nowrap; transition: background-color 150ms ease, color 150ms ease; }
+.btn.sm { height: 36px; padding: 0 16px; font-size: 12px; } .btn.md { height: 44px; padding: 0 20px; font-size: 14px; } .btn.lg { height: 52px; padding: 0 28px; font-size: 16px; }
+.btn.full { width: 100%; }
+.btn.brand { background: var(--brand-accent); color: var(--brand-on-accent); } .btn.brand:hover { background: var(--brand-primary-hover); }
+.btn.secondary { background: var(--theme-bg-tertiary); color: var(--theme-text); }
+.btn.outline { border: 1px solid var(--theme-border-secondary); color: var(--theme-text); }
+.btn.ghost { color: var(--brand-accent); } .btn.ghost:active { background: var(--theme-bg-tertiary); }
+.btn.ghost.danger-text { color: var(--color-danger); }
+.btn.danger { background: var(--color-danger); color: #ffffff; }
+.btn[disabled] { opacity: 0.5; cursor: default; }
+.btn .spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn.gradient { background: var(--brand-gradient); color: var(--brand-on-accent); }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { font-size: 14px; color: var(--theme-text-secondary); }
+.input { position: relative; display: flex; align-items: center; }
+.input input { width: 100%; height: 48px; border-radius: 12px; background: var(--theme-bg-input); border: 1px solid var(--theme-border); padding: 12px 16px; font-size: 16px; outline: none; color: var(--theme-text); }
+.input input::placeholder { color: var(--theme-text-tertiary); }
+.input input:focus { border-color: var(--brand-accent); box-shadow: 0 0 0 1px color-mix(in oklch, var(--brand-accent), transparent 80%); }
+.input.with-icon input { padding-left: 44px; }
+.input > svg { position: absolute; left: 14px; color: var(--theme-text-tertiary); }
+.input .trailing { position: absolute; right: 4px; }
+.input.error input { border-color: var(--color-danger); }
+.field .error { font-size: 14px; color: var(--color-danger); }
+.field .help { font-size: 12px; color: var(--theme-text-tertiary); }
+
+.chip, .pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 700; line-height: 1.5; white-space: nowrap; }
+.chip { background: var(--theme-bg-input); color: var(--theme-text-secondary); }
+.chip[aria-pressed="true"] { background: var(--brand-accent); color: var(--brand-on-accent); }
+.pill.brand { background: color-mix(in srgb, var(--brand-accent) 10%, transparent); color: var(--brand-accent); }
+.pill.success { background: color-mix(in srgb, var(--color-success) 10%, transparent); color: var(--color-success); }
+.pill.warning { background: color-mix(in srgb, var(--color-warning) 10%, transparent); color: var(--color-warning); }
+.pill.danger { background: color-mix(in srgb, var(--color-danger) 10%, transparent); color: var(--color-danger); }
+.pill.neutral { background: var(--theme-bg-tertiary); color: var(--theme-text-secondary); }
+.pill.lg { font-size: 14px; }
+
+.card { background: var(--theme-card); border-radius: 12px; box-shadow: 0 1px 3px rgba(22, 35, 59, 0.06); overflow: hidden; border: 1px solid transparent; }
+[data-theme="dark"] .card { border-color: var(--theme-border); }
+.card.p6 { padding: 24px; } .card.p4 { padding: 16px; }
+.card.hoverable:hover { background: var(--theme-card-hover); }
+.card.error { border-color: color-mix(in srgb, var(--color-danger) 40%, transparent); background: color-mix(in srgb, var(--color-danger) 5%, var(--theme-card)); }
+
+.micro { font-size: 12px; font-weight: 700; color: var(--brand-accent); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 12px; }
+.group-title { font-size: 14px; font-weight: 700; color: var(--theme-text-secondary); padding: 16px 16px 8px; margin: 0; }
+h1.title { font-size: 24px; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; margin: 0; }
+.h16 { font-size: 16px; font-weight: 700; line-height: 1.2; margin: 0; }
+.secondary { color: var(--theme-text-secondary); } .tertiary { color: var(--theme-text-tertiary); }
+.t12 { font-size: 12px; } .t14 { font-size: 14px; } .t16 { font-size: 16px; } .bold { font-weight: 700; } .nums { font-variant-numeric: tabular-nums; }
+.row { display: flex; align-items: center; gap: 12px; } .wrap { flex-wrap: wrap; } .between { justify-content: space-between; } .col { display: flex; flex-direction: column; } .g4 { gap: 16px; } .g3 { gap: 12px; } .g2 { gap: 8px; } .g1 { gap: 4px; } .g6 { gap: 24px; } .mt6 { margin-top: 24px; } .mt4 { margin-top: 16px; } .mt3 { margin-top: 12px; } .mt2 { margin-top: 8px; } .mt8 { margin-top: 32px; } .center { text-align: center; } .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .minw0 { min-width: 0; } .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .flex1 { flex: 1; } .link { color: var(--brand-accent); font-weight: 700; }
+.danger-text { color: var(--color-danger); } .warning-text { color: var(--color-warning); } .success-text { color: var(--color-success); }
+.divider { display: flex; align-items: center; gap: 12px; color: var(--theme-text-tertiary); font-size: 14px; } .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--theme-border); }
+
+.page-header { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 4px; background: color-mix(in srgb, var(--theme-bg) 95%, transparent); backdrop-filter: blur(4px); padding: 4px 8px 4px 4px; margin: -4px 0 16px -4px; }
+.page-header .h16 { flex: 1; }
+
+.settings-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; text-align: left; }
+.settings-row:active { background: var(--theme-card-hover); }
+.settings-row svg:first-child { color: var(--theme-text-secondary); }
+.settings-row .label { flex: 1; font-size: 14px; }
+.settings-row .chev { color: var(--theme-text-tertiary); }
+.settings-group { padding-top: 16px; } .settings-group + .settings-group { border-top: 1px solid var(--theme-border); }
+.settings-footer { padding: 16px; border-top: 1px solid var(--theme-border); }
+
+.switch { width: 44px; height: 24px; border-radius: 999px; padding: 0 2px; display: inline-flex; align-items: center; background: var(--theme-bg-tertiary); flex: none; transition: background-color 150ms ease; }
+.switch .knob { width: 20px; height: 20px; border-radius: 999px; background: #ffffff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform 150ms ease; }
+.switch[aria-checked="true"] { background: var(--brand-accent); } .switch[aria-checked="true"] .knob { transform: translateX(20px); }
+
+.tabs { display: flex; gap: 0; overflow-x: auto; border-bottom: 1px solid var(--theme-border); scrollbar-width: none; }
+.tabs .tab { position: relative; padding: 12px 16px; font-size: 14px; color: var(--theme-text-tertiary); white-space: nowrap; }
+.tabs .tab[aria-selected="true"] { color: var(--theme-text); font-weight: 700; }
+.tabs .tab[aria-selected="true"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 999px; background: var(--brand-accent); }
+
+.empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 64px 24px; text-align: center; }
+.empty .circle { width: 64px; height: 64px; border-radius: 999px; background: var(--theme-bg-tertiary); display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.empty h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.empty p { margin: 0; font-size: 14px; color: var(--theme-text-secondary); max-width: 260px; }
+.empty .action { margin-top: 12px; }
+
+.dropzone { border-radius: 16px; border: 2px dashed var(--theme-border-secondary); background: color-mix(in srgb, var(--theme-bg-secondary) 50%, transparent); min-height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px; text-align: center; color: var(--theme-text-secondary); font-size: 14px; }
+[data-theme="dark"] .dropzone { background: color-mix(in srgb, var(--theme-bg-tertiary) 50%, transparent); }
+.dropzone svg { color: var(--theme-text-tertiary); width: 40px; height: 40px; }
+.dropzone.active { border-color: var(--brand-accent); background: var(--brand-primary-soft); }
+.dropzone .preview { background: var(--theme-bg); border-radius: 12px; padding: 12px 20px; }
+.dropzone .preview img { height: 64px; object-fit: contain; }
+.progress { width: 100%; height: 4px; border-radius: 999px; background: var(--theme-bg-tertiary); overflow: hidden; } .progress > i { display: block; height: 100%; width: 62%; background: var(--brand-accent); border-radius: 999px; }
+
+table.data { width: 100%; border-collapse: collapse; }
+table.data th { text-align: left; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--theme-text-tertiary); padding: 12px 16px; border-bottom: 1px solid var(--theme-border); }
+table.data td { padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--theme-divider); vertical-align: middle; height: 56px; }
+table.data tr:last-child td { border-bottom: 0; }
+table.data tbody tr:hover td { background: var(--theme-card-hover); cursor: pointer; }
+table.data .sub { display: block; font-size: 12px; color: var(--theme-text-tertiary); }
+table.data td.mono { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+table.data td.break { word-break: break-all; }
+
+.mini-shell { border-radius: 12px; overflow: hidden; border: 1px solid var(--theme-border); background: var(--theme-bg); height: 140px; display: flex; flex-direction: column; position: relative; }
+.mini-shell .mini-top { height: 32px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); display: flex; align-items: center; justify-content: space-between; padding: 0 10px; font-size: 11px; font-weight: 700; color: var(--theme-text); }
+.mini-shell .mini-body { flex: 1; display: grid; place-items: center; }
+.mini-shell .mini-btn { height: 32px; padding: 0 20px; border-radius: 10px; background: var(--brand-accent); color: var(--brand-on-accent); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; }
+.mini-shell .mini-nav { position: absolute; left: 12px; right: 12px; bottom: 8px; height: 30px; border-radius: 999px; display: flex; align-items: center; justify-content: space-around; padding: 0 6px; }
+.mini-shell .mini-nav i { width: 24px; height: 22px; border-radius: 999px; display: block; background: transparent; } .mini-shell .mini-nav i.on { background: var(--theme-chip); box-shadow: inset 0 0 0 2px var(--brand-accent); }
+.mini-shell .mini-nav i.off { border: 1.5px solid var(--theme-text-tertiary); width: 14px; height: 14px; }
+.brand-preview .caption { font-size: 12px; font-weight: 700; color: var(--theme-text-tertiary); margin: 0 0 6px; }
+.readout-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; font-size: 12px; color: var(--theme-text-secondary); }
+.color-field .swatch { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--theme-border); overflow: hidden; flex: none; position: relative; }
+.color-field .swatch input { position: absolute; inset: -8px; width: 60px; height: 60px; padding: 0; border: 0; cursor: pointer; }
+.color-field .input input { text-transform: uppercase; }
+.icons-row { display: flex; gap: 12px; align-items: flex-end; }
+.icons-row .thumb { width: 40px; height: 40px; border-radius: 8px; background: var(--brand-accent); display: grid; place-items: center; color: var(--brand-on-accent); font-size: 10px; font-weight: 800; }
+.icons-row .thumb.small { width: 16px; height: 16px; border-radius: 3px; font-size: 6px; }
+.icons-row .thumb.mask { border-radius: 999px; }
+.icons-row .lbl { font-size: 10px; color: var(--theme-text-tertiary); text-align: center; margin-top: 4px; }
+
+.module-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--theme-divider); }
+.module-row:last-child { border-bottom: 0; }
+.module-row .txt { flex: 1; min-width: 0; } .module-row .name { font-size: 14px; font-weight: 700; } .module-row .desc { font-size: 12px; color: var(--theme-text-tertiary); }
+
+.checkrow { display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 14px; }
+.checkrow input { width: 20px; height: 20px; accent-color: var(--brand-primary); margin: 0; flex: none; }
+.strength { display: flex; gap: 6px; } .strength i { flex: 1; height: 4px; border-radius: 999px; background: var(--theme-bg-tertiary); } .strength i.w { background: var(--color-danger); } .strength i.o { background: var(--color-warning); } .strength i.s { background: var(--color-success); }
+
+.overlay-demo { position: relative; border-radius: 16px; overflow: hidden; background: rgba(0, 0, 0, 0.6); min-height: 320px; display: grid; place-items: center; width: 100%; }
+.dialog { width: 300px; border-radius: 16px; background: var(--theme-bg-secondary); overflow: hidden; text-align: center; }
+.dialog .body { padding: 24px 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.dialog .icon { width: 56px; height: 56px; border-radius: 999px; display: grid; place-items: center; }
+.dialog .icon.brand { background: color-mix(in srgb, var(--brand-accent) 10%, transparent); color: var(--brand-accent); }
+.dialog .icon.danger { background: color-mix(in srgb, var(--color-danger) 10%, transparent); color: var(--color-danger); }
+.dialog .footer { display: flex; border-top: 1px solid var(--theme-border); }
+.dialog .footer button { flex: 1; padding: 14px 0; font-size: 14px; font-weight: 700; color: var(--theme-text-secondary); }
+.dialog .footer button + button { border-left: 1px solid var(--theme-border); }
+.dialog .footer button.confirm { color: var(--brand-accent); } .dialog .footer button.confirm.danger { color: var(--color-danger); }
+
+.sheet-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 55; display: flex; align-items: flex-end; }
+.bottom-sheet { width: 100%; background: var(--theme-bg-secondary); border-radius: 16px 16px 0 0; padding: 8px 16px calc(var(--safe-bottom) + 16px); box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.3); }
+.bottom-sheet .handle { width: 48px; height: 4px; border-radius: 999px; background: var(--theme-handle); margin: 4px auto 16px; }
+.bottom-sheet .title { font-size: 16px; font-weight: 700; text-align: center; margin: 0; }
+
+.toast { display: inline-flex; align-items: center; gap: 12px; border-radius: 16px; padding: 12px 16px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); font-size: 14px; color: #ffffff; max-width: 420px; }
+.toast svg { flex: none; width: 20px; height: 20px; }
+.toast.success { background: var(--color-success); } .toast.error { background: var(--color-danger); } .toast.info { background: var(--brand-accent); color: var(--brand-on-accent); }
+
+.skeleton { border-radius: 6px; background: linear-gradient(90deg, var(--theme-bg-tertiary) 0%, var(--theme-bg-secondary) 50%, var(--theme-bg-tertiary) 100%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; height: 16px; }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton, .btn .spin { animation: none; } }
+
+.tenant-card { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.tenant-card .txt { flex: 1; min-width: 0; }
+.wordmark { font-weight: 800; font-size: 16px; letter-spacing: -0.02em; }
+.wordmark.lg { font-size: 24px; }
+.logo-16 { height: 64px; display: flex; align-items: center; justify-content: center; } .logo-16 img { max-height: 64px; max-width: 220px; object-fit: contain; }
+.focus-demo:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--theme-bg), 0 0 0 4px var(--brand-accent); }
+.dns-note { font-size: 12px; color: var(--theme-text-tertiary); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; width: 100%; }
+</style>
+</head>
+<body>
+<!-- lucide glyphs used by the screens (inline sprite; the app imports them from lucide-react) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-mail-x" viewBox="0 0 24 24"><path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h9"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/><path d="m17 17 4 4"/><path d="m21 17-4 4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></symbol>
+  <symbol id="i-user-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+</svg>
+
+<!-- ============ mockup toolbar (not a product surface) ============ -->
+<div class="toolbar" role="region" aria-label="Controles do mockup">
+  <span class="brandname">TRIA · Fase 2 <small>telas [designed] · 02-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
+  <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
+  <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
+  <span class="row g1">
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
+    <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
+    <button class="preset" type="button" data-p="#b91c1c" data-s="#f87171">Vermelho</button>
+    <button class="preset" type="button" data-p="#f5c518" data-s="#ffe066">Amarelo (contraste baixo)</button>
+  </span>
+  <span class="readout" id="brand-readout"></span>
+  <nav aria-label="Telas">
+    <a href="#desktop-shell-home">Shell desktop</a><a href="#settings">Configurações</a><a href="#tenant-list">Lista de tenants</a><a href="#tenant-list-empty">Lista vazia</a><a href="#new-tenant">Novo tenant</a><a href="#tenant-page-marca">Marca</a><a href="#tenant-page-modulos">Módulos</a><a href="#tenant-page-dominios">Domínios</a><a href="#tenant-page-admins">Admins</a><a href="#tenant-page-status">Status</a><a href="#accept-invite">Aceitar convite</a><a href="#expired-invite">Convite expirado</a><a href="#suspended">Indisponível</a><a href="#offline">Offline</a><a href="#install-hint">Instalar (iOS)</a><a href="#platform-shell-mobile">Painel no celular</a><a href="#feedback">Toasts e estados</a>
+  </nav>
+</div>
+
+<main class="sheet">
+
+<!-- ============================================================================== -->
+<section id="desktop-shell-home" class="screen">
+  <header><h2>Shell desktop — Início</h2><code>/inicio · ≥ 768px · D-39, D-42</code>
+    <p>Trilho de 240px (logo do tenant, "Início"/"Perfil", grupo inferior "Notificações", "Suporte", "Configurações", "Tema", "Sair") + coluna de 680px. Sem TopBar e sem BottomNav no desktop. Âncora visual: o logo (h-16) com o título de boas-vindas 24/700; o card "Em breve" é subordinado.</p>
+  </header>
+  <div class="frames">
+    <div class="desktop" data-brand-scope>
+      <aside class="rail">
+        <div class="logo-box"><img src="" alt="TRIA Demo" data-logo></div>
+        <div class="display-name" data-tenant-name>TRIA Demo</div>
+        <nav aria-label="Navegação">
+          <a class="rail-item active" href="#desktop-shell-home" aria-current="page"><svg class="i i-22"><use href="#i-home"/></svg>Início</a>
+          <a class="rail-item" href="#desktop-shell-home"><svg class="i i-22"><use href="#i-user"/></svg>Perfil</a>
+        </nav>
+        <div class="bottom">
+          <button class="rail-item" type="button"><svg class="i i-22"><use href="#i-bell"/></svg>Notificações<span class="spacer"></span><span class="badge">3</span></button>
+          <button class="rail-item" type="button"><svg class="i i-22"><use href="#i-chat"/></svg>Suporte</button>
+          <a class="rail-item" href="#settings"><svg class="i i-22"><use href="#i-settings"/></svg>Configurações</a>
+          <div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div>
+          <button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button>
+        </div>
+      </aside>
+      <main>
+        <div class="column col g6">
+          <div class="col g4 center" style="align-items:center;margin-top:32px">
+            <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
+            <h1 class="title">Bem-vindo(a) à <span data-tenant-name>TRIA Demo</span></h1>
+          </div>
+          <div class="card">
+            <div class="empty">
+              <div class="circle"><svg class="i i-28"><use href="#i-sparkles"/></svg></div>
+              <h3>Em breve</h3>
+              <p>As novidades da sua comunidade vão aparecer aqui.</p>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <p class="note">O logo acima é um SVG quadrado gerado pelo mockup a partir das iniciais (placeholder, caso "logo quadrado": o nome aparece ao lado/abaixo). Na app, <code>TenantLogo</code> renderiza o arquivo do cliente como está (D-26) ou o nome de exibição quando não há logo.</p>
+</section>
+
+<!-- ============================================================================== -->
+<section id="settings" class="screen">
+  <header><h2>Configurações</h2><code>/configuracoes · celular [proto] e desktop (grupos dentro de um Card)</code>
+    <p>Grupos "Conta", "Preferências", "Sobre". "Editar perfil" e "Notificações" levam a pílula neutra "Em breve"; "Tema escuro" é o único controle com cor da marca; "Sair" é ghost em vermelho no rodapé, sem confirmação (D-08).</p>
+  </header>
+  <div class="frames">
+    <div class="phone" data-brand-scope>
+      <div class="topbar"><div class="row"><div class="brand"><img src="" alt="TRIA Demo" data-logo><span data-tenant-name>TRIA Demo</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
+      <div class="body flush">
+        <div class="page-header" style="margin:0;padding:4px 8px 4px 4px"><button class="icon-btn" type="button" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></button><h1 class="h16">Configurações</h1></div>
+        <div class="settings-group">
+          <h2 class="group-title">Conta</h2>
+          <button class="settings-row" type="button"><svg class="i i-20"><use href="#i-user-circle"/></svg><span class="label">Editar perfil</span><span class="pill neutral">Em breve</span></button>
+        </div>
+        <div class="settings-group">
+          <h2 class="group-title">Preferências</h2>
+          <div class="settings-row"><svg class="i i-20" data-theme-icon><use href="#i-sun"/></svg><span class="label">Tema escuro</span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div>
+          <button class="settings-row" type="button"><svg class="i i-20"><use href="#i-bell"/></svg><span class="label">Notificações</span><span class="pill neutral">Em breve</span></button>
+        </div>
+        <div class="settings-group">
+          <h2 class="group-title">Sobre</h2>
+          <div class="settings-row"><svg class="i i-20"><use href="#i-info"/></svg><span class="label">Versão 0.2.0</span></div>
+        </div>
+        <div class="settings-footer"><button class="btn md full ghost danger-text" type="button"><svg class="i i-18"><use href="#i-logout"/></svg>Sair</button></div>
+      </div>
+      <nav class="bottomnav glass-bar" aria-label="Navegação"><a href="#settings" aria-label="Início"><span class="chip"><svg class="i i-23"><use href="#i-home"/></svg></span></a><a href="#settings" aria-label="Perfil" aria-current="page"><span class="chip"><svg class="i i-23"><use href="#i-user"/></svg></span></a></nav>
+    </div>
+    <div class="col g3" style="width:520px;max-width:100%">
+      <p class="note" style="margin:0">Desktop: o mesmo conteúdo dentro de um <code>Card</code>, título inline 24/700.</p>
+      <h1 class="title">Configurações</h1>
+      <div class="card" data-brand-scope>
+        <div class="settings-group"><h2 class="group-title">Conta</h2><button class="settings-row" type="button"><svg class="i i-20"><use href="#i-user-circle"/></svg><span class="label">Editar perfil</span><span class="pill neutral">Em breve</span></button></div>
+        <div class="settings-group"><h2 class="group-title">Preferências</h2><div class="settings-row"><svg class="i i-20" data-theme-icon><use href="#i-sun"/></svg><span class="label">Tema escuro</span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="settings-row" type="button"><svg class="i i-20"><use href="#i-bell"/></svg><span class="label">Notificações</span><span class="pill neutral">Em breve</span></button></div>
+        <div class="settings-group"><h2 class="group-title">Sobre</h2><div class="settings-row"><svg class="i i-20"><use href="#i-info"/></svg><span class="label">Versão 0.2.0</span></div></div>
+        <div class="settings-footer"><button class="btn md full ghost danger-text" type="button"><svg class="i i-18"><use href="#i-logout"/></svg>Sair</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="tenant-list" class="screen">
+  <header><h2>Painel — Lista de tenants</h2><code>/plataforma · host da plataforma · marca neutra TRIA · D-31</code>
+    <p>Linha de título "Tenants" + "Novo tenant" (única cor de marca da tela). Toolbar: busca "Buscar por nome ou slug" + chips "Todos · Ativos · Suspensos". <code>DataTable</code> em um Card; a linha inteira é link. Ao lado, a variante celular: um Card por tenant.</p>
+  </header>
+  <div class="frames">
+    <div class="desktop">
+      <aside class="rail">
+        <div class="logo-box"><span class="wordmark">TRIA</span></div>
+        <nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav>
+        <div class="bottom">
+          <div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div>
+          <button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button>
+        </div>
+      </aside>
+      <main>
+        <div class="column wide col">
+          <div class="row between wrap"><h1 class="title">Tenants</h1><a class="btn md brand" href="#new-tenant"><svg class="i i-18"><use href="#i-plus"/></svg>Novo tenant</a></div>
+          <div class="row wrap mt6 g3">
+            <div class="input with-icon" style="max-width:360px;flex:1"><svg class="i i-18"><use href="#i-search"/></svg><input type="search" placeholder="Buscar por nome ou slug" aria-label="Buscar por nome ou slug"></div>
+            <div class="row g2"><button class="chip" type="button" aria-pressed="true">Todos</button><button class="chip" type="button" aria-pressed="false">Ativos</button><button class="chip" type="button" aria-pressed="false">Suspensos</button></div>
+          </div>
+          <div class="card mt4">
+            <table class="data">
+              <thead><tr><th>Tenant</th><th>Domínio primário</th><th>Módulos</th><th>Status</th><th>Criado em</th></tr></thead>
+              <tbody>
+                <tr><td><span class="bold">TRIA Demo</span><span class="sub">tria-demo</span></td><td>comunidade.exemplo.com.br</td><td class="nums">6 módulos</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">12/09/2026</td></tr>
+                <tr><td><span class="bold">TRIA Lab</span><span class="sub">tria-lab</span></td><td>lab.exemplo.com.br</td><td class="nums">4 módulos</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">12/09/2026</td></tr>
+                <tr><td><span class="bold">Clube Aurora</span><span class="sub">clube-aurora</span></td><td><span class="pill warning">Sem domínio</span></td><td class="nums">6 módulos</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">15/09/2026</td></tr>
+                <tr><td><span class="bold">Instituto Horizonte</span><span class="sub">instituto-horizonte</span></td><td>membros.horizonte.exemplo</td><td class="nums">1 módulo</td><td><span class="pill danger">Suspenso</span></td><td class="t12 nums">02/09/2026</td></tr>
+                <tr><td><span class="bold">Academia Norte</span><span class="sub">academia-norte</span></td><td>app.academianorte.exemplo</td><td class="nums">nenhum módulo</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">16/09/2026</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="row mt4" style="justify-content:center"><button class="btn md outline" type="button">Carregar mais</button></div>
+          <div class="card mt6" style="max-width:440px"><div class="col g3" style="padding:16px"><p class="t12 tertiary" style="margin:0">Carregando (5 linhas Skeleton):</p><div class="skeleton" style="width:70%"></div><div class="skeleton" style="width:55%"></div><div class="skeleton" style="width:62%"></div><div class="skeleton" style="width:48%"></div><div class="skeleton" style="width:66%"></div></div></div>
+        </div>
+      </main>
+    </div>
+    <div class="phone">
+      <div class="topbar"><div class="row"><div class="brand"><span class="wordmark">TRIA</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
+      <div class="body col g3">
+        <h1 class="title">Tenants</h1>
+        <a class="btn md brand full" href="#new-tenant"><svg class="i i-18"><use href="#i-plus"/></svg>Novo tenant</a>
+        <div class="input with-icon"><svg class="i i-18"><use href="#i-search"/></svg><input type="search" placeholder="Buscar por nome ou slug" aria-label="Buscar por nome ou slug"></div>
+        <div class="row g2"><button class="chip" type="button" aria-pressed="true">Todos</button><button class="chip" type="button" aria-pressed="false">Ativos</button><button class="chip" type="button" aria-pressed="false">Suspensos</button></div>
+        <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">TRIA Demo</span><span class="pill success">Ativo</span></div><div class="t12 tertiary truncate">tria-demo · comunidade.exemplo.com.br</div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
+        <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">TRIA Lab</span><span class="pill success">Ativo</span></div><div class="t12 tertiary truncate">tria-lab · lab.exemplo.com.br</div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
+        <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">Clube Aurora</span><span class="pill success">Ativo</span></div><div class="t12 tertiary truncate">clube-aurora · <span class="warning-text">Sem domínio</span></div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
+        <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">Instituto Horizonte</span><span class="pill danger">Suspenso</span></div><div class="t12 tertiary truncate">instituto-horizonte · membros.horizonte.exemplo</div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
+      </div>
+      <nav class="bottomnav glass-bar" aria-label="Navegação"><a href="#tenant-list" aria-label="Tenants" aria-current="page"><span class="chip"><svg class="i i-23"><use href="#i-building"/></svg></span></a><a href="#settings" aria-label="Configurações"><span class="chip"><svg class="i i-23"><use href="#i-settings"/></svg></span></a></nav>
+    </div>
+  </div>
+  <p class="note">O painel vive no host da plataforma e usa sempre a marca neutra TRIA; o seletor de cor da barra acima não o recolore (só o <code>BrandPreview</code> dentro dos formulários).</p>
+</section>
+
+<!-- ============================================================================== -->
+<section id="tenant-list-empty" class="screen">
+  <header><h2>Painel — Lista vazia e busca sem resultado</h2><code>/plataforma · EmptyState variant="card" (Building2)</code></header>
+  <div class="frames two">
+    <div class="card"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-building"/></svg></div><h3>Nenhum tenant ainda</h3><p>Crie o primeiro tenant para começar.</p><div class="action"><a class="btn md brand" href="#new-tenant"><svg class="i i-18"><use href="#i-plus"/></svg>Novo tenant</a></div></div></div>
+    <div class="card"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-search"/></svg></div><h3>Nenhum tenant encontrado</h3><p>Tente outro nome ou slug.</p></div></div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="new-tenant" class="screen">
+  <header><h2>Painel — Novo tenant</h2><code>/plataforma/novo · formulário em um Card p-6 · BrandPreview (âncora visual)</code>
+    <p>Ordem dos campos: "Nome de exibição", "Slug" (auto-sugerido, helper "Não pode ser alterado depois."), Cores (dois <code>ColorField</code>s lado a lado), <code>BrandPreview</code> claro/escuro com a leitura de contraste, Módulos (seis Switch, todos ligados), "E-mail do primeiro administrador". Rodapé: "Criar tenant" (brand, lg) à direita e "Descartar" (ghost) à esquerda. Aqui o campo Slug mostra o estado de erro e o topo mostra o Card de erro do servidor. Mude a cor na barra para ver o preview e a leitura de contraste reagirem.</p>
+  </header>
+  <div class="frames">
+    <div class="desktop">
+      <aside class="rail">
+        <div class="logo-box"><span class="wordmark">TRIA</span></div>
+        <nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav>
+        <div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div>
+      </aside>
+      <main>
+        <div class="column wide">
+          <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><h1 class="h16">Novo tenant</h1></div>
+          <div class="card error p4 mt2" role="alert"><span class="t14 danger-text">Não foi possível criar o tenant. Revise os campos e tente novamente.</span></div>
+          <form class="card p6 col g6 mt4" onsubmit="return false">
+            <div class="field"><label for="nt-name">Nome de exibição</label><div class="input"><input id="nt-name" value="TRIA Demo" data-tenant-name-input></div></div>
+            <div class="field"><label for="nt-slug">Slug</label><div class="input error"><input id="nt-slug" value="tria-demo" aria-invalid="true" aria-describedby="nt-slug-err"></div><span class="error" id="nt-slug-err" role="alert">Este slug já está em uso.</span><span class="help">Não pode ser alterado depois.</span></div>
+            <div>
+              <p class="micro">Cores</p>
+              <div class="grid2">
+                <div class="field color-field"><label for="nt-primary">Cor primária</label><div class="row g2"><span class="swatch"><input type="color" value="#2e6fd0" data-color-input="primary" aria-label="Cor primária"></span><div class="input flex1"><input id="nt-primary" value="#2E6FD0" data-hex-input="primary" maxlength="7"></div></div></div>
+                <div class="field color-field"><label for="nt-secondary">Cor secundária</label><div class="row g2"><span class="swatch"><input type="color" value="#5b9cf8" data-color-input="secondary" aria-label="Cor secundária"></span><div class="input flex1"><input id="nt-secondary" value="#5B9CF8" data-hex-input="secondary" maxlength="7"></div></div></div>
+              </div>
+              <div class="card p4 mt3 brand-preview" data-brand-scope>
+                <div class="grid2">
+                  <div><p class="caption">Claro</p><div class="mini-shell" data-theme="light"><div class="mini-top"><span data-tenant-name>TRIA Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
+                  <div><p class="caption">Escuro</p><div class="mini-shell" data-theme="dark"><div class="mini-top"><span data-tenant-name>TRIA Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
+                </div>
+                <div class="readout-row" data-contrast-readout></div>
+                <div class="mt3 col g2" data-contrast-warning hidden>
+                  <span class="t14 warning-text" role="alert" data-contrast-warning-text></span>
+                  <label class="checkrow"><input type="checkbox"> Salvar mesmo assim</label>
+                </div>
+              </div>
+            </div>
+            <div>
+              <p class="micro">Módulos</p>
+              <div class="card" style="box-shadow:none;border:1px solid var(--theme-border)">
+                <div class="module-row"><div class="txt"><div class="name">Feed</div><div class="desc">Publicações do administrador na página inicial.</div></div><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Feed"><span class="knob"></span></button></div>
+                <div class="module-row"><div class="txt"><div class="name">Stories</div><div class="desc">Conteúdo que expira em 24 horas.</div></div><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Stories"><span class="knob"></span></button></div>
+                <div class="module-row"><div class="txt"><div class="name">Comunidades</div><div class="desc">Grupos temáticos com seus próprios feeds.</div></div><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Comunidades"><span class="knob"></span></button></div>
+                <div class="module-row"><div class="txt"><div class="name">Eventos</div><div class="desc">Agenda com confirmação de presença e check-in.</div></div><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Eventos"><span class="knob"></span></button></div>
+                <div class="module-row"><div class="txt"><div class="name">Chat</div><div class="desc">Conversa dos membros com a equipe de suporte.</div></div><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Chat"><span class="knob"></span></button></div>
+                <div class="module-row"><div class="txt"><div class="name">Notificações</div><div class="desc">Central de avisos e notificações push.</div></div><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Notificações"><span class="knob"></span></button></div>
+              </div>
+            </div>
+            <div class="field"><label for="nt-admin">E-mail do primeiro administrador</label><div class="input with-icon"><svg class="i i-18"><use href="#i-mail"/></svg><input id="nt-admin" type="email" placeholder="admin@cliente.com.br"></div><span class="help">O convite é enviado quando o domínio primário for verificado.</span></div>
+            <div class="row between wrap"><button class="btn md ghost" type="button">Descartar</button><button class="btn lg brand" type="submit">Criar tenant</button></div>
+          </form>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="tenant-page-marca" class="screen">
+  <header><h2>Painel — Página do tenant · aba Marca</h2><code>/plataforma/{id} (Marca) · título + StatusPill + Tabs sublinhadas</code>
+    <p>Cabeçalho: voltar, nome 24/700 + pílula de status + slug + host primário (link). Abas fixas Marca · Módulos · Domínios · Admins · Status. Marca: duas <code>FileDropZone</code>s (logo com preview; ícone quadrado opcional, estado vazio), cores + <code>BrandPreview</code>, "Ícones gerados", rodapé "Salvar alterações" (desabilitado até editar).</p>
+  </header>
+  <div class="frames">
+    <div class="desktop">
+      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <main>
+        <div class="column wide">
+          <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="true" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
+          <div class="card p6 mt6 col g6">
+            <div class="grid2">
+              <div class="col g2"><p class="micro" style="margin:0">Logo</p>
+                <div class="dropzone"><div class="preview" data-brand-scope><img src="" alt="TRIA Demo" data-logo></div><span class="t12 tertiary">PNG, SVG, WebP ou JPEG · até 2 MB</span><div class="row g2"><button class="btn sm outline" type="button"><svg class="i i-16"><use href="#i-upload"/></svg>Substituir logo</button></div></div>
+              </div>
+              <div class="col g2"><p class="micro" style="margin:0">Ícone quadrado (opcional)</p>
+                <div class="dropzone"><svg class="i"><use href="#i-image"/></svg><span>Nenhum logo enviado — o nome da comunidade aparece no lugar.</span><button class="btn sm outline" type="button"><svg class="i i-16"><use href="#i-upload"/></svg>Enviar ícone quadrado</button></div>
+                <span class="t12 tertiary">Opcional. Use quando o logo for horizontal ou ficar ilegível em um quadrado.</span>
+              </div>
+            </div>
+            <div class="grid2">
+              <div class="col g2"><p class="micro" style="margin:0">Enviando</p><div class="dropzone active"><span class="t12 tertiary">62%</span><div class="progress"><i></i></div></div></div>
+              <div class="col g2"><p class="micro" style="margin:0">Processando</p><div class="dropzone"><svg class="i i-28" style="width:28px;height:28px;animation:spin 1s linear infinite"><use href="#i-loader"/></svg><span>Gerando ícones…</span></div></div>
+            </div>
+            <div>
+              <p class="micro">Cores</p>
+              <div class="grid2">
+                <div class="field color-field"><label for="mk-primary">Cor primária</label><div class="row g2"><span class="swatch"><input type="color" value="#2e6fd0" data-color-input="primary" aria-label="Cor primária"></span><div class="input flex1"><input id="mk-primary" value="#2E6FD0" data-hex-input="primary" maxlength="7"></div></div></div>
+                <div class="field color-field"><label for="mk-secondary">Cor secundária</label><div class="row g2"><span class="swatch"><input type="color" value="#5b9cf8" data-color-input="secondary" aria-label="Cor secundária"></span><div class="input flex1"><input id="mk-secondary" value="#5B9CF8" data-hex-input="secondary" maxlength="7"></div></div></div>
+              </div>
+              <div class="card p4 mt3 brand-preview" data-brand-scope>
+                <div class="grid2">
+                  <div><p class="caption">Claro</p><div class="mini-shell" data-theme="light"><div class="mini-top"><span data-tenant-name>TRIA Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
+                  <div><p class="caption">Escuro</p><div class="mini-shell" data-theme="dark"><div class="mini-top"><span data-tenant-name>TRIA Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
+                </div>
+                <div class="readout-row" data-contrast-readout></div>
+                <div class="mt3 col g2" data-contrast-warning hidden><span class="t14 warning-text" role="alert" data-contrast-warning-text></span><label class="checkrow"><input type="checkbox"> Salvar mesmo assim</label></div>
+              </div>
+            </div>
+            <div data-brand-scope>
+              <p class="micro">Ícones gerados</p>
+              <div class="icons-row">
+                <div><div class="thumb small">T</div><div class="lbl">favicon 16</div></div>
+                <div><div class="thumb">T</div><div class="lbl">192</div></div>
+                <div><div class="thumb">T</div><div class="lbl">512</div></div>
+                <div><div class="thumb mask">T</div><div class="lbl">maskable 512</div></div>
+                <span class="t12 tertiary" style="align-self:center">iconVersion 3</span>
+              </div>
+            </div>
+            <div class="row" style="justify-content:flex-end"><button class="btn md brand" type="button" disabled>Salvar alterações</button></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="tenant-page-modulos" class="screen">
+  <header><h2>Painel — aba Módulos</h2><code>/plataforma/{id}/modulos · seis linhas min-h-14 com Switch (âncora visual)</code></header>
+  <div class="frames">
+    <div class="desktop">
+      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <main>
+        <div class="column wide">
+          <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
+          <div class="card mt6">
+            <div class="module-row"><div class="txt"><div class="name">Feed</div><div class="desc">Publicações do administrador na página inicial.</div></div><span class="pill success">Ativado</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Feed"><span class="knob"></span></button></div>
+            <div class="module-row"><div class="txt"><div class="name">Stories</div><div class="desc">Conteúdo que expira em 24 horas.</div></div><span class="pill success">Ativado</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Stories"><span class="knob"></span></button></div>
+            <div class="module-row"><div class="txt"><div class="name">Comunidades</div><div class="desc">Grupos temáticos com seus próprios feeds.</div></div><span class="pill neutral">Desativado</span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Comunidades"><span class="knob"></span></button></div>
+            <div class="module-row"><div class="txt"><div class="name">Eventos</div><div class="desc">Agenda com confirmação de presença e check-in.</div></div><span class="pill success">Ativado</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Eventos"><span class="knob"></span></button></div>
+            <div class="module-row" aria-busy="true"><div class="txt"><div class="name">Chat</div><div class="desc">Conversa dos membros com a equipe de suporte.</div></div><svg class="i i-18 tertiary" style="animation:spin 1s linear infinite"><use href="#i-loader"/></svg><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Chat" style="opacity:.6"><span class="knob"></span></button></div>
+            <div class="module-row"><div class="txt"><div class="name">Notificações</div><div class="desc">Central de avisos e notificações push.</div></div><span class="pill success">Ativado</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Notificações"><span class="knob"></span></button></div>
+            <div style="padding:12px 16px" class="t12 tertiary">As mudanças valem em até 30 segundos, sem novo deploy.</div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="tenant-page-dominios" class="screen">
+  <header><h2>Painel — aba Domínios</h2><code>/plataforma/{id}/dominios · card por domínio · tabela DNS com botões de copiar · D-34, D-35</code>
+    <p>Formulário inline "Domínio" + "Adicionar domínio". Cards: host 16/700 + "Primário" (brand) + status (warning "Aguardando DNS" · success "Verificado" · danger "Expirado"/"Falhou") + "Última verificação". Enquanto não verificado: tabela Tipo/Nome/Valor com <code>IconButton</code> "Copiar valor" (44×44) e a linha de ajuda; ações "Verificar agora" / "Reiniciar verificação", "Tornar primário", "Remover". Âncora: o card do domínio primário no topo.</p>
+  </header>
+  <div class="frames">
+    <div class="desktop">
+      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <main>
+        <div class="column wide">
+          <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
+
+          <form class="row wrap g3 mt6" onsubmit="return false">
+            <div class="input with-icon flex1" style="min-width:280px"><svg class="i i-18"><use href="#i-globe"/></svg><input type="text" placeholder="comunidade.cliente.com.br" aria-label="Domínio"></div>
+            <button class="btn md brand" type="submit">Adicionar domínio</button>
+          </form>
+
+          <div class="card p6 mt4 col g4">
+            <div class="row wrap g2"><span class="h16">comunidade.exemplo.com.br</span><span class="pill brand">Primário</span><span class="pill success">Verificado</span><span class="t12 tertiary">Última verificação 16/09/2026 14:20</span></div>
+            <div class="row wrap g2"><button class="btn sm outline" type="button"><svg class="i i-16"><use href="#i-refresh"/></svg>Verificar agora</button><button class="btn sm ghost danger-text" type="button" disabled>Remover</button><span class="t12 tertiary">Não é possível remover o domínio primário. Torne outro domínio primário antes.</span></div>
+          </div>
+
+          <div class="card p6 mt4 col g4">
+            <div class="row wrap g2"><span class="h16">app.exemplo.com.br</span><span class="pill warning">Aguardando DNS</span><span class="t12 tertiary">Última verificação 16/09/2026 15:50</span></div>
+            <div class="card" style="box-shadow:none;border:1px solid var(--theme-border)">
+              <table class="data">
+                <thead><tr><th>Tipo</th><th>Nome</th><th>Valor</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">CNAME</td><td>app</td><td class="break"><div class="row between g2"><span>cname.plataforma-exemplo.com</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div></td></tr>
+                  <tr><td class="mono">TXT</td><td>_tria-verify.app</td><td class="break"><div class="row between g2"><span>tria-verify=8f3a1c…d2e9</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <span class="dns-note">Crie estes registros no DNS do cliente. A verificação roda a cada 10 minutos por até 7 dias.</span>
+            <div class="row wrap g2"><button class="btn sm outline" type="button"><svg class="i i-16 spin"><use href="#i-loader"/></svg>Verificar agora</button><button class="btn sm ghost" type="button" disabled>Tornar primário</button><button class="btn sm ghost danger-text" type="button">Remover</button></div>
+          </div>
+
+          <div class="card p6 mt4 col g4">
+            <div class="row wrap g2"><span class="h16">antigo.exemplo.com.br</span><span class="pill danger">Expirado</span><span class="t12 tertiary">Última verificação 09/09/2026 10:05</span></div>
+            <div class="row wrap g2"><button class="btn sm outline" type="button"><svg class="i i-16"><use href="#i-refresh"/></svg>Reiniciar verificação</button><button class="btn sm ghost danger-text" type="button">Remover</button></div>
+            <span class="t12 danger-text">A verificação falhou: registro CNAME não encontrado. Confira os registros e tente de novo.</span>
+          </div>
+
+          <div class="card p6 mt4 col g4">
+            <div class="row wrap g2"><span class="h16">membros.exemplo.com.br</span><span class="pill success">Verificado</span><span class="t12 tertiary">Última verificação 16/09/2026 12:00</span></div>
+            <div class="row wrap g2"><button class="btn sm outline" type="button"><svg class="i i-16"><use href="#i-refresh"/></svg>Verificar agora</button><button class="btn sm ghost" type="button">Tornar primário</button><button class="btn sm ghost danger-text" type="button">Remover</button></div>
+          </div>
+
+          <div class="card mt6"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-globe"/></svg></div><h3>Nenhum domínio ainda</h3><p>Adicione o domínio do cliente para publicar a comunidade.</p></div></div>
+        </div>
+      </main>
+    </div>
+    <div class="col g4" style="width:340px;max-width:100%">
+      <p class="note" style="margin:0">Confirmações desta aba (ConfirmDialog):</p>
+      <div class="overlay-demo" style="min-height:240px"><div class="dialog" role="dialog" aria-modal="true"><div class="body"><div class="icon brand"><svg class="i i-28"><use href="#i-check-circle"/></svg></div><p class="h16">Tornar membros.exemplo.com.br o domínio primário?</p><p class="t14 secondary" style="margin:0">Os outros endereços passam a redirecionar para ele.</p></div><div class="footer"><button type="button">Cancelar</button><button type="button" class="confirm">Tornar primário</button></div></div></div>
+      <div class="overlay-demo" style="min-height:240px"><div class="dialog" role="dialog" aria-modal="true"><div class="body"><div class="icon danger"><svg class="i i-28"><use href="#i-alert"/></svg></div><p class="h16">Remover antigo.exemplo.com.br?</p><p class="t14 secondary" style="margin:0">O endereço deixa de abrir esta comunidade e sai da lista de redirecionamento de e-mails.</p></div><div class="footer"><button type="button">Cancelar</button><button type="button" class="confirm danger">Remover</button></div></div></div>
+    </div>
+  </div>
+  <p class="note">Erros de formulário desta aba (inline sob o campo): "Domínio inválido. Use um endereço como comunidade.cliente.com.br." · "Este domínio já está em uso." · "Este endereço é reservado pela plataforma."</p>
+</section>
+
+<!-- ============================================================================== -->
+<section id="tenant-page-admins" class="screen">
+  <header><h2>Painel — aba Admins</h2><code>/plataforma/{id}/admins · card do convite + card dos administradores</code>
+    <p>Âncora: a <code>StatusPill</code> do convite no primeiro card. "Reenviar convite" fica desabilitado sem domínio primário verificado (com a linha de ajuda).</p>
+  </header>
+  <div class="frames">
+    <div class="desktop">
+      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <main>
+        <div class="column wide">
+          <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
+          <div class="grid2 mt6" style="align-items:start">
+            <div class="col g4">
+              <div class="card p6 col g3">
+                <p class="micro" style="margin:0">Convite do primeiro administrador</p>
+                <span class="t14 bold">admin@cliente.com.br</span>
+                <span><span class="pill neutral">Convite enviado em 12/09/2026</span></span>
+                <div><button class="btn md outline" type="button"><svg class="i i-18"><use href="#i-mail"/></svg>Reenviar convite</button></div>
+              </div>
+              <div class="card p6 col g3">
+                <p class="micro" style="margin:0">Convite do primeiro administrador</p>
+                <span class="t14 bold">admin@cliente.com.br</span>
+                <span><span class="pill warning">Convite pendente — aguardando domínio</span></span>
+                <div class="col g1"><button class="btn md outline" type="button" disabled><svg class="i i-18"><use href="#i-mail"/></svg>Reenviar convite</button><span class="t12 tertiary">Adicione e verifique um domínio para enviar o convite.</span></div>
+              </div>
+              <div class="card p6 col g3">
+                <p class="micro" style="margin:0">Convite do primeiro administrador</p>
+                <span class="t14 bold">admin@cliente.com.br</span>
+                <span><span class="pill success">Aceito em 14/09/2026</span></span>
+              </div>
+            </div>
+            <div class="col g4">
+              <div class="card p6 col g3">
+                <p class="micro" style="margin:0">Administradores</p>
+                <div class="row g3"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span><div class="col flex1 minw0"><span class="t14 bold truncate">Ana Souza</span><span class="t12 tertiary truncate">admin@cliente.com.br</span></div><span class="pill neutral">Administrador</span></div>
+                <div class="row g3"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span><div class="col flex1 minw0"><span class="t14 bold truncate">Carlos Lima</span><span class="t12 tertiary truncate">carlos@cliente.com.br</span></div><span class="pill neutral">Administrador</span></div>
+              </div>
+              <div class="card p6 col g3">
+                <p class="micro" style="margin:0">Administradores</p>
+                <span class="t14 secondary">Nenhum administrador ativo ainda.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <p class="note">Os três estados do convite estão empilhados aqui para a revisão; na app aparece um só. Nomes e e-mails são placeholders.</p>
+</section>
+
+<!-- ============================================================================== -->
+<section id="tenant-page-status" class="screen">
+  <header><h2>Painel — aba Status + ConfirmDialog</h2><code>/plataforma/{id}/status · uma CTA (danger "Suspender tenant" ou brand "Reativar tenant") · D-32</code></header>
+  <div class="frames">
+    <div class="desktop" style="min-height:520px">
+      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <main>
+        <div class="column wide">
+          <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-status">Status</a></div>
+          <div class="grid2 mt6" style="align-items:start">
+            <div class="card p6 col g4">
+              <div class="row g3"><span class="pill success lg">Ativo</span></div>
+              <p class="t14 secondary" style="margin:0">Membros não conseguem entrar enquanto o tenant estiver suspenso; o site continua resolvendo o domínio e mostra a mensagem de indisponibilidade.</p>
+              <div><button class="btn md danger" type="button"><svg class="i i-18"><use href="#i-ban"/></svg>Suspender tenant</button></div>
+            </div>
+            <div class="card p6 col g4">
+              <div class="row g3"><span class="pill danger lg">Suspenso</span></div>
+              <p class="t14 secondary" style="margin:0">Membros não conseguem entrar enquanto o tenant estiver suspenso; o site continua resolvendo o domínio e mostra a mensagem de indisponibilidade.</p>
+              <div><button class="btn md brand" type="button"><svg class="i i-18"><use href="#i-check-circle"/></svg>Reativar tenant</button></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <div class="overlay-demo" style="width:360px;min-height:300px"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="sd-title"><div class="body"><div class="icon danger"><svg class="i i-28"><use href="#i-alert"/></svg></div><p class="h16" id="sd-title">Suspender <span data-tenant-name>TRIA Demo</span>?</p><p class="t14 secondary" style="margin:0">Os membros não conseguirão entrar até a reativação.</p></div><div class="footer"><button type="button">Cancelar</button><button type="button" class="confirm danger">Suspender</button></div></div></div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="accept-invite" class="screen">
+  <header><h2>Aceitar convite</h2><code>/aceitar-convite · host do tenant, marcado antes do login · coluna max-w-sm (384px)</code>
+    <p>Bloco da marca (logo ou nome), título 24/700 "Você foi convidado(a) a administrar {tenant}", sub 14, <code>PasswordField</code> com olho (IconButton 44×44) e medidor de força (três segmentos de 4px), dois consentimentos de 44px, CTA "Aceitar convite" (brand, lg). À direita: a mesma tela no desktop (coluna centrada no fundo <code>bg</code>).</p>
+  </header>
+  <div class="frames">
+    <div class="phone" data-brand-scope>
+      <div class="body col" style="justify-content:center;padding:16px;gap:32px;min-height:100%">
+        <div class="col g4 center" style="align-items:center">
+          <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
+          <h1 class="title">Você foi convidado(a) a administrar <span data-tenant-name>TRIA Demo</span></h1>
+          <p class="t14 secondary" style="margin:0">Crie sua senha para começar.</p>
+        </div>
+        <form class="col g4" onsubmit="return false">
+          <div class="field"><label for="ai-email">Email</label><div class="input with-icon"><svg class="i i-18"><use href="#i-mail"/></svg><input id="ai-email" type="email" value="admin@cliente.com.br" readonly></div></div>
+          <div class="field"><label for="ai-pass">Senha</label><div class="input with-icon"><svg class="i i-18"><use href="#i-lock"/></svg><input id="ai-pass" type="password" value="senha-de-exemplo" style="padding-right:48px"><button class="icon-btn trailing" type="button" aria-label="Mostrar senha"><svg class="i i-20"><use href="#i-eye"/></svg></button></div><div class="strength" aria-hidden="true"><i class="w"></i><i class="o"></i><i class="s"></i></div><span class="help success-text">Forte</span></div>
+          <label class="checkrow"><input type="checkbox" checked> <span>Li e aceito as regras da comunidade <span data-tenant-name>TRIA Demo</span> — <a class="link" href="#accept-invite">ver regras</a></span></label>
+          <label class="checkrow"><input type="checkbox"> <span>Aceito os <a class="link" href="#accept-invite">Termos de Uso</a> e a <a class="link" href="#accept-invite">Política de Privacidade</a> da TRIA</span></label>
+          <span class="t14 danger-text center" role="alert">Aceite as regras e os termos para continuar.</span>
+          <button class="btn lg brand full" type="submit">Aceitar convite</button>
+        </form>
+      </div>
+    </div>
+    <div class="desktop" data-brand-scope style="grid-template-columns:1fr;max-width:720px;min-height:640px">
+      <main style="align-items:center">
+        <div class="col" style="width:100%;max-width:384px;gap:32px">
+          <div class="col g4 center" style="align-items:center">
+            <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
+            <h1 class="title">Você foi convidado(a) a administrar <span data-tenant-name>TRIA Demo</span></h1>
+            <p class="t14 secondary" style="margin:0">Crie sua senha para começar.</p>
+          </div>
+          <form class="col g4" onsubmit="return false">
+            <div class="field"><label for="ai2-pass">Senha</label><div class="input with-icon"><svg class="i i-18"><use href="#i-lock"/></svg><input id="ai2-pass" type="password" placeholder="Mínimo de 8 caracteres" style="padding-right:48px"><button class="icon-btn trailing" type="button" aria-label="Mostrar senha"><svg class="i i-20"><use href="#i-eye"/></svg></button></div><div class="strength" aria-hidden="true"><i></i><i></i><i></i></div></div>
+            <label class="checkrow"><input type="checkbox"> <span>Li e aceito as regras da comunidade <span data-tenant-name>TRIA Demo</span> — <a class="link" href="#accept-invite">ver regras</a></span></label>
+            <label class="checkrow"><input type="checkbox"> <span>Aceito os <a class="link" href="#accept-invite">Termos de Uso</a> e a <a class="link" href="#accept-invite">Política de Privacidade</a> da TRIA</span></label>
+            <button class="btn lg brand full" type="submit"><svg class="i i-18 spin"><use href="#i-loader"/></svg>Entrando…</button>
+          </form>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="expired-invite" class="screen">
+  <header><h2>Convite expirado</h2><code>/convite-expirado · EmptyState (MailX) + Button outline "Voltar para login" · sem cor da marca</code></header>
+  <div class="frames">
+    <div class="phone" data-brand-scope style="height:640px">
+      <div class="body col" style="justify-content:center;min-height:100%;padding:16px">
+        <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
+        <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-mail-x"/></svg></div><h3>Convite expirado</h3><p>Este convite expirou. Peça um novo convite ao administrador da plataforma.</p><div class="action"><a class="btn md outline" href="#accept-invite">Voltar para login</a></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="suspended" class="screen">
+  <header><h2>Comunidade indisponível</h2><code>/comunidade-indisponivel e o login em host suspenso · D-32 · envelope TENANT_SUSPENDED</code>
+    <p>Esquerda: a página dedicada (EmptyState com <code>AlertTriangle</code>). Direita: o <code>/entrar</code> de um host suspenso — bloco da marca, Card com o aviso, formulário oculto.</p>
+  </header>
+  <div class="frames">
+    <div class="phone" data-brand-scope style="height:640px">
+      <div class="body col" style="justify-content:center;min-height:100%;padding:16px">
+        <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
+        <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-alert"/></svg></div><h3>Comunidade indisponível</h3><p>Esta comunidade está temporariamente indisponível.</p><div class="action"><a class="btn md outline" href="#suspended">Voltar para login</a></div></div>
+      </div>
+    </div>
+    <div class="phone" data-brand-scope style="height:640px">
+      <div class="body col" style="justify-content:center;min-height:100%;padding:16px;gap:32px">
+        <div class="col g4 center" style="align-items:center"><div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div><p class="h16 secondary">Entrar</p></div>
+        <div class="card p6 col g3" style="align-items:center;text-align:center"><svg class="i i-28 warning-text"><use href="#i-alert"/></svg><p class="h16">Comunidade indisponível</p><p class="t14 secondary" style="margin:0">Esta comunidade está temporariamente indisponível.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="offline" class="screen">
+  <header><h2>Offline</h2><code>/~offline · pré-cacheado por origem, sem sessão · só tokens neutros · EmptyState (WifiOff)</code></header>
+  <div class="frames">
+    <div class="phone" style="height:640px">
+      <div class="body col" style="justify-content:center;min-height:100%;padding:16px">
+        <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-wifi-off"/></svg></div><h3>Você está offline</h3><p>Verifique sua conexão e tente novamente.</p><div class="action"><button class="btn md outline" type="button">Tentar novamente</button></div></div>
+      </div>
+    </div>
+    <div class="desktop" style="grid-template-columns:1fr;max-width:640px;min-height:480px"><main style="align-items:center"><div style="width:100%;max-width:384px"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-wifi-off"/></svg></div><h3>Você está offline</h3><p>Verifique sua conexão e tente novamente.</p><div class="action"><button class="btn md outline" type="button">Tentar novamente</button></div></div></div></main></div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="install-hint" class="screen">
+  <header><h2>Dica de instalação (iOS)</h2><code>InstallHint · BottomSheet aberto sobre o Início · construído e não montado nesta fase (PWA-02 na Fase 7)</code>
+    <p>Círculo de 56px <code>bg-brand/10</code> com o ícone <code>Share</code> (âncora), título 16/700, corpo 14 com o glifo de compartilhar inline, "Entendi" (brand, largura total) e "Agora não" (ghost). Só aparece no Safari do iOS fora do modo standalone.</p>
+  </header>
+  <div class="frames">
+    <div class="phone" data-brand-scope>
+      <div class="topbar"><div class="row"><div class="brand"><img src="" alt="TRIA Demo" data-logo><span data-tenant-name>TRIA Demo</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
+      <div class="body col g6">
+        <div class="col g4 center" style="align-items:center;margin-top:32px"><div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div><h1 class="title">Bem-vindo(a) à <span data-tenant-name>TRIA Demo</span></h1></div>
+        <div class="card"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-sparkles"/></svg></div><h3>Em breve</h3><p>As novidades da sua comunidade vão aparecer aqui.</p></div></div>
+      </div>
+      <nav class="bottomnav glass-bar" aria-label="Navegação"><a href="#install-hint" aria-label="Início" aria-current="page"><span class="chip"><svg class="i i-23"><use href="#i-home"/></svg></span></a><a href="#install-hint" aria-label="Perfil"><span class="chip"><svg class="i i-23"><use href="#i-user"/></svg></span></a></nav>
+      <div class="sheet-scrim"><div class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="ih-title">
+        <div class="handle"></div>
+        <div class="col g3" style="align-items:center;text-align:center;padding:0 8px 8px">
+          <div class="dialog-icon" style="width:56px;height:56px;border-radius:999px;display:grid;place-items:center;background:color-mix(in srgb, var(--brand-accent) 10%, transparent);color:var(--brand-accent)"><svg class="i i-28"><use href="#i-share"/></svg></div>
+          <p class="title" id="ih-title" style="font-size:16px">Adicione à Tela de Início</p>
+          <p class="t14 secondary" style="margin:0">No Safari, toque em Compartilhar <svg class="i i-16" style="display:inline;vertical-align:-3px"><use href="#i-share"/></svg> e depois em “Adicionar à Tela de Início” para receber notificações.</p>
+          <button class="btn md brand full mt2" type="button">Entendi</button>
+          <button class="btn md ghost full" type="button">Agora não</button>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="platform-shell-mobile" class="screen">
+  <header><h2>Painel no celular</h2><code>/plataforma em 390px · TopBar neutra "TRIA" + cards + BottomNav (Tenants) · mesmos componentes, tabelas viram listas</code></header>
+  <div class="frames">
+    <div class="phone">
+      <div class="topbar"><div class="row"><div class="brand"><span class="wordmark">TRIA</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
+      <div class="body col g3">
+        <div class="page-header" style="margin:0;padding:0"><a class="icon-btn" href="#platform-shell-mobile" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400;flex:1">Tenants</span></div>
+        <div class="row wrap g2"><h1 class="title">TRIA Demo</h1><span class="pill success">Ativo</span></div>
+        <div class="t12 tertiary">tria-demo · <a class="link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br</a></div>
+        <div class="tabs" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
+        <form class="col g2" onsubmit="return false"><div class="input with-icon"><svg class="i i-18"><use href="#i-globe"/></svg><input type="text" placeholder="comunidade.cliente.com.br" aria-label="Domínio"></div><button class="btn md brand full" type="submit">Adicionar domínio</button></form>
+        <div class="card p4 col g3">
+          <div class="col g2"><span class="h16">comunidade.exemplo.com.br</span><div class="row wrap g2"><span class="pill brand">Primário</span><span class="pill success">Verificado</span></div><span class="t12 tertiary">Última verificação 16/09/2026 14:20</span></div>
+          <div class="row wrap g2"><button class="btn sm outline" type="button">Verificar agora</button></div>
+        </div>
+        <div class="card p4 col g3">
+          <div class="col g2"><span class="h16">app.exemplo.com.br</span><div class="row wrap g2"><span class="pill warning">Aguardando DNS</span></div></div>
+          <div class="col g2">
+            <div class="row between g2 t12"><span><span class="bold">CNAME</span> · app</span></div>
+            <div class="row between g2"><span class="t14" style="word-break:break-all">cname.plataforma-exemplo.com</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div>
+            <div class="row between g2 t12"><span><span class="bold">TXT</span> · _tria-verify.app</span></div>
+            <div class="row between g2"><span class="t14" style="word-break:break-all">tria-verify=8f3a1c…d2e9</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div>
+          </div>
+          <span class="dns-note">Crie estes registros no DNS do cliente. A verificação roda a cada 10 minutos por até 7 dias.</span>
+          <div class="row wrap g2"><button class="btn sm outline" type="button">Verificar agora</button><button class="btn sm ghost danger-text" type="button">Remover</button></div>
+        </div>
+      </div>
+      <nav class="bottomnav glass-bar" aria-label="Navegação"><a href="#platform-shell-mobile" aria-label="Tenants" aria-current="page"><span class="chip"><svg class="i i-23"><use href="#i-building"/></svg></span></a><a href="#settings" aria-label="Configurações"><span class="chip"><svg class="i i-23"><use href="#i-settings"/></svg></span></a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================================== -->
+<section id="feedback" class="screen">
+  <header><h2>Toasts, erros e vazios</h2><code>Toast (success / error / info) · Card de erro genérico · Tenant não encontrado</code></header>
+  <div class="frames">
+    <div class="col g3" data-brand-scope>
+      <div class="toast success" role="status"><svg class="i"><use href="#i-check-circle"/></svg>Tenant criado.</div>
+      <div class="toast success" role="status"><svg class="i"><use href="#i-check-circle"/></svg>Alterações salvas.</div>
+      <div class="toast success" role="status"><svg class="i"><use href="#i-check-circle"/></svg>Domínio primário atualizado.</div>
+      <div class="toast info" role="status"><svg class="i"><use href="#i-copy"/></svg>Valor copiado</div>
+      <div class="toast error" role="status"><svg class="i"><use href="#i-alert"/></svg>Falha no envio. Tente novamente.</div>
+      <div class="toast error" role="status"><svg class="i"><use href="#i-alert"/></svg>Arquivo muito grande. O limite é 2 MB.</div>
+    </div>
+    <div class="col g4" style="width:420px;max-width:100%">
+      <div class="card p6 col g3" style="align-items:flex-start"><span class="t14">Algo deu errado. Tente novamente.</span><button class="btn md outline" type="button">Tentar novamente</button></div>
+      <div class="card"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-building"/></svg></div><h3>Tenant não encontrado</h3><p>Verifique o link ou volte para a lista.</p><div class="action"><a class="btn md outline" href="#tenant-list">Voltar para a lista</a></div></div></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const html = document.documentElement;
+  const NEUTRAL = { primary: '#2e6fd0', secondary: '#5b9cf8' };
+
+  /* ---- WCAG 2.x maths (same rules as @tria/contracts/branding: onPrimary is #ffffff or #16233b,
+          whichever reaches the higher ratio; primaryDark lightens primary by 30% towards white) ---- */
+  const hexToRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const rgbToHex = (rgb) => '#' + rgb.map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, '0')).join('');
+  const lum = (hex) => { const [r, g, b] = hexToRgb(hex).map((c) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const la = lum(a), lb = lum(b); return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05); };
+  const mixWhite = (hex, t) => rgbToHex(hexToRgb(hex).map((c) => c + (255 - c) * t));
+  const onColour = (bg) => (ratio('#ffffff', bg) >= ratio('#16233b', bg) ? '#ffffff' : '#16233b');
+  const fmt = (r) => r.toFixed(1).replace('.', ',') + ':1';
+  const pill = (label, ok) => `<span class="pill ${ok ? 'success' : 'warning'}">${ok ? 'AA ' : 'Baixo '}${label}</span>`;
+
+  const state = { ...NEUTRAL };
+
+  function apply() {
+    const primary = state.primary, secondary = state.secondary;
+    const primaryDark = mixWhite(primary, 0.3);
+    const onPrimary = onColour(primary), onPrimaryDark = onColour(primaryDark);
+    const vars = { '--brand-primary': primary, '--brand-secondary': secondary, '--brand-on-primary': onPrimary, '--brand-primary-dark': primaryDark, '--brand-on-primary-dark': onPrimaryDark };
+    // brandStyleVars(): the five fixed keys, set on the tenant-branded scopes only (the panel chrome stays neutral)
+    document.querySelectorAll('[data-brand-scope]').forEach((el) => { for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v); });
+    // pickers / hex fields stay in sync
+    document.querySelectorAll('[data-color-input="primary"], #pick-primary').forEach((i) => { i.value = primary; });
+    document.querySelectorAll('[data-color-input="secondary"], #pick-secondary').forEach((i) => { i.value = secondary; });
+    document.querySelectorAll('[data-hex-input="primary"]').forEach((i) => { i.value = primary.toUpperCase(); });
+    document.querySelectorAll('[data-hex-input="secondary"]').forEach((i) => { i.value = secondary.toUpperCase(); });
+    // contrast readout (R-P2 / D-41): onPrimary vs primary >= 4.5, primary vs light ground >= 3, primaryDark vs dark ground >= 3
+    const r1 = ratio(onPrimary, primary), r1d = ratio(onPrimaryDark, primaryDark);
+    const r2 = ratio(primary, '#f5f7fb'), r3 = ratio(primaryDark, '#0f1118');
+    const readout = `<span>Texto sobre a cor primária</span>${pill(fmt(r1), r1 >= 4.5)}<span>Claro</span>${pill(fmt(r2), r2 >= 3)}<span>Escuro</span>${pill(fmt(r3), r3 >= 3)}`;
+    document.querySelectorAll('[data-contrast-readout]').forEach((el) => { el.innerHTML = readout; });
+    // D-41: warnings never block; the first failing check names its mode
+    const low = r1 < 4.5 ? { mode: 'claro', r: r1 } : r2 < 3 ? { mode: 'claro', r: r2 } : r1d < 4.5 ? { mode: 'escuro', r: r1d } : r3 < 3 ? { mode: 'escuro', r: r3 } : null;
+    document.querySelectorAll('[data-contrast-warning]').forEach((el) => {
+      el.hidden = !low;
+      if (low) el.querySelector('[data-contrast-warning-text]').textContent = `Contraste baixo no modo ${low.mode}: ${fmt(low.r)} (recomendado 4,5:1). O texto sobre a cor primária pode ficar difícil de ler.`;
+    });
+    document.getElementById('brand-readout').textContent = `primary ${primary} · on ${onPrimary} · dark ${primaryDark} · on-dark ${onPrimaryDark}`;
+    renderLogos();
+  }
+
+  /* placeholder square mark generated from the display name's initials (no real asset in the mockup) —
+     the "square-ish logo" case of the spec, so the display name renders next to / below it */
+  function renderLogos() {
+    const name = document.querySelector('[data-tenant-name-input]')?.value.trim() || 'TRIA Demo';
+    document.querySelectorAll('[data-tenant-name]').forEach((el) => { el.textContent = name; });
+    const initials = name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="${state.primary}"/><text x="32" y="41" text-anchor="middle" font-family="Manrope, system-ui, sans-serif" font-size="26" font-weight="800" fill="${onColour(state.primary)}">${initials}</text></svg>`;
+    const src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    document.querySelectorAll('img[data-logo]').forEach((img) => { img.src = src; img.alt = name; });
+  }
+
+  const setBrand = (p, s) => { state.primary = p.toLowerCase(); state.secondary = s.toLowerCase(); apply(); };
+  document.getElementById('pick-primary').addEventListener('input', (e) => setBrand(e.target.value, state.secondary));
+  document.getElementById('pick-secondary').addEventListener('input', (e) => setBrand(state.primary, e.target.value));
+  document.querySelectorAll('.preset').forEach((b) => b.addEventListener('click', () => setBrand(b.dataset.p, b.dataset.s)));
+  document.querySelectorAll('[data-color-input="primary"]').forEach((i) => i.addEventListener('input', (e) => setBrand(e.target.value, state.secondary)));
+  document.querySelectorAll('[data-color-input="secondary"]').forEach((i) => i.addEventListener('input', (e) => setBrand(state.primary, e.target.value)));
+  document.querySelectorAll('[data-hex-input]').forEach((i) => i.addEventListener('change', (e) => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) { if (i.dataset.hexInput === 'primary') setBrand(v, state.secondary); else setBrand(state.primary, v); } else apply(); }));
+  document.querySelector('[data-tenant-name-input]')?.addEventListener('input', renderLogos);
+
+  /* ---- theme: data-theme on <html> (the cookie tria_theme in the app, R-P3); every Switch mirrors it ---- */
+  function setTheme(dark) {
+    html.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.getElementById('theme-toggle').setAttribute('aria-pressed', String(dark));
+    document.getElementById('theme-label').textContent = dark ? 'Tema claro' : 'Tema escuro';
+    document.querySelectorAll('[data-theme-switch]').forEach((s) => s.setAttribute('aria-checked', String(dark)));
+    document.querySelectorAll('[data-theme-icon] use').forEach((u) => u.setAttribute('href', dark ? '#i-moon' : '#i-sun'));
+  }
+  const isDark = () => html.getAttribute('data-theme') === 'dark';
+  document.getElementById('theme-toggle').addEventListener('click', () => setTheme(!isDark()));
+  document.querySelectorAll('[data-theme-switch]').forEach((s) => s.addEventListener('click', () => setTheme(!isDark())));
+  document.querySelectorAll('.switch:not([data-theme-switch])').forEach((s) => s.addEventListener('click', () => s.setAttribute('aria-checked', String(s.getAttribute('aria-checked') !== 'true'))));
+  document.querySelectorAll('.chip[aria-pressed]').forEach((c) => c.addEventListener('click', () => { c.parentElement.querySelectorAll('.chip').forEach((o) => o.setAttribute('aria-pressed', 'false')); c.setAttribute('aria-pressed', 'true'); }));
+  document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => { const use = b.querySelector('use'); use.setAttribute('href', '#i-check'); setTimeout(() => use.setAttribute('href', '#i-copy'), 1500); }));
+
+  if (window.matchMedia('(prefers-color-scheme: dark)').matches) setTheme(true);
+  apply();
+})();
+</script>
+</body>
+</html>
