@@ -10,6 +10,12 @@
 # closed the gap). Export SEED_PASSWORD / SUPER_ADMIN_PASSWORD before running this script to override
 # them; hosted environments get theirs from GitHub environment secrets and GCP Secret Manager and
 # never from this file (see docs/DEPLOY.md).
+#
+# Phase 2 adds the kernel adapter selectors (DOMAIN_PROVIDER, AUTH_ALLOW_LIST, MAIL_TRANSPORT) pinned
+# to their LOCAL implementations, the public web origin parts (PUBLIC_WEB_SCHEME/PORT — the web app is
+# reached on http://<host>:3000 locally, never through a SITE_URL), Mailpit's HTTP API and a
+# local-only Send Email Hook secret. Export SEND_EMAIL_HOOK_SECRET_B64 (32 random bytes, base64) to
+# override the throwaway; hosted environments generate theirs and never reuse this constant.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -58,4 +64,17 @@ TENANT_LAB_HOST=tria-lab.localhost
 SEED_PASSWORD=${SEED_PASSWORD:-Segredo123}
 SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL:-ferramentas@triacompany.com.br}
 SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD:-SuperSegredo123}
+# Public web origin parts (packages/core/server/env.ts publicWebOrigin): local dev serves http on 3000.
+PUBLIC_WEB_SCHEME=http
+PUBLIC_WEB_PORT=3000
+# Kernel adapters pinned to their local implementations (the fail-safe defaults, spelled out).
+DOMAIN_PROVIDER=fake
+AUTH_ALLOW_LIST=local
+MAIL_TRANSPORT=local
+MAIL_DOMAIN=mail.tria.localhost
+MAILPIT_URL=http://127.0.0.1:54324
+# Local-stack-only Send Email Hook secret (Standard Webhooks, \`v1,whsec_<base64>\`); shared with
+# supabase/config.toml through env(SEND_EMAIL_HOOK_SECRETS). Throwaway constant — override by exporting
+# SEND_EMAIL_HOOK_SECRET_B64 before running this script.
+SEND_EMAIL_HOOK_SECRETS=v1,whsec_${SEND_EMAIL_HOOK_SECRET_B64:-dHJpYS1sb2NhbC1zZW5kLWVtYWlsLWhvb2sta2V5MDE=}
 ENV

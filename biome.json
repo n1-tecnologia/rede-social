@@ -152,6 +152,36 @@
       "formatter": {
         "enabled": false
       }
+    },
+    {
+      "includes": [
+        "packages/core/ui/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "../server/**",
+                      "../db/**",
+                      "../../server/**",
+                      "../../db/**",
+                      "@tria/core/server/*",
+                      "@tria/core/db/*",
+                      "@tria/core/db"
+                    ],
+                    "message": "Kernel UI is client-safe: no server or database imports"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }
