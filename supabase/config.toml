@@ -294,6 +294,25 @@ max_frequency = "5s"
 # enabled = true
 # uri = "pg-functions://<database>/<schema>/<hook_name>"
 
+# Send Email Hook (D-37): GoTrue calls the API for EVERY auth e-mail instead of rendering its own
+# templates; the API resolves the tenant, renders the pt-BR template in the tenant's brand
+# (packages/core/server/mail/templates) and hands the message to the mail transport (Mailpit locally,
+# Resend hosted). `host.docker.internal` is how the auth container reaches the API on the host
+# (`pnpm --filter @tria/api dev` on 8787, or the integration suite's in-process listener). The
+# secret is NEVER a literal here: scripts/supabase.sh exports the local throwaway, CI exports its
+# own value at job level, hosted environments keep theirs in Secret Manager; rotation is the
+# two-segment form `v1,whsec_<old>|v1,whsec_<new>` (the route verifies against every segment).
+# Hosted projects override `uri` through `[remotes.<env>.auth.hook.send_email]` pushed by
+# `supabase config push` (docs/deploy/auth-mail.md). Editing this block requires
+# `pnpm supabase stop && pnpm supabase start` (auth container env).
+# When this block is disabled GoTrue falls back to its own SMTP templates — the
+# `[auth.email.template.recovery]` block at the bottom of this file stays configured for that case
+# (D-13, neutral TRIA copy).
+[auth.hook.send_email]
+enabled = true
+uri = "http://host.docker.internal:8787/v1/hooks/auth/send-email"
+secrets = "env(SEND_EMAIL_HOOK_SECRETS)"
+
 # Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
 [auth.sms.twilio]
 enabled = false

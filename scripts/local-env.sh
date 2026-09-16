@@ -74,7 +74,9 @@ MAIL_TRANSPORT=local
 MAIL_DOMAIN=mail.tria.localhost
 MAILPIT_URL=http://127.0.0.1:54324
 # Local-stack-only Send Email Hook secret (Standard Webhooks, \`v1,whsec_<base64>\`); shared with
-# supabase/config.toml through env(SEND_EMAIL_HOOK_SECRETS). Throwaway constant — override by exporting
-# SEND_EMAIL_HOOK_SECRET_B64 before running this script.
-SEND_EMAIL_HOOK_SECRETS=v1,whsec_${SEND_EMAIL_HOOK_SECRET_B64:-dHJpYS1sb2NhbC1zZW5kLWVtYWlsLWhvb2sta2V5MDE=}
+# supabase/config.toml through env(SEND_EMAIL_HOOK_SECRETS). Keep the constant IDENTICAL to
+# scripts/supabase.sh — GoTrue (container env at \`supabase start\`) and the API (\`.env.local\`) must
+# share one secret. An exported SEND_EMAIL_HOOK_SECRETS (CI) wins over both defaults; export
+# SEND_EMAIL_HOOK_SECRET_B64 to override only the base64 part.
+SEND_EMAIL_HOOK_SECRETS=${SEND_EMAIL_HOOK_SECRETS:-v1,whsec_${SEND_EMAIL_HOOK_SECRET_B64:-dHJpYS1sb2NhbC1zZW5kLWVtYWlsLWhvb2sta2V5MDE=}}
 ENV

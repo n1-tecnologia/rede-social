@@ -27,6 +27,11 @@ jobs:
       SEED_PASSWORD: ci-only-Segredo123
       SUPER_ADMIN_PASSWORD: ci-only-SuperSegredo123
       SUPER_ADMIN_EMAIL: ferramentas@triacompany.com.br
+      # Send Email Hook secret, ci-only: `supabase start`/`db reset`/`test db` below run the setup-cli
+      # binary directly (scripts/supabase.sh does not apply), every CLI command validates the
+      # `[auth.hook.send_email]` block, and scripts/local-env.sh writes this exported value into
+      # .env.local so GoTrue and the API share it. Real environments: docs/deploy/auth-mail.md.
+      SEND_EMAIL_HOOK_SECRETS: v1,whsec_Y2ktb25seS1zZW5kLWVtYWlsLWhvb2stc2VjcmV0LTAwMDE=
     steps:
       - uses: actions/checkout@v7
 

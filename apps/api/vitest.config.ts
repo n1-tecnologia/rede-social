@@ -40,6 +40,10 @@ const KEYS = [
   'TENANT_DEMO_HOST',
   'TENANT_LAB_HOST',
   'PLATFORM_HOST',
+  'SEND_EMAIL_HOOK_SECRETS',
+  'MAIL_TRANSPORT',
+  'MAIL_DOMAIN',
+  'MAILPIT_URL',
 ] as const;
 
 /** Placeholders keep the unit suite hermetic; integration tests need the real local values. */
@@ -57,12 +61,21 @@ for (const key of KEYS) {
   if (value) fromProcess[key] = value;
 }
 
+/**
+ * The integration suite needs an API listening on 8787 for GoTrue's Send Email Hook
+ * (tests/integration/global-setup.ts). The unit script (`vitest run tests/unit`) shares this config
+ * and must stay hermetic — no listener, no database — so the setup is attached only when the
+ * integration directory is on the command line.
+ */
+const integrationRun = process.argv.some((arg) => arg.includes('tests/integration'));
+
 export default mergeConfig(
   vitestBase,
   defineConfig({
     test: {
       include: ['tests/**/*.test.ts'],
       env: { ...defaults, ...readEnvFile(), ...fromProcess },
+      globalSetup: integrationRun ? ['tests/integration/global-setup.ts'] : [],
       fileParallelism: false,
       testTimeout: 30_000,
       hookTimeout: 60_000,

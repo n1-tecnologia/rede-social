@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
 import { deriveBrandColors } from '@tria/contracts';
 import { parseHookSecrets } from '@tria/core/server/mail/hook-schema';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -448,4 +449,52 @@ describe('POST /v1/hooks/auth/send-email', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(await mailpitAll(demoMember.email, payload.email_data.token_hash)).toHaveLength(1);
   });
+
+  it.skipIf(!process.env.SEND_EMAIL_HOOK_SECRETS)(
+    '12. GoTrue-originated: resetPasswordForEmail on the local stack travels GoTrue → host.docker.internal:8787 → this route → Mailpit, branded (D-37)',
+    async () => {
+      // A throwaway demo member so the address is unique to this run (GoTrue throttles recovery per user).
+      const member = await createThrowawayUser(`gotrue-${RUN}@mail-test.local`);
+      const [demo] = await adminSql<{ id: string }[]>`
+        select id from public.tenants where slug = 'tria-demo'`;
+      if (!demo) throw new Error('seed tenant tria-demo missing');
+      await adminSql`
+        insert into public.memberships (tenant_id, user_id, role, status)
+        values (${demo.id}::uuid, ${member.id}::uuid, 'member', 'active')`;
+
+      const supabaseUrl = process.env.SUPABASE_URL ?? '';
+      const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY ?? '';
+      const client = createClient(supabaseUrl, publishableKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { error } = await client.auth.resetPasswordForEmail(member.email, {
+        redirectTo: `http://${HOSTS.demo}:3000/auth/confirm?next=/redefinir-senha`,
+      });
+      expect(error).toBeNull();
+
+      const deadline = Date.now() + 15_000;
+      let mail: MailpitMessage | null = null;
+      while (Date.now() < deadline && !mail) {
+        for (const { ID } of await mailpitSearch(member.email)) {
+          const message = await mailpitMessage(ID);
+          if (message.Subject === 'Redefina sua senha — TRIA Demo') {
+            mail = message;
+            break;
+          }
+        }
+        if (!mail) await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      if (!mail) throw new Error('GoTrue-originated recovery mail did not reach Mailpit');
+      for (const fragment of [
+        '/auth/confirm?next=/redefinir-senha',
+        'token_hash=',
+        'type=recovery',
+        '#7c3aed',
+        'seed-logos/tria-demo.svg',
+      ]) {
+        expect(mail.HTML, fragment).toContain(fragment);
+      }
+      expect(mail.From.Name).toBe('TRIA Demo');
+    },
+  );
 });

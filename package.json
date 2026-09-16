@@ -15,12 +15,12 @@
     "boundaries:negative": "bash scripts/check-boundaries.sh",
     "guard:lanes": "bash scripts/guard-local-settings.sh",
     "db:generate": "pnpm --filter @tria/api exec drizzle-kit generate",
-    "db:reset": "supabase db reset && bash scripts/db-local-role.sh",
+    "db:reset": "bash scripts/supabase.sh db reset && bash scripts/db-local-role.sh",
     "db:seed": "tsx scripts/seed.ts",
     "spike:supavisor": "vitest run --config scripts/vitest.config.ts",
     "test:integration": "pnpm --filter @tria/api test:integration",
     "e2e": "pnpm --filter @tria/web e2e",
-    "supabase": "supabase"
+    "supabase": "bash scripts/supabase.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",
