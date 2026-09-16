@@ -112,6 +112,28 @@
   --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
 }
 
+/* ===== Layer 1b — derived brand tokens, re-evaluated on every element =====
+   A custom property that references another one (`--brand-accent: var(--brand-primary)`) is substituted
+   at computed-value time ON THE ELEMENT WHERE IT IS DECLARED and descendants inherit the resolved
+   colour. Declared only on :root, the derivations above would always carry the neutral brand, and a
+   tenant's `--brand-*` set on a nested wrapper (the layouts' [data-brand-root] / <body style>) would
+   never reach `bg-brand`. Re-declaring them on every element makes each element derive from ITS
+   inherited `--brand-*`, so the brand may be set on any ancestor and a nested [data-theme] flips the
+   accent pair for its subtree only. The :root / dark blocks above stay as the documented fallbacks. */
+* {
+  --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+}
+[data-theme="dark"],
+[data-theme="dark"] * {
+  --brand-accent: var(--brand-primary-dark);
+  --brand-on-accent: var(--brand-on-primary-dark);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
+}
+
 /* ===== Layer 2 — Tailwind utilities bound to the runtime variables ===== */
 @theme inline {
   --font-sans: var(--font-manrope), system-ui, sans-serif;
