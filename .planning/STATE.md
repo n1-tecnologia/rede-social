@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-09-16T18:27:55.550Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-09-16T18:48:21.526Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 0dacc17db886404262432e891b7efd3b5ad296b6
+state_head: 34e852f0e6c3246596924b39255f2a38a94dd43c
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 11
+  completed_plans: 12
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 3 of 16
+Plan: 4 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -69,6 +69,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P08 | 78 min | 3 tasks | 18 files |
 | Phase 02 P01 | 95 min | 2 tasks | 22 files |
 | Phase 02 P02 | 185min | 3 tasks | 41 files |
+| Phase 02 P03 | 14 min | 3 tasks | 34 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,11 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-02: @tria/ui brand utilities bound via @theme inline (bg-brand → var(--brand-accent) on the element); --color-* aliases intentionally not emitted as CSS variables
 - [Phase 02]: 02-02: tokens.css is the only hex file; excluded from Biome's CSS formatter (linter on), Tailwind directives enabled repo-wide in biome.json
 - [Phase 02]: 02-02: package-legitimacy checkpoint approved by the user 2026-09-16 for the whole phase (incl. 02-03's sharp/resend/standardwebhooks) — do not re-ask
+- [Phase 02]: 02-03: assertProductionEnv() runs at import in every environment — a vercel/resend/supabase selection without its secrets is invalid anywhere; fake/local defaults never trip it (T-02-10)
+- [Phase 02]: 02-03: tenant_invites is exempted BY NAME from pgTAP 010's at-least-one-policy assertion and pinned at ZERO policies in 040 (platform_admins mirror) — a tenant table is either isolated by a policy or pinned as invisible
+- [Phase 02]: 02-03: request bodies normalise BEFORE validating (adminEmail trim+lowercase → z.email(); host normalizeHost → isRegistrableHost), because Zod 4 runs format checks before overwrite transforms
+- [Phase 02]: 02-03: GET /v1/platform/tenants answers primaryHost + nextCursor:null now (the widened contract is the route's response type); query/cursor handling stays with 02-12
+- [Phase 02]: 02-03: TENANT_SUSPENDED keeps the Phase 1 /auth/blocked sign-out path on the web until 02-08 ships /auth/suspended → /comunidade-indisponivel
 
 ### Pending Todos
 
@@ -150,6 +156,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-16T18:27:55.519Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-09-16T18:48:21.494Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
