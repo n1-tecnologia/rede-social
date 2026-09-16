@@ -1,3 +1,5 @@
+// The jsonb shape is owned by the contract (D-25 fixed keys); `$type` only — no SQL change.
+import type { TenantBranding } from '@tria/contracts';
 import { sql } from 'drizzle-orm';
 import {
   check,
@@ -10,12 +12,6 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { authenticatedRole } from 'drizzle-orm/supabase';
-
-export type TenantBranding = {
-  logoUrl?: string | null;
-  faviconUrl?: string | null;
-  colors?: Record<string, string>;
-};
 
 export const tenants = pgTable(
   'tenants',

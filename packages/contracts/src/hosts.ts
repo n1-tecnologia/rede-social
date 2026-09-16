@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hostBrandingSchema } from './branding';
 
 /** Header the web BFF forwards to the API with the browser-facing host, already normalised (D-23). */
 export const TENANT_HOST_HEADER = 'x-tenant-host';
@@ -81,11 +82,26 @@ export function createBoundedTtlCache<V>(max: number): BoundedTtlCache<V> {
   };
 }
 
-/** Body of `GET /v1/public/tenants/by-host` — exactly these two keys, nothing else (D-20). */
+/**
+ * Body of `GET /v1/public/tenants/by-host` — brand and host facts only, nothing beyond (D-20, T-02-04):
+ * no plan, timezone, ids or member counts ever enter this unauthenticated answer.
+ *
+ * - `status` (D-32): a suspended tenant's host STILL resolves so the "indisponível" screen is branded.
+ * - `isPrimary` / `primaryHost` (D-35): a tenant may own several verified hosts but exactly one primary;
+ *   `proxy.ts` 308s the aliases to `primaryHost`.
+ * - `branding` (D-25): the resolved public brand — colors with derivations, logo, favicon, icon set.
+ *
+ * Only VERIFIED hosts answer 200 (D-36); everything else is 404 `TENANT_NOT_FOUND`.
+ */
 export const hostTenantSchema = z
   .object({
     slug: z.string(),
     displayName: z.string(),
+    status: z.enum(['active', 'suspended']),
+    isPrimary: z.boolean(),
+    primaryHost: z.string(),
+    branding: hostBrandingSchema,
   })
   .strict();
 export type HostTenant = z.infer<typeof hostTenantSchema>;
+export type TenantStatus = HostTenant['status'];

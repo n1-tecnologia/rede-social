@@ -1,5 +1,6 @@
 import {
   createBoundedTtlCache,
+  type HostTenant as HostTenantFacts,
   hostTenantSchema,
   isRegistrableHost,
   normalizeHost,
@@ -7,16 +8,32 @@ import {
 import { headers } from 'next/headers';
 import { env } from '@/lib/env';
 
+export type HostMode = 'tenant' | 'platform' | 'generic';
+
 /**
  * How the browser-facing host classifies the request (D-20/D-21):
- * - `tenant`   — the host is registered in `tenant_domains`; the public shell shows that tenant.
+ * - `tenant`   — the host is a VERIFIED `tenant_domains` row (D-36); the public shell shows that tenant.
  * - `platform` — the host equals `PLATFORM_HOST`; TRIA's `super_admin` entry, no member sign-up.
  * - `generic`  — localhost, `*.vercel.app`, any unregistered host; the slug/cookie fallback applies.
  *
  * The host only selects the PUBLIC SHELL. The tenant of record is always the membership: the API
  * re-resolves `x-tenant-host` from `tenant_domains` solely to REJECT a mismatched session (D-23).
+ *
+ * The `tenant` variant carries the WHOLE by-host answer (`status`, `isPrimary`, `primaryHost`,
+ * `branding` — D-25/D-32/D-35) as resolved by `resolveHostTenant`. Pages that only have the proxy
+ * headers get the narrower `HostShell` from `getHostTenant()`.
  */
 export type HostTenant =
+  | ({ mode: 'tenant'; host: string } & HostTenantFacts)
+  | { mode: 'platform'; host: string }
+  | { mode: 'generic'; host: string };
+
+/**
+ * What the four `x-tenant-*` headers can carry (they are size-limited and never widened): the mode,
+ * the host and — on a tenant host — slug and display name. The brand comes from the cached lookup
+ * (`getHostBrand()`), never from a header.
+ */
+export type HostShell =
   | { mode: 'tenant'; host: string; slug: string; displayName: string }
   | { mode: 'platform'; host: string }
   | { mode: 'generic'; host: string };
@@ -26,7 +43,10 @@ export const TENANT_HOST_REQUEST_HEADER = 'x-tenant-host';
 export const TENANT_SLUG_HEADER = 'x-tenant-slug';
 export const TENANT_NAME_HEADER = 'x-tenant-name';
 
-const TTL_HIT_MS = 300_000; // registered host
+// 60 s (was 300 s): on Vercel proxy.ts and the layouts run in different functions, so there is no
+// cross-instance invalidation — this TTL IS the cache bust for a new logo or color (RESEARCH Pattern 1:
+// ≤ 60 s web + 60 s API before the public pages show a brand change).
+const TTL_HIT_MS = 60_000; // registered host
 const TTL_MISS_MS = 60_000; // 404 TENANT_NOT_FOUND
 const TTL_ERROR_MS = 10_000; // network error / 5xx (fail-open to generic, logged)
 
@@ -42,7 +62,7 @@ function isGenericFastPath(host: string): boolean {
 }
 
 /**
- * proxy.ts only. Classifies the raw `Host` header through the cached public lookup
+ * proxy.ts and `getHostBrand()`. Classifies the raw `Host` header through the cached public lookup
  * `GET /v1/public/tenants/by-host` (D-20). Never throws: a lookup failure yields `generic`.
  */
 export async function resolveHostTenant(rawHost: string | null | undefined): Promise<HostTenant> {
@@ -91,7 +111,7 @@ export async function resolveHostTenant(rawHost: string | null | undefined): Pro
  * Pages and server actions: rebuilds the classification from the request headers proxy.ts wrote
  * (it overwrites them on every request, so a browser can never claim a mode). Never fetches.
  */
-export async function getHostTenant(): Promise<HostTenant> {
+export async function getHostTenant(): Promise<HostShell> {
   const h = await headers();
   const host = normalizeHost(h.get(TENANT_HOST_REQUEST_HEADER)) ?? 'localhost';
   const mode = h.get(TENANT_MODE_HEADER);
@@ -105,7 +125,7 @@ export async function getHostTenant(): Promise<HostTenant> {
 }
 
 /** Where "Criar nova conta" points (D-22 on tenant hosts, D-01/D-06 fallback on generic hosts, D-21). */
-export function signupPath(t: HostTenant, slug: string): string {
+export function signupPath(t: Pick<HostShell, 'mode'>, slug: string): string {
   switch (t.mode) {
     case 'tenant':
       return '/cadastro';

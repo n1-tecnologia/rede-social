@@ -1,5 +1,5 @@
 import { createRoute } from '@hono/zod-openapi';
-import { type Bootstrap, bootstrapSchema, TENANT_ROLES } from '@tria/contracts';
+import { type Bootstrap, bootstrapSchema, resolveBranding, TENANT_ROLES } from '@tria/contracts';
 import { memberships, tenants, users } from '@tria/core/db/schema';
 import { withTenantTx } from '@tria/core/db/tenant-tx';
 import { requireAuth } from '@tria/core/server/auth/require-auth';
@@ -77,11 +77,8 @@ export const meRoutes = me.openapi(
         id: tenant.id,
         slug: tenant.slug,
         displayName: tenant.displayName,
-        branding: {
-          logoUrl: tenant.branding.logoUrl ?? null,
-          faviconUrl: tenant.branding.faviconUrl ?? null,
-          colors: tenant.branding.colors ?? {},
-        },
+        // D-25: the whole jsonb, resolved — every color key present, `{}` becomes the neutral brand.
+        branding: resolveBranding(tenant.branding),
       },
       // Enabled keys from `tenant_modules`, decorated by the registry and sorted by nav order.
       modules: enabledModulesForBootstrap(flags.keys, flags.settings),

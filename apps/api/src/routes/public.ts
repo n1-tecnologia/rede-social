@@ -6,6 +6,7 @@ import {
   publicTenantSchema,
   signupBodySchema,
   signupResponseSchema,
+  toHostBranding,
 } from '@tria/contracts';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { getPublicTenant } from '@tria/core/server/tenancy/public-tenant';
@@ -37,11 +38,13 @@ export const publicRoutes = createOpenApiApp()
       },
       responses: {
         200: {
-          description: 'Tenant served on this host (D-20): slug and display name only',
+          description:
+            'Tenant served on this VERIFIED host (D-20/D-36): slug, display name, status (a suspended tenant still answers, D-32), primary-host facts (D-35) and the public brand (D-25) — nothing else',
           content: { 'application/json': { schema: hostTenantSchema } },
         },
         404: {
-          description: 'No active tenant registered for this host',
+          description:
+            'No VERIFIED tenant host matches (unregistered, or attached but not verified)',
           content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
         },
       },
@@ -52,7 +55,18 @@ export const publicRoutes = createOpenApiApp()
       if (resolved.kind !== 'tenant') throw new ApiError(404, 'TENANT_NOT_FOUND');
       // The web BFF holds its own cache; nothing in between may store this answer.
       c.header('Cache-Control', 'no-store');
-      return c.json({ slug: resolved.slug, displayName: resolved.displayName }, 200);
+      return c.json(
+        {
+          slug: resolved.slug,
+          displayName: resolved.displayName,
+          status: resolved.status,
+          isPrimary: resolved.isPrimary,
+          primaryHost: resolved.primaryHost,
+          // Public subset only: `iconUrl`/`iconVersion` are panel facts (T-02-04).
+          branding: toHostBranding(resolved.branding),
+        },
+        200,
+      );
     },
   )
   .openapi(

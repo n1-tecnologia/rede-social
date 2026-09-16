@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { tenantBrandingSchema } from './branding';
 import { TENANT_ROLES, TOGGLEABLE_MODULES } from './modules';
 
 /** `GET /v1/me/bootstrap` (ARCHITECTURE §Pattern 3). `modules`/`permissions` are filled by plan 01-06. */
@@ -22,11 +23,8 @@ export const bootstrapSchema = z.object({
     id: z.uuid(),
     slug: z.string(),
     displayName: z.string(),
-    branding: z.object({
-      logoUrl: z.string().nullable(),
-      faviconUrl: z.string().nullable(),
-      colors: z.record(z.string(), z.string()),
-    }),
+    // D-25 structured brand; the API answers it RESOLVED (`resolveBranding`), so every key is present.
+    branding: tenantBrandingSchema,
   }),
   modules: z.array(
     z.object({

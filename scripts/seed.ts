@@ -16,9 +16,8 @@ import type { ModuleKey } from '@tria/contracts';
 const envFile = resolve(process.cwd(), 'apps/api/.env.local');
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
-const { normalizeHost, REAL_TENANT_DEFAULT_MODULES, TOGGLEABLE_MODULES } = await import(
-  '@tria/contracts'
-);
+const { deriveBrandColors, normalizeHost, REAL_TENANT_DEFAULT_MODULES, TOGGLEABLE_MODULES } =
+  await import('@tria/contracts');
 const { and, eq, ne } = await import('drizzle-orm');
 const { withAdminTx } = await import('@tria/core/db/admin-tx');
 const { memberships, platformAdmins, tenantDomains, tenantModules, tenants } = await import(
@@ -67,6 +66,10 @@ type SeedTenant = {
   host: string;
   /** Exactly the keys enabled for this tenant; every other key is written with `enabled = false`. */
   modules: readonly ModuleKey[];
+  /** D-25 source colors; the derivations are computed by `deriveBrandColors` at seed time. */
+  colors: { primary: string; secondary: string };
+  /** Root-relative wordmark served by apps/web (`public/seed-logos`); uploads are absolute URLs. */
+  logoUrl: string;
 };
 
 const SEED_TENANTS: SeedTenant[] = [
@@ -79,6 +82,9 @@ const SEED_TENANTS: SeedTenant[] = [
     // D-17 all six + D-19: `example` (the throwaway module) is enabled HERE ONLY — never on a real
     // tenant, and never through REAL_TENANT_DEFAULT_MODULES, which must not contain it.
     modules: [...REAL_TENANT_DEFAULT_MODULES, 'example'],
+    // Far from the neutral TRIA blue (#2e6fd0) and from tria-lab, so the brand smoke tells them apart.
+    colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+    logoUrl: '/seed-logos/tria-demo.svg',
   },
   {
     slug: 'tria-lab',
@@ -87,6 +93,8 @@ const SEED_TENANTS: SeedTenant[] = [
     host: LAB_HOST,
     // D-17: only feed + events, so the isolation suite exercises the disabled-module 404 from Phase 1.
     modules: ['feed', 'events'],
+    colors: { primary: '#0f766e', secondary: '#14b8a6' },
+    logoUrl: '/seed-logos/tria-lab.svg',
   },
 ];
 
@@ -110,6 +118,15 @@ async function ensureUser(email: string, name: string, password: string): Promis
 }
 
 for (const t of SEED_TENANTS) {
+  // D-25/D-28: the two source colors plus their persisted derivations; no icon set yet (02-11 derives it).
+  const branding = {
+    logoUrl: t.logoUrl,
+    faviconUrl: null,
+    iconUrl: null,
+    iconUrls: null,
+    iconVersion: 0,
+    colors: deriveBrandColors(t.colors),
+  };
   const tenantId = await withAdminTx(async (tx) => {
     const [tenant] = await tx
       .insert(tenants)
@@ -118,10 +135,11 @@ for (const t of SEED_TENANTS) {
         displayName: t.displayName,
         rulesText: t.rulesText,
         rulesVersion: 1,
+        branding,
       })
       .onConflictDoUpdate({
         target: tenants.slug,
-        set: { displayName: t.displayName, rulesText: t.rulesText },
+        set: { displayName: t.displayName, rulesText: t.rulesText, branding },
       })
       .returning({ id: tenants.id });
     if (!tenant) throw new Error(`could not upsert tenant ${t.slug}`);

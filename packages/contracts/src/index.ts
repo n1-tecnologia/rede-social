@@ -3,6 +3,7 @@ export const CONTRACTS_VERSION = 1;
 
 export * from './auth';
 export * from './bootstrap';
+export * from './branding';
 export * from './errors';
 export * from './events';
 export * from './hosts';
