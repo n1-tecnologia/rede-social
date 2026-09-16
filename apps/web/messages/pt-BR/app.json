@@ -1,13 +1,30 @@
 {
   "app": {
     "logout": "Sair",
-    "home": "Início",
+    "nav": {
+      "home": "Início",
+      "profile": "Perfil",
+      "mainNav": "Navegação principal",
+      "notifications": "Notificações",
+      "support": "Suporte",
+      "theme": "Tema",
+      "settings": "Configurações",
+      "openProfile": "Meu perfil"
+    },
+    "home": {
+      "welcome": "Bem-vindo(a) à {tenant}",
+      "soonTitle": "Em breve",
+      "soonBody": "As novidades da sua comunidade vão aparecer aqui."
+    },
+    "error": {
+      "title": "Algo deu errado.",
+      "body": "Tente novamente.",
+      "retry": "Tentar novamente"
+    },
     "role": {
       "admin_tenant": "Administrador",
       "support_tenant": "Suporte",
       "member": "Membro"
-    },
-    "modules": "Módulos ativos",
-    "none": "Nenhum módulo ativo"
+    }
   }
 }

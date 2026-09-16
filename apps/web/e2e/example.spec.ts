@@ -48,7 +48,7 @@ test.describe('MOD-01/ROLE-06 — the example module on /inicio', () => {
 
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
 
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('TRIA Lab');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Lab');
     await expect(page.locator('#exemplo')).toHaveCount(0);
   });
 });

@@ -287,6 +287,9 @@ importers:
       '@tria/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@tria/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@tria/module-example':
         specifier: workspace:*
         version: link:../../packages/modules/example

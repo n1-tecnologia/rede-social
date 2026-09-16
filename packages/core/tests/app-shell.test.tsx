@@ -13,7 +13,10 @@ afterEach(() => {
 
 const labels: NavLabels = { home: 'Início', profile: 'Perfil', module: () => null };
 const demoModules: NavModule[] = [
-  { key: 'example', nav: { label: 'Exemplo', icon: 'sparkles', href: '/inicio#exemplo', order: 90 } },
+  {
+    key: 'example',
+    nav: { label: 'Exemplo', icon: 'sparkles', href: '/inicio#exemplo', order: 90 },
+  },
 ];
 const noop = async () => {};
 

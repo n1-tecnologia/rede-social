@@ -88,7 +88,10 @@ describe('active state (longest match, ties to the first tab)', () => {
     const tabs = buildNav(
       [
         ...modules,
-        { key: 'example', nav: { order: 90, href: '/inicio#exemplo', icon: 'sparkles', label: 'Exemplo' } },
+        {
+          key: 'example',
+          nav: { order: 90, href: '/inicio#exemplo', icon: 'sparkles', label: 'Exemplo' },
+        },
       ],
       labels,
     ).tabs;

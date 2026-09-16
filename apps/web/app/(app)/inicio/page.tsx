@@ -1,29 +1,21 @@
-import { exampleItemsSchema } from '@tria/module-example/contracts';
-import { ExampleWidget } from '@tria/module-example/ui';
+import { resolveBranding } from '@tria/contracts';
+import { HomeSlots, TenantLogo } from '@tria/core/ui';
+import { EmptyState } from '@tria/ui';
+import { Sparkles } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
-import { apiFetch } from '@/lib/api';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { requirePlatformTenants } from '@/lib/platform';
+import { homeSlotsFor } from '@/lib/registry';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
-import { createExampleItem } from './example-actions';
 
 /**
- * The module's data, fetched only when the tenant HAS the module (D-19). An enabled key in
- * `bootstrap.modules` is the single source of truth here: the page never hardcodes "example
- * exists", so a tenant without the flag renders nothing and makes no request.
- */
-async function getExampleItems() {
-  const res = await apiFetch('/v1/example/items');
-  if (!res.ok) return [];
-  return exampleItemsSchema.parse(await res.json()).items;
-}
-
-/**
- * `/inicio` placeholder (D-07): tenant name, who you are, your role and the enabled modules from
- * `/v1/me/bootstrap` (deduped with the layout by React `cache`). Phase 2 replaces it with `/feed`
- * inside the branded shell; 01-06 fills `modules`; 01-07 mounts the example widget here.
- * On the platform host it renders the D-21 placeholder (01-06 replaces the body with the tenant list).
+ * `/inicio` — the kernel home (D-42, amends D-07): the branded welcome (logo as-is + "Bem-vindo(a) à
+ * {tenant}") and the home slots the tenant's ENABLED modules registered, or the "Em breve" card when
+ * there is none. Server-rendered from the bootstrap (deduped with the layout by React `cache`), so
+ * there is no client loading state for the brand or the widgets.
+ *
+ * On the platform host it renders the D-21 landing (02-12 owns the panel at `/plataforma`).
  */
 export default async function InicioPage() {
   const [hostTenant, t, tp] = await Promise.all([
@@ -41,14 +33,16 @@ export default async function InicioPage() {
     ]);
     const email = typeof data?.claims.email === 'string' ? data.claims.email : null;
     return (
-      <>
-        <h1>{tp('title')}</h1>
-        <p>{tp('placeholder')}</p>
-        {email ? <p>{email}</p> : null}
+      <div className="flex flex-col gap-4 px-4 md:px-0">
+        <h1 className="text-2xl font-bold tracking-[-0.02em] text-text">{tp('title')}</h1>
+        <p className="text-sm text-text-secondary">{tp('placeholder')}</p>
+        {email ? <p className="text-sm text-text-secondary">{email}</p> : null}
 
-        <section aria-labelledby="tenants-heading">
-          <h2 id="tenants-heading">{tp('tenants')}</h2>
-          <ul>
+        <section aria-labelledby="tenants-heading" className="flex flex-col gap-2">
+          <h2 id="tenants-heading" className="text-base font-bold text-text">
+            {tp('tenants')}
+          </h2>
+          <ul className="flex flex-col gap-1 text-sm text-text">
             {platform.tenants.map((tenant) => (
               <li key={tenant.id}>
                 {tenant.slug} — {tenant.displayName} (
@@ -57,55 +51,40 @@ export default async function InicioPage() {
             ))}
           </ul>
         </section>
-      </>
+      </div>
     );
   }
 
   const bootstrap = await requireBootstrap();
-  const { user, membership, tenant, modules, permissions } = bootstrap;
-
-  // 01-07: the throwaway reference module's widget (D-19). Phase 4 removes these three lines with
-  // the package. `canCreate` comes from the bootstrap permissions, which already account for the
-  // role AND the flag — the API re-checks it on every write regardless.
-  const hasExample = modules.some((m) => m.key === 'example');
-  const exampleItems = hasExample ? await getExampleItems() : [];
-  const te = await getTranslations('example');
+  const { tenant } = bootstrap;
+  const branding = resolveBranding(tenant.branding);
+  const slots = await homeSlotsFor(bootstrap);
 
   return (
-    <>
-      <h1>{tenant.displayName}</h1>
-      <p>
-        {user.name} — {user.email}
-      </p>
-      <p>{t(`role.${membership.role}`)}</p>
-
-      <section aria-labelledby="modules-heading">
-        <h2 id="modules-heading">{t('modules')}</h2>
-        {modules.length === 0 ? (
-          <p>{t('none')}</p>
-        ) : (
-          <ul>
-            {modules.map((m) => (
-              <li key={m.key}>{m.nav?.label ?? m.key}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {hasExample ? (
-        <ExampleWidget
-          items={exampleItems}
-          canCreate={permissions.includes('example.create')}
-          createAction={createExampleItem}
-          labels={{
-            title: te('title'),
-            empty: te('empty'),
-            add: te('add'),
-            placeholder: te('placeholder'),
-            processed: te('processed'),
-          }}
+    <div className="flex flex-col gap-6 px-4 md:px-0">
+      <div className="flex flex-col items-center gap-4">
+        <TenantLogo
+          logoUrl={branding.logoUrl}
+          displayName={tenant.displayName}
+          size="home"
+          className="mx-auto mt-8"
         />
-      ) : null}
-    </>
+        <h1 className="text-center text-2xl font-bold tracking-[-0.02em] text-text">
+          {t('home.welcome', { tenant: tenant.displayName })}
+        </h1>
+      </div>
+
+      <HomeSlots
+        slots={slots}
+        empty={
+          <EmptyState
+            variant="card"
+            icon={Sparkles}
+            title={t('home.soonTitle')}
+            body={t('home.soonBody')}
+          />
+        }
+      />
+    </div>
   );
 }

@@ -15,6 +15,8 @@ const log = moduleLogger('module-example');
 export const exampleModule = defineModule({
   key: 'example',
   nav: { label: 'Exemplo', icon: 'sparkles', href: '/inicio#exemplo', order: 90 },
+  // D-42: one home slot on /inicio; `apps/web/lib/registry.tsx` maps `example` → home[0] to the widget.
+  home: [{ order: 90 }],
   routes: () => import('./server/routes').then((m) => m.exampleRoutes),
   jobs: [exampleProcessJob],
   events: [

@@ -19,6 +19,7 @@
     "@t3-oss/env-nextjs": "0.13.11",
     "@tailwindcss/postcss": "4.3.3",
     "@tria/contracts": "workspace:*",
+    "@tria/core": "workspace:*",
     "@tria/module-example": "workspace:*",
     "@tria/ui": "workspace:*",
     "clsx": "2.1.1",

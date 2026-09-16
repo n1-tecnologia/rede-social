@@ -4,6 +4,8 @@
  * kernel's server or database code (enforced by the `packages/core/ui/**` Biome override).
  */
 export { AppShell, type AppShellProps } from './AppShell';
+export { BottomNav, type BottomNavProps } from './BottomNav';
+export { DesktopRail, type DesktopRailProps } from './DesktopRail';
 export { type HomeSlot, HomeSlots, type HomeSlotsProps } from './HomeSlots';
 export {
   activeTabKey,
@@ -16,4 +18,6 @@ export {
   type NavModule,
   type ShellNav,
 } from './nav';
+export { ScrollRoot, type ScrollRootProps } from './ScrollRoot';
 export { TenantLogo, type TenantLogoProps, type TenantLogoSize } from './TenantLogo';
+export { TopBar, type TopBarProps } from './TopBar';

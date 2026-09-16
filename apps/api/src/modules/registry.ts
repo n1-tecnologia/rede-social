@@ -50,10 +50,13 @@ export function enabledModulesForBootstrap(
 ): Bootstrap['modules'] {
   return [...enabled]
     .map((key) => {
-      const nav = MODULE_REGISTRY[key]?.nav;
+      const manifest = MODULE_REGISTRY[key];
+      const nav = manifest?.nav;
       return {
         key,
         ...(nav ? { nav } : {}),
+        // D-42: home-slot declarations ride along so the web composition point can place the widgets.
+        ...(manifest?.home ? { home: manifest.home } : {}),
         settings: settings.get(key) ?? {},
       };
     })

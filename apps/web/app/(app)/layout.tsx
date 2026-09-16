@@ -1,75 +1,101 @@
 import { brandStyleVars, resolveBranding } from '@tria/contracts';
+import { AppShell, buildNav, type ShellNav } from '@tria/core/ui';
+import type { Viewport } from 'next';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
-import { requireBootstrap } from '@/lib/bootstrap';
+import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
 import { requirePlatformTenants } from '@/lib/platform';
+import { moduleLabelResolver } from '@/lib/registry';
 import { getHostTenant } from '@/lib/tenant-host';
 import { logout } from './actions';
 
-function TopBar({
-  label,
-  logoutLabel,
-  branded = false,
-}: {
-  label: string;
-  logoutLabel: string;
-  /** Tenant shell: the label takes the tenant's primary color (TENANT-02). */
-  branded?: boolean;
-}) {
-  return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0.75rem 1rem',
-        borderBottom: '1px solid var(--theme-border)',
-      }}
-    >
-      <strong style={branded ? { color: 'var(--brand-primary)' } : undefined}>{label}</strong>
-      <form action={logout}>
-        <button type="submit">{logoutLabel}</button>
-      </form>
-    </header>
-  );
+/**
+ * `theme-color` = the tenant's primary on tenant hosts (UI-SPEC §PWA); the client updates the meta on
+ * the theme toggle. The bootstrap is the React-cached call the layout makes anyway; when it refuses,
+ * the layout performs the redirect — here the colour is simply omitted.
+ */
+export async function generateViewport(): Promise<Viewport> {
+  const base: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover' };
+  const host = await getHostTenant();
+  if (host.mode !== 'tenant') return base;
+  try {
+    const { tenant } = await getBootstrap();
+    return { ...base, themeColor: resolveBranding(tenant.branding).colors.primary };
+  } catch {
+    return base;
+  }
 }
 
 /**
- * Authenticated shell. proxy.ts already required a verified session; this layout resolves the tenant
- * of record from `GET /v1/me/bootstrap` (never from the host) and renders "Sair" on every page (D-08).
- * On the platform host there is no membership to bootstrap (D-21; 01-06 authorises that branch via
- * `GET /v1/platform/tenants`).
+ * Authenticated shell (UI-03, D-39). proxy.ts already required a verified session; this layout
+ * resolves the tenant of record from `GET /v1/me/bootstrap` (never from the host) and renders the
+ * responsive `AppShell` around every (app) page. On the platform host there is no membership to
+ * bootstrap (D-21; authorised by `GET /v1/platform/tenants`), so the shell is neutral and its single
+ * tab points at the platform panel (`/plataforma`, 02-12) — the landing stays `/inicio`, no redirect.
  *
- * TENANT-02: the tenant branch sets the `--brand-*` variables on its wrapper (`[data-brand-root]`) from
- * the bootstrap's `tenant.branding` — per request, never cached by path (Pitfall 1) — so the first
- * server-rendered HTML already carries the member's own brand and never another tenant's.
+ * TENANT-02 / MOD-04: brand (`--brand-*` on `[data-brand-root]`) and navigation (`buildNav` over the
+ * ENABLED module entries) come from the bootstrap alone, per request, never cached by path (Pitfall 1),
+ * so the first server-rendered HTML already carries the member's own brand and tabs.
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  const [hostTenant, t, tp] = await Promise.all([
+  const [hostTenant, t, tp, tRoot] = await Promise.all([
     getHostTenant(),
     getTranslations('app'),
     getTranslations('platform'),
+    getTranslations(),
   ]);
+  const labels = {
+    mainNav: t('nav.mainNav'),
+    profile: t('nav.openProfile'),
+    settings: t('nav.settings'),
+    logout: t('logout'),
+    theme: t('nav.theme'),
+  };
 
   if (hostTenant.mode === 'platform') {
     // D-21/D-23: authorised by the API, never by claims; refusals redirect (see requirePlatformTenants).
     await requirePlatformTenants();
+    const nav: ShellNav = {
+      tabs: [{ key: 'tenants', href: '/plataforma', icon: 'building-2', label: tp('tenants') }],
+      topbar: [],
+    };
     return (
-      <>
-        <TopBar label={tp('title')} logoutLabel={t('logout')} />
-        <main style={{ padding: '1rem' }}>{children}</main>
-      </>
+      <AppShell
+        brand={{ displayName: tp('title'), logoUrl: null }}
+        nav={nav}
+        counters={{ unreadNotifications: 0, unreadConversations: 0 }}
+        avatar={{ src: null, alt: '' }}
+        labels={labels}
+        settingsHref="/configuracoes"
+        logoutAction={logout}
+      >
+        {children}
+      </AppShell>
     );
   }
 
   // 401/403 refusals (blocked, host mismatch, no membership) redirect — see requireBootstrap.
-  const { tenant } = await requireBootstrap();
+  const bootstrap = await requireBootstrap();
+  const { tenant, membership } = bootstrap;
   const branding = resolveBranding(tenant.branding);
+  const nav = buildNav(bootstrap.modules, {
+    home: t('nav.home'),
+    profile: t('nav.profile'),
+    module: moduleLabelResolver(tRoot),
+  });
 
   return (
-    <div style={brandStyleVars(branding)} data-brand-root>
-      <TopBar label={tenant.displayName} logoutLabel={t('logout')} branded />
-      <main style={{ padding: '1rem' }}>{children}</main>
-    </div>
+    <AppShell
+      brand={{ displayName: tenant.displayName, logoUrl: branding.logoUrl }}
+      nav={nav}
+      counters={bootstrap.counters}
+      avatar={{ src: membership.profile.avatarUrl, alt: membership.profile.displayName }}
+      labels={labels}
+      settingsHref="/configuracoes"
+      logoutAction={logout}
+      style={brandStyleVars(branding)}
+    >
+      {children}
+    </AppShell>
   );
 }
