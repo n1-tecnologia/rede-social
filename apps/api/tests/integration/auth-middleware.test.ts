@@ -153,18 +153,38 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
     expect(JSON.stringify(body)).not.toContain('TRIA');
   });
 
-  it('c. a member of a SUSPENDED tenant gets MEMBERSHIP_BLOCKED too', async () => {
+  it('c. a member of a SUSPENDED tenant gets TENANT_SUSPENDED (D-32), distinct from a blocked member', async () => {
     expect((await bootstrap(suspendedToken)).status).toBe(200);
 
     await adminSql`update public.tenants set status = 'suspended' where slug = ${SUSPENDED_SLUG}`;
     const res = await bootstrap(suspendedToken);
     expect(res.status).toBe(403);
     const body = (await res.json()) as Envelope;
-    expect(body.error.code).toBe('MEMBERSHIP_BLOCKED');
+    expect(body.error.code).toBe('TENANT_SUSPENDED');
+    expect(body.error.message).toBe('Esta comunidade está temporariamente indisponível.');
     expect(body.error.details?.tenantName).toBe('Comunidade Suspensa');
 
     await adminSql`update public.tenants set status = 'active' where slug = ${SUSPENDED_SLUG}`;
     expect((await bootstrap(suspendedToken)).status).toBe(200);
+  });
+
+  it('c1. a BLOCKED member of a SUSPENDED tenant gets TENANT_SUSPENDED (order: tenant before member)', async () => {
+    await adminSql`update public.tenants set status = 'suspended' where slug = ${SUSPENDED_SLUG}`;
+    await setStatus(SUSPENDED_MEMBER, 'blocked');
+    const res = await bootstrap(suspendedToken);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as Envelope).error.code).toBe('TENANT_SUSPENDED');
+
+    await setStatus(SUSPENDED_MEMBER, 'active');
+    await adminSql`update public.tenants set status = 'active' where slug = ${SUSPENDED_SLUG}`;
+    expect((await bootstrap(suspendedToken)).status).toBe(200);
+  });
+
+  it('c3. an INVITED membership on an active tenant still passes requireAuth (D-29 accept-invite runs in the lane)', async () => {
+    await setStatus(MEMBER, 'invited');
+    const res = await bootstrap(memberToken);
+    expect(res.status).toBe(200);
+    await setStatus(MEMBER, 'active');
   });
 
   it('c2. WR-08: blocked_at set with status still active -> MEMBERSHIP_BLOCKED on the next request', async () => {
