@@ -174,7 +174,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(page1.nextCursor).toBe(page1.rows[0]?.slug);
     const page2 = await listPlatformTenants({ limit: 1, cursor: page1.nextCursor ?? undefined });
     expect(page2.rows).toHaveLength(1);
-    expect(page2.rows[0]?.slug > (page1.rows[0]?.slug ?? '')).toBe(true);
+    expect((page2.rows[0]?.slug ?? '') > (page1.rows[0]?.slug ?? '')).toBe(true);
 
     for (const row of [...page1.rows, ...page2.rows]) expect(row).toHaveProperty('primaryHost');
   });
