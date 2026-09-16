@@ -1,3 +1,4 @@
+import type { DnsRecord } from '@tria/contracts';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
@@ -14,19 +15,6 @@ import {
 import { authenticatedRole } from 'drizzle-orm/supabase';
 import { citext } from './citext';
 import { tenants } from './tenants';
-
-/**
- * One DNS instruction shown to the customer (RESEARCH Pattern 5). `routing` records point the host
- * at the platform; `ownership` is the TXT challenge Vercel asks for when the domain is in use by
- * another account. Written only by the platform lane from provider answers validated with
- * `dnsRecordSchema` (@tria/contracts); rendered as text (T-02-11).
- */
-export type DnsRecord = {
-  type: 'CNAME' | 'A' | 'TXT';
-  name: string;
-  value: string;
-  purpose: 'routing' | 'ownership';
-};
 
 /**
  * D-20: every tenant is reached on its own custom domain. Hosts are stored lower-case; a tenant may own

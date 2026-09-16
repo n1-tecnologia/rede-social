@@ -1,11 +1,16 @@
 import { z } from 'zod';
 
-/** Stable machine codes every client screen switches on (D-09). `TENANT_HOST_MISMATCH` per D-23. */
+/**
+ * Stable machine codes every client screen switches on (D-09). `TENANT_HOST_MISMATCH` per D-23;
+ * `TENANT_SUSPENDED` (D-32) is the tenant being unavailable as a whole, distinct from
+ * `MEMBERSHIP_BLOCKED` (this member only) — the web routes them to different screens.
+ */
 export const ERROR_CODES = [
   'UNAUTHENTICATED',
   'INVALID_TOKEN',
   'NO_MEMBERSHIP',
   'MEMBERSHIP_BLOCKED',
+  'TENANT_SUSPENDED',
   'TENANT_HOST_MISMATCH',
   'MODULE_DISABLED',
   'FORBIDDEN',

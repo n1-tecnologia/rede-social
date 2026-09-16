@@ -62,7 +62,10 @@ export const platformRoutes = platform.openapi(
         status: t.status,
         createdAt: t.createdAt.toISOString(),
         enabledModules: t.enabledModules,
+        primaryHost: t.primaryHost,
       })),
+      // Every tenant is answered in one page until the panel plan (02-12) wires `platformTenantsQuerySchema`.
+      nextCursor: null,
     };
 
     // Cross-tenant reads are audited from day one (T-06-05; the full audit log is Phase 8).

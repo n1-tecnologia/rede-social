@@ -8,6 +8,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INVALID_TOKEN: 'Sua sessão é inválida ou expirou. Faça login novamente.',
   NO_MEMBERSHIP: 'Sua conta não pertence a nenhuma comunidade.',
   MEMBERSHIP_BLOCKED: 'Seu acesso foi suspenso.',
+  TENANT_SUSPENDED: 'Esta comunidade está temporariamente indisponível.',
   TENANT_HOST_MISMATCH: 'Este endereço não pertence à sua comunidade.',
   MODULE_DISABLED: 'Este recurso não está disponível na sua comunidade.',
   FORBIDDEN: 'Você não tem permissão para fazer isso.',

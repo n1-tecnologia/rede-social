@@ -91,6 +91,10 @@ export function bootstrapRedirectPath(error: ApiClientError): string | null {
   if (error.status === 401) return '/entrar';
   switch (error.code) {
     case 'MEMBERSHIP_BLOCKED':
+    // D-32 interim (02-03): a suspended tenant's member is signed out through the same handler a
+    // blocked member uses, exactly as before the code split; 02-08 routes TENANT_SUSPENDED to
+    // `/auth/suspended` → the branded `/comunidade-indisponivel` screen instead.
+    case 'TENANT_SUSPENDED':
       return `/auth/blocked?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
     case 'TENANT_HOST_MISMATCH':
       return '/auth/host-mismatch';

@@ -30,9 +30,12 @@ export async function verifyBearer(c: {
 }
 
 /**
- * Order is fixed: verify -> membership -> blocked -> host. A blocked member on the wrong host still gets
- * MEMBERSHIP_BLOCKED. The host header can only DENY a session (403 TENANT_HOST_MISMATCH); the tenant of
- * record is always the membership (TENANT-01, D-23). `Host`/`X-Forwarded-Host` are never read.
+ * Order is fixed: verify -> membership -> tenant suspended -> blocked -> host. A suspended tenant
+ * answers TENANT_SUSPENDED for every member, blocked or not (D-32: the community is unavailable as a
+ * whole, so the member is not told about their own status); a blocked member on the wrong host still
+ * gets MEMBERSHIP_BLOCKED; an `invited` membership passes (D-29: accept-invite runs in the tenant
+ * lane). The host header can only DENY a session (403 TENANT_HOST_MISMATCH); the tenant of record is
+ * always the membership (TENANT-01, D-23). `Host`/`X-Forwarded-Host` are never read.
  */
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   const payload = await verifyBearer(c);
@@ -54,7 +57,10 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
     }
     throw new ApiError(403, 'NO_MEMBERSHIP');
   }
-  if (membership.status === 'blocked' || membership.tenantStatus !== 'active') {
+  if (membership.tenantStatus !== 'active') {
+    throw new ApiError(403, 'TENANT_SUSPENDED', { tenantName: membership.tenantDisplayName });
+  }
+  if (membership.status === 'blocked') {
     throw new ApiError(403, 'MEMBERSHIP_BLOCKED', { tenantName: membership.tenantDisplayName });
   }
 

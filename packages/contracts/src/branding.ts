@@ -176,6 +176,14 @@ export type ContrastReport = {
   darkSurface: ContrastCheck;
 };
 
+const contrastCheckSchema = z.object({ ratio: z.number().nonnegative(), ok: z.boolean() });
+/** Wire shape of `contrastReport()` — carried by the platform tenant detail (D-41 warnings). */
+export const contrastReportSchema: z.ZodType<ContrastReport> = z.object({
+  onPrimary: contrastCheckSchema,
+  lightSurface: contrastCheckSchema,
+  darkSurface: contrastCheckSchema,
+});
+
 /** The three checks the panel shows as warnings (never blocking) when saving a brand (D-41). */
 export function contrastReport(
   colors: Pick<BrandColors, 'primary' | 'onPrimary' | 'primaryDark'>,
