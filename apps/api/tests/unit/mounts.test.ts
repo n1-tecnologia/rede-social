@@ -43,7 +43,24 @@ describe('module mounts', () => {
     expect(permissionsFor('admin_tenant', new Set<ModuleKey>())).not.toContain('example.create');
   });
 
-  it('4. every registered key equals its manifest key and every job name is namespaced', () => {
+  it('4. the platform lane mounts the six provisioning routes under /v1/platform (02-05)', () => {
+    const paths = app.routes
+      .filter((route) => route.path.startsWith('/v1/platform') && route.method !== 'ALL')
+      .map((route) => `${route.method} ${route.path}`);
+
+    expect(paths).toContain('GET /v1/platform/tenants');
+    expect(paths).toContain('POST /v1/platform/tenants');
+    expect(paths).toContain('GET /v1/platform/tenants/:id');
+    expect(paths).toContain('PATCH /v1/platform/tenants/:id');
+    expect(paths).toContain('POST /v1/platform/tenants/:id/status');
+    expect(paths).toContain('PUT /v1/platform/tenants/:id/modules/:key');
+    // The guard is registered on the parent router, so every sub-router inherits it (T-02-15).
+    expect(
+      app.routes.some((route) => route.path === '/v1/platform/*' && route.method === 'ALL'),
+    ).toBe(true);
+  });
+
+  it('5. every registered key equals its manifest key and every job name is namespaced', () => {
     for (const key of keys) {
       expect(MODULE_REGISTRY[key]?.key).toBe(key);
       for (const job of MODULE_REGISTRY[key]?.jobs ?? []) {

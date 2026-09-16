@@ -199,10 +199,12 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(parsed.tenant.contrast.onPrimary.ok).toBe(true);
 
     const svc = platformTenantDetailSchema.parse(await getTenantDetail(ids.svc));
-    expect(svc.modules.filter((m) => m.enabled).map((m) => m.key).sort()).toEqual([
-      'events',
-      'feed',
-    ]);
+    expect(
+      svc.modules
+        .filter((m) => m.enabled)
+        .map((m) => m.key)
+        .sort(),
+    ).toEqual(['events', 'feed']);
     expect(svc.invites).toHaveLength(1);
     expect(svc.invites[0]?.status).toBe('pending');
     expect(svc.admins).toEqual([]);
