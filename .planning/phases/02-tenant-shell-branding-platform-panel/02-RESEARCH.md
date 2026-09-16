@@ -681,17 +681,24 @@ export const domainVerifyJob: JobDefinition<{ domainId: string }> = {
 | A11 | `primaryDark = mix(primary, white 30%)` is a good default for the D-41 dark surface | Pattern 2 | Panel preview + contrast warning let the super_admin see it; tune constant |
 | A12 | Vercel `verification[]` TXT record name is `_vercel.<apex>` (docs troubleshooting: `dig TXT _vercel.tenant1.com`); use `verification[].domain` verbatim anyway | Pattern 5 | None if `domain` field is shown as-is |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+_All five questions below were closed by the Phase 2 plan set (plan-checker iteration 1); the original text is kept verbatim, each item carries its "Resolved by" line._
 
 1. **Hosted proof of the Vercel + Supabase Management calls**
    - What we know: endpoints, bodies and error codes from official docs; adapter written now, proven against the fake.
    - What's unclear: token scopes for a team token, whether the Cloud Run egress needs anything, PAT lifetime.
    - Recommendation: record "attach a real customer domain end-to-end" as a Phase 01.1-02 runbook item; keep `DOMAIN_PROVIDER=fake` outside production.
+   - **Resolved by:** 02-09 `<assumption_delta_decision>` (hosted proof deferred to the 01.1 runbook, adapters proven against the fake) + 02-16 backstop prohibition (flat-scalar hosted Vercel/Supabase proof stays manual).
 2. **Resend "Reenviar convite" mechanics** (A3)
    - Recommendation: implement resend as `inviteUserByEmail` first; if GoTrue answers "already registered", fall back to `generateLink({ type: 'invite', email, options: { redirectTo } })` and deliver through our own transport (the hook is bypassed by `generateLink`, so render the same template directly).
+   - **Resolved by:** 02-10 Task 2 — `resendInvite` is `generateLink`-first through the 02-06 template/transport, with the `inviteUserByEmail` path kept as a flagged fallback recorded in the SUMMARY.
 3. **Where the TXT challenge appears for a *fresh* domain** (A2) — only observable on Vercel; the UI handles both cases.
+   - **Resolved by:** 02-09 — the fake provider's `needs-txt` hook emits the TXT record + `ownershipVerified false` on add and true on verify, so both shapes are exercised by `domains-fake.test.ts` and the panel UI (02-15) renders either.
 4. **Tailwind + `@tria/ui` packaging** — whether `apps/web` scans `packages/ui/src` and `packages/core/ui` for classes (Tailwind v4 auto-detects from the CSS import graph; add `@source "../../packages/ui/src"; @source "../../packages/core/ui";` in `globals.css` to be explicit). Verify in Wave 0 that primitives' classes are emitted.
+   - **Resolved by:** 02-02 — `apps/web/app/globals.css` carries explicit `@source` directives for `packages/ui/src` and `packages/core/ui` (acceptance-gated).
 5. **Manrope font** — the prototype uses `next/font/google` Manrope; decide self-host (`next/font/local`, offline-friendly for the PWA) vs Google (needs network at build). Recommendation: `next/font/google` with `display: 'swap'` (fonts are inlined at build on Vercel).
+   - **Resolved by:** 02-02 — Manrope via `next/font/google` exposed as the `--font-manrope` variable on `<html>`.
 
 ## Environment Availability
 
