@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-09-16T15:17:39.477Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-09-16T18:27:55.550Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: e6d0b18335ae17391404d214ccdae92e55d23937
+state_head: 0dacc17db886404262432e891b7efd3b5ad296b6
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 10
+  completed_plans: 11
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 2 of 16
+Plan: 3 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -68,6 +68,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P07 | 25 min | 3 tasks | 42 files |
 | Phase 01 P08 | 78 min | 3 tasks | 18 files |
 | Phase 02 P01 | 95 min | 2 tasks | 22 files |
+| Phase 02 P02 | 185min | 3 tasks | 41 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-01: apps/web splits HostTenant (full by-host answer from resolveHostTenant: status, isPrimary, primaryHost, branding) from HostShell (the four size-limited x-tenant-* headers from getHostTenant); the brand always comes from the cached fetch (getHostBrand), never a header
 - [Phase 02]: 02-01: resolveTenantHost resolves VERIFIED hosts only (isNotNull verified_at, D-36) and returns tenants.status instead of filtering on it (D-32); a suspended tenant's host answers 200 status 'suspended' so its screens stay branded — requireAuth still refuses its members
 - [Phase 02]: 02-01: TTL_HIT_MS on the web host cache lowered 300 s → 60 s; with no cross-instance invalidation on Vercel the TTL IS the brand cache bust (≤ 60 s web + 60 s API)
+- [Phase 02]: 02-02: @tria/ui brand utilities bound via @theme inline (bg-brand → var(--brand-accent) on the element); --color-* aliases intentionally not emitted as CSS variables
+- [Phase 02]: 02-02: tokens.css is the only hex file; excluded from Biome's CSS formatter (linter on), Tailwind directives enabled repo-wide in biome.json
+- [Phase 02]: 02-02: package-legitimacy checkpoint approved by the user 2026-09-16 for the whole phase (incl. 02-03's sharp/resend/standardwebhooks) — do not re-ask
 
 ### Pending Todos
 
@@ -146,6 +150,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-16T15:16:48.871Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-09-16T18:27:55.519Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None

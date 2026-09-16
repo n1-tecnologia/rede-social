@@ -122,7 +122,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Design Prototype (UI source of truth)
 
-- [ ] **UI-01**: The app's visual language (tokens, typography, spacing, motion, component styling) follows the design team's prototype in `reference/frontend-design/`; shared primitives (Button, IconButton, Avatar, Badge, BottomSheet, ConfirmDialog, EmptyState, Input, Skeleton, Tabs, Toast, TopBar, BottomNav, PullToRefresh, SafeAreaWrapper) are ported into the kernel shared-UI package
+- [x] **UI-01**: The app's visual language (tokens, typography, spacing, motion, component styling) follows the design team's prototype in `reference/frontend-design/`; shared primitives (Button, IconButton, Avatar, Badge, BottomSheet, ConfirmDialog, EmptyState, Input, Skeleton, Tabs, Toast, TopBar, BottomNav, PullToRefresh, SafeAreaWrapper) are ported into the kernel shared-UI package
 - [ ] **UI-02**: Feature screens are ported into their module package as each vertical phase is built, replacing mock data with API calls and keeping the prototype's interactions (double-tap like, comment sheet, infinite scroll, pull-to-refresh, swipe)
 - [ ] **UI-03**: The prototype's hardcoded brand (hex literals, "Igor Alves" strings, `lib/nav.ts`) is replaced by tenant-driven theme variables, tenant display name and flag-driven navigation; the iPhone `DeviceShell` mockup is replaced by a real responsive app shell with a desktop layout
 - [ ] **UI-04**: Screens the prototype lacks (stories strip/viewer, admin composers, admin panel, platform panel, moderation, support inbox) are designed in the prototype's language and reviewed with the design team before implementation
@@ -278,7 +278,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MEDIA-02 | Phase 3 | Pending |
 | MEDIA-03 | Phase 3 | Pending |
 | MEDIA-04 | Phase 4 | Pending |
-| UI-01 | Phase 2 | Pending |
+| UI-01 | Phase 2 | Complete |
 | UI-02 | Phase 4 | Pending |
 | UI-03 | Phase 2 | Pending |
 | UI-04 | Phase 2 | Pending |
