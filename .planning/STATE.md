@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-05-PLAN.md
-last_updated: "2026-09-16T22:52:15.304Z"
+stopped_at: Completed 02-06-PLAN.md
+last_updated: "2026-09-16T23:17:28.534Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: a76ce8b42b1f44c2baf4ab915e661b49494df684
+state_head: 6fdcf17670ec40497d0f079ebbf10f4c349e24f9
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 14
+  completed_plans: 15
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 6 of 16
+Plan: 7 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -72,6 +72,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P03 | 14 min | 3 tasks | 34 files |
 | Phase 02 P04 | 37 min | 3 tasks | 28 files |
 | Phase 02 P05 | 60 | 3 tasks | 10 files |
+| Phase 02 P06 | 21min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -136,6 +137,10 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-05: platformDefaultHook lives in apps/api/src/http/openapi.ts (shared by createOpenApiApp and routes/platform/*) to avoid an index ↔ tenants import cycle
 - [Phase 02]: 02-05: sendPendingInvites(tenantId, actor?) — actor optional so 02-09's domain-verify job can call it without a request; claim-before-send with claim revert on GoTrue failure
 - [Phase 02]: 02-05: integration fixtures that provision tenants run cleanupTestTenants() in beforeAll AND afterAll (memberships.tenant_id has no cascade; an interrupted run must not poison the next one)
+- [Phase 02]: 02-06: buildActionLink keeps redirect_to verbatim and appends token_hash/type (URLSearchParams re-encoded next=/…)
+- [Phase 02]: 02-06: e-mail layout re-filters the logo through safeHttpUrl and adds a primary top accent so link-less mails stay branded
+- [Phase 02]: 02-06: scripts/supabase.sh prefers the pinned node_modules/.bin/supabase and exports the local throwaway SEND_EMAIL_HOOK_SECRETS (same constant as local-env.sh); every CLI command validates the hook block
+- [Phase 02]: 02-06: integration suite serves the app in-process on 0.0.0.0:8787 via a Vitest globalSetup attached only to integration runs (GoTrue hook callback)
 
 ### Pending Todos
 
@@ -168,6 +173,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-16T22:52:15.269Z
-Stopped at: Completed 02-05-PLAN.md
+Last session: 2026-09-16T23:17:28.508Z
+Stopped at: Completed 02-06-PLAN.md
 Resume file: None
