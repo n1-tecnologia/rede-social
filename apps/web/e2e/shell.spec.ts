@@ -1,4 +1,11 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import {
+  type Browser,
+  type BrowserContext,
+  expect,
+  type Locator,
+  type Page,
+  test,
+} from '@playwright/test';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 
 /**
@@ -113,4 +120,98 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
       0,
     );
   });
+
+  test('D-41: dark theme from /configuracoes survives a JS-disabled reload (no flash) and a JS reload', async ({
+    browser,
+  }, testInfo) => {
+    const mobile = testInfo.project.name === 'mobile-chromium';
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+
+      await page.goto(`${hosts.demo}/configuracoes`);
+      const toggle = page.locator('main').getByRole('switch', { name: 'Tema escuro' });
+      await expect(toggle).toHaveAttribute('aria-checked', 'false');
+      await toggle.click();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+      await expect(toggle).toHaveAttribute('aria-checked', 'true');
+      const cookie = (await context.cookies()).find((c) => c.name === 'tria_theme');
+      expect(cookie?.value).toBe('dark');
+      expect(cookie?.httpOnly).toBe(false);
+      expect(cookie?.sameSite).toBe('Lax');
+
+      // The rail (desktop) also carries the toggle, in step with the settings row.
+      if (!mobile) {
+        await expect(page.locator('aside').getByRole('switch', { name: 'Tema' })).toHaveAttribute(
+          'aria-checked',
+          'true',
+        );
+      }
+
+      // Server-rendered theme with JavaScript OFF: the first HTML already says dark (Pitfall 2).
+      await withoutJavaScript(browser, await context.storageState(), async (noJs) => {
+        await noJs.goto(`${hosts.demo}/inicio`, { waitUntil: 'domcontentloaded' });
+        await expect(noJs.locator('html')).toHaveAttribute('data-theme', 'dark');
+      });
+
+      await page.reload();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('D-08: "Sair" on /configuracoes signs this device out and /inicio then lands on /entrar', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/configuracoes`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Configurações');
+    await expect(page.getByText('Em breve', { exact: true })).toHaveCount(2);
+    await page.locator('main').getByRole('button', { name: 'Sair' }).click();
+    await expect(page).toHaveURL(/\/entrar$/);
+    await page.goto(`${hosts.demo}/inicio`);
+    await expect(page).toHaveURL(/\/entrar$/);
+  });
+
+  test('/perfil: e-mail + role, Perfil tab current, TopBar avatar current on the phone', async ({
+    page,
+  }, testInfo) => {
+    const mobile = testInfo.project.name === 'mobile-chromium';
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/perfil`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Perfil');
+    await expect(page.getByText(users.demoMember)).toBeVisible();
+    await expect(page.getByText('Membro', { exact: true })).toBeVisible();
+
+    const nav = visibleNav(page, mobile);
+    await expect(nav.getByRole('link', { name: 'Perfil' })).toHaveAttribute('aria-current', 'page');
+    await expect(nav.getByRole('link', { name: 'Início' })).not.toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    if (mobile) {
+      await expect(page.getByRole('link', { name: 'Meu perfil' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+    }
+    await page.getByRole('link', { name: 'Configurações' }).first().click();
+    await expect(page).toHaveURL(/\/configuracoes$/);
+  });
 });
+
+async function withoutJavaScript(
+  browser: Browser,
+  storageState: Awaited<ReturnType<BrowserContext['storageState']>>,
+  fn: (page: Page) => Promise<void>,
+): Promise<void> {
+  const context = await browser.newContext({ storageState, javaScriptEnabled: false });
+  try {
+    await fn(await context.newPage());
+  } finally {
+    await context.close();
+  }
+}

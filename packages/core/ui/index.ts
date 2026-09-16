@@ -20,4 +20,5 @@ export {
 } from './nav';
 export { ScrollRoot, type ScrollRootProps } from './ScrollRoot';
 export { TenantLogo, type TenantLogoProps, type TenantLogoSize } from './TenantLogo';
+export { type Theme, ThemeToggle, type ThemeToggleProps } from './ThemeToggle';
 export { TopBar, type TopBarProps } from './TopBar';

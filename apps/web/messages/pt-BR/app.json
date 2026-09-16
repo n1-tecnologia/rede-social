@@ -25,6 +25,27 @@
       "admin_tenant": "Administrador",
       "support_tenant": "Suporte",
       "member": "Membro"
+    },
+    "settings": {
+      "title": "Configurações",
+      "back": "Voltar",
+      "groups": {
+        "account": "Conta",
+        "preferences": "Preferências",
+        "about": "Sobre"
+      },
+      "rows": {
+        "editProfile": "Editar perfil",
+        "darkTheme": "Tema escuro",
+        "notifications": "Notificações",
+        "version": "Versão {version}"
+      },
+      "soon": "Em breve",
+      "logoutFailed": "Algo deu errado. Tente novamente."
+    },
+    "profile": {
+      "title": "Perfil",
+      "settings": "Configurações"
     }
   }
 }

@@ -1,13 +1,15 @@
 import { brandStyleVars, resolveBranding } from '@tria/contracts';
-import { AppShell, buildNav, type ShellNav } from '@tria/core/ui';
+import { THEME_COOKIE } from '@tria/contracts/branding';
+import { AppShell, buildNav, type ShellNav, ThemeToggle } from '@tria/core/ui';
 import type { Viewport } from 'next';
+import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
 import { requirePlatformTenants } from '@/lib/platform';
 import { moduleLabelResolver } from '@/lib/registry';
 import { getHostTenant } from '@/lib/tenant-host';
-import { logout } from './actions';
+import { logout, setTheme } from './actions';
 
 /**
  * `theme-color` = the tenant's primary on tenant hosts (UI-SPEC §PWA); the client updates the meta on
@@ -38,12 +40,15 @@ export async function generateViewport(): Promise<Viewport> {
  * so the first server-rendered HTML already carries the member's own brand and tabs.
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  const [hostTenant, t, tp, tRoot] = await Promise.all([
+  const [hostTenant, t, tp, tRoot, cookieStore] = await Promise.all([
     getHostTenant(),
     getTranslations('app'),
     getTranslations('platform'),
     getTranslations(),
+    cookies(),
   ]);
+  // D-41: the theme is per device, not per tenant — the same cookie read as the root layout's.
+  const theme = cookieStore.get(THEME_COOKIE)?.value === 'dark' ? 'dark' : 'light';
   const labels = {
     mainNav: t('nav.mainNav'),
     profile: t('nav.openProfile'),
@@ -68,6 +73,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         labels={labels}
         settingsHref="/configuracoes"
         logoutAction={logout}
+        themeToggle={<ThemeToggle initial={theme} label={t('nav.theme')} action={setTheme} />}
       >
         {children}
       </AppShell>
@@ -93,6 +99,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       labels={labels}
       settingsHref="/configuracoes"
       logoutAction={logout}
+      themeToggle={<ThemeToggle initial={theme} label={t('nav.theme')} action={setTheme} />}
       style={brandStyleVars(branding)}
     >
       {children}
