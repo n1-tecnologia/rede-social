@@ -151,7 +151,7 @@ describe('Toast', () => {
     expect(toast.className).toContain('md:max-w-[420px]');
   });
 
-  it('auto-dismisses after 3000 ms', () => {
+  it('auto-dismisses after 3000 ms', async () => {
     vi.useFakeTimers();
     try {
       render(
@@ -165,8 +165,10 @@ describe('Toast', () => {
         vi.advanceTimersByTime(2999);
       });
       expect(screen.getByRole('status')).toBeInTheDocument();
-      act(() => {
+      // AnimatePresence unmounts on a microtask once the (skipped) exit settles
+      await act(async () => {
         vi.advanceTimersByTime(1);
+        await Promise.resolve();
       });
       expect(screen.queryByRole('status')).not.toBeInTheDocument();
     } finally {

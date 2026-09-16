@@ -7,7 +7,7 @@
  *     verbatim from the design prototype, plus the tenant `--brand-*` fallbacks (the neutral TRIA brand,
  *     visible only on generic hosts and the platform host). The layouts overwrite the five fixed
  *     `--brand-primary|secondary|on-primary|primary-dark|on-primary-dark` keys per tenant via
- *     `brandStyleVars` (@tria/contracts/branding); everything else is derived here with color-mix.
+ *     `brandStyleVars` (the contracts package, `branding` subpath); everything else is derived here with color-mix.
  *
  *  2. Tailwind aliases — declared inline in the theme block so `bg-brand` compiles to
  *     `background-color: var(--brand-accent)` and resolves ON THE ELEMENT: a `--brand-primary` set on
