@@ -36,7 +36,13 @@ export const hookRoutes = createOpenApiApp().post('/auth/send-email', async (c) 
   try {
     const payload = verifyHookRequest(raw, headers, parseHookSecrets(env.SEND_EMAIL_HOOK_SECRETS));
     actionType = payload.email_data.email_action_type;
-    await sendAuthMail({ payload, webhookId, logger: log });
+    const result = await sendAuthMail({ payload, webhookId, logger: log });
+    if (result.outcome === 'duplicate') {
+      log.info(
+        { event: 'mail.duplicate_suppressed', webhookId, requestId },
+        'hook replay suppressed',
+      );
+    }
     return c.json({}, 200);
   } catch (err) {
     if (err instanceof HookSignatureError) {

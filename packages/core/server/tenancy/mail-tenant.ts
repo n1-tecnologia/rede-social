@@ -2,7 +2,9 @@ import { normalizeHost, type ResolvedBranding, resolveBranding } from '@tria/con
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantDomains, tenants } from '../../db/schema';
+import { isPlatformAdmin } from '../platform/platform-admins';
 import { membershipForUser } from './membership';
+import { resolveTenantHost } from './tenant-host';
 
 /**
  * Which brand an auth e-mail carries (D-37, T-02-24). Lives under `tenancy/` because it opens the
@@ -44,9 +46,20 @@ export async function resolveMailTenant(input: {
   userId: string;
   redirectTo: string;
 }): Promise<MailTenantResolution> {
+  const redirectHost = redirectHostOf(input.redirectTo);
   const membership = await membershipForUser(input.userId);
+  // VERIFIED hosts only (D-36): an attached-but-unproven domain never selects a brand.
+  const hostTenant = redirectHost
+    ? await resolveTenantHost(redirectHost)
+    : { kind: 'unknown' as const };
 
   if (membership) {
+    // D-23: membership is the authority. A verified host of ANOTHER tenant in `redirect_to` means the
+    // mail must carry neither brand — refuse instead of choosing.
+    if (hostTenant.kind === 'tenant' && hostTenant.tenantId !== membership.tenantId) {
+      return { kind: 'refused', reason: 'tenant_host_mismatch' };
+    }
+
     // ONE admin-lane select: the tenant row plus its verified primary host (for the logo URL).
     const row = await withAdminTx(async (tx) => {
       const rows = await tx
@@ -85,5 +98,20 @@ export async function resolveMailTenant(input: {
     };
   }
 
+  // No membership: platform staff get the neutral TRIA mail; otherwise the verified tenant behind the
+  // `redirect_to` host (the first-admin invite, whose membership 02-05 inserts AFTER GoTrue returns).
+  if (await isPlatformAdmin(input.userId)) return { kind: 'neutral', via: 'platform_admin' };
+  if (hostTenant.kind === 'tenant') {
+    return {
+      kind: 'tenant',
+      via: 'redirect_host',
+      tenantId: hostTenant.tenantId,
+      slug: hostTenant.slug,
+      displayName: hostTenant.displayName,
+      status: hostTenant.status,
+      branding: hostTenant.branding,
+      primaryHost: hostTenant.primaryHost,
+    };
+  }
   return { kind: 'neutral', via: 'no_tenant' };
 }

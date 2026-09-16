@@ -82,9 +82,12 @@ export type LayoutInput = {
 
 function renderHeader(brand: MailBrand): string {
   const name = escapeHtml(brand.displayName);
-  if (brand.logoUrl) {
+  // Defence in depth: `toMailBrand` already filtered the URL by the deployment's scheme policy; the
+  // layout still refuses anything that is not http(s), so no caller can ever emit `javascript:`.
+  const logoUrl = safeHttpUrl(brand.logoUrl, true);
+  if (logoUrl) {
     // D-26: the customer's asset as-is — never tinted, masked or re-encoded.
-    return `<img src="${escapeHtml(brand.logoUrl)}" alt="${name}" height="48" style="display:block;max-height:48px;max-width:220px;border:0">`;
+    return `<img src="${escapeHtml(logoUrl)}" alt="${name}" height="48" style="display:block;max-height:48px;max-width:220px;border:0">`;
   }
   return `<h1 style="margin:0;font-size:22px;line-height:28px;font-weight:700;color:${TEXT}">${name}</h1>`;
 }
@@ -130,7 +133,8 @@ export function renderLayout(input: LayoutInput): RenderedMail {
     `<body style="margin:0;padding:0;background:${LIGHT_BG};font-family:${FONT}">`,
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${LIGHT_BG}">`,
     '<tr><td align="center" style="padding:24px 12px">',
-    `<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:${CARD_BG};border:1px solid ${BORDER};border-radius:16px">`,
+    // The primary colour also tops the card, so a mail without a CTA (notifications) is still branded.
+    `<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:${CARD_BG};border:1px solid ${BORDER};border-top:4px solid ${colors.background};border-radius:16px">`,
     `<tr><td style="padding:24px 24px 8px">${renderHeader(brand)}</td></tr>`,
     `<tr><td style="padding:16px 24px 8px">${bodyParts.join('')}</td></tr>`,
     `<tr><td style="padding:8px 24px 24px"><p style="margin:0;font-size:12px;line-height:16px;color:${MUTED};text-align:center">${FOOTER}</p></td></tr>`,
@@ -141,7 +145,8 @@ export function renderLayout(input: LayoutInput): RenderedMail {
     '</html>',
   ].join('\n');
 
-  const textLines: string[] = [heading, '', ...paragraphs];
+  // Plain-text alternative: the brand name stands in for the header, then the same content.
+  const textLines: string[] = [brand.displayName, '', heading, '', ...paragraphs];
   if (cta) textLines.push('', `${cta.label}: ${cta.href}`);
   if (code) textLines.push('', code);
   if (closing.length > 0) textLines.push('', ...closing);

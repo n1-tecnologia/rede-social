@@ -1,4 +1,9 @@
-import { absoluteBrandUrl, deriveBrandColors, NEUTRAL_BRAND } from '@tria/contracts';
+import {
+  absoluteBrandUrl,
+  createBoundedTtlCache,
+  deriveBrandColors,
+  NEUTRAL_BRAND,
+} from '@tria/contracts';
 import { env, publicWebOrigin } from '../env';
 import { type Logger, moduleLogger } from '../logging';
 import {
@@ -8,22 +13,25 @@ import {
 } from '../tenancy/mail-tenant';
 import { buildActionLink, HookPayloadError, type SendEmailHookPayload } from './hook-schema';
 import { localTransport } from './local';
-import { type MailBrand, safeHttpUrl } from './templates/layout';
+import { resendTransport } from './resend';
+import { renderInvite } from './templates/invite';
+import { type MailBrand, type RenderedMail, safeHttpUrl } from './templates/layout';
+import { LINK_ACTION_TYPES, renderNeutral } from './templates/neutral';
 import { renderRecovery } from './templates/recovery';
 import { MAIL_SEND_TIMEOUT_MS, type MailTransport, maskEmail } from './transport';
 
 /**
  * The kernel's auth-mail pipeline (D-37): hook payload → tenant resolution → pt-BR template →
  * transport. The transport is selected ONCE from `env.MAIL_TRANSPORT`; `local` (Mailpit) is the
- * default, so nothing here can send real mail unless a deploy asked for `resend` explicitly.
+ * default, so nothing here can send real mail unless a deploy asked for `resend` explicitly
+ * (`assertProductionEnv` then requires `RESEND_API_KEY` at boot).
  */
 function selectTransport(): MailTransport {
   switch (env.MAIL_TRANSPORT) {
     case 'local':
       return localTransport;
     case 'resend':
-      // Wired by the expansion task (`./resend.ts`); selecting it before then is a boot error.
-      throw new Error('MAIL_TRANSPORT=resend is not available yet');
+      return resendTransport;
   }
 }
 
@@ -41,6 +49,15 @@ export class MailRefusedError extends Error {
 }
 
 const NEUTRAL_COLORS = deriveBrandColors(NEUTRAL_BRAND);
+
+/**
+ * Replay guard (T-02-22, Pitfall 6): GoTrue retries inside its 5 s budget with the SAME
+ * `webhook-id`; a retry that reaches us after a slow-but-successful send must not double-send. The
+ * id is remembered BEFORE the transport call and forgotten on transport failure, so a later
+ * legitimate retry may still succeed. Bounded LRU: 5,000 ids for 15 minutes.
+ */
+const seenWebhookIds = createBoundedTtlCache<true>(5_000);
+const SEEN_TTL_MS = 15 * 60_000;
 
 /**
  * Brand facts for the template. Tenant: display name, the logo resolved to an absolute URL of the
@@ -77,6 +94,37 @@ export function toMailBrand(
   };
 }
 
+/** `recovery` and `invite` have dedicated templates; every other type falls back to `renderNeutral`. */
+function render(brand: MailBrand, emailData: SendEmailHookPayload['email_data']): RenderedMail {
+  const actionType = emailData.email_action_type;
+  switch (actionType) {
+    case 'recovery':
+      return renderRecovery({
+        brand,
+        link: buildActionLink(emailData.redirect_to, emailData.token_hash, 'recovery'),
+      });
+    case 'invite':
+      return renderInvite({
+        brand,
+        link: buildActionLink(emailData.redirect_to, emailData.token_hash, 'invite'),
+      });
+    default: {
+      // Link types get a link only when there is a token hash and `redirect_to` parses; a
+      // notification with a broken redirect is still worth delivering.
+      let link: string | null = null;
+      if (LINK_ACTION_TYPES.has(actionType) && emailData.token_hash) {
+        try {
+          link = buildActionLink(emailData.redirect_to, emailData.token_hash, actionType);
+        } catch {
+          link = null;
+        }
+      }
+      const code = actionType === 'reauthentication' && emailData.token ? emailData.token : null;
+      return renderNeutral({ brand, actionType, link, code });
+    }
+  }
+}
+
 export type SendAuthMailInput = {
   payload: SendEmailHookPayload;
   webhookId: string;
@@ -85,7 +133,7 @@ export type SendAuthMailInput = {
 };
 
 export type SendAuthMailResult = {
-  outcome: 'sent';
+  outcome: 'sent' | 'duplicate';
   tenantId: string | null;
   actionType: string;
 };
@@ -100,6 +148,10 @@ export async function sendAuthMail(input: SendAuthMailInput): Promise<SendAuthMa
   const { payload, webhookId } = input;
   const actionType = payload.email_data.email_action_type;
 
+  if (seenWebhookIds.get(webhookId)) {
+    return { outcome: 'duplicate', tenantId: null, actionType };
+  }
+
   const to = payload.user.email;
   if (!to) throw new HookPayloadError('no_recipient');
 
@@ -112,29 +164,26 @@ export async function sendAuthMail(input: SendAuthMailInput): Promise<SendAuthMa
 
   const brand = toMailBrand(resolution, redirectHost);
   const tenantId = resolution.kind === 'tenant' ? resolution.tenantId : null;
+  const rendered = render(brand, payload.email_data);
 
-  if (actionType !== 'recovery') throw new MailRefusedError('unsupported_action_type');
-  const rendered = renderRecovery({
-    brand,
-    link: buildActionLink(
-      payload.email_data.redirect_to,
-      payload.email_data.token_hash,
-      'recovery',
-    ),
-  });
-
-  await mailTransport.send(
-    {
-      from: { name: brand.displayName, email: `no-reply@${env.MAIL_DOMAIN}` },
-      to,
-      subject: rendered.subject,
-      html: rendered.html,
-      text: rendered.text,
-      idempotencyKey: webhookId,
-      meta: { actionType, tenantId },
-    },
-    { signal: AbortSignal.timeout(MAIL_SEND_TIMEOUT_MS) },
-  );
+  seenWebhookIds.set(webhookId, true, SEEN_TTL_MS);
+  try {
+    await mailTransport.send(
+      {
+        from: { name: brand.displayName, email: `no-reply@${env.MAIL_DOMAIN}` },
+        to,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        idempotencyKey: webhookId,
+        meta: { actionType, tenantId },
+      },
+      { signal: AbortSignal.timeout(MAIL_SEND_TIMEOUT_MS) },
+    );
+  } catch (err) {
+    seenWebhookIds.delete(webhookId);
+    throw err;
+  }
 
   log.info(
     {
