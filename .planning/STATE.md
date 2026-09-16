@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-09-16T23:17:28.534Z"
+stopped_at: Completed 02-07-PLAN.md
+last_updated: "2026-09-16T23:55:35.200Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 6fdcf17670ec40497d0f079ebbf10f4c349e24f9
+state_head: 3217e9246f6d788c38f58d05a570bccd9f1744ec
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 15
+  completed_plans: 16
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 7 of 16
+Plan: 8 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -73,6 +73,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P04 | 37 min | 3 tasks | 28 files |
 | Phase 02 P05 | 60 | 3 tasks | 10 files |
 | Phase 02 P06 | 21min | 3 tasks | 23 files |
+| Phase 02 P07 | 36min | 3 tasks | 41 files |
 
 ## Accumulated Context
 
@@ -141,6 +142,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-06: e-mail layout re-filters the logo through safeHttpUrl and adds a primary top accent so link-less mails stay branded
 - [Phase 02]: 02-06: scripts/supabase.sh prefers the pinned node_modules/.bin/supabase and exports the local throwaway SEND_EMAIL_HOOK_SECRETS (same constant as local-env.sh); every CLI command validates the hook block
 - [Phase 02]: 02-06: integration suite serves the app in-process on 0.0.0.0:8787 via a Vitest globalSetup attached only to integration runs (GoTrue hook callback)
+- [Phase 02]: 02-07: app.json — kernel tab label at app.nav.home; app.home is the welcome/soon object (a key cannot be both string and object)
+- [Phase 02]: 02-07: ThemeToggle has no local state — <html data-theme> is the single source of truth via useSyncExternalStore + MutationObserver, so the settings row and rail row never disagree
+- [Phase 02]: 02-07: activeTabKey returns null when no tab matches (aria-current never claimed by Início on /configuracoes); module tabs/slots/home widgets exist only via bootstrap.modules (MOD-04)
 
 ### Pending Todos
 
@@ -173,6 +177,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-16T23:17:28.508Z
-Stopped at: Completed 02-06-PLAN.md
+Last session: 2026-09-16T23:55:35.173Z
+Stopped at: Completed 02-07-PLAN.md
 Resume file: None
