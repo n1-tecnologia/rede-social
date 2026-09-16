@@ -149,4 +149,51 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       Object.assign(MODULE_REGISTRY, saved);
     }
   });
+
+  it('7. D-42 home slots: a manifest `home` array reaches the bootstrap entry verbatim', () => {
+    const widget = defineModule({
+      key: 'feed',
+      nav: { label: 'Feed', icon: 'home', href: '/feed', order: 10 },
+      home: [{ order: 5 }],
+    });
+    const [entry] = bootstrapWith({ feed: widget }, ['feed']);
+    expect(entry?.home).toEqual([{ order: 5 }]);
+  });
+
+  it('8. D-42 home slots: a manifest without `home` produces an entry without a `home` key', () => {
+    const bare = defineModule({
+      key: 'events',
+      nav: { label: 'Eventos', icon: 'calendar-days', href: '/eventos', order: 20 },
+    });
+    const [entry] = bootstrapWith({ events: bare }, ['events']);
+    expect(entry).not.toHaveProperty('home');
+    expect(entry).toEqual({
+      key: 'events',
+      nav: { label: 'Eventos', icon: 'calendar-days', href: '/eventos', order: 20 },
+      settings: {},
+    });
+  });
+
+  it('9. D-40 placement: a `topbar` nav entry with a badge passes through unchanged', () => {
+    const bell = defineModule({
+      key: 'notifications',
+      nav: {
+        label: 'Notificações',
+        icon: 'bell',
+        href: '/notificacoes',
+        order: 5,
+        placement: 'topbar',
+        badge: 'unreadNotifications',
+      },
+    });
+    const [entry] = bootstrapWith({ notifications: bell }, ['notifications']);
+    expect(entry?.nav).toEqual({
+      label: 'Notificações',
+      icon: 'bell',
+      href: '/notificacoes',
+      order: 5,
+      placement: 'topbar',
+      badge: 'unreadNotifications',
+    });
+  });
 });

@@ -35,8 +35,14 @@ export const bootstrapSchema = z.object({
           icon: z.string(),
           href: z.string(),
           order: z.number(),
+          // D-40: absent = 'tab' (BottomNav / rail); 'topbar' = TopBar slot / rail bottom-group row.
+          placement: z.enum(['tab', 'topbar']).optional(),
+          // D-40: a 'topbar' slot's count badge reads this `counters` key.
+          badge: z.enum(['unreadNotifications', 'unreadConversations']).optional(),
         })
         .optional(),
+      // D-42: home-slot declarations; the web composition point supplies the renderer per key/index.
+      home: z.array(z.object({ order: z.number() })).optional(),
       settings: z.record(z.string(), z.unknown()),
     }),
   ),

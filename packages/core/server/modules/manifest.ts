@@ -7,11 +7,42 @@ import {
 import type { Hono } from 'hono';
 import type { AppEnv } from '../auth/context';
 
-/** Navigation entry the shell renders; `order` drives the bootstrap list's sort (ROLE-06 ordering). */
+/** Where a module's navigation entry renders in the shell (D-40): a BottomNav/rail tab or a TopBar/rail slot. */
+export type ModuleNavPlacement = 'tab' | 'topbar';
+
+/** Which `bootstrap.counters` key feeds a TopBar/rail slot's count badge (D-40). */
+export type ModuleNavBadge = 'unreadNotifications' | 'unreadConversations';
+
+/**
+ * Navigation entry the shell renders; `order` drives the bootstrap list's sort (ROLE-06 ordering).
+ * Everything here is plain data: the manifest lives on the server and travels through
+ * `GET /v1/me/bootstrap`, so `icon` is a NAME (`'bell'`, `'users'`, …) that `@tria/core/ui`
+ * maps to a lucide component — never a React component.
+ */
 export interface ModuleNav {
+  /** Fallback label; the web catalog's `<key>.nav` entry wins when present (PWA-03). */
   label: string;
+  /** Icon name resolved by `iconFor()` in `packages/core/ui/nav.ts`; unknown names get a neutral glyph. */
   icon: string;
   href: string;
+  order: number;
+  /**
+   * `'tab'` (default when absent) renders in the BottomNav / rail nav between the kernel's Início and
+   * Perfil; `'topbar'` renders as a TopBar slot (mobile) / rail bottom-group row (desktop) — bell,
+   * support chat (D-40). A disabled module's entry never reaches the bootstrap, so it never renders.
+   */
+  placement?: ModuleNavPlacement;
+  /** A `'topbar'` slot's count source: the `bootstrap.counters` key whose value renders as a Badge. */
+  badge?: ModuleNavBadge;
+}
+
+/**
+ * A home-slot declaration (D-42): the module asks for a widget position on `/inicio` at `order`
+ * (ascending, ties by module key). The kernel only carries the declaration; the web composition point
+ * (`apps/web/lib/registry.tsx`) supplies the renderer per module key and slot index, so the manifest
+ * stays serialisable and the kernel never imports module UI (MOD-02).
+ */
+export interface ModuleHomeSlot {
   order: number;
 }
 
@@ -44,6 +75,11 @@ export interface EventSubscription<K extends keyof EventMap = keyof EventMap> {
 export interface ModuleManifest {
   key: ModuleKey;
   nav?: ModuleNav;
+  /**
+   * Home-slot declarations (D-42), emitted on the bootstrap entry when present. Settings rows stay
+   * static kernel rows this phase — a `settingsRows` extension is Phase 3/7's call.
+   */
+  home?: ModuleHomeSlot[];
   routes?: () => Promise<Hono<AppEnv>>;
   jobs?: AnyJobDefinition[];
   events?: EventSubscription[];
