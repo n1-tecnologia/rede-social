@@ -53,7 +53,7 @@ export const platformRoutes = platform.openapi(
   async (c) => {
     const { userId, requestId } = c.get('platformCtx');
 
-    const rows = await listPlatformTenants();
+    const { rows } = await listPlatformTenants();
     const body: PlatformTenants = {
       tenants: rows.map((t) => ({
         id: t.id,
