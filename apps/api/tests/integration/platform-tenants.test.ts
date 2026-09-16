@@ -1,4 +1,8 @@
-import { platformTenantDetailSchema } from '@tria/contracts';
+import {
+  platformTenantDetailSchema,
+  platformTenantsSchema,
+  TENANT_HOST_HEADER,
+} from '@tria/contracts';
 import { sqlClient } from '@tria/core/db';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { moduleFlags } from '@tria/core/server/modules/flags-cache';
@@ -13,16 +17,21 @@ import {
 } from '@tria/core/server/platform/tenants';
 import { invalidateTenantHost, resolveTenantHost } from '@tria/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, authAdmin } from './setup';
+import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
  * ROLE-03 / ROLE-04 / ROLE-05 — tenant provisioning through the kernel's platform lane
  * (`packages/core/server/platform/*`), against the live local stack and the real seed.
  *
- * Part 1 (this block) drives the SERVICES directly: what a route may rely on. Part 2 (below, added
- * with the routes) drives `/v1/platform/*` through the app. Every tenant created here carries a
- * unique `pt-svc-…` slug and is deleted in `afterAll`; the seeded tenants are only ever read, except
- * for one module flip on tria-demo that is restored in the same case.
+ * Part 1 drives the SERVICES directly: what a route may rely on. Part 2 drives `/v1/platform/*`
+ * through the app: the envelope codes, the strict detail, the concurrency/idempotency edges, the
+ * module toggle reflected in a member's bootstrap without a restart, suspend -> TENANT_SUSPENDED and
+ * the invite pending/sent states. Every tenant created here carries a unique `pt-svc-…`/`pt-test-…`
+ * slug and is deleted in `afterAll`; the seeded tenants are only ever read, except for one module
+ * flip on tria-demo (part 1) and one on tria-lab (part 2), both restored in the same case.
+ *
+ * Platform identity / host-mismatch coverage lives in `isolation.test.ts` and `modules.test.ts`;
+ * only one case of each is repeated here, on a mutation route.
  */
 
 const RUN = Date.now();
@@ -30,10 +39,44 @@ const SVC_SLUG = `pt-svc-${RUN}`.slice(0, 40);
 const SVC_EMAIL = `Admin.${RUN}@Tria-Test.local`;
 const SVC_HOST = `pt-svc-${RUN}.localhost`;
 
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
+
 const ids = { demo: '', lab: '', svc: '' };
 const actor = { userId: '' };
+const tokens = { superAdmin: '', demoMember: '', labMember: '' };
 let demoMemberId = '';
 const createdAuthUsers: string[] = [];
+
+type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
+
+const platform = (
+  path: string,
+  init: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> } = {},
+) =>
+  api.request(`/v1/platform${path}`, {
+    method: init.method ?? 'GET',
+    headers: {
+      ...(init.token ? { authorization: `Bearer ${init.token}` } : {}),
+      ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}),
+      ...(init.headers ?? {}),
+    },
+    ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+  });
+
+const bootstrap = (token: string, headers: Record<string, string> = {}) =>
+  api.request('/v1/me/bootstrap', { headers: { authorization: `Bearer ${token}`, ...headers } });
+
+const envelope = async (res: Response) => ((await res.json()) as Envelope).error;
+
+const newTenantBody = (slug: string, overrides: Record<string, unknown> = {}) => ({
+  displayName: 'Comunidade Teste',
+  slug,
+  colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+  modules: ['feed', 'communities', 'stories', 'events', 'chat', 'notifications'],
+  adminEmail: `admin-${slug}@tria-test.local`,
+  ...overrides,
+});
 
 async function tenantIdBySlug(slug: string): Promise<string> {
   const [row] = await adminSql<{ id: string }[]>`
@@ -56,9 +99,37 @@ async function expectApiError(promise: Promise<unknown>, status: number, code: s
   return err;
 }
 
+/**
+ * Removes every tenant this file provisions (`pt-svc-…`, `pt-test-…`) and the throwaway auth users
+ * it invites/creates. Runs BEFORE the suite too: an interrupted run leaves its rows behind, and
+ * `memberships.tenant_id` has no cascade on purpose, so a stale membership would block the tenant
+ * delete (and a stale `pt-svc-…` tenant would break the `q` assertion in case 3).
+ */
+async function cleanupTestTenants(): Promise<void> {
+  await adminSql`
+    delete from public.memberships where tenant_id in
+      (select id from public.tenants where slug like 'pt-svc-%' or slug like 'pt-test-%')`;
+  await adminSql`delete from public.tenants where slug like 'pt-svc-%' or slug like 'pt-test-%'`;
+  // Users invited (admin-pt-…, admin.<run>) or created (member-pt-…) by this file; GoTrue cascades
+  // identities/sessions from auth.users and public.users follows (users_id_users_id_fk).
+  await adminSql`
+    delete from auth.users
+     where lower(email) like '%@tria-test.local'
+       and (lower(email) like 'admin-pt-%' or lower(email) like 'member-pt-%'
+            or lower(email) like 'admin.%')`;
+}
+
 beforeAll(async () => {
+  if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
+  if (!SUPER_ADMIN_PASSWORD) {
+    throw new Error('SUPER_ADMIN_PASSWORD is required (same value as `pnpm db:seed`)');
+  }
+  await cleanupTestTenants();
   ids.demo = await tenantIdBySlug('tria-demo');
   ids.lab = await tenantIdBySlug('tria-lab');
+  tokens.superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+  tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
 
   const [admin] = await adminSql<{ user_id: string }[]>`
     select user_id from public.platform_admins limit 1`;
@@ -73,12 +144,13 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const userId of createdAuthUsers) await authAdmin().deleteUser(userId);
-  await adminSql`delete from public.tenants where slug like ${'pt-svc-%'}`;
-  await adminSql`delete from public.tenants where slug like ${'pt-test-%'}`;
-  // tria-demo's events flag is flipped and restored inside one case; make sure it is on either way.
+  await cleanupTestTenants();
+  // events is flipped on tria-demo (part 1) and tria-lab (part 2) and restored in the same case;
+  // make sure both are on either way (D-17: tria-lab = feed + events).
   await adminSql`update public.tenant_modules set enabled = true
-                 where tenant_id = ${ids.demo}::uuid and module_key = 'events'`;
+                 where tenant_id in (${ids.demo}::uuid, ${ids.lab}::uuid) and module_key = 'events'`;
   moduleFlags.invalidate(ids.demo);
+  moduleFlags.invalidate(ids.lab);
   await adminSql.end();
   await sqlClient.end();
 });
@@ -335,5 +407,372 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(detail.invites[0]?.status).toBe('sent');
     // An invited (not yet accepted) admin is not listed under admins.
     expect(detail.admins).toEqual([]);
+  });
+});
+
+describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-03/04/05)', () => {
+  const SLUG = `pt-test-${RUN}`.slice(0, 40);
+  const HOST = `pt-test-${RUN}.localhost`;
+  let tenantId = '';
+  let inviteEmail = '';
+
+  it('10. POST creates the tenant: 201 with the strict detail, 7 module rows (example false), one pending invite', async () => {
+    const res = await platform('/tenants', {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: newTenantBody(SLUG, { adminEmail: `  Admin-${SLUG}@Tria-Test.local ` }),
+    });
+    expect(res.status).toBe(201);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = platformTenantDetailSchema.strict().parse(await res.json());
+    tenantId = body.tenant.id;
+    inviteEmail = `admin-${SLUG}@tria-test.local`;
+
+    expect(body.tenant.slug).toBe(SLUG);
+    expect(body.tenant.status).toBe('active');
+    expect(Object.keys(body.tenant.branding.colors).sort()).toEqual(
+      ['onPrimary', 'onPrimaryDark', 'primary', 'primaryDark', 'secondary'].sort(),
+    );
+    expect(body.modules).toHaveLength(6);
+    expect(body.modules.map((m) => m.key)).not.toContain('example');
+    expect(body.modules.every((m) => m.enabled)).toBe(true);
+    expect(body.invites).toHaveLength(1);
+    expect(body.invites[0]).toMatchObject({ email: inviteEmail, status: 'pending', sentAt: null });
+    expect(body.domains).toEqual([]);
+    expect(body.admins).toEqual([]);
+
+    const rows = await adminSql<{ module_key: string; enabled: boolean }[]>`
+      select module_key, enabled from public.tenant_modules where tenant_id = ${tenantId}::uuid`;
+    expect(rows).toHaveLength(7);
+    expect(rows.find((r) => r.module_key === 'example')?.enabled).toBe(false);
+  });
+
+  it('11. idempotency: the same slug again is 400 VALIDATION_FAILED { slug: "taken" }', async () => {
+    const res = await platform('/tenants', {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: newTenantBody(SLUG),
+    });
+    expect(res.status).toBe(400);
+    const err = await envelope(res);
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.details?.slug).toBe('taken');
+  });
+
+  it('12. concurrency: two POSTs with a fresh identical slug leave exactly one tenant', async () => {
+    const slug = `pt-test-race-${RUN}`.slice(0, 40);
+    const [a, b] = await Promise.all([
+      platform('/tenants', { method: 'POST', token: tokens.superAdmin, body: newTenantBody(slug) }),
+      platform('/tenants', { method: 'POST', token: tokens.superAdmin, body: newTenantBody(slug) }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([201, 400]);
+    const loser = a.status === 400 ? a : b;
+    const err = await envelope(loser);
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.details?.slug).toBe('taken');
+
+    const [count] = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.tenants where slug = ${slug}`;
+    expect(count?.n).toBe('1');
+    const [modules] = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.tenant_modules tm
+        join public.tenants t on t.id = tm.tenant_id where t.slug = ${slug}`;
+    expect(modules?.n).toBe('7');
+  });
+
+  it('13. empty: modules [] creates an empty community; an empty displayName is 400 with the field path', async () => {
+    const slug = `pt-test-empty-${RUN}`.slice(0, 40);
+    const empty = await platform('/tenants', {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: newTenantBody(slug, { modules: [] }),
+    });
+    expect(empty.status).toBe(201);
+    const body = platformTenantDetailSchema.parse(await empty.json());
+    expect(body.modules).toHaveLength(6);
+    expect(body.modules.every((m) => m.enabled === false)).toBe(true);
+    const rows = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules where tenant_id = ${body.tenant.id}::uuid`;
+    expect(rows).toHaveLength(7);
+    expect(rows.every((r) => r.enabled === false)).toBe(true);
+
+    const invalid = await platform('/tenants', {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: newTenantBody(`pt-test-inv-${RUN}`.slice(0, 40), { displayName: '' }),
+    });
+    expect(invalid.status).toBe(400);
+    const err = await envelope(invalid);
+    expect(err.code).toBe('VALIDATION_FAILED');
+    const issues = err.details?.issues as { path: string }[];
+    expect(issues.map((i) => i.path)).toContain('displayName');
+
+    // `example` is not a valid checklist value either (D-19).
+    const example = await platform('/tenants', {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: newTenantBody(`pt-test-ex-${RUN}`.slice(0, 40), { modules: ['example'] }),
+    });
+    expect(example.status).toBe(400);
+  });
+
+  it('14. GET list: ?q= finds the new tenant, ?status=suspended excludes it, ?limit=1 pages by slug cursor', async () => {
+    const byQ = await platform(`/tenants?q=${SLUG}`, { token: tokens.superAdmin });
+    expect(byQ.status).toBe(200);
+    const found = platformTenantsSchema.parse(await byQ.json());
+    expect(found.tenants.map((t) => t.slug)).toEqual([SLUG]);
+    expect(found.tenants[0]?.primaryHost).toBeNull();
+    expect(found.nextCursor).toBeNull();
+
+    const suspended = await platform('/tenants?status=suspended&limit=100', {
+      token: tokens.superAdmin,
+    });
+    const suspendedBody = platformTenantsSchema.parse(await suspended.json());
+    expect(suspendedBody.tenants.map((t) => t.slug)).not.toContain(SLUG);
+
+    const page1 = await platform('/tenants?limit=1', { token: tokens.superAdmin });
+    const first = platformTenantsSchema.parse(await page1.json());
+    expect(first.tenants).toHaveLength(1);
+    expect(first.nextCursor).toBe(first.tenants[0]?.slug);
+
+    const page2 = await platform(`/tenants?limit=1&cursor=${first.nextCursor}`, {
+      token: tokens.superAdmin,
+    });
+    const second = platformTenantsSchema.parse(await page2.json());
+    expect(second.tenants).toHaveLength(1);
+    expect((second.tenants[0]?.slug ?? '') > (first.tenants[0]?.slug ?? '')).toBe(true);
+
+    // limit outside 1..100 is a validation failure, not a silent clamp.
+    expect((await platform('/tenants?limit=0', { token: tokens.superAdmin })).status).toBe(400);
+  });
+
+  it('15. GET detail answers the strict schema; an unknown id is 404 NOT_FOUND', async () => {
+    const res = await platform(`/tenants/${tenantId}`, { token: tokens.superAdmin });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const raw = (await res.json()) as Record<string, unknown>;
+    expect(Object.keys(raw).sort()).toEqual(
+      ['admins', 'domains', 'invites', 'modules', 'tenant'].sort(),
+    );
+    const body = platformTenantDetailSchema.strict().parse(raw);
+    expect(body.tenant.id).toBe(tenantId);
+    expect(body.tenant.contrast.onPrimary.ok).toBe(true);
+
+    const missing = await platform('/tenants/00000000-0000-4000-8000-000000000000', {
+      token: tokens.superAdmin,
+    });
+    expect(missing.status).toBe(404);
+    expect((await envelope(missing)).code).toBe('NOT_FOUND');
+
+    expect((await platform('/tenants/not-a-uuid', { token: tokens.superAdmin })).status).toBe(400);
+  });
+
+  it('16. PATCH re-derives the colors; a slug change is refused (D-31)', async () => {
+    const res = await platform(`/tenants/${tenantId}`, {
+      method: 'PATCH',
+      token: tokens.superAdmin,
+      body: { colors: { primary: '#111111', secondary: '#222222' } },
+    });
+    expect(res.status).toBe(200);
+    const body = platformTenantDetailSchema.parse(await res.json());
+    expect(body.tenant.branding.colors.primary).toBe('#111111');
+    expect(body.tenant.branding.colors.onPrimary).toBe('#ffffff');
+    expect(body.tenant.slug).toBe(SLUG);
+
+    const slugChange = await platform(`/tenants/${tenantId}`, {
+      method: 'PATCH',
+      token: tokens.superAdmin,
+      body: { slug: 'x' },
+    });
+    expect(slugChange.status).toBe(400);
+    expect((await envelope(slugChange)).code).toBe('VALIDATION_FAILED');
+    const after = platformTenantDetailSchema.parse(
+      await (await platform(`/tenants/${tenantId}`, { token: tokens.superAdmin })).json(),
+    );
+    expect(after.tenant.slug).toBe(SLUG);
+  });
+
+  it('17. ROLE-04: PUT …/modules/events on tria-lab is reflected in the lab member’s bootstrap on the very next request; example is not toggleable', async () => {
+    const before = (await (await bootstrap(tokens.labMember)).json()) as {
+      modules: { key: string }[];
+    };
+    expect(before.modules.map((m) => m.key)).toContain('events');
+
+    const off = await platform(`/tenants/${ids.lab}/modules/events`, {
+      method: 'PUT',
+      token: tokens.superAdmin,
+      body: { enabled: false },
+    });
+    expect(off.status).toBe(200);
+    const offBody = platformTenantDetailSchema.parse(await off.json());
+    expect(offBody.modules.find((m) => m.key === 'events')?.enabled).toBe(false);
+
+    const after = (await (await bootstrap(tokens.labMember)).json()) as {
+      modules: { key: string }[];
+    };
+    expect(after.modules.map((m) => m.key)).toEqual(['feed']);
+
+    // Idempotent: the same value again is 200 and still one row.
+    const again = await platform(`/tenants/${ids.lab}/modules/events`, {
+      method: 'PUT',
+      token: tokens.superAdmin,
+      body: { enabled: false },
+    });
+    expect(again.status).toBe(200);
+    const [rows] = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.tenant_modules
+       where tenant_id = ${ids.lab}::uuid and module_key = 'events'`;
+    expect(rows?.n).toBe('1');
+
+    // Restore D-17 (tria-lab = feed + events).
+    const on = await platform(`/tenants/${ids.lab}/modules/events`, {
+      method: 'PUT',
+      token: tokens.superAdmin,
+      body: { enabled: true },
+    });
+    expect(on.status).toBe(200);
+    const restored = (await (await bootstrap(tokens.labMember)).json()) as {
+      modules: { key: string }[];
+    };
+    expect(restored.modules.map((m) => m.key)).toEqual(['events', 'feed']);
+
+    // `example` is refused at validation on any tenant (D-19).
+    const example = await platform(`/tenants/${ids.demo}/modules/example`, {
+      method: 'PUT',
+      token: tokens.superAdmin,
+      body: { enabled: false },
+    });
+    expect(example.status).toBe(400);
+    expect((await envelope(example)).code).toBe('VALIDATION_FAILED');
+    // …and tria-demo still has it on: the example routes keep answering.
+    const items = await api.request('/v1/example/items', {
+      headers: { authorization: `Bearer ${tokens.demoMember}` },
+    });
+    expect(items.status).toBe(200);
+
+    const missing = await platform('/tenants/00000000-0000-4000-8000-000000000000/modules/feed', {
+      method: 'PUT',
+      token: tokens.superAdmin,
+      body: { enabled: true },
+    });
+    expect(missing.status).toBe(404);
+  });
+
+  it('18. D-32: POST /status suspended -> by-host answers status suspended and a member gets 403 TENANT_SUSPENDED; active restores', async () => {
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at, verification_status)
+      values (${tenantId}::uuid, ${HOST}, true, now(), 'verified')`;
+    invalidateTenantHost(HOST);
+    const warm = await api.request(`/v1/public/tenants/by-host?host=${HOST}`);
+    expect(warm.status).toBe(200);
+    expect(((await warm.json()) as { status: string }).status).toBe('active');
+
+    // A throwaway member of the new tenant.
+    const memberEmail = `member-${SLUG}@tria-test.local`;
+    const created = await authAdmin().createUser({
+      email: memberEmail,
+      password: 'Segredo123',
+      email_confirm: true,
+      user_metadata: { name: 'Membro Teste' },
+    });
+    if (created.error || !created.data.user) throw new Error(created.error?.message);
+    createdAuthUsers.push(created.data.user.id);
+    await adminSql`
+      insert into public.memberships (tenant_id, user_id, role, status)
+      values (${tenantId}::uuid, ${created.data.user.id}::uuid, 'member', 'active')`;
+    const memberToken = await signInAs(memberEmail, 'Segredo123');
+    expect((await bootstrap(memberToken)).status).toBe(200);
+
+    const suspend = await platform(`/tenants/${tenantId}/status`, {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: { status: 'suspended' },
+    });
+    expect(suspend.status).toBe(200);
+    expect(platformTenantDetailSchema.parse(await suspend.json()).tenant.status).toBe('suspended');
+
+    const byHost = await api.request(`/v1/public/tenants/by-host?host=${HOST}`);
+    expect(byHost.status).toBe(200);
+    expect(((await byHost.json()) as { status: string }).status).toBe('suspended');
+
+    const refused = await bootstrap(memberToken);
+    expect(refused.status).toBe(403);
+    expect((await envelope(refused)).code).toBe('TENANT_SUSPENDED');
+
+    const reactivate = await platform(`/tenants/${tenantId}/status`, {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: { status: 'active' },
+    });
+    expect(reactivate.status).toBe(200);
+    expect((await bootstrap(memberToken)).status).toBe(200);
+
+    const bad = await platform(`/tenants/${tenantId}/status`, {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: { status: 'deleted' },
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('19. D-30: the invite stays pending without a verified primary host and is sent once one exists', async () => {
+    // The host inserted in (18) is verified + primary; the invite created in (10) is still pending,
+    // because nothing has called the sender since — the API never sends by itself on a host insert
+    // (02-09's verify job does). Prove the pending state first from the detail.
+    const before = platformTenantDetailSchema.parse(
+      await (await platform(`/tenants/${tenantId}`, { token: tokens.superAdmin })).json(),
+    );
+    expect(before.invites[0]?.status).toBe('pending');
+    expect(before.domains[0]).toMatchObject({ host: HOST, isPrimary: true });
+
+    const result = await sendPendingInvites(tenantId, actor);
+    expect(result).toEqual({ sent: 1 });
+
+    const after = platformTenantDetailSchema.parse(
+      await (await platform(`/tenants/${tenantId}`, { token: tokens.superAdmin })).json(),
+    );
+    expect(after.invites[0]?.status).toBe('sent');
+    expect(after.invites[0]?.sentAt).not.toBeNull();
+    // Invited, not yet accepted: not an admin yet (T-02-19: the section lists active admins only).
+    expect(after.admins).toEqual([]);
+
+    const { data } = await authAdmin().listUsers({ page: 1, perPage: 1000 });
+    const invited = data.users.find((u) => u.email?.toLowerCase() === inviteEmail);
+    expect(invited).toBeDefined();
+    expect(invited?.invited_at).toBeTruthy();
+    if (invited) createdAuthUsers.push(invited.id);
+
+    const [membership] = await adminSql<{ role: string; status: string }[]>`
+      select role, status from public.memberships
+       where tenant_id = ${tenantId}::uuid and user_id = ${invited?.id ?? ''}::uuid`;
+    expect(membership).toEqual({ role: 'admin_tenant', status: 'invited' });
+  });
+
+  it('20. guard: a member on a platform mutation is 403 FORBIDDEN; a super_admin on a tenant host is 403 TENANT_HOST_MISMATCH', async () => {
+    const member = await platform(`/tenants/${tenantId}/status`, {
+      method: 'POST',
+      token: tokens.demoMember,
+      body: { status: 'suspended' },
+    });
+    expect(member.status).toBe(403);
+    expect((await envelope(member)).code).toBe('FORBIDDEN');
+
+    const onTenantHost = await platform(`/tenants/${tenantId}`, {
+      token: tokens.superAdmin,
+      headers: { [TENANT_HOST_HEADER]: HOSTS.demo },
+    });
+    expect(onTenantHost.status).toBe(403);
+    const err = await envelope(onTenantHost);
+    expect(err.code).toBe('TENANT_HOST_MISMATCH');
+    expect(err.details).toBeUndefined();
+
+    const anonymous = await platform('/tenants', { method: 'POST', body: newTenantBody('anon') });
+    expect(anonymous.status).toBe(401);
+
+    // The refused mutation changed nothing.
+    const detail = platformTenantDetailSchema.parse(
+      await (await platform(`/tenants/${tenantId}`, { token: tokens.superAdmin })).json(),
+    );
+    expect(detail.tenant.status).toBe('active');
   });
 });

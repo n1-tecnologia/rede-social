@@ -334,3 +334,70 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
     expect(await code(noHost)).toBe('NO_MEMBERSHIP');
   });
 });
+
+describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on the next request (ROLE-04, MOD-04)', () => {
+  const putModule = (tenantId: string, key: string, enabled: boolean) =>
+    api.request(`/v1/platform/tenants/${tenantId}/modules/${key}`, {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${tokens.superAdmin}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ enabled }),
+    });
+
+  it('13. no restart, no manual invalidate: the API toggle flips requireModule on this instance immediately', async () => {
+    const labId = tenantIds.lab;
+
+    // Warm the flags entry with the seeded state (D-17: chat is off on tria-lab)…
+    expect((await testRoute('chat', tokens.labMember)).status).toBe(404);
+
+    // …then toggle it through the platform API. Unlike case 8 the test never calls
+    // `moduleFlags.invalidate` — the service does, synchronously, before answering.
+    const on = await putModule(labId, 'chat', true);
+    expect(on.status).toBe(200);
+    expect(on.headers.get('cache-control')).toBe('no-store');
+    const onBody = (await on.json()) as { modules: { key: string; enabled: boolean }[] };
+    expect(onBody.modules.find((m) => m.key === 'chat')?.enabled).toBe(true);
+
+    const enabled = await testRoute('chat', tokens.labMember);
+    expect(enabled.status).toBe(200);
+    expect(await enabled.json()).toEqual({ ok: true });
+    const lab = (await (await bootstrap(tokens.labMember)).json()) as BootstrapBody;
+    expect(lab.modules.map((m) => m.key)).toEqual(['chat', 'events', 'feed']);
+
+    // Back off: the very next request is refused again.
+    const off = await putModule(labId, 'chat', false);
+    expect(off.status).toBe(200);
+    const disabled = await testRoute('chat', tokens.labMember);
+    expect(disabled.status).toBe(404);
+    expect(await code(disabled)).toBe('MODULE_DISABLED');
+    expect(
+      ((await (await bootstrap(tokens.labMember)).json()) as BootstrapBody).modules.map(
+        (m) => m.key,
+      ),
+    ).toEqual(['events', 'feed']);
+
+    // Writes are row upserts, never read-modify-write on a set: still exactly one row.
+    const [row] = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.tenant_modules
+       where tenant_id = ${labId}::uuid and module_key = 'chat'`;
+    expect(row?.n).toBe('1');
+
+    // Cache isolation: tria-demo's entry was never touched.
+    expect((await testRoute('chat', tokens.demoMember)).status).toBe(200);
+
+    // A member has no say in the platform lane; the tenant's flags are unchanged by the attempt.
+    const member = await api.request(`/v1/platform/tenants/${labId}/modules/chat`, {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${tokens.labAdmin}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(member.status).toBe(403);
+    expect(await code(member)).toBe('FORBIDDEN');
+    expect((await testRoute('chat', tokens.labMember)).status).toBe(404);
+  });
+});
