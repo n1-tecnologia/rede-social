@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-09-16T18:48:21.526Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-09-16T20:22:20.728Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 34e852f0e6c3246596924b39255f2a38a94dd43c
+state_head: 4ba2ad866fb28d2eb65228f2f5f97a64047d0f7e
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 12
+  completed_plans: 13
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 4 of 16
+Plan: 5 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -70,6 +70,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P01 | 95 min | 2 tasks | 22 files |
 | Phase 02 P02 | 185min | 3 tasks | 41 files |
 | Phase 02 P03 | 14 min | 3 tasks | 34 files |
+| Phase 02 P04 | 37 min | 3 tasks | 28 files |
 
 ## Accumulated Context
 
@@ -124,6 +125,10 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-03: request bodies normalise BEFORE validating (adminEmail trim+lowercase → z.email(); host normalizeHost → isRegistrableHost), because Zod 4 runs format checks before overwrite transforms
 - [Phase 02]: 02-03: GET /v1/platform/tenants answers primaryHost + nextCursor:null now (the widened contract is the route's response type); query/cursor handling stays with 02-12
 - [Phase 02]: 02-03: TENANT_SUSPENDED keeps the Phase 1 /auth/blocked sign-out path on the web until 02-08 ships /auth/suspended → /comunidade-indisponivel
+- [Phase 02]: 02-04: D-33 design review provisionally approved by the product owner (Igor Vilas Boas) on 2026-09-16 with no change list; the team designer reviews the platform-panel screens later — designer deltas are a follow-up polish pass, not a blocker for coding the [designed] screens
+- [Phase 02]: 02-04: catalog loader = pure assembleMessages() (sorted, deep-merge, duplicate leaf path throws naming both files) behind a memoized loadMessages(); next-intl onError throws outside production, getMessageFallback renders the dotted key
+- [Phase 02]: 02-04: hard-coded UI literals are a lint failure — scripts/check-ui-literals.sh (hex in strings/classes, legacy prototype classes, pt-BR JSX text, catalog root-key contract) runs after turbo lint in the root lint script; the Phase 1 #ddd hairline was fixed with var(--theme-border), not allow-listed
+- [Phase 02]: 02-04: derived brand tokens (--brand-accent/-hover/-soft/-gradient) are declared per element (* and [data-theme=dark] *), never only on :root — var() indirections resolve where declared, so a nested [data-brand-root] scope could not recolour bg-brand (pre-existing 02-02 bug found by the mockup brand picker)
 
 ### Pending Todos
 
@@ -156,6 +161,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-16T18:48:21.494Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-09-16T20:22:07.103Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
