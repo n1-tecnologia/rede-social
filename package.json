@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "lint": "turbo run lint",
+    "lint": "turbo run lint && bash scripts/check-ui-literals.sh",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "boundaries": "turbo boundaries --filter='!@tria/boundary-fixture'",

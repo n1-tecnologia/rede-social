@@ -1,0 +1,7 @@
+{
+  "noCommunity": {
+    "title": "Conta sem comunidade",
+    "body": "Sua conta ainda não pertence a uma comunidade.",
+    "cta": "Cadastrar em {tenant}"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "signup": {
+    "title": "Criar conta",
+    "name": "Nome completo",
+    "email": "Email",
+    "password": "Senha",
+    "showPassword": "Mostrar senha",
+    "hidePassword": "Ocultar senha",
+    "acceptRules": "Li e aceito as regras da comunidade {tenant}",
+    "acceptTerms": "Aceito os Termos de Uso e a Política de Privacidade da TRIA",
+    "rulesSheetTitle": "Regras da comunidade {tenant}",
+    "submit": "Cadastrar",
+    "pending": "Criando...",
+    "haveAccount": "Já tem conta?",
+    "login": "Entrar",
+    "duplicateEmail": "Este e-mail já está cadastrado. Entre com sua senha.",
+    "tenantNotFound": "Comunidade não encontrada.",
+    "passwordMin": "A senha deve ter pelo menos 8 caracteres.",
+    "strength": {
+      "weak": "Fraca",
+      "ok": "Boa",
+      "strong": "Forte"
+    },
+    "viewRules": "ver regras",
+    "closeRules": "Fechar",
+    "termsLink": "Termos de Uso",
+    "privacyLink": "Política de Privacidade",
+    "invalid": "Confira os campos destacados e tente novamente."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "app": {
+    "logout": "Sair",
+    "home": "Início",
+    "role": {
+      "admin_tenant": "Administrador",
+      "support_tenant": "Suporte",
+      "member": "Membro"
+    },
+    "modules": "Módulos ativos",
+    "none": "Nenhum módulo ativo"
+  }
+}

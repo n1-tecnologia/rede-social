@@ -1,0 +1,9 @@
+{
+  "example": {
+    "title": "Exemplo",
+    "empty": "Nenhum item ainda.",
+    "add": "Adicionar",
+    "placeholder": "Título do item",
+    "processed": "processado"
+  }
+}

@@ -23,7 +23,7 @@ function TopBar({
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0.75rem 1rem',
-        borderBottom: '1px solid #ddd',
+        borderBottom: '1px solid var(--theme-border)',
       }}
     >
       <strong style={branded ? { color: 'var(--brand-primary)' } : undefined}>{label}</strong>

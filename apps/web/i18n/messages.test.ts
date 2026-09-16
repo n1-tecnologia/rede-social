@@ -26,7 +26,11 @@ describe('loadMessages (PWA-03: one pt-BR catalog assembled from per-namespace f
     });
     expect(loadMessages(dir)).toEqual({
       common: { appName: 'TRIA' },
-      platform: { title: 'Plataforma TRIA', tenants: 'Tenants', list: { newTenant: 'Novo tenant' } },
+      platform: {
+        title: 'Plataforma TRIA',
+        tenants: 'Tenants',
+        list: { newTenant: 'Novo tenant' },
+      },
     });
   });
 
@@ -35,7 +39,10 @@ describe('loadMessages (PWA-03: one pt-BR catalog assembled from per-namespace f
       'login.json': { login: { title: 'Entrar' } },
       'signup.json': { signup: { title: 'Criar conta' } },
     });
-    expect(loadMessages(dir)).toEqual({ login: { title: 'Entrar' }, signup: { title: 'Criar conta' } });
+    expect(loadMessages(dir)).toEqual({
+      login: { title: 'Entrar' },
+      signup: { title: 'Criar conta' },
+    });
   });
 
   it('throws naming both files when two files declare the same leaf path', () => {
@@ -88,7 +95,9 @@ describe('loadMessages (PWA-03: one pt-BR catalog assembled from per-namespace f
     expect(messages.platform.modulesCount).toBe(
       '{count, plural, =0 {nenhum módulo} one {# módulo} other {# módulos}}',
     );
-    expect(messages.platform.modulesCount.normalize('NFD')).not.toBe(messages.platform.modulesCount);
+    expect(messages.platform.modulesCount.normalize('NFD')).not.toBe(
+      messages.platform.modulesCount,
+    );
   });
 
   it('assembles the real apps/web/messages/pt-BR catalog with every Phase 1 namespace present', () => {
@@ -114,13 +123,17 @@ describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   }
 
   it('fails on a hex colour literal in a .tsx', () => {
-    const r = run({ 'Foo.tsx': 'export const Foo = () => <div style={{ color: "#ff0000" }} />;\n' });
+    const r = run({
+      'Foo.tsx': 'export const Foo = () => <div style={{ color: "#ff0000" }} />;\n',
+    });
     expect(r.status).toBe(1);
     expect(r.out).toContain('Foo.tsx:1');
   });
 
   it('fails on a legacy prototype brand class', () => {
-    const r = run({ 'Foo.tsx': 'export const Foo = () => <button className="btn-gold">x</button>;\n' });
+    const r = run({
+      'Foo.tsx': 'export const Foo = () => <button className="btn-gold">x</button>;\n',
+    });
     expect(r.status).toBe(1);
     expect(r.out).toContain('btn-gold');
   });

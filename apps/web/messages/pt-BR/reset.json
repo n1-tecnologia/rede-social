@@ -1,0 +1,8 @@
+{
+  "reset": {
+    "title": "Redefinir senha",
+    "newPassword": "Nova senha",
+    "submit": "Salvar nova senha",
+    "pending": "Salvando..."
+  }
+}

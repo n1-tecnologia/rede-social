@@ -1,0 +1,13 @@
+{
+  "login": {
+    "title": "Entrar",
+    "email": "Email",
+    "password": "Senha",
+    "submit": "Entrar",
+    "pending": "Entrando...",
+    "forgot": "Esqueceu a senha?",
+    "createAccount": "Criar nova conta",
+    "tenantHint": "Comunidade: {tenant}",
+    "invalid": "Email ou senha incorretos."
+  }
+}

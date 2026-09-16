@@ -1,0 +1,6 @@
+{
+  "suspended": {
+    "title": "Acesso suspenso",
+    "body": "Seu acesso a {tenant} foi suspenso. Fale com a equipe."
+  }
+}

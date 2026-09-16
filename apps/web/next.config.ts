@@ -8,8 +8,11 @@ const nextConfig: NextConfig = {
   // assets and post server actions (D-20/D-21). Chromium resolves `*.localhost` to loopback (RFC 6761).
   allowedDevOrigins: ['*.localhost'],
   // `/termos` and `/privacidade` read the versioned markdown from `@tria/contracts/legal` at
-  // request time; without this the files are not traced into the Vercel function bundle.
-  outputFileTracingIncludes: { '/**': ['../../packages/contracts/legal/**'] },
+  // request time, and `i18n/messages.ts` reads the per-namespace pt-BR catalog with `fs` (PWA-03);
+  // without this neither set of files is traced into the Vercel function bundle.
+  outputFileTracingIncludes: {
+    '/**': ['../../packages/contracts/legal/**', './messages/pt-BR/**'],
+  },
 };
 
 // next-intl without locale routing: one pt-BR catalog resolved by ./i18n/request.ts.
