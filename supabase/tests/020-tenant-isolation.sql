@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(27);
+select plan(31);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -69,6 +69,13 @@ insert into public.consent_records (tenant_id, user_id, kind, text_version) valu
 
 -- A platform admin really exists: the lane must still see nothing (RLS with ZERO policies, 01-03).
 insert into public.platform_admins (user_id) values ('0a000000-0000-4000-8000-000000000002');
+
+-- D-30: a pending first-admin invite exists on BOTH sides (same local part again). tenant_invites is
+-- admin-lane only — RLS with ZERO policies, like platform_admins — so even A's own row must be
+-- invisible to A's lane (T-02-08).
+insert into public.tenant_invites (tenant_id, email, created_by) values
+  ('0a000000-0000-4000-8000-000000000001', 'convidado@a.local', '0a000000-0000-4000-8000-000000000002'),
+  ('0b000000-0000-4000-8000-000000000001', 'convidado@b.local', '0b000000-0000-4000-8000-000000000002');
 
 -- ── tenant A's lane ─────────────────────────────────────────────────────────────────────────────
 select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
@@ -213,6 +220,20 @@ select results_eq(
   'platform_admins: a real row is invisible to a tenant lane (RLS, zero policies)'
 );
 
+select results_eq(
+  $$ select count(*)::int from public.tenant_invites $$,
+  ARRAY[0],
+  'tenant_invites: A''s OWN pending invite is invisible to A''s lane (admin-lane only, zero policies)'
+);
+select throws_ok(
+  $$ insert into public.tenant_invites (tenant_id, email, created_by)
+     values ('0a000000-0000-4000-8000-000000000001', 'outro@a.local',
+             '0a000000-0000-4000-8000-000000000002') $$,
+  '42501',
+  null,
+  'tenant_invites: the lane cannot create an invite — provisioning is a platform-lane operation (D-30)'
+);
+
 -- ── tenant B's lane: the symmetric half, so nothing above is an artefact of who went first ──────
 reset role;
 select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
@@ -230,6 +251,20 @@ select results_eq(
   $$ select host::text from public.tenant_domains $$,
   ARRAY['b.test'],
   'symmetry: only B''s host is listed'
+);
+select results_eq(
+  $$ select count(*)::int from public.tenant_invites $$,
+  ARRAY[0],
+  'symmetry: B''s lane sees no invite either'
+);
+
+-- ── the admin lane (withAdminTx behind requireSuperAdmin) is the only reader of invites ─────────
+reset role;
+select tests.as_service();
+select results_eq(
+  $$ select tenant_id::text from public.tenant_invites where email = 'CONVIDADO@A.LOCAL' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'tenant_invites: the admin lane reads the row, and email is citext (case-insensitive lookup)'
 );
 
 reset role;

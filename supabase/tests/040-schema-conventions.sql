@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(30);
+select plan(36);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -52,6 +52,29 @@ select results_eq(
   ARRAY[true],
   'platform_admins still has RLS enabled — without it the schema-wide SELECT grant would apply'
 );
+
+-- ── tenant_invites: the same zero-policy protection, on a tenant-owned table (02-03, D-30) ──────
+-- 010 exempts exactly this table from "at least one policy"; this pair is what keeps the exemption
+-- honest — the count is pinned at zero and RLS must stay on, or the schema-wide SELECT grant applies.
+select results_eq(
+  $$ select count(*)::int from pg_policy where polrelid = 'public.tenant_invites'::regclass $$,
+  ARRAY[0],
+  'tenant_invites has ZERO policies: invites are admin-lane only, no tenant lane can read them (D-30)'
+);
+select results_eq(
+  $$ select relrowsecurity from pg_class where oid = 'public.tenant_invites'::regclass $$,
+  ARRAY[true],
+  'tenant_invites still has RLS enabled — without it the schema-wide SELECT grant would apply'
+);
+select is(
+  (select t.typname::text from pg_attribute a
+     join pg_type t on t.oid = a.atttypid
+    where a.attrelid = 'public.tenant_invites'::regclass and a.attname = 'email'),
+  'citext',
+  'tenant_invites.email is citext: a re-invite that differs only in case is the same invite'
+);
+select has_index('public', 'tenant_invites', 'tenant_invites_tenant_email_key',
+  'one invite per (tenant_id, email) — tenant-first, like every other tenant index');
 
 -- ── consent_records is append-only evidence: the lane may read, never rewrite ───────────────────
 select results_eq(
@@ -126,6 +149,17 @@ select has_index('public', 'tenant_domains', 'tenant_domains_host_key',
   'a host is globally unique — it can only ever point at one tenant');
 select has_index('public', 'tenant_domains', 'tenant_domains_one_primary_per_tenant',
   'at most one primary host per tenant');
+-- D-34: the verification lifecycle is a status column with a CHECK (SCHEMA-CONVENTIONS (d).1), and
+-- verified_at stays the resolution predicate the host resolver reads (D-36).
+select col_default_is('public', 'tenant_domains', 'verification_status', 'pending',
+  'a freshly attached host starts as pending');
+select throws_ok(
+  $$ insert into public.tenant_domains (tenant_id, host, verification_status)
+     values ('0d000000-0000-4000-8000-000000000001', 'conv-bad.test', 'done') $$,
+  '23514',
+  null,
+  'tenant_domains_verification_status_chk: only pending | verified | expired | failed are storable'
+);
 
 insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
 values ('0d000000-0000-4000-8000-000000000001', 'conv-a.test', true, now());

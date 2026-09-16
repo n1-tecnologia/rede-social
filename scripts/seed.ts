@@ -193,10 +193,18 @@ for (const t of SEED_TENANTS) {
       );
     await tx
       .insert(tenantDomains)
-      .values({ tenantId, host: t.host, isPrimary: true, verifiedAt: new Date() })
+      // D-36: seeded hosts are verified outright (verified_at is the resolution predicate) and
+      // carry verification_status = 'verified' so the platform panel lists them as "Verificado".
+      .values({
+        tenantId,
+        host: t.host,
+        isPrimary: true,
+        verifiedAt: new Date(),
+        verificationStatus: 'verified',
+      })
       .onConflictDoUpdate({
         target: tenantDomains.host,
-        set: { tenantId, isPrimary: true },
+        set: { tenantId, isPrimary: true, verifiedAt: new Date(), verificationStatus: 'verified' },
       });
   });
 

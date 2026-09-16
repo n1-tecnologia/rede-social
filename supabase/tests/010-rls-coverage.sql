@@ -25,6 +25,10 @@ select is_empty(
 
 -- 2. …and at least one policy. RLS without a policy denies everything, which would be a silent
 --    outage rather than a leak, so it is a separate assertion from 1.
+--    The ONLY exception is the admin-lane-only list below: tables a tenant lane must never read
+--    (`tenant_invites`, 02-03 / D-30 — same protection as `platform_admins`, which carries no
+--    tenant_id and is therefore outside this assertion). 040 pins their policy count at ZERO, so a
+--    table cannot hide here by accident: it is either isolated by a policy or pinned as invisible.
 select is_empty(
   $$
     select c.relname
@@ -32,6 +36,7 @@ select is_empty(
       join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'public'
        and c.relkind = 'r'
+       and c.relname not in ('tenant_invites')
        and exists (
          select 1 from pg_attribute a
           where a.attrelid = c.oid and a.attname = 'tenant_id'
@@ -39,7 +44,7 @@ select is_empty(
        )
        and not exists (select 1 from pg_policy p where p.polrelid = c.oid)
   $$,
-  'TENANT-03: every public table with a tenant_id column has at least one policy'
+  'TENANT-03: every public table with a tenant_id column has at least one policy (or is pinned admin-lane-only in 040)'
 );
 
 -- 3. Tables without tenant_id are covered too (users, platform_admins, tenants): `authenticated`
@@ -65,11 +70,13 @@ select is_empty(
       from (values
         ('tenants'), ('users'), ('memberships'), ('tenant_domains'), ('platform_admins'),
         ('tenant_modules'), ('consent_records'), ('chat_conversations'), ('chat_participants'),
-        ('chat_messages'), ('notifications'), ('example_items')
+        ('chat_messages'), ('notifications'), ('example_items'),
+        -- Phase 2 (02-03)
+        ('tenant_invites')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phase 1 declares exists in public'
+  'every table Phases 1-2 declare exists in public'
 );
 
 select * from finish();
