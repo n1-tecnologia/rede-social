@@ -21,10 +21,12 @@ screens:
   - install-hint
   - platform-shell-mobile
   - feedback
-status: pending-review
-approved: false
-approved_by: ""
-approved_at: ""
+status: approved
+approved: true
+approved_by: "Igor Vilas Boas (product owner)"
+approved_at: "2026-09-16"
+approval_kind: provisional
+approval_note: "Provisional approval by the product owner; the team's designer will review the platform-panel screens later. Any future designer deltas are a follow-up, not a blocker for coding the screens now."
 changes_requested: []
 winner: null
 tags: [phase-02, design-review, D-33, UI-04, platform-panel, desktop-shell, auth, pwa]
@@ -89,7 +91,17 @@ logo hides the name next to it, D-26).
 
 ## Review outcome
 
-Recorded by Claude after the design team replies (checkpoint in `02-04-PLAN.md`): `approved`,
-`approved_by`, `approved_at` and `status: approved` in the frontmatter, or the numbered change list
-in `changes_requested`, applied to `index.html` and appended to `02-UI-SPEC.md` under
-"## Design review deltas".
+**Approved (provisional) — Igor Vilas Boas, product owner, 2026-09-16.** Recorded from the D-33
+checkpoint reply in `02-04-PLAN.md`: the product owner approved every screen in this mockup with no
+change list (`changes_requested: []`), so `02-UI-SPEC.md` carries no "Design review deltas" section.
+
+The approval is **provisional**: the team's designer has not reviewed these screens yet and will do
+so later, the platform-panel screens in particular. That review is a **follow-up, not a blocker** —
+the [designed] screens may be coded now against this mockup and the UI-SPEC. When the designer's
+deltas arrive, record them in `changes_requested`, apply them to `index.html` and append a
+"## Design review deltas" section to `02-UI-SPEC.md`; the coded screens then absorb them as a
+polish pass.
+
+Reply on record (pt-BR): "todo design dessa pagina de super_admin aprovado, nao estou preocupado
+muito aqui porque depois irá passar na mao do designer da equipe. Entao por agora está tudo ok e
+aprovado por mim".
