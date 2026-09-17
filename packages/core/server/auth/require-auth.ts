@@ -30,12 +30,23 @@ export async function verifyBearer(c: {
 }
 
 /**
- * Order is fixed: verify -> membership -> tenant suspended -> blocked -> host. A suspended tenant
- * answers TENANT_SUSPENDED for every member, blocked or not (D-32: the community is unavailable as a
- * whole, so the member is not told about their own status); a blocked member on the wrong host still
- * gets MEMBERSHIP_BLOCKED; an `invited` membership passes (D-29: accept-invite runs in the tenant
- * lane). The host header can only DENY a session (403 TENANT_HOST_MISMATCH); the tenant of record is
- * always the membership (TENANT-01, D-23). `Host`/`X-Forwarded-Host` are never read.
+ * The only tenant-lane paths an `invited` membership may reach (D-29, T-02-122): the bootstrap that
+ * tells the web app to show the accept screen, and the accept itself. Mounted API paths
+ * (`app.ts` mounts `/v1/me`); compared against `c.req.path` with a trailing slash stripped.
+ */
+const INVITED_ALLOWED_PATHS = new Set(['/v1/me/bootstrap', '/v1/me/accept-invite']);
+
+/**
+ * Order is fixed: verify -> membership -> tenant suspended -> blocked -> host -> invited scope. A
+ * suspended tenant answers TENANT_SUSPENDED for every member, blocked or not (D-32: the community is
+ * unavailable as a whole, so the member is not told about their own status); a blocked member on the
+ * wrong host still gets MEMBERSHIP_BLOCKED; an `invited` membership passes the membership checks
+ * (D-29: accept-invite runs in the tenant lane) but, AFTER the host check, may reach only the two
+ * onboarding routes — an invited admin holds a session from the invite link without having accepted
+ * the tenant rules and TRIA's terms yet, so every other route answers 403 MEMBERSHIP_INVITED (a
+ * cross-tenant host still answers TENANT_HOST_MISMATCH first). The host header can only DENY a
+ * session (403 TENANT_HOST_MISMATCH); the tenant of record is always the membership (TENANT-01,
+ * D-23). `Host`/`X-Forwarded-Host` are never read.
  */
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   const payload = await verifyBearer(c);
@@ -71,6 +82,13 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
       // No details on purpose: the body must not name either tenant.
       throw new ApiError(403, 'TENANT_HOST_MISMATCH');
     }
+  }
+
+  if (
+    membership.status === 'invited' &&
+    !INVITED_ALLOWED_PATHS.has(c.req.path.replace(/\/+$/, ''))
+  ) {
+    throw new ApiError(403, 'MEMBERSHIP_INVITED', { tenantName: membership.tenantDisplayName });
   }
 
   c.set('ctx', {

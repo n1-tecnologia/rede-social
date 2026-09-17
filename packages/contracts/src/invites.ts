@@ -65,3 +65,11 @@ export const INVITE_STATE_REASONS = [
   'not_invited',
 ] as const;
 export type InviteStateReason = (typeof INVITE_STATE_REASONS)[number];
+
+/** Path params of `POST /v1/platform/tenants/{id}/invites/{inviteId}/resend`. */
+export const inviteParamsSchema = z.object({ id: z.uuid(), inviteId: z.uuid() });
+export type InviteParams = z.infer<typeof inviteParamsSchema>;
+
+/** `GET /v1/platform/tenants/{id}/invites` — every invite row of the tenant, oldest first. */
+export const tenantInvitesListSchema = z.object({ invites: z.array(tenantInviteSchema) });
+export type TenantInvitesList = z.infer<typeof tenantInvitesListSchema>;

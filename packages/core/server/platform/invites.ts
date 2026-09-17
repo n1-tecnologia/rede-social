@@ -1,10 +1,15 @@
+import { resolveBranding, type TenantInvite } from '@tria/contracts';
 import { and, asc, eq, isNotNull } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { memberships, tenantDomains, tenantInvites, tenants, users } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
-import { publicWebOrigin } from '../env';
+import { env, publicWebOrigin } from '../env';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
+import { buildActionLink } from '../mail/hook-schema';
+import { mailTransport, toMailBrand } from '../mail/index';
+import { renderInvite } from '../mail/templates/invite';
+import { MAIL_SEND_TIMEOUT_MS, MailTransportError, maskEmail } from '../mail/transport';
 import { supabaseAdmin } from '../supabase-admin';
 
 /** Who is acting (the `super_admin` behind `requireSuperAdmin()`, or the job that verified a host). */
@@ -184,4 +189,263 @@ export async function sendPendingInvites(
   }
 
   return { sent };
+}
+
+/** One `tenant_invites` row in the `tenantInviteSchema` shape (dates as ISO strings). */
+type InviteRow = {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  sentAt: Date | null;
+  acceptedAt: Date | null;
+  createdAt: Date;
+};
+
+const toInvite = (row: InviteRow): TenantInvite => ({
+  id: row.id,
+  email: row.email,
+  role: 'admin_tenant',
+  status: row.status as TenantInvite['status'],
+  sentAt: row.sentAt ? row.sentAt.toISOString() : null,
+  acceptedAt: row.acceptedAt ? row.acceptedAt.toISOString() : null,
+  createdAt: row.createdAt.toISOString(),
+});
+
+const inviteColumns = {
+  id: tenantInvites.id,
+  email: tenantInvites.email,
+  role: tenantInvites.role,
+  status: tenantInvites.status,
+  sentAt: tenantInvites.sentAt,
+  acceptedAt: tenantInvites.acceptedAt,
+  createdAt: tenantInvites.createdAt,
+};
+
+async function readInvite(tx: Tx, tenantId: string, inviteId: string): Promise<TenantInvite> {
+  const rows = await tx
+    .select(inviteColumns)
+    .from(tenantInvites)
+    .where(and(eq(tenantInvites.id, inviteId), eq(tenantInvites.tenantId, tenantId)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return toInvite(row);
+}
+
+/**
+ * `GET /v1/platform/tenants/{id}/invites` (D-30, D-37): every invite row of the tenant, oldest
+ * first. An unknown tenant is a 404 (never an empty list, so the panel can tell the two apart).
+ */
+export async function listTenantInvites(tenantId: string): Promise<TenantInvite[]> {
+  return withAdminTx(async (tx) => {
+    const exists = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
+    if (!exists[0]) throw new ApiError(404, 'NOT_FOUND');
+    const rows = await tx
+      .select(inviteColumns)
+      .from(tenantInvites)
+      .where(eq(tenantInvites.tenantId, tenantId))
+      .orderBy(asc(tenantInvites.createdAt));
+    return rows.map(toInvite);
+  });
+}
+
+/**
+ * GoTrue's "this e-mail already has a confirmed identity" shape (same defensive match as
+ * `signup.ts`): the wording is not part of GoTrue's contract, so code, status and message are all
+ * consulted.
+ */
+function isConfirmedEmail(error: { message?: string; code?: string; status?: number }): boolean {
+  const message = (error.message ?? '').toLowerCase();
+  return (
+    error.code === 'email_exists' ||
+    error.code === 'user_already_exists' ||
+    message.includes('already been registered') ||
+    message.includes('already registered') ||
+    (error.status === 422 && message.includes('user') && message.includes('exist'))
+  );
+}
+
+/**
+ * "Reenviar convite" (D-30): the super_admin resends the first-admin invite from the Admins tab.
+ * Branches on the invite row (read scoped by `id AND tenant_id`, so an id that belongs to another
+ * tenant is a plain 404 — never a hint that it exists elsewhere):
+ *
+ *   - `accepted`  -> 409 INVITE_STATE_INVALID { reason: 'already_accepted' };
+ *   - no verified primary host -> 409 { reason: 'no_verified_primary' } (the link needs the tenant's
+ *     own branded origin, D-36);
+ *   - `pending`   -> delegates to `sendPendingInvites` so the FIRST send has exactly one
+ *     implementation (claim-before-send, GoTrue `inviteUserByEmail`, the 02-06 hook, branded mail);
+ *   - `sent` / `expired` -> a fresh token through the GoTrue admin `generateLink({ type: 'invite' })`
+ *     — which never sends mail and returns `properties.hashed_token` — rendered with the 02-06
+ *     invite template in the tenant's brand and sent through the kernel `mailTransport`.
+ *
+ * Why not `inviteUserByEmail` again (RESEARCH A3): whether GoTrue re-sends for an already-invited
+ * user is unverified, every GoTrue-originated send consumes the `[auth.rate_limit] email_sent`
+ * budget, and `generateLink` REPLACES the user's confirmation token, so the previous link stops
+ * working deterministically (T-02-120) — the behaviour the panel and the e2e rely on.
+ *
+ * `redirectTo` is composed ONLY from the tenant's verified primary `tenant_domains.host` through
+ * `publicWebOrigin` (T-02-123). The hashed token and the built link are handed to `buildActionLink`
+ * / `renderInvite` and to nothing else — never a log line, never the return value (T-02-124). A
+ * transport failure leaves the row untouched so the panel can simply retry.
+ */
+export async function resendInvite(
+  tenantId: string,
+  inviteId: string,
+  actor: PlatformActor,
+): Promise<TenantInvite> {
+  const log = logFor(actor, 'platform.invites');
+
+  const state = await withAdminTx(async (tx) => {
+    const invite = await readInvite(tx, tenantId, inviteId);
+    const [tenant] = await tx
+      .select({
+        slug: tenants.slug,
+        displayName: tenants.displayName,
+        status: tenants.status,
+        branding: tenants.branding,
+      })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
+    if (!tenant) throw new ApiError(404, 'NOT_FOUND');
+    const hosts = await tx
+      .select({ host: tenantDomains.host })
+      .from(tenantDomains)
+      .where(
+        and(
+          eq(tenantDomains.tenantId, tenantId),
+          eq(tenantDomains.isPrimary, true),
+          isNotNull(tenantDomains.verifiedAt),
+        ),
+      )
+      .limit(1);
+    return { invite, tenant, host: hosts[0]?.host ?? null };
+  });
+
+  const { invite, tenant, host } = state;
+  if (invite.status === 'accepted') {
+    throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'already_accepted' });
+  }
+  if (!host) {
+    throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'no_verified_primary' });
+  }
+
+  if (invite.status === 'pending') {
+    await sendPendingInvites(tenantId, actor);
+    return withAdminTx((tx) => readInvite(tx, tenantId, inviteId));
+  }
+
+  // `sent` / `expired`: mint a fresh token (no mail from GoTrue) and send it ourselves.
+  const redirectTo = `${publicWebOrigin(host)}${INVITE_NEXT_PATH}`;
+  const generated = await supabaseAdmin.auth.admin.generateLink({
+    type: 'invite',
+    email: invite.email,
+    options: { redirectTo, data: { tenant_slug: tenant.slug } },
+  });
+  if (generated.error) {
+    if (isConfirmedEmail(generated.error)) {
+      // The identity is confirmed although our row is not: surface it, never guess.
+      throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'already_accepted' });
+    }
+    log.error(
+      {
+        event: 'invite.resend_failed',
+        userId: actor.userId,
+        tenantId,
+        inviteId,
+        err: generated.error.message,
+      },
+      'generateLink failed',
+    );
+    throw new ApiError(500, 'INTERNAL');
+  }
+  const hashedToken = generated.data.properties?.hashed_token;
+  const invitedUserId = generated.data.user?.id;
+  if (!hashedToken || !invitedUserId) {
+    log.error(
+      { event: 'invite.resend_failed', userId: actor.userId, tenantId, inviteId, err: 'no token' },
+      'generateLink returned no hashed token',
+    );
+    throw new ApiError(500, 'INTERNAL');
+  }
+
+  const link = buildActionLink(redirectTo, hashedToken, 'invite');
+  const brand = toMailBrand(
+    {
+      kind: 'tenant',
+      via: 'membership',
+      tenantId,
+      slug: tenant.slug,
+      displayName: tenant.displayName,
+      status: tenant.status,
+      branding: resolveBranding(tenant.branding),
+      primaryHost: host,
+    },
+    host,
+  );
+  const rendered = renderInvite({ brand, link });
+  const sentAt = new Date();
+
+  try {
+    await mailTransport.send(
+      {
+        from: { name: brand.displayName, email: `no-reply@${env.MAIL_DOMAIN}` },
+        to: invite.email,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        idempotencyKey: `invite-resend:${inviteId}:${sentAt.toISOString()}`,
+        meta: { actionType: 'invite', tenantId },
+      },
+      { signal: AbortSignal.timeout(MAIL_SEND_TIMEOUT_MS) },
+    );
+  } catch (error) {
+    log.error(
+      {
+        event: 'invite.resend_failed',
+        userId: actor.userId,
+        tenantId,
+        inviteId,
+        transport: error instanceof MailTransportError ? error.transport : mailTransport.name,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'invite mail could not be sent',
+    );
+    throw new ApiError(500, 'INTERNAL');
+  }
+
+  const fresh = await withAdminTx(async (tx) => {
+    // `generateLink` recreates the auth user when it had been deleted; wait for the mirror row.
+    await waitForMirroredUser(tx, invitedUserId);
+    await tx
+      .insert(memberships)
+      .values({ tenantId, userId: invitedUserId, role: 'admin_tenant', status: 'invited' })
+      .onConflictDoNothing();
+    await tx
+      .update(tenantInvites)
+      .set({ status: 'sent', sentAt, userId: invitedUserId })
+      .where(eq(tenantInvites.id, inviteId));
+    return readInvite(tx, tenantId, inviteId);
+  });
+
+  log.info(
+    {
+      event: 'invite.resent',
+      userId: actor.userId,
+      tenantId,
+      inviteId,
+      invitedUserId,
+      to: maskEmail(invite.email),
+      transport: mailTransport.name,
+    },
+    'first-admin invite resent',
+  );
+
+  return fresh;
 }

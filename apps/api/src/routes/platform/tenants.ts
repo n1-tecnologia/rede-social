@@ -2,6 +2,7 @@ import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import {
   apiErrorEnvelopeSchema,
   createTenantBodySchema,
+  inviteParamsSchema,
   type PlatformTenantDetail,
   type PlatformTenants,
   platformTenantDetailSchema,
@@ -10,9 +11,13 @@ import {
   REAL_TENANT_DEFAULT_MODULES,
   setModuleBodySchema,
   setTenantStatusBodySchema,
+  type TenantInvitesList,
+  tenantInviteSchema,
+  tenantInvitesListSchema,
   updateTenantBodySchema,
 } from '@tria/contracts';
 import { ApiError } from '@tria/core/server/http/api-error';
+import { listTenantInvites, resendInvite } from '@tria/core/server/platform/invites';
 import { setModuleEnabled } from '@tria/core/server/platform/modules';
 import type { PlatformEnv } from '@tria/core/server/platform/require-super-admin';
 import {
@@ -126,6 +131,43 @@ const moduleRoute = createRoute({
   },
 });
 
+/**
+ * `GET /tenants/{id}/invites` and `POST /tenants/{id}/invites/{inviteId}/resend` (02-10, D-30):
+ * the first-admin invite lifecycle from the Admins tab. The resend answer is the fresh invite row
+ * (never a link or token — T-02-124); an invite that belongs to another tenant is a plain 404.
+ */
+const invitesListRoute = createRoute({
+  method: 'get',
+  path: '/tenants/{id}/invites',
+  request: { params: idParams },
+  responses: {
+    200: {
+      description: 'Every invite row of the tenant, oldest first',
+      content: { 'application/json': { schema: tenantInvitesListSchema } },
+    },
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+  },
+});
+
+const inviteResendRoute = createRoute({
+  method: 'post',
+  path: '/tenants/{id}/invites/{inviteId}/resend',
+  request: { params: inviteParamsSchema },
+  responses: {
+    200: {
+      description:
+        'The invite after the resend (status sent, fresh sentAt); pending invites go through the first send, sent/expired ones get a fresh token and a branded mail from the kernel transport',
+      content: { 'application/json': { schema: tenantInviteSchema } },
+    },
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant or invite'),
+    409: envelope(
+      'INVITE_STATE_INVALID — { reason: "already_accepted" } or { reason: "no_verified_primary" }',
+    ),
+  },
+});
+
 async function detailOr404(id: string): Promise<PlatformTenantDetail> {
   const detail = await getTenantDetail(id);
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
@@ -230,4 +272,30 @@ export const tenantsRoutes = tenants
     );
     c.header('Cache-Control', 'no-store');
     return c.json(detail, 200);
+  })
+  .openapi(invitesListRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+
+    const body: TenantInvitesList = { invites: await listTenantInvites(id) };
+
+    c.get('logger').info(
+      { event: 'platform.invites.list', userId, requestId, tenantId: id },
+      'platform read',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(body, 200);
+  })
+  .openapi(inviteResendRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id, inviteId } = c.req.valid('param');
+
+    const invite = await resendInvite(id, inviteId, { userId, logger: c.get('logger') });
+
+    c.get('logger').info(
+      { event: 'platform.invites.resend', userId, requestId, tenantId: id, inviteId },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(invite, 200);
   });

@@ -4,6 +4,8 @@ import { z } from 'zod';
  * Stable machine codes every client screen switches on (D-09). `TENANT_HOST_MISMATCH` per D-23;
  * `TENANT_SUSPENDED` (D-32) is the tenant being unavailable as a whole, distinct from
  * `MEMBERSHIP_BLOCKED` (this member only) — the web routes them to different screens.
+ * `MEMBERSHIP_INVITED` (D-29) is an invited admin's Bearer outside the two onboarding routes: the web
+ * routes it back to `/aceitar-convite`.
  * `DOMAIN_IN_USE` / `DOMAIN_STATE_INVALID` (D-34/D-35) are the platform panel's custom-domain
  * refusals: a host attached to another tenant (the body never names it), and an operation the
  * row's state forbids (`details.reason` from `DOMAIN_STATE_REASONS`). `INVITE_STATE_INVALID` (D-30)
@@ -14,6 +16,7 @@ export const ERROR_CODES = [
   'INVALID_TOKEN',
   'NO_MEMBERSHIP',
   'MEMBERSHIP_BLOCKED',
+  'MEMBERSHIP_INVITED',
   'TENANT_SUSPENDED',
   'DOMAIN_IN_USE',
   'DOMAIN_STATE_INVALID',

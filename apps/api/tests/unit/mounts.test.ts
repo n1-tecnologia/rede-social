@@ -54,6 +54,9 @@ describe('module mounts', () => {
     expect(paths).toContain('PATCH /v1/platform/tenants/:id');
     expect(paths).toContain('POST /v1/platform/tenants/:id/status');
     expect(paths).toContain('PUT /v1/platform/tenants/:id/modules/:key');
+    // 02-10: the invite lifecycle is chained on the same tenants router.
+    expect(paths).toContain('GET /v1/platform/tenants/:id/invites');
+    expect(paths).toContain('POST /v1/platform/tenants/:id/invites/:inviteId/resend');
     // The guard is registered on the parent router, so every sub-router inherits it (T-02-15).
     expect(
       app.routes.some((route) => route.path === '/v1/platform/*' && route.method === 'ALL'),
