@@ -8,7 +8,8 @@ import { useTranslations } from 'next-intl';
  * Connectivity banner (PWA-01), mounted once in the root layout so it shows on every route.
  * `useOffline()` only reports offline when `experimental.useOffline` is on (next.config.ts); with it,
  * Next keeps failed navigations/actions pending and retries them itself when the connection returns —
- * so this banner never reloads and has no dismiss: it simply disappears once the app is back online.
+ * so this banner never refreshes the page and has no dismiss: it simply disappears once the app is
+ * back online.
  *
  * Neutral tokens only (it renders above tenant and non-tenant pages alike), pinned under the safe-area
  * top inset, `z-[90]` — below the `@tria/ui` toast layer (`z-[100]`). `role="status"` + polite live
