@@ -44,6 +44,7 @@ let name = '';
 let adminEmail = '';
 let host = '';
 let tenantId = '';
+let logoBefore: string | null = null;
 
 let context: BrowserContext;
 let page: Page;
@@ -78,6 +79,22 @@ async function byHost(): Promise<HostAnswer> {
   const res = await fetch(`${API_URL}/v1/public/tenants/by-host?host=${host}`);
   if (!res.ok) throw new Error(`by-host ${host}: ${res.status}`);
   return (await res.json()) as HostAnswer;
+}
+
+/**
+ * After a full navigation the file input exists before React hydrated it; a pick dispatched in that
+ * window is lost (no handler yet). React tags hydrated DOM nodes with its internal props key, so
+ * waiting for it is the cheapest honest "interactive" probe before `setInputFiles`.
+ */
+async function waitForHydration(page: Page, selector: string): Promise<void> {
+  await page.waitForFunction(
+    (sel) => {
+      const el = document.querySelector(sel);
+      return el !== null && Object.keys(el).some((key) => key.startsWith('__reactProps'));
+    },
+    selector,
+    { timeout: 30_000 },
+  );
 }
 
 /** The RENDERED background of the mini login CTA inside one preview frame. */
@@ -179,6 +196,7 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
       page.getByText('Nenhum logo enviado — o nome da comunidade aparece no lugar.'),
     ).toBeVisible();
     await expect(page.locator('[data-icons-status]')).toHaveCount(0);
+    await waitForHydration(page, '[data-upload-zone="logo"] input[type="file"]');
 
     // Browser → signed Storage URL → complete (D-27); the zone shows the new logo through <img>.
     await page.locator('[data-upload-zone="logo"] input[type="file"]').setInputFiles(SEED_LOGO);
@@ -245,5 +263,107 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
     await expect.poll(async () => (await getTenantBranding(slug)).iconUrl).toBeNull();
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
     await expect(page.getByText('Gerados a partir do logo')).toBeVisible();
+    logoBefore = (await getTenantBranding(slug)).logoUrl;
+  });
+
+  test('3. upload errors: type and size never reach the API; transfer and not-an-image refusals keep the logo and the zone usable', async () => {
+    await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
+    const zone = page.locator('[data-upload-zone="logo"]');
+    const input = zone.locator('input[type="file"]');
+    const alert = zone.getByRole('alert');
+    await waitForHydration(page, '[data-upload-zone="logo"] input[type="file"]');
+    const urls: string[] = [];
+    page.on('request', (req) => urls.push(req.url()));
+
+    // (a) wrong type — client gate, no request.
+    await input.setInputFiles({
+      name: 'anim.gif',
+      mimeType: 'image/gif',
+      buffer: Buffer.alloc(64),
+    });
+    await expect(alert).toHaveText('Formato não suportado. Use PNG, SVG, WebP ou JPEG.');
+    expect(urls.some((u) => u.includes('/branding/uploads'))).toBe(false);
+
+    // (b) too large — client gate, no request.
+    await input.setInputFiles({
+      name: 'grande.png',
+      mimeType: 'image/png',
+      buffer: Buffer.alloc(2 * 1024 * 1024 + 1),
+    });
+    await expect(alert).toHaveText('Arquivo muito grande. O limite é 2 MB.');
+    expect(urls.some((u) => u.includes('/branding/uploads'))).toBe(false);
+
+    // (c) the PUT to Storage fails — transfer error, zone back to idle.
+    await page.route('**/storage/v1/object/upload/sign/**', (route) => route.abort('failed'));
+    try {
+      await input.setInputFiles({ name: 'ok.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
+      await expect(alert).toHaveText('Falha no envio. Tente novamente.', { timeout: 30_000 });
+    } finally {
+      await page.unroute('**/storage/v1/object/upload/sign/**');
+    }
+
+    // (d) a text payload named .png: the PUT succeeds, complete refuses it (object removed).
+    await input.setInputFiles({
+      name: 'falso.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('<html>hi</html>'),
+    });
+    await expect(alert).toHaveText('O arquivo não é uma imagem válida. Escolha outro arquivo.', {
+      timeout: 30_000,
+    });
+
+    // Nothing persisted, zone idle and usable again.
+    expect((await getTenantBranding(slug)).logoUrl).toBe(logoBefore);
+    await expect(input).toBeEnabled();
+    await expect(zone.getByRole('progressbar')).toHaveCount(0);
+
+    // (e) the zone still works afterwards.
+    await input.setInputFiles({ name: 'novo.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
+    await expect(page.getByText('Alterações salvas.').first()).toBeVisible({ timeout: 30_000 });
+    await expect(alert).toHaveCount(0);
+    await expect.poll(async () => (await getTenantBranding(slug)).logoUrl).not.toBe(logoBefore);
+  });
+
+  test('4. mobile: the two zones and the two mini-shells stack; no horizontal overflow', async () => {
+    test.skip(test.info().project.name !== 'mobile-chromium', 'phone layout only');
+    await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
+    const logoZone = page.locator('[data-upload-zone="logo"]');
+    const iconZone = page.locator('[data-upload-zone="icon"]');
+    await expect(iconZone).toBeVisible();
+    const [logoBox, iconBox] = await Promise.all([logoZone.boundingBox(), iconZone.boundingBox()]);
+    if (!logoBox || !iconBox) throw new Error('zones have no box');
+    expect(Math.abs(logoBox.x - iconBox.x)).toBeLessThanOrEqual(1);
+    expect(iconBox.y).toBeGreaterThan(logoBox.y + logoBox.height - 1);
+
+    const frames = page.locator('[data-brand-scope]');
+    await expect(frames).toHaveCount(2);
+    const [lightBox, darkBox] = await Promise.all([
+      frames.nth(0).boundingBox(),
+      frames.nth(1).boundingBox(),
+    ]);
+    if (!lightBox || !darkBox) throw new Error('frames have no box');
+    expect(Math.abs(lightBox.x - darkBox.x)).toBeLessThanOrEqual(1);
+    expect(darkBox.y).toBeGreaterThan(lightBox.y + lightBox.height - 1);
+
+    const widths = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth);
+  });
+
+  test('5. mobile: the new-tenant preview stacks two 200 px frames', async () => {
+    test.skip(test.info().project.name !== 'mobile-chromium', 'phone layout only');
+    await page.goto(`${hosts.platform}/plataforma/novo`);
+    const frames = page.locator('[data-brand-scope]');
+    await expect(frames).toHaveCount(2);
+    const [lightBox, darkBox] = await Promise.all([
+      frames.nth(0).boundingBox(),
+      frames.nth(1).boundingBox(),
+    ]);
+    if (!lightBox || !darkBox) throw new Error('frames have no box');
+    expect(Math.abs(lightBox.width - 200)).toBeLessThanOrEqual(1);
+    expect(Math.abs(darkBox.width - 200)).toBeLessThanOrEqual(1);
+    expect(darkBox.y).toBeGreaterThan(lightBox.y + lightBox.height - 1);
   });
 });
