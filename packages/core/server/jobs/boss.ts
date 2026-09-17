@@ -144,12 +144,16 @@ async function startedBoss(): Promise<PgBoss> {
  * second error would replace the real one on its way to the caller and the logs. Nothing needs
  * restoring on that path either — the caller's transaction is being rolled back and the LOCAL
  * setting dies with it.
+ *
+ * `startAfter` (seconds, an ISO string or a Date — pg-boss 12 accepts all three) defers the job:
+ * deferred jobs are how the kernel's domain poller (`kernel.domain-verify`, 02-09) paces itself at
+ * its ~10-minute cadence without a scheduler, re-arming one deferred job per host under `short`.
  */
 export async function enqueueInTx(
   tx: Tx,
   name: string,
   payload: object,
-  opts: { singletonKey?: string } = {},
+  opts: { singletonKey?: string; startAfter?: number | string | Date } = {},
 ): Promise<string | null> {
   const boss = await startedBoss();
   const rows = (await tx.execute(sql`select current_role as role`)) as unknown as {

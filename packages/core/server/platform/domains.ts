@@ -1,0 +1,541 @@
+import {
+  type AttachDomainBody,
+  type DnsRecord,
+  type DomainStatus,
+  normalizeHost,
+  type TenantDomain,
+  type TenantDomainsList,
+} from '@tria/contracts';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { withAdminTx } from '../../db/admin-tx';
+import { tenantDomains, tenants } from '../../db/schema';
+import type { Tx } from '../../db/tenant-tx';
+import {
+  authAllowList,
+  DOMAIN_VERIFY_DEADLINE_MS,
+  DOMAIN_VERIFY_INTERVAL_S,
+  DOMAIN_VERIFY_QUEUE,
+  DomainProviderError,
+  domainProvider,
+} from '../domains/index';
+import { env } from '../env';
+import { ApiError } from '../http/api-error';
+import { enqueueInTx } from '../jobs/boss';
+import { invalidateTenantHost } from '../tenancy/tenant-host';
+import { logFor, type PlatformActor, sendPendingInvites } from './invites';
+
+/**
+ * Custom domains of a tenant (TENANT-07, D-34/D-35/D-36) — the admin-lane service behind
+ * `/v1/platform/tenants/{id}/domains*` AND the `kernel.domain-verify` poller. Everything that
+ * touches `tenant_domains` at runtime lives here, so the route and the job share ONE
+ * `checkDomain` and the verified transition has exactly one writer.
+ *
+ * Invariants this file keeps (pinned by `platform-domains.test.ts` and pgTAP 050):
+ *  - `verified_at` is written ONLY by the single `update … where verified_at is null returning`
+ *    inside `checkDomain` — the row that comes back is the one and only winner, the loser runs no
+ *    side effects (T-02-54);
+ *  - a host is registered at the provider BEFORE its row exists (PATTERNS Analog B), and an insert
+ *    failure compensates with `removeDomain`;
+ *  - every read/mutation a route asks for is scoped by `tenant_id AND id`, so another tenant's
+ *    domain id is a plain 404 (T-02-57);
+ *  - the 409 for a host owned by another tenant never names that tenant (T-02-58).
+ */
+
+type DomainRow = typeof tenantDomains.$inferSelect;
+
+const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
+
+const toTenantDomain = (d: DomainRow): TenantDomain => ({
+  id: d.id,
+  host: d.host,
+  isPrimary: d.isPrimary,
+  verificationStatus: d.verificationStatus as DomainStatus,
+  verifiedAt: iso(d.verifiedAt),
+  dnsRecords: d.dnsRecords,
+  lastCheckedAt: iso(d.lastCheckedAt),
+  verifyDeadlineAt: iso(d.verifyDeadlineAt),
+  lastError: d.lastError,
+  createdAt: d.createdAt.toISOString(),
+});
+
+/**
+ * Keeps the provider's order but drops later duplicates of the same `type + name` (case-insensitive
+ * name), so a re-check never depends on array order and the panel never shows one instruction twice
+ * (edge TENANT-07/ordering).
+ */
+export function dedupeDnsRecords(records: readonly DnsRecord[]): DnsRecord[] {
+  const seen = new Set<string>();
+  const out: DnsRecord[] = [];
+  for (const record of records) {
+    const key = `${record.type}|${record.name.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(record);
+  }
+  return out;
+}
+
+/** Postgres `23505` (unique_violation), possibly wrapped by drizzle's `DrizzleQueryError`: the constraint name, or null. */
+function uniqueViolationConstraint(error: unknown): string | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const e = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (e.code === '23505') {
+      return typeof e.constraint_name === 'string' ? e.constraint_name : '';
+    }
+    current = e.cause;
+  }
+  return null;
+}
+
+/**
+ * The shape the attach body already guarantees (`normalizeHost` + `isRegistrableHost`) plus what a
+ * provider would refuse anyway: at least one dot, no empty label, no label starting/ending with `-`.
+ */
+function isAttachableHost(host: string): boolean {
+  const labels = host.split('.');
+  if (labels.length < 2) return false;
+  return labels.every(
+    (label) => label.length > 0 && !label.startsWith('-') && !label.endsWith('-'),
+  );
+}
+
+/** Serialises every allow-list read-modify-write across API instances and the worker (RESEARCH Pattern 5). */
+async function withAllowListLock(fn: () => Promise<void>): Promise<void> {
+  await withAdminTx(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('tenant_domains.allow_list'))`);
+    await fn();
+  });
+}
+
+/** Re-arms the poller for a host: one deferred job per `domainId` (duplicates are dropped by the `short` policy). */
+async function enqueueVerify(tx: Tx, domainId: string): Promise<void> {
+  await enqueueInTx(
+    tx,
+    DOMAIN_VERIFY_QUEUE,
+    { domainId },
+    { singletonKey: domainId, startAfter: DOMAIN_VERIFY_INTERVAL_S },
+  );
+}
+
+async function loadRow(
+  tx: Tx,
+  domainId: string,
+  tenantId?: string,
+): Promise<DomainRow | undefined> {
+  const rows = await tx
+    .select()
+    .from(tenantDomains)
+    .where(
+      tenantId
+        ? and(eq(tenantDomains.id, domainId), eq(tenantDomains.tenantId, tenantId))
+        : eq(tenantDomains.id, domainId),
+    )
+    .limit(1);
+  return rows[0];
+}
+
+async function tenantExists(tx: Tx, tenantId: string): Promise<boolean> {
+  const rows = await tx
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+  return rows.length > 0;
+}
+
+async function listRows(tx: Tx, tenantId: string): Promise<DomainRow[]> {
+  return tx
+    .select()
+    .from(tenantDomains)
+    .where(eq(tenantDomains.tenantId, tenantId))
+    .orderBy(desc(tenantDomains.isPrimary), asc(tenantDomains.createdAt));
+}
+
+const toList = (rows: DomainRow[]): TenantDomainsList => ({
+  domains: rows.map(toTenantDomain),
+  primaryHost: rows.find((r) => r.isPrimary && r.verifiedAt !== null)?.host ?? null,
+});
+
+/** `GET …/domains` — every host of the tenant, primary first; `primaryHost` is the VERIFIED primary or null. */
+export async function listTenantDomains(tenantId: string): Promise<TenantDomainsList> {
+  return withAdminTx(async (tx) => {
+    if (!(await tenantExists(tx, tenantId))) throw new ApiError(404, 'NOT_FOUND');
+    return toList(await listRows(tx, tenantId));
+  });
+}
+
+export type AttachDomainResult = { domain: TenantDomain; created: boolean };
+
+/** Maps a provider refusal on attach to the envelope; anything else stays a 500. */
+function attachProviderError(error: unknown, log: ReturnType<typeof logFor>): never {
+  if (error instanceof DomainProviderError) {
+    switch (error.kind) {
+      case 'in_use':
+        throw new ApiError(409, 'DOMAIN_IN_USE', { reason: 'provider' });
+      case 'invalid_domain':
+        throw new ApiError(400, 'VALIDATION_FAILED', { host: 'invalid_domain' });
+      case 'rate_limited':
+        log.warn(
+          { event: 'platform.domains.provider_rate_limited', status: error.status ?? null },
+          'provider rate limited the attach',
+        );
+        throw new ApiError(503, 'INTERNAL');
+      default:
+        log.error(
+          { event: 'platform.domains.provider_failed', kind: error.kind, status: error.status },
+          'provider refused the attach',
+        );
+        throw new ApiError(500, 'INTERNAL');
+    }
+  }
+  log.error(
+    {
+      event: 'platform.domains.provider_failed',
+      err: error instanceof Error ? error.message : String(error),
+    },
+    'provider call failed',
+  );
+  throw new ApiError(500, 'INTERNAL');
+}
+
+/**
+ * `POST …/domains` (D-34). Order matters:
+ *  1. guards on the (already normalised) host: never the platform host (D-21), never an
+ *     unregistrable shape;
+ *  2. the existing row for the host — citext makes every case variant ONE lookup: same tenant ->
+ *     idempotent 200 with NO provider call; another tenant -> 409 without details;
+ *  3. the provider registration (`addDomain`), BEFORE the row (PATTERNS Analog B);
+ *  4. the row + the deferred poller in one admin transaction. `is_primary` is true for the tenant's
+ *     first host; a concurrent second "first host" loses on `tenant_domains_one_primary_per_tenant`
+ *     and is retried as non-primary. A concurrent identical attach loses on
+ *     `tenant_domains_host_key` and re-reads the winner's row (same tenant) or answers 409 (other
+ *     tenant — the registration now legitimately belongs to the winner, so no `removeDomain`).
+ *     Any other insert failure compensates with `removeDomain` and answers 500.
+ */
+export async function attachDomain(
+  tenantId: string,
+  body: AttachDomainBody,
+  actor: PlatformActor,
+): Promise<AttachDomainResult> {
+  const log = logFor(actor, 'platform-domains');
+  const host = body.host;
+
+  const platformHost = normalizeHost(env.PLATFORM_HOST);
+  if (platformHost && host === platformHost) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { host: 'platform_host' });
+  }
+  if (!isAttachableHost(host)) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { host: 'not_registrable' });
+  }
+
+  const existing = await withAdminTx(async (tx) => {
+    if (!(await tenantExists(tx, tenantId))) throw new ApiError(404, 'NOT_FOUND');
+    const rows = await tx.select().from(tenantDomains).where(eq(tenantDomains.host, host)).limit(1);
+    return rows[0];
+  });
+  if (existing) {
+    if (existing.tenantId === tenantId) return { domain: toTenantDomain(existing), created: false };
+    // No details: the body must never name the tenant that owns this host (T-02-58).
+    throw new ApiError(409, 'DOMAIN_IN_USE');
+  }
+
+  let records: DnsRecord[];
+  try {
+    const check = await domainProvider.addDomain(host);
+    records = dedupeDnsRecords(check.records);
+  } catch (error) {
+    attachProviderError(error, log);
+  }
+
+  const insert = async (forceNonPrimary: boolean): Promise<DomainRow> =>
+    withAdminTx(async (tx) => {
+      const [{ n } = { n: 0 }] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(tenantDomains)
+        .where(eq(tenantDomains.tenantId, tenantId));
+      const [row] = await tx
+        .insert(tenantDomains)
+        .values({
+          tenantId,
+          host,
+          isPrimary: !forceNonPrimary && n === 0,
+          verifiedAt: null,
+          verificationStatus: 'pending',
+          dnsRecords: records,
+          verifyDeadlineAt: new Date(Date.now() + DOMAIN_VERIFY_DEADLINE_MS),
+          lastCheckedAt: null,
+          lastError: null,
+        })
+        .returning();
+      if (!row) throw new Error('tenant_domains insert returned no row');
+      await enqueueVerify(tx, row.id);
+      return row;
+    });
+
+  let row: DomainRow;
+  try {
+    try {
+      row = await insert(false);
+    } catch (error) {
+      const constraint = uniqueViolationConstraint(error);
+      if (constraint?.includes('one_primary')) {
+        row = await insert(true);
+      } else {
+        throw error;
+      }
+    }
+  } catch (error) {
+    const constraint = uniqueViolationConstraint(error);
+    if (constraint !== null && (constraint === '' || constraint.includes('host'))) {
+      const winner = await withAdminTx(async (tx) => {
+        const rows = await tx
+          .select()
+          .from(tenantDomains)
+          .where(eq(tenantDomains.host, host))
+          .limit(1);
+        return rows[0];
+      });
+      if (winner && winner.tenantId === tenantId) {
+        return { domain: toTenantDomain(winner), created: false };
+      }
+      throw new ApiError(409, 'DOMAIN_IN_USE');
+    }
+    // Compensation (Analog B): the registration must not outlive the row that never got written.
+    let removeError: string | null = null;
+    try {
+      await domainProvider.removeDomain(host);
+    } catch (e) {
+      removeError = e instanceof Error ? e.message : String(e);
+    }
+    log.error(
+      {
+        event: 'platform.domains.attach_compensated',
+        userId: actor.userId,
+        tenantId,
+        host,
+        removeError,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'tenant_domains insert failed; provider registration removed',
+    );
+    throw new ApiError(500, 'INTERNAL');
+  }
+
+  log.info(
+    {
+      event: 'platform.domains.attach',
+      userId: actor.userId,
+      tenantId,
+      domainId: row.id,
+      host,
+      provider: domainProvider.name,
+      isPrimary: row.isPrimary,
+    },
+    'domain attached',
+  );
+  return { domain: toTenantDomain(row), created: true };
+}
+
+export type CheckDomainOutcome = 'verified' | 'already_verified' | 'pending' | 'expired' | 'gone';
+export type CheckDomainResult = { outcome: CheckDomainOutcome; domain: TenantDomain | null };
+
+async function recordError(domainId: string, lastError: string): Promise<void> {
+  await withAdminTx(async (tx) => {
+    await tx.update(tenantDomains).set({ lastError }).where(eq(tenantDomains.id, domainId));
+  });
+}
+
+/**
+ * What must follow the verified transition, in this order, OUTSIDE the transaction and idempotent
+ * (re-run on every "Verificar agora" of an already verified host — that is how a failed allow-list
+ * call is recoverable from the panel):
+ *  1. `invalidateTenantHost` so the host resolves on this instance's next request (D-36);
+ *  2. the allow-list entry, under the cross-process advisory lock (T-02-53);
+ *  3. `sendPendingInvites` — claim-before-send, so re-runs never send twice (D-30, T-02-54).
+ * Failures of 2/3 are recorded in `last_error` and logged, never thrown, and never touch
+ * `verified_at`.
+ */
+async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): Promise<void> {
+  const log = logFor(actor, 'platform-domains');
+  invalidateTenantHost(row.host);
+
+  try {
+    await withAllowListLock(() => authAllowList.add(row.host));
+  } catch (error) {
+    log.error(
+      {
+        event: 'platform.domains.allow_list_failed',
+        tenantId: row.tenantId,
+        domainId: row.id,
+        host: row.host,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'allow-list add failed; retry with "Verificar agora"',
+    );
+    await recordError(row.id, 'allow_list');
+  }
+
+  try {
+    await sendPendingInvites(row.tenantId, actor);
+  } catch (error) {
+    log.error(
+      {
+        event: 'platform.domains.invite_failed',
+        tenantId: row.tenantId,
+        domainId: row.id,
+        host: row.host,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'pending invites could not be sent; retry with "Verificar agora"',
+    );
+    await recordError(row.id, 'invite');
+  }
+}
+
+/**
+ * The ONE check the route ("Verificar agora"), the restart and the poller share (D-34/D-36).
+ *
+ * - `gone`: no such row (or, when `tenantId` is given, not this tenant's row) — the route maps it
+ *   to 404.
+ * - `already_verified`: NO provider call; the side effects re-run idempotently and the row is
+ *   answered unchanged (`verified_at` is never reset).
+ * - `expired`: the deadline passed (either already marked, or marked by this call after a failed
+ *   check) — nothing is re-armed; `restartDomainVerification` reopens it.
+ * - `verified`: BOTH conditions held and THIS call won the single
+ *   `update … set verified_at = now() … where id = $1 and verified_at is null returning` — a
+ *   zero-row answer means another caller (the job racing the button) won and this one returns
+ *   `already_verified` without running side effects.
+ * - `pending`: records/last_checked_at refreshed and the poller re-armed in the same transaction.
+ */
+export async function checkDomain(
+  domainId: string,
+  actor: PlatformActor,
+  opts: { source: 'manual' | 'job'; tenantId?: string },
+): Promise<CheckDomainResult> {
+  const log = logFor(actor, 'platform-domains');
+
+  const row = await withAdminTx((tx) => loadRow(tx, domainId, opts.tenantId));
+  if (!row) return { outcome: 'gone', domain: null };
+
+  if (row.verifiedAt !== null) {
+    await ensureVerifiedSideEffects(row, actor);
+    const fresh = await withAdminTx((tx) => loadRow(tx, domainId));
+    return { outcome: 'already_verified', domain: toTenantDomain(fresh ?? row) };
+  }
+  if (row.verificationStatus === 'expired') {
+    return { outcome: 'expired', domain: toTenantDomain(row) };
+  }
+
+  let check: Awaited<ReturnType<typeof domainProvider.verify>>;
+  try {
+    check = await domainProvider.verify(row.host);
+  } catch (error) {
+    const kind = error instanceof DomainProviderError ? error.kind : 'unavailable';
+    const status = error instanceof DomainProviderError ? error.status : undefined;
+    const [updated] = await withAdminTx((tx) =>
+      tx
+        .update(tenantDomains)
+        .set({ lastCheckedAt: new Date(), lastError: status ? `${kind}:${status}` : kind })
+        .where(eq(tenantDomains.id, domainId))
+        .returning(),
+    );
+    log.warn(
+      {
+        event: 'platform.domains.check_failed',
+        tenantId: row.tenantId,
+        domainId,
+        host: row.host,
+        source: opts.source,
+        kind,
+        status: status ?? null,
+      },
+      'provider check failed; host stays pending',
+    );
+    return { outcome: 'pending', domain: toTenantDomain(updated ?? row) };
+  }
+
+  const records = dedupeDnsRecords(check.records);
+  const now = new Date();
+
+  if (check.ownershipVerified && check.configured) {
+    const [winner] = await withAdminTx((tx) =>
+      tx
+        .update(tenantDomains)
+        .set({
+          verifiedAt: now,
+          verificationStatus: 'verified',
+          dnsRecords: records,
+          lastCheckedAt: now,
+          lastError: null,
+        })
+        // The single writer of verified_at: `… where id = $1 and verified_at is null returning *`.
+        .where(and(eq(tenantDomains.id, domainId), isNull(tenantDomains.verifiedAt)))
+        .returning(),
+    );
+    if (!winner) {
+      const fresh = await withAdminTx((tx) => loadRow(tx, domainId));
+      return { outcome: 'already_verified', domain: toTenantDomain(fresh ?? row) };
+    }
+    await ensureVerifiedSideEffects(winner, actor);
+    log.info(
+      {
+        event: 'platform.domains.verified',
+        userId: actor.userId,
+        tenantId: winner.tenantId,
+        domainId,
+        host: winner.host,
+        source: opts.source,
+      },
+      'domain verified',
+    );
+    const fresh = await withAdminTx((tx) => loadRow(tx, domainId));
+    return { outcome: 'verified', domain: toTenantDomain(fresh ?? winner) };
+  }
+
+  if (row.verifyDeadlineAt && row.verifyDeadlineAt.getTime() < now.getTime()) {
+    const [expired] = await withAdminTx((tx) =>
+      tx
+        .update(tenantDomains)
+        .set({ verificationStatus: 'expired', dnsRecords: records, lastCheckedAt: now })
+        .where(and(eq(tenantDomains.id, domainId), isNull(tenantDomains.verifiedAt)))
+        .returning(),
+    );
+    log.info(
+      {
+        event: 'platform.domains.expired',
+        tenantId: row.tenantId,
+        domainId,
+        host: row.host,
+        source: opts.source,
+      },
+      'verification deadline passed; poller stopped',
+    );
+    return { outcome: 'expired', domain: toTenantDomain(expired ?? row) };
+  }
+
+  const [pending] = await withAdminTx(async (tx) => {
+    const updated = await tx
+      .update(tenantDomains)
+      .set({ dnsRecords: records, lastCheckedAt: now, lastError: null })
+      .where(and(eq(tenantDomains.id, domainId), isNull(tenantDomains.verifiedAt)))
+      .returning();
+    if (updated[0]) await enqueueVerify(tx, domainId);
+    return updated;
+  });
+  log.info(
+    {
+      event: 'platform.domains.verify',
+      tenantId: row.tenantId,
+      domainId,
+      host: row.host,
+      source: opts.source,
+      ownershipVerified: check.ownershipVerified,
+      configured: check.configured,
+    },
+    'domain still pending; poller re-armed',
+  );
+  return { outcome: 'pending', domain: toTenantDomain(pending ?? row) };
+}

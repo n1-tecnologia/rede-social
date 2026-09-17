@@ -17,6 +17,13 @@ export const env = createEnv({
     /** Read once by `server/logging.ts`; every logger in the codebase is a child of that root. */
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 
+    /**
+     * The platform domain (D-21) — where TRIA's `super_admin` works. The API reads it so the
+     * custom-domain attach refuses it (D-34: a tenant host is never the platform host). Unset in
+     * Preview/local means "every unregistered host is generic" (01-02).
+     */
+    PLATFORM_HOST: z.string().min(1).optional(),
+
     /** Custom-domain provider (RESEARCH Pattern 5). `fake` answers fixed DNS records and verifies on first check. */
     DOMAIN_PROVIDER: z.enum(['fake', 'vercel']).default('fake'),
     VERCEL_TOKEN: z.string().min(1).optional(),

@@ -54,3 +54,34 @@ export type AttachDomainBody = z.infer<typeof attachDomainBodySchema>;
 /** Answer of `POST …/domains/{domainId}/verify` ("Verificar agora"): the row after the check. */
 export const domainCheckResultSchema = tenantDomainSchema;
 export type DomainCheckResult = z.infer<typeof domainCheckResultSchema>;
+
+/**
+ * Answer of `GET /v1/platform/tenants/{id}/domains` (D-35): every host ordered `is_primary desc,
+ * created_at asc`, and `primaryHost` = the VERIFIED primary or null — the same fact the tenant
+ * list, the invite sender and the by-host resolver agree on. A tenant with zero hosts lists
+ * `{ domains: [], primaryHost: null }` (edge TENANT-07/empty).
+ */
+export const tenantDomainsListSchema = z
+  .object({
+    domains: z.array(tenantDomainSchema),
+    primaryHost: z.string().nullable(),
+  })
+  .strict();
+export type TenantDomainsList = z.infer<typeof tenantDomainsListSchema>;
+
+/** Path params of every `…/tenants/{id}/domains/{domainId}/*` route. */
+export const tenantDomainParamsSchema = z.object({ id: z.uuid(), domainId: z.uuid() });
+export type TenantDomainParams = z.infer<typeof tenantDomainParamsSchema>;
+
+/**
+ * `details.reason` vocabulary of `409 DOMAIN_STATE_INVALID` (D-34/D-35) — what the Domínios tab
+ * (02-15) switches on: set-primary on an unverified host, delete of the primary while aliases
+ * exist, verify on an expired host, restart on a host that has not expired.
+ */
+export const DOMAIN_STATE_REASONS = [
+  'not_verified',
+  'primary_with_aliases',
+  'expired',
+  'not_expired',
+] as const;
+export type DomainStateReason = (typeof DOMAIN_STATE_REASONS)[number];

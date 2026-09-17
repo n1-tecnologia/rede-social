@@ -9,6 +9,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NO_MEMBERSHIP: 'Sua conta não pertence a nenhuma comunidade.',
   MEMBERSHIP_BLOCKED: 'Seu acesso foi suspenso.',
   TENANT_SUSPENDED: 'Esta comunidade está temporariamente indisponível.',
+  DOMAIN_IN_USE: 'Este domínio já está em uso.',
+  DOMAIN_STATE_INVALID: 'Esta operação não é permitida no estado atual do domínio.',
   TENANT_HOST_MISMATCH: 'Este endereço não pertence à sua comunidade.',
   MODULE_DISABLED: 'Este recurso não está disponível na sua comunidade.',
   FORBIDDEN: 'Você não tem permissão para fazer isso.',
