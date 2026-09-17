@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-10-PLAN.md
-last_updated: "2026-09-17T02:08:43.330Z"
+stopped_at: Completed 02-13-PLAN.md
+last_updated: "2026-09-17T02:33:53.335Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 8f4c5a74e0bacc09c7702db23a730dc6b0dfdf11
+state_head: 904ce9f994e3dacad675c8d7909673b67539c6f7
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 21
+  completed_plans: 22
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 13 of 16
+Plan: 14 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -79,6 +79,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P11 | 21min | 3 tasks | 27 files |
 | Phase 02 P12 | 24min | 3 tasks | 30 files |
 | Phase 02 P10 | 22min | 3 tasks | 23 files |
+| Phase 02 P13 | 21min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -167,6 +168,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-10: invited scope is an allow-list in requireAuth (/v1/me/bootstrap + /v1/me/accept-invite) checked after the host check; the bootstrap stays 200 with membership.status = 'invited' and the web guard lives in requireBootstrap()
 - [Phase 02]: 02-10: the accept action sets the password through @supabase/ssr updateUser BEFORE calling POST /v1/me/accept-invite, so a failure in between leaves a recoverable state routed back to /aceitar-convite
 - [Phase 02]: 02-10: integration cases that read a GoTrue-originated invite mail must attach *.localhost hosts — GoTrue drops a redirectTo outside additional_redirect_urls and mails a neutral link without /auth/confirm
+- [Phase 02]: 02-13: colours have two doors (panel PUT …/branding/colors with the confirmLowContrast gate; 02-05 PATCH ungated) and ONE persistence path — applyBrandColors bumps iconVersion and re-derives only when the primary changes
+- [Phase 02]: 02-13: icon derivation never runs in the request path — complete/colors decode the image header and enqueue kernel.branding-derive-icons (singletonKey = tenantId, short); the worker derives under versioned immutable keys with an optimistic iconVersion write (superseded on a race)
+- [Phase 02]: 02-13: stateless signed-upload id <kind>-<uuid>.<ext>; the object under <tenant_id>/branding/ is the proof; assertTenantKey before every Storage call; test cleanup goes through the Storage API (direct deletes from storage.objects are refused)
 
 ### Pending Todos
 
@@ -199,6 +203,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T02:08:43.299Z
-Stopped at: Completed 02-10-PLAN.md
+Last session: 2026-09-17T02:33:53.307Z
+Stopped at: Completed 02-13-PLAN.md
 Resume file: None
