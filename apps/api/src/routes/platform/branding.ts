@@ -1,6 +1,7 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import {
   apiErrorEnvelopeSchema,
+  brandingColorsBodySchema,
   brandingUploadBodySchema,
   brandingUploadParamsSchema,
   brandingUploadSchema,
@@ -8,7 +9,12 @@ import {
   platformTenantDetailSchema,
 } from '@tria/contracts';
 import { ApiError } from '@tria/core/server/http/api-error';
-import { completeBrandingUpload, startBrandingUpload } from '@tria/core/server/platform/branding';
+import {
+  completeBrandingUpload,
+  removeIconOverride,
+  setBrandingColors,
+  startBrandingUpload,
+} from '@tria/core/server/platform/branding';
 import type { PlatformEnv } from '@tria/core/server/platform/require-super-admin';
 import { getTenantDetail } from '@tria/core/server/platform/tenants';
 import { platformDefaultHook } from '../../http/openapi';
@@ -86,6 +92,41 @@ const uploadCompleteRoute = createRoute({
   },
 });
 
+const colorsRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/branding/colors',
+  request: {
+    params: idParams,
+    body: {
+      content: { 'application/json': { schema: brandingColorsBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: detailResponse(
+      'The two source colours persisted with their derivations (tenant.branding.colors) and the contrast report in both modes (tenant.contrast); a primary change bumps iconVersion and re-derives the maskable icon',
+    ),
+    400: envelope(
+      'VALIDATION_FAILED — a malformed colour, or { confirmLowContrast: "required", contrastReport } when a check fails and the body did not carry confirmLowContrast: true (nothing persisted; re-submit with the flag after the user confirms)',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+  },
+});
+
+const removeIconRoute = createRoute({
+  method: 'delete',
+  path: '/tenants/{id}/branding/icon',
+  request: { params: idParams },
+  responses: {
+    200: detailResponse(
+      'The square-icon override removed (iconUrl null, iconVersion bumped, the set re-derived from the logo by the worker); unchanged when there was no override',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+  },
+});
+
 export const brandingRoutes = branding
   .openapi(uploadStartRoute, async (c) => {
     const { userId, requestId } = c.get('platformCtx');
@@ -126,6 +167,49 @@ export const brandingRoutes = branding
         tenantId: id,
         uploadId,
         iconVersion,
+      },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(detail, 200);
+  })
+  .openapi(colorsRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    const body = c.req.valid('json');
+
+    const applied = await setBrandingColors(id, body, { userId, logger: c.get('logger') });
+    const detail = await detailOr404(id);
+
+    c.get('logger').info(
+      {
+        event: 'platform.branding.colors',
+        userId,
+        requestId,
+        tenantId: id,
+        rederive: applied.rederive,
+        iconVersion: applied.branding.iconVersion,
+      },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(detail, 200);
+  })
+  .openapi(removeIconRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+
+    const result = await removeIconOverride(id, { userId, logger: c.get('logger') });
+    const detail = await detailOr404(id);
+
+    c.get('logger').info(
+      {
+        event: 'platform.branding.icon_removed',
+        userId,
+        requestId,
+        tenantId: id,
+        removed: result.removed,
+        iconVersion: result.iconVersion,
       },
       'platform write',
     );

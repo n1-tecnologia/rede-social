@@ -1,8 +1,14 @@
 import {
   BRANDING_MAX_BYTES,
+  type BrandColors,
   type BrandIconUrls,
+  type BrandingColorsBody,
   type BrandingUpload,
   type BrandingUploadBody,
+  type ContrastReport,
+  contrastPasses,
+  contrastReport,
+  deriveBrandColors,
   mimeToExtension,
   type ResolvedBranding,
   resolveBranding,
@@ -429,4 +435,143 @@ export async function requeueIconDerivation(tenantId: string, attempt: number): 
   await withAdminTx((tx) =>
     enqueueDerivation(tx, tenantId, { iconVersion: -1, attempt }, { startAfter: 60 * attempt }),
   );
+}
+
+export type ApplyBrandColorsResult = {
+  branding: ResolvedBranding;
+  report: ContrastReport;
+  /** True when the primary changed: the maskable icon background follows it, so the set is re-derived. */
+  rederive: boolean;
+};
+
+/**
+ * The ONE persistence path for the two D-25 source colours (D-25/D-41): recomputes the persisted
+ * derivations with `deriveBrandColors`, evaluates the report, and bumps `iconVersion` + enqueues a
+ * derivation ONLY when the primary changed (the maskable background is the only icon input that
+ * depends on colours; a secondary-only change re-derives nothing). Runs INSIDE the caller's
+ * transaction — `setBrandingColors` (the panel's `PUT …/branding/colors`) and 02-05's
+ * `updateTenant` (`PATCH …/tenants/{id}`) both call it; the caller invalidates hosts after commit.
+ */
+export async function applyBrandColors(
+  tx: Tx,
+  tenant: { id: string; branding: unknown },
+  colors: { primary: string; secondary: string },
+  _actor: PlatformActor,
+): Promise<ApplyBrandColorsResult> {
+  const derived: BrandColors = deriveBrandColors(colors);
+  const report = contrastReport(derived);
+  const current = resolveBranding(tenant.branding);
+  const rederive = derived.primary !== current.colors.primary;
+  const next: ResolvedBranding = {
+    ...current,
+    colors: derived,
+    iconVersion: rederive ? current.iconVersion + 1 : current.iconVersion,
+  };
+  await tx
+    .update(tenants)
+    .set({ branding: next, updatedAt: new Date() })
+    .where(eq(tenants.id, tenant.id));
+  if (rederive) {
+    await enqueueDerivation(tx, tenant.id, { iconVersion: next.iconVersion, attempt: 0 });
+  }
+  return { branding: next, report, rederive };
+}
+
+/**
+ * `PUT /v1/platform/tenants/{id}/branding/colors` (D-41): the report is evaluated in BOTH modes
+ * BEFORE any write; when a check fails and `confirmLowContrast` is not `true`, nothing is persisted
+ * and the answer is 400 `{ confirmLowContrast: 'required', contrastReport }` so the panel can warn
+ * and ask. No colour pair is ever refused outright — the ONLY refusal is the missing confirmation,
+ * and a confirmed low-contrast save is logged with `lowContrastConfirmed: true` (T-02-87).
+ */
+export async function setBrandingColors(
+  tenantId: string,
+  body: BrandingColorsBody,
+  actor: PlatformActor,
+): Promise<ApplyBrandColorsResult> {
+  const report = contrastReport(deriveBrandColors(body));
+  const lowContrast = !contrastPasses(report);
+  if (lowContrast && body.confirmLowContrast !== true) {
+    throw new ApiError(400, 'VALIDATION_FAILED', {
+      confirmLowContrast: 'required',
+      contrastReport: report,
+    });
+  }
+
+  const applied = await withAdminTx(async (tx) => {
+    const row = await loadTenant(tx, tenantId);
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    return applyBrandColors(tx, row, body, actor);
+  });
+
+  await invalidateAllTenantHosts(tenantId);
+  logFor(actor, 'platform.branding').info(
+    {
+      event: 'platform.branding.colors',
+      userId: actor.userId,
+      tenantId,
+      primary: applied.branding.colors.primary,
+      secondary: applied.branding.colors.secondary,
+      lowContrast,
+      lowContrastConfirmed: lowContrast && body.confirmLowContrast === true,
+      rederive: applied.rederive,
+      iconVersion: applied.branding.iconVersion,
+    },
+    'branding colours saved',
+  );
+  return applied;
+}
+
+/**
+ * `DELETE /v1/platform/tenants/{id}/branding/icon` (D-28): clears the square override, bumps
+ * `iconVersion` and enqueues a derivation from the logo; the previous object is removed best-effort
+ * after commit. Idempotent: with no override nothing is written (the unchanged detail is answered).
+ */
+export async function removeIconOverride(
+  tenantId: string,
+  actor: PlatformActor,
+): Promise<{ removed: boolean; iconVersion: number }> {
+  const log = logFor(actor, 'platform.branding');
+  const result = await withAdminTx(async (tx) => {
+    const row = await loadTenant(tx, tenantId);
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    const current = resolveBranding(row.branding);
+    if (current.iconUrl === null) {
+      return { removed: false, iconVersion: current.iconVersion, previousKey: null };
+    }
+    const previousKey = objectKeyFromPublicUrl(current.iconUrl, tenantId, storageOrigin());
+    const next: ResolvedBranding = {
+      ...current,
+      iconUrl: null,
+      iconVersion: current.iconVersion + 1,
+    };
+    await tx
+      .update(tenants)
+      .set({ branding: next, updatedAt: new Date() })
+      .where(eq(tenants.id, tenantId));
+    await enqueueDerivation(tx, tenantId, { iconVersion: next.iconVersion, attempt: 0 });
+    return { removed: true, iconVersion: next.iconVersion, previousKey };
+  });
+
+  if (!result.removed) return { removed: false, iconVersion: result.iconVersion };
+
+  await invalidateAllTenantHosts(tenantId);
+  if (result.previousKey) {
+    await removeQuietly(
+      result.previousKey,
+      tenantId,
+      actor,
+      'platform.branding.icon_remove_failed',
+    );
+  }
+  log.info(
+    {
+      event: 'platform.branding.icon_removed',
+      userId: actor.userId,
+      tenantId,
+      iconVersion: result.iconVersion,
+    },
+    'branding icon override removed',
+  );
+  return { removed: true, iconVersion: result.iconVersion };
 }

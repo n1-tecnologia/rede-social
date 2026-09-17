@@ -486,7 +486,19 @@ describe('square-icon override — set, derive from it, remove, derive from the 
     const squarePng = (
       await deriveIconSet(Buffer.from(SQUARE_SVG), { primaryHex: PRIMARY, mime: 'image/svg+xml' })
     ).i512;
-    const { uploadId, res } = await uploadAndComplete(tenantId, 'icon', 'image/png', squarePng);
+    const start = await startUpload(tenantId, {
+      kind: 'icon',
+      mime: 'image/png',
+      size: squarePng.length,
+    });
+    expect(start.status).toBe(201);
+    const { uploadId, signedUrl } = (await start.json()) as {
+      uploadId: string;
+      signedUrl: string;
+    };
+    expect(uploadId.startsWith('icon-')).toBe(true);
+    expect((await putToSignedUrl(signedUrl, squarePng, 'image/png')).ok).toBe(true);
+    const res = await complete(tenantId, uploadId);
     expect(res.status).toBe(200);
     const detail = platformTenantDetailSchema.parse(await res.json());
     expect(detail.tenant.branding.iconUrl).toContain(`/${tenantId}/branding/`);

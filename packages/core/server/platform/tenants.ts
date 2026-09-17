@@ -38,6 +38,7 @@ import {
 } from '../../db/schema';
 import { ApiError } from '../http/api-error';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
+import { applyBrandColors } from './branding';
 import { createPendingInvite, logFor, type PlatformActor, sendPendingInvites } from './invites';
 
 export type { PlatformActor } from './invites';
@@ -341,8 +342,11 @@ async function invalidateTenantHosts(tenantId: string): Promise<void> {
 
 /**
  * `PATCH /v1/platform/tenants/{id}` (D-31): display name and/or the two source colors. The slug is
- * immutable — the contract does not even accept it. New colors are re-derived with the same function
- * the seed and the preview use, and the rest of the branding jsonb (logo, icons) is kept as is.
+ * immutable — the contract does not even accept it. Colors go through `applyBrandColors` — the ONE
+ * persistence path shared with `PUT …/branding/colors` (02-13) — so a primary change also bumps
+ * `iconVersion` and re-derives the maskable icon whichever door changed it; the rest of the
+ * branding jsonb (logo, icons) is kept as is. No contrast gate here (the 02-03 contract has no
+ * confirmation field); the detail answer carries `tenant.contrast` for the caller to read.
  */
 export async function updateTenant(
   id: string,
@@ -351,18 +355,19 @@ export async function updateTenant(
 ): Promise<void> {
   await withAdminTx(async (tx) => {
     const [current] = await tx
-      .select({ branding: tenants.branding })
+      .select({ id: tenants.id, branding: tenants.branding })
       .from(tenants)
       .where(eq(tenants.id, id))
       .limit(1);
     if (!current) throw new ApiError(404, 'NOT_FOUND');
 
-    const set: Partial<typeof tenants.$inferInsert> = { updatedAt: new Date() };
-    if (body.displayName !== undefined) set.displayName = body.displayName;
-    if (body.colors !== undefined) {
-      set.branding = { ...current.branding, colors: deriveBrandColors(body.colors) };
+    if (body.displayName !== undefined) {
+      await tx
+        .update(tenants)
+        .set({ displayName: body.displayName, updatedAt: new Date() })
+        .where(eq(tenants.id, id));
     }
-    await tx.update(tenants).set(set).where(eq(tenants.id, id));
+    if (body.colors !== undefined) await applyBrandColors(tx, current, body.colors, actor);
   });
 
   await invalidateTenantHosts(id);
