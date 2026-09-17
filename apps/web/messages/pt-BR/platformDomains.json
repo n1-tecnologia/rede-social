@@ -1,0 +1,75 @@
+{
+  "platformDomains": {
+    "title": "Domínios",
+    "add": {
+      "label": "Domínio",
+      "placeholder": "comunidade.cliente.com.br",
+      "submit": "Adicionar domínio",
+      "pending": "Adicionando…"
+    },
+    "helper": "Crie estes registros no DNS do cliente. A verificação roda a cada 10 minutos por até 7 dias.",
+    "empty": {
+      "title": "Nenhum domínio ainda",
+      "body": "Adicione o domínio do cliente para publicar a comunidade."
+    },
+    "status": {
+      "pending": "Aguardando DNS",
+      "verified": "Verificado",
+      "expired": "Expirado",
+      "failed": "Falhou"
+    },
+    "primary": "Primário",
+    "card": {
+      "lastChecked": "Última verificação {date}",
+      "neverChecked": "Ainda não verificado",
+      "lastError": "Último erro: {reason}",
+      "verify": "Verificar agora",
+      "verifying": "Verificando…",
+      "restart": "Reiniciar verificação",
+      "restarting": "Reiniciando…",
+      "setPrimary": "Tornar primário",
+      "remove": "Remover",
+      "removePrimaryHelper": "Não é possível remover o domínio primário. Torne outro domínio primário antes.",
+      "openHost": "Abrir {host}"
+    },
+    "dns": {
+      "title": "Registros DNS",
+      "type": "Tipo",
+      "name": "Nome",
+      "value": "Valor",
+      "copy": "Copiar valor",
+      "copied": "Valor copiado"
+    },
+    "confirm": {
+      "removeTitle": "Remover {host}?",
+      "removeBody": "O endereço deixa de abrir esta comunidade e sai da lista de redirecionamento de e-mails.",
+      "remove": "Remover",
+      "primaryTitle": "Tornar {host} o domínio primário?",
+      "primaryBody": "Os outros endereços passam a redirecionar para ele.",
+      "primary": "Tornar primário",
+      "cancel": "Cancelar"
+    },
+    "toasts": {
+      "added": "Domínio adicionado.",
+      "removed": "Domínio removido.",
+      "primaryUpdated": "Domínio primário atualizado.",
+      "verified": "Domínio verificado.",
+      "restarted": "Verificação reiniciada.",
+      "copied": "Valor copiado",
+      "error": "Algo deu errado. Tente novamente."
+    },
+    "errors": {
+      "invalid": "Domínio inválido. Use um endereço como comunidade.cliente.com.br.",
+      "taken": "Este domínio já está em uso.",
+      "platformHost": "Este endereço é reservado pela plataforma.",
+      "removePrimary": "Não é possível remover o domínio primário. Torne outro domínio primário antes.",
+      "verifyFailed": "A verificação falhou: {reason}. Confira os registros e tente de novo.",
+      "verifyPendingReason": "os registros DNS ainda não foram encontrados",
+      "expired": "O prazo de verificação expirou. Reinicie a verificação.",
+      "notExpired": "Este domínio não está expirado.",
+      "notVerified": "Só um domínio verificado pode ser primário.",
+      "notFound": "Este domínio não existe mais.",
+      "generic": "Algo deu errado. Tente novamente."
+    }
+  }
+}
