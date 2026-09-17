@@ -57,12 +57,22 @@ export type AcceptInviteForm = z.infer<typeof acceptInviteFormSchema>;
  * - `already_accepted` — resend refused: the admin already accepted (the panel hides the button);
  * - `no_verified_primary` — resend refused: the tenant has no verified primary host, so there is
  *   no branded origin for the link to open (the panel disables the button with a helper line);
- * - `not_invited` — accept refused: the caller's membership is not `invited` (blocked or missing).
+ * - `not_invited` — accept refused: the caller's membership is not `invited` (blocked or missing);
+ * - `email_in_use` — send/resend refused: the e-mail already has an identity on the platform
+ *   (confirmed member elsewhere, super_admin, an orphan identity) and can never receive this
+ *   invite; the row is left `expired` with `sentAt` null (02-19 D-A, "Convite recusado");
+ * - `user_in_other_tenant` — send/resend refused: the identity already holds a membership in
+ *   another tenant (V1 one-tenant-per-user, ROLE-02); same refused row state.
+ *
+ * The last two are answered ONLY on the platform lane (behind `requireSuperAdmin()`) and never
+ * name the other tenant.
  */
 export const INVITE_STATE_REASONS = [
   'already_accepted',
   'no_verified_primary',
   'not_invited',
+  'email_in_use',
+  'user_in_other_tenant',
 ] as const;
 export type InviteStateReason = (typeof INVITE_STATE_REASONS)[number];
 
