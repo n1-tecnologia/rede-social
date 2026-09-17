@@ -6,7 +6,7 @@ import {
   type TenantDomain,
   type TenantDomainsList,
 } from '@tria/contracts';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantDomains, tenants } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
@@ -349,6 +349,20 @@ async function recordError(domainId: string, lastError: string): Promise<void> {
 }
 
 /**
+ * Clears `last_error` only when something is set (a no-op otherwise, so it is safe on every path).
+ * Called by `checkDomain` after a fully successful `ensureVerifiedSideEffects` run, so the panel's
+ * "Verificar agora" offer on a verified host disappears once the retry succeeded (WR-01).
+ */
+async function clearLastErrorIfSettled(domainId: string): Promise<void> {
+  await withAdminTx(async (tx) => {
+    await tx
+      .update(tenantDomains)
+      .set({ lastError: null })
+      .where(and(eq(tenantDomains.id, domainId), isNotNull(tenantDomains.lastError)));
+  });
+}
+
+/**
  * What must follow the verified transition, in this order, OUTSIDE the transaction and idempotent
  * (re-run on every "Verificar agora" of an already verified host — that is how a failed allow-list
  * call is recoverable from the panel):
@@ -356,15 +370,18 @@ async function recordError(domainId: string, lastError: string): Promise<void> {
  *  2. the allow-list entry, under the cross-process advisory lock (T-02-53);
  *  3. `sendPendingInvites` — claim-before-send, so re-runs never send twice (D-30, T-02-54).
  * Failures of 2/3 are recorded in `last_error` and logged, never thrown, and never touch
- * `verified_at`.
+ * `verified_at`. Returns whether both steps succeeded; the callers clear `last_error` only then
+ * (WR-01).
  */
-async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): Promise<void> {
+async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): Promise<boolean> {
   const log = logFor(actor, 'platform-domains');
   invalidateTenantHost(row.host);
+  let ok = true;
 
   try {
     await withAllowListLock(() => authAllowList.add(row.host));
   } catch (error) {
+    ok = false;
     log.error(
       {
         event: 'platform.domains.allow_list_failed',
@@ -381,6 +398,7 @@ async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): 
   try {
     await sendPendingInvites(row.tenantId, actor);
   } catch (error) {
+    ok = false;
     log.error(
       {
         event: 'platform.domains.invite_failed',
@@ -393,6 +411,8 @@ async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): 
     );
     await recordError(row.id, 'invite');
   }
+
+  return ok;
 }
 
 /**
@@ -424,7 +444,8 @@ export async function checkDomain(
   if (!row) return { outcome: 'gone', domain: null };
 
   if (row.verifiedAt !== null) {
-    await ensureVerifiedSideEffects(row, actor);
+    const ok = await ensureVerifiedSideEffects(row, actor);
+    if (ok) await clearLastErrorIfSettled(domainId);
     const fresh = await withAdminTx((tx) => loadRow(tx, domainId));
     return { outcome: 'already_verified', domain: toTenantDomain(fresh ?? row) };
   }
@@ -499,7 +520,10 @@ export async function checkDomain(
       const fresh = await withAdminTx((tx) => loadRow(tx, domainId));
       return { outcome: 'already_verified', domain: toTenantDomain(fresh ?? row) };
     }
-    await ensureVerifiedSideEffects(winner, actor);
+    // The `lastError: null` written by the winning update precedes the side effects, and a
+    // `recordError` may land after it — clearing on success keeps the answered row honest.
+    const ok = await ensureVerifiedSideEffects(winner, actor);
+    if (ok) await clearLastErrorIfSettled(domainId);
     log.info(
       {
         event: 'platform.domains.verified',

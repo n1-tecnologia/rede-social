@@ -718,4 +718,37 @@ describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () 
     expect(domain.verifiedAt).not.toBeNull();
     expect(domain.lastError).toBeNull();
   });
+
+  it('20. WR-01: a verified host with a side-effect last_error answers lastError null after a successful re-run ("Verificar agora": no provider call, verified_at unchanged); without an error the clear is a no-op', async () => {
+    await adminSql`update public.tenant_domains set last_error = 'allow_list'
+                   where id = ${domainId}::uuid`;
+    expect((await domainRow(domainId))?.last_error).toBe('allow_list');
+    const verifies = fakeDomainProviderStats().verify;
+    const verifiedAtBefore = (await domainRow(domainId))?.verified_at;
+
+    const res = await platform(`/tenants/${tenantId}/domains/${domainId}/verify`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const domain = tenantDomainSchema.strict().parse(await res.json());
+    expect(domain.verificationStatus).toBe('verified');
+    expect(domain.lastError).toBeNull();
+    expect(new Date(domain.verifiedAt ?? 0).getTime()).toBe(
+      new Date(verifiedAtBefore ?? 0).getTime(),
+    );
+    expect((await domainRow(domainId))?.last_error).toBeNull();
+    // already_verified makes NO provider call.
+    expect(fakeDomainProviderStats().verify).toBe(verifies);
+
+    // A verified host WITHOUT an error also answers lastError null (the conditional clear is a no-op).
+    const again = await platform(`/tenants/${tenantId}/domains/${domainId}/verify`, {
+      method: 'POST',
+    });
+    expect(again.status).toBe(200);
+    const unchanged = tenantDomainSchema.parse(await again.json());
+    expect(unchanged.lastError).toBeNull();
+    expect(unchanged.verifiedAt).toBe(domain.verifiedAt);
+    expect(fakeDomainProviderStats().verify).toBe(verifies);
+  });
 });
