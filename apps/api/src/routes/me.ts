@@ -14,6 +14,7 @@ import { requireAuth } from '@tria/core/server/auth/require-auth';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { moduleFlags } from '@tria/core/server/modules/flags-cache';
 import { acceptInvite } from '@tria/core/server/tenancy/accept-invite';
+import { membershipOfRecord } from '@tria/core/server/tenancy/membership-scope';
 import { eq } from 'drizzle-orm';
 import { createOpenApiApp } from '../http/openapi';
 import { enabledModulesForBootstrap, permissionsFor } from '../modules/registry';
@@ -93,10 +94,11 @@ export const meRoutes = me
           .from(users)
           .where(eq(users.id, ctx.userId))
           .limit(1);
+        // layer 2 of the tenant scoping (CLAUDE.md): tenant_id + user_id + deleted_at is null — never user_id alone (WR-05)
         const [membership] = await tx
           .select({ role: memberships.role, status: memberships.status })
           .from(memberships)
-          .where(eq(memberships.userId, ctx.userId))
+          .where(membershipOfRecord(ctx))
           .limit(1);
         return { tenant, user, membership };
       });
