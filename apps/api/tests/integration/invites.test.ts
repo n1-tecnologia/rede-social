@@ -10,6 +10,7 @@ import {
 } from '@tria/contracts';
 import { sqlClient } from '@tria/core/db';
 import { stopBoss } from '@tria/core/server/jobs/boss';
+import { isOneTenantPerUserViolation } from '@tria/core/server/platform/invites';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -377,6 +378,8 @@ describe('contracts (02-10 Task 2)', () => {
       'already_accepted',
       'no_verified_primary',
       'not_invited',
+      'email_in_use',
+      'user_in_other_tenant',
     ]);
     const params = c.inviteParamsSchema as z.ZodTypeAny | undefined;
     const list = c.tenantInvitesListSchema as z.ZodTypeAny | undefined;
@@ -627,5 +630,123 @@ describe('resend lifecycle — list, resend, supersession, 409/404/403 (D-30)', 
     const mails = await waitForMailCount(lateEmail, 1);
     expect(mails).toHaveLength(1);
     expect(mails[0]?.HTML).toContain('type=invite');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// 02-19: refusals — an e-mail that already has an identity on the platform (WR-02 / WR-03 /
+// WR-04). The identity pre-check runs BEFORE any GoTrue call, so a refused invite never mails or
+// re-tokens a foreign identity; the refused row is `expired` + `sent_at null` (D-A).
+// ---------------------------------------------------------------------------------------------
+
+/** A verified primary host inserted directly (the `throwawayInvited` shape) so a resend has an origin. */
+async function insertVerifiedPrimary(tenantId: string, host: string): Promise<void> {
+  await adminSql`
+    insert into public.tenant_domains (tenant_id, host, is_primary, verified_at, verification_status)
+    values (${tenantId}::uuid, ${host}, true, now(), 'verified')`;
+}
+
+/** An ACTIVE `member` row for `userId` in the seeded tria-lab tenant — the "other tenant". */
+async function membershipInLab(userId: string): Promise<void> {
+  await adminSql`
+    insert into public.memberships (tenant_id, user_id, role, status)
+    select id, ${userId}::uuid, 'member', 'active' from public.tenants where slug = 'tria-lab'`;
+}
+
+/** A confirmed auth identity for `email` with NO membership anywhere (createUser, no mail). */
+async function confirmedIdentity(email: string): Promise<string> {
+  const { data, error } = await authAdmin().createUser({
+    email,
+    password: INVITED_PASSWORD,
+    email_confirm: true,
+  });
+  if (error || !data.user) throw new Error(`createUser failed for ${email}: ${error?.message}`);
+  await waitForMirror(data.user.id);
+  return data.user.id;
+}
+
+const membershipCount = async (tenantId: string) => {
+  const [row] = await adminSql<{ count: number }[]>`
+    select count(*)::int as count from public.memberships where tenant_id = ${tenantId}::uuid`;
+  return row?.count ?? 0;
+};
+
+const inviteRow = async (inviteId: string) => {
+  const [row] = await adminSql<
+    { status: string; sent_at: string | null; user_id: string | null }[]
+  >`select status, sent_at, user_id from public.tenant_invites where id = ${inviteId}::uuid`;
+  return row;
+};
+
+const resend = (tenantId: string, inviteId: string) =>
+  platform(`/tenants/${tenantId}/invites/${inviteId}/resend`, { method: 'POST' });
+
+/** Both resends answer the same 409 reason; the row, the memberships and Mailpit stay untouched. */
+async function expectRefusedTwice(
+  tenantId: string,
+  inviteId: string,
+  email: string,
+  reason: 'email_in_use' | 'user_in_other_tenant',
+) {
+  for (const attempt of [1, 2]) {
+    const res = await resend(tenantId, inviteId);
+    expect(res.status, `attempt ${attempt}`).toBe(409);
+    const err = await envelope(res);
+    expect(err.code).toBe('INVITE_STATE_INVALID');
+    // The body carries the reason and nothing else — never the other tenant (T-02-152).
+    expect(err.details).toEqual({ reason });
+    const row = await inviteRow(inviteId);
+    expect(row?.status).toBe('expired');
+    expect(row?.sent_at).toBeNull();
+    expect(row?.user_id).toBeNull();
+    expect(await membershipCount(tenantId)).toBe(0);
+    expect(await mailpitMessages(email)).toHaveLength(0);
+  }
+  const detail = await tenantDetail(tenantId);
+  expect(detail.invites[0]?.status).toBe('expired');
+  expect(detail.invites[0]?.sentAt).toBeNull();
+}
+
+describe('refusals — e-mail already on the platform (WR-02 / WR-03 / WR-04)', () => {
+  it('R1. an identity holding a membership in ANOTHER tenant -> 409 { reason: "user_in_other_tenant" }: row expired + sent_at null, no membership here, no mail, the other membership intact; the second resend repeats it', async () => {
+    const slug = `inv-r1-${RUN}`.slice(0, 40);
+    const email = `admin+r1-${RUN}@invite.test`;
+    // The tenant is created FIRST (the create-time check must keep accepting a fresh e-mail).
+    const { id: tenantId, inviteId } = await createTenantViaApi(slug, email);
+    const userId = await confirmedIdentity(email);
+    await membershipInLab(userId);
+    await insertVerifiedPrimary(tenantId, `${slug}.localhost`);
+
+    await expectRefusedTwice(tenantId, inviteId, email, 'user_in_other_tenant');
+
+    const [lab] = await adminSql<{ status: string }[]>`
+      select m.status from public.memberships m
+        join public.tenants t on t.id = m.tenant_id
+       where t.slug = 'tria-lab' and m.user_id = ${userId}::uuid and m.deleted_at is null`;
+    expect(lab?.status).toBe('active');
+  });
+
+  it('R2. a confirmed identity with NO membership (super_admin, orphan) -> 409 { reason: "email_in_use" }: same refused state, no mail; the second resend repeats it', async () => {
+    const slug = `inv-r2-${RUN}`.slice(0, 40);
+    const email = `admin+r2-${RUN}@invite.test`;
+    const { id: tenantId, inviteId } = await createTenantViaApi(slug, email);
+    await confirmedIdentity(email);
+    await insertVerifiedPrimary(tenantId, `${slug}.localhost`);
+
+    await expectRefusedTwice(tenantId, inviteId, email, 'email_in_use');
+  });
+
+  it('R3. isOneTenantPerUserViolation maps ONLY a 23505 on memberships_one_tenant_per_user_v1 (cause chain walked)', () => {
+    expect(
+      isOneTenantPerUserViolation({
+        cause: { code: '23505', constraint_name: 'memberships_one_tenant_per_user_v1' },
+      }),
+    ).toBe(true);
+    expect(
+      isOneTenantPerUserViolation({ code: '23505', constraint_name: 'memberships_tenant_user_uq' }),
+    ).toBe(false);
+    expect(isOneTenantPerUserViolation({ code: '23505' })).toBe(false);
+    expect(isOneTenantPerUserViolation({ code: '23503' })).toBe(false);
+    expect(isOneTenantPerUserViolation(null)).toBe(false);
   });
 });
