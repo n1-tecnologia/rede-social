@@ -10,8 +10,9 @@
  *     `brandStyleVars` (the contracts package, `branding` subpath); everything else is derived here with color-mix.
  *
  *  2. Tailwind aliases — declared inline in the theme block so `bg-brand` compiles to
- *     `background-color: var(--brand-accent)` and resolves ON THE ELEMENT: a `--brand-primary` set on
- *     any ancestor (and a nested theme attribute) repaints the subtree with no alias re-declaration.
+ *     `background-color: var(--brand-accent)`. The derived `--brand-accent` & co. are re-declared on
+ *     every brand scope (Layer 1b) so a `--brand-primary` set inline on a wrapper (and a nested theme
+ *     attribute) repaints that subtree — see the Layer 1b note for why :root alone is not enough.
  *
  * Legacy prototype aliases (the colour-named ones, the CTA/label/gradient-text classes, the IG mark)
  * are deliberately NOT carried — UI-03 replaces them with tenant tokens.
@@ -19,8 +20,9 @@
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-/* ===== Layer 1 — light (default) ===== */
-:root {
+/* ===== Layer 1 — light (default; also re-applied by an explicit light scope nested in a dark page) ===== */
+:root,
+[data-theme="light"] {
   --theme-bg: #f5f7fb;
   --theme-bg-secondary: #ffffff;
   --theme-bg-tertiary: #e9eef7;
@@ -58,13 +60,6 @@
   --brand-on-primary: #ffffff;
   --brand-primary-dark: #5b9cf8;
   --brand-on-primary-dark: #0f1118;
-
-  /* derived — never enumerated per tenant (D-25) */
-  --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
-  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
-  --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
-  --brand-accent: var(--brand-primary);
-  --brand-on-accent: var(--brand-on-primary);
 
   /* device / safe-area / shell contract (the shell may override inline) */
   --screen-w: 100vw;
@@ -105,33 +100,45 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(255, 255, 255, 0.03),
     0 12px 32px rgba(0, 0, 0, 0.55);
   --theme-chip: rgba(255, 255, 255, 0.1);
-
-  /* the accent pair flips to the dark-surface derivation (D-41) */
-  --brand-accent: var(--brand-primary-dark);
-  --brand-on-accent: var(--brand-on-primary-dark);
-  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
 }
 
-/* ===== Layer 1b — derived brand tokens, re-evaluated on every element =====
-   A custom property that references another one (`--brand-accent: var(--brand-primary)`) is substituted
-   at computed-value time ON THE ELEMENT WHERE IT IS DECLARED and descendants inherit the resolved
-   colour. Declared only on :root, the derivations above would always carry the neutral brand, and a
-   tenant's `--brand-*` set on a nested wrapper (the layouts' [data-brand-root] / <body style>) would
-   never reach `bg-brand`. Re-declaring them on every element makes each element derive from ITS
-   inherited `--brand-*`, so the brand may be set on any ancestor and a nested [data-theme] flips the
-   accent pair for its subtree only. The :root / dark blocks above stay as the documented fallbacks. */
-* {
+/* ===== Layer 1b — derived brand aliases, declared on EVERY brand scope (D-25, D-41) =====
+   A custom property that references another one (`--brand-accent: var(--brand-primary)`) substitutes
+   its var() at computed-value time ON THE ELEMENT WHERE IT IS DECLARED; descendants inherit the
+   resolved colour. Declared only on :root, the aliases would always carry the neutral brand and a
+   tenant's `--brand-*` set inline on a wrapper (02-01's auth <main>, 02-07's [data-brand-root], the
+   BrandPreview mini-shells) would never reach `bg-brand`. So the aliases are (re)declared on every
+   brand scope: `[data-brand-root]` (AppShell root), `[data-brand-scope]` (BrandPreview frames) and
+   `[style*="--brand-primary"]` — every element `brandStyleVars` is spread onto (React serialises the
+   custom properties into the `style` attribute). The dark pair applies under or on a dark scope; a
+   LIGHT frame nested in a dark page ([data-brand-scope][data-theme="light"]) wins by source order
+   against the equal-specificity dark descendant rule. `dark:` utilities inside such a light frame
+   still match the @custom-variant descendant rule — cosmetic, accepted. */
+:root,
+[data-brand-root],
+[data-brand-scope],
+[style*="--brand-primary"] {
   --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
   --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
   --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
   --brand-accent: var(--brand-primary);
   --brand-on-accent: var(--brand-on-primary);
 }
+/* the accent pair flips to the dark-surface derivation (D-41) */
 [data-theme="dark"],
-[data-theme="dark"] * {
+[data-theme="dark"] [data-brand-root],
+[data-theme="dark"] [data-brand-scope],
+[data-theme="dark"] [style*="--brand-primary"],
+[data-brand-scope][data-theme="dark"] {
   --brand-accent: var(--brand-primary-dark);
   --brand-on-accent: var(--brand-on-primary-dark);
-  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), var(--theme-bg) 80%);
+}
+/* a light brand scope nested in a dark page: back to the light pair (source order wins the tie) */
+[data-brand-scope][data-theme="light"] {
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
 }
 
 /* ===== Layer 2 — Tailwind utilities bound to the runtime variables ===== */

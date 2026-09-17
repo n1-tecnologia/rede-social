@@ -5,6 +5,7 @@
  */
 export { AppShell, type AppShellProps } from './AppShell';
 export { BottomNav, type BottomNavProps } from './BottomNav';
+export { BrandPreview, type BrandPreviewLabels, type BrandPreviewProps } from './BrandPreview';
 export { DesktopRail, type DesktopRailProps } from './DesktopRail';
 export { type HomeSlot, HomeSlots, type HomeSlotsProps } from './HomeSlots';
 export {

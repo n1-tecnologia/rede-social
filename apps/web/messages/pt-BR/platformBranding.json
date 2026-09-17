@@ -1,0 +1,75 @@
+{
+  "platformBranding": {
+    "title": "Marca",
+    "assets": {
+      "title": "Logo e ícone"
+    },
+    "logo": {
+      "title": "Logo",
+      "upload": "Enviar logo",
+      "replace": "Substituir logo",
+      "empty": "Nenhum logo enviado — o nome da comunidade aparece no lugar.",
+      "hint": "PNG, SVG, WebP ou JPEG até 2 MB.",
+      "alt": "Logo de {tenant}"
+    },
+    "icon": {
+      "title": "Ícone quadrado (opcional)",
+      "upload": "Enviar ícone quadrado",
+      "replace": "Substituir ícone",
+      "remove": "Remover",
+      "helper": "Opcional. Use quando o logo for horizontal ou ficar ilegível em um quadrado.",
+      "alt": "Ícone quadrado de {tenant}",
+      "confirmTitle": "Remover ícone quadrado?",
+      "confirmBody": "Os ícones voltam a ser gerados a partir do logo.",
+      "confirm": "Remover",
+      "cancel": "Cancelar"
+    },
+    "upload": {
+      "progress": "{percent}% enviado",
+      "processing": "Gerando ícones…",
+      "choose": "Escolher arquivo"
+    },
+    "errors": {
+      "type": "Formato não suportado. Use PNG, SVG, WebP ou JPEG.",
+      "size": "Arquivo muito grande. O limite é 2 MB.",
+      "transfer": "Falha no envio. Tente novamente.",
+      "notAnImage": "O arquivo não é uma imagem válida. Escolha outro arquivo.",
+      "formatMismatch": "O conteúdo do arquivo não corresponde ao formato informado. Escolha outro arquivo.",
+      "svgUnsafe": "Este SVG contém scripts ou referências externas e foi recusado. Escolha outro arquivo.",
+      "objectMissing": "O envio não foi concluído. Tente novamente.",
+      "hexInvalid": "Use o formato #RRGGBB.",
+      "generic": "Algo deu errado. Tente novamente."
+    },
+    "colors": {
+      "title": "Cores",
+      "save": "Salvar alterações",
+      "saving": "Salvando…"
+    },
+    "preview": {
+      "title": "Prévia",
+      "light": "Claro",
+      "dark": "Escuro",
+      "lightAria": "Prévia do aplicativo no modo claro",
+      "darkAria": "Prévia do aplicativo no modo escuro",
+      "login": "Entrar",
+      "namePlaceholder": "Nome da comunidade"
+    },
+    "icons": {
+      "title": "Ícones do aplicativo",
+      "generating": "Ícones sendo gerados…",
+      "ready": "Ícones gerados",
+      "slow": "Os ícones ainda estão sendo gerados. Atualize a página em alguns instantes.",
+      "version": "Versão {version}",
+      "favicon": "Favicon",
+      "i192": "192 px",
+      "i512": "512 px",
+      "maskable": "Maskable 512 px",
+      "fromLogo": "Gerados a partir do logo",
+      "fromOverride": "Gerados a partir do ícone quadrado"
+    },
+    "toasts": {
+      "saved": "Alterações salvas.",
+      "error": "Algo deu errado. Tente novamente."
+    }
+  }
+}

@@ -6,6 +6,7 @@ import {
   hexColorSchema,
   NEUTRAL_BRAND,
 } from '@tria/contracts/branding';
+import { BrandPreview } from '@tria/core/ui';
 import { Button, Card, Input, SectionTitle, Switch } from '@tria/ui';
 import { Mail } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -22,9 +23,9 @@ export interface NewTenantFormProps {
   moduleKeys: string[];
   action: (prev: CreateTenantState, formData: FormData) => Promise<CreateTenantState>;
   /**
-   * Slot between the colour fields and the contrast readout. Empty in 02-12; plan 02-14 mounts the
-   * kernel `BrandPreview` (the light/dark mini-shells of UI-SPEC) through it, fed with the two
-   * source colours as last validly typed.
+   * Override of the preview slot between the colour fields and the contrast readout. By default
+   * (02-14) the kernel `BrandPreview` renders there — the light/dark mini-shells of UI-SPEC fed with
+   * the two source colours as last validly typed and the typed display name (no logo yet).
    */
   renderPreview?: (colors: { primary: string; secondary: string }) => ReactNode;
 }
@@ -65,6 +66,7 @@ function SubmitButton({
  */
 export function NewTenantForm({ moduleKeys, action, renderPreview }: NewTenantFormProps) {
   const t = useTranslations('platform');
+  const tb = useTranslations('platformBranding');
   const [state, formAction] = useActionState(action, {});
   const [displayName, setDisplayName] = useState(state.values?.displayName ?? '');
   const [slug, setSlug] = useState(state.values?.slug ?? '');
@@ -171,7 +173,22 @@ export function NewTenantForm({ moduleKeys, action, renderPreview }: NewTenantFo
               placeholder={t('new.hexPlaceholder')}
             />
           </div>
-          {renderPreview ? renderPreview(lastValid) : null}
+          {renderPreview ? (
+            renderPreview(lastValid)
+          ) : (
+            <BrandPreview
+              colors={lastValid}
+              displayName={displayName.trim() || tb('preview.namePlaceholder')}
+              logoUrl={null}
+              labels={{
+                light: tb('preview.light'),
+                dark: tb('preview.dark'),
+                lightAria: tb('preview.lightAria'),
+                darkAria: tb('preview.darkAria'),
+                login: tb('preview.login'),
+              }}
+            />
+          )}
           <ContrastFeedback
             report={report}
             confirmed={confirmed}

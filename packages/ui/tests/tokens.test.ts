@@ -61,33 +61,58 @@ describe('tokens.css — dark variant and @theme inline aliases', () => {
 });
 
 describe('tokens.css — neutral fallback brand and the two theme layers', () => {
-  it('carries the neutral TRIA brand fallback and its derivations on :root', () => {
+  it('carries the neutral TRIA brand fallback and the light neutrals on :root (and explicit light scopes)', () => {
     const root = block(':root');
     expect(root).toContain('--brand-primary: #2e6fd0');
     expect(root).toContain('--brand-secondary: #5b9cf8');
     expect(root).toContain('--brand-on-primary: #ffffff');
     expect(root).toContain('--brand-primary-dark: #5b9cf8');
     expect(root).toContain('--brand-on-primary-dark: #0f1118');
-    expect(root).toContain('--brand-accent: var(--brand-primary)');
-    expect(root).toContain('--brand-on-accent: var(--brand-on-primary)');
-    expect(root).toContain(
-      '--brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%)',
-    );
-    expect(root).toContain(
-      '--brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%)',
-    );
-    expect(root).toContain('--brand-gradient: linear-gradient(135deg');
     expect(root).toContain('--theme-bg: #f5f7fb');
+    // 02-14: a light frame nested in a dark page re-applies the light neutrals.
+    expect(css).toContain(':root,\n[data-theme="light"] {');
   });
 
-  it('switches the accent pair and the ground to the dark values under [data-theme="dark"]', () => {
-    const dark = block('[data-theme="dark"]');
-    expect(dark).toContain('--theme-bg: #0f1118');
+  /**
+   * 02-14 (D-25/D-41): a `var()` inside a custom property substitutes where the property is
+   * DECLARED, so the derived aliases must be declared on every brand scope — :root, the AppShell
+   * root, the BrandPreview frames and any element carrying inline `--brand-*` — not on :root alone.
+   */
+  it('declares the derived brand aliases on every brand scope, light and dark', () => {
+    const light = block('[data-brand-scope],\n[style*="--brand-primary"]');
+    expect(css).toContain(
+      ':root,\n[data-brand-root],\n[data-brand-scope],\n[style*="--brand-primary"] {',
+    );
+    expect(light).toContain('--brand-accent: var(--brand-primary)');
+    expect(light).toContain('--brand-on-accent: var(--brand-on-primary)');
+    expect(light).toContain(
+      '--brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%)',
+    );
+    expect(light).toContain(
+      '--brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%)',
+    );
+    expect(light).toContain('--brand-gradient: linear-gradient(135deg');
+
+    const dark = block('[data-theme="dark"] [data-brand-scope]');
+    expect(css).toContain('[data-brand-scope][data-theme="dark"] {');
     expect(dark).toContain('--brand-accent: var(--brand-primary-dark)');
     expect(dark).toContain('--brand-on-accent: var(--brand-on-primary-dark)');
     expect(dark).toContain(
-      '--brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%)',
+      '--brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), var(--theme-bg) 80%)',
     );
+
+    // A light frame inside a dark page gets the light pair back (declared last: source order wins).
+    const lightInDark = block('[data-brand-scope][data-theme="light"]');
+    expect(lightInDark).toContain('--brand-accent: var(--brand-primary)');
+    expect(css.indexOf('[data-brand-scope][data-theme="light"] {')).toBeGreaterThan(
+      css.indexOf('[data-brand-scope][data-theme="dark"] {'),
+    );
+  });
+
+  it('switches the ground to the dark neutrals under [data-theme="dark"]', () => {
+    const dark = block('[data-theme="dark"]');
+    expect(dark).toContain('--theme-bg: #0f1118');
+    expect(dark).toContain('--theme-text: #f2f5fa');
   });
 
   it('ships the device/safe-area contract and the glass bar', () => {
