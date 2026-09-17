@@ -2,6 +2,7 @@ import { expect, type Page, test } from '@playwright/test';
 import {
   closeAdmin,
   consentCountForEmail,
+  createMember,
   deleteTenantBySlug,
   deleteUserByEmail,
   envValue,
@@ -17,7 +18,8 @@ import { throwawayOrigin } from './tenant-fixtures';
  * super_admin provisions a tenant through the API, attaches its host through the FAKE provider and
  * verifies it, GoTrue delivers the branded invite through the 02-06 hook to Mailpit, and the link
  * opens the branded accept screen on the tenant's own host. Test 2 drives the panel resend and the
- * superseded link, test 3 the pending-without-host state. Both Playwright projects run it.
+ * superseded link, test 3 the pending-without-host state, test 4 (02-20, WR-02/WR-03) the refusal
+ * of an e-mail that already belongs to another tenant. Both Playwright projects run it.
  *
  * Node-side calls use `127.0.0.1` (Node's resolver does not special-case `*.localhost`); the
  * browser navigates the tenant origin (`<slug>.localhost:3000`).
@@ -372,5 +374,56 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     const body = (await refused.json()) as { error: { details?: { reason?: string } } };
     expect(body.error.details?.reason).toBe('no_verified_primary');
     expect(await inviteStatusForEmail(adminEmail)).toBe('pending');
+  });
+
+  test('4. an invite for an e-mail that belongs to another tenant is refused: "Convite recusado" pill, reason toast on resend, the other membership untouched (WR-02/WR-03)', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const sfx = Date.now().toString(36);
+    const slug = `e2e-inv4-${sfx}`;
+    const host = `${slug}.localhost`;
+    const adminEmail = `admin+${sfx}@e2e-invite.local`;
+    created.slugs.push(slug);
+    created.emails.push(adminEmail);
+
+    // Create FIRST (the 02-19 create-time identity check must pass), THEN give the address a
+    // confirmed identity with an ACTIVE membership in the seeded lab tenant. The verification that
+    // triggers the first send now refuses it (user_in_other_tenant): row `expired` + sentAt null.
+    const token = await superAdminToken();
+    const { id } = await createTenant(token, {
+      displayName: `E2E Recusado ${sfx}`,
+      slug,
+      adminEmail,
+      primary: '#0e7490',
+      secondary: '#67e8f9',
+    });
+    await createMember(adminEmail, 'Throwaway-123456', 'tria-lab');
+    await attachAndVerify(token, id, host);
+    const refused = await waitForInviteStatus(token, id, 'expired');
+    expect(refused.sentAt).toBeNull();
+
+    // The panel names the cause instead of "Convite expirado" and still offers the resend.
+    const panel = await browser.newContext();
+    const page = await panel.newPage();
+    await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
+    await expect(page.getByText('Convite recusado — o e-mail já está em uso')).toBeVisible();
+    await expect(page.getByText('Convite expirado')).toHaveCount(0);
+    const resend = page.getByRole('button', { name: 'Reenviar convite' });
+    await expect(resend).toBeEnabled();
+    await resend.click();
+    await expect(
+      page.getByText(
+        'Este e-mail já pertence a um membro de outro tenant e não pode administrar este.',
+      ),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // The lab membership is untouched (the single V1 row for this e-mail) and the invite stays
+    // refused — no membership was minted for the new tenant, no mail went out.
+    expect(await membershipForEmail(adminEmail)).toEqual({ role: 'member', status: 'active' });
+    expect(await inviteStatusForEmail(adminEmail)).toBe('expired');
+
+    await panel.close();
   });
 });

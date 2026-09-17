@@ -40,6 +40,7 @@ const slugsFor = (project: string) => {
     mod: `e2e-mod-${s}`,
     a: `mesmo-nome-a-${s}`,
     b: `mesmo-nome-b-${s}`,
+    refused: `e2e-recusado-${s}`,
   };
 };
 
@@ -472,5 +473,45 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
       await expect(adminPage.getByRole('link', { name: 'Voltar para a lista' })).toBeVisible();
     }
     await admin.close();
+  });
+
+  test('8. an admin e-mail that already exists on the platform is refused as a field error (WR-03)', async ({
+    browser,
+  }, testInfo) => {
+    test.skip(isRemote, 'local stack only');
+    const slugs = slugsFor(testInfo.project.name);
+    const s = suffixFor(testInfo.project.name);
+    // The seeded lab member (`member@tria-lab.local`) already has an identity + membership: the
+    // API's 400 VALIDATION_FAILED { adminEmail: 'in_use' } (02-19) becomes a field error under
+    // #adminEmail, the form keeps every typed value and no tenant row is created.
+    const inUse = users.labMember;
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await signInSuperAdmin(page);
+
+    await page.goto(`${hosts.platform}/plataforma/novo`);
+    const alerts = page.locator('form').getByRole('alert');
+    const name = `Recusado ${s}`;
+    await page.locator('#displayName').fill(name);
+    await page.locator('#slug').fill(slugs.refused);
+    await page.locator('#adminEmail').fill(inUse);
+    await page.getByRole('button', { name: 'Criar tenant' }).click();
+
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Este e-mail já possui uma conta na plataforma' }),
+    ).toBeVisible();
+    await expect(
+      alerts.filter({
+        hasText:
+          'Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador.',
+      }),
+    ).toHaveCount(1);
+    await expect(page).toHaveURL(`${hosts.platform}/plataforma/novo`);
+    await expect(page.locator('#displayName')).toHaveValue(name);
+    await expect(page.locator('#slug')).toHaveValue(slugs.refused);
+    await expect(page.locator('#adminEmail')).toHaveValue(inUse);
+    expect(await getTenantModuleFlag(slugs.refused, 'feed')).toBeNull();
+
+    await context.close();
   });
 });
