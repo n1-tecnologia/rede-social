@@ -10,28 +10,28 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### Tenancy & Branding
 
 - [x] **TENANT-01**: A single deployment serves every tenant on that tenant's own custom domain (a hostname the customer owns, registered in `tenant_domains`), while the platform domain serves TRIA's `super_admin`; the host only selects the tenant's public shell (login, sign-up, branding) and after login the app resolves tenant, role and modules from the user's membership, rejecting a session whose membership does not belong to the host's tenant
-- [x] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
+- [ ] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
 - [x] **TENANT-03**: Every tenant-owned row carries `tenant_id`; the API runs tenant requests under a database role subject to Row Level Security (no service-role key for user traffic), so cross-tenant reads/writes are blocked at the DB even if application code has a bug
 - [ ] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
 - [x] **TENANT-05**: An automated isolation test suite with at least two tenants proves that lists, detail pages, search, notifications, chat and storage never return another tenant's data
-- [x] **TENANT-06**: Authentication e-mails (password recovery, confirmation) are sent with the tenant's display name and logo, not TRIA's
-- [x] **TENANT-07**: `super_admin` can attach a custom domain to a tenant from the platform panel; the platform registers it with the hosting provider and the auth redirect allow-list, shows the DNS records the customer must create, and reports verification status (pilot/seed tenants get their domains from the provisioning script)
+- [ ] **TENANT-06**: Authentication e-mails (password recovery, confirmation) are sent with the tenant's display name and logo, not TRIA's
+- [ ] **TENANT-07**: `super_admin` can attach a custom domain to a tenant from the platform panel; the platform registers it with the hosting provider and the auth redirect allow-list, shows the DNS records the customer must create, and reports verification status (pilot/seed tenants get their domains from the provisioning script)
 
 ### Modularity (architecture requirement)
 
 - [x] **MOD-01**: The codebase is a monorepo where each feature (feed, communities, stories, events, chat, notifications, moderation, profiles) is a self-contained module package containing its own DB schema/migrations, API routes, domain logic and UI components
 - [x] **MOD-02**: A core kernel package provides tenancy, auth/session, roles, feature flags, media broker and shared UI primitives; feature modules depend only on the kernel and on published contracts of other modules, never on another module's internals (enforced by lint/dependency rules)
 - [ ] **MOD-03**: Modules communicate through domain events (e.g. `post.liked`, `event.rsvp`) consumed by other modules (e.g. notifications) so a module can be removed or replaced without touching the others
-- [x] **MOD-04**: Each module is registered in a module registry that declares its routes, navigation entries, feature-flag key and event subscriptions; the API mounts and the app renders only registered, enabled modules
+- [ ] **MOD-04**: Each module is registered in a module registry that declares its routes, navigation entries, feature-flag key and event subscriptions; the API mounts and the app renders only registered, enabled modules
 - [ ] **MOD-05**: A module can be reused in another TRIA project by copying/publishing its package and providing the kernel contracts, documented in a per-module README with its public interface
 
 ### Roles & Platform Panel
 
 - [x] **ROLE-01**: Four roles exist: `super_admin` (TRIA staff, cross-tenant), `admin_tenant`, `support_tenant`, `member`; roles are stored per tenant membership, not on the global user
 - [x] **ROLE-02**: Identity is separate from membership: a user record can be linked to a tenant through a membership row carrying role and status, with V1 enforcing one membership per user via a constraint that can be relaxed for V2
-- [x] **ROLE-03**: `super_admin` can create a tenant in a platform panel: name, slug, initial branding, enabled modules and the first `admin_tenant` (by e-mail invitation)
-- [x] **ROLE-04**: `super_admin` can enable/disable feature modules per tenant, and the change is reflected in the tenant's navigation and API access without a redeploy
-- [x] **ROLE-05**: `super_admin` can list all tenants with status and open any tenant's settings
+- [ ] **ROLE-03**: `super_admin` can create a tenant in a platform panel: name, slug, initial branding, enabled modules and the first `admin_tenant` (by e-mail invitation)
+- [ ] **ROLE-04**: `super_admin` can enable/disable feature modules per tenant, and the change is reflected in the tenant's navigation and API access without a redeploy
+- [ ] **ROLE-05**: `super_admin` can list all tenants with status and open any tenant's settings
 - [x] **ROLE-06**: Authorization is enforced in the API for every route based on role and enabled modules (a disabled module's routes return 404 for that tenant)
 
 ### Onboarding & Auth
@@ -122,16 +122,16 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Design Prototype (UI source of truth)
 
-- [x] **UI-01**: The app's visual language (tokens, typography, spacing, motion, component styling) follows the design team's prototype in `reference/frontend-design/`; shared primitives (Button, IconButton, Avatar, Badge, BottomSheet, ConfirmDialog, EmptyState, Input, Skeleton, Tabs, Toast, TopBar, BottomNav, PullToRefresh, SafeAreaWrapper) are ported into the kernel shared-UI package
+- [ ] **UI-01**: The app's visual language (tokens, typography, spacing, motion, component styling) follows the design team's prototype in `reference/frontend-design/`; shared primitives (Button, IconButton, Avatar, Badge, BottomSheet, ConfirmDialog, EmptyState, Input, Skeleton, Tabs, Toast, TopBar, BottomNav, PullToRefresh, SafeAreaWrapper) are ported into the kernel shared-UI package
 - [ ] **UI-02**: Feature screens are ported into their module package as each vertical phase is built, replacing mock data with API calls and keeping the prototype's interactions (double-tap like, comment sheet, infinite scroll, pull-to-refresh, swipe)
-- [x] **UI-03**: The prototype's hardcoded brand (hex literals, "Igor Alves" strings, `lib/nav.ts`) is replaced by tenant-driven theme variables, tenant display name and flag-driven navigation; the iPhone `DeviceShell` mockup is replaced by a real responsive app shell with a desktop layout
-- [x] **UI-04**: Screens the prototype lacks (stories strip/viewer, admin composers, admin panel, platform panel, moderation, support inbox) are designed in the prototype's language and reviewed with the design team before implementation
+- [ ] **UI-03**: The prototype's hardcoded brand (hex literals, "Igor Alves" strings, `lib/nav.ts`) is replaced by tenant-driven theme variables, tenant display name and flag-driven navigation; the iPhone `DeviceShell` mockup is replaced by a real responsive app shell with a desktop layout
+- [ ] **UI-04**: Screens the prototype lacks (stories strip/viewer, admin composers, admin panel, platform panel, moderation, support inbox) are designed in the prototype's language and reviewed with the design team before implementation
 
 ### PWA & Platform
 
-- [x] **PWA-01**: The app is mobile-first and responsive on desktop, installable as a PWA (manifest + service worker), and works in standalone mode
+- [ ] **PWA-01**: The app is mobile-first and responsive on desktop, installable as a PWA (manifest + service worker), and works in standalone mode
 - [ ] **PWA-02**: On iOS, users are shown a short "Adicionar à Tela de Início" hint before push can be enabled, since Web Push on iOS requires installation
-- [x] **PWA-03**: All UI text is pt-BR and centralized in a message catalog for future i18n
+- [ ] **PWA-03**: All UI text is pt-BR and centralized in a message catalog for future i18n
 - [ ] **PWA-04**: GitHub is the source of truth: pushes deploy the Next.js app to Vercel and the API/worker to Cloud Run automatically, with separate preview/staging and production environments
 
 ## v2 Requirements
@@ -208,22 +208,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TENANT-01 | Phase 1 | Complete |
-| TENANT-02 | Phase 2 | Complete |
+| TENANT-02 | Phase 2 | Gaps Found |
 | TENANT-03 | Phase 1 | Complete |
 | TENANT-04 | Phase 3 | Pending |
 | TENANT-05 | Phase 1 | Complete |
-| TENANT-06 | Phase 2 | Complete |
-| TENANT-07 | Phase 2 | Complete |
+| TENANT-06 | Phase 2 | Gaps Found |
+| TENANT-07 | Phase 2 | Gaps Found |
 | MOD-01 | Phase 1 | Complete |
 | MOD-02 | Phase 1 | Complete |
 | MOD-03 | Phase 4 | Pending |
-| MOD-04 | Phase 2 | Complete |
+| MOD-04 | Phase 2 | Gaps Found |
 | MOD-05 | Phase 8 | Pending |
 | ROLE-01 | Phase 1 | Complete |
 | ROLE-02 | Phase 1 | Complete |
-| ROLE-03 | Phase 2 | Complete |
-| ROLE-04 | Phase 2 | Complete |
-| ROLE-05 | Phase 2 | Complete |
+| ROLE-03 | Phase 2 | Gaps Found |
+| ROLE-04 | Phase 2 | Gaps Found |
+| ROLE-05 | Phase 2 | Gaps Found |
 | ROLE-06 | Phase 1 | Complete |
 | AUTH-01 | Phase 1 | Complete |
 | AUTH-02 | Phase 1 | Complete |
@@ -278,13 +278,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MEDIA-02 | Phase 3 | Pending |
 | MEDIA-03 | Phase 3 | Pending |
 | MEDIA-04 | Phase 4 | Pending |
-| UI-01 | Phase 2 | Complete |
+| UI-01 | Phase 2 | Gaps Found |
 | UI-02 | Phase 4 | Pending |
-| UI-03 | Phase 2 | Complete |
-| UI-04 | Phase 2 | Complete |
-| PWA-01 | Phase 2 | Complete |
+| UI-03 | Phase 2 | Gaps Found |
+| UI-04 | Phase 2 | Gaps Found |
+| PWA-01 | Phase 2 | Gaps Found |
 | PWA-02 | Phase 7 | Pending |
-| PWA-03 | Phase 2 | Complete |
+| PWA-03 | Phase 2 | Gaps Found |
 | PWA-04 | Phase 01.1 | Pending |
 
 **Coverage:**
