@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-16-PLAN.md (Phase 2 complete, 16/16)
-last_updated: "2026-09-17T13:00:46.374Z"
-last_activity: 2026-09-16
+stopped_at: Completed 02-17-PLAN.md
+last_updated: "2026-09-17T13:25:01.300Z"
+last_activity: 2026-09-17
 last_activity_desc: Phase 02 execution started
-state_head: 39484071579bf0257467d1cd9cd47ffb9ca2765f
+state_head: a095736f52c0e2440abfd4772d523337f11dd164
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 32
-  completed_plans: 25
+  completed_plans: 26
   percent: 0
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 ## Current Position
 
-Phase: 02 (Tenant Shell, Branding & Platform Panel) — READY TO EXECUTE
-Plan: 16 of 20 (16 executed, 4 gap-closure plans 02-17..02-20 ready)
+Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
+Plan: 2 of 20
 Status: Ready to execute
-Last activity: 2026-09-16 — Phase 02 execution started
+Last activity: 2026-09-17 — Phase 02 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -83,6 +83,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P15 | 13min | 3 tasks | 15 files |
 | Phase 02 P14 | 20 min | 3 tasks | 21 files |
 | Phase 02 P16 | 1h 47m | 3 tasks | 12 files |
+| Phase 02 P17 | 8 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -183,6 +184,9 @@ Recent decisions affecting current work:
 - [Phase 02-16]: 02-16: pnpm verify is the local exit gate and ci.yml mirrors it step for step (one checks job; PWA production-build e2e appended with its own report folders); spec filters must use pnpm --filter @tria/web exec playwright test <spec> — pnpm e2e -- <spec> runs the whole suite
 - [Phase 02-16]: 02-16: scripts/check-static-routes.sh is the build-output gate (exit 2 without a build, strict allow-list /_* and /serwist/*); apps/api/turbo.json declares @react-email/render as an implicit boundary dependency so boundaries can follow the build
 - [Phase 02-16]: 02-16: served-HTML follow-up of a brand/status change is bounded by the 60 s web host cache (observed 55-61 s); specs poll up to 70 s and annotate the delay, assertions stay exact; the real-device standalone install and the hosted provider flows stay explicit backstops
+- [Phase 02]: 02-17: a thrown domainProvider.verify is a normal poller outcome — checkDomain evaluates verify_deadline_at first (expired, nothing re-armed) and otherwise records last_error = '<kind>[:<status>]' and enqueueVerify(tx, domainId) inside the same admin transaction, guarded by verified_at is null; verify-job.ts keeps its crash re-arm for THROWN errors only
+- [Phase 02]: 02-17: ensureVerifiedSideEffects returns a boolean and both checkDomain branches clear last_error via clearLastErrorIfSettled only when BOTH side effects succeeded — a failed side effect keeps its error so the Domínios card keeps offering 'Verificar agora'
+- [Phase 02]: 02-17: fake provider 'provider-fails-once' switch (module-level Set of hosts that already threw; first verify -> DomainProviderError('unavailable', 503)); IN-01..IN-07 stay deferred to Phase 8 hardening (product-owner decision 2026-09-17)
 
 ### Pending Todos
 
@@ -215,6 +219,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T05:17:17.121Z
-Stopped at: Completed 02-16-PLAN.md (Phase 2 complete, 16/16)
+Last session: 2026-09-17T13:25:01.270Z
+Stopped at: Completed 02-17-PLAN.md
 Resume file: None
