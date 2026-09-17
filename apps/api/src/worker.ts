@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { deriveIconsJob } from '@tria/core/server/branding/derive-icons-job';
 import { domainVerifyJob } from '@tria/core/server/domains/verify-job';
 import { createBoss, createQueues } from '@tria/core/server/jobs/boss';
 import type { AnyJobDefinition } from '@tria/core/server/modules/manifest';
@@ -14,8 +15,9 @@ import { MODULE_REGISTRY } from './modules/registry';
  *
  * Queue creation happens HERE at start, for every `JobDefinition` any registered module declares
  * plus the kernel's own jobs. Kernel jobs are listed here explicitly and register their queue names
- * inside the kernel (`packages/core/server/domains/index.ts`); module jobs come from the registry
- * (02-13 adds the icon-derivation job the same way). `createQueues` is idempotent, which is what
+ * inside the kernel (`packages/core/server/domains/index.ts`, `…/branding/index.ts`); module jobs
+ * come from the registry. Icon derivation (`deriveIconsJob`) is CPU work — sharp resize/composite,
+ * ICO packing, five Storage uploads — and runs HERE, never in the request-serving role (D-28). `createQueues` is idempotent, which is what
  * makes the concurrent cases safe: two worker instances booting together, or a worker booting while
  * the API performs its first lazy enqueue, all converge on the same queue row.
  *
@@ -29,6 +31,7 @@ import { MODULE_REGISTRY } from './modules/registry';
 export async function startWorker(): Promise<void> {
   const jobs: AnyJobDefinition[] = [
     domainVerifyJob,
+    deriveIconsJob,
     ...Object.values(MODULE_REGISTRY).flatMap((manifest) => manifest?.jobs ?? []),
   ];
 

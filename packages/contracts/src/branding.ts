@@ -270,3 +270,116 @@ export function absoluteBrandUrl(url: string | null | undefined, origin: string)
   if (!url) return null;
   return new URL(url, origin).toString();
 }
+
+// ── Branding uploads and colours (02-13, D-27/D-28/D-41) ─────────────────────────────────────────
+//
+// The platform's brand mutations: `POST …/branding/uploads` (a signed Storage URL for the browser),
+// `POST …/branding/uploads/{uploadId}/complete`, `PUT …/branding/colors` and
+// `DELETE …/branding/icon`. Pure like the rest of this file — the panel imports it through
+// `@tria/contracts/branding` for its client-side size/mime pre-checks.
+
+/** D-27: the four accepted logo/icon formats. Storage enforces the same allow-list at PUT time. */
+export const BRANDING_UPLOAD_MIMES = [
+  'image/png',
+  'image/svg+xml',
+  'image/webp',
+  'image/jpeg',
+] as const;
+export const brandingUploadMimeSchema = z.enum(BRANDING_UPLOAD_MIMES);
+export type BrandingUploadMime = z.infer<typeof brandingUploadMimeSchema>;
+
+/** D-27: "order of 2 MB" — the bucket's `file_size_limit` and the 413 threshold agree on this value. */
+export const BRANDING_MAX_BYTES = 2 * 1024 * 1024;
+
+/** `logo` (the wordmark shown everywhere) or `icon` (the optional square override of the derived set, D-28). */
+export const BRANDING_UPLOAD_KINDS = ['logo', 'icon'] as const;
+export type BrandingUploadKind = (typeof BRANDING_UPLOAD_KINDS)[number];
+
+/** The object-key extension of each accepted mime (one canonical extension per format). */
+export const mimeToExtension: Record<BrandingUploadMime, 'png' | 'svg' | 'webp' | 'jpg'> = {
+  'image/png': 'png',
+  'image/svg+xml': 'svg',
+  'image/webp': 'webp',
+  'image/jpeg': 'jpg',
+};
+
+/**
+ * Body of `POST /v1/platform/tenants/{id}/branding/uploads`. No maximum on `size` here on purpose:
+ * an oversized file is answered 413 by the route (a size problem, not a shape problem), so the
+ * validator only requires a positive integer.
+ */
+export const brandingUploadBodySchema = z
+  .object({
+    kind: z.enum(BRANDING_UPLOAD_KINDS),
+    mime: brandingUploadMimeSchema,
+    size: z.number().int().positive(),
+  })
+  .strict();
+export type BrandingUploadBody = z.infer<typeof brandingUploadBodySchema>;
+
+/** 201 answer of the upload start: the browser PUTs the file to `signedUrl`, then completes with `uploadId`. */
+export const brandingUploadSchema = z
+  .object({
+    uploadId: z.string(),
+    signedUrl: z.url(),
+    path: z.string(),
+    maxBytes: z.number().int(),
+    expiresInSeconds: z.number().int(),
+  })
+  .strict();
+export type BrandingUpload = z.infer<typeof brandingUploadSchema>;
+
+/**
+ * The stateless upload id: `<kind>-<uuid>.<ext>`. Everything `complete` needs is in the id, and the
+ * object's existence under the tenant's own prefix is the proof of a legitimate upload (T-02-83:
+ * no path separators can ever pass).
+ */
+export const BRANDING_UPLOAD_ID_RE =
+  /^(logo|icon)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|svg|webp|jpg)$/;
+export const brandingUploadIdSchema = z.string().regex(BRANDING_UPLOAD_ID_RE);
+export const brandingUploadParamsSchema = z.object({
+  id: z.uuid(),
+  uploadId: brandingUploadIdSchema,
+});
+export type BrandingUploadParams = z.infer<typeof brandingUploadParamsSchema>;
+
+/** The `details.upload` vocabulary of a refused `complete` (400) or a missing object (404). */
+export const BRANDING_UPLOAD_ISSUES = [
+  'not_an_image',
+  'format_mismatch',
+  'svg_unsafe',
+  'too_large',
+  'object_missing',
+] as const;
+export type BrandingUploadIssue = (typeof BRANDING_UPLOAD_ISSUES)[number];
+
+/**
+ * Body of `PUT /v1/platform/tenants/{id}/branding/colors` (D-25/D-41). A low-contrast pair is never
+ * refused outright: without `confirmLowContrast: true` the API answers 400
+ * `{ confirmLowContrast: 'required', contrastReport }` so the panel can warn and ask.
+ */
+export const brandingColorsBodySchema = z
+  .object({
+    primary: hexColorSchema,
+    secondary: hexColorSchema,
+    confirmLowContrast: z.boolean().optional(),
+  })
+  .strict();
+export type BrandingColorsBody = z.infer<typeof brandingColorsBodySchema>;
+
+/** True when every check of a `contrastReport()` passes (the API gate and the panel share it). */
+export function contrastPasses(report: ContrastReport): boolean {
+  return report.onPrimary.ok && report.lightSurface.ok && report.darkSurface.ok;
+}
+
+/**
+ * True when the persisted icon set was derived for the CURRENT `iconVersion` (derived keys live
+ * under `/icons/<iconVersion>/`). False right after an upload or a primary-colour change until the
+ * worker's `kernel.branding-derive-icons` job writes the new set — the panel shows "gerando ícones…".
+ */
+export function iconsUpToDate(branding: {
+  iconUrls: BrandIconUrls | null;
+  iconVersion: number;
+}): boolean {
+  return branding.iconUrls?.i512.includes(`/icons/${branding.iconVersion}/`) ?? false;
+}

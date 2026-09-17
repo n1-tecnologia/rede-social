@@ -85,6 +85,13 @@
       "when": 1789583810908,
       "tag": "20260916183650_tenant_invites_and_domain_verification",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789611458289,
+      "tag": "20260917021738_branding_bucket",
+      "breakpoints": true
     }
   ]
 }

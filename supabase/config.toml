@@ -123,6 +123,17 @@ file_size_limit = "50MiB"
 # allowed_mime_types = ["image/png", "image/jpeg"]
 # objects_path = "./images"
 
+# Tenant brand assets (02-13, D-27/D-28): the browser PUTs a logo/icon straight to an API-minted signed
+# URL at `<tenant_id>/branding/<uuid>.<ext>`; the worker writes the derived favicon + PWA icon set under
+# `<tenant_id>/branding/icons/<iconVersion>/` (the ICO mime types are for that derived favicon). Public
+# reads bypass RLS by design (brand assets are public); writes happen only through service-key
+# signed URLs, so no storage.objects policy exists for this bucket. This block seeds LOCAL stacks
+# only — hosted projects get the same row from supabase/migrations/*_branding_bucket.sql.
+[storage.buckets.branding]
+public = true
+file_size_limit = "2MiB"
+allowed_mime_types = ["image/png", "image/svg+xml", "image/webp", "image/jpeg", "image/x-icon", "image/vnd.microsoft.icon"]
+
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
 enabled = true
