@@ -6,7 +6,8 @@ import { z } from 'zod';
  * `MEMBERSHIP_BLOCKED` (this member only) — the web routes them to different screens.
  * `DOMAIN_IN_USE` / `DOMAIN_STATE_INVALID` (D-34/D-35) are the platform panel's custom-domain
  * refusals: a host attached to another tenant (the body never names it), and an operation the
- * row's state forbids (`details.reason` from `DOMAIN_STATE_REASONS`).
+ * row's state forbids (`details.reason` from `DOMAIN_STATE_REASONS`). `INVITE_STATE_INVALID` (D-30)
+ * is the same shape for the first-admin invite (`details.reason` from `INVITE_STATE_REASONS`).
  */
 export const ERROR_CODES = [
   'UNAUTHENTICATED',
@@ -16,6 +17,7 @@ export const ERROR_CODES = [
   'TENANT_SUSPENDED',
   'DOMAIN_IN_USE',
   'DOMAIN_STATE_INVALID',
+  'INVITE_STATE_INVALID',
   'TENANT_HOST_MISMATCH',
   'MODULE_DISABLED',
   'FORBIDDEN',

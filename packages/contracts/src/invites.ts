@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { passwordSchema } from './auth';
 
 /**
  * First-admin invite contracts (ROLE-03, D-29/D-30). The invite row lives in `tenant_invites`
@@ -36,3 +37,31 @@ export const acceptInviteResponseSchema = z.object({
   landing: z.literal('/inicio'),
 });
 export type AcceptInviteResponse = z.infer<typeof acceptInviteResponseSchema>;
+
+/**
+ * What the `/aceitar-convite` form must satisfy (D-29, D-10, D-03): the accept body PLUS the new
+ * password (min 8, the same `passwordSchema` sign-up and reset use) PLUS both consent boxes ticked.
+ * `z.literal(true)` is the AUTH-04 rule — no default, no merge, no pre-check: an absent or unticked
+ * box fails validation in the web action and nothing reaches the API. The password field exists
+ * here ONLY for the form; the action strips it before calling `POST /v1/me/accept-invite`.
+ */
+export const acceptInviteFormSchema = acceptInviteBodySchema.extend({
+  password: passwordSchema,
+  acceptRules: z.literal(true),
+  acceptTerms: z.literal(true),
+});
+export type AcceptInviteForm = z.infer<typeof acceptInviteFormSchema>;
+
+/**
+ * `details.reason` of a 409 `INVITE_STATE_INVALID` (D-30, the `DOMAIN_STATE_REASONS` pattern):
+ * - `already_accepted` — resend refused: the admin already accepted (the panel hides the button);
+ * - `no_verified_primary` — resend refused: the tenant has no verified primary host, so there is
+ *   no branded origin for the link to open (the panel disables the button with a helper line);
+ * - `not_invited` — accept refused: the caller's membership is not `invited` (blocked or missing).
+ */
+export const INVITE_STATE_REASONS = [
+  'already_accepted',
+  'no_verified_primary',
+  'not_invited',
+] as const;
+export type InviteStateReason = (typeof INVITE_STATE_REASONS)[number];

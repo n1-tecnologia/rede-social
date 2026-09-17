@@ -38,6 +38,13 @@ function isOtpType(value: string | null): value is EmailOtpType {
  * `{origin}/auth/confirm?next=/redefinir-senha&token_hash=…&type=recovery`, where `origin` is the host
  * the member actually used (D-22).
  *
+ * Also the landing point of the first-admin invite (ROLE-03, D-29, plans 02-05/02-06/02-10): the
+ * branded invite mail links to `{tenant origin}/auth/confirm?next=/aceitar-convite&token_hash=…&type=invite`.
+ * A failed invite exchange (missing, expired, already-consumed or superseded-by-a-resend token) lands
+ * on `/convite-expirado`, never on the recovery form: the invited admin has no password to recover
+ * yet. The redirect carries no query string — that screen names no tenant. Every other type keeps
+ * the Phase 1 fallback.
+ *
  * `verifyOtp` exchanges the one-time hash for a session; because this is a Route Handler, the
  * `@supabase/ssr` client may write the HttpOnly session cookies here (a Server Component may not).
  * With a session in place the redirect lands on `/redefinir-senha`, whose action can call `updateUser`.
@@ -53,6 +60,9 @@ export async function GET(request: NextRequest): Promise<never> {
     const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
     if (!error) redirect(safeNext);
   }
+
+  // An invite link that no longer exchanges: the dedicated expired screen (D-29).
+  if (type === 'invite') redirect('/convite-expirado');
 
   // Missing params, unknown type, expired or already-used token: ask for a fresh link.
   redirect('/esqueci-senha?erro=link-invalido');

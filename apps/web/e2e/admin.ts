@@ -149,3 +149,41 @@ export async function getTenantModuleFlag(slug: string, key: string): Promise<bo
      where t.slug = ${slug} and tm.module_key = ${key}`;
   return rows[0]?.enabled ?? null;
 }
+
+/** A `.env.local` / process value a spec needs on the Node side (02-10 invite spec). Read, never printed. */
+export function envValue(name: string): string {
+  return required(name);
+}
+
+/** The live membership of an e-mail (`role` + `status`), or `null` when there is none (02-10). */
+export async function membershipForEmail(
+  email: string,
+): Promise<{ role: string; status: string } | null> {
+  const rows = await sql()<{ role: string; status: string }[]>`
+    select m.role, m.status
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+     where u.email = ${email} and m.deleted_at is null
+     limit 1`;
+  return rows[0] ?? null;
+}
+
+/** How many `consent_records` rows an e-mail owns (D-03 evidence: two after an accept). */
+export async function consentCountForEmail(email: string): Promise<number> {
+  const rows = await sql()<{ count: number }[]>`
+    select count(*)::int as count
+      from public.consent_records c
+      join public.users u on u.id = c.user_id
+     where u.email = ${email}`;
+  return rows[0]?.count ?? 0;
+}
+
+/** The newest `tenant_invites.status` for an e-mail, or `null` (02-10 lifecycle assertions). */
+export async function inviteStatusForEmail(email: string): Promise<string | null> {
+  const rows = await sql()<{ status: string }[]>`
+    select status from public.tenant_invites
+     where email = ${email}
+     order by created_at desc
+     limit 1`;
+  return rows[0]?.status ?? null;
+}

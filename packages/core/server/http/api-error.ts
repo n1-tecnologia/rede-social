@@ -11,6 +11,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   TENANT_SUSPENDED: 'Esta comunidade está temporariamente indisponível.',
   DOMAIN_IN_USE: 'Este domínio já está em uso.',
   DOMAIN_STATE_INVALID: 'Esta operação não é permitida no estado atual do domínio.',
+  INVITE_STATE_INVALID: 'O convite não está em um estado que permite esta ação.',
   TENANT_HOST_MISMATCH: 'Este endereço não pertence à sua comunidade.',
   MODULE_DISABLED: 'Este recurso não está disponível na sua comunidade.',
   FORBIDDEN: 'Você não tem permissão para fazer isso.',
