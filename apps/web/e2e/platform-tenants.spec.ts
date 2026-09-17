@@ -258,7 +258,8 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await expect(submit).toBeEnabled();
 
     // Six switches, all on by default (D-17); the seventh registry key is never listed (D-19).
-    const switches = page.getByRole('switch');
+    // Scoped to the form column: the desktop rail carries the "Tema" switch (02-16 theme row).
+    const switches = page.locator('main').getByRole('switch');
     await expect(switches).toHaveCount(6);
     for (const sw of await switches.all()) await expect(sw).toBeChecked();
     await expect(page.getByRole('switch', { name: /example/i })).toHaveCount(0);

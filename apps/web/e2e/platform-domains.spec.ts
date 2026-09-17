@@ -382,7 +382,8 @@ test.describe('02-15 — Módulos tab', () => {
     await expect(
       page.getByText('As mudanças valem em até 30 segundos, sem novo deploy.'),
     ).toBeVisible();
-    const switches = page.getByRole('switch');
+    // Scoped to the tab column: the desktop rail carries the "Tema" switch (02-16 theme row).
+    const switches = page.locator('main').getByRole('switch');
     await expect(switches).toHaveCount(6);
     for (let i = 0; i < 6; i += 1) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'true'); // D-17 defaults
@@ -429,7 +430,7 @@ test.describe('02-15 — Módulos tab', () => {
       'aria-checked',
       'false',
     );
-    await expect(page.getByRole('switch')).toHaveCount(6);
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(6);
 
     await page.getByRole('switch', { name: /Feed/ }).click();
     await expect(page.getByRole('switch', { name: /Feed/ })).toHaveAttribute(

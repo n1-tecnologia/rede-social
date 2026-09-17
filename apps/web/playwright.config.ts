@@ -20,13 +20,28 @@ if (existsSync(envFile)) process.loadEnvFile(envFile);
  * distinct origins with separate cookies. Readiness is probed on plain `localhost` (a generic host that
  * needs no API lookup); the Next dev server binds one port for all of them.
  * Node-side helpers must use `127.0.0.1` URLs: Node's resolver does not special-case `*.localhost`.
+ *
+ * Projects (02-16): `pixel-chromium` (Pixel 7 on Chromium) exists for ROADMAP Phase 2 criterion 1 —
+ * "on a phone" means iPhone 14 AND Pixel 7 — and is scoped to the two Phase 2 smoke specs
+ * (`branding.spec.ts`, `phase2-smoke.spec.ts`) so the rest of the suite keeps Phase 1's two-project
+ * cost. The worker is NOT a webServer: specs that need icon derivation (`kernel.branding-derive-icons`)
+ * call `ensureWorker()` from `./e2e/worker.ts` and stop it in `afterAll` (02-14 decision).
+ * `PLAYWRIGHT_REPORT_DIR` / `PLAYWRIGHT_OUTPUT_DIR` let CI keep the dev-server run and the
+ * production-build run (`playwright.pwa.config.ts` inherits these) in separate folders.
  */
+const REPORT_DIR = process.env.PLAYWRIGHT_REPORT_DIR ?? 'playwright-report';
+const OUTPUT_DIR = process.env.PLAYWRIGHT_OUTPUT_DIR ?? 'test-results';
+
 export default defineConfig({
   testDir: './e2e',
   retries: 0,
   fullyParallel: false,
   workers: 1,
-  reporter: process.env.CI ? 'github' : 'list',
+  reporter: process.env.CI
+    ? [['github'], ['html', { open: 'never', outputFolder: REPORT_DIR }]]
+    : 'list',
+  outputDir: OUTPUT_DIR,
+  expect: { timeout: 10_000 },
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://tria-demo.localhost:3000',
     trace: 'retain-on-failure',
@@ -34,6 +49,12 @@ export default defineConfig({
   projects: [
     // iPhone 14 viewport/UA/touch on Chromium (the device preset defaults to WebKit).
     { name: 'mobile-chromium', use: { ...devices['iPhone 14'], browserName: 'chromium' } },
+    // Pixel 7 on Chromium — the Android phone of criterion 1; only the two Phase 2 smoke specs.
+    {
+      name: 'pixel-chromium',
+      testMatch: /(branding|phase2-smoke)\.spec\.ts$/,
+      use: { ...devices['Pixel 7'], browserName: 'chromium' },
+    },
     { name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: [
