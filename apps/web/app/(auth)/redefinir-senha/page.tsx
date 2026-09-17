@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { PasswordField } from '../cadastro/[slug]/PasswordField';
+import { PasswordField } from '../PasswordField';
 import { SubmitButton } from '../SubmitButton';
 import { reset } from './actions';
 
@@ -16,9 +16,9 @@ export default async function RedefinirSenhaPage() {
 
   return (
     <>
-      <h1>{t('title')}</h1>
+      <h1 className="text-center text-2xl font-bold tracking-[-0.02em] text-text">{t('title')}</h1>
 
-      <form action={reset} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <form action={reset} className="flex flex-col gap-4">
         <PasswordField
           id="password"
           name="password"

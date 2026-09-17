@@ -3,14 +3,18 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { env } from '@/lib/env';
+import { getHostBrand } from '@/lib/host-brand';
 import { getHostTenant, signupPath } from '@/lib/tenant-host';
+import { AuthInput } from '../../AuthInput';
+import { ConsentFields } from '../../ConsentFields';
+import { PasswordField } from '../../PasswordField';
 import { SubmitButton } from '../../SubmitButton';
+import { UnavailableCard } from '../../UnavailableCard';
 import { signup } from './actions';
-import { PasswordField } from './PasswordField';
-import { RulesSheet } from './RulesSheet';
 
 /**
- * Public sign-up (AUTH-01, AUTH-04, D-01 as amended by D-22).
+ * Public sign-up (AUTH-01, AUTH-04, D-01 as amended by D-22), on `@tria/ui` since 02-08 with the
+ * Phase 1 fields, ids, hidden inputs and action untouched.
  *
  * The page ALWAYS receives a slug param: on a tenant domain `proxy.ts` rewrites `/cadastro` to
  * `/cadastro/{hostSlug}` (and 308s `/cadastro/*` back to `/cadastro`), so the host decides the tenant
@@ -27,6 +31,14 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return { alternates: { canonical: signupPath(hostTenant, slug) } };
 }
 
+/** T-02-49: only these `?campos=` tokens map to a field message; anything else renders nothing. */
+const FIELD_ERROR_KEYS = ['name', 'email', 'password'] as const;
+type FieldErrorKey = (typeof FIELD_ERROR_KEYS)[number];
+
+function isFieldErrorKey(value: string): value is FieldErrorKey {
+  return (FIELD_ERROR_KEYS as readonly string[]).includes(value);
+}
+
 export default async function CadastroPage({
   params,
   searchParams,
@@ -34,11 +46,13 @@ export default async function CadastroPage({
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ erro?: string; campos?: string }>;
 }) {
-  const [{ slug }, { erro, campos }, hostTenant, t] = await Promise.all([
+  const [{ slug }, { erro, campos }, hostTenant, brand, t, tu] = await Promise.all([
     params,
     searchParams,
     getHostTenant(),
+    getHostBrand(),
     getTranslations('signup'),
+    getTranslations('unavailable'),
   ]);
 
   // Member sign-up is never offered on the platform domain (D-21) — defence in depth behind proxy.ts.
@@ -46,6 +60,10 @@ export default async function CadastroPage({
   // D-22: on a tenant domain the host is the only authority for the slug.
   if (hostTenant.mode === 'tenant' && slug !== hostTenant.slug) notFound();
   if (!slugSchema.safeParse(slug).success) notFound();
+  // D-32: a suspended host answers with the branded card, not "não encontrada" (the API 404s anyway).
+  if (brand.tenant?.status === 'suspended') {
+    return <UnavailableCard title={tu('title')} body={tu('body')} />;
+  }
 
   const res = await fetch(`${env.API_URL}/v1/public/tenants/${encodeURIComponent(slug)}`, {
     cache: 'no-store',
@@ -55,33 +73,61 @@ export default async function CadastroPage({
   if (!parsed.success) notFound();
   const tenant = parsed.data;
 
-  const invalidFields = (campos ?? '').split(',');
+  const invalidFields = new Set(
+    erro === 'validacao' ? (campos ?? '').split(',').filter(isFieldErrorKey) : [],
+  );
+  const fieldError = (field: FieldErrorKey): string | undefined => {
+    if (!invalidFields.has(field)) return undefined;
+    return field === 'password' ? t('passwordMin') : t(`fieldErrors.${field}`);
+  };
 
   return (
     <>
-      <h1>{t('title')}</h1>
-      <p>{tenant.displayName}</p>
+      <h1 className="text-center text-2xl font-bold tracking-[-0.02em] text-text">{t('title')}</h1>
+      <p className="break-words text-center text-sm text-text-secondary">{tenant.displayName}</p>
 
       {erro === 'email-existente' ? (
-        <p role="alert">
-          {t('duplicateEmail')} <Link href="/entrar">{t('login')}</Link>
+        <p role="alert" className="text-center text-sm text-danger">
+          {t('duplicateEmail')}{' '}
+          <Link href="/entrar" className="font-bold text-brand">
+            {t('login')}
+          </Link>
         </p>
       ) : null}
       {erro === 'validacao' ? (
-        <p role="alert">{invalidFields.includes('password') ? t('passwordMin') : t('invalid')}</p>
+        <p role="alert" className="text-center text-sm text-danger">
+          {invalidFields.has('password') ? t('passwordMin') : t('invalid')}
+        </p>
       ) : null}
 
-      <form action={signup} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <form action={signup} className="flex flex-col gap-4">
         <input type="hidden" name="slug" value={slug} />
         <input type="hidden" name="rulesVersion" value={tenant.rulesVersion} />
         <input type="hidden" name="termsVersion" value={tenant.termsVersion} />
 
-        <label htmlFor="name">{t('name')}</label>
-        <input id="name" name="name" type="text" autoComplete="name" required minLength={2} />
-
-        <label htmlFor="email">{t('email')}</label>
-        <input id="email" name="email" type="email" autoComplete="email" required />
-
+        <AuthInput
+          id="name"
+          name="name"
+          type="text"
+          autoComplete="name"
+          required
+          minLength={2}
+          icon="user"
+          placeholder={t('name')}
+          aria-label={t('name')}
+          error={fieldError('name')}
+        />
+        <AuthInput
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          icon="mail"
+          placeholder={t('email')}
+          aria-label={t('email')}
+          error={fieldError('email')}
+        />
         <PasswordField
           id="password"
           name="password"
@@ -97,35 +143,27 @@ export default async function CadastroPage({
         />
 
         {/* D-03 / AUTH-04: two separate controls, both unchecked, both required. */}
-        <label htmlFor="acceptRules">
-          <input id="acceptRules" name="acceptRules" type="checkbox" required />{' '}
-          {t('acceptRules', { tenant: tenant.displayName })}
-        </label>
-        <RulesSheet
-          trigger={t('viewRules')}
-          title={t('rulesSheetTitle', { tenant: tenant.displayName })}
-          close={t('closeRules')}
+        <ConsentFields
           rulesText={tenant.rulesText}
+          labels={{
+            acceptRules: t('acceptRules', { tenant: tenant.displayName }),
+            acceptTerms: t('acceptTerms'),
+            viewRules: t('viewRules'),
+            rulesSheetTitle: t('rulesSheetTitle', { tenant: tenant.displayName }),
+            closeRules: t('closeRules'),
+            termsLink: t('termsLink'),
+            privacyLink: t('privacyLink'),
+          }}
         />
-
-        <label htmlFor="acceptTerms">
-          <input id="acceptTerms" name="acceptTerms" type="checkbox" required /> {t('acceptTerms')}
-        </label>
-        <p style={{ margin: 0 }}>
-          <Link href="/termos" target="_blank" rel="noreferrer">
-            {t('termsLink')}
-          </Link>
-          {' · '}
-          <Link href="/privacidade" target="_blank" rel="noreferrer">
-            {t('privacyLink')}
-          </Link>
-        </p>
 
         <SubmitButton label={t('submit')} pendingLabel={t('pending')} />
       </form>
 
-      <p>
-        {t('haveAccount')} <Link href="/entrar">{t('login')}</Link>
+      <p className="text-center text-sm text-text-secondary">
+        {t('haveAccount')}{' '}
+        <Link href="/entrar" className="font-bold text-brand">
+          {t('login')}
+        </Link>
       </p>
     </>
   );
