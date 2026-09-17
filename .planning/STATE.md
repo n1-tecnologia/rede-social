@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-11-PLAN.md
-last_updated: "2026-09-17T01:12:06.088Z"
+stopped_at: Completed 02-12-PLAN.md
+last_updated: "2026-09-17T01:40:51.075Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 40c8f036504bd720e4665c065997723725584ead
+state_head: 4d7982f72a6002ac5ba1057b9763128d4be7e1d3
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 19
+  completed_plans: 20
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 11 of 16
+Plan: 12 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -77,6 +77,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P08 | 15min | 3 tasks | 30 files |
 | Phase 02 P09 | 18min | 3 tasks | 21 files |
 | Phase 02 P11 | 21min | 3 tasks | 27 files |
+| Phase 02 P12 | 24min | 3 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -158,6 +159,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-11: standalone-mode emulation is unsupported by the bundled Chromium 153 (display-mode ignored by Emulation.setEmulatedMedia; --app headless does not report standalone) — pwa.spec.ts asserts the browser half and skips the standalone half with an annotation; the real-device install check stays the definitive PWA-01 proof
 - [Phase 02]: 02-11: SW caching is allow-list shaped — documents/RSC/actions//auth//v1//api//m//serwist NetworkOnly, CacheFirst next-static, bounded SWR brand-assets; SerwistProvider cacheOnNavigation and reloadOnOnline explicitly false; manifest + head icons from ONE allow-listed set with whole-set neutral fallback
 - [Phase 02]: 02-11: /~offline + pwa.json landed in the Task 1 commit (Rule 3) because a 404 precache entry fails the SW install; InstallHint lives in apps/web/components/pwa (unmounted, Phase 7 may hoist to @tria/core/ui); vitest.config.ts uses oxc.jsx automatic (Vite 8) for .tsx helper tests
+- [Phase 02]: 02-12: platform panel authorises by host gate (notFound before any fetch) then GET /v1/platform/tenants?limit=1 — a 200 is the only proof of super_admin; every page/tab re-proves it
+- [Phase 02]: 02-12: server actions return catalog KEYS; client panel components translate with useTranslations('platform') (functions never cross the server→client prop boundary)
+- [Phase 02]: 02-12: tenant page header keeps the display name as the single h1 (own back control + crumb instead of PageHeader); slug rendered as text only — immutable after creation (D-31)
 
 ### Pending Todos
 
@@ -190,6 +194,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T01:12:06.061Z
-Stopped at: Completed 02-11-PLAN.md
+Last session: 2026-09-17T01:40:51.047Z
+Stopped at: Completed 02-12-PLAN.md
 Resume file: None
