@@ -7,6 +7,7 @@
  * in `platform_admins`. Safe to re-run. Passwords come from env only, never from git.
  */
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 // Type-only: erased at runtime, so it cannot pull a kernel module in before the env file is loaded.
 import type { ModuleKey } from '@tria/contracts';
@@ -25,6 +26,17 @@ const { memberships, platformAdmins, tenantDomains, tenantModules, tenants } = a
 );
 const { sqlClient } = await import('@tria/core/db');
 const { supabaseAdmin } = await import('@tria/core/server/supabase-admin');
+const { deriveIconSet } = await import('@tria/core/server/branding/icons');
+const { uploadIconSet } = await import('@tria/core/server/platform/branding');
+const { sql } = await import('drizzle-orm');
+
+/**
+ * D-28: both seed tenants carry a real favicon + PWA icon set derived from their seed logo at a FIXED
+ * version: re-runs overwrite the same five objects (`uploadIconSet` upserts), so the seed stays
+ * idempotent and never accumulates versions. No pg-boss job is enqueued — the seed is the fixture
+ * writer of record; jobs belong to runtime mutations (02-13).
+ */
+const SEED_ICON_VERSION = 1;
 
 const seedPassword = process.env.SEED_PASSWORD;
 if (!seedPassword) {
@@ -118,15 +130,10 @@ async function ensureUser(email: string, name: string, password: string): Promis
 }
 
 for (const t of SEED_TENANTS) {
-  // D-25/D-28: the two source colors plus their persisted derivations; no icon set yet (02-11 derives it).
-  const branding = {
-    logoUrl: t.logoUrl,
-    faviconUrl: null,
-    iconUrl: null,
-    iconUrls: null,
-    iconVersion: 0,
-    colors: deriveBrandColors(t.colors),
-  };
+  // D-25/D-28: the two source colors plus their persisted derivations and the root-relative logo.
+  // The icon fields are NOT part of the upsert `set` (a re-run must never briefly null a live icon
+  // set): the first insert starts them empty and the follow-up update below writes the derived set.
+  const brandSource = { logoUrl: t.logoUrl, colors: deriveBrandColors(t.colors) };
   const tenantId = await withAdminTx(async (tx) => {
     const [tenant] = await tx
       .insert(tenants)
@@ -135,16 +142,35 @@ for (const t of SEED_TENANTS) {
         displayName: t.displayName,
         rulesText: t.rulesText,
         rulesVersion: 1,
-        branding,
+        branding: { ...brandSource, faviconUrl: null, iconUrl: null },
       })
       .onConflictDoUpdate({
         target: tenants.slug,
-        set: { displayName: t.displayName, rulesText: t.rulesText, branding },
+        set: {
+          displayName: t.displayName,
+          rulesText: t.rulesText,
+          branding: sql`${tenants.branding} || ${JSON.stringify(brandSource)}::jsonb`,
+        },
       })
       .returning({ id: tenants.id });
     if (!tenant) throw new Error(`could not upsert tenant ${t.slug}`);
     return tenant.id;
   });
+
+  // D-28: derive favicon + 192 + 512 + maskable-on-primary + apple-180 from the seed wordmark and
+  // store them under `<tenant_id>/branding/icons/1/` in the public `branding` bucket, so the
+  // per-tenant manifest (02-11) and the 02-16 smoke see real, distinct icons per host.
+  const svg = await readFile(resolve(process.cwd(), 'apps/web/public/seed-logos', `${t.slug}.svg`));
+  const set = await deriveIconSet(svg, { primaryHex: t.colors.primary, mime: 'image/svg+xml' });
+  const { faviconUrl, iconUrls } = await uploadIconSet(tenantId, SEED_ICON_VERSION, set);
+  await withAdminTx(async (tx) => {
+    const iconPatch = JSON.stringify({ faviconUrl, iconUrls, iconVersion: SEED_ICON_VERSION });
+    await tx
+      .update(tenants)
+      .set({ branding: sql`${tenants.branding} || ${iconPatch}::jsonb`, updatedAt: new Date() })
+      .where(eq(tenants.id, tenantId));
+  });
+  console.log(`seed: tenant ${t.slug} icons derived (v${SEED_ICON_VERSION}) → ${iconUrls.i512}`);
 
   const people = [
     {
