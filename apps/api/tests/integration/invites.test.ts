@@ -749,4 +749,58 @@ describe('refusals — e-mail already on the platform (WR-02 / WR-03 / WR-04)', 
     expect(isOneTenantPerUserViolation({ code: '23503' })).toBe(false);
     expect(isOneTenantPerUserViolation(null)).toBe(false);
   });
+
+  describe('WR-04 — resend decides from OUR state when GoTrue says the identity is confirmed', () => {
+    let invited: Invited;
+    let mailsAfterR4 = 0;
+
+    beforeAll(async () => {
+      // Identity confirmed (the admin exchanged the link on /auth/confirm) but never accepted:
+      // membership `invited`, row `sent` with `user_id`.
+      invited = await throwawayInvited('wr04');
+    });
+
+    it('R4. an invited membership -> 200 sent with a RECOVERY link that opens a session for the admin; the row stays sent, the membership invited', async () => {
+      const res = await resend(invited.tenantId, invited.inviteId);
+      expect(res.status).toBe(200);
+      const row = tenantInviteSchema.parse(await res.json());
+      expect(row.status).toBe('sent');
+      expect(row.sentAt).not.toBeNull();
+
+      const [newest] = await waitForMailCount(invited.email, 1);
+      expect(newest?.HTML).toContain('/auth/confirm?next=/aceitar-convite');
+      expect(newest?.HTML).toContain('type=recovery');
+      expect(newest?.HTML).not.toContain('type=invite');
+      mailsAfterR4 = (await mailpitMessages(invited.email)).length;
+
+      const client = createClient(
+        process.env.SUPABASE_URL ?? '',
+        process.env.SUPABASE_PUBLISHABLE_KEY ?? '',
+        { auth: { persistSession: false, autoRefreshToken: false } },
+      );
+      const opened = await client.auth.verifyOtp({
+        type: 'recovery',
+        token_hash: extractTokenHash(newest?.HTML ?? ''),
+      });
+      expect(opened.error).toBeNull();
+      expect(opened.data.session?.user.email).toBe(invited.email);
+      await client.auth.signOut({ scope: 'local' }).catch(() => undefined);
+
+      expect((await tenantDetail(invited.tenantId)).invites[0]?.status).toBe('sent');
+      expect(await membershipStatus(invited.tenantId, invited.userId)).toBe('invited');
+      expect((await inviteRow(invited.inviteId))?.user_id).toBe(invited.userId);
+    });
+
+    it('R5. an ACTIVE membership (stale row shape) -> 409 { reason: "already_accepted" } and no new mail', async () => {
+      await adminSql`
+        update public.memberships set status = 'active'
+         where tenant_id = ${invited.tenantId}::uuid and user_id = ${invited.userId}::uuid`;
+      const res = await resend(invited.tenantId, invited.inviteId);
+      expect(res.status).toBe(409);
+      const err = await envelope(res);
+      expect(err.code).toBe('INVITE_STATE_INVALID');
+      expect(err.details?.reason).toBe('already_accepted');
+      expect(await mailpitMessages(invited.email)).toHaveLength(mailsAfterR4);
+    });
+  });
 });
