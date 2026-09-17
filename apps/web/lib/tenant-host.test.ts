@@ -60,31 +60,27 @@ afterEach(() => {
 describe('resolveHostTenant — bounded by-host lookup (WR-06)', () => {
   const slowHost = `slow-${Date.now()}.example`;
 
-  it(
-    '1. a hanging API resolves to generic within the 2 s budget, logs the timeout',
-    async () => {
-      fetchMock.mockImplementation(hangingFetch);
-      const startedAt = Date.now();
-      const result = await resolveHostTenant(slowHost);
-      const elapsed = Date.now() - startedAt;
+  it('1. a hanging API resolves to generic within the 2 s budget, logs the timeout', async () => {
+    fetchMock.mockImplementation(hangingFetch);
+    const startedAt = Date.now();
+    const result = await resolveHostTenant(slowHost);
+    const elapsed = Date.now() - startedAt;
 
-      expect(result).toEqual({ mode: 'generic', host: slowHost });
-      expect(elapsed).toBeGreaterThanOrEqual(1_900);
-      expect(elapsed).toBeLessThan(3_500);
+    expect(result).toEqual({ mode: 'generic', host: slowHost });
+    expect(elapsed).toBeGreaterThanOrEqual(1_900);
+    expect(elapsed).toBeLessThan(3_500);
 
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(url).toBe(`http://api.test/v1/public/tenants/by-host?host=${slowHost}`);
-      expect(init.cache).toBe('no-store');
-      expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`http://api.test/v1/public/tenants/by-host?host=${slowHost}`);
+    expect(init.cache).toBe('no-store');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
 
-      expect(errorSpy).toHaveBeenCalledWith(
-        'tenant-host.lookup_failed',
-        expect.objectContaining({ host: slowHost, error: expect.stringContaining('TimeoutError') }),
-      );
-    },
-    10_000,
-  );
+    expect(errorSpy).toHaveBeenCalledWith(
+      'tenant-host.lookup_failed',
+      expect.objectContaining({ host: slowHost, error: expect.stringContaining('TimeoutError') }),
+    );
+  }, 10_000);
 
   it('2. the generic answer is served from the error TTL — no second fetch for the same host', async () => {
     fetchMock.mockImplementation(hangingFetch);

@@ -49,6 +49,10 @@ export const TENANT_NAME_HEADER = 'x-tenant-name';
 const TTL_HIT_MS = 60_000; // registered host
 const TTL_MISS_MS = 60_000; // 404 TENANT_NOT_FOUND
 const TTL_ERROR_MS = 10_000; // network error / 5xx (fail-open to generic, logged)
+// Interactive path (proxy + every layout); the API-side adapters use 10 s — a hanging Cloud Run must
+// fail open to generic within one perceived beat (WR-06). A timeout is a lookup failure: generic for
+// TTL_ERROR_MS, never another tenant's brand.
+const HOST_LOOKUP_TIMEOUT_MS = 2_000;
 
 // Module-level, per instance, keyed by the normalised host. Recorded discretion (plan 01-02 truths).
 // Bounded LRU (WR-06): on Vercel the Host is constrained to project domains, but on any other
@@ -64,6 +68,8 @@ function isGenericFastPath(host: string): boolean {
 /**
  * proxy.ts and `getHostBrand()`. Classifies the raw `Host` header through the cached public lookup
  * `GET /v1/public/tenants/by-host` (D-20). Never throws: a lookup failure yields `generic`.
+ * Bounded by `HOST_LOOKUP_TIMEOUT_MS`; a timeout is a lookup failure — generic for `TTL_ERROR_MS`,
+ * never another tenant's brand.
  */
 export async function resolveHostTenant(rawHost: string | null | undefined): Promise<HostTenant> {
   const host = normalizeHost(rawHost) ?? 'localhost';
@@ -84,7 +90,7 @@ export async function resolveHostTenant(rawHost: string | null | undefined): Pro
   try {
     const res = await fetch(
       `${env.API_URL}/v1/public/tenants/by-host?host=${encodeURIComponent(host)}`,
-      { cache: 'no-store' },
+      { cache: 'no-store', signal: AbortSignal.timeout(HOST_LOOKUP_TIMEOUT_MS) },
     );
     if (res.ok) {
       const parsed = hostTenantSchema.safeParse(await res.json());
