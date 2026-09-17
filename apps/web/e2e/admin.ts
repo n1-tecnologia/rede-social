@@ -131,3 +131,21 @@ export async function deleteUserByEmail(email: string): Promise<void> {
 export async function deleteExampleItemsLike(pattern: string): Promise<void> {
   await sql()`delete from public.example_items where title like ${pattern}`;
 }
+
+/**
+ * Removes a tenant the platform-panel spec created through the UI (02-12). `tenant_modules`,
+ * `tenant_domains`, `tenant_invites` and `memberships` cascade from `tenants`.
+ */
+export async function deleteTenantBySlug(slug: string): Promise<void> {
+  await sql()`delete from public.tenants where slug = ${slug}`;
+}
+
+/** `tenant_modules.enabled` for one key of one tenant, or `null` when there is no row (D-17/D-19). */
+export async function getTenantModuleFlag(slug: string, key: string): Promise<boolean | null> {
+  const rows = await sql()<{ enabled: boolean }[]>`
+    select tm.enabled
+      from public.tenant_modules tm
+      join public.tenants t on t.id = tm.tenant_id
+     where t.slug = ${slug} and tm.module_key = ${key}`;
+  return rows[0]?.enabled ?? null;
+}
