@@ -411,6 +411,17 @@ function isConfirmedEmail(error: { message?: string; code?: string; status?: num
  *     mail and returns `properties.hashed_token` — rendered with the 02-06 invite template in the
  *     tenant's brand and sent through the kernel `mailTransport`.
  *
+ * WR-04 (02-19 D-C) — when `generateLink({ type: 'invite' })` answers `email_exists`, GoTrue only
+ * says the identity is CONFIRMED (`/auth/confirm` runs `verifyOtp` before the password is set, so an
+ * admin who abandoned `/aceitar-convite` is confirmed but never accepted). Acceptance is OUR state:
+ *   - `invite.status === 'accepted'` (checked first) or this tenant's membership `active`
+ *     -> 409 { reason: 'already_accepted' };
+ *   - membership `invited` -> a recovery-type `generateLink` for the SAME `redirectTo`,
+ *     sent with the same branded invite template (`type=recovery` in the link): `/auth/confirm`
+ *     accepts `recovery`, honours `next=/aceitar-convite`, and the accept action sets the password
+ *     through `updateUser`, which a recovery session allows — the admin lands on the accept screen;
+ *   - no membership / no `user_id` -> `email_in_use` refusal; any other status -> `not_invited`.
+ *
  * Why not `inviteUserByEmail` again (RESEARCH A3): whether GoTrue re-sends for an already-invited
  * user is unverified, every GoTrue-originated send consumes the `[auth.rate_limit] email_sent`
  * budget, and `generateLink` REPLACES the user's confirmation token, so the previous link stops
@@ -430,6 +441,13 @@ export async function resendInvite(
 
   const state = await withAdminTx(async (tx) => {
     const invite = await readInvite(tx, tenantId, inviteId);
+    // The back-reference is internal (not in `tenantInviteSchema`): it names OUR membership row
+    // when GoTrue answers that the identity is already confirmed (WR-04).
+    const [ref] = await tx
+      .select({ userId: tenantInvites.userId })
+      .from(tenantInvites)
+      .where(eq(tenantInvites.id, inviteId))
+      .limit(1);
     const [tenant] = await tx
       .select({
         slug: tenants.slug,
@@ -452,10 +470,10 @@ export async function resendInvite(
         ),
       )
       .limit(1);
-    return { invite, tenant, host: hosts[0]?.host ?? null };
+    return { invite, invitedUserRef: ref?.userId ?? null, tenant, host: hosts[0]?.host ?? null };
   });
 
-  const { invite, tenant, host } = state;
+  const { invite, invitedUserRef, tenant, host } = state;
   if (invite.status === 'accepted') {
     throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'already_accepted' });
   }
@@ -480,22 +498,59 @@ export async function resendInvite(
 
   // Mint a fresh token (no mail from GoTrue) and send it ourselves.
   const redirectTo = `${publicWebOrigin(host)}${INVITE_NEXT_PATH}`;
-  const generated = await supabaseAdmin.auth.admin.generateLink({
+  let linkType: 'invite' | 'recovery' = 'invite';
+  let generated = await supabaseAdmin.auth.admin.generateLink({
     type: 'invite',
     email: invite.email,
     options: { redirectTo, data: { tenant_slug: tenant.slug } },
   });
-  if (generated.error) {
-    if (isConfirmedEmail(generated.error)) {
-      // The identity is confirmed although our row is not: surface it, never guess.
+  if (generated.error && isConfirmedEmail(generated.error)) {
+    // GoTrue only says the identity is confirmed (the admin exchanged the link on /auth/confirm);
+    // whether the invite was ACCEPTED is OUR state (WR-04): the invite row was checked above, the
+    // membership of this tenant decides here.
+    const membership = invitedUserRef
+      ? await withAdminTx(async (tx) => {
+          const rows = await tx
+            .select({ status: memberships.status })
+            .from(memberships)
+            .where(
+              and(
+                eq(memberships.tenantId, tenantId),
+                eq(memberships.userId, invitedUserRef),
+                isNull(memberships.deletedAt),
+              ),
+            )
+            .limit(1);
+          return rows[0]?.status ?? null;
+        })
+      : null;
+    if (membership === 'active') {
       throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'already_accepted' });
     }
+    if (membership === null) {
+      // A confirmed identity that is not our invited admin (the pre-check's race guard).
+      throw await refuseInvite(inviteId, 'email_in_use', log, { tenantId, userId: actor.userId });
+    }
+    if (membership !== 'invited') {
+      throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'not_invited' });
+    }
+    // `invited`: a recovery link for the same redirectTo (D-C) — `/auth/confirm` accepts the type
+    // and honours `next=/aceitar-convite`, where `updateUser` sets the password on that session.
+    linkType = 'recovery';
+    generated = await supabaseAdmin.auth.admin.generateLink({
+      type: 'recovery',
+      email: invite.email,
+      options: { redirectTo },
+    });
+  }
+  if (generated.error) {
     log.error(
       {
         event: 'invite.resend_failed',
         userId: actor.userId,
         tenantId,
         inviteId,
+        linkType,
         err: generated.error.message,
       },
       'generateLink failed',
@@ -512,7 +567,7 @@ export async function resendInvite(
     throw new ApiError(500, 'INTERNAL');
   }
 
-  const link = buildActionLink(redirectTo, hashedToken, 'invite');
+  const link = buildActionLink(redirectTo, hashedToken, linkType);
   const brand = toMailBrand(
     {
       kind: 'tenant',
@@ -591,6 +646,7 @@ export async function resendInvite(
       tenantId,
       inviteId,
       invitedUserId,
+      linkType,
       to: maskEmail(invite.email),
       transport: mailTransport.name,
     },
