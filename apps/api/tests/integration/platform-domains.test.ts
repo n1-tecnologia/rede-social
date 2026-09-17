@@ -256,8 +256,10 @@ const domainRow = async (domainId: string) => {
       last_checked_at: string | null;
       verify_deadline_at: string | null;
       is_primary: boolean;
+      last_error: string | null;
     }[]
-  >`select verification_status, verified_at, last_checked_at, verify_deadline_at, is_primary
+  >`select verification_status, verified_at, last_checked_at, verify_deadline_at, is_primary,
+           last_error
       from public.tenant_domains where id = ${domainId}::uuid`;
   return row;
 };
@@ -609,5 +611,111 @@ describe('adjacency and concurrency — a second tenant (TENANT-07 edge ledger)'
     const resolved = await byHost(INV);
     expect(resolved.status).toBe(200);
     expect(((await resolved.json()) as { slug: string }).slug).toBe(SLUG);
+  });
+});
+
+/** Mimics the worker consuming every job of the host, so a re-arm is observable as a NEW created row. */
+const completeJobsOf = (domainId: string) =>
+  adminSql`update pgboss.job_common set state = 'completed'
+            where name = 'kernel.domain-verify' and singleton_key = ${domainId}`;
+
+const createdJobsOf = async (domainId: string) =>
+  (await jobRows(domainId)).filter((j) => j.state === 'created');
+
+describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () => {
+  const SLUG = `pd-err-${RUN}`.slice(0, 40);
+  const HOST = `provider-fails-once-${RUN}.cliente.test`;
+  const EXP_HOST = `provider-fails-once-exp-${RUN}.cliente.test`;
+  let tenantId = '';
+  let domainId = '';
+  let expDomainId = '';
+
+  it('17. a throwing provider keeps the host pending, records last_error = "unavailable:503" and re-arms ONE new created job >= 590 s ahead in the same transaction', async () => {
+    const created = await createThrowawayTenant(SLUG);
+    tenantId = created.id;
+
+    const res = await platform(`/tenants/${tenantId}/domains`, {
+      method: 'POST',
+      body: { host: HOST },
+    });
+    expect(res.status).toBe(201);
+    domainId = tenantDomainSchema.parse(await res.json()).id;
+    createdDomainIds.push(domainId);
+
+    await completeJobsOf(domainId);
+    expect(await createdJobsOf(domainId)).toHaveLength(0);
+    const verifies = fakeDomainProviderStats().verify;
+
+    await domainVerifyJob.handler({ domainId });
+
+    const row = await domainRow(domainId);
+    expect(row?.verification_status).toBe('pending');
+    expect(row?.verified_at).toBeNull();
+    expect(row?.last_checked_at).not.toBeNull();
+    expect(row?.last_error).toBe('unavailable:503');
+    expect(fakeDomainProviderStats().verify).toBe(verifies + 1);
+
+    // The re-arm is a NEW job (the attach job was completed above), paced by DOMAIN_VERIFY_INTERVAL_S.
+    const waiting = await createdJobsOf(domainId);
+    expect(waiting).toHaveLength(1);
+    expect(new Date(waiting[0]?.start_after ?? 0).getTime() - Date.now()).toBeGreaterThanOrEqual(
+      590_000,
+    );
+  });
+
+  it('18. the next run verifies the host (the fake answers OK now): verified_at set, last_error cleared, by-host 200, invite sent, and no further re-arm', async () => {
+    const waitingBefore = (await createdJobsOf(domainId)).length;
+
+    await domainVerifyJob.handler({ domainId });
+
+    const row = await domainRow(domainId);
+    expect(row?.verification_status).toBe('verified');
+    expect(row?.verified_at).not.toBeNull();
+    expect(row?.last_error).toBeNull();
+    expect((await byHost(HOST)).status).toBe(200);
+    expect((await tenantDetail(tenantId)).invites[0]?.status).toBe('sent');
+    expect((await createdJobsOf(domainId)).length).toBe(waitingBefore);
+  });
+
+  it('19. past verify_deadline_at a throwing provider marks the host expired on the error path and re-arms nothing; verify answers 409 { reason: "expired" }; restart -> 200 and verifies', async () => {
+    const res = await platform(`/tenants/${tenantId}/domains`, {
+      method: 'POST',
+      body: { host: EXP_HOST },
+    });
+    expect(res.status).toBe(201);
+    expDomainId = tenantDomainSchema.parse(await res.json()).id;
+    createdDomainIds.push(expDomainId);
+
+    await completeJobsOf(expDomainId);
+    await adminSql`update public.tenant_domains set verify_deadline_at = now() - interval '1 hour'
+                   where id = ${expDomainId}::uuid`;
+
+    await domainVerifyJob.handler({ domainId: expDomainId });
+
+    const row = await domainRow(expDomainId);
+    expect(row?.verification_status).toBe('expired');
+    expect(row?.verified_at).toBeNull();
+    expect(row?.last_error).toBe('unavailable:503');
+    expect(row?.last_checked_at).not.toBeNull();
+    expect(await createdJobsOf(expDomainId)).toHaveLength(0);
+
+    const refused = await platform(`/tenants/${tenantId}/domains/${expDomainId}/verify`, {
+      method: 'POST',
+    });
+    expect(refused.status).toBe(409);
+    const err = await envelope(refused);
+    expect(err.code).toBe('DOMAIN_STATE_INVALID');
+    expect(err.details).toEqual({ reason: 'expired' });
+
+    // error -> expired -> restart -> verified: the fake answers OK on the restart's immediate check.
+    const restarted = await platform(`/tenants/${tenantId}/domains/${expDomainId}/restart`, {
+      method: 'POST',
+    });
+    expect(restarted.status).toBe(200);
+    expect(restarted.headers.get('cache-control')).toBe('no-store');
+    const domain = tenantDomainSchema.strict().parse(await restarted.json());
+    expect(domain.verificationStatus).toBe('verified');
+    expect(domain.verifiedAt).not.toBeNull();
+    expect(domain.lastError).toBeNull();
   });
 });

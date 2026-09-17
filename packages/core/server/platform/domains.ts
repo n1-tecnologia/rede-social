@@ -402,13 +402,16 @@ async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): 
  *   to 404.
  * - `already_verified`: NO provider call; the side effects re-run idempotently and the row is
  *   answered unchanged (`verified_at` is never reset).
- * - `expired`: the deadline passed (either already marked, or marked by this call after a failed
- *   check) — nothing is re-armed; `restartDomainVerification` reopens it.
+ * - `expired`: the deadline passed (either already marked, marked by this call after a failed
+ *   check, or marked by this call after a provider ERROR past the deadline) — nothing is re-armed;
+ *   `restartDomainVerification` reopens it.
  * - `verified`: BOTH conditions held and THIS call won the single
  *   `update … set verified_at = now() … where id = $1 and verified_at is null returning` — a
  *   zero-row answer means another caller (the job racing the button) won and this one returns
  *   `already_verified` without running side effects.
- * - `pending`: records/last_checked_at refreshed and the poller re-armed in the same transaction.
+ * - `pending`: records/last_checked_at refreshed and the poller re-armed in the same transaction
+ *   — including a failed provider call: last_error = '<kind>[:<status>]', last_checked_at
+ *   refreshed, poller re-armed in the same transaction (CR-01).
  */
 export async function checkDomain(
   domainId: string,
@@ -433,15 +436,29 @@ export async function checkDomain(
   try {
     check = await domainProvider.verify(row.host);
   } catch (error) {
+    // A provider failure (Vercel 429/5xx/timeout, schema mismatch) is a normal poller outcome
+    // (CR-01): the deadline still applies and the cadence must survive it. `last_error` carries
+    // only the kind and the HTTP status, never anything from the provider's answer (T-02-51).
     const kind = error instanceof DomainProviderError ? error.kind : 'unavailable';
     const status = error instanceof DomainProviderError ? error.status : undefined;
-    const [updated] = await withAdminTx((tx) =>
-      tx
+    const now = new Date();
+    const expired = row.verifyDeadlineAt !== null && row.verifyDeadlineAt.getTime() < now.getTime();
+    const [updated] = await withAdminTx(async (tx) => {
+      const rows = await tx
         .update(tenantDomains)
-        .set({ lastCheckedAt: new Date(), lastError: status ? `${kind}:${status}` : kind })
-        .where(eq(tenantDomains.id, domainId))
-        .returning(),
-    );
+        .set({
+          lastCheckedAt: now,
+          lastError: status ? `${kind}:${status}` : kind,
+          ...(expired ? { verificationStatus: 'expired' as const } : {}),
+        })
+        // A job that lost the race to a concurrent winner must not stamp the verified row (T-02-54).
+        .where(and(eq(tenantDomains.id, domainId), isNull(tenantDomains.verifiedAt)))
+        .returning();
+      // Re-arm in the SAME transaction unless the deadline passed (a duplicate while the previous
+      // job is still `created` is dropped by the `short` policy).
+      if (rows[0] && !expired) await enqueueVerify(tx, domainId);
+      return rows;
+    });
     log.warn(
       {
         event: 'platform.domains.check_failed',
@@ -451,10 +468,13 @@ export async function checkDomain(
         source: opts.source,
         kind,
         status: status ?? null,
+        expired,
       },
-      'provider check failed; host stays pending',
+      expired
+        ? 'provider check failed; deadline passed; poller stopped'
+        : 'provider check failed; poller re-armed',
     );
-    return { outcome: 'pending', domain: toTenantDomain(updated ?? row) };
+    return { outcome: expired ? 'expired' : 'pending', domain: toTenantDomain(updated ?? row) };
   }
 
   const records = dedupeDnsRecords(check.records);

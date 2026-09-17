@@ -1,10 +1,11 @@
 import type { DnsRecord } from '@tria/contracts';
-import type { DomainCheck, DomainProvider } from './types';
+import { type DomainCheck, type DomainProvider, DomainProviderError } from './types';
 
 /**
  * `DOMAIN_PROVIDER=fake` — the env default and what every non-production environment runs (D-36:
  * "with the fake adapter the first check verifies", so attach -> verify -> resolve -> invite is
- * e2e-testable without Vercel). Deterministic per host, no network, no state beyond call counters:
+ * e2e-testable without Vercel). Deterministic per host, no network, no state beyond call counters
+ * and the set of hosts that already threw once:
  *
  *  - a subdomain (3+ labels) gets `CNAME <host> -> fake.tria-dns.test`, a 2-label apex gets
  *    `A <host> -> 203.0.113.10` (TEST-NET-3, never routable);
@@ -14,7 +15,12 @@ import type { DomainCheck, DomainProvider } from './types';
  *  - `addDomain` always answers `configured: false` (the customer has not created the records yet);
  *  - `verify` answers `ownershipVerified: true` and `configured: true`, EXCEPT for a host containing
  *    `never-verifies`, which stays unconfigured forever — the expiry / poller tests need a host
- *    that never flips.
+ *    that never flips;
+ *  - a host containing `provider-fails-once` makes the FIRST `verify` call for it throw a
+ *    `DomainProviderError` of kind `unavailable` with status 503 (a Vercel 5xx / timeout
+ *    stand-in); every later call
+ *    answers normally — the poller's provider-error branch (CR-01: record the error, apply the
+ *    deadline, re-arm in the same transaction) is reachable locally and in CI.
  *
  * The seed never reaches this adapter: seeded hosts are written verified directly (D-24).
  */
@@ -23,6 +29,9 @@ const ROUTING_CNAME_TARGET = 'fake.tria-dns.test';
 const ROUTING_A_TARGET = '203.0.113.10';
 
 const counters = { addDomain: 0, getDnsRecords: 0, verify: 0, removeDomain: 0 };
+
+/** Hosts whose one-time `provider-fails-once` failure has already been raised in this process. */
+const failedOnce = new Set<string>();
 
 /** Test seam: how many times each provider method ran in this process (no duplicate registration). */
 export function fakeDomainProviderStats(): {
@@ -70,6 +79,10 @@ export function createFakeDomainProvider(): DomainProvider {
     },
     async verify(host): Promise<DomainCheck> {
       counters.verify += 1;
+      if (host.includes('provider-fails-once') && !failedOnce.has(host)) {
+        failedOnce.add(host);
+        throw new DomainProviderError('unavailable', 503);
+      }
       return {
         ownershipVerified: true,
         configured: !host.includes('never-verifies'),

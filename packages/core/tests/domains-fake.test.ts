@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createFakeDomainProvider, fakeDomainProviderStats } from '../server/domains/fake';
+import { DomainProviderError } from '../server/domains/types';
 
 /**
  * The `DOMAIN_PROVIDER=fake` contract (D-36): what every non-production environment runs, and what
@@ -55,6 +56,31 @@ describe('fake domain provider', () => {
 
     const ok = await provider.verify('ok.cliente.test');
     expect(ok).toMatchObject({ ownershipVerified: true, configured: true });
+  });
+
+  it('provider-fails-once: the FIRST verify throws DomainProviderError(unavailable, 503), the second verifies; other hosts never throw (CR-01 error-path seam)', async () => {
+    const host = 'provider-fails-once-x.cliente.test';
+    const before = fakeDomainProviderStats().verify;
+
+    let thrown: unknown;
+    try {
+      await provider.verify(host);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DomainProviderError);
+    expect((thrown as DomainProviderError).kind).toBe('unavailable');
+    expect((thrown as DomainProviderError).status).toBe(503);
+
+    const second = await provider.verify(host);
+    expect(second).toMatchObject({ ownershipVerified: true, configured: true });
+    // The counter still increments on the throwing call.
+    expect(fakeDomainProviderStats().verify).toBe(before + 2);
+
+    await expect(provider.verify('plain-x.cliente.test')).resolves.toMatchObject({
+      ownershipVerified: true,
+      configured: true,
+    });
   });
 
   it('addDomain, getDnsRecords and verify answer the same record set for a host', async () => {
