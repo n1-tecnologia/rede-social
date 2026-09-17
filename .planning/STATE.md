@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-15-PLAN.md
-last_updated: "2026-09-17T02:53:57.627Z"
+stopped_at: Completed 02-14-PLAN.md
+last_updated: "2026-09-17T03:23:54.229Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 2575765374d5099ef5fd0609f62a2b18fbee70e5
+state_head: 501b998c902178ed1808c32df65663ea1f7e5892
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 23
+  completed_plans: 24
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 15 of 16
+Plan: 16 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -81,6 +81,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P10 | 22min | 3 tasks | 23 files |
 | Phase 02 P13 | 21min | 3 tasks | 18 files |
 | Phase 02 P15 | 13min | 3 tasks | 15 files |
+| Phase 02 P14 | 20 min | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -175,6 +176,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-15: the four domain row actions share runDomainAction (uuid gate → fetch → readRow → mapDomainActionError → revalidate → redirect-after-try); mapDomainActionError is called once, behaviour pinned by e2e
 - [Phase 02]: 02-15: AttachDomainForm keeps the host input controlled (synced from AttachDomainState.value) because React 19 resets uncontrolled forms after every action
 - [Phase 02]: 02-15: Módulos rows render Ativado/Desativado as StatusPills with the helper at the card bottom per the approved tenant-page-modulos mockup (D-33)
+- [Phase 02]: 02-14: brand aliases (--brand-accent & co.) are declared on every brand scope in tokens.css (:root, [data-brand-root], [data-brand-scope], [style*="--brand-primary"]) with a light-in-dark override; the per-element * rule was replaced — bg-brand is asserted by rendered colour in e2e
+- [Phase 02]: 02-14: kernel BrandPreview (packages/core/ui) takes strings as props and derives colours with the contracts functions; Phase 8 reuses it unchanged; branding specs spawn their own ROLE=worker via apps/web/e2e/worker.ts
 
 ### Pending Todos
 
@@ -207,6 +210,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T02:53:57.597Z
-Stopped at: Completed 02-15-PLAN.md
+Last session: 2026-09-17T03:23:54.200Z
+Stopped at: Completed 02-14-PLAN.md
 Resume file: None
