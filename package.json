@@ -20,6 +20,9 @@
     "spike:supavisor": "vitest run --config scripts/vitest.config.ts",
     "test:integration": "pnpm --filter @tria/api test:integration",
     "e2e": "pnpm --filter @tria/web e2e",
+    "check:static-routes": "bash scripts/check-static-routes.sh",
+    "verify": "pnpm lint && pnpm turbo typecheck build test && pnpm check:static-routes && pnpm boundaries && pnpm boundaries:negative && pnpm guard:lanes && pnpm supabase test db && pnpm test:integration && pnpm spike:supavisor && pnpm e2e && pnpm --filter @tria/web e2e:pwa",
+    "verify:smoke": "pnpm --filter @tria/web exec playwright test branding.spec.ts phase2-smoke.spec.ts invite.spec.ts recovery.spec.ts && pnpm --filter @tria/web exec playwright test --config playwright.pwa.config.ts --grep @tracer",
     "supabase": "bash scripts/supabase.sh"
   },
   "devDependencies": {

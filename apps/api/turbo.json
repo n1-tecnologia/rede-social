@@ -1,4 +1,13 @@
 {
   "extends": ["//"],
-  "tags": ["app"]
+  "tags": ["app"],
+  "boundaries": {
+    // `turbo boundaries` also walks the git-ignored tsup bundle `dist/` when it exists (after
+    // `pnpm turbo build`, i.e. inside `pnpm verify` and CI). The bundled `resend` SDK (a dependency of
+    // @tria/core, inlined by tsup's `noExternal`) carries an optional
+    // `await import('@react-email/render')` inside a try/catch that project code never reaches
+    // (02-07 / 02-11 deferred item). Declaring it implicit keeps the check honest for real imports
+    // while letting the build output coexist with the gate.
+    "implicitDependencies": ["@react-email/render"]
+  }
 }

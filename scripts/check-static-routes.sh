@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Build-output gate for ROADMAP Phase 2 criterion 1 (TENANT-02, plan 02-16, RESEARCH Pattern 11):
+# "no authenticated or host-branded route may be prerendered". Every page under (app)/, (auth)/,
+# (platform)/, the per-tenant manifest under /m/ and the offline page read cookies or headers per
+# request, so they must build as ƒ (dynamic). A route that Next turned static would serve ONE
+# tenant's brand (or one member's shell) to every host — the cross-tenant leak this phase exists to
+# prevent. Runs after `next build` inside the root `verify` script and in CI (`pnpm check:static-routes`).
+#
+# What it reads (apps/web/.next after `pnpm --filter @tria/web build`):
+#   - app-path-routes-manifest.json — every App Router source key → public path;
+#   - prerender-manifest.json — `routes` (static HTML emitted at build) and `dynamicRoutes`
+#     (parametrised routes with generated params).
+# What it enforces:
+#   1. both manifests exist — a missing file exits 2 with the path (never a pass by absence);
+#   2. every key of REQUIRED_KEYS exists in the routes manifest — a moved or renamed route fails the
+#      gate ("route moved or renamed — update REQUIRED_KEYS") instead of silently vanishing from it;
+#   3. no public path of a key under a GUARDED prefix appears in `routes` or `dynamicRoutes`;
+#   4. every key of `routes` matches ALLOWED_STATIC (`^/_` — Next's internals such as /_global-error —
+#      or `^/serwist/`): /serwist/[path] is the ONLY legitimately static app output, because 02-11's
+#      `createSerwistRoute` prerenders the service-worker script (/serwist/sw.js + .map) at build;
+#   5. no `dynamicRoutes` entry other than /serwist/[path] maps back to a guarded source key.
+#
+# When it fails: read the printed offenders, find which layout/page stopped reading a request-time
+# API (`cookies()`, `headers()`, `connection()`) or gained a `generateStaticParams` / `dynamic =
+# 'force-static'`, and restore the per-request read — never add the path to the allow-list. The
+# allow-list may only ever gain a `/_`-prefixed internal or a `/serwist/` path.
+#
+# Note: enabling `cacheComponents` (Next 16 Cache Components / PPR) changes what the prerender
+# manifest lists (partially prerendered shells appear as routes); this gate must be revisited then.
+#
+# Node runs the JSON logic (the only runtime guaranteed on every machine; no jq dependency).
+# Exit codes: 0 pass, 1 offenders found, 2 build output missing.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NEXT_DIR="${NEXT_DIR:-$ROOT/apps/web/.next}"
+
+for file in prerender-manifest.json app-path-routes-manifest.json; do
+  if [ ! -f "$NEXT_DIR/$file" ]; then
+    echo "check-static-routes: $NEXT_DIR/$file missing — run 'pnpm --filter @tria/web build' first" >&2
+    exit 2
+  fi
+done
+
+node - "$NEXT_DIR" <<'EOF'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const nextDir = process.argv[2];
+const prerender = JSON.parse(fs.readFileSync(path.join(nextDir, 'prerender-manifest.json'), 'utf8'));
+const appRoutes = JSON.parse(fs.readFileSync(path.join(nextDir, 'app-path-routes-manifest.json'), 'utf8'));
+
+/** Source keys that MUST exist (Phase 2 tree). Extend when a new authenticated route ships. */
+const REQUIRED_KEYS = [
+  '/(app)/inicio/page',
+  '/(app)/configuracoes/page',
+  '/(app)/perfil/page',
+  '/(auth)/entrar/page',
+  '/(platform)/plataforma/page',
+  '/(platform)/plataforma/novo/page',
+  '/(platform)/plataforma/tenants/[id]/marca/page',
+  '/(platform)/plataforma/tenants/[id]/modulos/page',
+  '/(platform)/plataforma/tenants/[id]/dominios/page',
+  '/(platform)/plataforma/tenants/[id]/admins/page',
+  '/(platform)/plataforma/tenants/[id]/status/page',
+  '/m/[slug]/manifest.webmanifest/route',
+  '/~offline/page',
+  '/serwist/[path]/route',
+];
+/** Source-key prefixes whose public paths may never be static. */
+const GUARDED_PREFIXES = ['/(app)/', '/(auth)/', '/(platform)/', '/m/', '/~offline'];
+/** The only static output Next may emit: its internals and 02-11's service-worker route. */
+const ALLOWED_STATIC = [/^\/_/, /^\/serwist\//];
+const STATIC_DYNAMIC_ROUTE = '/serwist/[path]';
+
+const staticRoutes = Object.keys(prerender.routes ?? {});
+const dynamicRoutes = Object.keys(prerender.dynamicRoutes ?? {});
+const offenders = [];
+
+for (const key of REQUIRED_KEYS) {
+  if (!(key in appRoutes)) {
+    offenders.push(`${key}: route moved or renamed — update REQUIRED_KEYS`);
+  }
+}
+
+const guarded = Object.entries(appRoutes).filter(([key]) =>
+  GUARDED_PREFIXES.some((prefix) => key.startsWith(prefix)),
+);
+for (const [key, publicPath] of guarded) {
+  if (publicPath in (prerender.routes ?? {})) {
+    offenders.push(`${publicPath} (${key}) is prerendered as a static route`);
+  }
+  if (publicPath in (prerender.dynamicRoutes ?? {})) {
+    offenders.push(`${publicPath} (${key}) is listed under dynamicRoutes (prerendered params)`);
+  }
+}
+
+for (const route of staticRoutes) {
+  if (!ALLOWED_STATIC.some((re) => re.test(route))) {
+    offenders.push(`${route} is static but not allow-listed (only /_* and /serwist/* may be)`);
+  }
+}
+
+const guardedPublicPaths = new Map(guarded.map(([key, publicPath]) => [publicPath, key]));
+for (const route of dynamicRoutes) {
+  if (route === STATIC_DYNAMIC_ROUTE) continue;
+  const source = guardedPublicPaths.get(route);
+  if (source) offenders.push(`${route} (${source}) is a prerendered dynamic route`);
+}
+
+console.log('check-static-routes');
+console.log(`  static routes:       ${staticRoutes.length ? staticRoutes.join(', ') : '(none)'}`);
+console.log(`  dynamic prerendered: ${dynamicRoutes.length ? dynamicRoutes.join(', ') : '(none)'}`);
+console.log(`  guarded routes checked: ${guarded.length}`);
+console.log(`  offenders: ${offenders.length}`);
+for (const offender of offenders) console.log(`    - ${offender}`);
+if (offenders.length > 0) {
+  console.error('check-static-routes: FAIL — an authenticated or host-branded route is static');
+  process.exit(1);
+}
+console.log('check-static-routes: OK — no authenticated or host-branded route is static');
+EOF

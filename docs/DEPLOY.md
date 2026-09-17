@@ -5,7 +5,19 @@ Everything the pipeline reads, by name, per environment. Plans 01-10 (GitHub + V
 this file, no workflow reads it.
 
 Pipeline files: `.github/workflows/ci.yml`, `deploy-api.yml`, `seed-prod.yml`,
-`keepalive-staging.yml`, `apps/web/vercel.json`, `apps/api/Dockerfile`.
+`keepalive-staging.yml`, `apps/web/vercel.json`, `apps/api/Dockerfile`,
+`scripts/check-static-routes.sh` (build-output gate, Phase 2).
+
+## Documents
+
+- `docs/deploy/auth-mail.md` — branded auth e-mails: Send Email Hook secrets, Resend, rotation,
+  failure modes (02-06).
+- `## Custom domains (TENANT-07, D-34)` (this file) — provider / allow-list variables and the
+  deferred hosted proof (02-09).
+- `## Phase 2 verification` (this file) — the local exit gate `pnpm verify`, the smoke, the manual
+  checks and the hosted proofs deferred to the Phase 01.1 runbook (02-16).
+- `packages/core/db/README.md` — connection URL shapes (pooler ports, `api_user`, session-mode
+  fallback).
 
 ## Environments (D-11, D-15)
 
@@ -128,7 +140,11 @@ must create, and the `kernel.domain-verify` pg-boss job (in the **worker** servi
 every ~10 minutes for up to 7 days. Only a verified host resolves (D-36); the verified transition
 adds the host to the Supabase Auth redirect allow-list and sends the pending first-admin invite.
 Locally and in CI both adapters are the fail-safe **local** implementations (`fake` / `local`,
-the kernel env defaults) — nothing here is needed to develop or test.
+the kernel env defaults) — nothing here is needed to develop or test. Locally and in CI the flow
+runs against `DOMAIN_PROVIDER=fake` (`apps/web/e2e/phase2-smoke.spec.ts`,
+`platform-domains.spec.ts`); aliases 308 to the primary (D-35) and only verified hosts resolve
+(D-36). The real-provider proof is the runbook item "Attach a real customer domain end-to-end"
+below (Phase 01.1).
 
 Variables read by the **`api` and `worker`** Cloud Run services (both run the same image; the
 worker runs the poller, the API answers "Verificar agora"):
@@ -150,13 +166,101 @@ failing the first attach. The adapters call only the documented project-level en
 / config / verify / detach) — the platform never writes the customer's DNS, buys a domain or deletes
 one at the Vercel account level (`.planning/phases/02-…/COVERAGE.md`).
 
+## Supabase hosted auth settings (Phase 2)
+
+**Email OTP Expiration = 86400** (24 h) on the hosted projects — Dashboard → Authentication →
+Emails, or `[remotes.<env>.auth.email] otp_expiry = 86400` in `supabase/config.toml` pushed by
+`supabase config push` — so a first `admin_tenant` can open the invite link within a day of the
+domain verifying (02-10). The local stack keeps `otp_expiry = 3600` (`[auth.email]`), which the
+e2e suite never approaches. The Send Email Hook values (secret, transport, rotation) live in
+`docs/deploy/auth-mail.md`.
+
+## Storage buckets
+
+`[storage.buckets.branding]` in `supabase/config.toml` applies to the **local stack only**
+(`supabase start`). Hosted projects get the public `branding` bucket (2 MiB cap, image MIME
+allow-list) from `supabase/migrations/20260917021738_branding_bucket.sql`, applied by
+`supabase db push` like every other migration — there is no dashboard step, and `supabase config
+push` does **not** create buckets (02-13). Object keys are `<tenant_id>/branding/…`; the derived
+icon set lives under `<tenant_id>/branding/icons/<iconVersion>/`.
+
+## Phase 2 verification
+
+**Local exit gate — `pnpm verify` (~15–20 min, one shot).** Runs, in this order, exactly what CI
+runs (`.github/workflows/ci.yml`, single `checks` job, D-12):
+
+1. `pnpm lint` — Biome on every package + `scripts/check-ui-literals.sh` (no hex literal, legacy
+   brand class or pt-BR literal in TSX; catalog files valid — UI-03, PWA-03);
+2. `pnpm turbo typecheck build test` — TypeScript, `next build`, unit suites;
+3. `pnpm check:static-routes` — the build-output gate (below);
+4. `pnpm boundaries` / `pnpm boundaries:negative` / `pnpm guard:lanes`;
+5. `pnpm supabase test db` — pgTAP (RLS, tenant isolation);
+6. `pnpm test:integration` — the API integration suite (needs the running API on :8787 or starts
+   its own listener);
+7. `pnpm spike:supavisor`;
+8. `pnpm e2e` — Playwright against the dev servers on `mobile-chromium` (iPhone 14),
+   `pixel-chromium` (Pixel 7; only `branding.spec.ts` and `phase2-smoke.spec.ts`) and
+   `desktop-chromium`;
+9. `pnpm --filter @tria/web e2e:pwa` — 02-11's suite against a **production build** on :3100
+   (manifest per tenant, service worker, offline fallback, `display-mode` mirror).
+
+**Smoke only — `pnpm verify:smoke` (~10 min).** `branding.spec.ts` (criterion 1 on the seed
+tenants), `phase2-smoke.spec.ts` (criteria 2 and 4 on a panel-provisioned throwaway tenant:
+create → attach + verify → invite mail → served brand → Marca rebrand through the worker → member
+shell → alias 308 → suspend/reactivate → module toggle → branded recovery mail), `invite.spec.ts`,
+`recovery.spec.ts`, then the `@tracer` half of the PWA suite. Use it after a change that touches
+branding, the panel, the proxy or the mail path; `pnpm verify` before a phase seals or a PR opens.
+Never filter Playwright through `pnpm e2e -- <spec>` — pnpm forwards the `--` and Playwright then
+runs the whole suite; the scripts call `pnpm --filter @tria/web exec playwright test <spec>`.
+
+**Prerequisites.** `pnpm supabase start` (pinned CLI, Docker), `pnpm db:reset`,
+`bash scripts/local-env.sh --write` (writes `apps/api/.env.local` and `apps/web/.env.local` with
+`MAIL_TRANSPORT=local`, `DOMAIN_PROVIDER=fake`, `AUTH_ALLOW_LIST=local`), `pnpm db:seed` (also
+derives the seed tenants' icon sets), Chromium via
+`pnpm --filter @tria/web exec playwright install chromium`. The smoke spawns its own
+`ROLE=worker` on :8790 for icon derivation and stops it afterwards; a running one is reused. Mail
+is read from Mailpit (`http://127.0.0.1:54324`). Expect ~60 s waits inside the smoke: the web
+host cache (`apps/web/lib/tenant-host.ts`, 60 s TTL) is what a brand or status change has to
+outlive before the served HTML follows; the spec polls and annotates the observed delay.
+
+**Build-output gate — `scripts/check-static-routes.sh`** (`pnpm check:static-routes`, after
+`pnpm --filter @tria/web build`). Reads `apps/web/.next/prerender-manifest.json` and
+`app-path-routes-manifest.json`: every authenticated or host-branded route (`(app)/`, `(auth)/`,
+`(platform)/`, `/m/[slug]/manifest.webmanifest`, `/~offline`) must be dynamic; the only static
+output allowed is Next's `/_*` internals and `/serwist/*` (02-11 prerenders the service-worker
+script). Exit 2 = no build output (never a pass by absence); exit 1 = offenders printed. A failure
+means a layout or page stopped reading a request-time API (`cookies()` / `headers()`) or gained a
+static export — restore the per-request read; never add the path to the allow-list. A required key
+that disappears (`route moved or renamed — update REQUIRED_KEYS`) is also a failure.
+
+**Manual checks (not automatable).**
+
+| Check | Requirement | Why manual | Steps |
+|---|---|---|---|
+| App installs and runs in standalone mode on a real iOS Safari and a real Android Chrome device | PWA-01 | Playwright cannot install a PWA and the bundled Chromium ignores `display-mode` emulation (`pwa.spec.ts` skips that half with an annotation); installability needs an HTTPS origin, i.e. the hosted environment from Phase 01.1 | Open the tenant host on the device over HTTPS → "Adicionar à Tela de Início" (iOS: Compartilhar → Adicionar à Tela de Início; Android Chrome: install prompt) → launch → no browser chrome, the tenant's icon and name; `document.documentElement.dataset.displayMode === 'standalone'` |
+| Design approval of the prototype-less screens | UI-04 (D-33) | Human design review | Recorded in `.planning/sketches/001-phase-02-designed-screens/README.md` (`approved: true`, provisional, 2026-09-16); the designer's follow-up review stays open |
+
+**Hosted proofs deferred to the Phase 01.1 runbook.**
+
+- Custom domain end-to-end with `DOMAIN_PROVIDER=vercel` + `AUTH_ALLOW_LIST=supabase` — the
+  runbook item "Attach a real customer domain end-to-end" under `## Runbook`.
+- Send Email Hook against Resend with `MAIL_TRANSPORT=resend` — `docs/deploy/auth-mail.md`
+  ("Hosted values — Phase 01.1 runbook items").
+- `scripts/check-static-routes.sh` against a Vercel build (`vercel build` locally, then
+  `NEXT_DIR=apps/web/.next bash scripts/check-static-routes.sh`, or the deployment's `.next`) —
+  CI proves the identical `next build` on the runner; the Vercel parity run is the hosted step.
+- Staging smoke on the TRIA-owned seed hosts (D-24: `TENANT_DEMO_HOST` / `TENANT_LAB_HOST`) with
+  `PLAYWRIGHT_BASE_URL=https://<TENANT_DEMO_HOST>` (+ `PLAYWRIGHT_API_URL` for the by-host reads):
+  `branding.spec.ts`'s remote-capable tests are the ones without `isRemote` skips.
+- `otp_expiry = 86400` on the hosted projects (section above).
+
 ## Production gate (D-12)
 
 Three conditions must hold **on the same `main` SHA** before a single production migration runs:
 
 1. `checks` — `deploy-api.yml` calls `./.github/workflows/ci.yml` as a job (`workflow_call`), so the
-   lint/typecheck/build/unit, boundary, lane-guard, pgTAP, integration, spike and e2e steps all pass
-   for that exact commit, not for an earlier one.
+   lint (+ UI literal guard), typecheck/build/unit, build-output gate, boundary, lane-guard, pgTAP,
+   integration, spike, e2e and PWA e2e steps all pass for that exact commit, not for an earlier one.
 2. `build` — the image for that SHA is in Artifact Registry.
 3. `production` — one required reviewer approves the GitHub Environment (configured in 01-10).
 

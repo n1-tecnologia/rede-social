@@ -1,6 +1,10 @@
-# Mirrors the local exit gate (plan 01-08) step for step. `workflow_call` makes this same file the
-# `checks` job of deploy-api.yml, so the production gate runs the identical checks for the exact
-# `main` SHA it is about to deploy — there is never a second, drifting copy of these steps (D-12).
+# Mirrors the root `verify` script (package.json, plan 02-16) step for step: lint (Biome + the UI
+# literal guard), typecheck/build/unit, the build-output gate, module boundaries, lane guard, pgTAP,
+# API integration, the pooler spike, the dev-server e2e (iPhone 14, Pixel 7, desktop) and the
+# production-build PWA e2e. `workflow_call` makes this same file the `checks` job of deploy-api.yml,
+# so the production gate runs the identical checks for the exact `main` SHA it is about to deploy —
+# there is never a second, drifting copy of these steps (D-12). Add a step here only when the
+# `verify` script gains one, in the same position.
 name: CI
 
 on:
@@ -14,8 +18,9 @@ permissions:
 
 jobs:
   checks:
-    name: lint, typecheck, tests, pgTAP, integration, e2e
+    name: lint, typecheck, build gate, tests, pgTAP, integration, e2e, PWA e2e
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # Job-level so the group is the same whether this file runs directly or is called by
     # deploy-api.yml; `github.workflow` keeps the two groups apart.
     concurrency:
@@ -24,6 +29,9 @@ jobs:
     env:
       # Local-stack-only credentials: the Supabase instance lives and dies inside this runner.
       # Real environments get these from GitHub environment secrets (see docs/DEPLOY.md).
+      # The runner never reaches a real provider: scripts/local-env.sh writes MAIL_TRANSPORT=local,
+      # DOMAIN_PROVIDER=fake and AUTH_ALLOW_LIST=local, and no hosted secret is declared here
+      # (fork pull requests receive none either — plain `pull_request`, never `pull_request_target`).
       SEED_PASSWORD: ci-only-Segredo123
       SUPER_ADMIN_PASSWORD: ci-only-SuperSegredo123
       SUPER_ADMIN_EMAIL: ferramentas@triacompany.com.br
@@ -44,8 +52,15 @@ jobs:
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
-      - name: Lint, typecheck, build, unit tests
-        run: pnpm turbo lint typecheck build test
+      # The root script, not the bare turbo task: this is what makes scripts/check-ui-literals.sh
+      # (UI-03 / PWA-03) run in CI.
+      - name: Lint (Biome + UI literal guard)
+        run: pnpm lint
+      - name: Typecheck, build, unit tests
+        run: pnpm turbo typecheck build test
+      # ROADMAP Phase 2 criterion 1 build-output gate: no authenticated or host-branded route is static.
+      - name: "Build output: no authenticated route is static"
+        run: pnpm check:static-routes
 
       - name: Module boundaries
         run: pnpm boundaries
@@ -82,12 +97,25 @@ jobs:
 
       - name: Install Chromium for Playwright
         run: pnpm --filter @tria/web exec playwright install --with-deps chromium
-      - name: End-to-end (mobile + desktop)
+      - name: End-to-end (iPhone 14, Pixel 7, desktop — dev servers)
         run: pnpm e2e
+      # Production build required: `@serwist/turbopack` empties the precache in `next dev` (02-11).
+      # playwright.pwa.config.ts builds and starts the app on port 3100 and inherits the base
+      # config's report knobs, so the two Playwright runs keep separate report/trace folders.
+      - name: End-to-end PWA (production build — iPhone 14, Pixel 7, desktop)
+        run: pnpm --filter @tria/web e2e:pwa
+        env:
+          PLAYWRIGHT_REPORT_DIR: playwright-report-pwa
+          PLAYWRIGHT_OUTPUT_DIR: test-results-pwa
 
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-report
-          path: apps/web/playwright-report
+          name: playwright-artifacts
+          path: |
+            apps/web/playwright-report
+            apps/web/playwright-report-pwa
+            apps/web/test-results
+            apps/web/test-results-pwa
+          if-no-files-found: ignore
           retention-days: 7
