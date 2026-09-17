@@ -171,6 +171,15 @@ async function expectExpiredScreen(page: Page, origin: string): Promise<void> {
   );
 }
 
+/** Submits `/entrar` on `origin` without asserting the landing (owned by 02-07). */
+async function signIn(page: Page, origin: string, email: string, password: string): Promise<void> {
+  await page.goto(`${origin}/entrar`);
+  await page.locator('#email').fill(email);
+  await page.locator('#password').fill(password);
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await page.waitForURL((url) => !url.pathname.endsWith('/entrar'), { timeout: 30_000 });
+}
+
 /** Every fixture a test created, for `afterAll` (Playwright restarts the worker after a failure). */
 const created: { slugs: string[]; emails: string[] } = { slugs: [], emails: [] };
 
@@ -241,5 +250,127 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     await expectExpiredScreen(page, origin);
     await page.goto(`${origin}/inicio`);
     await expect(page).toHaveURL(`${origin}/inicio`);
+  });
+
+  test('2. panel resend supersedes the old link; the new link accepts; the Admins tab shows Aceito em', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const sfx = Date.now().toString(36);
+    const slug = `e2e-inv2-${sfx}`;
+    const host = `${slug}.localhost`;
+    const origin = throwawayOrigin(host);
+    const adminEmail = `admin+${sfx}@e2e-invite.local`;
+    // ROLE-03/encoding cross-ref: an accented name in the heading and in the resent mail's subject.
+    const displayName = `Associação São José ${sfx}`;
+    created.slugs.push(slug);
+    created.emails.push(adminEmail);
+
+    const token = await superAdminToken();
+    const { id, inviteId } = await createTenant(token, {
+      displayName,
+      slug,
+      adminEmail,
+      primary: '#b45309',
+      secondary: '#f59e0b',
+    });
+    await attachAndVerify(token, id, host);
+    await waitForInviteStatus(token, id, 'sent');
+    const link1 = await waitForInviteLink(adminEmail, null);
+
+    // The super_admin on the platform host: "Convite enviado em …" + an enabled resend button.
+    const panel = await browser.newContext();
+    const page = await panel.newPage();
+    await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
+    await expect(page.getByText(/^Convite enviado em /)).toBeVisible();
+    const resend = page.getByRole('button', { name: 'Reenviar convite' });
+    await expect(resend).toBeEnabled();
+    await resend.click();
+    await expect(page.getByText('Convite reenviado.')).toBeVisible({ timeout: 30_000 });
+
+    const link2 = await waitForInviteLink(adminEmail, link1);
+    expect(link2).not.toBe(link1);
+
+    // A fresh context on the tenant origin (no platform cookies): old link expired, new link works.
+    const tenant = await browser.newContext();
+    const page2 = await tenant.newPage();
+    await page2.goto(link1);
+    await expectExpiredScreen(page2, origin);
+
+    await page2.goto(link2);
+    await expect(page2).toHaveURL(`${origin}/aceitar-convite`);
+    const heading = page2.getByRole('heading', { level: 1 });
+    await expect(heading).toHaveText(`Você foi convidado(a) a administrar ${displayName}`);
+    // E08 overflow / encoding: no horizontal overflow, no truncated code point.
+    expect(await heading.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(await heading.evaluate((el) => el.textContent)).toBe(
+      `Você foi convidado(a) a administrar ${displayName}`,
+    );
+    await acceptInvite(page2);
+    expect(await membershipForEmail(adminEmail)).toEqual({
+      role: 'admin_tenant',
+      status: 'active',
+    });
+
+    // Back on the panel: "Aceito em …", no resend control, the admin listed.
+    await page.reload();
+    await expect(page.getByText(/^Aceito em /)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reenviar convite' })).toHaveCount(0);
+    await expect(page.getByTestId('admins-card').getByText(adminEmail).first()).toBeVisible();
+
+    const refused = await platformApi(
+      token,
+      `/v1/platform/tenants/${id}/invites/${inviteId}/resend`,
+      { method: 'POST' },
+    );
+    expect(refused.status).toBe(409);
+    const body = (await refused.json()) as { error: { details?: { reason?: string } } };
+    expect(body.error.details?.reason).toBe('already_accepted');
+
+    // The accepted link is consumed too.
+    await page2.goto(link2);
+    await expectExpiredScreen(page2, origin);
+
+    await panel.close();
+    await tenant.close();
+  });
+
+  test('3. pending invite without a verified host: disabled resend + helper; the API answers 409 no_verified_primary', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const sfx = Date.now().toString(36);
+    const slug = `e2e-inv3-${sfx}`;
+    const adminEmail = `admin+${sfx}@e2e-invite.local`;
+    created.slugs.push(slug);
+    created.emails.push(adminEmail);
+
+    const token = await superAdminToken();
+    const { id, inviteId } = await createTenant(token, {
+      displayName: `E2E Pendente ${sfx}`,
+      slug,
+      adminEmail,
+      primary: '#0e7490',
+      secondary: '#67e8f9',
+    });
+
+    await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
+    await expect(page.getByText('Convite pendente — aguardando domínio')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reenviar convite' })).toBeDisabled();
+    await expect(
+      page.getByText('Adicione e verifique um domínio para enviar o convite.'),
+    ).toBeVisible();
+
+    const refused = await platformApi(
+      token,
+      `/v1/platform/tenants/${id}/invites/${inviteId}/resend`,
+      { method: 'POST' },
+    );
+    expect(refused.status).toBe(409);
+    const body = (await refused.json()) as { error: { details?: { reason?: string } } };
+    expect(body.error.details?.reason).toBe('no_verified_primary');
+    expect(await inviteStatusForEmail(adminEmail)).toBe('pending');
   });
 });

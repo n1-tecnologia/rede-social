@@ -1,11 +1,16 @@
 import { getTranslations } from 'next-intl/server';
 import { AdminsCard } from '@/components/platform/AdminsCard';
-import { formatPanelDate, requirePlatformTenantDetail } from '@/lib/platform';
+import { ResendInviteButton } from '@/components/platform/ResendInviteButton';
+import { formatPanelDate, primaryVerifiedHost, requirePlatformTenantDetail } from '@/lib/platform';
+import { resendInviteAction } from './actions';
 
 /**
  * Admins tab (D-29/D-30): the first-admin invite (the newest `tenant_invites` row) and the
  * `admin_tenant` memberships. Dates are formatted here, on the server. The "Reenviar convite"
- * control is the `resend` slot plan 02-10 fills (this page passes nothing).
+ * control (02-10) fills `AdminsCard`'s `resend` slot: a `pending` invite can be resent once a
+ * verified primary host exists (the API delegates to the first send) — without one the button is
+ * disabled with the helper line; an `accepted` invite renders no control at all. After a resend the
+ * layout revalidates, so the "Convite enviado em {date}" pill shows the new `sentAt`.
  */
 export default async function TenantAdminsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -23,9 +28,28 @@ export default async function TenantAdminsPage({ params }: { params: Promise<{ i
       }
     : null;
 
+  const canResend = raw?.status === 'pending' ? primaryVerifiedHost(detail) !== null : true;
+  const resend =
+    raw && raw.status !== 'accepted' ? (
+      <ResendInviteButton
+        tenantId={id}
+        inviteId={raw.id}
+        canResend={canResend}
+        labels={{
+          resend: t('admins.resend'),
+          resendPending: t('admins.resendPending'),
+          resendHelper: t('admins.resendHelper'),
+          resent: t('admins.resent'),
+          resendFailed: t('admins.resendFailed'),
+        }}
+        action={resendInviteAction}
+      />
+    ) : undefined;
+
   return (
     <AdminsCard
       invite={invite}
+      resend={resend}
       admins={detail.admins.map((a) => ({ userId: a.userId, name: a.name, email: a.email }))}
       labels={{
         inviteTitle: t('admins.inviteTitle'),

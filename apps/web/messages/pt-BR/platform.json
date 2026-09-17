@@ -122,6 +122,8 @@
       "resend": "Reenviar convite",
       "resendPending": "Reenviando…",
       "resendHelper": "Adicione e verifique um domínio para enviar o convite.",
+      "resent": "Convite reenviado.",
+      "resendFailed": "Não foi possível reenviar o convite. Tente novamente.",
       "adminsTitle": "Administradores",
       "role": "Administrador",
       "empty": "Nenhum administrador ativo ainda."
