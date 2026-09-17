@@ -1,52 +1,55 @@
 import { brandStyleVars } from '@tria/contracts';
+import type { Metadata, Viewport } from 'next';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { getHostBrand } from '@/lib/host-brand';
+import { AuthBrand } from './AuthBrand';
 
 /**
- * Public auth pages, branded per HOST before any session exists (TENANT-02, roadmap criterion 1):
- * the `--brand-*` variables and the tenant's logo/display name are server-rendered on the first HTML,
- * so there is no default-brand flash (Pitfall 2). Platform and generic hosts keep the neutral TRIA
- * wordmark and the neutral variables.
+ * Public pages, branded per HOST before any session exists (TENANT-02, roadmap criterion 1, UI-SPEC
+ * Auth Pages Contract): the five `--brand-*` variables sit on `<main>` and the tenant's logo (or its
+ * display name, D-26) is server-rendered on the first HTML, so there is no default-brand flash
+ * (Pitfall 2). Platform and generic hosts keep the neutral TRIA wordmark and the neutral variables.
  *
- * Phase 1 inline styles stay for now — 02-08 ports the prototype visuals; this layout's job is the
- * variables and the identity, not the look.
+ * Only token utilities are used (D-41 consumer): under `<html data-theme="dark">` the ground becomes
+ * the dark `--theme-bg` and the brand CTA switches to `--brand-primary-dark` without any change here.
+ *
+ * The "Comunidade: {tenant}" line is NOT rendered by the layout: it belongs to `/entrar` only, so the
+ * host tenant's name never enters `/endereco-invalido`'s body text (D-23 contract).
  */
+export async function generateMetadata(): Promise<Metadata> {
+  const [tc, brand] = await Promise.all([getTranslations('common'), getHostBrand()]);
+  return { title: brand.tenant?.displayName ?? tc('appName') };
+}
+
+// No `maximumScale` / `userScalable`: pinch-zoom stays available (WCAG 1.4.4, UI-SPEC).
+export async function generateViewport(): Promise<Viewport> {
+  const brand = await getHostBrand();
+  return {
+    width: 'device-width',
+    initialScale: 1,
+    viewportFit: 'cover',
+    themeColor: brand.branding.colors.primary,
+  };
+}
+
 export default async function AuthLayout({ children }: { children: ReactNode }) {
-  const [t, brand] = await Promise.all([getTranslations('common'), getHostBrand()]);
-  const logoUrl = brand.tenant?.branding.logoUrl ?? null;
+  const [tc, brand] = await Promise.all([getTranslations('common'), getHostBrand()]);
 
   return (
     <main
-      style={{
-        ...brandStyleVars(brand.branding),
-        maxWidth: 420,
-        margin: '0 auto',
-        padding: '2rem 1rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1.5rem',
-      }}
+      style={brandStyleVars(brand.branding)}
+      className="flex min-h-[var(--screen-h)] flex-col items-center justify-center bg-bg p-4"
     >
-      {brand.mode === 'tenant' && brand.displayName ? (
-        logoUrl ? (
-          // D-26: the logo is rendered as-is (never tinted); the auth pages show it larger than the shell.
-          // biome-ignore lint/performance/noImgElement: tenant logos are arbitrary hosts (uploads), next/image would need per-tenant remotePatterns.
-          <img
-            src={logoUrl}
-            alt={brand.displayName}
-            style={{ height: 64, maxWidth: '100%', objectFit: 'contain', alignSelf: 'flex-start' }}
+      <div className="flex w-full max-w-sm flex-col items-center gap-8">
+        <header className="flex w-full flex-col items-center gap-3">
+          <AuthBrand
+            logoUrl={brand.tenant ? brand.branding.logoUrl : null}
+            displayName={brand.tenant?.displayName ?? tc('appName')}
           />
-        ) : (
-          // D-26: without a logo, the display name stands in its place — verbatim, no normalisation.
-          <p style={{ fontWeight: 700, fontSize: '1.25rem', color: 'var(--brand-primary)' }}>
-            {brand.displayName}
-          </p>
-        )
-      ) : (
-        <p style={{ fontWeight: 700, letterSpacing: '0.1em' }}>{t('appName')}</p>
-      )}
-      {children}
+        </header>
+        <div className="flex w-full flex-col gap-6">{children}</div>
+      </div>
     </main>
   );
 }

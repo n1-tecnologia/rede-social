@@ -1,13 +1,26 @@
 'use client';
 
+import { Button, type ButtonVariant } from '@tria/ui';
 import { useFormStatus } from 'react-dom';
 
-/** The only client component of the auth pages: pending state for a server-action form. */
-export function SubmitButton({ label, pendingLabel }: { label: string; pendingLabel: string }) {
+/**
+ * Pending state for a server-action form: `@tria/ui` `Button` `variant="brand" size="lg" fullWidth`
+ * with `loading={pending}` (spinner, `aria-busy`, disabled) and the catalog's pending label
+ * ("Entrando...", "Criando...", "Enviando...", "Salvando..."). The idle accessible name is the label.
+ */
+export function SubmitButton({
+  label,
+  pendingLabel,
+  variant = 'brand',
+}: {
+  label: string;
+  pendingLabel: string;
+  variant?: ButtonVariant;
+}) {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" disabled={pending} aria-busy={pending}>
+    <Button type="submit" variant={variant} size="lg" fullWidth loading={pending}>
       {pending ? pendingLabel : label}
-    </button>
+    </Button>
   );
 }

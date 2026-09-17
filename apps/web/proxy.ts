@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
+import { isRegistrableHost, normalizeHost } from '@tria/contracts';
 import { type NextRequest, NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { sessionCookieOptions } from '@/lib/supabase/cookie-options';
@@ -11,7 +12,12 @@ import {
   TENANT_SLUG_HEADER,
 } from '@/lib/tenant-host';
 
-/** Public paths (D-01/D-22). `/cadastro` exact serves tenant hosts; `/cadastro/{slug}` generic hosts. */
+/**
+ * Public paths (D-01/D-22). `/cadastro` exact serves tenant hosts; `/cadastro/{slug}` generic hosts.
+ * Phase 2 entries: `/comunidade-indisponivel` (D-32, 02-08); `/aceitar-convite` + `/convite-expirado`
+ * (02-10) and the manifest, `/serwist/*`, `/~offline` (02-11) are pre-registered here because those
+ * plans share a wave and neither may edit this file — a public path that does not exist yet just 404s.
+ */
 const PUBLIC = [
   /^\/entrar(?:\/|$)/,
   /^\/cadastro(?:\/|$)/,
@@ -21,8 +27,15 @@ const PUBLIC = [
   /^\/acesso-suspenso(?:\/|$)/,
   /^\/endereco-invalido(?:\/|$)/,
   /^\/sem-comunidade(?:\/|$)/,
+  /^\/comunidade-indisponivel(?:\/|$)/,
+  /^\/aceitar-convite(?:\/|$)/,
+  /^\/convite-expirado(?:\/|$)/,
   /^\/termos(?:\/|$)/,
   /^\/privacidade(?:\/|$)/,
+  /^\/manifest\.webmanifest$/,
+  /^\/m\/[a-z0-9-]+\/manifest\.webmanifest$/,
+  /^\/serwist\//,
+  /^\/~offline(?:\/|$)/,
 ];
 
 const TENANT_SLUG_COOKIE = 'tenant_slug';
@@ -46,6 +59,44 @@ function buildRequestHeaders(request: NextRequest, hostTenant: HostTenant): Head
   return h;
 }
 
+/**
+ * D-35: a VERIFIED non-primary host (an alias) folds into the tenant's ONE primary origin with a 308
+ * (method + body preserved) — installs, cookies and push subscriptions live on that origin.
+ *
+ * The target host comes ONLY from the by-host answer (`primaryHost`, a verified `tenant_domains` row),
+ * normalised, `isRegistrableHost`-checked and different from the current host (loop guard — the
+ * one-primary-per-tenant index makes a real cycle impossible, this is defence in depth; T-02-40/45).
+ * Scheme: `x-forwarded-proto` when it is literally `http`/`https`, else the request's; port: the
+ * `:NNNN` suffix of the browser-facing host value when present (local dev keeps `:3000`, production
+ * hosts carry none). Path + query are re-emitted from `request.nextUrl`, never from a raw header.
+ * `Cache-Control: no-store` because a 308 is cacheable by default and the primary may be switched
+ * later (T-02-42). Returns null when no redirect applies.
+ */
+function primaryHostRedirect(
+  request: NextRequest,
+  hostTenant: HostTenant,
+  browserHost: string | null | undefined,
+): NextResponse | null {
+  if (hostTenant.mode !== 'tenant' || hostTenant.isPrimary) return null;
+  const target = normalizeHost(hostTenant.primaryHost);
+  if (!target || !isRegistrableHost(target) || target === hostTenant.host) return null;
+
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const scheme =
+    forwardedProto === 'http' || forwardedProto === 'https'
+      ? forwardedProto
+      : request.nextUrl.protocol.replace(/:$/, '');
+  const port = browserHost?.match(/:(\d{1,5})$/)?.[1];
+  const origin = `${scheme}://${target}${port ? `:${port}` : ''}`;
+
+  const response = NextResponse.redirect(
+    new URL(request.nextUrl.pathname + request.nextUrl.search, origin),
+    308,
+  );
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+}
+
 /** Refreshed session cookies must survive when a rewrite/redirect replaces the Supabase response. */
 function withCookies(target: NextResponse, source: NextResponse): NextResponse {
   for (const cookie of source.cookies.getAll()) target.cookies.set(cookie);
@@ -65,7 +116,13 @@ export async function proxy(request: NextRequest) {
   //    D-20/D-23 the host only SELECTS the public shell — the API still re-resolves it and can only
   //    DENY a session — so trusting it here cannot leak another tenant's data.
   const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
-  const hostTenant = await resolveHostTenant(forwardedHost || request.headers.get('host'));
+  const browserHost = forwardedHost || request.headers.get('host');
+  const hostTenant = await resolveHostTenant(browserHost);
+
+  // D-35: an alias host answers 308 to the tenant's primary origin (still before the Supabase client).
+  const toPrimary = primaryHostRedirect(request, hostTenant, browserHost);
+  if (toPrimary) return toPrimary;
+
   let requestHeaders = buildRequestHeaders(request, hostTenant);
 
   // Vercel Production only (01-11 sets PLATFORM_HOST there, never on Preview): the deployment alias
