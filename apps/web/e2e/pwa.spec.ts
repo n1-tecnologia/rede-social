@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 
 /**
  * PWA-01 against a PRODUCTION build (playwright.pwa.config.ts → `pnpm --filter @tria/web e2e:pwa`).
@@ -231,5 +231,100 @@ test.describe('PWA-01 — offline fallback and caching contract', () => {
     await expect(page.getByRole('status').filter({ hasText: OFFLINE_BANNER })).toHaveCount(0, {
       timeout: 15_000,
     });
+  });
+});
+
+const INSTALL_TITLE = 'Adicione à Tela de Início';
+const NEUTRAL_ICON = /^\/icons\/tria-/;
+const BUCKET_ICON = /\/storage\/v1\/object\/public\/branding\//;
+
+test.describe('PWA-01 — second tenant, cross-host isolation, neutral fallback, unmounted hint', () => {
+  test('the lab host serves its own manifest and head links', { tag: ['@install'] }, async ({
+    request,
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const res = await request.get(`${hosts.lab}/m/tria-lab/manifest.webmanifest`);
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.name).toBe('TRIA Lab');
+    expect(body.theme_color).toBe('#0f766e');
+    expect(body.id).toBe('/?tenant=tria-lab');
+
+    await page.goto(`${hosts.lab}/entrar`);
+    await expect(page.locator('link[rel="manifest"]')).toHaveAttribute(
+      'href',
+      '/m/tria-lab/manifest.webmanifest',
+    );
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#0f766e');
+  });
+
+  test('cross-host manifests are refused (T-02-71); _tria answers only on non-tenant hosts', {
+    tag: ['@install'],
+  }, async ({ request }) => {
+    test.skip(isRemote, 'local stack only');
+    const refused = [
+      `${hosts.demo}/m/tria-lab/manifest.webmanifest`,
+      `${hosts.generic}/m/tria-demo/manifest.webmanifest`,
+      `${hosts.platform}/m/tria-demo/manifest.webmanifest`,
+      `${hosts.demo}/m/_tria/manifest.webmanifest`,
+      `${hosts.demo}/m/not%20a%20slug/manifest.webmanifest`,
+    ];
+    for (const url of refused) {
+      // The route answers 404; a slug the proxy's PUBLIC class rejects never reaches the route and
+      // is bounced to /entrar instead (307) — both are refusals, neither is a manifest.
+      const res = await request.get(url, { maxRedirects: 0 });
+      expect([404, 307], url).toContain(res.status());
+      if (res.status() === 307) expect(res.headers().location, url).toMatch(/\/entrar$/);
+      else expect(res.headers()['cache-control'], url).toContain('no-store');
+      expect(res.headers()['content-type'] ?? '', url).not.toContain('manifest+json');
+    }
+
+    const neutral = await request.get(`${hosts.generic}/m/_tria/manifest.webmanifest`);
+    expect(neutral.status()).toBe(200);
+    const body = await neutral.json();
+    expect(body.name).toBe('TRIA');
+    expect(body.id).toBe('/?tenant=_tria');
+    for (const icon of body.icons as { src: string }[]) expect(icon.src).toMatch(NEUTRAL_ICON);
+
+    const platform = await request.get(`${hosts.platform}/m/_tria/manifest.webmanifest`);
+    expect(platform.status()).toBe(200);
+    expect((await platform.json()).name).toBe('TRIA');
+  });
+
+  test('the neutral icon set is served cookie-less as image/png', { tag: ['@install'] }, async ({
+    request,
+  }) => {
+    for (const path of ['/icons/tria-192.png', '/icons/tria-maskable-512.png']) {
+      const res = await request.get(path);
+      expect(res.status(), path).toBe(200);
+      expect(res.headers()['content-type'], path).toContain('image/png');
+    }
+  });
+
+  test('the demo manifest icons are all neutral or all from the branding bucket — never mixed (T-02-72)', {
+    tag: ['@install'],
+  }, async ({ request }) => {
+    const body = await (await request.get(DEMO_MANIFEST)).json();
+    const srcs = (body.icons as { src: string }[]).map((i) => i.src);
+    const neutral = srcs.filter((s) => NEUTRAL_ICON.test(s)).length;
+    const bucket = srcs.filter((s) => BUCKET_ICON.test(s)).length;
+    expect(neutral + bucket).toBe(3);
+    expect(neutral === 3 || bucket === 3, srcs.join(', ')).toBe(true);
+  });
+
+  test('the install hint is built but unmounted: no dialog and no hint copy on any page', {
+    tag: ['@install'],
+  }, async ({ page }) => {
+    await page.goto('/entrar');
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    expect(await page.locator('body').innerText()).not.toContain(INSTALL_TITLE);
+
+    await login(page, users.demoMember, SEED_PASSWORD);
+    for (const path of ['/inicio', '/configuracoes']) {
+      await page.goto(path);
+      await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+      expect(await page.locator('body').innerText(), path).not.toContain(INSTALL_TITLE);
+    }
   });
 });

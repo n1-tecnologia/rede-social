@@ -10,6 +10,10 @@ import { configDefaults, defineConfig, mergeConfig } from 'vitest/config';
  *
  * `@/` mirrors the tsconfig path alias (Vite does not read `paths`), so `proxy.ts` and its imports
  * resolve in vitest exactly as they do in Next.
+ *
+ * `oxc.jsx` (Vite 8 transforms with oxc): the tsconfig keeps `jsx: preserve` for Next, so Vite must
+ * transform JSX itself for tests that import a `.tsx` module for its pure helpers without rendering
+ * (components/pwa/InstallHint.test.ts, 02-11).
  */
 export default mergeConfig(
   vitestBase,
@@ -17,6 +21,7 @@ export default mergeConfig(
     resolve: {
       alias: { '@': fileURLToPath(new URL('.', import.meta.url)) },
     },
+    oxc: { jsx: { runtime: 'automatic' } },
     test: {
       environment: 'node',
       include: ['**/*.test.{ts,tsx}'],
