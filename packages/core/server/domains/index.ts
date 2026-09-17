@@ -1,8 +1,9 @@
 import { env } from '../env';
 import { registerJobQueues } from '../jobs/boss';
-import { createLocalAuthAllowList } from './auth-allow-list';
+import { createLocalAuthAllowList, createSupabaseAuthAllowList } from './auth-allow-list';
 import { createFakeDomainProvider } from './fake';
 import { type AuthAllowList, DOMAIN_VERIFY_QUEUE, type DomainProvider } from './types';
+import { createVercelDomainProvider } from './vercel';
 
 /**
  * Env-selected singletons (T-02-59: the fail-safe defaults are the local implementations; a real
@@ -14,18 +15,41 @@ import { type AuthAllowList, DOMAIN_VERIFY_QUEUE, type DomainProvider } from './
  * maps to a file, not a directory).
  */
 
-function notWiredYet(what: string): never {
-  throw new Error(`${what} is wired in 02-09 Task 3`);
+/**
+ * `assertProductionEnv()` (02-03) already refused a `vercel` / `supabase` selection without these
+ * values at import time, so a missing one here is a programming error, not a deploy error — but it
+ * still fails with a named message instead of a `!` assertion that would let `undefined` reach a
+ * request header.
+ */
+function requireEnv(
+  name:
+    | 'VERCEL_TOKEN'
+    | 'VERCEL_PROJECT_ID'
+    | 'VERCEL_TEAM_ID'
+    | 'SUPABASE_PAT'
+    | 'SUPABASE_PROJECT_REF',
+): string {
+  const value = env[name];
+  if (!value)
+    throw new Error(`${name} is required by the selected adapter (see assertProductionEnv)`);
+  return value;
 }
 
 export const domainProvider: DomainProvider =
   env.DOMAIN_PROVIDER === 'vercel'
-    ? notWiredYet('DOMAIN_PROVIDER=vercel')
+    ? createVercelDomainProvider({
+        token: requireEnv('VERCEL_TOKEN'),
+        projectId: requireEnv('VERCEL_PROJECT_ID'),
+        teamId: requireEnv('VERCEL_TEAM_ID'),
+      })
     : createFakeDomainProvider();
 
 export const authAllowList: AuthAllowList =
   env.AUTH_ALLOW_LIST === 'supabase'
-    ? notWiredYet('AUTH_ALLOW_LIST=supabase')
+    ? createSupabaseAuthAllowList({
+        pat: requireEnv('SUPABASE_PAT'),
+        projectRef: requireEnv('SUPABASE_PROJECT_REF'),
+      })
     : createLocalAuthAllowList();
 
 // `kernel.domain-verify` is a KERNEL-owned queue, so it registers itself here rather than in

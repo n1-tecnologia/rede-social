@@ -80,6 +80,8 @@ Readable by `RUNTIME_SA` only. Names are referenced literally in `deploy-api.yml
 | `worker-database-url-prod` | `BOSS_DATABASE_URL` | `worker` |
 | `supabase-service-key-prod` | `SUPABASE_SERVICE_KEY` | both production services |
 | `supabase-url-prod` | `SUPABASE_URL` | both production services |
+| `vercel-token-prod` | `VERCEL_TOKEN` | `api`, `worker` (custom domains, D-34 — see below) |
+| `supabase-pat-prod` | `SUPABASE_PAT` | `api`, `worker` (auth allow-list, D-34 — see below) |
 
 `DATABASE_URL` is always the **`api_user`** connection through the Supavisor **transaction** pooler
 (port 6543); `BOSS_DATABASE_URL` is the same role through the **session** pooler (port 5432) because
@@ -109,8 +111,44 @@ production). Any other host — a `*.vercel.app` preview alias included — send
 still gets the constant answer). The hosted project's `[auth] additional_redirect_urls` is the second,
 independent guard and must therefore be an **explicit per-domain list**
 (`https://comunidade.cliente.com.br/auth/confirm**`, `https://app.seusistema.com/auth/confirm**`, …),
-never a wildcard host such as `https://**` — review it whenever a tenant domain is attached and
-whenever `supabase config push` runs.
+never a wildcard host such as `https://**`. Since 02-09 (D-34) the per-domain
+`https://<host>/auth/confirm**` entries are **added by the API when a custom domain verifies and
+removed when it is detached** (`AUTH_ALLOW_LIST=supabase`, Management API `PATCH …/config/auth`
+`uri_allow_list`, one entry per host, never a wildcard); the platform host entry stays in
+`config.toml`. The list must still be **reviewed after every `supabase config push`**: a push
+re-applies `[auth] additional_redirect_urls` from `config.toml` and can drop the runtime entries.
+After each push open every verified domain in the platform panel and press "Verificar agora" — it
+re-adds the entry idempotently (Phase 8 adds a reconcile command that does this for every host).
+
+## Custom domains (TENANT-07, D-34)
+
+A tenant's host is attached from the platform panel; the API registers it with the hosting
+provider through an env-selected adapter, stores it **unverified** with the DNS records the customer
+must create, and the `kernel.domain-verify` pg-boss job (in the **worker** service) re-checks it
+every ~10 minutes for up to 7 days. Only a verified host resolves (D-36); the verified transition
+adds the host to the Supabase Auth redirect allow-list and sends the pending first-admin invite.
+Locally and in CI both adapters are the fail-safe **local** implementations (`fake` / `local`,
+the kernel env defaults) — nothing here is needed to develop or test.
+
+Variables read by the **`api` and `worker`** Cloud Run services (both run the same image; the
+worker runs the poller, the API answers "Verificar agora"):
+
+| Variable | staging | production | Source |
+|---|---|---|---|
+| `DOMAIN_PROVIDER` | `fake` (Preview deployments carry no customer domains) | `vercel` | plain env |
+| `VERCEL_TOKEN` | — | Secret Manager `vercel-token-prod` | Vercel → Team Settings → Tokens (team-scoped token) |
+| `VERCEL_PROJECT_ID` | — | project id of `apps/web` | Vercel → Project → Settings → General; plain env |
+| `VERCEL_TEAM_ID` | — | team id | Vercel → Team Settings → General; plain env |
+| `AUTH_ALLOW_LIST` | `local` | `supabase` | plain env |
+| `SUPABASE_PAT` | — | Secret Manager `supabase-pat-prod` | Supabase → Account → Access Tokens: a **dedicated** token with `auth:write` — not the CI `SUPABASE_ACCESS_TOKEN` |
+| `SUPABASE_PROJECT_REF` | — | `rede-social-prod` reference id | same value as the GitHub secret `SUPABASE_PROJECT_ID`; plain env |
+| `PLATFORM_HOST` | staging platform host | `app.seusistema.com` | now also read by the API so an attach of the platform host is refused (`400 { host: "platform_host" }`) |
+
+`assertProductionEnv()` (kernel `env.ts`) refuses `DOMAIN_PROVIDER=vercel` / `AUTH_ALLOW_LIST=supabase`
+without their credentials at boot, so a half-configured revision fails its startup probe instead of
+failing the first attach. The adapters call only the documented project-level endpoints (add / status
+/ config / verify / detach) — the platform never writes the customer's DNS, buys a domain or deletes
+one at the Vercel account level (`.planning/phases/02-…/COVERAGE.md`).
 
 ## Production gate (D-12)
 
@@ -155,3 +193,19 @@ is safe. It is the only path that writes seed data to production (D-14).
 
 **Migrations never run from a developer machine.** `supabase db push` against a remote project is a
 workflow step only; locally use `pnpm db:reset`.
+
+**Attach a real customer domain end-to-end (hosted proof, deferred from Phase 2 to the Phase 01.1
+runbook).** The Vercel and Supabase Management adapters ship unit-tested against the documented
+bodies (02-09) but have not run against the real APIs (RESEARCH Open Question 1 / A1 / A2). Once the
+production project exists: (1) create the team-scoped Vercel token and the dedicated Supabase PAT,
+store them as `vercel-token-prod` / `supabase-pat-prod`, set `DOMAIN_PROVIDER=vercel`,
+`AUTH_ALLOW_LIST=supabase`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID`, `SUPABASE_PROJECT_REF` on `api`
+and `worker` and redeploy; (2) in the platform panel attach `comunidade.<cliente>` to a test tenant;
+(3) create the CNAME (or A for an apex) and, if shown, the `_vercel.<apex>` TXT record at the
+customer's DNS; (4) wait for the poller (~10 min) or press "Verificar agora"; (5) confirm
+`GET /v1/public/tenants/by-host?host=comunidade.<cliente>` answers 200, the first-admin invite mail
+arrives, the project's auth `uri_allow_list` contains `https://comunidade.<cliente>/auth/confirm**`,
+and `https://comunidade.<cliente>/entrar` renders the tenant brand; (6) record the outcome here:
+token scope needed, whether Cloud Run egress needed anything, and whether a fresh domain showed a
+TXT step (A2). Detach the test host afterwards (panel → Remover) and confirm the allow-list entry
+is gone.
