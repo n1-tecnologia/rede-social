@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
-status: executing
-stopped_at: Completed 02-14-PLAN.md
-last_updated: "2026-09-17T03:23:54.229Z"
+status: verifying
+stopped_at: Completed 02-16-PLAN.md (Phase 2 complete, 16/16)
+last_updated: "2026-09-17T05:17:17.149Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 501b998c902178ed1808c32df65663ea1f7e5892
+state_head: def1ce963e9875f0a186b913e1e86ff2bd2acc71
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 24
+  completed_plans: 25
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
 Plan: 16 of 16
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-16 — Phase 02 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -82,6 +82,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P13 | 21min | 3 tasks | 18 files |
 | Phase 02 P15 | 13min | 3 tasks | 15 files |
 | Phase 02 P14 | 20 min | 3 tasks | 21 files |
+| Phase 02 P16 | 1h 47m | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -178,6 +179,10 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-15: Módulos rows render Ativado/Desativado as StatusPills with the helper at the card bottom per the approved tenant-page-modulos mockup (D-33)
 - [Phase 02]: 02-14: brand aliases (--brand-accent & co.) are declared on every brand scope in tokens.css (:root, [data-brand-root], [data-brand-scope], [style*="--brand-primary"]) with a light-in-dark override; the per-element * rule was replaced — bg-brand is asserted by rendered colour in e2e
 - [Phase 02]: 02-14: kernel BrandPreview (packages/core/ui) takes strings as props and derives colours with the contracts functions; Phase 8 reuses it unchanged; branding specs spawn their own ROLE=worker via apps/web/e2e/worker.ts
+- [Phase 02-16]: 02-16: honest two-witness ROLE-04 proof — panel path with feed (bootstrap within the flags TTL, nav unchanged) + reference module flipped by spec-only SQL on the throwaway tenant (tab/slot + 200/404); Phase 4 extends the smoke with the feed tab
+- [Phase 02-16]: 02-16: pnpm verify is the local exit gate and ci.yml mirrors it step for step (one checks job; PWA production-build e2e appended with its own report folders); spec filters must use pnpm --filter @tria/web exec playwright test <spec> — pnpm e2e -- <spec> runs the whole suite
+- [Phase 02-16]: 02-16: scripts/check-static-routes.sh is the build-output gate (exit 2 without a build, strict allow-list /_* and /serwist/*); apps/api/turbo.json declares @react-email/render as an implicit boundary dependency so boundaries can follow the build
+- [Phase 02-16]: 02-16: served-HTML follow-up of a brand/status change is bounded by the 60 s web host cache (observed 55-61 s); specs poll up to 70 s and annotate the delay, assertions stay exact; the real-device standalone install and the hosted provider flows stay explicit backstops
 
 ### Pending Todos
 
@@ -210,6 +215,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T03:23:54.200Z
-Stopped at: Completed 02-14-PLAN.md
+Last session: 2026-09-17T05:17:17.121Z
+Stopped at: Completed 02-16-PLAN.md (Phase 2 complete, 16/16)
 Resume file: None
