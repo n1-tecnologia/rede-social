@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-08-PLAN.md
-last_updated: "2026-09-17T00:17:42.521Z"
+stopped_at: Completed 02-09-PLAN.md
+last_updated: "2026-09-17T00:44:48.993Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 76c5956518c173547c0ed347978b80d7622c0b69
+state_head: ef1595a19d4d32012cd0410156e048fb0730f7ae
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 17
+  completed_plans: 18
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 9 of 16
+Plan: 10 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -75,6 +75,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P06 | 21min | 3 tasks | 23 files |
 | Phase 02 P07 | 36min | 3 tasks | 41 files |
 | Phase 02 P08 | 15min | 3 tasks | 30 files |
+| Phase 02 P09 | 18min | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,10 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-07: activeTabKey returns null when no tab matches (aria-current never claimed by Início on /configuracoes); module tabs/slots/home widgets exist only via bootstrap.modules (MOD-04)
 - [Phase 02]: 02-08: server pages hand lucide icons to client primitives by name (AuthInput) — React Flight refuses forwardRef objects as client props
 - [Phase 02]: 02-08: alias hosts fold into the primary origin via primaryHostRedirect() in proxy.ts (308, no-store, isRegistrableHost + loop guard) before the Supabase client; TENANT_SUSPENDED now routes to /auth/suspended → /comunidade-indisponivel (02-03 interim mapping removed)
+- [Phase 02]: 02-09: checkDomain(domainId, actor, { source, tenantId? }) is the ONE check the route, the restart and the kernel.domain-verify job share; verified_at is written only by its single update … where verified_at is null returning, the loser runs no side effects, and already_verified re-runs the idempotent side effects (cache, allow-list under pg_advisory_xact_lock, claim-before-send invites) so a failed allow-list call is recoverable from Verificar agora
+- [Phase 02]: 02-09: the poller crash re-arm lives in platform/domains.ts (rearmDomainVerification) because Biome confines withAdminTx to server/{tenancy,platform}; domains/* (adapters + verify-job) never touch the database; kernel.domain-verify registers its queue in domains/index.ts and worker.ts lists kernel jobs explicitly before module jobs (registry untouched)
+- [Phase 02]: 02-09: case-variant invariant pinned as the schema behaves — same lower-case host on another tenant is 23505, an upper-cased spelling is 23514 (tenant_domains_host_chk; hosts are lower-cased at the boundary) and the citext lookup is case-insensitive; the plan's 23505-for-Inv-A.Test was unreachable
+- [Phase 02]: 02-09: adapter request helpers take { method, path, body } so every call site carries the HTTP method literally and the COVERAGE OPT-OUT audit is a grep on vercel.ts (0 hits); provider errors on attach map by kind (in_use → 409 DOMAIN_IN_USE { reason: provider }, invalid_domain → 400, rate_limited → 503, else 500) and a concurrent identical attach never compensates with removeDomain
 
 ### Pending Todos
 
@@ -180,6 +185,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T00:17:42.494Z
-Stopped at: Completed 02-08-PLAN.md
+Last session: 2026-09-17T00:44:30.724Z
+Stopped at: Completed 02-09-PLAN.md
 Resume file: None
