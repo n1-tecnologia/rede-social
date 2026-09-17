@@ -29,7 +29,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 - [x] **ROLE-01**: Four roles exist: `super_admin` (TRIA staff, cross-tenant), `admin_tenant`, `support_tenant`, `member`; roles are stored per tenant membership, not on the global user
 - [x] **ROLE-02**: Identity is separate from membership: a user record can be linked to a tenant through a membership row carrying role and status, with V1 enforcing one membership per user via a constraint that can be relaxed for V2
-- [ ] **ROLE-03**: `super_admin` can create a tenant in a platform panel: name, slug, initial branding, enabled modules and the first `admin_tenant` (by e-mail invitation)
+- [x] **ROLE-03**: `super_admin` can create a tenant in a platform panel: name, slug, initial branding, enabled modules and the first `admin_tenant` (by e-mail invitation)
 - [ ] **ROLE-04**: `super_admin` can enable/disable feature modules per tenant, and the change is reflected in the tenant's navigation and API access without a redeploy
 - [ ] **ROLE-05**: `super_admin` can list all tenants with status and open any tenant's settings
 - [x] **ROLE-06**: Authorization is enforced in the API for every route based on role and enabled modules (a disabled module's routes return 404 for that tenant)
@@ -131,7 +131,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 - [ ] **PWA-01**: The app is mobile-first and responsive on desktop, installable as a PWA (manifest + service worker), and works in standalone mode
 - [ ] **PWA-02**: On iOS, users are shown a short "Adicionar à Tela de Início" hint before push can be enabled, since Web Push on iOS requires installation
-- [ ] **PWA-03**: All UI text is pt-BR and centralized in a message catalog for future i18n
+- [x] **PWA-03**: All UI text is pt-BR and centralized in a message catalog for future i18n
 - [ ] **PWA-04**: GitHub is the source of truth: pushes deploy the Next.js app to Vercel and the API/worker to Cloud Run automatically, with separate preview/staging and production environments
 
 ## v2 Requirements
@@ -221,7 +221,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MOD-05 | Phase 8 | Pending |
 | ROLE-01 | Phase 1 | Complete |
 | ROLE-02 | Phase 1 | Complete |
-| ROLE-03 | Phase 2 | Gaps Found |
+| ROLE-03 | Phase 2 | Complete |
 | ROLE-04 | Phase 2 | Gaps Found |
 | ROLE-05 | Phase 2 | Gaps Found |
 | ROLE-06 | Phase 1 | Complete |
@@ -284,7 +284,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-04 | Phase 2 | Gaps Found |
 | PWA-01 | Phase 2 | Gaps Found |
 | PWA-02 | Phase 7 | Pending |
-| PWA-03 | Phase 2 | Gaps Found |
+| PWA-03 | Phase 2 | Complete |
 | PWA-04 | Phase 01.1 | Pending |
 
 **Coverage:**

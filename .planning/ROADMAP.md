@@ -124,7 +124,7 @@ Plans:
   3. The prototype's shared primitives (Button, IconButton, Avatar, Badge, BottomSheet, ConfirmDialog, EmptyState, Input, Skeleton, Tabs, Toast, TopBar, BottomNav, PullToRefresh, SafeAreaWrapper) and design tokens live in the kernel shared-UI package; hardcoded brand hex literals, "Igor Alves" strings and `lib/nav.ts` are replaced by tenant theme variables, tenant display name and registry-driven navigation; the platform-panel screens (which the prototype lacks) are designed in the prototype's language and reviewed with the design team.
   4. The app is installable as a PWA (manifest + service worker) and runs in standalone mode on iOS and Android; password-recovery and confirmation e-mails show the tenant's display name and logo; every shell and auth string is pt-BR and comes from a central message catalog.
 
-**Plans**: 19/20 plans executed (16 executed + 4 gap-closure)
+**Plans**: 20/20 plans executed (16 executed + 4 gap-closure)
 **Wave 1**
 
 - [x] 02-01-PLAN.md
@@ -173,7 +173,7 @@ Plans:
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
-- [ ] 02-20-PLAN.md — gap closure (wave 10): panel surfaces + catalog for the refusals, two e2e proofs, and the phase exit gate (affected suites + full `pnpm verify`) recorded
+- [x] 02-20-PLAN.md — gap closure (wave 10): panel surfaces + catalog for the refusals, two e2e proofs, and the phase exit gate (affected suites + full `pnpm verify`) recorded
 
 **UI hint**: yes
 **Research needed**: Vercel Domains REST API + verification flow for customer-owned domains (add domain, read DNS/verification records, poll status) and Supabase redirect allow-list updates per domain; `@serwist/turbopack` service-worker setup under Next 16.3; branded auth e-mails on Supabase (per-project templates vs Send Email hook) - decide here; the rest (Tailwind `@theme inline`, dynamic manifest route handlers, `force-dynamic` segments) is well documented and needs a review gate, not research.
@@ -297,7 +297,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 |-------|----------------|--------|-----------|
 | 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 9/9 | Complete    | 2026-09-14 |
 | 01.1. Cloud Provisioning & First Release (INSERTED) | 0/3 | Deferred (needs accounts) | - |
-| 2. Tenant Shell, Branding & Platform Panel | 19/20 | In Progress|  |
+| 2. Tenant Shell, Branding & Platform Panel | 20/20 | In Progress|  |
 | 3. Media Pipeline & Member Profiles | 0/TBD | Not started | - |
 | 4. Feed | 0/TBD | Not started | - |
 | 5. Communities & Stories | 0/TBD | Not started | - |

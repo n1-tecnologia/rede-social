@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-19-PLAN.md
-last_updated: "2026-09-17T13:59:19.709Z"
+stopped_at: Completed 02-20-PLAN.md
+last_updated: "2026-09-17T14:37:50.487Z"
 last_activity: 2026-09-17
 last_activity_desc: Phase 02 execution started
-state_head: b225fec355b3cc97b9bccabbdd4300f15d882ecd
+state_head: 03e74810fb05d6b4b25c45ffff058ac56e2426e6
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 32
-  completed_plans: 28
+  completed_plans: 29
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 4 of 20
+Plan: 5 of 20
 Status: Ready to execute
 Last activity: 2026-09-17 — Phase 02 execution started
 
@@ -86,6 +86,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P17 | 8 min | 2 tasks | 4 files |
 | Phase 02 P18 | 10 min | 3 tasks | 9 files |
 | Phase 02 P19 | 15 min | 3 tasks | 8 files |
+| Phase 02 P20 | 32 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -194,6 +195,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-18: useSignedUpload.onFile is try + catch only (no finally — the success path must not re-run fail() after onCompleted); the catch logs platform.branding.upload_failed { kind, error } to the console and renders t('errors.generic'); happy-dom@20.14.5 + @testing-library/react@16.3.3 added to apps/web at the versions core/ui already pin (importers-only lockfile change) — LogoUpload.test.ts is the first hook test in apps/web (WR-07)
 - [Phase 02]: 02-19: refused invite = status 'expired' + sent_at null (D-A, no schema change); identityConflict on the public.users mirror ⋈ memberships is the ONE identity rule (D-B) — runs in createTenant (400 { adminEmail: 'in_use' }), sendPendingInvites and resendInvite before any GoTrue call; GoTrue email_exists (code 'email_exists', 422) and the 23505 on memberships_one_tenant_per_user_v1 stay only as race guards
 - [Phase 02]: 02-19: resend decides 'accepted' from OUR membership row — email_exists + invited membership mints generateLink({ type: 'recovery' }) for the same redirectTo with the invite template (D-C); ensureVerifiedSideEffects records last_error 'invite:<reason>' and setPrimaryDomain never fails the switch on an invite refusal (D-D)
+- [Phase 02]: 02-20: refused invite state ('expired' + sentAt null) is derived in the Admins page into the view-only InviteView 'refused' (danger pill 'Convite recusado — o e-mail já está em uso', resend kept); the resend toast maps exactly email_in_use / user_in_other_tenant to catalog copy naming no tenant, every other refusal keeps the generic toast; createTenantAction accumulates fieldErrors from slug 'taken', adminEmail 'in_use' and issues[] independently
+- [Phase 02]: 02-20: Phase 2 exit gate re-run over the four gap-closure plans is green one shot (pnpm verify 17m30s: unit 288, pgTAP 98, integration 187, e2e 174 passed/38 skipped, PWA 45/3); the first attempt died with ENOSPC from the 14 GB gitignored .turbo/cache — prune .turbo/cache and apps/web/.next when the disk fills, never the Docker stack
 
 ### Pending Todos
 
@@ -226,6 +229,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T13:59:19.677Z
-Stopped at: Completed 02-19-PLAN.md
+Last session: 2026-09-17T14:37:34.040Z
+Stopped at: Completed 02-20-PLAN.md
 Resume file: None
