@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-17-PLAN.md
-last_updated: "2026-09-17T13:25:01.300Z"
+stopped_at: Completed 02-18-PLAN.md
+last_updated: "2026-09-17T13:39:44.267Z"
 last_activity: 2026-09-17
 last_activity_desc: Phase 02 execution started
-state_head: a095736f52c0e2440abfd4772d523337f11dd164
+state_head: b4521186ad4c3f4a92f4f4650ff4109bb78dfb3e
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 32
-  completed_plans: 26
+  completed_plans: 27
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 2 of 20
+Plan: 3 of 20
 Status: Ready to execute
 Last activity: 2026-09-17 — Phase 02 execution started
 
@@ -84,6 +84,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P14 | 20 min | 3 tasks | 21 files |
 | Phase 02 P16 | 1h 47m | 3 tasks | 12 files |
 | Phase 02 P17 | 8 min | 2 tasks | 4 files |
+| Phase 02 P18 | 10 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-17: a thrown domainProvider.verify is a normal poller outcome — checkDomain evaluates verify_deadline_at first (expired, nothing re-armed) and otherwise records last_error = '<kind>[:<status>]' and enqueueVerify(tx, domainId) inside the same admin transaction, guarded by verified_at is null; verify-job.ts keeps its crash re-arm for THROWN errors only
 - [Phase 02]: 02-17: ensureVerifiedSideEffects returns a boolean and both checkDomain branches clear last_error via clearLastErrorIfSettled only when BOTH side effects succeeded — a failed side effect keeps its error so the Domínios card keeps offering 'Verificar agora'
 - [Phase 02]: 02-17: fake provider 'provider-fails-once' switch (module-level Set of hosts that already threw; first verify -> DomainProviderError('unavailable', 503)); IN-01..IN-07 stay deferred to Phase 8 hardening (product-owner decision 2026-09-17)
+- [Phase 02]: 02-18: membershipOfRecord(ctx) in packages/core/server/tenancy is the ONE where-clause for the caller's membership in the tenant of record (tenant_id + user_id + deleted_at is null, explicit empty-clause guard); GET /v1/me/bootstrap uses it instead of user_id alone, and every later tenant-lane read of memberships reuses it (WR-05, layer 2 of the three-layer scoping)
+- [Phase 02]: 02-18: the web by-host lookup is bounded by HOST_LOOKUP_TIMEOUT_MS = 2 s (tighter than the API adapters' 10 s: proxy.ts + every layout); the timeout reuses the existing catch → generic + TTL_ERROR_MS path, so it can never fail open to a tenant brand (WR-06, measured 2007 ms)
+- [Phase 02]: 02-18: useSignedUpload.onFile is try + catch only (no finally — the success path must not re-run fail() after onCompleted); the catch logs platform.branding.upload_failed { kind, error } to the console and renders t('errors.generic'); happy-dom@20.14.5 + @testing-library/react@16.3.3 added to apps/web at the versions core/ui already pin (importers-only lockfile change) — LogoUpload.test.ts is the first hook test in apps/web (WR-07)
 
 ### Pending Todos
 
@@ -219,6 +223,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T13:25:01.270Z
-Stopped at: Completed 02-17-PLAN.md
+Last session: 2026-09-17T13:39:15.507Z
+Stopped at: Completed 02-18-PLAN.md
 Resume file: None

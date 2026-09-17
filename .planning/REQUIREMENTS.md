@@ -10,7 +10,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### Tenancy & Branding
 
 - [x] **TENANT-01**: A single deployment serves every tenant on that tenant's own custom domain (a hostname the customer owns, registered in `tenant_domains`), while the platform domain serves TRIA's `super_admin`; the host only selects the tenant's public shell (login, sign-up, branding) and after login the app resolves tenant, role and modules from the user's membership, rejecting a session whose membership does not belong to the host's tenant
-- [ ] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
+- [x] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
 - [x] **TENANT-03**: Every tenant-owned row carries `tenant_id`; the API runs tenant requests under a database role subject to Row Level Security (no service-role key for user traffic), so cross-tenant reads/writes are blocked at the DB even if application code has a bug
 - [ ] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
 - [x] **TENANT-05**: An automated isolation test suite with at least two tenants proves that lists, detail pages, search, notifications, chat and storage never return another tenant's data
@@ -22,7 +22,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [x] **MOD-01**: The codebase is a monorepo where each feature (feed, communities, stories, events, chat, notifications, moderation, profiles) is a self-contained module package containing its own DB schema/migrations, API routes, domain logic and UI components
 - [x] **MOD-02**: A core kernel package provides tenancy, auth/session, roles, feature flags, media broker and shared UI primitives; feature modules depend only on the kernel and on published contracts of other modules, never on another module's internals (enforced by lint/dependency rules)
 - [ ] **MOD-03**: Modules communicate through domain events (e.g. `post.liked`, `event.rsvp`) consumed by other modules (e.g. notifications) so a module can be removed or replaced without touching the others
-- [ ] **MOD-04**: Each module is registered in a module registry that declares its routes, navigation entries, feature-flag key and event subscriptions; the API mounts and the app renders only registered, enabled modules
+- [x] **MOD-04**: Each module is registered in a module registry that declares its routes, navigation entries, feature-flag key and event subscriptions; the API mounts and the app renders only registered, enabled modules
 - [ ] **MOD-05**: A module can be reused in another TRIA project by copying/publishing its package and providing the kernel contracts, documented in a per-module README with its public interface
 
 ### Roles & Platform Panel
@@ -208,7 +208,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TENANT-01 | Phase 1 | Complete |
-| TENANT-02 | Phase 2 | Gaps Found |
+| TENANT-02 | Phase 2 | Complete |
 | TENANT-03 | Phase 1 | Complete |
 | TENANT-04 | Phase 3 | Pending |
 | TENANT-05 | Phase 1 | Complete |
@@ -217,7 +217,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MOD-01 | Phase 1 | Complete |
 | MOD-02 | Phase 1 | Complete |
 | MOD-03 | Phase 4 | Pending |
-| MOD-04 | Phase 2 | Gaps Found |
+| MOD-04 | Phase 2 | Complete |
 | MOD-05 | Phase 8 | Pending |
 | ROLE-01 | Phase 1 | Complete |
 | ROLE-02 | Phase 1 | Complete |
