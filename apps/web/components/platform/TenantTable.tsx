@@ -1,8 +1,10 @@
 'use client';
 
-import { Card, Skeleton, StatusPill } from '@tria/ui';
-import { ChevronRight } from 'lucide-react';
+import { Button, Card, EmptyState, Skeleton, StatusPill } from '@tria/ui';
+import { Building2, ChevronRight, Plus, SearchX } from 'lucide-react';
 import Link from 'next/link';
+import { useState, useTransition } from 'react';
+import { LinkButton } from '@/app/(auth)/LinkButton';
 import type { TenantRowView } from '@/lib/platform';
 
 export type TenantListQuery = { q?: string; status?: 'active' | 'suspended'; limit: number };
@@ -50,7 +52,52 @@ function statusTone(status: TenantRowView['status']): 'success' | 'danger' {
  * distinguishable (edge ROLE-05/adjacency) — and every row links BY ID, never by name or slug.
  * Cell content is React text only (T-02-63); dates and plurals arrive pre-rendered from the server.
  */
-export function TenantTable({ rows, labels }: TenantTableProps) {
+export function TenantTable({
+  rows: initialRows,
+  nextCursor: initialCursor,
+  query,
+  labels,
+  loadMoreAction,
+}: TenantTableProps) {
+  const [rows, setRows] = useState(initialRows);
+  const [cursor, setCursor] = useState(initialCursor);
+  const [pending, startTransition] = useTransition();
+
+  const loadMore = () => {
+    if (!loadMoreAction || !cursor) return;
+    const next = cursor;
+    startTransition(async () => {
+      const page = await loadMoreAction({ ...query, cursor: next });
+      setRows((prev) => [...prev, ...page.rows]);
+      setCursor(page.nextCursor);
+    });
+  };
+
+  if (rows.length === 0) {
+    const filtered = Boolean(query.q) || Boolean(query.status);
+    return filtered ? (
+      <EmptyState
+        variant="card"
+        icon={SearchX}
+        title={labels.searchEmptyTitle}
+        body={labels.searchEmptyBody}
+      />
+    ) : (
+      <EmptyState
+        variant="card"
+        icon={Building2}
+        title={labels.emptyTitle}
+        body={labels.emptyBody}
+        action={
+          <LinkButton href="/plataforma/novo" variant="brand">
+            <Plus aria-hidden size={18} />
+            {labels.new}
+          </LinkButton>
+        }
+      />
+    );
+  }
+
   return (
     <>
       <Card className="hidden md:block">
@@ -174,6 +221,14 @@ export function TenantTable({ rows, labels }: TenantTableProps) {
           </li>
         ))}
       </ul>
+
+      {cursor !== null && loadMoreAction ? (
+        <div className="mt-4 flex justify-center">
+          <Button variant="outline" loading={pending} onClick={loadMore}>
+            {pending ? labels.loadingMore : labels.loadMore}
+          </Button>
+        </div>
+      ) : null}
     </>
   );
 }

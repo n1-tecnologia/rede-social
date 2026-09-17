@@ -37,6 +37,11 @@ async function signIn(page: Page, origin: string, email: string, password: strin
   await page.waitForURL((url) => !url.pathname.endsWith('/entrar'), { timeout: 30_000 });
 }
 
+/** Text that exists twice in the DOM (desktop table + mobile cards): match the visible copy only. */
+function visibleText(page: Page, text: string | RegExp) {
+  return page.getByText(text).filter({ visible: true }).first();
+}
+
 async function signInSuperAdmin(page: Page): Promise<void> {
   await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
 }
@@ -58,8 +63,8 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     const demoRow = page.getByRole('link', { name: /TRIA Demo \(tria-demo\)/ });
     await expect(demoRow).toBeVisible();
     await expect(demoRow).toHaveAttribute('href', UUID_PATH);
-    await expect(page.getByText('tria-demo.localhost').first()).toBeVisible();
-    await expect(page.getByText('Ativo').first()).toBeVisible();
+    await expect(visibleText(page, 'tria-demo.localhost')).toBeVisible();
+    await expect(visibleText(page, 'Ativo')).toBeVisible();
 
     // "Novo tenant" → the D-31 form; the slug is suggested from the name while untouched.
     await page.getByRole('link', { name: 'Novo tenant' }).click();
@@ -74,8 +79,9 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await page.locator('#adminEmail').fill(`admin+${rand}@e2e.local`);
     await page.getByRole('button', { name: 'Criar tenant' }).click();
 
-    // Lands on the tenant page, Marca tab, with the "Tenant criado." toast (Task 2 mounts it).
+    // Lands on the tenant page, Marca tab, with the "Tenant criado." toast.
     await expect(page).toHaveURL(new RegExp(`${UUID_PATH.source}/marca`), { timeout: 30_000 });
+    await expect(page.getByRole('status')).toContainText('Tenant criado.');
     await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
     await expect(page.getByTestId('tenant-status-pill')).toHaveText('Ativo');
     await expect(page.getByText(slug, { exact: true })).toBeVisible();
@@ -109,7 +115,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await page.goto(`${hosts.platform}/plataforma`);
     const newRow = page.getByRole('link', { name: `${name} (${slug})` });
     await expect(newRow).toBeVisible();
-    await expect(page.getByText('Sem domínio').first()).toBeVisible();
+    await expect(visibleText(page, 'Sem domínio')).toBeVisible();
 
     await context.close();
   });

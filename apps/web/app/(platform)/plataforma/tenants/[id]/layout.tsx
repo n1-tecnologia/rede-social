@@ -2,7 +2,8 @@ import { StatusPill } from '@tria/ui';
 import { ChevronLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense } from 'react';
+import { FlashToast } from '@/components/platform/FlashToast';
 import { TenantTabs } from '@/components/platform/TenantTabs';
 import { primaryVerifiedHost, requirePlatformTenantDetail } from '@/lib/platform';
 
@@ -34,6 +35,9 @@ export default async function TenantLayout({
 
   return (
     <div className="flex flex-col">
+      <Suspense fallback={null}>
+        <FlashToast />
+      </Suspense>
       <div className="-mx-2 flex items-center gap-1">
         <Link
           href="/plataforma"

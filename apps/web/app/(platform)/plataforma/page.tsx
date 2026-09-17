@@ -4,7 +4,9 @@ import { Suspense } from 'react';
 import { z } from 'zod';
 import { LinkButton } from '@/app/(auth)/LinkButton';
 import { TenantTable, TenantTableSkeleton } from '@/components/platform/TenantTable';
+import { TenantToolbar } from '@/components/platform/TenantToolbar';
 import { PANEL_PAGE_SIZE, requirePlatformTenants, toTenantRow } from '@/lib/platform';
+import { loadMoreTenantsAction } from './actions';
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -46,6 +48,7 @@ async function TenantList({ query }: { query: ReturnType<typeof parseQuery> }) {
       rows={rows}
       nextCursor={page.nextCursor}
       query={query}
+      loadMoreAction={loadMoreTenantsAction}
       labels={{
         colTenant: t('list.colTenant'),
         colPrimaryHost: t('list.colPrimaryHost'),
@@ -91,7 +94,9 @@ export default async function PlatformTenantsPage({
         </LinkButton>
       </div>
 
-      <div className="mt-6">
+      <TenantToolbar q={query.q} status={query.status} limit={query.limit} />
+
+      <div className="mt-4">
         <Suspense
           key={`${query.q ?? ''}|${query.status ?? ''}|${query.limit}`}
           fallback={<TenantTableSkeleton />}

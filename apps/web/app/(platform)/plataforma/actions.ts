@@ -3,14 +3,22 @@
 import {
   createTenantBodySchema,
   platformTenantDetailSchema,
+  platformTenantsQuerySchema,
   setTenantStatusBodySchema,
 } from '@tria/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { platformRedirectPath } from '@/lib/platform';
+import {
+  buildTenantsQuery,
+  getPlatformTenants,
+  platformRedirectPath,
+  type TenantRowView,
+  toTenantRow,
+} from '@/lib/platform';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -219,4 +227,40 @@ export async function setTenantStatusAction(
 
   if (refusal) redirect(refusal);
   return outcome;
+}
+
+/**
+ * "Carregar mais" (ROLE-05 pagination): the next page of the SAME query from the slug cursor the
+ * API answered, mapped to table rows on the server (dates and plurals pre-rendered). Bad input
+ * answers an empty page rather than throwing; 401/403 navigate like every platform read.
+ */
+export async function loadMoreTenantsAction(query: {
+  q?: string;
+  status?: 'active' | 'suspended';
+  limit: number;
+  cursor: string;
+}): Promise<{ rows: TenantRowView[]; nextCursor: string | null }> {
+  const parsed = platformTenantsQuerySchema.safeParse(query);
+  if (!parsed.success) return { rows: [], nextCursor: null };
+
+  let refusal: string | null = null;
+  let page: { rows: TenantRowView[]; nextCursor: string | null } = { rows: [], nextCursor: null };
+  try {
+    const [t, result] = await Promise.all([
+      getTranslations('platform'),
+      getPlatformTenants(buildTenantsQuery(parsed.data)),
+    ]);
+    page = {
+      rows: result.tenants.map((item) =>
+        toTenantRow(item, (count) => t('modulesCount', { count })),
+      ),
+      nextCursor: result.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = platformRedirectPath(error);
+    if (!refusal) console.error('platform.tenants.load_more_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return page;
 }
