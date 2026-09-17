@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { domainVerifyJob } from '@tria/core/server/domains/verify-job';
 import { createBoss, createQueues } from '@tria/core/server/jobs/boss';
 import type { AnyJobDefinition } from '@tria/core/server/modules/manifest';
 import { Hono } from 'hono';
@@ -11,10 +12,12 @@ import { MODULE_REGISTRY } from './modules/registry';
  * `apps/worker`). It owns everything long-running about pg-boss — polling, supervision, archiving —
  * so the request-serving role stays stateless and scale-to-zero friendly.
  *
- * Queue creation happens HERE at start, for every `JobDefinition` any registered module declares.
- * `createQueues` is idempotent, which is what makes the concurrent cases safe: two worker instances
- * booting together, or a worker booting while the API performs its first lazy enqueue, all converge
- * on the same queue row.
+ * Queue creation happens HERE at start, for every `JobDefinition` any registered module declares
+ * plus the kernel's own jobs. Kernel jobs are listed here explicitly and register their queue names
+ * inside the kernel (`packages/core/server/domains/index.ts`); module jobs come from the registry
+ * (02-13 adds the icon-derivation job the same way). `createQueues` is idempotent, which is what
+ * makes the concurrent cases safe: two worker instances booting together, or a worker booting while
+ * the API performs its first lazy enqueue, all converge on the same queue row.
  *
  * The worker is deployed as a Cloud Run SERVICE (`deploy-api.yml`, `--min-instances=1
  * --no-cpu-throttling`), and a service must accept TCP connections on `PORT` during the startup
@@ -24,9 +27,10 @@ import { MODULE_REGISTRY } from './modules/registry';
  * exists". `tests/integration/worker.test.ts` boots this branch in a fresh process and asserts it.
  */
 export async function startWorker(): Promise<void> {
-  const jobs: AnyJobDefinition[] = Object.values(MODULE_REGISTRY).flatMap(
-    (manifest) => manifest?.jobs ?? [],
-  );
+  const jobs: AnyJobDefinition[] = [
+    domainVerifyJob,
+    ...Object.values(MODULE_REGISTRY).flatMap((manifest) => manifest?.jobs ?? []),
+  ];
 
   // Session-mode connection in production (A6): the worker polls continuously, the API does not.
   const boss = createBoss({

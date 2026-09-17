@@ -539,3 +539,179 @@ export async function checkDomain(
   );
   return { outcome: 'pending', domain: toTenantDomain(pending ?? row) };
 }
+
+/**
+ * Crash path of the poller (`domains/verify-job.ts`): when the handler failed unexpectedly and the
+ * row is still pending, one more deferred job keeps the host from going silent. Lives here because
+ * the admin lane is confined to `server/{tenancy,platform}` — adapters and the job touch no
+ * database directly. A duplicate is dropped by the `short` policy; a missing/non-pending row is a
+ * no-op.
+ */
+export async function rearmDomainVerification(domainId: string): Promise<boolean> {
+  return withAdminTx(async (tx) => {
+    const row = await loadRow(tx, domainId);
+    if (!row || row.verifiedAt !== null || row.verificationStatus !== 'pending') return false;
+    await enqueueVerify(tx, domainId);
+    return true;
+  });
+}
+
+/** Every host of the tenant leaves the in-process host cache (their `isPrimary`/`primaryHost` facts changed). */
+async function invalidateTenantHosts(tenantId: string): Promise<void> {
+  const rows = await withAdminTx((tx) => listRows(tx, tenantId));
+  for (const row of rows) invalidateTenantHost(row.host);
+}
+
+/**
+ * `POST …/domains/{domainId}/primary` (D-35): switches the primary among VERIFIED hosts only.
+ * Demote-then-promote in ONE admin transaction (PATTERNS Analog D) — the partial unique index
+ * `tenant_domains_one_primary_per_tenant` is the last line of defence. After commit every host of
+ * the tenant leaves the cache and `sendPendingInvites` runs (a newly verified primary may unblock
+ * the first-admin invite). Already primary -> the unchanged list (idempotent).
+ */
+export async function setPrimaryDomain(
+  tenantId: string,
+  domainId: string,
+  actor: PlatformActor,
+): Promise<TenantDomainsList> {
+  const log = logFor(actor, 'platform-domains');
+  const row = await withAdminTx((tx) => loadRow(tx, domainId, tenantId));
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  if (row.verifiedAt === null) {
+    throw new ApiError(409, 'DOMAIN_STATE_INVALID', { reason: 'not_verified' });
+  }
+  if (row.isPrimary) return listTenantDomains(tenantId);
+
+  await withAdminTx(async (tx) => {
+    await tx
+      .update(tenantDomains)
+      .set({ isPrimary: false })
+      .where(and(eq(tenantDomains.tenantId, tenantId), eq(tenantDomains.isPrimary, true)));
+    await tx
+      .update(tenantDomains)
+      .set({ isPrimary: true })
+      .where(and(eq(tenantDomains.id, domainId), eq(tenantDomains.tenantId, tenantId)));
+  });
+
+  await invalidateTenantHosts(tenantId);
+  await sendPendingInvites(tenantId, actor);
+  log.info(
+    {
+      event: 'platform.domains.set_primary',
+      userId: actor.userId,
+      tenantId,
+      domainId,
+      host: row.host,
+    },
+    'primary host switched',
+  );
+  return listTenantDomains(tenantId);
+}
+
+/**
+ * `DELETE …/domains/{domainId}` (D-35, Pitfall 9). The primary cannot be removed while other hosts
+ * exist (promote another first). Order: provider detach (not-found is success) -> allow-list entry
+ * removed under the lock (a failure is logged, never blocks the delete) -> row deleted -> host cache
+ * invalidated. A provider failure leaves the row in place and answers 500.
+ */
+export async function removeDomain(
+  tenantId: string,
+  domainId: string,
+  actor: PlatformActor,
+): Promise<void> {
+  const log = logFor(actor, 'platform-domains');
+  const { row, others } = await withAdminTx(async (tx) => {
+    const row = await loadRow(tx, domainId, tenantId);
+    const others = row ? (await listRows(tx, tenantId)).filter((r) => r.id !== domainId) : [];
+    return { row, others };
+  });
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  if (row.isPrimary && others.length > 0) {
+    throw new ApiError(409, 'DOMAIN_STATE_INVALID', { reason: 'primary_with_aliases' });
+  }
+
+  try {
+    await domainProvider.removeDomain(row.host);
+  } catch (error) {
+    const kind = error instanceof DomainProviderError ? error.kind : 'unavailable';
+    log.error(
+      {
+        event: 'platform.domains.remove_failed',
+        userId: actor.userId,
+        tenantId,
+        domainId,
+        host: row.host,
+        kind,
+        status: error instanceof DomainProviderError ? (error.status ?? null) : null,
+      },
+      'provider detach failed; row kept',
+    );
+    throw new ApiError(500, 'INTERNAL');
+  }
+
+  try {
+    await withAllowListLock(() => authAllowList.remove(row.host));
+  } catch (error) {
+    log.error(
+      {
+        event: 'platform.domains.allow_list_failed',
+        tenantId,
+        domainId,
+        host: row.host,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'allow-list remove failed; continuing with the delete',
+    );
+  }
+
+  await withAdminTx((tx) =>
+    tx
+      .delete(tenantDomains)
+      .where(and(eq(tenantDomains.id, domainId), eq(tenantDomains.tenantId, tenantId))),
+  );
+  invalidateTenantHost(row.host);
+
+  log.info(
+    { event: 'platform.domains.remove', userId: actor.userId, tenantId, domainId, host: row.host },
+    'domain removed',
+  );
+}
+
+/**
+ * `POST …/domains/{domainId}/restart` (D-34): only an `expired` host may be restarted. In one
+ * transaction the row goes back to `pending` with a fresh 7-day deadline and the poller is re-armed;
+ * then one check runs immediately (the customer usually restarts right after fixing DNS) and its
+ * row is answered.
+ */
+export async function restartDomainVerification(
+  tenantId: string,
+  domainId: string,
+  actor: PlatformActor,
+): Promise<TenantDomain> {
+  const log = logFor(actor, 'platform-domains');
+  const row = await withAdminTx((tx) => loadRow(tx, domainId, tenantId));
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  if (row.verificationStatus !== 'expired') {
+    throw new ApiError(409, 'DOMAIN_STATE_INVALID', { reason: 'not_expired' });
+  }
+
+  await withAdminTx(async (tx) => {
+    await tx
+      .update(tenantDomains)
+      .set({
+        verificationStatus: 'pending',
+        verifyDeadlineAt: new Date(Date.now() + DOMAIN_VERIFY_DEADLINE_MS),
+        lastError: null,
+      })
+      .where(and(eq(tenantDomains.id, domainId), eq(tenantDomains.tenantId, tenantId)));
+    await enqueueVerify(tx, domainId);
+  });
+  log.info(
+    { event: 'platform.domains.restart', userId: actor.userId, tenantId, domainId, host: row.host },
+    'verification restarted',
+  );
+
+  const result = await checkDomain(domainId, actor, { source: 'manual', tenantId });
+  if (!result.domain) throw new ApiError(404, 'NOT_FOUND');
+  return result.domain;
+}
