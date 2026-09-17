@@ -124,7 +124,7 @@ Plans:
   3. The prototype's shared primitives (Button, IconButton, Avatar, Badge, BottomSheet, ConfirmDialog, EmptyState, Input, Skeleton, Tabs, Toast, TopBar, BottomNav, PullToRefresh, SafeAreaWrapper) and design tokens live in the kernel shared-UI package; hardcoded brand hex literals, "Igor Alves" strings and `lib/nav.ts` are replaced by tenant theme variables, tenant display name and registry-driven navigation; the platform-panel screens (which the prototype lacks) are designed in the prototype's language and reviewed with the design team.
   4. The app is installable as a PWA (manifest + service worker) and runs in standalone mode on iOS and Android; password-recovery and confirmation e-mails show the tenant's display name and logo; every shell and auth string is pt-BR and comes from a central message catalog.
 
-**Plans**: TBD
+**Plans**: 20 plans (16 executed + 4 gap-closure)
 
 - [x] 02-01-PLAN.md
 - [x] 02-02-PLAN.md
@@ -142,6 +142,10 @@ Plans:
 - [x] 02-14-PLAN.md
 - [x] 02-15-PLAN.md
 - [x] 02-16-PLAN.md
+- [ ] 02-17-PLAN.md — gap closure (wave 8): CR-01 domain poller re-arms / expires on the provider-error path (fake `provider-fails-once` + checkDomain fix + integration proof); WR-01 last_error cleared after a successful verified re-run
+- [ ] 02-18-PLAN.md — gap closure (wave 8): WR-05 bootstrap membership scoped by tenant (membershipOfRecord), WR-06 2 s timeout on the by-host lookup, WR-07 upload hook error boundary (+ happy-dom / Testing Library in apps/web)
+- [ ] 02-19-PLAN.md — gap closure (wave 9): WR-02/WR-03/WR-04 invite refusals (identityConflict pre-check, reasons email_in_use / user_in_other_tenant, create-time adminEmail check, recovery-link resend fallback, last_error 'invite:<reason>')
+- [ ] 02-20-PLAN.md — gap closure (wave 10): panel surfaces + catalog for the refusals, two e2e proofs, and the phase exit gate (affected suites + full `pnpm verify`) recorded
 
 **UI hint**: yes
 **Research needed**: Vercel Domains REST API + verification flow for customer-owned domains (add domain, read DNS/verification records, poll status) and Supabase redirect allow-list updates per domain; `@serwist/turbopack` service-worker setup under Next 16.3; branded auth e-mails on Supabase (per-project templates vs Send Email hook) - decide here; the rest (Tailwind `@theme inline`, dynamic manifest route handlers, `force-dynamic` segments) is well documented and needs a review gate, not research.
