@@ -2,7 +2,13 @@ import { getTranslations } from 'next-intl/server';
 import { BrandingForm } from '@/components/platform/BrandingForm';
 import { type BrandingView, toBrandingView } from '@/lib/branding-view';
 import { requirePlatformTenantDetail } from '@/lib/platform';
-import { getBrandingStatusAction, saveBrandColorsAction } from './actions';
+import {
+  completeBrandingUploadAction,
+  getBrandingStatusAction,
+  removeIconOverrideAction,
+  saveBrandColorsAction,
+  startBrandingUploadAction,
+} from './actions';
 
 /**
  * Marca tab (02-14, ROLE-03, D-31 — mockup `tenant-page-marca`): the tenant's logo / square icon,
@@ -42,7 +48,13 @@ export default async function TenantBrandingPage({ params }: { params: Promise<{
         darkAria: t('preview.darkAria'),
         login: t('preview.login'),
       }}
-      actions={{ saveColors: saveBrandColorsAction, status: getBrandingStatusAction }}
+      actions={{
+        saveColors: saveBrandColorsAction,
+        status: getBrandingStatusAction,
+        start: startBrandingUploadAction,
+        complete: completeBrandingUploadAction,
+        removeIcon: removeIconOverrideAction,
+      }}
     />
   );
 }

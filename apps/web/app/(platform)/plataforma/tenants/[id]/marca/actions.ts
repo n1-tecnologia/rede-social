@@ -2,7 +2,12 @@
 
 import { platformTenantDetailSchema } from '@tria/contracts';
 import {
+  BRANDING_UPLOAD_ISSUES,
+  type BrandingUploadIssue,
   brandingColorsBodySchema,
+  brandingUploadBodySchema,
+  brandingUploadIdSchema,
+  brandingUploadSchema,
   type ContrastReport,
   contrastReportSchema,
 } from '@tria/contracts/branding';
@@ -142,4 +147,161 @@ export async function getBrandingStatusAction(
 
   if (refusal) redirect(refusal);
   return view ? { ok: true, view } : { ok: false };
+}
+
+export type StartBrandingUploadResult =
+  | { ok: true; upload: { uploadId: string; signedUrl: string; maxBytes: number } }
+  | { ok: false; code: 'type' | 'size' | 'generic' };
+
+/**
+ * `POST /v1/platform/tenants/{id}/branding/uploads` (D-27): only `{ kind, mime, size }` cross here —
+ * never file bytes. Answers the signed Storage URL the browser PUTs to (held in component state for
+ * the duration of the upload only, T-02-110) and the `uploadId` for `complete`.
+ */
+export async function startBrandingUploadAction(
+  tenantId: string,
+  input: { kind: 'logo' | 'icon'; mime: string; size: number },
+): Promise<StartBrandingUploadResult> {
+  const id = tenantIdSchema.safeParse(tenantId);
+  if (!id.success) return { ok: false, code: 'generic' };
+  const body = brandingUploadBodySchema.safeParse(input);
+  if (!body.success) {
+    const paths = body.error.issues.map((issue) => issue.path.map(String).join('.'));
+    return { ok: false, code: paths.includes('size') ? 'size' : 'type' };
+  }
+
+  let refusal: string | null = null;
+  let result: StartBrandingUploadResult = { ok: false, code: 'generic' };
+  try {
+    const res = await apiFetch(`${tenantPath(id.data)}/branding/uploads`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body.data),
+    });
+    if (res.ok) {
+      const upload = brandingUploadSchema.parse(await res.json());
+      result = {
+        ok: true,
+        upload: {
+          uploadId: upload.uploadId,
+          signedUrl: upload.signedUrl,
+          maxBytes: upload.maxBytes,
+        },
+      };
+    } else {
+      const envelope = await readEnvelope(res);
+      const details = envelope?.details;
+      const issues = Array.isArray(details?.issues) ? (details.issues as { path?: string }[]) : [];
+      if (res.status === 413 || details?.size === 'too_large') {
+        result = { ok: false, code: 'size' };
+      } else if (res.status === 400 && issues.some((i) => String(i.path ?? '').includes('mime'))) {
+        result = { ok: false, code: 'type' };
+      } else {
+        refusal = refusalPath(res.status, envelope);
+        if (!refusal) {
+          console.error('platform.branding.upload_start_failed', {
+            status: res.status,
+            code: envelope?.code,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('platform.branding.upload_start_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+export type CompleteBrandingUploadResult =
+  | { ok: true; view: BrandingView }
+  | { ok: false; code: BrandingUploadIssue | 'generic' };
+
+/**
+ * `POST /v1/platform/tenants/{id}/branding/uploads/{uploadId}/complete` (no body): the API verifies
+ * the object (size, content type, image header — 02-13) and records it. A refused object is already
+ * removed server-side; its `details.upload` vocabulary maps to the zone's pt-BR copy.
+ */
+export async function completeBrandingUploadAction(
+  tenantId: string,
+  uploadId: string,
+): Promise<CompleteBrandingUploadResult> {
+  const id = tenantIdSchema.safeParse(tenantId);
+  const upload = brandingUploadIdSchema.safeParse(uploadId);
+  if (!id.success || !upload.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: CompleteBrandingUploadResult = { ok: false, code: 'generic' };
+  try {
+    const res = await apiFetch(
+      `${tenantPath(id.data)}/branding/uploads/${encodeURIComponent(upload.data)}/complete`,
+      { method: 'POST' },
+    );
+    if (res.ok) {
+      result = { ok: true, view: await parseView(res) };
+      revalidatePath(`/plataforma/tenants/${id.data}`, 'layout');
+    } else {
+      const envelope = await readEnvelope(res);
+      const issue = envelope?.details?.upload;
+      if (
+        (res.status === 400 || res.status === 404) &&
+        typeof issue === 'string' &&
+        (BRANDING_UPLOAD_ISSUES as readonly string[]).includes(issue)
+      ) {
+        result = { ok: false, code: issue as BrandingUploadIssue };
+      } else {
+        refusal = refusalPath(res.status, envelope);
+        if (!refusal) {
+          console.error('platform.branding.complete_failed', {
+            status: res.status,
+            code: envelope?.code,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('platform.branding.complete_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * `DELETE /v1/platform/tenants/{id}/branding/icon` (D-28): clears the square override; the icons
+ * re-derive from the logo in the worker. Sits behind a `ConfirmDialog` in the panel.
+ */
+export async function removeIconOverrideAction(
+  tenantId: string,
+): Promise<{ ok: true; view: BrandingView } | { ok: false; code: 'generic' }> {
+  const id = tenantIdSchema.safeParse(tenantId);
+  if (!id.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: { ok: true; view: BrandingView } | { ok: false; code: 'generic' } = {
+    ok: false,
+    code: 'generic',
+  };
+  try {
+    const res = await apiFetch(`${tenantPath(id.data)}/branding/icon`, { method: 'DELETE' });
+    if (res.ok) {
+      result = { ok: true, view: await parseView(res) };
+      revalidatePath(`/plataforma/tenants/${id.data}`, 'layout');
+    } else {
+      const envelope = await readEnvelope(res);
+      refusal = refusalPath(res.status, envelope);
+      if (!refusal) {
+        console.error('platform.branding.icon_remove_failed', {
+          status: res.status,
+          code: envelope?.code,
+        });
+      }
+    }
+  } catch (error) {
+    console.error('platform.branding.icon_remove_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
 }

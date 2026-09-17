@@ -1,7 +1,9 @@
+import { fileURLToPath } from 'node:url';
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 import { closeAdmin, deleteTenantBySlug, deleteUserByEmail } from './admin';
 import { closeBrandingAdmin, getTenantBranding, insertVerifiedHost } from './branding-admin';
 import { hosts, isRemote } from './fixtures';
+import { ensureWorker } from './worker';
 
 /**
  * Marca tab (02-14, ROLE-03/UI-04, D-25/D-27/D-28/D-31/D-41): the super_admin rebrands a tenant
@@ -10,7 +12,9 @@ import { hosts, isRemote } from './fixtures';
  * by-host answer reflects it on the next request. Colours are asserted by RENDERED computed style
  * (the tokens.css alias-scoping fix), never by reading the raw variable.
  *
- * Serial: every test builds on the tenant test 1 creates; a shared context keeps the session.
+ * Serial: every test builds on the tenant test 1 creates; a shared context keeps the session. The
+ * spec brings its own `ROLE=worker` (`ensureWorker`) because icon derivation runs off the request
+ * path and the Playwright config starts API + web only.
  */
 
 test.describe.configure({ mode: 'serial', timeout: 180_000 });
@@ -43,6 +47,12 @@ let tenantId = '';
 
 let context: BrowserContext;
 let page: Page;
+let stopWorker: () => Promise<void> = async () => {};
+
+const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/tria-lab.svg', import.meta.url));
+const SQUARE_SVG = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#dc2626"/></svg>',
+);
 
 /** Submits `/entrar` on `origin` without asserting the landing (owned by 02-07). */
 async function signIn(page: Page, origin: string, email: string, password: string): Promise<void> {
@@ -84,12 +94,14 @@ test.beforeAll(async ({ browser }, testInfo) => {
   name = `E2E Marca ${s}`;
   adminEmail = `admin+${s}@e2e.local`;
   host = `e2e-marca-${s}.cliente.test`;
+  stopWorker = await ensureWorker();
   context = await browser.newContext();
   page = await context.newPage();
   await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
 });
 
 test.afterAll(async () => {
+  await stopWorker();
   await deleteUserByEmail(adminEmail);
   await deleteTenantBySlug(slug);
   await closeAdmin();
@@ -158,5 +170,80 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
     await expect.poll(async () => (await byHost()).branding.colors.primary).toBe('#1d4ed8');
     await expect.poll(() => brandButtonBg(page, 'light')).toBe('rgb(29, 78, 216)');
     expect(await page.content()).not.toContain(LAB_PRIMARY);
+  });
+
+  test('2. logo upload → icons generated → tenant host carries the icon URLs; square icon override → remove', async () => {
+    await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
+    // E14/empty: no logo yet, no app-icons card.
+    await expect(
+      page.getByText('Nenhum logo enviado — o nome da comunidade aparece no lugar.'),
+    ).toBeVisible();
+    await expect(page.locator('[data-icons-status]')).toHaveCount(0);
+
+    // Browser → signed Storage URL → complete (D-27); the zone shows the new logo through <img>.
+    await page.locator('[data-upload-zone="logo"] input[type="file"]').setInputFiles(SEED_LOGO);
+    await expect(page.getByText('Alterações salvas.').first()).toBeVisible({ timeout: 30_000 });
+    const logo = page.locator(`img[alt="Logo de ${name}"]`);
+    await expect(logo).toBeVisible();
+    await expect(logo).toHaveAttribute(
+      'src',
+      new RegExp(`/storage/v1/object/public/branding/${tenantId}/branding/`),
+    );
+
+    // D-28: honest status until the worker wrote the set for the current iconVersion.
+    await expect(page.locator('[data-icons-status="generating"]')).toBeVisible();
+    await expect(page.locator('[data-icons-status="generating"]')).toHaveText(
+      /Ícones sendo gerados…/,
+    );
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator('[data-icons-status="ready"]')).toHaveText(/Ícones gerados/);
+    await expect(page.locator('[data-icon-thumb]')).toHaveCount(4);
+
+    const b = await getTenantBranding(slug);
+    expect(b.logoUrl).toContain(tenantId);
+    expect(b.iconUrls?.i512).toContain(`/icons/${b.iconVersion}/`);
+    await expect(page.getByText(`Versão ${b.iconVersion}`)).toBeVisible();
+    await expect(page.getByText('Gerados a partir do logo')).toBeVisible();
+
+    // The job's write invalidated the host: by-host carries the same URLs; the PNG really exists.
+    const h = await byHost();
+    expect(h.branding.iconUrls?.i512).toBe(b.iconUrls?.i512);
+    expect(h.branding.faviconUrl).toBe(b.faviconUrl);
+    const png = await fetch(b.iconUrls?.i512 ?? '');
+    expect(png.status).toBe(200);
+    expect((png.headers.get('content-type') ?? '').startsWith('image/png')).toBe(true);
+    expect((await png.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+    // E12/populated: the mini-shells now carry the uploaded logo.
+    await expect(
+      page.locator(`[data-brand-scope][data-theme="light"] img[src="${b.logoUrl}"]`).first(),
+    ).toBeAttached();
+
+    // Square-icon override (D-28): same signed-PUT path with kind 'icon'.
+    await page
+      .locator('[data-upload-zone="icon"] input[type="file"]')
+      .setInputFiles({ name: 'quadrado.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
+    const override = page.locator(`img[alt="Ícone quadrado de ${name}"]`);
+    await expect(override).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText('Gerados a partir do ícone quadrado')).toBeVisible();
+    const withOverride = await getTenantBranding(slug);
+    expect(withOverride.iconUrl).not.toBeNull();
+    expect(withOverride.iconVersion).toBeGreaterThan(b.iconVersion);
+
+    // Remover → ConfirmDialog → DELETE …/branding/icon → icons re-derive from the logo.
+    await page.getByRole('button', { name: 'Remover' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Remover ícone quadrado?')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Remover' }).click();
+    await expect(override).toHaveCount(0, { timeout: 30_000 });
+    await expect(
+      page.getByText(
+        'Opcional. Use quando o logo for horizontal ou ficar ilegível em um quadrado.',
+      ),
+    ).toBeVisible();
+    await expect.poll(async () => (await getTenantBranding(slug)).iconUrl).toBeNull();
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText('Gerados a partir do logo')).toBeVisible();
   });
 });
