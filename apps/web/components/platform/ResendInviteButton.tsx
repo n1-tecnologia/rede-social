@@ -15,6 +15,11 @@ export interface ResendInviteButtonProps {
     resendHelper: string;
     resent: string;
     resendFailed: string;
+    /**
+     * Reason-specific failure copy keyed by the API's `details.reason` (WR-02/WR-03). Only the two
+     * documented refusals are known; any other reason falls back to `resendFailed`.
+     */
+    reasons?: Partial<Record<'email_in_use' | 'user_in_other_tenant', string>>;
   };
   /** `resendInviteAction` — the API call + layout revalidation live in the server action. */
   action: (tenantId: string, inviteId: string) => Promise<ResendInviteResult>;
@@ -24,8 +29,10 @@ export interface ResendInviteButtonProps {
  * The "Reenviar convite" control of the Admins tab (D-30, mockup `tenant-page-admins`), mounted in
  * `AdminsCard`'s typed `resend` slot. Outline button; "Reenviando…" with the spinner and `aria-busy`
  * while the action is in flight (E17 loading); disabled with the helper line while the invite is
- * pending without a verified host (E17 partial). Every outcome ends with a toast. No network call
- * happens here — the server action is the only path to the API.
+ * pending without a verified host (E17 partial). Every outcome ends with a toast: a refusal with a
+ * documented reason toasts its own copy (WR-02/WR-03), any other failure the generic copy — always
+ * from the catalog, never the API message. No network call happens here — the server action is the
+ * only path to the API.
  */
 export function ResendInviteButton({
   tenantId,
@@ -37,13 +44,18 @@ export function ResendInviteButton({
   const toast = useToast();
   const [pending, startTransition] = useTransition();
 
+  const reasonCopy = (reason: string | undefined): string | undefined =>
+    reason === 'email_in_use' || reason === 'user_in_other_tenant'
+      ? labels.reasons?.[reason]
+      : undefined;
+
   const resend = () => {
     startTransition(async () => {
       const result = await action(tenantId, inviteId);
       toast.show(
         result.ok
           ? { tone: 'success', message: labels.resent }
-          : { tone: 'error', message: labels.resendFailed },
+          : { tone: 'error', message: reasonCopy(result.reason) ?? labels.resendFailed },
       );
     });
   };

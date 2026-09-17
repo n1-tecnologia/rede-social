@@ -91,6 +91,7 @@
         "slugTaken": "Este slug já está em uso.",
         "hexInvalid": "Use o formato #RRGGBB.",
         "emailInvalid": "Informe um e-mail válido.",
+        "emailInUse": "Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador.",
         "generic": "Não foi possível criar o tenant. Revise os campos e tente novamente."
       }
     },
@@ -119,11 +120,14 @@
       "inviteSent": "Convite enviado em {date}",
       "inviteAccepted": "Aceito em {date}",
       "inviteExpired": "Convite expirado",
+      "inviteRefused": "Convite recusado — o e-mail já está em uso",
       "resend": "Reenviar convite",
       "resendPending": "Reenviando…",
       "resendHelper": "Adicione e verifique um domínio para enviar o convite.",
       "resent": "Convite reenviado.",
       "resendFailed": "Não foi possível reenviar o convite. Tente novamente.",
+      "resendEmailInUse": "Este e-mail já possui uma conta na plataforma e não pode receber o convite.",
+      "resendUserInOtherTenant": "Este e-mail já pertence a um membro de outro tenant e não pode administrar este.",
       "adminsTitle": "Administradores",
       "role": "Administrador",
       "empty": "Nenhum administrador ativo ainda."

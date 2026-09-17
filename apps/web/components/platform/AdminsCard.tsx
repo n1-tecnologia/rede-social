@@ -3,7 +3,12 @@ import type { ReactNode } from 'react';
 
 export type InviteView = {
   email: string;
-  status: 'pending' | 'sent' | 'accepted' | 'expired';
+  /**
+   * The contract's four statuses plus `refused` — a view-only state derived by the page from
+   * `status === 'expired' && sentAt === null` (a refused first-admin e-mail, 02-19 D-A); the API
+   * contract has no such status and never learns of it.
+   */
+  status: 'pending' | 'sent' | 'accepted' | 'expired' | 'refused';
   /** Pre-formatted on the server (`formatPanelDate(sentAt, 'dateTime')`). */
   sentAtLabel: string | null;
   /** Pre-formatted on the server (`formatPanelDate(acceptedAt)`). */
@@ -21,6 +26,8 @@ export interface AdminsCardLabels {
   /** Already interpolated with the accepted date. */
   inviteAccepted: string;
   inviteExpired: string;
+  /** The refused pill (WR-02/WR-03): the e-mail already belongs to an identity on the platform. */
+  inviteRefused: string;
   adminsTitle: string;
   role: string;
   empty: string;
@@ -42,6 +49,7 @@ const inviteTone = {
   sent: 'neutral',
   accepted: 'success',
   expired: 'danger',
+  refused: 'danger',
 } as const;
 
 /**
@@ -57,6 +65,7 @@ export function AdminsCard({ invite, admins, labels, resend }: AdminsCardProps) 
         sent: labels.inviteSent,
         accepted: labels.inviteAccepted,
         expired: labels.inviteExpired,
+        refused: labels.inviteRefused,
       }[invite.status]
     : null;
 

@@ -51,7 +51,8 @@ type CreateFieldError =
   | 'slugInvalid'
   | 'slugTaken'
   | 'hexInvalid'
-  | 'emailInvalid';
+  | 'emailInvalid'
+  | 'emailInUse';
 
 /** What `createTenantAction` hands back to `useActionState` — catalog keys, never copy. */
 export type CreateTenantState = {
@@ -93,7 +94,9 @@ function str(formData: FormData, key: string): string {
 /**
  * `POST /v1/platform/tenants` (D-31). Validation first (`createTenantBodySchema.safeParse`), so a bad
  * form never becomes a request; the API's 400 `VALIDATION_FAILED` is mapped the same way — `details.slug
- * === 'taken'` is the duplicate slug, `details.issues[]` a schema failure it caught that we did not.
+ * === 'taken'` is the duplicate slug, `details.adminEmail` = `'in_use'` an e-mail that already has an
+ * identity on the platform (WR-03, 02-19), `details.issues[]` a schema failure it caught that we did
+ * not; the three are independent and may arrive together.
  * Every branch echoes `values` so already-valid fields keep what was typed (E11/partial). Success
  * redirects to the tenant's Marca tab with `?toast=created`.
  */
@@ -145,17 +148,21 @@ export async function createTenantAction(
       const code = body?.error?.code ?? 'HTTP_ERROR';
       const details = body?.error?.details;
       if (res.status === 400 && code === 'VALIDATION_FAILED') {
-        if (details?.slug === 'taken') {
-          result = { fieldErrors: { slug: 'slugTaken' }, values };
-        } else if (Array.isArray(details?.issues)) {
-          const fieldErrors = mapIssues(details.issues as { path: string }[]);
-          result =
-            Object.keys(fieldErrors ?? {}).length > 0
-              ? { fieldErrors, values }
-              : { error: 'generic', values };
-        } else {
-          result = { error: 'generic', values };
+        const fieldErrors: NonNullable<CreateTenantState['fieldErrors']> = {};
+        if (details?.slug === 'taken') fieldErrors.slug = 'slugTaken';
+        if (details?.adminEmail === 'in_use') fieldErrors.adminEmail = 'emailInUse';
+        if (Array.isArray(details?.issues)) {
+          for (const [field, key] of Object.entries(
+            mapIssues(details.issues as { path: string }[]) ?? {},
+          )) {
+            const name = field as CreateField;
+            if (key && !fieldErrors[name]) fieldErrors[name] = key;
+          }
         }
+        result =
+          Object.keys(fieldErrors).length > 0
+            ? { fieldErrors, values }
+            : { error: 'generic', values };
       } else if (res.status === 401 || res.status === 403) {
         refusal = platformRedirectPath(
           new ApiClientError(res.status, code, details, body?.error?.requestId),
