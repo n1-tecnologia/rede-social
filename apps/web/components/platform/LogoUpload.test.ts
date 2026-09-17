@@ -34,7 +34,7 @@ const startOk = {
 };
 
 let actions: { start: ReturnType<typeof vi.fn>; complete: ReturnType<typeof vi.fn> };
-let onCompleted: ReturnType<typeof vi.fn>;
+let onCompleted: ReturnType<typeof vi.fn<(view: BrandingView) => void>>;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 
 const mount = () =>
@@ -49,7 +49,7 @@ const mount = () =>
 
 beforeEach(() => {
   actions = { start: vi.fn(), complete: vi.fn() };
-  onCompleted = vi.fn();
+  onCompleted = vi.fn<(view: BrandingView) => void>();
   toast.show.mockReset();
   put.mockReset();
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

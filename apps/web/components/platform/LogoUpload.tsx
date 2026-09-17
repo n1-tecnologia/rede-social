@@ -24,8 +24,10 @@ const ACCEPT = `${BRANDING_UPLOAD_ACCEPT},.png,.svg,.webp,.jpg,.jpeg`;
  * The signed-upload flow shared by the logo and the square-icon zones (02-14, D-27, CLAUDE.md §4):
  * `classifyFile` (UX gate — no request on a wrong type/size) → `start` → browser PUT straight to
  * Storage with progress → `complete` → `onCompleted(view)` + toast. One in-flight upload per zone;
- * every failure path returns the zone to idle with its pt-BR message (UI-SPEC "Error state — upload").
- * The signed URL lives in this closure for the duration of the PUT only (T-02-110).
+ * every failure path — including a REJECTED server action or a thrown transfer — returns the zone to
+ * idle with the pt-BR generic message (UI-SPEC "Error state — upload", WR-07); the raw error goes to
+ * the console only, never to the user (T-02-147). The signed URL lives in this closure for the
+ * duration of the PUT only (T-02-110).
  */
 export function useSignedUpload({
   tenantId,
@@ -59,52 +61,60 @@ export function useSignedUpload({
 
   const onFile = async (file: File) => {
     if (busy.current) return;
-    setError(null);
-    const rejected = classifyFile(file);
-    if (rejected) return setError(t(`errors.${rejected}`));
-    const mime = resolveMime(file);
-    if (!mime) return setError(t('errors.type'));
+    try {
+      setError(null);
+      const rejected = classifyFile(file);
+      if (rejected) return setError(t(`errors.${rejected}`));
+      const mime = resolveMime(file);
+      if (!mime) return setError(t('errors.type'));
 
-    busy.current = true;
-    setState('progress');
-    setProgress(0);
+      busy.current = true;
+      setState('progress');
+      setProgress(0);
 
-    const started = await actions.start(tenantId, { kind, mime, size: file.size });
-    if (!started.ok) {
-      return fail(
-        started.code === 'type'
-          ? t('errors.type')
-          : started.code === 'size'
-            ? t('errors.size')
-            : t('errors.generic'),
-      );
+      const started = await actions.start(tenantId, { kind, mime, size: file.size });
+      if (!started.ok) {
+        return fail(
+          started.code === 'type'
+            ? t('errors.type')
+            : started.code === 'size'
+              ? t('errors.size')
+              : t('errors.generic'),
+        );
+      }
+
+      const put = await uploadToSignedUrl(started.upload.signedUrl, file, {
+        mime,
+        onProgress: setProgress,
+      });
+      if (!put.ok)
+        return fail(put.reason === 'too_large' ? t('errors.size') : t('errors.transfer'));
+
+      setState('processing');
+      const completed = await actions.complete(tenantId, started.upload.uploadId);
+      if (!completed.ok) {
+        const message = {
+          not_an_image: t('errors.notAnImage'),
+          format_mismatch: t('errors.formatMismatch'),
+          svg_unsafe: t('errors.svgUnsafe'),
+          too_large: t('errors.size'),
+          object_missing: t('errors.objectMissing'),
+          generic: t('errors.generic'),
+        }[completed.code];
+        return fail(message);
+      }
+
+      busy.current = false;
+      setState('idle');
+      setProgress(0);
+      onCompleted(completed.view);
+      toast.show({ tone: 'success', message: t('toasts.saved') });
+    } catch (error) {
+      // A rejected action / thrown transfer (WR-07): `fail` resets busy, state and progress. Kept as
+      // try + catch only — the success path above must not re-run `fail` after `onCompleted`.
+      console.error('platform.branding.upload_failed', { kind, error: String(error) });
+      fail(t('errors.generic'));
     }
-
-    const put = await uploadToSignedUrl(started.upload.signedUrl, file, {
-      mime,
-      onProgress: setProgress,
-    });
-    if (!put.ok) return fail(put.reason === 'too_large' ? t('errors.size') : t('errors.transfer'));
-
-    setState('processing');
-    const completed = await actions.complete(tenantId, started.upload.uploadId);
-    if (!completed.ok) {
-      const message = {
-        not_an_image: t('errors.notAnImage'),
-        format_mismatch: t('errors.formatMismatch'),
-        svg_unsafe: t('errors.svgUnsafe'),
-        too_large: t('errors.size'),
-        object_missing: t('errors.objectMissing'),
-        generic: t('errors.generic'),
-      }[completed.code];
-      return fail(message);
-    }
-
-    busy.current = false;
-    setState('idle');
-    setProgress(0);
-    onCompleted(completed.view);
-    toast.show({ tone: 'success', message: t('toasts.saved') });
   };
 
   const reset = () => {
