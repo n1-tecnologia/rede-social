@@ -1,5 +1,7 @@
-import Link from 'next/link';
+import { EmptyState } from '@tria/ui';
+import { Link2Off } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { LinkButton } from '../LinkButton';
 
 /**
  * "Endereço incorreto" (TENANT-01, D-23). Reached only through `/auth/host-mismatch`, which has
@@ -14,12 +16,17 @@ export default async function EnderecoInvalidoPage() {
   const [t, tc] = await Promise.all([getTranslations('hostMismatch'), getTranslations('common')]);
 
   return (
-    <>
-      <h1>{t('title')}</h1>
-      <p>{t('body')}</p>
-      <p>
-        <Link href="/entrar">{tc('back')}</Link>
-      </p>
-    </>
+    <div className="w-full">
+      <EmptyState
+        icon={Link2Off}
+        title={t('title')}
+        body={t('body')}
+        action={
+          <LinkButton href="/entrar" variant="outline" size="lg" fullWidth>
+            {tc('back')}
+          </LinkButton>
+        }
+      />
+    </div>
   );
 }

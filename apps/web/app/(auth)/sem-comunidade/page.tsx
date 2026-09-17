@@ -1,7 +1,9 @@
+import { EmptyState } from '@tria/ui';
+import { UserX } from 'lucide-react';
 import { cookies } from 'next/headers';
-import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { getHostTenant, signupPath } from '@/lib/tenant-host';
+import { LinkButton } from '../LinkButton';
 
 /**
  * "Conta sem comunidade" (orphan identity): a valid session whose user has no membership row, which
@@ -32,16 +34,23 @@ export default async function SemComunidadePage() {
   }
 
   return (
-    <>
-      <h1>{t('title')}</h1>
-      <p>{t('body')}</p>
-      <p>
-        {cta ? (
-          <Link href={cta.href}>{t('cta', { tenant: cta.tenant })}</Link>
-        ) : (
-          <Link href="/entrar">{tc('back')}</Link>
-        )}
-      </p>
-    </>
+    <div className="w-full">
+      <EmptyState
+        icon={UserX}
+        title={t('title')}
+        body={t('body')}
+        action={
+          cta ? (
+            <LinkButton href={cta.href} variant="outline" size="lg" fullWidth>
+              {t('cta', { tenant: cta.tenant })}
+            </LinkButton>
+          ) : (
+            <LinkButton href="/entrar" variant="outline" size="lg" fullWidth>
+              {tc('back')}
+            </LinkButton>
+          )
+        }
+      />
+    </div>
   );
 }

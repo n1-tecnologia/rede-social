@@ -82,6 +82,9 @@ export async function loadOrRedirect<T>(
  * - 401: expired/invalid session between proxy.ts and the API — back to login.
  * - `MEMBERSHIP_BLOCKED` (AUTH-06 / D-09): the block takes effect on the very next request. The tenant
  *   display name is the only detail the 403 carries and the only one the screen shows.
+ * - `TENANT_SUSPENDED` (D-32): the TENANT, not the member, is unavailable; the device is signed out
+ *   like D-09 and lands on the branded public screen `/comunidade-indisponivel`. No query — the brand
+ *   comes from the host and the copy names no tenant, reason or timestamp.
  * - `TENANT_HOST_MISMATCH` (TENANT-01 / D-23): no query parameters — the screen must not name either
  *   tenant.
  * - `NO_MEMBERSHIP`: orphan identity, a session with no membership row.
@@ -91,11 +94,9 @@ export function bootstrapRedirectPath(error: ApiClientError): string | null {
   if (error.status === 401) return '/entrar';
   switch (error.code) {
     case 'MEMBERSHIP_BLOCKED':
-    // D-32 interim (02-03): a suspended tenant's member is signed out through the same handler a
-    // blocked member uses, exactly as before the code split; 02-08 routes TENANT_SUSPENDED to
-    // `/auth/suspended` → the branded `/comunidade-indisponivel` screen instead.
-    case 'TENANT_SUSPENDED':
       return `/auth/blocked?t=${encodeURIComponent(String(error.details?.tenantName ?? ''))}`;
+    case 'TENANT_SUSPENDED':
+      return '/auth/suspended';
     case 'TENANT_HOST_MISMATCH':
       return '/auth/host-mismatch';
     case 'NO_MEMBERSHIP':

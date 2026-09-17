@@ -1,9 +1,11 @@
 import { expect, type Page, test } from '@playwright/test';
-import { hosts, isRemote } from './fixtures';
+import { closeAdmin, createMember, deleteUserByEmail } from './admin';
+import { hosts, isRemote, login } from './fixtures';
 import {
   closeTenantFixtures,
   createThrowawayTenant,
   deleteTenantBySlug,
+  setTenantStatus,
   throwawayOrigin,
 } from './tenant-fixtures';
 
@@ -113,6 +115,88 @@ test.describe('B. unverified host is generic (D-36)', () => {
     await expect(page.getByText('TRIA', { exact: true })).toBeVisible();
     expect(await brandPrimary(page, 'main')).toBe(NEUTRAL);
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveCount(0);
+  });
+});
+
+test.describe('C. suspended tenant (D-32)', () => {
+  const PASSWORD = 'Segredo123';
+  const slug1 = `e2e-susp1-${sfx}`;
+  const host1 = `e2e-susp1-${sfx}.localhost`;
+  const slug2 = `e2e-susp2-${sfx}`;
+  const host2 = `e2e-susp2-${sfx}.localhost`;
+  const email = `susp-${sfx}@tria-test.local`;
+
+  test.beforeAll(async () => {
+    test.skip(isRemote, 'local stack only');
+    await deleteUserByEmail(email);
+    await createThrowawayTenant({
+      slug: slug1,
+      displayName: `Suspensa ${sfx}`,
+      hosts: [{ host: host1, primary: true, verified: true }],
+      colors: { primary: '#0e7490', secondary: '#67e8f9' },
+      logoUrl: null,
+    });
+    await createMember(email, PASSWORD, slug1);
+    await createThrowawayTenant({
+      slug: slug2,
+      displayName: `Fria ${sfx}`,
+      hosts: [{ host: host2, primary: true, verified: true }],
+      colors: { primary: '#9a3412', secondary: '#fdba74' },
+      logoUrl: null,
+      status: 'suspended',
+    });
+  });
+
+  test.afterAll(async () => {
+    await deleteUserByEmail(email);
+    await deleteTenantBySlug(slug1);
+    await deleteTenantBySlug(slug2);
+    await closeAdmin();
+    await closeTenantFixtures();
+  });
+
+  test('C1. bootstrap path: a member of a tenant suspended mid-session is signed out onto the branded screen', async ({
+    page,
+    context,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const origin = throwawayOrigin(host1);
+    await login(page, email, PASSWORD, origin);
+
+    await setTenantStatus(slug1, 'suspended');
+    await page.goto(`${origin}/inicio`);
+    await expect(page).toHaveURL(`${origin}/comunidade-indisponivel`, { timeout: 30_000 });
+    await expect(page.getByText('Comunidade indisponível')).toBeVisible();
+    await expect(
+      page.getByText('Esta comunidade está temporariamente indisponível.'),
+    ).toBeVisible();
+    expect(await brandPrimary(page, 'main')).toBe('#0e7490');
+    expect(await page.locator('body').innerText()).not.toMatch(/motivo/i);
+    await expect(page.getByRole('link', { name: 'Voltar para login' })).toHaveAttribute(
+      'href',
+      '/entrar',
+    );
+    expect((await context.cookies()).filter((c) => c.name.startsWith('sb-'))).toHaveLength(0);
+
+    await page.goto(`${origin}/inicio`);
+    await expect(page).toHaveURL(`${origin}/entrar`, { timeout: 30_000 });
+  });
+
+  test('C2. cold /entrar and /cadastro on a suspended host hide the forms behind the branded card', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const origin = throwawayOrigin(host2);
+    await page.goto(`${origin}/entrar`);
+    await expect(page.getByText('Comunidade indisponível')).toBeVisible();
+    await expect(page.locator('#email')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Entrar' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveCount(0);
+    expect(await brandPrimary(page, 'main')).toBe('#9a3412');
+
+    await page.goto(`${origin}/cadastro`);
+    await expect(page.getByText('Comunidade indisponível')).toBeVisible();
+    await expect(page.locator('#name')).toHaveCount(0);
   });
 });
 
