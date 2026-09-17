@@ -15,7 +15,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [ ] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
 - [x] **TENANT-05**: An automated isolation test suite with at least two tenants proves that lists, detail pages, search, notifications, chat and storage never return another tenant's data
 - [ ] **TENANT-06**: Authentication e-mails (password recovery, confirmation) are sent with the tenant's display name and logo, not TRIA's
-- [ ] **TENANT-07**: `super_admin` can attach a custom domain to a tenant from the platform panel; the platform registers it with the hosting provider and the auth redirect allow-list, shows the DNS records the customer must create, and reports verification status (pilot/seed tenants get their domains from the provisioning script)
+- [x] **TENANT-07**: `super_admin` can attach a custom domain to a tenant from the platform panel; the platform registers it with the hosting provider and the auth redirect allow-list, shows the DNS records the customer must create, and reports verification status (pilot/seed tenants get their domains from the provisioning script)
 
 ### Modularity (architecture requirement)
 
@@ -213,7 +213,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-04 | Phase 3 | Pending |
 | TENANT-05 | Phase 1 | Complete |
 | TENANT-06 | Phase 2 | Gaps Found |
-| TENANT-07 | Phase 2 | Gaps Found |
+| TENANT-07 | Phase 2 | Complete |
 | MOD-01 | Phase 1 | Complete |
 | MOD-02 | Phase 1 | Complete |
 | MOD-03 | Phase 4 | Pending |

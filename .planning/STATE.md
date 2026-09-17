@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-18-PLAN.md
-last_updated: "2026-09-17T13:39:44.267Z"
+stopped_at: Completed 02-19-PLAN.md
+last_updated: "2026-09-17T13:59:19.709Z"
 last_activity: 2026-09-17
 last_activity_desc: Phase 02 execution started
-state_head: b4521186ad4c3f4a92f4f4650ff4109bb78dfb3e
+state_head: b225fec355b3cc97b9bccabbdd4300f15d882ecd
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 32
-  completed_plans: 27
+  completed_plans: 28
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 3 of 20
+Plan: 4 of 20
 Status: Ready to execute
 Last activity: 2026-09-17 — Phase 02 execution started
 
@@ -85,6 +85,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P16 | 1h 47m | 3 tasks | 12 files |
 | Phase 02 P17 | 8 min | 2 tasks | 4 files |
 | Phase 02 P18 | 10 min | 3 tasks | 9 files |
+| Phase 02 P19 | 15 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -191,6 +192,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-18: membershipOfRecord(ctx) in packages/core/server/tenancy is the ONE where-clause for the caller's membership in the tenant of record (tenant_id + user_id + deleted_at is null, explicit empty-clause guard); GET /v1/me/bootstrap uses it instead of user_id alone, and every later tenant-lane read of memberships reuses it (WR-05, layer 2 of the three-layer scoping)
 - [Phase 02]: 02-18: the web by-host lookup is bounded by HOST_LOOKUP_TIMEOUT_MS = 2 s (tighter than the API adapters' 10 s: proxy.ts + every layout); the timeout reuses the existing catch → generic + TTL_ERROR_MS path, so it can never fail open to a tenant brand (WR-06, measured 2007 ms)
 - [Phase 02]: 02-18: useSignedUpload.onFile is try + catch only (no finally — the success path must not re-run fail() after onCompleted); the catch logs platform.branding.upload_failed { kind, error } to the console and renders t('errors.generic'); happy-dom@20.14.5 + @testing-library/react@16.3.3 added to apps/web at the versions core/ui already pin (importers-only lockfile change) — LogoUpload.test.ts is the first hook test in apps/web (WR-07)
+- [Phase 02]: 02-19: refused invite = status 'expired' + sent_at null (D-A, no schema change); identityConflict on the public.users mirror ⋈ memberships is the ONE identity rule (D-B) — runs in createTenant (400 { adminEmail: 'in_use' }), sendPendingInvites and resendInvite before any GoTrue call; GoTrue email_exists (code 'email_exists', 422) and the 23505 on memberships_one_tenant_per_user_v1 stay only as race guards
+- [Phase 02]: 02-19: resend decides 'accepted' from OUR membership row — email_exists + invited membership mints generateLink({ type: 'recovery' }) for the same redirectTo with the invite template (D-C); ensureVerifiedSideEffects records last_error 'invite:<reason>' and setPrimaryDomain never fails the switch on an invite refusal (D-D)
 
 ### Pending Todos
 
@@ -223,6 +226,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T13:39:15.507Z
-Stopped at: Completed 02-18-PLAN.md
+Last session: 2026-09-17T13:59:19.677Z
+Stopped at: Completed 02-19-PLAN.md
 Resume file: None
