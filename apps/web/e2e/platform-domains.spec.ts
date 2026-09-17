@@ -1,5 +1,11 @@
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
-import { closeAdmin, deleteTenantBySlug, deleteUserByEmail } from './admin';
+import {
+  closeAdmin,
+  createMember,
+  deleteTenantBySlug,
+  deleteUserByEmail,
+  getTenantModuleFlag,
+} from './admin';
 import {
   type ApiFetch,
   apiSession,
@@ -7,7 +13,7 @@ import {
   expireDomain,
   getDomainStatus,
 } from './domains-admin';
-import { hosts, isRemote } from './fixtures';
+import { hosts, isRemote, SEED_PASSWORD } from './fixtures';
 
 /**
  * Platform panel screens III (02-15, TENANT-07 UI half, ROLE-04, MOD-04, D-33..D-36): the Domínios
@@ -38,6 +44,8 @@ const API_URL = process.env.API_URL ?? 'http://localhost:8787';
 const rand = Math.random().toString(36).slice(2, 8);
 const slug = `e2e-dom-${rand}`;
 const adminEmail = `admin+${rand}@e2e.local`;
+/** A throwaway member of the tenant — the ROLE-04 witness of test 6 (bootstrap `modules[]`). */
+const memberEmail = `member+${rand}@e2e.local`;
 /** 3 labels + `needs-txt` → CNAME + TXT rows from the fake provider; verifies on the first check. */
 const host1 = `novo-needs-txt-${rand}.exemplo.test`;
 /** A plain alias (CNAME only) — promoted to primary in test 2, the member's host in test 6. */
@@ -130,6 +138,7 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(async () => {
   // The invite creates the admin's auth user when host1 verifies; the tenant delete cascades hosts.
   await deleteUserByEmail(adminEmail);
+  await deleteUserByEmail(memberEmail);
   await deleteTenantBySlug(slug);
   await closeAdmin();
   await closeDomainsAdmin();
@@ -355,5 +364,80 @@ test.describe('02-15 — Domínios tab', () => {
 
     await removeHost(page, longHost);
     await expect(page.getByTestId('domain-card')).toHaveCount(1);
+  });
+});
+
+test.describe('02-15 — Módulos tab', () => {
+  test('6. six switches → disable feed → DB flag false + member bootstrap drops feed → re-enable', async () => {
+    // The member calls the API on the tenant's verified host (host2, primary since test 2).
+    await createMember(memberEmail, SEED_PASSWORD, slug);
+    const memberApi = await apiSession(memberEmail, SEED_PASSWORD);
+    const modulesOf = async (): Promise<string[]> => {
+      const res = await memberApi('/v1/me/bootstrap', {}, host2);
+      expect(res.status, 'GET /v1/me/bootstrap').toBe(200);
+      return ((await res.json()) as { modules: { key: string }[] }).modules.map((m) => m.key);
+    };
+
+    await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/modulos`);
+    await expect(
+      page.getByText('As mudanças valem em até 30 segundos, sem novo deploy.'),
+    ).toBeVisible();
+    const switches = page.getByRole('switch');
+    await expect(switches).toHaveCount(6);
+    for (let i = 0; i < 6; i += 1) {
+      await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'true'); // D-17 defaults
+    }
+    for (const name of [
+      /Feed/,
+      /Comunidades/,
+      /Stories/,
+      /Eventos/,
+      /Chat de suporte/,
+      /Notificações/,
+    ]) {
+      await expect(page.getByRole('switch', { name })).toBeVisible();
+    }
+    // D-19: the reference module is never listed.
+    expect(await page.locator('body').innerText()).not.toContain('example');
+    expect(await page.getByText('Ativado', { exact: true }).count()).toBe(6);
+
+    if (test.info().project.name === 'mobile-chromium') {
+      const card = page.locator('ul', { has: switches.first() }).locator('..');
+      const widths = await card.evaluate((el) => ({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+      }));
+      expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth); // E15/overflow
+    }
+
+    expect(await modulesOf()).toContain('feed');
+    expect(await getTenantModuleFlag(slug, 'feed')).toBe(true);
+
+    const feed = page.getByRole('switch', { name: /Feed/ });
+    await feed.click();
+    await expect(feed).toHaveAttribute('aria-checked', 'false'); // optimistic, at once
+    await expect(toast(page, 'Alterações salvas.')).toBeVisible();
+    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(1);
+    await expect.poll(() => getTenantModuleFlag(slug, 'feed'), { timeout: 10_000 }).toBe(false);
+    // ROLE-04 without a redeploy: immediate on the instance that served the PUT, ≤ 30 s anywhere.
+    await expect.poll(modulesOf, { timeout: 35_000 }).not.toContain('feed');
+    expect(await getTenantModuleFlag(slug, 'example')).toBe(false);
+
+    // The server, not client memory, renders the new state after a reload.
+    await page.reload();
+    await expect(page.getByRole('switch', { name: /Feed/ })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    await expect(page.getByRole('switch')).toHaveCount(6);
+
+    await page.getByRole('switch', { name: /Feed/ }).click();
+    await expect(page.getByRole('switch', { name: /Feed/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(toast(page, 'Alterações salvas.')).toBeVisible();
+    await expect.poll(modulesOf, { timeout: 35_000 }).toContain('feed');
+    await expect.poll(() => getTenantModuleFlag(slug, 'feed'), { timeout: 10_000 }).toBe(true);
   });
 });

@@ -1,0 +1,13 @@
+{
+  "platformModules": {
+    "title": "Módulos",
+    "helper": "As mudanças valem em até 30 segundos, sem novo deploy.",
+    "enabled": "Ativado",
+    "disabled": "Desativado",
+    "toggle": "Ativar ou desativar {module}",
+    "toasts": {
+      "saved": "Alterações salvas.",
+      "error": "Algo deu errado. Tente novamente."
+    }
+  }
+}
