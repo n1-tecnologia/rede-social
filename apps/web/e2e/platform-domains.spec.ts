@@ -403,7 +403,8 @@ test.describe('02-15 — Módulos tab', () => {
     expect(await page.getByText('Ativado', { exact: true }).count()).toBe(6);
 
     if (test.info().project.name === 'mobile-chromium') {
-      const card = page.locator('ul', { has: switches.first() }).locator('..');
+      // `has:` inner locators are relative to the outer element — a root-scoped locator never matches.
+      const card = page.locator('ul', { has: page.getByRole('switch').first() }).locator('..');
       const widths = await card.evaluate((el) => ({
         scrollWidth: el.scrollWidth,
         clientWidth: el.clientWidth,
