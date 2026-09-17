@@ -125,26 +125,54 @@ Plans:
   4. The app is installable as a PWA (manifest + service worker) and runs in standalone mode on iOS and Android; password-recovery and confirmation e-mails show the tenant's display name and logo; every shell and auth string is pt-BR and comes from a central message catalog.
 
 **Plans**: 20 plans (16 executed + 4 gap-closure)
+**Wave 1**
 
 - [x] 02-01-PLAN.md
 - [x] 02-02-PLAN.md
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [x] 02-03-PLAN.md
 - [x] 02-04-PLAN.md
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [x] 02-05-PLAN.md
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [x] 02-06-PLAN.md
 - [x] 02-07-PLAN.md
 - [x] 02-08-PLAN.md
 - [x] 02-09-PLAN.md
+- [x] 02-12-PLAN.md
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [x] 02-10-PLAN.md
 - [x] 02-11-PLAN.md
-- [x] 02-12-PLAN.md
 - [x] 02-13-PLAN.md
-- [x] 02-14-PLAN.md
 - [x] 02-15-PLAN.md
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [x] 02-14-PLAN.md
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [x] 02-16-PLAN.md
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
 - [ ] 02-17-PLAN.md — gap closure (wave 8): CR-01 domain poller re-arms / expires on the provider-error path (fake `provider-fails-once` + checkDomain fix + integration proof); WR-01 last_error cleared after a successful verified re-run
 - [ ] 02-18-PLAN.md — gap closure (wave 8): WR-05 bootstrap membership scoped by tenant (membershipOfRecord), WR-06 2 s timeout on the by-host lookup, WR-07 upload hook error boundary (+ happy-dom / Testing Library in apps/web)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
 - [ ] 02-19-PLAN.md — gap closure (wave 9): WR-02/WR-03/WR-04 invite refusals (identityConflict pre-check, reasons email_in_use / user_in_other_tenant, create-time adminEmail check, recovery-link resend fallback, last_error 'invite:<reason>')
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
 - [ ] 02-20-PLAN.md — gap closure (wave 10): panel surfaces + catalog for the refusals, two e2e proofs, and the phase exit gate (affected suites + full `pnpm verify`) recorded
 
 **UI hint**: yes
