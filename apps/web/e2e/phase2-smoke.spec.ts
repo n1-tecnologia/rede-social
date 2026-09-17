@@ -8,7 +8,15 @@ import {
   type TestInfo,
   test,
 } from '@playwright/test';
-import { closeAdmin, createMember, deleteTenantBySlug, deleteUserByEmail, envValue } from './admin';
+import postgres from 'postgres';
+import {
+  closeAdmin,
+  createMember,
+  deleteTenantBySlug,
+  deleteUserByEmail,
+  envValue,
+  getTenantModuleFlag,
+} from './admin';
 import { type ApiFetch, apiSession, closeDomainsAdmin } from './domains-admin';
 import { hosts, isRemote, login, SEED_PASSWORD } from './fixtures';
 import { closeTenantFixtures, throwawayOrigin } from './tenant-fixtures';
@@ -99,6 +107,31 @@ type HostAnswer = {
 };
 
 const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/tria-lab.svg', import.meta.url));
+
+/**
+ * Spec-only superuser connection (local stack only — `isRemote` skips the file; the URL is never
+ * printed). It exists for ONE write: flipping the reference module of the THROWAWAY tenant.
+ */
+const sql = postgres(
+  process.env.PLAYWRIGHT_DB_URL ?? 'postgres://postgres:postgres@127.0.0.1:54322/postgres',
+  { prepare: false, max: 1 },
+);
+
+/**
+ * Honest ROLE-04 witness, second half (see the file docblock): `tenant_modules.example` is flipped by
+ * SQL ONLY because D-19 forbids the panel from listing the reference module; the panel path itself
+ * is proven with `feed` in the same test (test 4 a). Scoped to the throwaway tenant by slug — the
+ * seed tenants are never touched (prohibition). `(tenant_id, module_key)` is the primary key.
+ */
+async function setTenantModuleFlag(slug: string, key: string, enabled: boolean): Promise<void> {
+  const rows = await sql`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    select id, ${key}, ${enabled} from public.tenants where slug = ${slug}
+    on conflict (tenant_id, module_key)
+      do update set enabled = excluded.enabled, updated_at = now()
+    returning tenant_id`;
+  if (rows.length === 0) throw new Error(`no tenant ${slug} for module ${key}`);
+}
 
 // ---------------------------------------------------------------------------------------------
 // Module-private helpers (no new fixture file — the outline's file set is kept)
@@ -342,6 +375,7 @@ test.afterAll(async () => {
     await closeAdmin();
     await closeDomainsAdmin();
     await closeTenantFixtures();
+    await sql.end();
     await stopWorker();
   }
 });
@@ -606,5 +640,212 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     await expect(page.locator('[data-brand-root]').getByText('TRIA', { exact: true })).toHaveCount(
       0,
     );
+  });
+
+  test('3. alias host → 308 to the primary; Status tab suspend → branded unavailable screen; reactivate', async ({
+    page,
+    browser,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name === 'pixel-chromium',
+      'layout-independent — runs on mobile-chromium and desktop-chromium',
+    );
+    if (!brand) throw new Error('test 1 must run first (serial)');
+
+    // A second host attached and verified from the Domínios tab is NON-primary (D-35).
+    await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/dominios`);
+    await page.locator('#host').fill(aliasHost);
+    await page.getByRole('button', { name: 'Adicionar domínio' }).click();
+    const aliasCard = page
+      .getByTestId('domain-card')
+      .filter({ has: page.getByRole('heading', { name: aliasHost, exact: true }) });
+    await expect(aliasCard).toBeVisible();
+    await expect(aliasCard.getByText('Aguardando DNS', { exact: true })).toBeVisible();
+    await expect(aliasCard.getByText('Primário', { exact: true })).toHaveCount(0);
+    await aliasCard.getByRole('button', { name: 'Verificar agora' }).click();
+    await expect(aliasCard.getByText('Verificado', { exact: true })).toBeVisible();
+    const aliasAnswer = await byHost(aliasHost);
+    expect(aliasAnswer.status).toBe(200);
+    expect(aliasAnswer.body.isPrimary).toBe(false);
+    expect(aliasAnswer.body.primaryHost).toBe(host);
+
+    // Browser GET on the alias: 308 to the primary origin, path + query preserved, no-store (D-35).
+    const target = `${aliasOrigin}/entrar?x=1`;
+    const responsePromise = page.waitForResponse((r) => r.url() === target);
+    await page.goto(target);
+    const redirect = await responsePromise;
+    expect(redirect.status()).toBe(308);
+    expect(redirect.headers().location).toBe(`${origin}/entrar?x=1`);
+    expect(redirect.headers()['cache-control']).toContain('no-store');
+    await expect(page).toHaveURL(`${origin}/entrar?x=1`);
+    await expect(page.getByText(`Comunidade: ${displayName}`, { exact: true })).toBeVisible();
+
+    // Suspend from the panel (D-32): a signed-in member's next /inicio lands on the BRANDED
+    // /comunidade-indisponivel and the host's /entrar hides its form.
+    const memberContext = await newContextLike(browser, testInfo);
+    const memberPage = await memberContext.newPage();
+    try {
+      await login(memberPage, memberEmail, SEED_PASSWORD, origin);
+      await expect(memberPage.locator('[data-brand-root]')).toBeVisible();
+
+      await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/status`);
+      await page.getByRole('button', { name: 'Suspender tenant' }).click();
+      await page.getByRole('dialog').getByRole('button', { name: 'Suspender' }).click();
+      await expect(page.getByTestId('tenant-status-pill')).toHaveText('Suspenso');
+      expect((await byHost(host)).body.status).toBe('suspended');
+
+      await memberPage.goto(`${origin}/inicio`);
+      await expect(memberPage).toHaveURL(`${origin}/comunidade-indisponivel`, { timeout: 30_000 });
+      await expect(memberPage.getByText('Comunidade indisponível')).toBeVisible();
+      expect(await brandPrimary(memberPage, 'main')).toBe(PRIMARY_2); // branded, host-resolved
+      expect((await memberContext.cookies()).filter((c) => c.name.startsWith('sb-'))).toHaveLength(
+        0,
+      );
+
+      // The cold /entrar hides the form (02-08 C2). The web host cache (60 s) still knows the tenant
+      // as active for a while, so the first HTML is polled up to 70 s; the assertion stays exact.
+      const t0 = Date.now();
+      await expect
+        .poll(
+          async () => {
+            const { html } = await firstHtml(memberPage, `${origin}/entrar`);
+            return html.includes('Comunidade indisponível') && !html.includes('id="password"');
+          },
+          { timeout: 70_000, intervals: [1_000, 2_000, 3_000] },
+        )
+        .toBe(true);
+      testInfo.annotations.push({
+        type: 'by-host → served HTML (suspend)',
+        description: `${Math.round((Date.now() - t0) / 1000)} s`,
+      });
+
+      // Reactivate: the form is back (polled for the same cache).
+      await page.getByRole('button', { name: 'Reativar tenant' }).click();
+      await expect(page.getByTestId('tenant-status-pill')).toHaveText('Ativo');
+      expect((await byHost(host)).body.status).toBe('active');
+      const t1 = Date.now();
+      await expect
+        .poll(
+          async () =>
+            (await firstHtml(memberPage, `${origin}/entrar`)).html.includes('id="password"'),
+          { timeout: 70_000, intervals: [1_000, 2_000, 3_000] },
+        )
+        .toBe(true);
+      testInfo.annotations.push({
+        type: 'by-host → served HTML (reactivate)',
+        description: `${Math.round((Date.now() - t1) / 1000)} s`,
+      });
+    } finally {
+      await memberContext.close();
+    }
+  });
+
+  test('4. Módulos tab: Feed off → bootstrap drops feed without redeploy (nav unchanged); reference-module flag → Exemplo tab + slot appear/disappear and /v1/example/items 200/404 (honest ROLE-04 witness)', async ({
+    page,
+    browser,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name === 'pixel-chromium',
+      'layout-independent — runs on mobile-chromium and desktop-chromium',
+    );
+    if (!brand) throw new Error('test 1 must run first (serial)');
+
+    const memberApi: ApiFetch = await apiSession(memberEmail, SEED_PASSWORD);
+    const modulesOf = async (): Promise<string[]> => {
+      const res = await memberApi('/v1/me/bootstrap', {}, host);
+      expect(res.status, 'GET /v1/me/bootstrap').toBe(200);
+      return ((await res.json()) as { modules: { key: string }[] }).modules.map((m) => m.key);
+    };
+    const exampleItems = async (): Promise<{ status: number; code: string | null }> => {
+      const res = await memberApi('/v1/example/items', {}, host);
+      const body = (await res.json().catch(() => ({}))) as { error?: { code?: string } };
+      return { status: res.status, code: body.error?.code ?? null };
+    };
+
+    const memberContext = await newContextLike(browser, testInfo);
+    const memberPage = await memberContext.newPage();
+    try {
+      await login(memberPage, memberEmail, SEED_PASSWORD, origin);
+
+      // (a) Panel path with a REAL toggleable module: Feed off → flag → bootstrap within the TTL;
+      // the nav stays ['Início', 'Perfil'] because feed ships no tab before Phase 4 (no phantom tab).
+      await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+      await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/modulos`);
+      await expect(page.locator('main').getByRole('switch')).toHaveCount(6);
+      expect(await modulesOf()).toContain('feed');
+      const feed = page.getByRole('switch', { name: /Feed/ });
+      await feed.click();
+      await expect(feed).toHaveAttribute('aria-checked', 'false');
+      await expect(toast(page, 'Alterações salvas.')).toBeVisible();
+      await expect.poll(() => getTenantModuleFlag(slug, 'feed'), { timeout: 10_000 }).toBe(false);
+      await expect.poll(modulesOf, { timeout: 35_000 }).not.toContain('feed'); // MODULE_FLAGS_TTL_MS
+      await memberPage.goto(`${origin}/inicio`);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']);
+      await expect(visibleNav(memberPage).getByRole('link', { name: 'Feed' })).toHaveCount(0);
+
+      // (b) Navigation + API-404 witness with the ONLY module that ships a nav entry and routes in
+      // this phase (reference module, D-19 baseline off for panel-created tenants).
+      expect(await exampleItems()).toEqual({ status: 404, code: 'MODULE_DISABLED' });
+      await setTenantModuleFlag(slug, 'example', true);
+      await expect.poll(async () => (await exampleItems()).status, { timeout: 35_000 }).toBe(200); // same API process, no restart — the flags TTL is the bound
+      await memberPage.goto(`${origin}/inicio`);
+      // Kernel Início first / Perfil last, registry order between (cross-reference: 02-07 MOD-04/ordering).
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Exemplo', 'Perfil']);
+      await expect(memberPage.locator('#exemplo')).toBeVisible();
+      await expect(
+        memberPage.locator('#exemplo').getByRole('heading', { name: 'Exemplo' }),
+      ).toBeVisible();
+
+      await setTenantModuleFlag(slug, 'example', false);
+      await expect.poll(async () => (await exampleItems()).status, { timeout: 35_000 }).toBe(404);
+      expect((await exampleItems()).code).toBe('MODULE_DISABLED');
+      await memberPage.goto(`${origin}/inicio`);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']); // tab + slot gone, no redeploy
+      await expect(memberPage.locator('#exemplo')).toHaveCount(0);
+
+      // (c) The tenant ends as created: Feed back on from the panel, example still off.
+      await page.getByRole('switch', { name: /Feed/ }).click();
+      await expect(page.getByRole('switch', { name: /Feed/ })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+      await expect(toast(page, 'Alterações salvas.')).toBeVisible();
+      await expect.poll(modulesOf, { timeout: 35_000 }).toContain('feed');
+      expect(await getTenantModuleFlag(slug, 'example')).toBe(false);
+    } finally {
+      await memberContext.close();
+    }
+  });
+
+  test('5. branded recovery e-mail for the throwaway tenant via GoTrue → hook → Mailpit', async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name === 'pixel-chromium',
+      'layout-independent — runs on mobile-chromium and desktop-chromium',
+    );
+    if (!brand) throw new Error('test 1 must run first (serial)');
+
+    await page.goto(`${origin}/esqueci-senha`);
+    await page.locator('#email').fill(memberEmail);
+    await page.getByRole('button', { name: 'Enviar link' }).click();
+    await expect(page).toHaveURL(/\/esqueci-senha\?enviado=1$/, { timeout: 30_000 });
+
+    await expect.poll(() => mailpitNewest(`to:${memberEmail}`), { timeout: 30_000 }).not.toBeNull();
+    const mail = await mailpitNewest(`to:${memberEmail}`);
+    if (!mail) throw new Error('recovery mail vanished');
+    expect(mail.Subject).toBe(`Redefina sua senha — ${displayName}`);
+    expect(mail.From.Name).toBe(displayName);
+    expect(mail.From.Address.startsWith('no-reply@')).toBe(true);
+    // The CTA carries the PERSISTED primary (02-06 layout: `background:${primary}`), the logo as-is
+    // (D-26) and the platform footer; no seed or neutral hex anywhere (D-37/D-38, TENANT-06).
+    expect(mail.HTML).toContain(`background:${PRIMARY_2}`);
+    expect(mail.HTML).toContain(`<img src="${brand.logoUrl}"`);
+    expect(mail.HTML).toContain(`alt="${displayName}"`);
+    expect(mail.HTML).toContain('Enviado pela plataforma TRIA');
+    for (const hex of [...SEED_PRIMARIES, NEUTRAL]) expect(mail.HTML).not.toContain(hex);
+    expect(mail.Text).toContain(`${origin}/auth/confirm`); // plain-text alternative
+    // No link is followed: Phase 1's recovery.spec.ts owns the reset flow (branded by 02-06).
   });
 });

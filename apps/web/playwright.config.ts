@@ -52,7 +52,7 @@ export default defineConfig({
     // Pixel 7 on Chromium — the Android phone of criterion 1; only the two Phase 2 smoke specs.
     {
       name: 'pixel-chromium',
-      testMatch: /(branding|phase2-smoke)\.spec\.ts$/,
+      testMatch: /[\\/](branding|phase2-smoke)\.spec\.ts$/,
       use: { ...devices['Pixel 7'], browserName: 'chromium' },
     },
     { name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },
