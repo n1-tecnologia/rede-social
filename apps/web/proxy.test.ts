@@ -157,3 +157,50 @@ describe('proxy.ts — PUBLIC entries', () => {
     expect(settings.headers.get('location')).toBe('http://primary.example/entrar');
   });
 });
+
+describe('proxy.ts — PWA PUBLIC entries (02-11, T-02-77)', () => {
+  beforeEach(() => {
+    resolve.mockReset();
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+  });
+
+  it('9. the tenant manifest, the reserved _tria manifest, the SW script and /~offline are public', async () => {
+    for (const path of [
+      '/m/tria-demo/manifest.webmanifest',
+      '/m/_tria/manifest.webmanifest',
+      '/serwist/sw.js',
+      '/~offline',
+    ]) {
+      const res = await proxy(
+        request(`http://primary.example${path}`, { host: 'primary.example' }),
+      );
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get('location'), path).toBeNull();
+    }
+  });
+
+  it('10. /inicio still redirects to /entrar without a session', async () => {
+    const res = await proxy(request('http://primary.example/inicio', { host: 'primary.example' }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('http://primary.example/entrar');
+  });
+
+  it('11. the anchored manifest entry refuses a traversal suffix and an upper-case slug (class stays lower-case)', async () => {
+    // `/m/tria-demo/manifest.webmanifest/../inicio` normalises to `/m/tria-demo/inicio`.
+    const traversal = await proxy(
+      request('http://primary.example/m/tria-demo/manifest.webmanifest/../inicio', {
+        host: 'primary.example',
+      }),
+    );
+    expect(traversal.status).toBe(307);
+    expect(traversal.headers.get('location')).toBe('http://primary.example/entrar');
+
+    const upper = await proxy(
+      request('http://primary.example/m/Tria_Demo/manifest.webmanifest', {
+        host: 'primary.example',
+      }),
+    );
+    expect(upper.status).toBe(307);
+    expect(upper.headers.get('location')).toBe('http://primary.example/entrar');
+  });
+});

@@ -1,0 +1,16 @@
+{
+  "pwa": {
+    "offline": {
+      "title": "Você está offline",
+      "body": "Verifique sua conexão e tente novamente.",
+      "retry": "Tentar novamente",
+      "banner": "Você está offline. Alguns conteúdos podem não estar disponíveis."
+    },
+    "install": {
+      "title": "Adicione à Tela de Início",
+      "body": "No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início” para receber notificações.",
+      "confirm": "Entendi",
+      "dismiss": "Agora não"
+    }
+  }
+}

@@ -33,7 +33,7 @@ const PUBLIC = [
   /^\/termos(?:\/|$)/,
   /^\/privacidade(?:\/|$)/,
   /^\/manifest\.webmanifest$/,
-  /^\/m\/[a-z0-9-]+\/manifest\.webmanifest$/,
+  /^\/m\/[a-z0-9_-]+\/manifest\.webmanifest$/, // underscore admits the reserved neutral manifest slug (02-11)
   /^\/serwist\//,
   /^\/~offline(?:\/|$)/,
 ];
