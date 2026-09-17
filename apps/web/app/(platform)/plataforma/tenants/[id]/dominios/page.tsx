@@ -55,6 +55,13 @@ export default async function TenantDomainsPage({ params }: { params: Promise<{ 
       copy: t('dns.copy'),
       copied: t('dns.copied'),
     },
+    confirm: {
+      removeBody: t('confirm.removeBody'),
+      remove: t('confirm.remove'),
+      primaryBody: t('confirm.primaryBody'),
+      primary: t('confirm.primary'),
+      cancel: t('confirm.cancel'),
+    },
     toasts: {
       removed: t('toasts.removed'),
       primaryUpdated: t('toasts.primaryUpdated'),
@@ -111,15 +118,8 @@ export default async function TenantDomainsPage({ params }: { params: Promise<{ 
             actions={actions}
             labels={{
               ...shared,
-              confirm: {
-                removeTitle: t('confirm.removeTitle', { host: view.host }),
-                removeBody: t('confirm.removeBody'),
-                remove: t('confirm.remove'),
-                primaryTitle: t('confirm.primaryTitle', { host: view.host }),
-                primaryBody: t('confirm.primaryBody'),
-                primary: t('confirm.primary'),
-                cancel: t('confirm.cancel'),
-              },
+              confirmRemoveTitle: t('confirm.removeTitle', { host: view.host }),
+              confirmPrimaryTitle: t('confirm.primaryTitle', { host: view.host }),
               lastErrorLabel: view.lastError
                 ? t('card.lastError', { reason: view.lastError })
                 : null,

@@ -70,16 +70,16 @@ export interface DomainCardLabels {
     copied: string;
   };
   confirm: {
-    /** Already interpolated with the host. */
-    removeTitle: string;
     removeBody: string;
     remove: string;
-    /** Already interpolated with the host. */
-    primaryTitle: string;
     primaryBody: string;
     primary: string;
     cancel: string;
   };
+  /** `confirm.removeTitle` already interpolated with the host. */
+  confirmRemoveTitle: string;
+  /** `confirm.primaryTitle` already interpolated with the host. */
+  confirmPrimaryTitle: string;
   toasts: {
     removed: string;
     primaryUpdated: string;
@@ -251,7 +251,7 @@ export function DomainCard({ tenantId, view, labels, actions }: DomainCardProps)
           open={dialog === 'primary'}
           tone="brand"
           icon={CheckCircle2}
-          title={labels.confirm.primaryTitle}
+          title={labels.confirmPrimaryTitle}
           body={labels.confirm.primaryBody}
           confirmLabel={labels.confirm.primary}
           cancelLabel={labels.confirm.cancel}
@@ -269,7 +269,7 @@ export function DomainCard({ tenantId, view, labels, actions }: DomainCardProps)
           open={dialog === 'remove'}
           tone="danger"
           icon={TriangleAlert}
-          title={labels.confirm.removeTitle}
+          title={labels.confirmRemoveTitle}
           body={labels.confirm.removeBody}
           confirmLabel={labels.confirm.remove}
           cancelLabel={labels.confirm.cancel}
