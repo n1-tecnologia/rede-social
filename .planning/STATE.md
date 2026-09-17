@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-12-PLAN.md
-last_updated: "2026-09-17T01:40:51.075Z"
+stopped_at: Completed 02-10-PLAN.md
+last_updated: "2026-09-17T02:08:43.330Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: 4d7982f72a6002ac5ba1057b9763128d4be7e1d3
+state_head: 8f4c5a74e0bacc09c7702db23a730dc6b0dfdf11
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 20
+  completed_plans: 21
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 12 of 16
+Plan: 13 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -78,6 +78,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P09 | 18min | 3 tasks | 21 files |
 | Phase 02 P11 | 21min | 3 tasks | 27 files |
 | Phase 02 P12 | 24min | 3 tasks | 30 files |
+| Phase 02 P10 | 22min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -162,6 +163,10 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-12: platform panel authorises by host gate (notFound before any fetch) then GET /v1/platform/tenants?limit=1 — a 200 is the only proof of super_admin; every page/tab re-proves it
 - [Phase 02]: 02-12: server actions return catalog KEYS; client panel components translate with useTranslations('platform') (functions never cross the server→client prop boundary)
 - [Phase 02]: 02-12: tenant page header keeps the display name as the single h1 (own back control + crumb instead of PageHeader); slug rendered as text only — immutable after creation (D-31)
+- [Phase 02]: 02-10: resend of a sent/expired invite uses GoTrue admin generateLink({ type: 'invite' }) + the 02-06 template/transport (never inviteUserByEmail again); proven locally that generateLink regenerates the confirmation token — the old token_hash is refused, the new one verifies
+- [Phase 02]: 02-10: invited scope is an allow-list in requireAuth (/v1/me/bootstrap + /v1/me/accept-invite) checked after the host check; the bootstrap stays 200 with membership.status = 'invited' and the web guard lives in requireBootstrap()
+- [Phase 02]: 02-10: the accept action sets the password through @supabase/ssr updateUser BEFORE calling POST /v1/me/accept-invite, so a failure in between leaves a recoverable state routed back to /aceitar-convite
+- [Phase 02]: 02-10: integration cases that read a GoTrue-originated invite mail must attach *.localhost hosts — GoTrue drops a redirectTo outside additional_redirect_urls and mails a neutral link without /auth/confirm
 
 ### Pending Todos
 
@@ -194,6 +199,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T01:40:51.047Z
-Stopped at: Completed 02-12-PLAN.md
+Last session: 2026-09-17T02:08:43.299Z
+Stopped at: Completed 02-10-PLAN.md
 Resume file: None
