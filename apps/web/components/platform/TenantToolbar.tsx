@@ -9,10 +9,11 @@ import { useEffect, useState } from 'react';
 export interface TenantToolbarProps {
   q?: string;
   status?: 'active' | 'suspended';
-  limit: number;
+  /** Only when the URL carried an explicit `limit` — the server default is never echoed. */
+  limit?: number;
 }
 
-function listUrl(params: { q?: string; status?: string; limit: number }): string {
+function listUrl(params: { q?: string; status?: string; limit?: number }): string {
   const search = new URLSearchParams();
   if (params.q) search.set('q', params.q);
   if (params.status) search.set('status', params.status);

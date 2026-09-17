@@ -23,6 +23,8 @@ function parseQuery(sp: SearchParams): {
   q?: string;
   status?: 'active' | 'suspended';
   limit: number;
+  /** Whether the URL carried a valid `limit` (the toolbar only echoes explicit values). */
+  explicitLimit: boolean;
 } {
   const q = qSchema.safeParse(first(sp.q));
   const status = statusSchema.safeParse(first(sp.status));
@@ -31,6 +33,7 @@ function parseQuery(sp: SearchParams): {
     q: q.success ? q.data : undefined,
     status: status.success ? status.data : undefined,
     limit: limit.success ? limit.data : PANEL_PAGE_SIZE,
+    explicitLimit: limit.success,
   };
 }
 
@@ -47,7 +50,7 @@ async function TenantList({ query }: { query: ReturnType<typeof parseQuery> }) {
     <TenantTable
       rows={rows}
       nextCursor={page.nextCursor}
-      query={query}
+      query={{ q: query.q, status: query.status, limit: query.limit }}
       loadMoreAction={loadMoreTenantsAction}
       labels={{
         colTenant: t('list.colTenant'),
@@ -94,7 +97,11 @@ export default async function PlatformTenantsPage({
         </LinkButton>
       </div>
 
-      <TenantToolbar q={query.q} status={query.status} limit={query.limit} />
+      <TenantToolbar
+        q={query.q}
+        status={query.status}
+        limit={query.explicitLimit ? query.limit : undefined}
+      />
 
       <div className="mt-4">
         <Suspense
