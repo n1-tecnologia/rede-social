@@ -775,4 +775,42 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     );
     expect(detail.tenant.status).toBe('active');
   });
+
+  it('21. WR-03 (02-19 D-B): an adminEmail that already has an identity on the platform is 400 VALIDATION_FAILED { adminEmail: "in_use" } — case-insensitive, no tenant row, same from the service', async () => {
+    const slug = `pt-test-inuse-${RUN}`.slice(0, 40);
+    for (const adminEmail of ['member@tria-demo.local', 'Member@Tria-Demo.LOCAL']) {
+      const res = await platform('/tenants', {
+        method: 'POST',
+        token: tokens.superAdmin,
+        body: newTenantBody(slug, { adminEmail }),
+      });
+      expect(res.status, adminEmail).toBe(400);
+      const err = await envelope(res);
+      expect(err.code).toBe('VALIDATION_FAILED');
+      expect(err.details).toEqual({ adminEmail: 'in_use' });
+    }
+    // One transaction or nothing: the refusal ran before the insert.
+    const [count] = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.tenants where slug = ${slug}`;
+    expect(count?.n).toBe('0');
+
+    const err = await expectApiError(
+      createTenant(
+        {
+          displayName: 'Em uso',
+          slug,
+          colors: { primary: '#111111', secondary: '#222222' },
+          modules: [],
+          adminEmail: '  Admin@Tria-Demo.LOCAL ',
+        },
+        actor,
+      ),
+      400,
+      'VALIDATION_FAILED',
+    );
+    expect(err.details).toEqual({ adminEmail: 'in_use' });
+    const [after] = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.tenants where slug = ${slug}`;
+    expect(after?.n).toBe('0');
+  });
 });

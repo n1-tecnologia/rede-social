@@ -399,20 +399,35 @@ async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): 
     await sendPendingInvites(row.tenantId, actor);
   } catch (error) {
     ok = false;
+    // A refusal (02-19: the admin e-mail already has an identity on the platform) is recorded with
+    // its cause — `invite:email_in_use` / `invite:user_in_other_tenant` — so the Domínios card can
+    // name it; every other failure stays the plain `invite`. The row is no longer `pending` after a
+    // refusal, so the next re-run finds nothing to send and the clear (WR-01) removes the cause.
+    const reason = inviteRefusalReason(error);
     log.error(
       {
         event: 'platform.domains.invite_failed',
         tenantId: row.tenantId,
         domainId: row.id,
         host: row.host,
+        reason,
         err: error instanceof Error ? error.message : String(error),
       },
       'pending invites could not be sent; retry with "Verificar agora"',
     );
-    await recordError(row.id, 'invite');
+    await recordError(row.id, reason ? `invite:${reason}` : 'invite');
   }
 
   return ok;
+}
+
+/** The `details.reason` of a 409 `INVITE_STATE_INVALID` thrown by `sendPendingInvites`, else null. */
+function inviteRefusalReason(error: unknown): string | null {
+  return error instanceof ApiError &&
+    error.code === 'INVITE_STATE_INVALID' &&
+    typeof error.details?.reason === 'string'
+    ? error.details.reason
+    : null;
 }
 
 /**
@@ -611,7 +626,9 @@ async function invalidateTenantHosts(tenantId: string): Promise<void> {
  * Demote-then-promote in ONE admin transaction (PATTERNS Analog D) — the partial unique index
  * `tenant_domains_one_primary_per_tenant` is the last line of defence. After commit every host of
  * the tenant leaves the cache and `sendPendingInvites` runs (a newly verified primary may unblock
- * the first-admin invite). Already primary -> the unchanged list (idempotent).
+ * the first-admin invite). An invite failure — including a 02-19 refusal — is logged and never
+ * fails the switch: the primary already committed, and the invite outcome is visible on the Admins
+ * tab (D-D). Already primary -> the unchanged list (idempotent).
  */
 export async function setPrimaryDomain(
   tenantId: string,
@@ -638,7 +655,22 @@ export async function setPrimaryDomain(
   });
 
   await invalidateTenantHosts(tenantId);
-  await sendPendingInvites(tenantId, actor);
+  try {
+    await sendPendingInvites(tenantId, actor);
+  } catch (error) {
+    log.error(
+      {
+        event: 'platform.domains.invite_failed',
+        userId: actor.userId,
+        tenantId,
+        domainId,
+        host: row.host,
+        reason: inviteRefusalReason(error),
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'pending invites could not be sent after the primary switch; see the Admins tab',
+    );
+  }
   log.info(
     {
       event: 'platform.domains.set_primary',

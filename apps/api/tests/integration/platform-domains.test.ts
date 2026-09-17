@@ -751,4 +751,89 @@ describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () 
     expect(unchanged.verifiedAt).toBe(domain.verifiedAt);
     expect(fakeDomainProviderStats().verify).toBe(verifies);
   });
+
+  it('21. WR-03 / D-D (02-19): an in-use admin e-mail still verifies the host with last_error "invite:email_in_use" and a refused invite; the second verify clears it; the alias promotion answers 200 even when the switch refuses a re-pended invite', async () => {
+    const slug = `pd-inv-${RUN}`.slice(0, 40);
+    const host = `pd-inv-${RUN}.cliente.test`;
+    const created = await createThrowawayTenant(slug);
+    // The identity appears AFTER creation (the create-time check accepted a fresh e-mail).
+    const identity = await authAdmin().createUser({
+      email: created.adminEmail,
+      password: 'Throwaway-123456',
+      email_confirm: true,
+    });
+    if (identity.error) throw new Error(`createUser failed: ${identity.error.message}`);
+
+    const attached = await platform(`/tenants/${created.id}/domains`, {
+      method: 'POST',
+      body: { host },
+    });
+    expect(attached.status).toBe(201);
+    const invDomainId = tenantDomainSchema.parse(await attached.json()).id;
+    createdDomainIds.push(invDomainId);
+
+    const verified = await platform(`/tenants/${created.id}/domains/${invDomainId}/verify`, {
+      method: 'POST',
+    });
+    expect(verified.status).toBe(200);
+    const domain = tenantDomainSchema.parse(await verified.json());
+    expect(domain.verificationStatus).toBe('verified');
+    expect(domain.verifiedAt).not.toBeNull();
+    expect(domain.lastError).toBe('invite:email_in_use');
+    expect((await byHost(host)).status).toBe(200);
+
+    const refused = (await tenantDetail(created.id)).invites[0];
+    expect(refused?.status).toBe('expired');
+    expect(refused?.sentAt).toBeNull();
+    const membershipCount = async () => {
+      const [row] = await adminSql<{ n: string }[]>`
+        select count(*)::text as n from public.memberships where tenant_id = ${created.id}::uuid`;
+      return row?.n;
+    };
+    expect(await membershipCount()).toBe('0');
+
+    // No pending invite is left, so both side effects succeed and 02-17's clear removes the cause.
+    const again = await platform(`/tenants/${created.id}/domains/${invDomainId}/verify`, {
+      method: 'POST',
+    });
+    expect(again.status).toBe(200);
+    expect(tenantDomainSchema.parse(await again.json()).lastError).toBeNull();
+
+    // D-D: the primary switch never fails because of an invite refusal raised inside it.
+    const aliasHost = `pd-inv-alias-${RUN}.cliente.test`;
+    const alias = await platform(`/tenants/${created.id}/domains`, {
+      method: 'POST',
+      body: { host: aliasHost },
+    });
+    expect(alias.status).toBe(201);
+    const aliasId = tenantDomainSchema.parse(await alias.json()).id;
+    createdDomainIds.push(aliasId);
+    const aliasVerified = await platform(`/tenants/${created.id}/domains/${aliasId}/verify`, {
+      method: 'POST',
+    });
+    expect(aliasVerified.status).toBe(200);
+    expect(tenantDomainSchema.parse(await aliasVerified.json()).verificationStatus).toBe(
+      'verified',
+    );
+    // A refused row is terminal (D-A): put it back in front of the switch so the catch is exercised.
+    await adminSql`update public.tenant_invites set status = 'pending', sent_at = null
+                   where tenant_id = ${created.id}::uuid`;
+
+    const promoted = await platform(`/tenants/${created.id}/domains/${aliasId}/primary`, {
+      method: 'POST',
+    });
+    expect(promoted.status).toBe(200);
+    expect(promoted.headers.get('cache-control')).toBe('no-store');
+    const list = tenantDomainsListSchema.parse(await promoted.json());
+    expect(list.primaryHost).toBe(aliasHost);
+    expect(list.domains.map((d) => [d.host, d.isPrimary])).toEqual([
+      [aliasHost, true],
+      [host, false],
+    ]);
+
+    const refusedAgain = (await tenantDetail(created.id)).invites[0];
+    expect(refusedAgain?.status).toBe('expired');
+    expect(refusedAgain?.sentAt).toBeNull();
+    expect(await membershipCount()).toBe('0');
+  });
 });

@@ -39,7 +39,13 @@ import {
 import { ApiError } from '../http/api-error';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
 import { applyBrandColors } from './branding';
-import { createPendingInvite, logFor, type PlatformActor, sendPendingInvites } from './invites';
+import {
+  createPendingInvite,
+  identityConflict,
+  logFor,
+  type PlatformActor,
+  sendPendingInvites,
+} from './invites';
 
 export type { PlatformActor } from './invites';
 
@@ -57,6 +63,9 @@ export type PlatformTenantRow = {
 export type PlatformTenantsPage = { rows: PlatformTenantRow[]; nextCursor: string | null };
 
 const DEFAULT_LIMIT = 25;
+
+/** The tenant id `createTenant` hands `identityConflict` before the tenant exists (no membership can match it). */
+const NIL_TENANT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** `%`/`_`/`\` in the search text are literal characters, not LIKE wildcards. */
 const likeContains = (q: string): string => `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
@@ -163,14 +172,20 @@ export async function listPlatformTenants(
  * its derived brand colors, one `tenant_modules` row per TOGGLEABLE key (`enabled` per the checklist,
  * `example` always false) and the first admin's `pending` invite. A duplicate slug surfaces the unique
  * constraint as 400 `VALIDATION_FAILED { slug: 'taken' }` from inside the transaction, so a concurrent
- * loser leaves no partial rows. After commit the invites are sent — a no-op until a verified primary
- * host exists, which at creation is never.
+ * loser leaves no partial rows. The first admin's e-mail must be new to the platform (V1
+ * one-tenant-per-user, 02-19 D-B): `identityConflict` runs inside the SAME transaction before the
+ * `tenants` insert — any identity counts, since the tenant does not exist yet — and refuses with
+ * 400 `VALIDATION_FAILED` carrying `adminEmail: in_use` as a field error, so the form is where the
+ * super_admin corrects it (instead of provisioning a tenant whose invite can never be delivered).
+ * After commit the invites are sent — a no-op until a verified primary host exists, which at
+ * creation is never.
  */
 export async function createTenant(
   input: CreateTenantBody,
   actor: PlatformActor,
 ): Promise<{ id: string }> {
   const log = logFor(actor, 'platform.tenants');
+  const adminEmail = input.adminEmail.trim().toLowerCase();
   const branding: TenantBranding = {
     logoUrl: null,
     faviconUrl: null,
@@ -184,6 +199,11 @@ export async function createTenant(
   let tenantId: string;
   try {
     tenantId = await withAdminTx(async (tx) => {
+      // No tenant exists yet, so the nil UUID makes EVERY membership "another tenant's" and every
+      // identity a conflict (D-B). Nothing was inserted, so the throw rolls back nothing.
+      const conflict = await identityConflict(tx, adminEmail, NIL_TENANT_ID);
+      if (conflict) throw new ApiError(400, 'VALIDATION_FAILED', { adminEmail: 'in_use' });
+
       const [tenant] = await tx
         .insert(tenants)
         .values({ slug: input.slug, displayName: input.displayName, branding })
@@ -200,12 +220,13 @@ export async function createTenant(
 
       await createPendingInvite(tx, {
         tenantId: tenant.id,
-        email: input.adminEmail,
+        email: adminEmail,
         createdBy: actor.userId,
       });
       return tenant.id;
     });
   } catch (error) {
+    if (error instanceof ApiError) throw error;
     if (isUniqueViolation(error, 'slug')) {
       throw new ApiError(400, 'VALIDATION_FAILED', { slug: 'taken' });
     }

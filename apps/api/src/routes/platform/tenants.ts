@@ -77,7 +77,9 @@ const createRouteDef = createRoute({
     201: detailResponse(
       'The provisioned tenant: branding with derived colors, one module row per key, the pending first-admin invite',
     ),
-    400: envelope('VALIDATION_FAILED — field issues, or { slug: "taken" } for a duplicate slug'),
+    400: envelope(
+      'VALIDATION_FAILED — field issues, { slug: "taken" } for a duplicate slug, or { adminEmail: "in_use" } when the e-mail already has an identity on the platform',
+    ),
     403: envelope('Not a platform admin'),
   },
 });
@@ -163,7 +165,7 @@ const inviteResendRoute = createRoute({
     403: envelope('Not a platform admin'),
     404: envelope('No such tenant or invite'),
     409: envelope(
-      'INVITE_STATE_INVALID — { reason: "already_accepted" } or { reason: "no_verified_primary" }',
+      'INVITE_STATE_INVALID — { reason } is one of already_accepted, no_verified_primary, not_invited, email_in_use (the e-mail already has an identity on the platform) or user_in_other_tenant (the identity holds a membership elsewhere); refused invites read expired with sentAt null',
     ),
   },
 });
