@@ -1,12 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
+import * as contracts from '@tria/contracts';
 import {
   acceptInviteResponseSchema,
+  apiErrorEnvelopeSchema,
+  ERROR_CODES,
   platformTenantDetailSchema,
   TRIA_TERMS_VERSION,
+  tenantInviteSchema,
 } from '@tria/contracts';
 import { sqlClient } from '@tria/core/db';
 import { stopBoss } from '@tria/core/server/jobs/boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
@@ -275,8 +280,352 @@ describe('tracer — the first admin accepts the invite (ROLE-03, D-29, D-03)', 
   });
 });
 
-// Keep the imports the Task 2 describes need referenced so the tracer file lints standalone.
-void createClient;
-void HOSTS;
-void MAILPIT_URL;
-void createdDomainIds;
+// ---------------------------------------------------------------------------------------------
+// Part 2 (Task 2): the lifecycle — idempotency, concurrency, stale consents, cross-tenant host, the
+// invited scope, list/resend, 409s/404s/403, the superseded token.
+// ---------------------------------------------------------------------------------------------
+
+type MailpitMessage = {
+  ID: string;
+  Subject: string;
+  From: { Name: string; Address: string };
+  HTML: string;
+  Text: string;
+};
+
+/** Every Mailpit message for `to`, newest first (search + per-message fetch). */
+async function mailpitMessages(to: string): Promise<MailpitMessage[]> {
+  const list = await fetch(
+    `${MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}&limit=20`,
+  );
+  if (!list.ok) return [];
+  const { messages } = (await list.json()) as { messages?: Array<{ ID: string }> };
+  const out: MailpitMessage[] = [];
+  for (const m of messages ?? []) {
+    const full = await fetch(`${MAILPIT_URL}/api/v1/message/${m.ID}`);
+    if (full.ok) out.push((await full.json()) as MailpitMessage);
+  }
+  return out;
+}
+
+async function waitForMailCount(to: string, count: number, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last: MailpitMessage[] = [];
+  while (Date.now() < deadline) {
+    last = await mailpitMessages(to);
+    if (last.length >= count) return last;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  throw new Error(`expected ${count} mail(s) for ${to}, found ${last.length}`);
+}
+
+/** The `token_hash` of the first `/auth/confirm` href in an HTML body (`&amp;` unescaped). */
+function extractTokenHash(html: string): string {
+  for (const match of html.matchAll(/href="([^"]+)"/g)) {
+    const href = (match[1] ?? '').replace(/&amp;/g, '&');
+    if (!href.includes('/auth/confirm')) continue;
+    const value = new URL(href).searchParams.get('token_hash');
+    if (value) return value;
+  }
+  throw new Error('no token_hash in the mail');
+}
+
+async function waitForInviteStatus(tenantId: string, status: string, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = '';
+  while (Date.now() < deadline) {
+    const detail = await tenantDetail(tenantId);
+    last = detail.invites[0]?.status ?? '';
+    if (last === status) return detail;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  throw new Error(`invite of ${tenantId} never reached ${status} (last: ${last})`);
+}
+
+const consentCount = async (tenantId: string, userId: string) => {
+  const [row] = await adminSql<{ count: number }[]>`
+    select count(*)::int as count from public.consent_records
+     where tenant_id = ${tenantId}::uuid and user_id = ${userId}::uuid`;
+  return row?.count ?? 0;
+};
+
+const membershipStatus = async (tenantId: string, userId: string) => {
+  const [row] = await adminSql<{ status: string }[]>`
+    select status from public.memberships
+     where tenant_id = ${tenantId}::uuid and user_id = ${userId}::uuid and deleted_at is null`;
+  return row?.status ?? null;
+};
+
+const accept = (invited: Invited, body: unknown = acceptBody(), host = invited.host) =>
+  lane(invited.token, '/v1/me/accept-invite', {
+    method: 'POST',
+    body,
+    headers: { 'x-tenant-host': host, 'X-Client-IP': '203.0.113.9', 'User-Agent': 'vitest' },
+  });
+
+describe('contracts (02-10 Task 2)', () => {
+  it('ERROR_CODES carries MEMBERSHIP_INVITED + INVITE_STATE_INVALID; the envelope accepts both; the platform schemas exist', () => {
+    expect(ERROR_CODES).toContain('MEMBERSHIP_INVITED');
+    expect(ERROR_CODES).toContain('INVITE_STATE_INVALID');
+    for (const code of ['MEMBERSHIP_INVITED', 'INVITE_STATE_INVALID']) {
+      expect(
+        apiErrorEnvelopeSchema.safeParse({ error: { code, message: 'x', requestId: 'r' } }).success,
+      ).toBe(true);
+    }
+    const c = contracts as unknown as Record<string, z.ZodTypeAny | readonly string[] | undefined>;
+    expect(c.INVITE_STATE_REASONS).toEqual([
+      'already_accepted',
+      'no_verified_primary',
+      'not_invited',
+    ]);
+    const params = c.inviteParamsSchema as z.ZodTypeAny | undefined;
+    const list = c.tenantInvitesListSchema as z.ZodTypeAny | undefined;
+    expect(params).toBeDefined();
+    expect(list).toBeDefined();
+    const id = '11111111-1111-4111-8111-111111111111';
+    expect(params?.safeParse({ id, inviteId: id }).success).toBe(true);
+    expect(params?.safeParse({ id, inviteId: 'nope' }).success).toBe(false);
+    expect(list?.safeParse({ invites: [] }).success).toBe(true);
+  });
+});
+
+describe('accept-invite edges — idempotent, concurrent, stale, cross-tenant (ROLE-03 ledger)', () => {
+  it('5. accepting twice answers 200 both times; ONE active membership and exactly TWO consent rows remain', async () => {
+    const invited = await throwawayInvited('idem');
+    expect((await accept(invited)).status).toBe(200);
+    expect((await accept(invited)).status).toBe(200);
+    expect(await consentCount(invited.tenantId, invited.userId)).toBe(2);
+    const rows = await adminSql<{ status: string }[]>`
+      select status from public.memberships
+       where tenant_id = ${invited.tenantId}::uuid and user_id = ${invited.userId}::uuid`;
+    expect(rows).toEqual([{ status: 'active' }]);
+  });
+
+  it('6. two concurrent accepts both settle 200; the row lock serialises them: two consent rows, one accepted_at', async () => {
+    const invited = await throwawayInvited('race');
+    const [a, b] = await Promise.all([accept(invited), accept(invited)]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(await consentCount(invited.tenantId, invited.userId)).toBe(2);
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(distinct accepted_at)::int as n from public.tenant_invites
+       where id = ${invited.inviteId}::uuid`;
+    expect(row?.n).toBe(1);
+    expect(await membershipStatus(invited.tenantId, invited.userId)).toBe('active');
+  });
+
+  it('7. a stale rulesVersion -> 400 VALIDATION_FAILED { consents: "stale" }; nothing written', async () => {
+    const invited = await throwawayInvited('stale');
+    const res = await accept(invited, { rulesVersion: 2, termsVersion: TRIA_TERMS_VERSION });
+    expect(res.status).toBe(400);
+    const err = await envelope(res);
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.details?.consents).toBe('stale');
+    expect(await membershipStatus(invited.tenantId, invited.userId)).toBe('invited');
+    expect(await consentCount(invited.tenantId, invited.userId)).toBe(0);
+    const [invite] = await adminSql<{ status: string }[]>`
+      select status from public.tenant_invites where id = ${invited.inviteId}::uuid`;
+    expect(invite?.status).toBe('sent');
+  });
+
+  it('8. cross-tenant host -> 403 TENANT_HOST_MISMATCH and nothing changes; an ACTIVE seed member replays as a no-op 200', async () => {
+    const invited = await throwawayInvited('xhost');
+    const res = await accept(invited, acceptBody(), HOSTS.lab);
+    expect(res.status).toBe(403);
+    expect((await envelope(res)).code).toBe('TENANT_HOST_MISMATCH');
+    expect(await membershipStatus(invited.tenantId, invited.userId)).toBe('invited');
+    expect(await consentCount(invited.tenantId, invited.userId)).toBe(0);
+
+    const memberToken = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+    const [member] = await adminSql<{ tenant_id: string; user_id: string }[]>`
+      select m.tenant_id, m.user_id from public.memberships m
+        join public.users u on u.id = m.user_id where u.email = 'member@tria-demo.local' limit 1`;
+    if (!member) throw new Error('seed member missing');
+    const before = await consentCount(member.tenant_id, member.user_id);
+    const replay = await lane(memberToken, '/v1/me/accept-invite', {
+      method: 'POST',
+      body: acceptBody(),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(replay.status).toBe(200);
+    expect(await consentCount(member.tenant_id, member.user_id)).toBe(before);
+  });
+});
+
+describe('resend lifecycle — list, resend, supersession, 409/404/403 (D-30)', () => {
+  const tag = 'resend';
+  const slug = `inv-${tag}-${RUN}`.slice(0, 40);
+  // `*.localhost:3000` is in GoTrue's local `additional_redirect_urls`; a `.cliente.test` host
+  // would make GoTrue drop `redirectTo` and mail a neutral link without `/auth/confirm`.
+  const host = `${slug}.localhost`;
+  const adminEmail = `admin+${tag}-${RUN}@invite.test`;
+  const displayName = 'Associação São José';
+  const primary = '#b45309';
+  let tenantId = '';
+  let inviteId = '';
+  let firstTokenHash = '';
+  let secondTokenHash = '';
+
+  beforeAll(async () => {
+    const created = await createTenantViaApi(slug, adminEmail, displayName, {
+      primary,
+      secondary: '#f59e0b',
+    });
+    tenantId = created.id;
+    inviteId = created.inviteId;
+    const attached = await platform(`/tenants/${tenantId}/domains`, {
+      method: 'POST',
+      body: { host },
+    });
+    if (attached.status !== 201) throw new Error(`attach failed: ${attached.status}`);
+    const domain = (await attached.json()) as { id: string };
+    createdDomainIds.push(domain.id);
+    const verified = await platform(`/tenants/${tenantId}/domains/${domain.id}/verify`, {
+      method: 'POST',
+    });
+    if (verified.status !== 200) throw new Error(`verify failed: ${verified.status}`);
+    await waitForInviteStatus(tenantId, 'sent');
+  });
+
+  it('9. the first (GoTrue) mail is in Mailpit; POST …/resend answers the fresh sent row and a SECOND branded mail arrives; GET …/invites lists one row', async () => {
+    const [first] = await waitForMailCount(adminEmail, 1);
+    expect(first?.HTML).toContain('type=invite');
+    firstTokenHash = extractTokenHash(first?.HTML ?? '');
+    const before = (await tenantDetail(tenantId)).invites[0];
+    expect(before?.status).toBe('sent');
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    const res = await platform(`/tenants/${tenantId}/invites/${inviteId}/resend`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const row = tenantInviteSchema.parse(await res.json());
+    expect(row.id).toBe(inviteId);
+    expect(row.status).toBe('sent');
+    expect(new Date(row.sentAt ?? 0).getTime()).toBeGreaterThan(
+      new Date(before?.sentAt ?? 0).getTime(),
+    );
+
+    const mails = await waitForMailCount(adminEmail, 2);
+    const newest = mails[0];
+    expect(newest?.Subject).toBe(`Convite para administrar ${displayName}`);
+    expect(newest?.From.Name).toBe(displayName);
+    expect(newest?.HTML).toContain('/auth/confirm?next=/aceitar-convite');
+    expect(newest?.HTML).toContain('type=invite');
+    expect(newest?.HTML).toContain('token_hash=');
+    expect(newest?.HTML).toContain(primary);
+    secondTokenHash = extractTokenHash(newest?.HTML ?? '');
+    expect(secondTokenHash).not.toBe(firstTokenHash);
+
+    const list = await platform(`/tenants/${tenantId}/invites`);
+    expect(list.status).toBe(200);
+    expect(list.headers.get('cache-control')).toBe('no-store');
+    const body = z.object({ invites: z.array(tenantInviteSchema) }).parse(await list.json());
+    expect(body.invites).toHaveLength(1);
+    expect(body.invites[0]?.id).toBe(inviteId);
+
+    const unknown = await platform(
+      `/tenants/${tenantId}/invites/11111111-1111-4111-8111-111111111111/resend`,
+      { method: 'POST' },
+    );
+    expect(unknown.status).toBe(404);
+    expect((await envelope(unknown)).code).toBe('NOT_FOUND');
+
+    const other = await throwawayInvited('other');
+    const foreign = await platform(`/tenants/${other.tenantId}/invites/${inviteId}/resend`, {
+      method: 'POST',
+    });
+    expect(foreign.status).toBe(404);
+    expect((await envelope(foreign)).code).toBe('NOT_FOUND');
+
+    const memberToken = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+    for (const [method, path] of [
+      ['GET', `/v1/platform/tenants/${tenantId}/invites`],
+      ['POST', `/v1/platform/tenants/${tenantId}/invites/${inviteId}/resend`],
+    ] as const) {
+      const refused = await lane(memberToken, path, { method });
+      expect(refused.status).toBe(403);
+      expect((await envelope(refused)).code).toBe('FORBIDDEN');
+    }
+  });
+
+  it('10. the resend superseded the first link: the old token_hash no longer verifies, the new one opens a session', async () => {
+    const client = createClient(
+      process.env.SUPABASE_URL ?? '',
+      process.env.SUPABASE_PUBLISHABLE_KEY ?? '',
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    );
+    const stale = await client.auth.verifyOtp({ type: 'invite', token_hash: firstTokenHash });
+    expect(stale.error).not.toBeNull();
+    expect(stale.data.session).toBeNull();
+
+    const fresh = await client.auth.verifyOtp({ type: 'invite', token_hash: secondTokenHash });
+    expect(fresh.error).toBeNull();
+    expect(fresh.data.session?.user.email).toBe(adminEmail);
+    await client.auth.signOut({ scope: 'local' }).catch(() => undefined);
+  });
+
+  it('11. once the admin accepted, resend -> 409 INVITE_STATE_INVALID { reason: "already_accepted" }', async () => {
+    const [user] = await adminSql<{ id: string }[]>`
+      select id from auth.users where lower(email) = ${adminEmail}`;
+    if (!user) throw new Error('invited auth user missing');
+    const updated = await authAdmin().updateUserById(user.id, {
+      password: INVITED_PASSWORD,
+      email_confirm: true,
+    });
+    expect(updated.error).toBeNull();
+    const token = await signInAs(adminEmail, INVITED_PASSWORD);
+    const accepted = await lane(token, '/v1/me/accept-invite', {
+      method: 'POST',
+      body: acceptBody(),
+      headers: { 'x-tenant-host': host },
+    });
+    expect(accepted.status).toBe(200);
+
+    const res = await platform(`/tenants/${tenantId}/invites/${inviteId}/resend`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(409);
+    const err = await envelope(res);
+    expect(err.code).toBe('INVITE_STATE_INVALID');
+    expect(err.details?.reason).toBe('already_accepted');
+  });
+
+  it('12. a pending invite on a tenant with NO verified host -> 409 { reason: "no_verified_primary" }, still pending, no mail', async () => {
+    const nohostSlug = `inv-nohost-${RUN}`.slice(0, 40);
+    const nohostEmail = `admin+nohost-${RUN}@invite.test`;
+    const created = await createTenantViaApi(nohostSlug, nohostEmail);
+    const res = await platform(`/tenants/${created.id}/invites/${created.inviteId}/resend`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(409);
+    const err = await envelope(res);
+    expect(err.code).toBe('INVITE_STATE_INVALID');
+    expect(err.details?.reason).toBe('no_verified_primary');
+    expect((await tenantDetail(created.id)).invites[0]?.status).toBe('pending');
+    expect(await mailpitMessages(nohostEmail)).toHaveLength(0);
+  });
+
+  it('13. a pending invite whose verified primary host appeared without a verify call: resend delegates to the first send -> 200 sent, one mail', async () => {
+    const lateSlug = `inv-late-${RUN}`.slice(0, 40);
+    const lateHost = `${lateSlug}.localhost`;
+    const lateEmail = `admin+late-${RUN}@invite.test`;
+    const created = await createTenantViaApi(lateSlug, lateEmail);
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at, verification_status)
+      values (${created.id}::uuid, ${lateHost}, true, now(), 'verified')`;
+    expect((await tenantDetail(created.id)).invites[0]?.status).toBe('pending');
+
+    const res = await platform(`/tenants/${created.id}/invites/${created.inviteId}/resend`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+    const row = tenantInviteSchema.parse(await res.json());
+    expect(row.status).toBe('sent');
+    expect(row.sentAt).not.toBeNull();
+    const mails = await waitForMailCount(lateEmail, 1);
+    expect(mails).toHaveLength(1);
+    expect(mails[0]?.HTML).toContain('type=invite');
+  });
+});

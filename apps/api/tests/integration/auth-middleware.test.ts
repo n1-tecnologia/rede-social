@@ -187,6 +187,49 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
     await setStatus(MEMBER, 'active');
   });
 
+  it('c4. invited scope (02-10, T-02-122): the same INVITED Bearer on any other tenant-lane route -> 403 MEMBERSHIP_INVITED naming the tenant', async () => {
+    await setStatus(MEMBER, 'invited');
+    try {
+      const res = await api.request('/v1/example/items', {
+        headers: { authorization: `Bearer ${memberToken}` },
+      });
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('MEMBERSHIP_INVITED');
+      expect(body.error.details?.tenantName).toBe('TRIA Demo');
+      // The two onboarding routes stay reachable: bootstrap (above) and accept-invite (its own
+      // handler answers — here a 400 for the empty body, never the 403 of the scope rule).
+      const accept = await api.request('/v1/me/accept-invite', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${memberToken}`, 'content-type': 'application/json' },
+        body: '{}',
+      });
+      expect(accept.status).toBe(400);
+    } finally {
+      await setStatus(MEMBER, 'active');
+    }
+  });
+
+  it('c5. invited scope: the host check wins — an INVITED Bearer on another tenant’s host -> TENANT_HOST_MISMATCH (order: host before invited scope)', async () => {
+    await setStatus(MEMBER, 'invited');
+    try {
+      const res = await api.request('/v1/example/items', {
+        headers: { authorization: `Bearer ${memberToken}`, [TENANT_HOST_HEADER]: HOSTS.lab },
+      });
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('TENANT_HOST_MISMATCH');
+      expect(body.error.details).toBeUndefined();
+    } finally {
+      await setStatus(MEMBER, 'active');
+    }
+    // An ACTIVE member on the same route is untouched by the scope rule.
+    const active = await api.request('/v1/example/items', {
+      headers: { authorization: `Bearer ${memberToken}` },
+    });
+    expect(active.status).not.toBe(403);
+  });
+
   it('c2. WR-08: blocked_at set with status still active -> MEMBERSHIP_BLOCKED on the next request', async () => {
     expect((await bootstrap(memberToken)).status).toBe(200);
     await setLifecycle(MEMBER, 'blocked_at', true);
