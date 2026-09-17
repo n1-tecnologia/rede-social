@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { hosts } from './fixtures';
+import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 
 /**
  * PWA-01 against a PRODUCTION build (playwright.pwa.config.ts → `pnpm --filter @tria/web e2e:pwa`).
@@ -141,5 +141,95 @@ test.describe('PWA-01 — installable tenant shell (tracer)', () => {
     expect((await request.get('/serwist/sw.js')).status()).toBe(200);
     expect((await request.get(DEMO_MANIFEST)).status()).toBe(200);
     expect(hosts.demo).toContain('tria-demo');
+  });
+});
+
+const OFFLINE_TITLE = 'Você está offline';
+const OFFLINE_BANNER = 'Você está offline. Alguns conteúdos podem não estar disponíveis.';
+
+/** Every request URL held in Cache Storage (precache + runtime caches). */
+async function cachedUrls(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const urls: string[] = [];
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      for (const req of await cache.keys()) urls.push(req.url);
+    }
+    return urls;
+  });
+}
+
+test.describe('PWA-01 — offline fallback and caching contract', () => {
+  test('/~offline is precached per build', { tag: ['@offline'] }, async ({ page }) => {
+    await page.goto('/entrar');
+    await waitForController(page);
+    const precached = await page.evaluate(async () => {
+      const hit = await caches.match('/~offline', { ignoreSearch: true });
+      return Boolean(hit);
+    });
+    expect(precached).toBe(true);
+  });
+
+  test('an offline navigation renders the neutral offline page; retry lands on /entrar once online', {
+    tag: ['@offline'],
+  }, async ({ page, context }) => {
+    await page.goto('/entrar');
+    await waitForController(page);
+
+    await context.setOffline(true);
+    await page.goto('/inicio', { waitUntil: 'commit' });
+    await expect(page.getByRole('heading', { name: OFFLINE_TITLE })).toBeVisible();
+    await expect(page.getByText('Verifique sua conexão e tente novamente.')).toBeVisible();
+    const retry = page.getByRole('button', { name: 'Tentar novamente' });
+    await expect(retry).toBeVisible();
+    expect(await page.locator('[data-brand-root]').count()).toBe(0);
+    expect(await page.content()).not.toContain('data-brand-root');
+
+    await context.setOffline(false);
+    await retry.click();
+    await expect(page).toHaveURL(/\/entrar$/);
+  });
+
+  test('the service worker never stores authenticated documents, RSC payloads or API/auth answers (T-02-70)', {
+    tag: ['@offline'],
+  }, async ({ page }) => {
+    await page.goto('/entrar');
+    await waitForController(page);
+    await login(page, users.demoMember, SEED_PASSWORD);
+    expect(await page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+    await page.goto('/inicio', { waitUntil: 'networkidle' });
+    await page.goto('/configuracoes', { waitUntil: 'networkidle' });
+    await page.goto('/inicio', { waitUntil: 'networkidle' });
+
+    const urls = await cachedUrls(page);
+    expect(urls.length).toBeGreaterThan(0);
+    const paths = urls.map((u) => new URL(u));
+    for (const url of paths) {
+      const full = url.pathname + url.search;
+      expect(['/inicio', '/configuracoes', '/perfil', '/entrar'], full).not.toContain(url.pathname);
+      expect(full, full).not.toContain('_rsc=');
+      expect(url.pathname, full).not.toMatch(/^\/(v1|auth|m)\//);
+      expect(url.pathname, full).not.toContain('/v1/');
+      // The only document-like entry (no file extension) is the offline fallback.
+      if (!/\.[a-z0-9]+$/i.test(url.pathname)) expect(url.pathname, full).toBe('/~offline');
+    }
+  });
+
+  test('the offline banner follows connectivity on an open page', { tag: ['@offline'] }, async ({
+    page,
+    context,
+  }) => {
+    await page.goto('/entrar');
+    await expect(page.getByRole('status').filter({ hasText: OFFLINE_BANNER })).toHaveCount(0);
+
+    await context.setOffline(true);
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    await expect(page.getByRole('status').filter({ hasText: OFFLINE_BANNER })).toBeVisible();
+
+    await context.setOffline(false);
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await expect(page.getByRole('status').filter({ hasText: OFFLINE_BANNER })).toHaveCount(0, {
+      timeout: 15_000,
+    });
   });
 });

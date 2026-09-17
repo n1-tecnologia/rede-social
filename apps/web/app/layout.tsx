@@ -4,6 +4,7 @@ import { Manrope } from 'next/font/google';
 import { cookies } from 'next/headers';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
+import { OfflineBanner } from '@/components/pwa/OfflineBanner';
 import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister';
 import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
@@ -69,7 +70,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang="pt-BR" data-theme={theme} className={manrope.variable} suppressHydrationWarning>
       <body className="bg-bg font-sans text-text antialiased">
         <ServiceWorkerRegister />
-        <NextIntlClientProvider>{children}</NextIntlClientProvider>
+        <NextIntlClientProvider>
+          <OfflineBanner />
+          {children}
+        </NextIntlClientProvider>
       </body>
     </html>
   );
