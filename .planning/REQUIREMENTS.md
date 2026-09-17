@@ -129,7 +129,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### PWA & Platform
 
-- [ ] **PWA-01**: The app is mobile-first and responsive on desktop, installable as a PWA (manifest + service worker), and works in standalone mode
+- [x] **PWA-01**: The app is mobile-first and responsive on desktop, installable as a PWA (manifest + service worker), and works in standalone mode
 - [ ] **PWA-02**: On iOS, users are shown a short "Adicionar à Tela de Início" hint before push can be enabled, since Web Push on iOS requires installation
 - [x] **PWA-03**: All UI text is pt-BR and centralized in a message catalog for future i18n
 - [ ] **PWA-04**: GitHub is the source of truth: pushes deploy the Next.js app to Vercel and the API/worker to Cloud Run automatically, with separate preview/staging and production environments
@@ -282,7 +282,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-02 | Phase 4 | Pending |
 | UI-03 | Phase 2 | Complete |
 | UI-04 | Phase 2 | Pending |
-| PWA-01 | Phase 2 | Pending |
+| PWA-01 | Phase 2 | Complete |
 | PWA-02 | Phase 7 | Pending |
 | PWA-03 | Phase 2 | Complete |
 | PWA-04 | Phase 01.1 | Pending |

@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 02
 current_phase_name: Tenant Shell, Branding & Platform Panel
 status: executing
-stopped_at: Completed 02-09-PLAN.md
-last_updated: "2026-09-17T00:44:48.993Z"
+stopped_at: Completed 02-11-PLAN.md
+last_updated: "2026-09-17T01:12:06.088Z"
 last_activity: 2026-09-16
 last_activity_desc: Phase 02 execution started
-state_head: ef1595a19d4d32012cd0410156e048fb0730f7ae
+state_head: 40c8f036504bd720e4665c065997723725584ead
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 28
-  completed_plans: 18
+  completed_plans: 19
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 02 (Tenant Shell, Branding & Platform Panel) — EXECUTING
-Plan: 10 of 16
+Plan: 11 of 16
 Status: Ready to execute
 Last activity: 2026-09-16 — Phase 02 execution started
 
@@ -76,6 +76,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P07 | 36min | 3 tasks | 41 files |
 | Phase 02 P08 | 15min | 3 tasks | 30 files |
 | Phase 02 P09 | 18min | 3 tasks | 21 files |
+| Phase 02 P11 | 21min | 3 tasks | 27 files |
 
 ## Accumulated Context
 
@@ -153,6 +154,10 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-09: the poller crash re-arm lives in platform/domains.ts (rearmDomainVerification) because Biome confines withAdminTx to server/{tenancy,platform}; domains/* (adapters + verify-job) never touch the database; kernel.domain-verify registers its queue in domains/index.ts and worker.ts lists kernel jobs explicitly before module jobs (registry untouched)
 - [Phase 02]: 02-09: case-variant invariant pinned as the schema behaves — same lower-case host on another tenant is 23505, an upper-cased spelling is 23514 (tenant_domains_host_chk; hosts are lower-cased at the boundary) and the citext lookup is case-insensitive; the plan's 23505-for-Inv-A.Test was unreachable
 - [Phase 02]: 02-09: adapter request helpers take { method, path, body } so every call site carries the HTTP method literally and the COVERAGE OPT-OUT audit is a grep on vercel.ts (0 hits); provider errors on attach map by kind (in_use → 409 DOMAIN_IN_USE { reason: provider }, invalid_domain → 400, rate_limited → 503, else 500) and a concurrent identical attach never compensates with removeDomain
+- [Phase 02]: 02-11: TS 7 spike passed — next build with @serwist/turbopack under typescript@7.0.2, no TS 6 alias; tsconfig lib + WebWorker type-checks (no triple-slash fallback)
+- [Phase 02]: 02-11: standalone-mode emulation is unsupported by the bundled Chromium 153 (display-mode ignored by Emulation.setEmulatedMedia; --app headless does not report standalone) — pwa.spec.ts asserts the browser half and skips the standalone half with an annotation; the real-device install check stays the definitive PWA-01 proof
+- [Phase 02]: 02-11: SW caching is allow-list shaped — documents/RSC/actions//auth//v1//api//m//serwist NetworkOnly, CacheFirst next-static, bounded SWR brand-assets; SerwistProvider cacheOnNavigation and reloadOnOnline explicitly false; manifest + head icons from ONE allow-listed set with whole-set neutral fallback
+- [Phase 02]: 02-11: /~offline + pwa.json landed in the Task 1 commit (Rule 3) because a 404 precache entry fails the SW install; InstallHint lives in apps/web/components/pwa (unmounted, Phase 7 may hoist to @tria/core/ui); vitest.config.ts uses oxc.jsx automatic (Vite 8) for .tsx helper tests
 
 ### Pending Todos
 
@@ -185,6 +190,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T00:44:30.724Z
-Stopped at: Completed 02-09-PLAN.md
+Last session: 2026-09-17T01:12:06.061Z
+Stopped at: Completed 02-11-PLAN.md
 Resume file: None
