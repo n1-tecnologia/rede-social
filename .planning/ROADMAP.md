@@ -192,7 +192,18 @@ Plans:
   3. Uploading a file over the size cap (Supabase Free plan: 50 MB) or with a disallowed type is rejected with a clear message at confirmation time (magic-byte and size validation); valid images are resized/compressed into display sizes within seconds and the original limits are enforced per kind.
   4. `admin_tenant` can upload a phone-recorded video (including iPhone HEVC) that is transcoded by the chosen streaming vendor and plays back as HLS with a thumbnail on iOS Safari and Android Chrome, showing a "processando" placeholder until ready; the isolation suite proves a tenant-B session cannot obtain a signed URL for a tenant-A object.
 
-**Plans**: TBD
+**Plans**: 8 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Media broker keystone: `media_assets`, the private `media` bucket, signed direct upload, worker WebP variants and the zero-DB-read 302 serving endpoint (wave 1)
+- [ ] 03-02-PLAN.md — Member profile: `member_profiles` keyed by membership with its trigger, backfill and search indexes; own-profile read/write; a real `bootstrap.membership.profile` (wave 2)
+- [ ] 03-03-PLAN.md — Member directory API: accent-insensitive keyset search, D-47 staff-hidden filters, and the other-member profile route (wave 3)
+- [ ] 03-04-PLAN.md — Profile screens: `/perfil`, `/perfil/editar`, the generalised upload hook with TUS and the silent HEIC re-encode, `MediaImage` (wave 3)
+- [ ] 03-05-PLAN.md — Directory screens `/membros` and `/membros/[membershipId]`, plus the D-02 first-access nudge card on `/inicio` (wave 4)
+- [ ] 03-06-PLAN.md — Video ingest: the `VideoProvider` seam with a Mux adapter and a local fake, the signature-verified webhook and the idempotent event job (wave 4)
+- [ ] 03-07-PLAN.md — Signed playback tokens, the `admin_tenant` media screen `/configuracoes/midia` and the three-state `VideoPlayer` (wave 5)
+- [ ] 03-08-PLAN.md — Orphan sweeper, the extended two-tenant isolation suite, the phase smoke and the `pnpm verify` exit gate (wave 6)
+
 **UI hint**: yes
 **Research needed**: Video vendor choice (Mux vs Cloudflare Stream) with pricing verified at phase start (and whether the pilot can defer video if budget is tight); TUS resumable uploads on mobile Safari over throttled networks; Supabase signed-URL semantics without native transforms on the Free plan (worker-produced variants); direct-upload + webhook -> `media.assets.status='ready'` flow.
 **Notes**: Video has no content consumer until Phase 4, so verification uses the admin upload flow plus a playback check; keep it in this phase so the whole broker (images, files, video) is one contract. `media.assets` carries tenant, owner, purpose, status, provider, dimensions; private buckets use tenant-prefixed paths with `storage.objects` policies.
