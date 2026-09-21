@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Media Pipeline & Member Profiles
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-09-21T19:20:14.437Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-09-21T23:41:50.787Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 03 execution started
-state_head: bd81ce4a1c3ea3ce7931c5e66de824a88ae2ba23
+state_head: 1cf365f5c145e1b2dc6ee3ada7f76b540fd464b1
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 40
-  completed_plans: 31
+  completed_plans: 32
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 03 (Media Pipeline & Member Profiles) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-09-21 — Phase 03 execution started
 
@@ -89,6 +89,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P20 | 32 min | 3 tasks | 7 files |
 | Phase 03 P01 | 29 min | 3 tasks | 30 files |
 | Phase 03 P02 | 28 min | 3 tasks | 20 files |
+| Phase 03 P03 | 17 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -205,6 +206,10 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-01: job-lifecycle admin writes (terminal failed, deferred re-arm) live in media/derive-job.ts, not in the broker service; inside packages/core/server/media only storage.ts reaches supabase-admin and only service.ts + derive-job.ts open admin-tx (grep-pinned)
 - [Phase 03]: 03-01: the per-tenant storage ceiling is a SOFT quota — read and insert share one admin transaction with no row lock, so a millisecond-scale overshoot is accepted rather than serialising a tenant uploads
 - [Phase 03]: 03-01: the HEIC unit fixture is macOS sips-generated, not iPhone-captured (unavailable here); the test asserts decoded format==='heif' AND compression==='hevc' before asserting heic_unsupported, so a non-HEVC substitute fails loudly
+- [Phase 03]: 03-03: the keyset pagination convention Phase 4 inherits — opaque base64url {v,n,id}, ordered by the expression the index carries, the sort key read BACK from the projection, over-fetch limit+1, limit clamped server-side
+- [Phase 03]: 03-03: D-47 lives as TWO predicates at two call sites, not a shared helper — listMembers filters role='member' while getMemberProfile filters no role at all, so a staff profile stays openable by direct link; the asymmetry is pinned mechanically by an awk/grep acceptance criterion
+- [Phase 03]: 03-03: memberListQuerySchema is .strict() (platformTenantsQuerySchema is not) — an unknown query key such as ?role=admin_tenant must fail loudly rather than be silently ignored
+- [Phase 03]: 03-03: likeEscape is re-derived in profiles/search.ts rather than imported from platform/tenants.ts — likeContains is a module-private const inside the PRIVILEGED lane, which profiles/** may not import at all (Biome 'Admin lane is kernel-only')
 
 ### Pending Todos
 
@@ -237,6 +242,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-21T19:20:14.387Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-09-21T23:41:11.060Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None

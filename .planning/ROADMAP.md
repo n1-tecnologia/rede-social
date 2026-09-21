@@ -192,7 +192,7 @@ Plans:
   3. Uploading a file over the size cap (Supabase Free plan: 50 MB) or with a disallowed type is rejected with a clear message at confirmation time (magic-byte and size validation); valid images are resized/compressed into display sizes within seconds and the original limits are enforced per kind.
   4. `admin_tenant` can upload a phone-recorded video (including iPhone HEVC) that is transcoded by the chosen streaming vendor and plays back as HLS with a thumbnail on iOS Safari and Android Chrome, showing a "processando" placeholder until ready; the isolation suite proves a tenant-B session cannot obtain a signed URL for a tenant-A object.
 
-**Plans**: 2/8 plans executed
+**Plans**: 3/8 plans executed
 
 Plans:
 **Wave 1**
@@ -205,7 +205,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-03-PLAN.md — Member directory API: accent-insensitive keyset search, D-47 staff-hidden filters, and the other-member profile route (wave 3)
+- [x] 03-03-PLAN.md — Member directory API: accent-insensitive keyset search, D-47 staff-hidden filters, and the other-member profile route (wave 3)
 - [ ] 03-04-PLAN.md — Profile screens: `/perfil`, `/perfil/editar`, the generalised upload hook with TUS and the silent HEIC re-encode, `MediaImage` (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
@@ -329,7 +329,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 | 1. Foundation - Kernel, Tenancy, Auth & CI/CD | 9/9 | Complete    | 2026-09-14 |
 | 01.1. Cloud Provisioning & First Release (INSERTED) | 0/3 | Deferred (needs accounts) | - |
 | 2. Tenant Shell, Branding & Platform Panel | 20/20 | In Progress|  |
-| 3. Media Pipeline & Member Profiles | 2/8 | In Progress|  |
+| 3. Media Pipeline & Member Profiles | 3/8 | In Progress|  |
 | 4. Feed | 0/TBD | Not started | - |
 | 5. Communities & Stories | 0/TBD | Not started | - |
 | 6. Events | 0/TBD | Not started | - |
