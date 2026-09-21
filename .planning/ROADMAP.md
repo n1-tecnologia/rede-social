@@ -195,13 +195,33 @@ Plans:
 **Plans**: 8 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 03-01-PLAN.md — Media broker keystone: `media_assets`, the private `media` bucket, signed direct upload, worker WebP variants and the zero-DB-read 302 serving endpoint (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 03-02-PLAN.md — Member profile: `member_profiles` keyed by membership with its trigger, backfill and search indexes; own-profile read/write; a real `bootstrap.membership.profile` (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 03-03-PLAN.md — Member directory API: accent-insensitive keyset search, D-47 staff-hidden filters, and the other-member profile route (wave 3)
 - [ ] 03-04-PLAN.md — Profile screens: `/perfil`, `/perfil/editar`, the generalised upload hook with TUS and the silent HEIC re-encode, `MediaImage` (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 03-05-PLAN.md — Directory screens `/membros` and `/membros/[membershipId]`, plus the D-02 first-access nudge card on `/inicio` (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 03-06-PLAN.md — Video ingest: the `VideoProvider` seam with a Mux adapter and a local fake, the signature-verified webhook and the idempotent event job (wave 4)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 03-07-PLAN.md — Signed playback tokens, the `admin_tenant` media screen `/configuracoes/midia` and the three-state `VideoPlayer` (wave 5)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 03-08-PLAN.md — Orphan sweeper, the extended two-tenant isolation suite, the phase smoke and the `pnpm verify` exit gate (wave 6)
 
 **UI hint**: yes
