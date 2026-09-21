@@ -1,0 +1,65 @@
+import {
+  MEDIA_BUCKET,
+  MEDIA_LIMITS,
+  type MediaKind,
+  type MediaLimit,
+  type MediaPurpose,
+  PURPOSE_WIDTHS,
+  VARIANT_WIDTHS,
+} from '@tria/contracts/media';
+
+/**
+ * Server-side ceilings and decoder guards. Pure: no database, no env, no Storage client.
+ *
+ * The per-(kind, purpose) mime allow-list and byte cap live in `@tria/contracts/media`, NOT here:
+ * the browser needs the same table for its pick-time gate (the Phase 2 `classifyFile` /
+ * `BRANDING_MAX_BYTES` precedent in `apps/web/lib/upload.ts`). This file keeps only what must never
+ * reach a bundle — the per-tenant ceilings and the sharp decoder limits — and re-exports the
+ * contract table so server call sites have one import.
+ */
+
+export { MEDIA_BUCKET, MEDIA_LIMITS, PURPOSE_WIDTHS, VARIANT_WIDTHS };
+
+/**
+ * Larger than branding's 4096 (T-03-04 keeps its own limit): a 12 MP phone photo is 4032x3024 and
+ * fits, a 48 MP one is 8000x6000 and would be refused at 4096. Every `sharp()` in this area carries
+ * `limitInputPixels: MEDIA_MAX_INPUT_PIXELS`, so a decompression bomb dies at the decoder, and the
+ * header check refuses any side above `MEDIA_MAX_INPUT_SIDE` before a single pixel is touched.
+ */
+export const MEDIA_MAX_INPUT_SIDE = 8192;
+export const MEDIA_MAX_INPUT_PIXELS = MEDIA_MAX_INPUT_SIDE * MEDIA_MAX_INPUT_SIDE;
+
+/**
+ * Per-tenant storage ceiling, checked at `start` BEFORE a row exists (R-16, T-03-06). A constant
+ * for the pilot — under Supabase Free's 1 GB total — tightened into a per-tenant column in Phase 8.
+ */
+export const MEDIA_TENANT_BYTES_CEILING = 800 * 1024 * 1024;
+/** Per-tenant video-minutes ceiling; 03-06 checks it with the same shape at `start`. */
+export const MEDIA_TENANT_VIDEO_SECONDS_CEILING = 3 * 60 * 60;
+
+/** Thrown when a (kind, purpose) pair is not in `MEDIA_LIMITS`; the service maps it to a 400. */
+export class MediaLimitError extends Error {
+  constructor(kind: string, purpose: string) {
+    super(`no media limit for ${kind}/${purpose}`);
+    this.name = 'MediaLimitError';
+  }
+}
+
+/** The limit for an accepted pair, or `MediaLimitError` — an unknown pair is never a silent default. */
+export function limitFor(kind: MediaKind, purpose: MediaPurpose): MediaLimit {
+  const limit = MEDIA_LIMITS[kind]?.[purpose];
+  if (!limit) throw new MediaLimitError(kind, purpose);
+  return limit;
+}
+
+/**
+ * The purpose's ladder filtered to widths at or below the original, ALWAYS keeping the smallest
+ * entry: a tiny source still produces one variant rather than an empty ladder (which would leave a
+ * `ready` asset with nothing to render). `attachment` derives nothing and stays empty.
+ */
+export function widthsForPurpose(purpose: MediaPurpose, originalWidth: number): number[] {
+  const ladder = PURPOSE_WIDTHS[purpose] ?? [];
+  if (ladder.length === 0) return [];
+  const fitting = ladder.filter((width) => width <= originalWidth);
+  return fitting.length > 0 ? [...fitting] : [ladder[0] as number];
+}

@@ -8,6 +8,7 @@ import { requestIdMiddleware } from './http/request-id';
 import { healthRoutes } from './routes/health';
 import { hookRoutes } from './routes/hooks';
 import { meRoutes } from './routes/me';
+import { mediaRoutes } from './routes/media';
 import { platformRoutes } from './routes/platform';
 import { publicRoutes } from './routes/public';
 
@@ -46,6 +47,9 @@ const routes = app
   .route('/v1/public', publicRoutes)
   .route('/v1/hooks', hookRoutes)
   .route('/v1/me', meRoutes)
+  // `/v1/media` is the tenant-lane media broker (03-01): it carries its own `requireAuth`, so
+  // `ctx.tenantId` (the membership of record) is the ONLY source of a Storage key prefix.
+  .route('/v1/media', mediaRoutes)
   .route('/v1/platform', platformRoutes)
   // The module carries its own `requireAuth` + `requireModule('example')` + `requireRole` chain
   // (packages/modules/example/server/routes.ts), so the mount cannot forget a guard.

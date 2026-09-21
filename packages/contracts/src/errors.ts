@@ -28,6 +28,9 @@ export const ERROR_CODES = [
   'TENANT_NOT_FOUND',
   'VALIDATION_FAILED',
   'NOT_FOUND',
+  // 03-01: the named 03-06 seam — `POST /v1/media/uploads { kind: 'video' }` until the
+  // `VideoProvider` adapter lands. A named, tested refusal rather than a silent gap.
+  'NOT_IMPLEMENTED',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

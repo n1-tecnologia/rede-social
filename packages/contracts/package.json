@@ -10,7 +10,8 @@
   "description": "Zod schemas, error codes, module keys and API types shared by every @tria app and module",
   "exports": {
     ".": "./src/index.ts",
-    "./branding": "./src/branding.ts"
+    "./branding": "./src/branding.ts",
+    "./media": "./src/media.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

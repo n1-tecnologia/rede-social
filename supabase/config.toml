@@ -134,6 +134,23 @@ public = true
 file_size_limit = "2MiB"
 allowed_mime_types = ["image/png", "image/svg+xml", "image/webp", "image/jpeg", "image/x-icon", "image/vnd.microsoft.icon"]
 
+# Member media (03-01, MEDIA-01/MEDIA-02/TENANT-04): PRIVATE. The browser PUTs (or TUS-uploads) the
+# bytes straight to an API-minted signed URL at `<tenant_id>/media/<assetId>/original` — no extension,
+# so the whole key space is a pure function of (tenantId, assetId, variant) — and the worker writes the
+# derived WebP ladder at `<tenant_id>/media/<assetId>/w<width>.webp` (immutable, one-year cache).
+# Reads happen ONLY through `GET /v1/media/{assetId}/{variant}`, which 302s to a freshly signed URL
+# built from the CALLER's own tenant id, so cross-tenant access is structurally impossible.
+# There is deliberately NO storage.objects policy for this bucket (R-15): the browser never holds a
+# Supabase JWT for Storage, so a policy would grant nothing that is used while creating a latent
+# widening the day a token leaks. Member uploads are jpeg/png/webp + pdf only — never a vector
+# format, which as a member-uploaded avatar would be a stored-XSS surface (T-03-09).
+# This block seeds LOCAL stacks only — hosted projects get the same row from
+# supabase/migrations/*_media_bucket.sql.
+[storage.buckets.media]
+public = false
+file_size_limit = "50MiB"
+allowed_mime_types = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
+
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
 enabled = true
