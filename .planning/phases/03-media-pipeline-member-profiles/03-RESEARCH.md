@@ -772,21 +772,28 @@ Escape `%`, `_` and `\` in `$1` as literals — the repo already has `likeContai
 | A7 | The `file` (PDF) upload kind is in scope for this phase (the goal sentence says "images, files and phone video"), with the *UI* for attachments deferred to Phase 4 | §Standard Stack (`file-type`) | If out of scope, drop `file-type` and one branch of `limits.ts`. Worth one line of confirmation in the plan. |
 | A8 | Making `member_profiles` rows eagerly (with a backfill) is preferable to a lazy row with read-time `coalesce` | R-08, Pattern 4 | A lazy row cannot use the trigram expression index; search degrades. The argument is sound but the tradeoff (an extra insert on every membership creation) is a design judgement. |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All three questions below were decided during `/gsd-plan-phase 03` and are adopted in the
+> committed plans. Each carries an inline **RESOLVED** marker naming the plan that implements it.
+> Nothing in this section is still open; no planning decision is waiting on it.
 
 1. **Does the pilot have a Mux account yet?**
    - What we know: `docs/DEPLOY.md` has no Mux entries; Phase 01.1 (cloud provisioning) has **not run** (STATE: "Phase 01.1 stays unexecuted until the end"; memory: "cloud work deferred to the end").
    - What's unclear: whether the Mux API tokens, signing key and webhook secret can exist during Phase 3 at all.
    - Recommendation: build the **fake video provider first** and make it the default in every non-production environment (the `domains/fake.ts` precedent). All of Phase 3's automated proof — including the isolation case for the playback token — runs against the fake. The real-device criterion-4 check becomes a **Phase 01.1 runbook item**, recorded as a known-blocked UAT line exactly like Phase 2's four blocked items. The planner should expect criterion 4 to close partially.
+   - **RESOLVED (adopted):** the recommendation is taken in full. `03-06-PLAN.md` Task 2 builds the `VideoProvider` seam with the fake implementation as the default in every non-production environment, `assertProductionEnv()` refuses a `mux` selection without secrets, and every automated proof in 03-06/03-07/03-08 runs against the fake. `03-08-PLAN.md` Task 3 records the real-device HLS check and the real Mux transcode as the two known-blocked Phase 01.1 UAT lines. No Mux account is required to execute this phase.
 
 2. **Where does the "Membros" entry point live if the user later wants it in the nav bar?**
    - What we know: D-40 orders tabs with "Perfil" last; by Phase 6 the bar carries four tabs.
    - What's unclear: whether the product owner considers a `/perfil` row discoverable enough.
    - Recommendation: ship R-11 (`/perfil` row → `/membros`) and surface it in the D-33 mockup review. Moving it to a tab later is a registry change, not a rewrite.
+   - **RESOLVED (adopted):** R-11 ships as the `/perfil` row. `03-04-PLAN.md` Task 1 authors the "Membros" (`users`) row on `/perfil` pointing at `/membros`; `03-05-PLAN.md` Task 1 lands the `/membros` route the row targets; `03-07-PLAN.md` keeps the nav tab budget untouched. The entry point was carried through the D-33 review and is fixed in `03-UI-SPEC.md` (status `approved`). Promoting it to a nav tab stays a later registry change.
 
 3. **`MEDIA_MAX_INPUT_SIDE` — 8192 or 4096?**
    - What we know: branding uses 4096; a 48 MP phone photo is 8000 × 6000.
    - Recommendation: 8192 for the media path with its own `limitInputPixels`, and refuse above it with a distinct pt-BR message. Measure worker memory on a 48 MP fixture before Phase 4's composer multiplies the volume.
+   - **RESOLVED (adopted):** `MEDIA_MAX_INPUT_SIDE = 8192`. `03-01-PLAN.md` pins it in `packages/core/server/media/limits.ts` with its own `limitInputPixels` on the sharp pipeline and a distinct pt-BR refusal for the decompression-bomb case; the 48 MP JPEG fixture is a Wave 0 requirement in `03-VALIDATION.md`, so the memory measurement happens inside this phase rather than before Phase 4.
 
 ## Environment Availability
 

@@ -34,7 +34,26 @@ created: "2026-09-21"
 - **After every task commit:** Run `pnpm --filter <package> test` for the touched package
 - **After every plan wave:** Run `pnpm supabase test db` + `pnpm test:integration`
 - **Before `/gsd-verify-work`:** Full `pnpm verify` must be green
-- **Max feedback latency:** 60 seconds (per-package quick run)
+
+### Feedback Latency Ceiling (tiered)
+
+A single flat ceiling is not true for this phase and was never what the 60-second figure meant.
+Roughly half of Phase 3's user-observable behaviour — the silent HEIC re-encode, the >6 MiB TUS
+path, resumable video transfer, the HLS player's three states, keyset "Carregar mais" — is
+**only** observable in a browser, so a targeted Playwright spec is the *primary* signal for those
+behaviours, not a slow substitute for a faster one that exists. Declaring a 60-second universal
+ceiling would force either a dishonest command or a dishonest claim. The phase therefore declares
+three tiers, and every task's `<automated>` chain is ordered fast-tier-first so `&&` short-circuits
+on the cheapest gate that can fail:
+
+| Tier | What runs | Declared ceiling | Where it is the primary signal |
+|------|-----------|------------------|--------------------------------|
+| **T1 — inner loop** | `pnpm --filter <pkg> typecheck`, `lint`, `test`, `bash scripts/check-ui-literals.sh`, `test -z "$(git status --porcelain …)"`, targeted `grep -q` artifact gates | **≤ 60 s** | Every task. T1 is the first segment of every `<automated>` chain, so any type, lint, contract, drift or copy error reports inside 60 s without the later tiers running at all. |
+| **T2 — behaviour gate** | `pnpm test:integration -- <filters>`, `pnpm supabase test db`, one or two **targeted** Playwright spec files (never the full e2e suite) | **≤ 5 min per task** | The browser-only and DB-only behaviours listed above. If a single spec file exceeds 5 minutes, split the spec — do not relax the tier. |
+| **T3 — phase exit gate** | `pnpm verify` | **≤ 20 min, run once** | `03-08` Task 3 only. Phase 2's baseline run was 17m30s; ~1050 s is the expected cost and is budgeted, not an overrun. No other task may put `pnpm verify` in its `<automated>`. |
+
+- **Nyquist reading:** sampling continuity is satisfied at T1 (every task, ≤60 s) and confirmed at
+  T2. T3 is a gate, not a sample.
 
 ---
 
@@ -80,7 +99,8 @@ created: "2026-09-21"
 - [ ] Sampling continuity: no 3 consecutive tasks without automated verify
 - [ ] Wave 0 covers all MISSING references
 - [ ] No watch-mode flags
-- [ ] Feedback latency < 60s
+- [ ] Every task's `<automated>` chain is ordered T1 → T2 (→ T3 only in `03-08` Task 3)
+- [ ] T1 primary signal < 60s on every task; T2 < 5 min per task; T3 run once, ≤ 20 min
 - [ ] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending
