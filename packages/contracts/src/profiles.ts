@@ -226,12 +226,7 @@ export const memberListQuerySchema = z
   .object({
     q: z.string().max(MEMBERS_MAX_QUERY_LENGTH).optional(),
     cursor: z.string().max(MEMBERS_MAX_CURSOR_LENGTH).optional(),
-    limit: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(MEMBERS_MAX_PAGE_SIZE)
-      .default(MEMBERS_PAGE_SIZE),
+    limit: z.coerce.number().int().min(1).max(MEMBERS_MAX_PAGE_SIZE).default(MEMBERS_PAGE_SIZE),
   })
   .strict();
 export type MemberListQuery = z.infer<typeof memberListQuerySchema>;
