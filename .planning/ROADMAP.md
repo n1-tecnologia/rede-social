@@ -214,15 +214,15 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 03-06-PLAN.md — Video ingest: the `VideoProvider` seam with a Mux adapter and a local fake, the signature-verified webhook and the idempotent event job (wave 4)
+- [ ] 03-06-PLAN.md — Video ingest: the `VideoProvider` seam with a Mux adapter and a local fake, the signature-verified webhook and the idempotent event job (wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 03-07-PLAN.md — Signed playback tokens, the `admin_tenant` media screen `/configuracoes/midia` and the three-state `VideoPlayer` (wave 5)
+- [ ] 03-07-PLAN.md — Signed playback tokens, the `admin_tenant` media screen `/configuracoes/midia` and the three-state `VideoPlayer` (wave 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 03-08-PLAN.md — Orphan sweeper, the extended two-tenant isolation suite, the phase smoke and the `pnpm verify` exit gate (wave 6)
+- [ ] 03-08-PLAN.md — Orphan sweeper, the extended two-tenant isolation suite, the phase smoke and the `pnpm verify` exit gate (wave 7)
 
 **UI hint**: yes
 **Research needed**: Video vendor choice (Mux vs Cloudflare Stream) with pricing verified at phase start (and whether the pilot can defer video if budget is tight); TUS resumable uploads on mobile Safari over throttled networks; Supabase signed-URL semantics without native transforms on the Free plan (worker-produced variants); direct-upload + webhook -> `media.assets.status='ready'` flow.
