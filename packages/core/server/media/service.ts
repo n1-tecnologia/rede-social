@@ -149,6 +149,11 @@ const tooLarge = (maxBytes: number): ApiError =>
  * declared mime buys a fast refusal, `complete` is where the bytes are judged.
  *
  * Order: unknown (kind, purpose) → HEIC by name → mime allow-list → byte cap → tenant ceiling.
+ *
+ * The ceiling is read and the row inserted in ONE admin transaction, and the sum is deliberately NOT
+ * locked: the arbiter is a soft quota, not a balance, so a small overshoot when two uploads start in
+ * the same millisecond is acceptable and far cheaper than serialising every upload of a tenant
+ * behind a row lock. What matters is that no row exists when the ceiling refuses (R-16, T-03-06).
  */
 export async function startUpload(ctx: Ctx, body: MediaStartBody): Promise<MediaStart> {
   let limit: ReturnType<typeof limitFor>;
@@ -172,23 +177,20 @@ export async function startUpload(ctx: Ctx, body: MediaStartBody): Promise<Media
     throw new ApiError(501, 'NOT_IMPLEMENTED', { media: 'video_provider_missing' });
   }
 
-  // R-16 / T-03-06: the ceiling is charged BEFORE a row exists. RLS scopes the sum to the tenant.
-  const used = await withTenantTx(ctx, async (tx) => {
-    const [row] = await tx
-      .select({ total: sql<string>`coalesce(sum(${mediaAssets.bytes}), 0)` })
-      .from(mediaAssets)
-      .where(isNull(mediaAssets.deletedAt));
-    return Number(row?.total ?? 0);
-  });
-  if (used + body.size > MEDIA_TENANT_BYTES_CEILING) {
-    throw new ApiError(413, 'VALIDATION_FAILED', { media: 'quota_exceeded' });
-  }
-
   const assetId = crypto.randomUUID();
   const key = mediaOriginalKey(ctx.tenantId, assetId);
   assertTenantKey(key, ctx.tenantId);
 
-  await withAdminTx(async (tx) => {
+  // R-16 / T-03-06: the ceiling is charged BEFORE a row exists, in the same transaction as the
+  // insert, with the tenant predicate explicit (the admin lane bypasses RLS).
+  const accepted = await withAdminTx(async (tx) => {
+    const [totals] = await tx
+      .select({ total: sql<string>`coalesce(sum(${mediaAssets.bytes}), 0)` })
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.tenantId, ctx.tenantId), isNull(mediaAssets.deletedAt)));
+    const used = Number(totals?.total ?? 0);
+    if (used + body.size > MEDIA_TENANT_BYTES_CEILING) return false;
+
     await tx.insert(mediaAssets).values({
       id: assetId,
       tenantId: ctx.tenantId,
@@ -201,7 +203,21 @@ export async function startUpload(ctx: Ctx, body: MediaStartBody): Promise<Media
       bytes: body.size,
       filename: body.filename ?? null,
     });
+    return true;
   });
+  if (!accepted) {
+    log.warn(
+      {
+        event: 'media.upload_rejected',
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        requestId: ctx.requestId,
+        reason: 'quota_exceeded',
+      },
+      'media upload refused: the tenant storage ceiling is reached',
+    );
+    throw new ApiError(413, 'VALIDATION_FAILED', { media: 'quota_exceeded' });
+  }
 
   let signed: Awaited<ReturnType<typeof signUpload>>;
   try {
@@ -283,6 +299,15 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
 
   const reject = async (reason: string): Promise<never> => {
     await removeQuietly([key], log, 'media.upload_remove_failed');
+    // The row survives as status='rejected' with failure_reason = the machine code the member was
+    // given: a refused upload stays auditable and the 03-08 sweeper has something definite to
+    // collect, instead of a `pending` row that merely looks abandoned.
+    await withAdminTx(async (tx) => {
+      await tx
+        .update(mediaAssets)
+        .set({ status: 'rejected', failureReason: reason })
+        .where(and(eq(mediaAssets.id, assetId), eq(mediaAssets.tenantId, ctx.tenantId)));
+    });
     log.warn(
       {
         event: 'media.upload_rejected',

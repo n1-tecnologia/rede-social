@@ -1,8 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { mediaAssetSchema } from '@tria/contracts/media';
 import { sqlClient } from '@tria/core/db';
+import { deriveIconSet } from '@tria/core/server/branding/icons';
 import { stopBoss } from '@tria/core/server/jobs/boss';
 import { deriveVariantsJob } from '@tria/core/server/media/derive-job';
+import { MEDIA_TENANT_BYTES_CEILING } from '@tria/core/server/media/limits';
+import { mediaInternals } from '@tria/core/server/media/service';
 import { encodeJpeg, probeSize } from '@tria/core/server/media/variants';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
@@ -30,6 +35,17 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  */
 
 const MEMBER_EMAIL = 'member@tria-demo.local';
+/** The second seeded tenant — the isolation half of ROADMAP criterion 4. */
+const LAB_MEMBER_EMAIL = 'member@tria-lab.local';
+
+/**
+ * The same REAL HEVC-compressed HEIC the kernel unit suite pins (RESEARCH Pitfall 2). Read from the
+ * kernel's fixture directory rather than duplicated: one file, one provenance, so a substitute that
+ * is not genuinely HEVC-in-HEIF fails BOTH suites at once.
+ */
+const HEIC = readFileSync(
+  fileURLToPath(new URL('../../../../packages/core/tests/fixtures/iphone.heic', import.meta.url)),
+);
 
 type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
 
@@ -37,8 +53,14 @@ type Envelope = { error: { code: string; message: string; details?: Record<strin
 const PHOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600"><rect width="900" height="600" fill="#0ea5e9"/><circle cx="450" cy="300" r="180" fill="#f59e0b"/></svg>`;
 
 let memberToken = '';
+let labToken = '';
 let demoTenantId = '';
+let demoUserId = '';
+let labTenantId = '';
+let labSlug = '';
+let labDisplayName = '';
 let PHOTO_JPEG: Buffer;
+let PHOTO_PNG: Buffer;
 
 const createdAssetIds: string[] = [];
 
@@ -123,7 +145,7 @@ async function removeTenantMediaObjects(tenantId: string): Promise<void> {
 }
 
 async function cleanup(): Promise<void> {
-  for (const tenantId of [demoTenantId].filter(Boolean)) {
+  for (const tenantId of [demoTenantId, labTenantId].filter(Boolean)) {
     await removeTenantMediaObjects(tenantId);
     await adminSql`delete from public.media_assets where tenant_id = ${tenantId}::uuid`;
   }
@@ -144,6 +166,26 @@ beforeAll(async () => {
   if (!tenant) throw new Error('the tria-demo tenant is not seeded');
   demoTenantId = tenant.id;
   PHOTO_JPEG = await encodeJpeg(Buffer.from(PHOTO_SVG));
+  // A real PNG, built through the 02-13 kernel helper — the api package has no `sharp` dependency.
+  PHOTO_PNG = (
+    await deriveIconSet(Buffer.from(PHOTO_SVG), { primaryHex: '#0ea5e9', mime: 'image/svg+xml' })
+  ).i512;
+
+  labToken = await signInAs(LAB_MEMBER_EMAIL, SEED_PASSWORD);
+  const [lab] = await adminSql<{ id: string; slug: string; display_name: string }[]>`
+    select id, slug, display_name from public.tenants where slug = 'tria-lab'`;
+  if (!lab) throw new Error('the tria-lab tenant is not seeded');
+  labTenantId = lab.id;
+  labSlug = lab.slug;
+  labDisplayName = lab.display_name;
+
+  const [owner] = await adminSql<{ user_id: string }[]>`
+    select m.user_id from public.memberships m
+      join public.users u on u.id = m.user_id
+     where m.tenant_id = ${demoTenantId}::uuid and u.email = ${MEMBER_EMAIL}`;
+  if (!owner) throw new Error('the tria-demo member is not seeded');
+  demoUserId = owner.user_id;
+
   await cleanup();
 });
 
@@ -267,5 +309,345 @@ describe('tracer — start, PUT to Storage, complete, the worker derives, the 30
     const again = await completeUpload(assetId);
     expect(again.status).toBe(404);
     expect((await envelope(again)).details?.media).toBe('object_missing');
+  });
+});
+
+describe('refusals at start — the declared facts buy a fast, specific answer (T-03-03/T-03-05/T-03-06)', () => {
+  it('a mime outside the kind+purpose allow-list answers 400 type_not_allowed', async () => {
+    const res = await startUpload({
+      kind: 'image',
+      purpose: 'avatar',
+      mime: 'image/gif',
+      size: 1024,
+    });
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).details?.media).toBe('type_not_allowed');
+  });
+
+  it('image/heic is refused BY NAME and no row is ever created', async () => {
+    const before = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.media_assets where tenant_id = ${demoTenantId}::uuid`;
+    const res = await startUpload({
+      kind: 'image',
+      purpose: 'avatar',
+      mime: 'image/heic',
+      size: 1024,
+    });
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).details?.media).toBe('heic_unsupported');
+    const after = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.media_assets where tenant_id = ${demoTenantId}::uuid`;
+    expect(after[0]?.n).toBe(before[0]?.n);
+  });
+
+  it('a size above the purpose cap answers 413 too_large with the cap itself', async () => {
+    const res = await startUpload({
+      kind: 'image',
+      purpose: 'avatar',
+      mime: 'image/jpeg',
+      size: 20 * 1024 * 1024,
+    });
+    expect(res.status).toBe(413);
+    const details = (await envelope(res)).details;
+    expect(details?.media).toBe('too_large');
+    expect(details?.maxBytes).toBe(8388608);
+  });
+
+  it('an unknown (kind, purpose) pair answers type_not_allowed rather than defaulting', async () => {
+    const res = await startUpload({
+      kind: 'file',
+      purpose: 'avatar',
+      mime: 'application/pdf',
+      size: 1024,
+    });
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).details?.media).toBe('type_not_allowed');
+  });
+
+  it('video answers the named 03-06 seam, never a silent gap', async () => {
+    const res = await startUpload({
+      kind: 'video',
+      purpose: 'post',
+      mime: 'video/mp4',
+      size: 1024,
+    });
+    expect(res.status).toBe(501);
+    expect((await envelope(res)).details?.media).toBe('video_provider_missing');
+  });
+});
+
+describe('refusals at complete — the BYTES are judged, and a refused upload leaves no object (T-03-03)', () => {
+  /** start -> PUT the given bytes under the given declared mime -> complete. */
+  async function roundTrip(bytes: Buffer, declaredMime: string, contentType = declaredMime) {
+    const start = await startUpload({
+      kind: 'image',
+      purpose: 'post',
+      mime: declaredMime,
+      size: bytes.length,
+    });
+    expect(start.status).toBe(201);
+    const body = (await start.json()) as { assetId: string; signedUrl: string; path: string };
+    createdAssetIds.push(body.assetId);
+    const put = await putToSignedUrl(body.signedUrl, bytes, contentType);
+    expect(put.ok).toBe(true);
+    const done = await completeUpload(body.assetId);
+    return { assetId: body.assetId, path: body.path, res: done };
+  }
+
+  it('HTML bytes declared image/jpeg answer not_an_image; the object is gone and the row is rejected', async () => {
+    const { assetId, path, res } = await roundTrip(
+      Buffer.from('<html>hi</html>'),
+      'image/jpeg',
+      'image/jpeg',
+    );
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).details?.media).toBe('not_an_image');
+
+    const objects = await adminSql<{ name: string }[]>`
+      select name from storage.objects where bucket_id = 'media' and name = ${path}`;
+    expect(objects.length).toBe(0);
+
+    const row = await adminSql<{ status: string; failure_reason: string }[]>`
+      select status, failure_reason from public.media_assets where id = ${assetId}::uuid`;
+    expect(row[0]?.status).toBe('rejected');
+    expect(row[0]?.failure_reason).toBe('not_an_image');
+  });
+
+  it('a PNG uploaded under an image/jpeg start answers format_mismatch', async () => {
+    const { res } = await roundTrip(PHOTO_PNG, 'image/jpeg', 'image/jpeg');
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).details?.media).toBe('format_mismatch');
+  });
+
+  it('a REAL iPhone-shaped HEIC answers heic_unsupported — refused by decoded format, not by name', async () => {
+    const { res } = await roundTrip(HEIC, 'image/jpeg', 'image/jpeg');
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).details?.media).toBe('heic_unsupported');
+  });
+
+  it('completing an upload whose PUT never happened answers 404 object_missing', async () => {
+    const start = await startUpload({
+      kind: 'image',
+      purpose: 'post',
+      mime: 'image/jpeg',
+      size: PHOTO_JPEG.length,
+    });
+    const body = (await start.json()) as { assetId: string };
+    createdAssetIds.push(body.assetId);
+    const res = await completeUpload(body.assetId);
+    expect(res.status).toBe(404);
+    expect((await envelope(res)).details?.media).toBe('object_missing');
+  });
+
+  it('completing a random uuid takes the same 404 branch — no existence oracle', async () => {
+    const res = await completeUpload('8f14e45f-ce1a-4e2f-8b4a-1f0a0b0c0d0e');
+    expect(res.status).toBe(404);
+    const error = await envelope(res);
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.details?.media).toBe('object_missing');
+  });
+});
+
+describe('quota — the tenant ceiling is charged before a row exists (R-16/T-03-06)', () => {
+  it('refuses with quota_exceeded and creates nothing, then accepts once the padding is soft-deleted', async () => {
+    const padBytes = MEDIA_TENANT_BYTES_CEILING - 1024 * 1024;
+    const [pad] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, mime, bytes)
+      values (${demoTenantId}::uuid, ${demoUserId}::uuid, 'image', 'post', 'ready',
+              'image/jpeg', ${padBytes})
+      returning id`;
+    const padId = pad?.id;
+    if (!padId) throw new Error('could not seed the quota padding row');
+
+    const before = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.media_assets where tenant_id = ${demoTenantId}::uuid`;
+    const refused = await startUpload({
+      kind: 'image',
+      purpose: 'post',
+      mime: 'image/jpeg',
+      size: 4 * 1024 * 1024,
+    });
+    expect(refused.status).toBe(413);
+    expect((await envelope(refused)).details?.media).toBe('quota_exceeded');
+    const after = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.media_assets where tenant_id = ${demoTenantId}::uuid`;
+    expect(after[0]?.n).toBe(before[0]?.n);
+
+    await adminSql`
+      update public.media_assets set deleted_at = now(), status = 'deleted'
+       where id = ${padId}::uuid`;
+    const accepted = await startUpload({
+      kind: 'image',
+      purpose: 'post',
+      mime: 'image/jpeg',
+      size: 4 * 1024 * 1024,
+    });
+    expect(accepted.status).toBe(201);
+    createdAssetIds.push(((await accepted.json()) as { assetId: string }).assetId);
+  });
+});
+
+describe('idempotency and concurrency — one confirmation, one job, one ladder', () => {
+  /** A fully uploaded but not yet confirmed asset. */
+  async function uploaded(purpose = 'post') {
+    const start = await startUpload({
+      kind: 'image',
+      purpose,
+      mime: 'image/jpeg',
+      size: PHOTO_JPEG.length,
+    });
+    expect(start.status).toBe(201);
+    const body = (await start.json()) as { assetId: string; signedUrl: string };
+    createdAssetIds.push(body.assetId);
+    const put = await putToSignedUrl(body.signedUrl, PHOTO_JPEG, 'image/jpeg');
+    expect(put.ok).toBe(true);
+    return body.assetId;
+  }
+
+  it('two sequential completes answer the same body and leave exactly ONE derivation job', async () => {
+    const assetId = await uploaded();
+    const first = mediaAssetSchema.parse(await (await completeUpload(assetId)).json());
+    const second = mediaAssetSchema.parse(await (await completeUpload(assetId)).json());
+    expect(second).toEqual(first);
+    expect((await deriveJobs(assetId)).length).toBe(1);
+  });
+
+  it('two CONCURRENT completes likewise produce exactly one job (singletonKey under the short policy)', async () => {
+    const assetId = await uploaded();
+    const [a, b] = await Promise.all([completeUpload(assetId), completeUpload(assetId)]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect((await deriveJobs(assetId)).length).toBe(1);
+  });
+
+  it('running the derivation twice is safe: the same widths, still ready', async () => {
+    const assetId = await uploaded('avatar');
+    await completeUpload(assetId);
+    await deriveVariantsJob.handler({ tenantId: demoTenantId, assetId, attempt: 0 });
+    const once = await assetRow(assetId);
+    await deriveVariantsJob.handler({ tenantId: demoTenantId, assetId, attempt: 0 });
+    const twice = await assetRow(assetId);
+    expect(twice?.status).toBe('ready');
+    expect(twice?.variant_widths).toEqual(once?.variant_widths);
+    expect(twice?.variant_widths).toEqual([128, 320]);
+  });
+
+  it('a row soft-deleted mid-derivation is never resurrected (the beforeVariantWrite seam)', async () => {
+    const assetId = await uploaded('avatar');
+    await completeUpload(assetId);
+    const original = mediaInternals.beforeVariantWrite;
+    try {
+      mediaInternals.beforeVariantWrite = async () => {
+        await adminSql`
+          update public.media_assets set status = 'deleted', deleted_at = now()
+           where id = ${assetId}::uuid`;
+      };
+      await deriveVariantsJob.handler({ tenantId: demoTenantId, assetId, attempt: 0 });
+    } finally {
+      mediaInternals.beforeVariantWrite = original;
+    }
+    const row = await assetRow(assetId);
+    expect(row?.status).toBe('deleted');
+  });
+
+  it('a derivation that keeps failing re-arms while it may, then ends in a terminal failed state', async () => {
+    const assetId = await uploaded('avatar');
+    await completeUpload(assetId);
+    const original = mediaInternals.beforeVariantWrite;
+    try {
+      mediaInternals.beforeVariantWrite = async () => {
+        throw new Error('boom');
+      };
+
+      // Below the attempt ceiling: one deferred job is re-armed and the row stays `processing`.
+      await deriveVariantsJob.handler({ tenantId: demoTenantId, assetId, attempt: 0 });
+      expect((await assetRow(assetId))?.status).toBe('processing');
+
+      // At the ceiling: no infinite `processing`, a terminal `failed` with its reason instead.
+      await deriveVariantsJob.handler({ tenantId: demoTenantId, assetId, attempt: 3 });
+      const row = await adminSql<{ status: string; failure_reason: string }[]>`
+        select status, failure_reason from public.media_assets where id = ${assetId}::uuid`;
+      expect(row[0]?.status).toBe('failed');
+      expect(row[0]?.failure_reason).toBe('derive_failed');
+    } finally {
+      mediaInternals.beforeVariantWrite = original;
+    }
+  });
+});
+
+describe('isolation — a tenant-B session cannot reach a tenant-A object (TENANT-04, criterion 4)', () => {
+  let tenantAAssetId = '';
+
+  beforeAll(async () => {
+    const start = await startUpload({
+      kind: 'image',
+      purpose: 'avatar',
+      mime: 'image/jpeg',
+      size: PHOTO_JPEG.length,
+    });
+    const body = (await start.json()) as { assetId: string; signedUrl: string };
+    tenantAAssetId = body.assetId;
+    createdAssetIds.push(tenantAAssetId);
+    await putToSignedUrl(body.signedUrl, PHOTO_JPEG, 'image/jpeg');
+    await completeUpload(tenantAAssetId);
+    await deriveVariantsJob.handler({
+      tenantId: demoTenantId,
+      assetId: tenantAAssetId,
+      attempt: 0,
+    });
+  });
+
+  it('each community mints keys under its OWN prefix and never the other one', async () => {
+    const mine = await startUpload({
+      kind: 'image',
+      purpose: 'avatar',
+      mime: 'image/jpeg',
+      size: PHOTO_JPEG.length,
+    });
+    const theirs = await startUpload(
+      { kind: 'image', purpose: 'avatar', mime: 'image/jpeg', size: PHOTO_JPEG.length },
+      labToken,
+    );
+    const a = (await mine.json()) as { assetId: string; path: string };
+    const b = (await theirs.json()) as { assetId: string; path: string };
+    createdAssetIds.push(a.assetId, b.assetId);
+    expect(a.path.startsWith(`${demoTenantId}/media/`)).toBe(true);
+    expect(b.path.startsWith(`${labTenantId}/media/`)).toBe(true);
+  });
+
+  it('GET on the foreign asset answers 404 with NO Location and a body that names no community', async () => {
+    const res = await media(`/${tenantAAssetId}/w320`, {
+      token: labToken,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get('location')).toBeNull();
+
+    const text = JSON.stringify(await res.json());
+    expect(text).not.toContain(labSlug);
+    expect(text).not.toContain('tria-demo');
+    expect(text).not.toContain(labDisplayName);
+    expect(text).not.toContain(demoTenantId);
+  });
+
+  it('completing the foreign asset answers the same 404 object_missing a nonexistent id gets', async () => {
+    const res = await completeUpload(tenantAAssetId, labToken);
+    expect(res.status).toBe(404);
+    expect((await envelope(res)).details?.media).toBe('object_missing');
+  });
+
+  it('deleting the foreign asset answers 404 and leaves it untouched', async () => {
+    const res = await media(`/${tenantAAssetId}`, { method: 'DELETE', token: labToken });
+    expect(res.status).toBe(404);
+    const row = await assetRow(tenantAAssetId);
+    expect(row?.status).toBe('ready');
+    expect(row?.tenant_id).toBe(demoTenantId);
+  });
+
+  it('the owner still reads it — the refusal was about the caller, not about the asset', async () => {
+    const res = await media(`/${tenantAAssetId}/w320`, { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain(`/media/${tenantAAssetId}/w320.webp`);
   });
 });
