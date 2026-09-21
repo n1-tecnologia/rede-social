@@ -185,3 +185,70 @@ export const AVATAR_DISPLAY_VARIANT = 'w128';
 export function avatarUrlFor(assetId: string | null): string | null {
   return assetId === null ? null : mediaVariantUrl(assetId, AVATAR_DISPLAY_VARIANT);
 }
+
+/**
+ * The member directory (PROF-03, D-47, R-11).
+ *
+ * `MEMBERS_PAGE_SIZE` is R-11's number and is what `/membros` must send as `limit`: the server
+ * clamps to `1..MEMBERS_MAX_PAGE_SIZE` so a crafted `?limit=100000` cannot ask for an unbounded
+ * page (T-03-23). `MEMBERS_MAX_QUERY_LENGTH` caps the search term for the same reason; the pure
+ * `normaliseQuery` helper in `packages/core/server/profiles/search.ts` truncates to the SAME number
+ * as a second line of defence, so the cap holds even for a caller that never passed this schema.
+ */
+export const MEMBERS_PAGE_SIZE = 25;
+export const MEMBERS_MAX_PAGE_SIZE = 50;
+export const MEMBERS_MAX_QUERY_LENGTH = 80;
+
+/**
+ * The longest cursor this endpoint will look at. The envelope is a base64url JSON object carrying a
+ * normalised display name (≤ 60 code units folded to ASCII) and a uuid, so ~200 characters is
+ * already generous; the bound exists so a megabyte of "cursor" is refused before it is decoded.
+ */
+const MEMBERS_MAX_CURSOR_LENGTH = 400;
+
+/**
+ * Query of `GET /v1/members`.
+ *
+ * `q` absent, `q=''` and a `q` that trims to empty are the SAME request — no filter, the full page
+ * (the server normalises, see `normaliseQuery`). Matching is an accent- and case-insensitive
+ * SUBSTRING (R-10): `goncal` finds `João Gonçalves`. `%`, `_` and `\` are literal characters, never
+ * wildcards.
+ *
+ * `cursor` is OPAQUE. Its encoding is an implementation detail of
+ * `packages/core/server/profiles/search.ts` and no consumer may parse, build or mutate it — pass
+ * back verbatim the `nextCursor` the previous page returned. A stale or tampered value is not an
+ * error: it degrades to the first page.
+ *
+ * `.strict()` so an unknown query key is a 400 rather than a silently ignored filter — the day
+ * `?role=admin_tenant` is tried against this endpoint, it must fail loudly (D-47).
+ */
+export const memberListQuerySchema = z
+  .object({
+    q: z.string().max(MEMBERS_MAX_QUERY_LENGTH).optional(),
+    cursor: z.string().max(MEMBERS_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(MEMBERS_MAX_PAGE_SIZE)
+      .default(MEMBERS_PAGE_SIZE),
+  })
+  .strict();
+export type MemberListQuery = z.infer<typeof memberListQuerySchema>;
+
+/**
+ * One page of the directory. `items` is `memberProfileSchema` — the SAME strict shape
+ * `GET /v1/members/{membershipId}` answers, so D-45 ("photo, display name and bio only") holds in
+ * the list exactly as it holds on the profile screen, and a role can never ride along in a row.
+ *
+ * `nextCursor` is non-null EXACTLY when another row exists beyond this page (the query over-fetches
+ * one row to decide it), so `/membros` shows "Carregar mais" while — and only while —
+ * `nextCursor !== null`, and never renders a button that returns nothing.
+ */
+export const memberListSchema = z
+  .object({
+    items: z.array(memberProfileSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type MemberList = z.infer<typeof memberListSchema>;

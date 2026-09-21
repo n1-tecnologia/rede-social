@@ -1,4 +1,11 @@
-import { avatarUrlFor, type OwnProfile, type UpdateProfileBody } from '@tria/contracts/profiles';
+import {
+  avatarUrlFor,
+  type MemberList,
+  type MemberListQuery,
+  type MemberProfile,
+  type OwnProfile,
+  type UpdateProfileBody,
+} from '@tria/contracts/profiles';
 import { eq, sql } from 'drizzle-orm';
 import { memberProfiles, memberships, users } from '../../db/schema';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';
@@ -7,6 +14,7 @@ import { ApiError } from '../http/api-error';
 import { moduleLogger } from '../logging';
 import { deleteAsset } from '../media/service';
 import { membershipOfRecord } from '../tenancy/membership-scope';
+import { decodeCursor, encodeCursor, likeEscape, normaliseQuery } from './search';
 
 /**
  * The member profile service (PROF-01, TENANT-04) — a PURE TENANT-LANE area.
@@ -257,4 +265,136 @@ export async function dismissNudge(ctx: Ctx): Promise<OwnProfile> {
     const row = requireRow(await profileRow(tx, ctx));
     return ownProfileView(row, await ownEmail(tx, ctx));
   });
+}
+
+/* ── The directory half (PROF-02, PROF-03, D-45, D-47, TENANT-04) ────────────────────────────── */
+
+type DirectoryRow = {
+  id: string;
+  membership_id: string;
+  display_name: string;
+  bio: string | null;
+  avatar_asset_id: string | null;
+};
+
+const memberView = (row: Omit<DirectoryRow, 'id'>): MemberProfile => ({
+  membershipId: row.membership_id,
+  displayName: row.display_name,
+  bio: row.bio,
+  avatarAssetId: row.avatar_asset_id,
+  avatarUrl: avatarUrlFor(row.avatar_asset_id),
+});
+
+/**
+ * `GET /v1/members/{membershipId}` (PROF-02, D-45): another member's photo, display name and bio —
+ * and nothing else, because the answer is `memberProfileSchema`, which is `.strict()`.
+ *
+ * THERE IS DELIBERATELY NO ROLE FILTER HERE, and that is D-47 verbatim: "A staff member's profile is
+ * still **openable by direct link** under PROF-02 (from their content in Phase 4, or the support
+ * conversation in Phase 7) — it is simply not browsable in the list." The two routes therefore apply
+ * different predicates on purpose; collapsing them into a shared helper would erase the distinction.
+ * `listMembers` below carries the `member` predicate, this one carries only the lifecycle predicate.
+ *
+ * The TENANT predicate is not written here either: it comes from the `member_profiles_tenant_select`
+ * RLS policy, so a row of another community is not "denied" — it is invisible to this lane. That is
+ * what makes all four miss reasons (unknown id, another tenant, blocked/invited, soft-deleted) take
+ * the very same branch below.
+ */
+export async function getMemberProfile(ctx: Ctx, membershipId: string): Promise<MemberProfile> {
+  const row = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<DirectoryRow>(sql`
+      select mp.id,
+             mp.membership_id,
+             mp.display_name,
+             mp.bio,
+             mp.avatar_asset_id
+        from member_profiles mp
+        join memberships m on m.id = mp.membership_id
+       where mp.membership_id = ${membershipId}::uuid
+         and m.status = 'active'
+         and m.deleted_at is null
+       limit 1`);
+    return rows[0];
+  });
+
+  // ONE bare 404 with NO details payload (D-23, T-03-19, SCHEMA-CONVENTIONS §(j)). Adding a details
+  // key here — even `{ member: 'not_found' }` vs `{ member: 'blocked' }` — would re-introduce the
+  // existence oracle D-23 forbids: the directory would become a probe for another community's
+  // membership. The body must also never name a tenant, which is why there is nothing to name.
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return memberView(row);
+}
+
+/**
+ * `GET /v1/members?q=&cursor=&limit=` (PROF-03, D-47, R-10/R-11) — one keyset page of the tenant's
+ * browsable members.
+ *
+ * Ordering is `app.imm_unaccent(lower(display_name)) asc, member_profiles.id asc`, which is exactly
+ * the expression `member_profiles_tenant_name_idx` is built on, so the page is index-ordered and the
+ * order is TOTAL: two members with identical names occupy two stable adjacent slots that a page
+ * boundary can neither duplicate nor skip. `sort_key` is read back from the projection rather than
+ * re-folded in JavaScript, so the cursor can never disagree with the index.
+ */
+export async function listMembers(ctx: Ctx, query: MemberListQuery): Promise<MemberList> {
+  const limit = query.limit;
+  const term = normaliseQuery(query.q);
+  // The member's own words are a `like` TERM, never a pattern: `%`, `_` and `\` are escaped as
+  // literals and the statement declares `escape '\'`, so `?q=%` matches members whose name contains
+  // a percent sign — not the whole directory (T-03-21).
+  const needle = term === null ? null : likeEscape(term);
+  const after = decodeCursor(query.cursor);
+  const afterName = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<DirectoryRow & { sort_key: string }>(sql`
+      select mp.id,
+             mp.membership_id,
+             mp.display_name,
+             mp.bio,
+             mp.avatar_asset_id,
+             app.imm_unaccent(lower(mp.display_name)) as sort_key
+        from member_profiles mp
+        join memberships m on m.id = mp.membership_id
+       -- D-47, a FLAT conjunction on purpose: V2-PROF-01's per-member "hide-me" flag and any
+       -- moderation-driven visibility rule land as ONE more 'and' on this very line, so the
+       -- deferred feature stays a one-line change instead of a helper that hides the predicate.
+       where m.role = 'member' and m.status = 'active' and m.deleted_at is null
+         and (
+           ${needle}::text is null
+           or app.imm_unaccent(lower(mp.display_name))
+              like '%' || app.imm_unaccent(lower(${needle}::text)) || '%' escape '\\'
+         )
+         and (
+           ${afterName}::text is null
+           or (app.imm_unaccent(lower(mp.display_name)), mp.id) > (${afterName}::text, ${afterId}::uuid)
+         )
+       order by app.imm_unaccent(lower(mp.display_name)), mp.id
+       limit ${limit + 1}`),
+  );
+
+  // Over-fetch by one: `nextCursor` is non-null EXACTLY when another row exists, so the UI never
+  // renders a "Carregar mais" that comes back empty.
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.sort_key, id: last.id }) : null;
+
+  // T-03-24: the SHAPE of the search, never its text. What a member looked for is member behaviour
+  // and does not belong in a log line.
+  log.info(
+    {
+      event: 'members.list',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      hasQuery: term !== null,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'member directory listed',
+  );
+
+  return { items: page.map(memberView), nextCursor };
 }

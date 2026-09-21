@@ -9,6 +9,7 @@ import { healthRoutes } from './routes/health';
 import { hookRoutes } from './routes/hooks';
 import { meRoutes } from './routes/me';
 import { mediaRoutes } from './routes/media';
+import { membersRoutes } from './routes/members';
 import { platformRoutes } from './routes/platform';
 import { publicRoutes } from './routes/public';
 
@@ -50,6 +51,10 @@ const routes = app
   // `/v1/media` is the tenant-lane media broker (03-01): it carries its own `requireAuth`, so
   // `ctx.tenantId` (the membership of record) is the ONLY source of a Storage key prefix.
   .route('/v1/media', mediaRoutes)
+  // `/v1/members` is the tenant-lane member directory (03-03): it carries its own `requireAuth`, so
+  // the community whose members are listed is always the membership of record, never a path or query
+  // value, and the RLS select policy makes another community's rows invisible rather than refused.
+  .route('/v1/members', membersRoutes)
   .route('/v1/platform', platformRoutes)
   // The module carries its own `requireAuth` + `requireModule('example')` + `requireRole` chain
   // (packages/modules/example/server/routes.ts), so the mount cannot forget a guard.
