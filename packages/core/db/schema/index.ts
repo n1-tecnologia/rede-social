@@ -1,6 +1,7 @@
 export * from './chat-stubs';
 export * from './consent-records';
 export * from './media-assets';
+export * from './member-profiles';
 export * from './memberships';
 export * from './notification-stubs';
 export * from './platform-admins';

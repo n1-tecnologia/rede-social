@@ -11,7 +11,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./branding": "./src/branding.ts",
-    "./media": "./src/media.ts"
+    "./media": "./src/media.ts",
+    "./profiles": "./src/profiles.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
