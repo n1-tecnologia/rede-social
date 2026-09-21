@@ -72,11 +72,14 @@ select is_empty(
         ('tenant_modules'), ('consent_records'), ('chat_conversations'), ('chat_participants'),
         ('chat_messages'), ('notifications'), ('example_items'),
         -- Phase 2 (02-03)
-        ('tenant_invites')
+        ('tenant_invites'),
+        -- Phase 3 (03-01). `media_assets` needs NO entry in assertion 2's exemption list: it
+        -- carries its own tenant select policy, so it is isolated rather than pinned invisible.
+        ('media_assets')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-2 declare exists in public'
+  'every table Phases 1-3 declare exists in public'
 );
 
 select * from finish();

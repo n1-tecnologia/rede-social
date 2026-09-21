@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(31);
+select plan(34);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -62,6 +62,16 @@ insert into public.chat_messages (tenant_id, conversation_id, seq, author_user_i
    '0a000000-0000-4000-8000-000000000002', 'oi'),
   ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000004', 1,
    '0b000000-0000-4000-8000-000000000002', 'oi');
+
+-- 03-01: one live asset each, plus a SOFT-DELETED one for A. Same mime and byte count on both
+-- sides, so a leak cannot hide behind "the rows look different anyway" (TENANT-05 adjacency).
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, deleted_at) values
+  ('0a000000-0000-4000-8000-000000000005', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', 'image', 'avatar', 'ready', 'image/jpeg', 1024, null),
+  ('0b000000-0000-4000-8000-000000000005', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-000000000002', 'image', 'avatar', 'ready', 'image/jpeg', 1024, null),
+  ('0a000000-0000-4000-8000-000000000006', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', 'image', 'avatar', 'deleted', 'image/jpeg', 1024, now());
 
 insert into public.consent_records (tenant_id, user_id, kind, text_version) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'tenant_rules', 1),
@@ -212,6 +222,24 @@ select is_empty(
   $$ select id from public.notifications
       where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
   'notifications: B''s rows are invisible'
+);
+
+-- 03-01 (MEDIA-01/TENANT-04): the asset ROW is tenant-scoped like every other row. The OBJECT is
+-- protected separately and structurally — the Storage key is built from the caller's own tenant id,
+-- so the two halves of the isolation argument are independent (070-media-bucket.sql pins the other).
+select is_empty(
+  $$ select id from public.media_assets
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'media_assets: B''s assets are invisible'
+);
+select results_eq(
+  $$ select count(*)::int from public.media_assets $$,
+  ARRAY[1],
+  'media_assets: adjacency — both tenants own an identical-looking avatar, the lane returns exactly A''s live one'
+);
+select is_empty(
+  $$ select id from public.media_assets where id = '0a000000-0000-4000-8000-000000000006' $$,
+  'media_assets: a SOFT-DELETED row is invisible to its OWN tenant''s lane (the policy carries deleted_at is null)'
 );
 
 select results_eq(
