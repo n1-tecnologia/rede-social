@@ -58,7 +58,9 @@ const PROFILE_FIELDS = ['displayName', 'bio', 'avatarAssetId'] as const;
 
 const profileIssueFor = (code: string, message: string): ProfileIssue => {
   if (message === 'required' || code === 'too_small') return 'required';
-  if (code === 'too_big') return 'too_long';
+  // `too_big` is Zod's code-POINT cap; the code-UNIT refinement next to it raises a `custom` issue
+  // carrying the same `'too_long'` message (see `withinCodeUnits` in @tria/contracts/profiles).
+  if (message === 'too_long' || code === 'too_big') return 'too_long';
   return 'invalid';
 };
 

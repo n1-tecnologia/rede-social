@@ -54,23 +54,49 @@ export function normaliseBio(raw: unknown): string | null {
 }
 
 /**
+ * THE UNIT OF BOTH CAPS: UTF-16 code units, i.e. exactly what JavaScript's `String.length`
+ * measures — which is also what the browser's `value.length` counter and `<textarea maxLength>`
+ * count. The client counter and the server therefore cannot disagree: an astral-plane emoji is a
+ * surrogate pair and counts as 2 on both sides.
+ *
+ * This check is NOT redundant with `.max()`. VERIFIED against this repo's zod 4.6.2:
+ * `z.string().max(n)` counts Unicode CODE POINTS, so `z.string().max(4)` accepts three emoji
+ * (6 code units) — a value a `maxLength={4}` field would have refused. `.max()` is kept because it
+ * produces the `too_big` issue for the ordinary text case; this refinement is the stricter of the
+ * two and is what actually pins the unit. Both carry the same `'too_long'` message, so the route's
+ * refusal hook maps either one to `details.<field> = 'too_long'`.
+ */
+const withinCodeUnits = (max: number) => (value: string) => value.length <= max;
+
+/**
  * The display name (D-46: freely editable, overwritten in place, no history, no approval gate).
  * `.trim()` runs BEFORE `.min()`/`.max()` in Zod 4, so `'  Ana  '` is accepted as `'Ana'` and a
  * 61-character value whose trailing character is a space is accepted as 60.
  * The `'required'` message is what the route hook turns into `details.displayName = 'required'`.
  */
-export const displayNameSchema = z.string().trim().min(1, 'required').max(MAX_DISPLAY_NAME_LENGTH);
+export const displayNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'required')
+  .max(MAX_DISPLAY_NAME_LENGTH, 'too_long')
+  .refine(withinCodeUnits(MAX_DISPLAY_NAME_LENGTH), 'too_long');
 
 /**
  * The bio, normalised in a `preprocess` and only THEN length-checked. Normalising inside the schema
  * (rather than after it) is what avoids the Zod 4 ordering trap recorded for 02-03 — format checks
  * run before overwrite transforms — so a 151-character value that trims to 150 is accepted.
  *
- * `.max()` counts UTF-16 code units, i.e. exactly what JavaScript's `String.length` measures, which
- * is also the unit the browser's `value.length` counter and `<textarea maxLength>` use. The client
- * counter and the server therefore cannot disagree: an astral-plane emoji counts as 2 on both sides.
+ * The cap is measured in UTF-16 code units — see `withinCodeUnits` above for why `.max()` alone
+ * would not be, and why both checks carry the same `'too_long'` message.
  */
-export const bioSchema = z.preprocess(normaliseBio, z.string().max(MAX_BIO_LENGTH).nullable());
+export const bioSchema = z.preprocess(
+  normaliseBio,
+  z
+    .string()
+    .max(MAX_BIO_LENGTH, 'too_long')
+    .refine(withinCodeUnits(MAX_BIO_LENGTH), 'too_long')
+    .nullable(),
+);
 
 /**
  * `PATCH /v1/me/profile` body. At least one key must be present; unknown keys are refused

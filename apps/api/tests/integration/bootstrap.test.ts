@@ -42,6 +42,24 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
     expect(body.user.email).toBe(MEMBER);
   });
 
+  it('1b. PROF-01 filled `membership.profile` WITHOUT growing it (Pitfall 9)', async () => {
+    const res = await bootstrap();
+    const body = bootstrapSchema.parse(await res.json());
+    // The sub-shape is frozen: the profile became real in 03-02, and the nudge state and
+    // `avatarAssetId` deliberately live on `GET /v1/me/profile` rather than here, so a cached
+    // bootstrap payload never has to be invalidated by a new profile fact.
+    expect(Object.keys(body.membership.profile).sort()).toEqual([
+      'avatarUrl',
+      'bio',
+      'displayName',
+    ]);
+    // Fed from `member_profiles`, not from `users.name`: the row the membership trigger created.
+    const [row] = await adminSql<{ display_name: string }[]>`
+      select p.display_name from public.member_profiles p
+       where p.user_id = ${memberCtx.userId}::uuid and p.tenant_id = ${memberCtx.tenantId}::uuid`;
+    expect(body.membership.profile.displayName).toBe(row?.display_name);
+  });
+
   it('2. no token -> 401 UNAUTHENTICATED with the envelope', async () => {
     const res = await api.request('/v1/me/bootstrap');
     expect(res.status).toBe(401);

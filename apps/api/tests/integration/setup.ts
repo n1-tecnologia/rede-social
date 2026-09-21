@@ -46,22 +46,28 @@ export const adminSql = postgres('postgres://postgres:postgres@127.0.0.1:54322/p
 });
 
 /**
- * A REAL avatar asset for the given session, through the 03-01 broker end to end: `start` mints the
+ * A REAL image asset for the given session, through the 03-01 broker end to end: `start` mints the
  * signed target, the bytes go STRAIGHT to Storage (never through the API), `complete` decodes the
  * header, and the worker handler derives the WebP ladder so the row reaches `ready`. Returns the
  * `media_assets` id, which is what `PATCH /v1/me/profile { avatarAssetId }` takes (03-02).
+ *
+ * `purpose` is a parameter so a test can build the NEGATIVE fixture the avatar gate exists for — an
+ * otherwise perfectly valid `post` image, which the profile must still refuse.
  *
  * The heavy kernel imports (`sharp` through `variants`, pg-boss through `derive-job`) are loaded
  * INSIDE the function on purpose: `setup.ts` is imported by every integration file, including
  * `health-no-db.ts`, and none of them should pay for the media stack just to reach `api`/`adminSql`.
  */
-export async function uploadAvatar(token: string, bytes?: Buffer): Promise<string> {
+export async function uploadAvatar(
+  token: string,
+  opts: { purpose?: 'avatar' | 'post'; bytes?: Buffer } = {},
+): Promise<string> {
   const { app } = await import('../../src/app');
   const { encodeJpeg } = await import('@tria/core/server/media/variants');
   const { deriveVariantsJob } = await import('@tria/core/server/media/derive-job');
 
   const body =
-    bytes ??
+    opts.bytes ??
     (await encodeJpeg(
       Buffer.from(
         `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><rect width="640" height="640" fill="#7c3aed"/><circle cx="320" cy="320" r="200" fill="#fde68a"/></svg>`,
@@ -74,7 +80,7 @@ export async function uploadAvatar(token: string, bytes?: Buffer): Promise<strin
     headers,
     body: JSON.stringify({
       kind: 'image',
-      purpose: 'avatar',
+      purpose: opts.purpose ?? 'avatar',
       mime: 'image/jpeg',
       size: body.length,
       filename: 'foto.jpg',
