@@ -10,6 +10,7 @@ import {
   Input,
   SectionTitle,
   StatusPill,
+  Textarea,
 } from '../src/index';
 
 describe('Button', () => {
@@ -95,6 +96,52 @@ describe('Input', () => {
     expect(input.className).toContain('text-base');
     expect(input.className).toContain('pl-10');
     expect(input).not.toHaveAttribute('aria-invalid');
+  });
+});
+
+describe('Textarea', () => {
+  it('links the label, the counter and the error, and keeps the field 16px and unresizable', () => {
+    render(
+      <Textarea id="bio" label="Bio" counter={{ value: 12, max: 150 }} maxLength={150} rows={3} />,
+    );
+    const label = screen.getByText('Bio');
+    expect(label).toHaveAttribute('for', 'bio');
+    const field = screen.getByLabelText('Bio');
+    expect(field.tagName).toBe('TEXTAREA');
+    expect(field).toHaveAttribute('maxlength', '150');
+    expect(field).toHaveAttribute('rows', '3');
+    expect(field.className).toContain('text-base');
+    expect(field.className).toContain('resize-none');
+    expect(field.className).toContain('rounded-xl');
+
+    const counter = screen.getByText('12/150');
+    expect(counter).toHaveAttribute('aria-live', 'off');
+    expect(counter.className).toContain('tabular-nums');
+    expect(counter.className).toContain('text-text-tertiary');
+    expect(field.getAttribute('aria-describedby')).toBe(counter.id);
+  });
+
+  it('turns the counter danger at the cap', () => {
+    render(<Textarea id="bio" label="Bio" counter={{ value: 150, max: 150 }} maxLength={150} />);
+    expect(screen.getByText('150/150').className).toContain('text-danger');
+  });
+
+  it('announces the error and describes the field with both the counter and the error', () => {
+    render(
+      <Textarea
+        id="bio"
+        label="Bio"
+        counter={{ value: 3, max: 150 }}
+        error="Bio muito longa."
+        maxLength={150}
+      />,
+    );
+    const field = screen.getByLabelText('Bio');
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field.className).toContain('border-danger');
+    const error = screen.getByRole('alert');
+    expect(error).toHaveTextContent('Bio muito longa.');
+    expect(field.getAttribute('aria-describedby')).toBe(`bio-counter ${error.id}`);
   });
 });
 

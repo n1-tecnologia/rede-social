@@ -1,0 +1,58 @@
+{
+  "profile": {
+    "title": "Perfil",
+    "back": "Voltar",
+    "rows": {
+      "editProfile": "Editar perfil",
+      "members": "Membros",
+      "settings": "Configurações"
+    },
+    "edit": {
+      "title": "Editar perfil",
+      "back": "Voltar",
+      "photo": {
+        "change": "Alterar foto",
+        "remove": "Remover foto",
+        "helper": "JPEG, PNG ou WebP. Fotos do iPhone são convertidas automaticamente.",
+        "dropzone": "Arraste uma foto ou toque para escolher"
+      },
+      "name": {
+        "label": "Nome",
+        "placeholder": "Seu nome"
+      },
+      "bio": {
+        "label": "Bio",
+        "placeholder": "Conte um pouco sobre você"
+      },
+      "save": "Salvar alterações",
+      "saving": "Salvando…"
+    },
+    "confirm": {
+      "removePhoto": {
+        "title": "Remover sua foto?",
+        "body": "Seu perfil volta a mostrar o ícone padrão.",
+        "confirm": "Remover",
+        "cancel": "Cancelar"
+      }
+    },
+    "toasts": {
+      "saved": "Perfil atualizado.",
+      "photoUpdated": "Foto atualizada.",
+      "photoRemoved": "Foto removida."
+    },
+    "nudge": {
+      "title": "Complete seu perfil",
+      "body": "Adicione uma foto e uma bio para a comunidade te reconhecer.",
+      "action": "Completar perfil",
+      "dismiss": "Agora não"
+    },
+    "errors": {
+      "title": "Algo deu errado",
+      "generic": "Algo deu errado. Tente novamente.",
+      "retry": "Tentar novamente",
+      "nameRequired": "Informe seu nome.",
+      "nameTooLong": "Nome muito longo. Use até {max} caracteres.",
+      "bioTooLong": "Bio muito longa. Use até {max} caracteres."
+    }
+  }
+}

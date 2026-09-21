@@ -1,0 +1,40 @@
+{
+  "media": {
+    "photo": {
+      "dropzone": "Arraste uma foto ou toque para escolher",
+      "preparing": "Preparando sua foto…"
+    },
+    "video": {
+      "dropzone": "Arraste um vídeo ou toque para escolher",
+      "processing": "Enviando para o processamento…"
+    },
+    "progress": "{percent}% enviado",
+    "cancel": "Cancelar envio",
+    "retry": "Tentar novamente",
+    "toasts": {
+      "photoUpdated": "Foto atualizada.",
+      "photoRemoved": "Foto removida.",
+      "videoQueued": "Vídeo enviado. Avisamos quando estiver pronto.",
+      "videoRemoved": "Vídeo removido."
+    },
+    "status": {
+      "processing": "Processando",
+      "ready": "Pronto",
+      "failed": "Falhou",
+      "rejected": "Recusado"
+    },
+    "errors": {
+      "type": "Formato não suportado. Use JPEG, PNG ou WebP.",
+      "videoType": "Formato de vídeo não suportado. Envie um MP4 ou um vídeo gravado no celular.",
+      "size": "Arquivo muito grande. O limite é {limit}.",
+      "transfer": "Falha no envio. Tente novamente.",
+      "prepare": "Não foi possível preparar esta imagem. Tente outra foto.",
+      "notCompleted": "O envio não foi concluído. Tente novamente.",
+      "notAnImage": "Este arquivo não é uma imagem válida. Tente outra foto.",
+      "quota": "A comunidade atingiu o limite de armazenamento. Fale com o administrador.",
+      "duration": "Vídeo muito longo. O limite é {duration}.",
+      "transcode": "Não foi possível processar este vídeo.",
+      "generic": "Algo deu errado. Tente novamente."
+    }
+  }
+}

@@ -55,3 +55,4 @@ export {
   Tabs,
   type TabsProps,
 } from './primitives/Tabs';
+export { Textarea, type TextareaProps } from './primitives/Textarea';
