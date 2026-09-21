@@ -75,7 +75,10 @@ select is_empty(
         ('tenant_invites'),
         -- Phase 3 (03-01). `media_assets` needs NO entry in assertion 2's exemption list: it
         -- carries its own tenant select policy, so it is isolated rather than pinned invisible.
-        ('media_assets')
+        ('media_assets'),
+        -- Phase 3 (03-02). `member_profiles` needs no exemption either — it carries TWO policies
+        -- (a tenant-wide select and a self-scoped update); 080 pins that count.
+        ('member_profiles')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,

@@ -21,14 +21,27 @@ const { deriveBrandColors, normalizeHost, REAL_TENANT_DEFAULT_MODULES, TOGGLEABL
   await import('@tria/contracts');
 const { and, eq, ne } = await import('drizzle-orm');
 const { withAdminTx } = await import('@tria/core/db/admin-tx');
-const { memberships, platformAdmins, tenantDomains, tenantModules, tenants } = await import(
-  '@tria/core/db/schema'
-);
+const {
+  mediaAssets,
+  memberProfiles,
+  memberships,
+  platformAdmins,
+  tenantDomains,
+  tenantModules,
+  tenants,
+} = await import('@tria/core/db/schema');
 const { sqlClient } = await import('@tria/core/db');
 const { supabaseAdmin } = await import('@tria/core/server/supabase-admin');
 const { deriveIconSet } = await import('@tria/core/server/branding/icons');
 const { uploadIconSet } = await import('@tria/core/server/platform/branding');
+const { deriveVariants } = await import('@tria/core/server/media/variants');
+const { putObject } = await import('@tria/core/server/media/storage');
+const { mediaOriginalKey, mediaVariantKey } = await import('@tria/core/server/media/keys');
+const { PURPOSE_WIDTHS } = await import('@tria/contracts/media');
 const { sql } = await import('drizzle-orm');
+
+/** The widths the worker derives for an avatar — the seed writes exactly the same ladder (R-06). */
+const AVATAR_WIDTHS = PURPOSE_WIDTHS.avatar;
 
 /**
  * D-28: both seed tenants carry a real favicon + PWA icon set derived from their seed logo at a FIXED
@@ -71,11 +84,30 @@ if (DEMO_HOST === LAB_HOST) {
   throw new Error(`TENANT_DEMO_HOST and TENANT_LAB_HOST must differ (both are ${DEMO_HOST})`);
 }
 
+/**
+ * A seeded community member (03-02, PROF-01/PROF-03). The names are FIXED and deliberately loaded
+ * with pt-BR diacritics (`ç`, `ã`, `í`, `ñ`, `ü`, `'`), because `app.imm_unaccent` and the trigram
+ * index are only honestly exercised by data that actually needs folding: 03-03's directory search
+ * must find `João Gonçalves` from `goncal` and `Íris Muñoz` from `MUNOZ`.
+ *
+ * `bio: null` on purpose for two of them — 03-04's "sem bio" state and the D-02 nudge need members
+ * who really lack a bio, not a screenshot of one.
+ */
+type SeedMember = {
+  local: string;
+  name: string;
+  bio: string | null;
+  /** A real `ready` avatar asset derived at seed time (03-01 broker shape, written directly). */
+  photo?: { hex: string };
+};
+
 type SeedTenant = {
   slug: string;
   displayName: string;
   rulesText: string;
   host: string;
+  /** Members beyond the tenant's admin and its original `member@<slug>.local`. */
+  members: readonly SeedMember[];
   /** Exactly the keys enabled for this tenant; every other key is written with `enabled = false`. */
   modules: readonly ModuleKey[];
   /** D-25 source colors; the derivations are computed by `deriveBrandColors` at seed time. */
@@ -97,6 +129,28 @@ const SEED_TENANTS: SeedTenant[] = [
     // Far from the neutral TRIA blue (#2e6fd0) and from tria-lab, so the brand smoke tells them apart.
     colors: { primary: '#7c3aed', secondary: '#a78bfa' },
     logoUrl: '/seed-logos/tria-demo.svg',
+    members: [
+      {
+        local: 'joao.goncalves',
+        name: 'João Gonçalves',
+        bio: 'Organizo os encontros de sábado.',
+        photo: { hex: '#7c3aed' },
+      },
+      {
+        local: 'iris.munoz',
+        name: 'Íris Muñoz',
+        bio: 'Fotógrafa. Sempre com a câmera na mochila.',
+        photo: { hex: '#0ea5e9' },
+      },
+      // No bio: the "sem bio" row and the D-02 nudge need a member who really has none.
+      { local: 'ana.paula.ferreira', name: 'Ana Paula Ferreira', bio: null },
+      { local: 'luis.angelo.sa', name: 'Luís Ângelo Sá', bio: 'Professor de história.' },
+      { local: 'cristovao.nobrega', name: 'Cristóvão Nóbrega', bio: 'Curioso por natureza.' },
+      { local: 'beatriz.almeida', name: 'Beatriz Almeida', bio: 'Corro aos domingos.' },
+      // No bio either — two is enough to make "at least two" an honest assertion.
+      { local: 'rafael.teixeira', name: 'Rafael Teixeira', bio: null },
+      { local: 'sofia.davila', name: "Sofia D'Ávila", bio: 'Escrevo sobre a comunidade.' },
+    ],
   },
   {
     slug: 'tria-lab',
@@ -107,6 +161,11 @@ const SEED_TENANTS: SeedTenant[] = [
     modules: ['feed', 'events'],
     colors: { primary: '#0f766e', secondary: '#14b8a6' },
     logoUrl: '/seed-logos/tria-lab.svg',
+    members: [
+      { local: 'alvaro.pinheiro', name: 'Álvaro Pinheiro', bio: 'Testando o isolamento.' },
+      { local: 'helena.kuster', name: 'Helena Küster', bio: 'Trago o café.' },
+      { local: 'marcos.vinicius', name: 'Marcos Vinícius', bio: null },
+    ],
   },
 ];
 
@@ -127,6 +186,85 @@ async function ensureUser(email: string, name: string, password: string): Promis
   const existing = list.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
   if (!existing) throw error;
   return existing.id;
+}
+
+/**
+ * The bio and (for two demo members) a REAL avatar asset, keyed by `membership_id` — the row itself
+ * was already created by the trigger. Idempotent on both halves: the bio is an `update`, and the
+ * avatar block short-circuits as soon as the profile already points at one, so a re-run never
+ * accumulates assets or Storage objects.
+ *
+ * The avatar is written the way 02-13's seed writes the icon set: derived here and `putObject`-ed
+ * under the broker's own key shape (`<tenant>/media/<assetId>/original` + one `w<width>.webp` per
+ * avatar width), then recorded as a `ready` row. No pg-boss job is enqueued — the seed is the
+ * fixture writer of record; jobs belong to runtime mutations.
+ */
+async function seedMemberProfile(
+  tenantId: string,
+  userId: string,
+  member: SeedMember,
+): Promise<boolean> {
+  const existing = await withAdminTx(async (tx) =>
+    tx
+      .select({ id: memberProfiles.id, avatarAssetId: memberProfiles.avatarAssetId })
+      .from(memberProfiles)
+      .where(and(eq(memberProfiles.tenantId, tenantId), eq(memberProfiles.userId, userId)))
+      .limit(1),
+  );
+  const profile = existing[0];
+  if (!profile) throw new Error(`the membership trigger did not create a profile for ${userId}`);
+
+  await withAdminTx(async (tx) => {
+    await tx
+      .update(memberProfiles)
+      .set({ bio: member.bio, displayName: member.name, updatedAt: new Date() })
+      .where(eq(memberProfiles.id, profile.id));
+  });
+
+  if (!member.photo || profile.avatarAssetId) return Boolean(profile.avatarAssetId);
+
+  const assetId = crypto.randomUUID();
+  const svg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><rect width="640" height="640" fill="${member.photo.hex}"/><circle cx="320" cy="250" r="110" fill="#ffffff" fill-opacity="0.85"/><ellipse cx="320" cy="520" rx="190" ry="140" fill="#ffffff" fill-opacity="0.85"/></svg>`,
+  );
+  const widths = [...AVATAR_WIDTHS];
+  const variants = await deriveVariants(svg, widths);
+  const [original] = await deriveVariants(svg, [640]);
+  if (!original) throw new Error('could not derive the seed avatar original');
+
+  await putObject(mediaOriginalKey(tenantId, assetId), original.body, {
+    contentType: 'image/webp',
+  });
+  for (const variant of variants) {
+    await putObject(mediaVariantKey(tenantId, assetId, variant.width), variant.body, {
+      contentType: 'image/webp',
+    });
+  }
+
+  await withAdminTx(async (tx) => {
+    await tx.insert(mediaAssets).values({
+      id: assetId,
+      tenantId,
+      ownerUserId: userId,
+      kind: 'image',
+      purpose: 'avatar',
+      status: 'ready',
+      provider: 'supabase',
+      mime: 'image/webp',
+      bytes: original.body.length,
+      width: 640,
+      height: 640,
+      variantWidths: widths,
+      filename: 'avatar.webp',
+      readyAt: new Date(),
+    });
+    await tx
+      .update(memberProfiles)
+      .set({ avatarAssetId: assetId, updatedAt: new Date() })
+      .where(eq(memberProfiles.id, profile.id));
+  });
+
+  return true;
 }
 
 for (const t of SEED_TENANTS) {
@@ -179,13 +317,28 @@ for (const t of SEED_TENANTS) {
       name: `Admin ${t.displayName}`,
     },
     { role: 'member' as const, email: `member@${t.slug}.local`, name: `Membro ${t.displayName}` },
+    // 03-02: a real community. The `member_profiles` row for each of these is created by the
+    // `member_profiles_from_membership` trigger, with `display_name := users.name` — the seed never
+    // inserts a profile row itself, which is exactly what makes the trigger's guarantee testable.
+    ...t.members.map((m) => ({
+      role: 'member' as const,
+      email: `${m.local}@${t.slug}.local`,
+      name: m.name,
+      profile: m,
+    })),
   ];
+  let memberCount = 0;
+  let photoCount = 0;
   for (const p of people) {
     const userId = await ensureUser(p.email, p.name, seedPassword);
     await withAdminTx(async (tx) => {
       await tx.insert(memberships).values({ tenantId, userId, role: p.role }).onConflictDoNothing();
     });
+    if (p.role === 'member') memberCount += 1;
+    if (!('profile' in p)) continue;
+    if (await seedMemberProfile(tenantId, userId, p.profile)) photoCount += 1;
   }
+  console.log(`seed: tenant ${t.slug} — ${memberCount} members, ${photoCount} with photo`);
 
   // D-16/D-17: one row per TOGGLEABLE key, so flipping a module later is an update, never an insert
   // race. A key absent from `t.modules` is written as `enabled = false` — indistinguishable from a

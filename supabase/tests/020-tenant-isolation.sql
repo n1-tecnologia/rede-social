@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(34);
+select plan(38);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -260,6 +260,48 @@ select throws_ok(
   '42501',
   null,
   'tenant_invites: the lane cannot create an invite — provisioning is a platform-lane operation (D-30)'
+);
+
+-- ── 03-02 (PROF-01/PROF-02/TENANT-04): member_profiles, the first TENANT-WIDE select policy ─────
+-- A second member of A is created here, mid-file, on purpose: the self-scoped UPDATE policy needs a
+-- NEIGHBOUR to be meaningful (a tenant with one member cannot distinguish "my row" from "a row of my
+-- tenant"), and creating them here leaves every membership assertion above pinned exactly as it was.
+-- Their profile row is created by the `member_profiles_from_membership` trigger, not by this file —
+-- which is the R-08 guarantee being exercised rather than simulated.
+reset role;
+select tests.auth_user('vizinho@a.local', '0a000000-0000-4000-8000-00000000000a');
+select tests.member('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000000000a');
+select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
+
+select is_empty(
+  $$ select id from public.member_profiles
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'member_profiles: B''s profiles are invisible to A''s lane'
+);
+-- Unlike consent_records (self-only), this select policy is TENANT-WIDE by design: PROF-02 and
+-- PROF-03 are a member reading OTHER members of their own community.
+select results_eq(
+  $$ select count(*)::int from public.member_profiles $$,
+  ARRAY[2],
+  'member_profiles: A''s lane sees BOTH of its members'' profiles — the select policy is tenant-wide'
+);
+select results_eq(
+  $$ with u as (
+       update public.member_profiles set bio = 'minha bio'
+        where user_id = '0a000000-0000-4000-8000-000000000002' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[1],
+  'member_profiles: a member CAN rewrite their own row (D-46: renaming is free and ungated)'
+);
+-- T-03-12: the row a PATCH may touch is decided by the policy, never by a body field. The statement
+-- below names the neighbour explicitly and still changes nothing.
+select results_eq(
+  $$ with u as (
+       update public.member_profiles set bio = 'invadida'
+        where user_id = '0a000000-0000-4000-8000-00000000000a' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'member_profiles: an update aimed at a NEIGHBOUR''s row in the same tenant touches nothing'
 );
 
 -- ── tenant B's lane: the symmetric half, so nothing above is an artefact of who went first ──────
