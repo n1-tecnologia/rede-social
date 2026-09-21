@@ -1,7 +1,8 @@
 ---
 phase: "03"
 slug: "media-pipeline-member-profiles"
-status: draft
+status: approved
+reviewed_at: "2026-09-21"
 shadcn_initialized: false
 preset: none
 created: "2026-09-21"
@@ -371,85 +372,161 @@ Everything in `02-UI-SPEC.md` §Motion & Accessibility still holds. Deltas:
 > Empty-state and error-state COPY live in `## Copywriting Contract` above — this section covers
 > state coverage and REFERENCES those rows rather than restating the copy (de-dup).
 
-**Pre-probe draft, 2026-09-21** — written from the screen contracts above so the planner is not blocked; the probe **replaces** these rows when it runs (rows are idempotent by element id + category).
+**Probe run 2026-09-21** — 73 applicable considerations across 10 elements, 73 resolved, 0 unresolved (55 explicit · 2 backstop · 16 dismissed with reason). Element kinds were confirmed by the user, who added `form` to E6 and `interactive-control` to E10 over the heuristic classification. Rows are idempotent by element id + category and are REPLACED, never appended, on a re-run.
 
-| Id | Surface | Element kinds |
-|----|---------|---------------|
-| E01 | Own profile `/perfil` | media, static-content, nav |
-| E02 | Edit profile `/perfil/editar` | form, media, interactive-control |
-| E03 | Member profile `/membros/[membershipId]` | media, static-content |
-| E04 | Member directory `/membros` | list-collection, form, interactive-control |
-| E05 | `ProfileNudgeCard` on `/inicio` | static-content, interactive-control, media |
-| E06 | `AvatarUploadField` / `FileDropZone` | form, interactive-control, static-content |
-| E07 | `MediaImage` | media |
-| E08 | Admin media `/configuracoes/midia` | list-collection, form, media, interactive-control |
-| E09 | `VideoPlayer` | media, static-content |
-| E10 | `/configuracoes` deltas | list-collection, nav |
+**Legend** — ✔ resolved (explicit) is a plain truth the planner lifts into `must_haves.truths`; ◐ resolved (backstop) is lifted as the flat scalar `{ statement, verification: backstop }` and routes to `human_needed` at verify time when no evidence is wired; ✖ dismissed carries its reason as the audit trail and is never lifted.
 
-Applicable state considerations resolved: 44 covered, 4 backstop, 0 unresolved (pre-probe draft)
+### E1 · Own profile `/perfil`
 
-| Category | Element(s) | Status | Resolution / Reason |
-|----------|------------|--------|---------------------|
-| empty | E01 Own profile | ✅ covered | No photo → `Avatar`'s neutral `User` fallback (R-09); no bio → the column closes after the e-mail, no placeholder line. The three rows are static and always present. |
-| empty | E02 Edit profile | ✅ covered | Empty bio shows the placeholder and `0/150`; "Remover foto" is not rendered when there is no photo; no inline error until first submit. |
-| empty | E03 Member profile | ✅ covered | No bio → nothing is rendered (Copywriting "Empty state — member profile, no bio"); no photo → the `User` fallback. |
-| empty | E04 Directory | ✅ covered | Zero members → "Nenhum membro ainda"; a query with no hits → "Nenhum membro encontrado" (both `EmptyState variant="card"`, icon `Users`). |
-| empty | E05 Nudge card | ✅ covered | The card exists *because* the profile is empty; it is absent once dismissed or once both photo and bio exist. |
-| empty | E06 Upload field | ✅ covered | `idle` is the empty state: the dashed zone with its caption; nothing implies a pending file. |
-| empty | E07 `MediaImage` | ✅ covered | No `assetId` → the caller renders `Avatar`'s fallback or the plain `bg-bg-tertiary` box; `MediaImage` is never asked to render nothing. |
-| empty | E08 Admin media | ✅ covered | Zero assets → "Nenhum vídeo ainda" `EmptyState` below the always-visible upload zone. |
-| empty | E10 `/configuracoes` | ✖ dismissed | Static kernel row list; the "Administração" group is hidden (not empty) for non-admins. |
-| loading | E01 Own profile; E03 Member profile | ✅ covered | `Skeleton` circle 80 + name bar + two bio bars, matching the final geometry. |
-| loading | E02 Edit profile | ✅ covered | "Salvar" uses the pending label "Salvando…" with `aria-busy`; the photo upload has its own independent state machine and does not block the form. |
-| loading | E04 Directory | ✅ covered | 8 `Skeleton` rows on first load and on every debounced query change; "Carregar mais" shows "Carregando…" while keeping existing rows visible. |
-| loading | E05 Nudge card | ✅ covered | Server-rendered with `/inicio`; "Agora não" disables both buttons while the server action is in flight. |
-| loading | E06 Upload field | ✅ covered | `preparing` → `progress` ({percent} + 4px brand bar + "Cancelar envio") → `processing` → `done` toast; the full table in *Upload contract*. |
-| loading | E08 Admin media | ✅ covered | 4 `Skeleton` rows on first load; rows in `processing` poll every 5 s for up to 5 min and then offer "Atualizar". |
-| loading | E09 `VideoPlayer` | ✅ covered | The `processing` state IS the loading state ("Processando o vídeo…"); a `ready` player shows its own poster while buffering. |
-| loading | E07 `MediaImage` | ✅ covered | The aspect-ratio `bg-bg-tertiary` box is the placeholder; no spinner is layered over an image and nothing reflows. |
-| error | E01 Own profile; E03 Member profile | ✅ covered | Fetch failure → generic `EmptyState` + "Tentar novamente"; unknown/other-tenant membership → "Membro não encontrado" (404, names no tenant). |
-| error | E02 Edit profile | ✅ covered | Field-level `Input`/`Textarea` error slots ("Informe seu nome.", the `too_long` fallback) plus the generic error toast for server failures. |
-| error | E04 Directory | ✅ covered | Fetch failure → generic `EmptyState` + "Tentar novamente"; a stale cursor re-fetches from the start rather than showing a gap. |
-| error | E05 Nudge card | ✅ covered | A failed dismissal reverts the card and shows the generic error toast; the card is never left in a half-dismissed state. |
-| error | E06 Upload field | ✅ covered | Type / size / transfer / re-encode / confirmation / quota / duration messages per the Copywriting Contract, in the zone's `role="alert"` slot. **A successful HEIC re-encode produces no message at all (R-12).** |
-| error | E07 `MediaImage` | ✅ covered | `onError` clears `src` → neutral fallback; an expired or cross-tenant asset degrades to "no photo", never a broken-image glyph. |
-| error | E08 Admin media; E09 `VideoPlayer` | ✅ covered | `failed` row: danger pill + "Não foi possível processar este vídeo." + `ghost` "Remover"; an expired playback token shows the generic toast + "Tentar novamente" that re-mints. |
-| populated | E01 Own profile | ✅ covered | Avatar 80 (`w320` variant), name 24/700, e-mail 14 secondary, bio 14 centred `max-w-xs`, three rows `py-3.5` with chevrons; desktop wraps the rows in a `Card`. |
-| populated | E03 Member profile | ✅ covered | Avatar 80, name 24/700, bio centred — and nothing else (D-45). |
-| populated | E04 Directory | ✅ covered | 25 rows per page, `min-h-14`, `Avatar md` + name 14/700 + bio snippet 12 tertiary + `ChevronRight`; sticky `SearchBar`; "Carregar mais" appends without re-ordering. |
-| populated | E05 Nudge card | ✅ covered | `Card p-4`, `Avatar md`, title 14/700, body 12 secondary, brand "Completar perfil" + ghost "Agora não"; sits between the welcome block and `HomeSlots`. |
-| populated | E08 Admin media | ✅ covered | Rows with a `w-24 aspect-video` poster, 16/700 filename, date + duration 12 `tabular-nums`, status pill; ready rows open the player sheet. |
-| populated | E09 `VideoPlayer` | ✅ covered | `aspect-video rounded-xl`, `streamType="on-demand"`, `playsInline`, signed poster, `accent-color: var(--brand-accent)`. |
-| partial | E01 Own profile; E03 Member profile | ✅ covered | Photo without bio and bio without photo both render; each missing piece is simply absent, never a placeholder. |
-| partial | E02 Edit profile | ✅ covered | Partial fill never disables "Salvar" (only non-dirty does); submit marks each invalid field and keeps valid values. A photo upload in flight does not block saving the name/bio. |
-| partial | E04 Directory | ✅ covered | A member with no photo renders the fallback icon; a member with no bio renders a single-line row at the same `min-h-14` (UI-D-02). |
-| partial | E05 Nudge card | ✅ covered | The card shows while **either** photo or bio is missing, with identical copy in both cases — deliberately, so the card never enumerates what is missing. |
-| partial | E08 Admin media | ✅ covered | A `processing` asset has no poster (spinner in the thumbnail box) and no duration; the row keeps its full geometry so nothing shifts when it flips to `ready`. |
-| overflow | E01, E03 Profiles | ✅ covered | The column scrolls inside `<main class="app-scroll">`; the bio is bounded by `max-w-xs` and wraps; `vh/dvh` are banned inside pages. |
-| overflow | E02 Edit profile | ✅ covered | `gap-6` column scrolls; with the keyboard open the page grows rather than clipping; the `Textarea` is `resize-none` at `rows={3}` and scrolls internally past three lines. |
-| overflow | E04 Directory | ✅ covered | Rows are full-width with `truncate` on both lines; no horizontal scroll at 320px; the sticky search block never overlaps the first row (content padding accounts for it). |
-| overflow | E06 Upload field | ✅ covered | The progress caption and the error message wrap inside the zone; the zone grows vertically rather than clipping. |
-| overflow | E08 Admin media | ✅ covered | The filename `truncate`s with `title`; the metadata line wraps to two lines on narrow widths; the thumbnail is fixed at `w-24`. |
-| overflow | E09 `VideoPlayer` | ✅ covered | The player is `aspect-video` inside `overflow-hidden`; the mobile sheet is bounded by `max-h` 80% of the screen. |
-| zero-one-many | E04 Directory | ✅ covered | Zero → `EmptyState`; one → a single row with identical geometry; many → 25-row pages with "Carregar mais". The result count announcement uses an ICU plural. |
-| zero-one-many | E08 Admin media | ✅ covered | Zero → `EmptyState`; one or many → identical row geometry; the polling loop runs while *any* row is `processing`. |
-| zero-one-many | E01 Own profile rows | ✖ dismissed | Fixed set of three rows; the count never varies. |
-| long-text | E01, E03 Profiles | 🧪 backstop | A 60-char display name wraps to two lines centred at 24/700 and a 150-char bio wraps inside `max-w-xs` — verify with a seeded long-name/long-bio member in the profile e2e. |
-| long-text | E04 Directory | ✅ covered | Name and bio snippet both `truncate` with `title`; the row height is unchanged by length. |
-| long-text | E02 Edit profile | ✅ covered | "Nome" is capped at `maxLength={60}` and "Bio" at `maxLength={150}` with a visible counter; neither can overflow its field. |
-| long-text | E06 Upload field | 🧪 backstop | The longest refusal string ("A comunidade atingiu o limite de armazenamento. Fale com o administrador.") wraps inside the zone without pushing the caption out — verify in a component test. |
-| long-text | E08 Admin media | 🧪 backstop | A 60-char filename from a phone (`IMG_20260921_...mov`) `truncate`s with `title` at 16/700 — verify with a long-filename fixture. |
-| long-text | E05 Nudge card | ✅ covered | Both strings are fixed catalog copy that wraps; the two buttons stay on one row at 320px (`size="sm"` = 36px height, labels ≤ 17 chars). |
-| long-text | E09 `VideoPlayer` | 🧪 backstop | The "Processando o vídeo…" block keeps its `aspect-video` frame with the helper line wrapped to two lines at 320px — verify in a component test. |
-| long-text | E10 `/configuracoes` | ✅ covered | All row labels are fixed catalog strings with `truncate`. |
+*Kinds:* list-collection, nav, media, static-content
 
-<!-- Status vocabulary (locked by probe-core projectTruths):
-     ✅ covered   → a plain truth string lifted into must_haves.truths
-     🧪 backstop  → a flat scalar { statement, verification: backstop }; at verify time, no explicit
-                    evidence → insufficient_spec → human_needed (never a silent pass, #1154)
-     ✖ dismissed → not applicable, with the reason as the audit trail (never lifted)
-     ⚠ unresolved → an explicit planner assumption (surfaced, never silently dropped)
-     Rows are REPLACED (not appended) on a probe re-run — idempotent. -->
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | Sem foto, `Avatar` cai no icone neutro `User`; sem bio, o paragrafo da bio nao e renderizado e o grupo de rows segue imediatamente ao nome. |
+| ✔ | `loading` | `Skeleton` circulo 80 + duas barras de texto + tres barras de row. |
+| ✔ | `error` | `EmptyState` generico com acao “Tentar novamente”. |
+| ✔ | `populated` | `ProfileHeader` (Avatar xl, nome 24/700, e-mail 14/400, bio 14/400 centrada `max-w-xs`) seguido de tres rows: Editar perfil, Membros, Configuracoes. Sem role `StatusPill` (UI-D-01). |
+| ✔ | `partial` | Foto sem bio e bio sem foto renderizam com o mesmo header; cada bloco ausente e omitido, nunca substituido por placeholder. |
+| ✔ | `overflow` | Nome limitado a 60 caracteres pelo `maxLength` do formulario e quebra em multiplas linhas; bio limitada a `max-w-xs` e quebra livremente. |
+| ✖ | `zero-one-many` | **dismissed** — O grupo de rows de /perfil e um conjunto fixo de tres itens, sem contagem variavel. |
+| ✔ | `long-text` | Nome <=60 e bio <=150 garantidos por `maxLength` no formulario; ambos quebram, nenhum e truncado nesta tela. |
+
+### E2 · Edit profile `/perfil/editar`
+
+*Kinds:* form, list-collection, media, interactive-control, static-content
+
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | Membro sem foto e sem bio: `Avatar` no icone neutro, “Remover foto” nao renderizado, campos vazios, “Salvar” desabilitado ate o formulario sujar. |
+| ✔ | `loading` | `Skeleton` circulo + duas barras de campo, no mesmo vocabulario de loading das demais telas da fase. |
+| ✔ | `error` | Erro de campo “Informe seu nome.” no `Input`; falha de upload renderiza a mensagem dentro do slot `error` da zona com `role="alert"` em 14px `text-danger` + ghost “Tentar novamente”. |
+| ✔ | `populated` | `Avatar` xl, `Input` Nome preenchido, `Textarea` Bio com contador {n}/150, footer `Button variant="brand" size="lg" fullWidth` “Salvar” habilitado. |
+| ✔ | `partial` | O upload da foto commita independentemente do “Salvar”: quem so troca a foto nunca precisa submeter o formulario. |
+| ✔ | `overflow` | `Textarea rows={3}` com scroll interno; o cap de 150 impede crescimento indefinido. |
+| ✖ | `zero-one-many` | **dismissed** — Formulario de instancia unica; nao ha contagem de itens. |
+| ✔ | `long-text` | `maxLength` 60 (nome) e 150 (bio), com contador visivel na bio. |
+
+### E3 · Member profile `/membros/[membershipId]`
+
+*Kinds:* media, static-content
+
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | Sem foto, icone neutro; sem bio, a coluna encerra apos o nome — D-45 nao permite nenhum outro conteudo. |
+| ✔ | `loading` | `Skeleton` circulo 80 + barra de nome + duas barras de bio. |
+| ✔ | `error` | id desconhecido, de outro tenant, bloqueado ou soft-deleted -> `notFound()` com `EmptyState` “Membro nao encontrado” + outline “Voltar para membros”; o corpo do 404 nunca nomeia um tenant (D-23). |
+| ✔ | `populated` | `Avatar` xl, nome 24/700 como unico h1, bio 14 centrada `max-w-xs`. Nada alem disso (D-45). |
+| ✔ | `overflow` | Bio em `max-w-xs` quebrando; nome quebra em multiplas linhas. |
+| ✔ | `long-text` | Nome <=60 e bio <=150 garantidos pelo formulario de edicao. |
+
+### E4 · Member directory `/membros`
+
+*Kinds:* list-collection, nav, media, interactive-control, static-content
+
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | Dois estados distintos: sem membros e sem resultados de busca, ambos `EmptyState variant="card"` com icone `Users` e variantes de copy proprias no catalogo. |
+| ✔ | `loading` | 8 `Skeleton` rows (circulo 40 + duas barras) na primeira carga e a cada mudanca de query debounced; “Carregar mais” mostra label pendente e mantem os rows existentes visiveis. |
+| ✔ | `error` | `EmptyState` generico + “Tentar novamente”. |
+| ✔ | `populated` | `MemberRow` por membro separados por `border-b border-divider`, pagina de 25, ordenados por `unaccent(lower(display_name))` e depois `membershipId`. |
+| ✔ | `partial` | Membro sem bio: a segunda linha nao e renderizada e o row encolhe para uma linha; nenhum placeholder textual e inventado. |
+| ✔ | `overflow` | Nome e bio truncam com ellipsis dentro do row; a busca nao destaca correspondencias. |
+| ✔ | `zero-one-many` | A live region usa chaves singular/plural do catalogo `members.json`: “1 membro encontrado” quando `count === 1` e “{count} membros encontrados” caso contrario. |
+| ✔ | `long-text` | Truncamento por CSS no row, em ambas as linhas. |
+
+### E5 · Home nudge card (`/inicio`)
+
+*Kinds:* form, list-collection, media, interactive-control, static-content
+
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | Nao e renderizado quando o membro ja tem foto e bio, ou ja dispensou; nao existe versao “vazia” do card. |
+| ✖ | `loading` | **dismissed** — Renderizado no servidor junto com /inicio a partir de dados que a pagina ja carrega; nao tem carregamento proprio. |
+| ◐ | `error` | Falha da server action “Agora nao” — o card permanece visivel apos o clique — nao esta especificada. *(verification: backstop — held-out UI-state test)* |
+| ✔ | `populated` | `Card p-4`: `Avatar size="md"`, titulo 14/700 “Complete seu perfil”, corpo 12/400, linha de acao com brand “Completar perfil” + ghost “Agora nao”. Sem glyph X. |
+| ✔ | `partial` | Visivel enquanto `avatarAssetId is null || bio is null`: ter apenas um dos dois ainda mostra o card. |
+| ✖ | `overflow` | **dismissed** — Copy fixa do catalogo, sem conteudo do membro no corpo. |
+| ✖ | `zero-one-many` | **dismissed** — Card unico; nao ha contagem. |
+| ✖ | `long-text` | **dismissed** — Nenhum texto do membro entra no card. |
+
+### E6 · Admin media `/configuracoes/midia`
+
+*Kinds:* list-collection, media, interactive-control, **form** (added at kind-confirmation)
+
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | `EmptyState variant="card"` com icone `Film`. |
+| ✔ | `loading` | 3 `Skeleton` rows (thumb + duas barras) na primeira carga, no mesmo formato dos 8 rows do diretorio. |
+| ✔ | `error` | Row com falha: pill danger “Falhou” + linha 12px `text-danger` “Nao foi possivel processar este video.” + ghost “Remover” com `ConfirmDialog`. Erro de upload no slot `error` da zona. |
+| ✔ | `populated` | `MediaAssetRow` mais recentes primeiro, thumb `w-24 aspect-video`, filename truncado, data pt-BR `tabular-nums`, `StatusPill` de estado. |
+| ✔ | `partial` | Row em processamento: sem poster (`Loader2` 20 centrado), duracao apenas quando conhecida, row nao interativo. |
+| ✔ | `overflow` | Filename truncado no row. |
+| ✔ | `zero-one-many` | Mesmo contrato do diretorio (R-11): keyset, pagina de 25, botao `outline fullWidth` “Carregar mais” que anexa enquanto houver cursor. |
+| ✔ | `long-text` | Filename truncado; nenhuma outra string variavel no row. |
+
+### E7 · Settings `/configuracoes` deltas
+
+*Kinds:* list-collection, nav
+
+| | Category | Statement |
+|---|---|---|
+| ✖ | `empty` | **dismissed** — Conjunto de rows fixo e definido em codigo; nao ha estado sem dados. |
+| ✖ | `loading` | **dismissed** — Renderizado no servidor a partir da membership ja presente no bootstrap. |
+| ✖ | `error` | **dismissed** — Rows estaticas de navegacao; nao ha fetch proprio que possa falhar. |
+| ✔ | `populated` | “Editar perfil” vira `<Link>` com `ChevronRight` 18; grupo “Administracao” com a row “Midia”; “Notificacoes” mantem a pill “Em breve”. |
+| ✔ | `partial` | O grupo “Administracao” e renderizado apenas para `admin_tenant` e fica inteiramente oculto — nao desabilitado — para os demais papeis. |
+| ✖ | `overflow` | **dismissed** — Labels pt-BR fixas do catalogo. |
+| ✔ | `zero-one-many` | O grupo “Administracao” so e renderizado quando tem ao menos uma row; para papeis sem nenhuma, o `SectionTitle` tambem nao aparece. |
+| ✖ | `long-text` | **dismissed** — Labels fixas do catalogo. |
+
+### E8 · Upload state machine (`useSignedUpload`)
+
+*Kinds:* form, media, interactive-control, static-content
+
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | `idle`: `FileDropZone` tracejada (mobile: alvo de toque; desktop: drag-over destaca `border-brand bg-brand-soft`) ou, para a foto, o `Avatar` atual + “Alterar foto”. |
+| ✔ | `loading` | `preparing` (“Preparando sua foto…” com a zona inerte) e `progress` (barra 4px `rounded-full bg-brand` + “{percent}% enviado” 12 `tabular-nums` + ghost “Cancelar envio”); a barra nunca anda para tras. |
+| ✔ | `error` | Volta a `idle` e renderiza a mensagem dentro do slot `error` da zona com `role="alert"` em 14px `text-danger` + ghost “Tentar novamente” para falha de transferencia; recusas chegam no pick e na confirmacao (criterio 3). |
+| ✔ | `populated` | `done`: toast de sucesso e volta a `idle` com o novo asset no lugar (“Foto atualizada.” / “Video enviado. Avisamos quando estiver pronto.”). |
+| ✔ | `partial` | Cancelar aborta a transferencia em voo e volta a `idle` sem mensagem; sair da tela nao bloqueia e o orphan sweeper (R-07) recolhe o asset pendente. |
+| ✖ | `overflow` | **dismissed** — A zona mostra captions do catalogo, nao o nome do arquivo escolhido. |
+| ✖ | `long-text` | **dismissed** — Todas as mensagens vem do Copywriting Contract, com tamanho controlado. |
+
+### E9 · `MediaImage` rendering contract
+
+*Kinds:* media
+
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | Sem asset, `Avatar` cai no icone neutro `User` e qualquer outra superficie no box liso `bg-bg-tertiary`. |
+| ✔ | `loading` | O `<img>` fica em box com aspect ratio explicito sobre `bg-bg-tertiary`: nada reflui, sem CLS e sem spinner sobre imagem. |
+| ✔ | `error` | `onError` limpa o `src`, caindo no mesmo estado neutro de “sem foto”; glyph de imagem quebrada nunca e exibido; asset expirado ou de outro tenant degrada identicamente. |
+| ✔ | `populated` | `src="/v1/media/{assetId}/w320"` com `srcSet` na escada de larguras declarada pelo payload (R-06) e `sizes` por call site; `loading="lazy" decoding="async"` exceto o avatar do header (eager). |
+
+### E10 · `VideoPlayer`
+
+*Kinds:* list-collection, media, static-content, **interactive-control** (added at kind-confirmation)
+
+| | Category | Statement |
+|---|---|---|
+| ✔ | `empty` | Nao ha estado vazio: o player so e renderizado para um asset existente, em um dos tres estados `processing`/`ready`/`failed`. |
+| ✔ | `loading` | `processing`: `Card` com frame `aspect-video bg-bg-tertiary rounded-xl`, `Loader2` 28 `text-brand`, “Processando o video…” e “Isso pode levar alguns minutos. Voce pode sair desta tela.”; sob `prefers-reduced-motion` o spinner nao gira e a copy carrega o estado. |
+| ✔ | `error` | `failed`: pill danger + copy, sem frame de player. Token de playback expirado em sessao vira toast generico + ghost “Tentar novamente” que re-emite; erro cru do player nunca aparece. |
+| ✔ | `populated` | `ready`: `<MuxPlayer>` `aspect-video rounded-xl`, `streamType="on-demand"`, `playsInline`, poster por token assinado, tokens playback/thumbnail/storyboard por request (D-44), `accent-color` em `var(--brand-accent)`; `BottomSheet` no mobile, dialog `max-w-[680px]` no desktop. |
+| ◐ | `partial` | Asset `ready` cujo poster/thumbnail nao resolve (token de thumbnail falha ou o Mux ainda nao gerou o still) nao esta especificado. *(verification: backstop — held-out UI-state test)* |
+| ✖ | `overflow` | **dismissed** — Frame fixo em `aspect-video`; o player gerencia o proprio conteudo. |
+| ✖ | `zero-one-many` | **dismissed** — Instancia unica de player por asset. |
+| ✖ | `long-text` | **dismissed** — Nenhum texto variavel no frame do player. |
+
+### Backstop items — what a verifier must confirm
+
+Two considerations have no specified behavior in this contract. They are recorded as `verification: backstop` so plan-phase lifts them as `{ statement, verification: backstop }`; at verify time, a backstop truth with no explicit evidence abstains to `human_needed` (reason `insufficient_spec`) rather than passing silently.
+
+| Element | Category | What is unspecified | Backstop test |
+|---|---|---|---|
+| E5 Home nudge card | `error` | What the member sees when the “Agora não” server action fails and the card is still on screen after the click | A held-out UI-state test that forces the dismissal action to reject and asserts the card does not silently appear dismissed |
+| E10 `VideoPlayer` | `partial` | A `ready` asset whose poster/thumbnail token does not resolve — the player is playable but has no still | A held-out UI-state test rendering a `ready` asset with an unresolvable poster, asserting no broken-image glyph and no raw player error |
 
 ---
 
@@ -466,12 +543,40 @@ Applicable state considerations resolved: 44 covered, 4 backstop, 0 unresolved (
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+Verified by `gsd-ui-checker` on 2026-09-21. The checker re-ran the inventory enumeration command
+itself (returns 30, matching the declared count), confirmed `--brand-accent` / `--brand-on-accent`
+are real theme-resolved aliases defined at `packages/ui/src/styles/tokens.css:124-141` (so the
+"Phase 3 adds no token" claim holds), and checked the typography and spacing inheritance claims
+line-by-line against `02-UI-SPEC.md` rather than assuming them.
 
-**Approval:** pending
+- [x] Dimension 1 Copywriting: **FLAG** (non-blocking) — see recommendation below
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
+
+**Items flagged for scrutiny — all cleared.** UI-D-01 (role `StatusPill` removed from `/perfil`)
+does not contradict CONTEXT: the Deferred list rejects role badges "on profiles and in the
+directory" unqualified, and `03-CONTEXT.md` §Claude's Discretion explicitly hands over "what the
+owner's own `/perfil` shows beyond the other-member view". UI-D-04 (`SearchBar` at 16px / `h-11`,
+departing from the prototype's `text-sm` / `py-2.5`) is justified by two pre-existing inherited
+rules, not invented here: `02-UI-SPEC.md` Typography declares 16px for "All inputs (iOS zoom
+guard)" and its Spacing exceptions declare the 44px minimum touch target (Apple HIG / WCAG 2.5.5).
+The departure is recorded in the UI-D table, the Spacing exceptions and the component row.
+
+### Non-blocking recommendations
+
+1. **Dimension 1 — Copywriting.** The `/perfil/editar` primary CTA is **"Salvar"**, a bare verb and
+   the only generic label in the contract. The approved Phase 2 baseline uses **"Salvar alterações"**
+   (verb + noun) for the equivalent action on the Marca tab. Aligning would keep the two kernel forms
+   consistent. *Non-binding example — any specific verb+noun reaching the same property counts.*
+   Scored FLAG rather than BLOCK for parity with Phase 2, approved with the same dimension at FLAG.
+2. **Dimension 3 — Color (observation, outside the scored criteria).** Accent-reserved item (2) reads
+   "`ghost` button text", but the Copywriting Contract then gives three ghost buttons that are *not*
+   accent — "Agora não" (neutral), "Remover foto" and "Remover" (`text-danger`). Narrowing item (2)
+   to exclude the neutral dismissal and the destructive ghosts would save the executor reconciling
+   the two sections. An ambiguity, not accent overuse.
+
+**Approval:** approved 2026-09-21 — 7/7 dimensions evaluated, 6 PASS + 1 non-blocking FLAG.
