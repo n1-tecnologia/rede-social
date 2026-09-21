@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
 current_phase: 03
-current_phase_name: media-pipeline-member-profiles
-status: UAT partial — 9/13 passed, 4 blocked on Phase 01.1
-stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-09-21T17:56:37.333Z"
+current_phase_name: Media Pipeline & Member Profiles
+status: executing
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-09-21T18:44:31.487Z"
 last_activity: 2026-09-21
-last_activity_desc: Phase 02 execution started
-state_head: a668e2f7f8730a71a63f9b4b03ed9a4cd7b9d26c
+last_activity_desc: Phase 03 execution started
+state_head: e6e1e0434b4aa92c0aa3e9e275eb84b75f442be9
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 40
-  completed_plans: 29
+  completed_plans: 30
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-11)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 02 — Tenant Shell, Branding & Platform Panel
+**Current focus:** Phase 03 — Media Pipeline & Member Profiles
 
 ## Current Position
 
-Phase: 03 (media-pipeline-member-profiles) — READY TO EXECUTE
-Plan: 20 of 20
-Status: UAT partial — 9/13 passed, 4 blocked on Phase 01.1
-Last activity: 2026-09-21 — Phase 02 execution started
+Phase: 03 (Media Pipeline & Member Profiles) — EXECUTING
+Plan: 2 of 8
+Status: Ready to execute
+Last activity: 2026-09-21 — Phase 03 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -87,6 +87,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02 P18 | 10 min | 3 tasks | 9 files |
 | Phase 02 P19 | 15 min | 3 tasks | 8 files |
 | Phase 02 P20 | 32 min | 3 tasks | 7 files |
+| Phase 03 P01 | 29 min | 3 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -197,6 +198,12 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-19: resend decides 'accepted' from OUR membership row — email_exists + invited membership mints generateLink({ type: 'recovery' }) for the same redirectTo with the invite template (D-C); ensureVerifiedSideEffects records last_error 'invite:<reason>' and setPrimaryDomain never fails the switch on an invite refusal (D-D)
 - [Phase 02]: 02-20: refused invite state ('expired' + sentAt null) is derived in the Admins page into the view-only InviteView 'refused' (danger pill 'Convite recusado — o e-mail já está em uso', resend kept); the resend toast maps exactly email_in_use / user_in_other_tenant to catalog copy naming no tenant, every other refusal keeps the generic toast; createTenantAction accumulates fieldErrors from slug 'taken', adminEmail 'in_use' and issues[] independently
 - [Phase 02]: 02-20: Phase 2 exit gate re-run over the four gap-closure plans is green one shot (pnpm verify 17m30s: unit 288, pgTAP 98, integration 187, e2e 174 passed/38 skipped, PWA 45/3); the first attempt died with ENOSPC from the 14 GB gitignored .turbo/cache — prune .turbo/cache and apps/web/.next when the disk fills, never the Docker stack
+- [Phase 03]: 03-01: the original media object key carries NO extension (<tenant>/media/<assetId>/original) — the mime lives in the row and in the object contentType, so the whole key space is a pure function of (tenantId, assetId, variant) and GET /v1/media/{id}/{variant} does ZERO database reads
+- [Phase 03]: 03-01: media contract ships as the @tria/contracts/media SUBPATH export — src/index.ts is a hand-written barrel and stays frozen; the ./branding precedent
+- [Phase 03]: 03-01: NOT_IMPLEMENTED added to ERROR_CODES so kind:'video' answers a named, tested 501 { media: 'video_provider_missing' } that 03-06 replaces with the VideoProvider adapter
+- [Phase 03]: 03-01: job-lifecycle admin writes (terminal failed, deferred re-arm) live in media/derive-job.ts, not in the broker service; inside packages/core/server/media only storage.ts reaches supabase-admin and only service.ts + derive-job.ts open admin-tx (grep-pinned)
+- [Phase 03]: 03-01: the per-tenant storage ceiling is a SOFT quota — read and insert share one admin transaction with no row lock, so a millisecond-scale overshoot is accepted rather than serialising a tenant uploads
+- [Phase 03]: 03-01: the HEIC unit fixture is macOS sips-generated, not iPhone-captured (unavailable here); the test asserts decoded format==='heif' AND compression==='hevc' before asserting heic_unsupported, so a non-HEVC substitute fails loudly
 
 ### Pending Todos
 
@@ -229,6 +236,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-21T16:30:58.060Z
-Stopped at: Phase 3 UI-SPEC approved
-Resume file: .planning/phases/03-media-pipeline-member-profiles/03-UI-SPEC.md
+Last session: 2026-09-21T18:44:18.863Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
