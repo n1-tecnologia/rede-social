@@ -20,11 +20,15 @@ const log = moduleLogger('module-feed');
  * later edit can turn that 404 into a 403 that confirms the row exists somewhere.
  */
 
-/** One hydrated row of the list projection. Snake_case: it comes straight off `tx.execute`. */
+/**
+ * One hydrated row of the list projection. Snake_case: it comes straight off `tx.execute`, which
+ * returns the driver's own row objects — NOT Drizzle's column-mapped ones — so the timestamps arrive
+ * as text and are formatted by the statement itself (see `ISO_MICROSECONDS`).
+ */
 type FeedRow = {
   id: string;
-  created_at: Date;
-  edited_at: Date | null;
+  created_at: string;
+  edited_at: string | null;
   caption: string;
   community_id: string | null;
   like_count: number;
@@ -34,6 +38,17 @@ type FeedRow = {
   display_name: string;
   avatar_asset_id: string | null;
 };
+
+/**
+ * ISO-8601 in UTC with MICROSECOND precision, produced by Postgres rather than by JavaScript.
+ *
+ * This matters for correctness, not tidiness. The cursor's `n` is this exact string, and the page
+ * predicate compares it back as `::timestamptz`. Round-tripping through a JS `Date` would truncate
+ * `timestamptz`'s microseconds to milliseconds, moving the page boundary EARLIER than the row it
+ * came from — which silently SKIPS any post written in the same millisecond but a later microsecond.
+ * Keeping the full precision in text makes `(created_at, id)` a genuinely total order end to end.
+ */
+const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
 
 /**
  * THE projection, written once and shared by the list and the detail read so the two can never
@@ -46,8 +61,8 @@ type FeedRow = {
  */
 const PROJECTION = sql`
     select p.id,
-           p.created_at,
-           p.edited_at,
+           to_char(p.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at,
+           to_char(p.edited_at at time zone 'utc', ${ISO_MICROSECONDS}) as edited_at,
            p.caption,
            p.community_id,
            p.like_count,
@@ -61,7 +76,8 @@ const PROJECTION = sql`
       join member_profiles mp on mp.membership_id = ms.id`;
 
 /**
- * Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`.
+ * Row → published contract. Timestamps cross the wire as ISO strings, never as `Date` — and here
+ * they already ARE ISO strings, formatted by the statement (`ISO_MICROSECONDS`).
  *
  * `viewerLiked` is hard-`false` here: 04-03 adds `left join feed_likes l on l.post_id = p.id and
  * l.user_id = app.user_id()` to the SAME statement rather than a second query per post.
@@ -69,8 +85,8 @@ const PROJECTION = sql`
  */
 const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
   id: row.id,
-  createdAt: row.created_at.toISOString(),
-  editedAt: row.edited_at?.toISOString() ?? null,
+  createdAt: row.created_at,
+  editedAt: row.edited_at,
   caption: row.caption,
   author: {
     membershipId: row.membership_id,
@@ -122,9 +138,7 @@ export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<F
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   const nextCursor =
-    rows.length > limit && last
-      ? encodeCursor({ n: last.created_at.toISOString(), id: last.id })
-      : null;
+    rows.length > limit && last ? encodeCursor({ n: last.created_at, id: last.id }) : null;
 
   // T-04-05: the SHAPE of the read — counts, ids and flags. A caption is member content and never
   // reaches a log line, an error `details` payload or an OpenAPI example.
@@ -205,7 +219,7 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
     communityId: created.community_id,
     // 04-04 sets this from `media_kind` once `feed_post_media` exists.
     hasMedia: false,
-    occurredAt: created.created_at.toISOString(),
+    occurredAt: created.created_at,
   });
 
   log.info(
