@@ -39,6 +39,14 @@ const row = {
   avatar_asset_id: null,
 };
 
+/**
+ * Statements the NEXT `tx.execute` calls should answer with, in order. Empty means "the post row",
+ * which is what every 04-01 assertion needs. 04-03's interaction cases push their own.
+ */
+let executeQueue: unknown[][] = [];
+/** Thrown by the next `tx.execute`, then cleared — how the 23503 refusal is simulated. */
+let executeError: unknown = null;
+
 const tx = {
   insert: () => ({
     values: () => ({
@@ -48,14 +56,23 @@ const tx = {
       },
     }),
   }),
-  execute: async () => [row],
+  execute: async () => {
+    if (executeError !== null) {
+      const error = executeError;
+      executeError = null;
+      throw error;
+    }
+    return executeQueue.length > 0 ? executeQueue.shift() : [row];
+  },
 };
 
 vi.mock('@tria/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
 }));
 
-const { createPost } = await import('../server/service');
+const { createComment, createPost, deleteComment, likePost, unlikePost } = await import(
+  '../server/service'
+);
 
 function context(): RequestContext {
   return {
@@ -72,6 +89,8 @@ let unsubscribe: () => void = () => {};
 
 beforeEach(() => {
   transaction = 'commit';
+  executeQueue = [];
+  executeError = null;
   received = [];
   unsubscribe = subscribe('post.published', async (payload) => {
     received.push(payload);
@@ -138,6 +157,158 @@ describe('post.published — after commit, exactly once, never on failure', () =
     } finally {
       unsubscribeBroken();
       unsubscribeHealthy();
+    }
+  });
+});
+
+/* ── 04-03: the five interaction events ────────────────────────────────────────────────────────── */
+
+const COMMENT_ID = '55555555-5555-4555-8555-555555555555';
+const PARENT_ID = '66666666-6666-4666-8666-666666666666';
+const POST_AUTHOR_ID = '77777777-7777-4777-8777-777777777777';
+const PARENT_AUTHOR_ID = '88888888-8888-4888-8888-888888888888';
+
+/** A Postgres refusal shaped the way postgres.js raises it, wrapped once the way drizzle does. */
+const pgError = (code: string, constraint: string) => ({
+  message: 'refused',
+  cause: { code, constraint_name: constraint },
+});
+
+const commentRow = {
+  id: COMMENT_ID,
+  created_at: CREATED_AT,
+  body: 'olá',
+  like_count: 0,
+  viewer_liked: false,
+  reply_count: 0,
+  depth: 1,
+  author_user_id: USER_ID,
+  membership_id: MEMBERSHIP_ID,
+  display_name: 'Membro',
+  avatar_asset_id: null,
+  post_author_user_id: POST_AUTHOR_ID,
+  parent_author_user_id: PARENT_AUTHOR_ID,
+};
+
+describe('the interaction events — after commit, once, and never on a refusal', () => {
+  it('4. a like emits ONE post.liked carrying the recipient Phase 7 needs', async () => {
+    const ctx = context();
+    const seen: unknown[] = [];
+    const off = subscribe('post.liked', async (payload) => {
+      seen.push(payload);
+    });
+    try {
+      // insert (no rows) → the counter read-back inside the same transaction
+      executeQueue = [[], [{ like_count: 1, author_user_id: POST_AUTHOR_ID }]];
+      const result = await likePost(ctx, POST_ID);
+
+      expect(result).toEqual({ liked: true, likeCount: 1 });
+      expect(ctx.events).toHaveLength(1);
+      await flush(ctx);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({
+        postId: POST_ID,
+        postAuthorUserId: POST_AUTHOR_ID,
+        actorUserId: USER_ID,
+      });
+    } finally {
+      off();
+    }
+  });
+
+  it('5. an unlike that removed NOTHING is a successful no-op and emits no post.unliked', async () => {
+    const ctx = context();
+    const seen: unknown[] = [];
+    const off = subscribe('post.unliked', async (payload) => {
+      seen.push(payload);
+    });
+    try {
+      // the delete returned no row: there was nothing to unlike
+      executeQueue = [[], [{ like_count: 0, author_user_id: POST_AUTHOR_ID }]];
+      expect(await unlikePost(ctx, POST_ID)).toEqual({ liked: false, likeCount: 0 });
+      expect(ctx.events).toHaveLength(0);
+
+      // …and the same call that DID remove a row emits exactly once.
+      executeQueue = [[{ id: 'row' }], [{ like_count: 0, author_user_id: POST_AUTHOR_ID }]];
+      await unlikePost(ctx, POST_ID);
+      expect(ctx.events).toHaveLength(1);
+      await flush(ctx);
+      expect(seen).toHaveLength(1);
+    } finally {
+      off();
+    }
+  });
+
+  it('6. a reply emits comment.created carrying BOTH the post author and the parent author', async () => {
+    const ctx = context();
+    const seen: unknown[] = [];
+    const off = subscribe('comment.created', async (payload) => {
+      seen.push(payload);
+    });
+    try {
+      executeQueue = [[{ id: COMMENT_ID }], [commentRow]];
+      const created = await createComment(ctx, POST_ID, { body: 'olá', parentId: PARENT_ID });
+
+      expect(created.isReply).toBe(true);
+      await flush(ctx);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({
+        postId: POST_ID,
+        commentId: COMMENT_ID,
+        parentCommentId: PARENT_ID,
+        postAuthorUserId: POST_AUTHOR_ID,
+        parentAuthorUserId: PARENT_AUTHOR_ID,
+        actorUserId: USER_ID,
+      });
+    } finally {
+      off();
+    }
+  });
+
+  it('7. a reply REFUSED by the database (23503) emits nothing and answers reply_depth_exceeded', async () => {
+    const ctx = context();
+    const seen: unknown[] = [];
+    const off = subscribe('comment.created', async (payload) => {
+      seen.push(payload);
+    });
+    try {
+      executeError = pgError('23503', 'feed_comments_parent_fk');
+      await expect(
+        createComment(ctx, POST_ID, { body: 'olá', parentId: PARENT_ID }),
+      ).rejects.toMatchObject({ status: 400, details: { comment: 'reply_depth_exceeded' } });
+
+      // The guarantee in one line: the write never committed, so nothing was queued.
+      expect(ctx.events).toHaveLength(0);
+      await flush(ctx);
+      expect(seen).toHaveLength(0);
+    } finally {
+      off();
+    }
+  });
+
+  it('8. an UNRELATED integrity error is not mistranslated into a 400', async () => {
+    const ctx = context();
+    executeError = pgError('23503', 'feed_comments_post_id_feed_posts_id_fk');
+    await expect(createComment(ctx, POST_ID, { body: 'olá' })).rejects.not.toMatchObject({
+      status: 400,
+    });
+    expect(ctx.events).toHaveLength(0);
+  });
+
+  it('9. a soft delete emits comment.deleted once', async () => {
+    const ctx = context();
+    const seen: unknown[] = [];
+    const off = subscribe('comment.deleted', async (payload) => {
+      seen.push(payload);
+    });
+    try {
+      executeQueue = [[{ id: COMMENT_ID }]];
+      await deleteComment(ctx, COMMENT_ID);
+      await flush(ctx);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({ commentId: COMMENT_ID, actorUserId: USER_ID });
+    } finally {
+      off();
     }
   });
 });

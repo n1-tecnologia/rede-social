@@ -27,16 +27,37 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 export const FEED_LIST_STATEMENT_BUDGET = 1;
 
 /**
- * Every table the feed module reads on a list. `feed_post_media`, `feed_comments`, `feed_likes` and
- * `feed_link_previews` do not exist yet (04-03/04-04 add them) and are named on purpose: the day
- * `viewerLiked` stops being hard-`false`, the join must land in the SAME statement or this test
- * goes red.
+ * The POST PAGE's budget (04-03, RESEARCH Open Question 4): one `GET /v1/feed/posts/{id}` plus one
+ * `GET /v1/feed/posts/{id}/comments` together. Three, and here is what each one is:
+ *   1. the hydrated post — author, counters and `viewerLiked` in ONE statement;
+ *   2. the comment route's visibility check on the post, which is what makes a foreign-tenant post
+ *      answer the same bare 404 the detail read gives instead of an empty list;
+ *   3. the hydrated ROOT page — author, `viewerLiked` and `replyCount` in ONE statement, never one
+ *      query per root.
+ * Replies are not in this number: they load on "Ver N respostas" (D-60) and cost one statement of
+ * their own, which the second test pins.
+ */
+// biome-ignore lint/suspicious/noExportsInTest: colocated with the only assertion that proves it
+export const FEED_DETAIL_STATEMENT_BUDGET = 3;
+
+/** A "ver respostas" tap is ONE statement, however many replies come back. */
+// biome-ignore lint/suspicious/noExportsInTest: colocated with the only assertion that proves it
+export const FEED_REPLIES_STATEMENT_BUDGET = 1;
+
+/**
+ * Every table the feed module reads. `feed_comments` and `feed_likes` are now real (04-03) and the
+ * list budget still holds at ONE: `viewerLiked`'s `feed_likes` join landed in the SAME statement,
+ * which is exactly what this regex was written in 04-01 to force. `feed_post_media` and
+ * `feed_link_previews` do not exist yet (04-04 adds them) and are named for the same reason.
  */
 const FEED_TABLES_PATTERN = 'feed_(posts|post_media|comments|likes|link_previews)';
 
 let token = '';
 let tenantId = '';
 const created: string[] = [];
+/** The post the detail/comments budget is measured against, plus its root comment. */
+let detailPostId = '';
+let detailRootId = '';
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
@@ -67,6 +88,33 @@ beforeAll(async () => {
     const id = rows[0]?.id;
     if (id) created.push(id);
   }
+
+  // A post with a real thread on it: 12 root comments and 5 replies under one of them, so an N+1 in
+  // either list has plenty of chances to show up rather than one or two.
+  //
+  // The roots carry EXPLICIT timestamps and the one that has replies is the NEWEST, so it lands on
+  // the first `?limit=10` page. Without that the vacuity guard below ("some root on this page has
+  // replies") would be measuring insertion order rather than the thing it is guarding against.
+  detailPostId = created[0] ?? '';
+  for (let i = 0; i < 11; i++) {
+    await adminSql`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+      values (${tenantId}::uuid, ${detailPostId}::uuid, ${author?.id ?? null}::uuid,
+              ${`Orcamento raiz ${i}`}, 0, null, null,
+              ${new Date(base - (12 - i) * 60_000).toISOString()}::timestamptz)`;
+  }
+  const [root] = await adminSql<{ id: string }[]>`
+    insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+    values (${tenantId}::uuid, ${detailPostId}::uuid, ${author?.id ?? null}::uuid,
+            'Orcamento raiz com respostas', 0, null, null, now())
+    returning id`;
+  detailRootId = root?.id ?? '';
+  for (let i = 0; i < 5; i++) {
+    await adminSql`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+      values (${tenantId}::uuid, ${detailPostId}::uuid, ${author?.id ?? null}::uuid,
+              ${`Orcamento resposta ${i}`}, 1, ${detailRootId}::uuid, 0)`;
+  }
 });
 
 afterAll(async () => {
@@ -74,6 +122,7 @@ afterAll(async () => {
     await adminSql`delete from public.feed_posts where id = any(${created}::uuid[])`;
   }
   await adminSql`delete from public.feed_posts where caption like 'Orcamento de consultas %'`;
+  await adminSql`delete from public.feed_comments where body like 'Orcamento %'`;
   await adminSql.end();
   await sqlClient.end();
 });
@@ -98,5 +147,46 @@ describe('GET /v1/feed — the CI query budget (criterion 4)', () => {
        where query ~ ${FEED_TABLES_PATTERN}`;
 
     expect(measured?.calls ?? 0).toBeLessThanOrEqual(FEED_LIST_STATEMENT_BUDGET);
+  });
+});
+
+/** Sum of `calls` over the feed tables since the last reset — the filtered measure, never a total. */
+async function feedCalls(): Promise<number> {
+  const [measured] = await adminSql<{ calls: number }[]>`
+    select coalesce(sum(calls), 0)::int as calls
+      from pg_stat_statements
+     where query ~ ${FEED_TABLES_PATTERN}`;
+  return measured?.calls ?? 0;
+}
+
+describe('the post page — the detail query budget (04-03, criterion 4)', () => {
+  it(`costs at most ${FEED_DETAIL_STATEMENT_BUDGET} statements for the post plus its comments`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const headers = { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo };
+    const post = await api.request(`/v1/feed/posts/${detailPostId}`, { headers });
+    expect(post.status).toBe(200);
+    const list = await api.request(`/v1/feed/posts/${detailPostId}/comments?limit=10`, { headers });
+    expect(list.status).toBe(200);
+
+    // Guard against the budget passing vacuously on a post with no thread on it.
+    const body = (await list.json()) as { items: { replyCount: number }[] };
+    expect(body.items.length).toBe(10);
+    expect(body.items.some((c) => c.replyCount > 0)).toBe(true);
+
+    expect(await feedCalls()).toBeLessThanOrEqual(FEED_DETAIL_STATEMENT_BUDGET);
+  });
+
+  it(`a "ver respostas" tap costs at most ${FEED_REPLIES_STATEMENT_BUDGET} statement`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const res = await api.request(`/v1/feed/comments/${detailRootId}/replies`, {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items.length).toBe(5);
+
+    expect(await feedCalls()).toBeLessThanOrEqual(FEED_REPLIES_STATEMENT_BUDGET);
   });
 });
