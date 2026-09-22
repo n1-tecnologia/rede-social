@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 12
+open_count: 13
 waived_count: 0
 fixed_count: 6
-total_count: 18
-last_updated: 2026-09-22T15:43:33.463Z
+total_count: 19
+last_updated: 2026-09-22T16:05:15.396Z
 ---
 
 # Broken Windows Ledger
@@ -33,6 +33,7 @@ last_updated: 2026-09-22T15:43:33.463Z
 | 16 | 04 | stub | packages/modules/feed/server/service.ts | 98 | viewerLiked is hard-false for every post; 04-03 adds the feed_likes join to the SAME statement | open |  | 2026-09-22T15:43:33.315Z |  |
 | 17 | 04 | stub | packages/modules/feed/server/service.ts | 221 | post.published carries hasMedia: false; 04-04 sets it from media_kind once feed_post_media exists | open |  | 2026-09-22T15:43:33.390Z |  |
 | 18 | 04 | stub | packages/modules/feed/ui/FeedList.tsx |  | The admin empty-state CTA renders only when the host passes createHref; 04-05 supplies it with /criar | open |  | 2026-09-22T15:43:33.463Z |  |
+| 19 | 04 | unrun-verify | .planning/sketches/002-phase-04-designed-screens/index.html |  | D-33 / UI-04 design review of the six [designed] Phase 4 surfaces is unrun: the sketch README frontmatter is still status: pending / approved: false. 04-04, 04-05 and 04-09 code against it. | open |  | 2026-09-22T16:05:15.396Z |  |
 
 ````json
 [
@@ -250,6 +251,18 @@ last_updated: 2026-09-22T15:43:33.463Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-22T15:43:33.463Z",
+    "resolved_at": null
+  },
+  {
+    "id": 19,
+    "kind": "unrun-verify",
+    "phase": "04",
+    "file": ".planning/sketches/002-phase-04-designed-screens/index.html",
+    "line": null,
+    "description": "D-33 / UI-04 design review of the six [designed] Phase 4 surfaces is unrun: the sketch README frontmatter is still status: pending / approved: false. 04-04, 04-05 and 04-09 code against it.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-22T16:05:15.396Z",
     "resolved_at": null
   }
 ]

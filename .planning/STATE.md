@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Feed
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-09-22T15:44:30.013Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-09-22T16:07:42.670Z"
 last_activity: 2026-09-22
 last_activity_desc: Phase 04 execution started
-state_head: 5443dc451848f014c4a35ee82caf97b76c2ac797
+state_head: 6507cd046d6a2ff5c2f02d7c07c3386669832f6f
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 50
-  completed_plans: 38
+  completed_plans: 39
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 04 (Feed) — EXECUTING
-Plan: 2 of 10
+Plan: 3 of 10
 Status: Ready to execute
 Last activity: 2026-09-22 — Phase 04 execution started
 
@@ -96,6 +96,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P07 | 62 min | 3 tasks | 31 files |
 | Phase 03 P08 | 67 min | 3 tasks | 16 files |
 | Phase 04 P01 | 31 min | 3 tasks | 39 files |
+| Phase 04 P02 | 15 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -254,6 +255,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-01: the feed write guard is requirePermission('feed.post.create'), never requireRole — the V1 rule lives in tenant_modules['feed'].settings.postingPolicy — V2 member posting must stay one UPDATE with no migration and no route edit (FEED-08); a role comparison in a route would hard-code V1 into code.
 - [Phase 04]: 04-01: the kernel gains an RBAC seam (setPermissionResolver), not knowledge of modules — The inversion registerJobQueues already uses: the kernel declares the shape, apps/api fills it at import time, packages/core still imports no module (MOD-02). A missing registration throws rather than failing open.
 - [Phase 04]: 04-01: feed timestamps are formatted in SQL with microsecond precision, never through a JS Date — tx.execute returns driver rows, and a Date round-trip truncates timestamptz to milliseconds — moving the keyset boundary earlier than the row it came from and silently skipping same-millisecond posts. Caught by the tracer's own integration proof.
+- [Phase 04]: InfiniteScroll/useInfiniteScroll live in @tria/ui, not the feed module, and take the IntersectionObserver root from ScrollContainerContext (prop-overridable) rather than a document lookup — Phase 5 community lists and Phase 7 notification lists need the identical sentinel; a primitive that reaches for a global element cannot be reused, which is the coupling ScrollContainerContext exists to remove (PROTOTYPE risk 2, Pitfall 8)
+- [Phase 04]: The like colour is a new semantic token --color-like (#ef4444, identical in both themes), declared in the light block, the dark block and @theme inline as its own literal rather than an alias — UI-D-08: a like is affective, not destructive, so a Phase 8 destructive-palette change must not move the heart; and a brand-coloured heart loses a universally-read affordance. The three declarations make the both-themes contract testable while still compiling text-like/fill-like/bg-like
+- [Phase 04]: TDD on a brand-new module ships a deliberately inert stub in the RED commit so the failure is an assertion failure, not a module-resolution crash — Per #3770 a load-time crash is INVALID_RED and must not authorize GREEN; the stub is the only way to get an intentional RED for a file that does not exist yet. gsd-tools check tdd-red-evidence returned RED_EVIDENCE_OK for both TDD tasks
 
 ### Pending Todos
 
@@ -286,6 +290,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-22T15:44:21.659Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-09-22T16:07:36.227Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
