@@ -3,19 +3,22 @@ status: partial
 phase: 03-media-pipeline-member-profiles
 source: [03-VERIFICATION.md]
 started: 2026-09-22T11:11:16Z
-updated: 2026-09-22T12:15:36Z
+updated: 2026-09-22T12:21:34Z
 ---
 
 ## Current Test
 
-[testing paused — 2 items outstanding]
+[testing paused — 3 items outstanding]
 
 ## Tests
 
 ### 1. Real Mux transcode end to end (Phase 01.1 runbook)
 expected: A real transcode completes, `video.asset.ready` is delivered and verified, the row reaches 'Pronto' with a playback id, duration and aspect ratio.
 why_human: Requires a real vendor account. The Mux adapter (createDirectUpload, webhooks.unwrap, signPlaybackId, assets.delete) has never executed against a real account — broken-windows 12.
-result: pass
+result: blocked
+blocked_by: third-party
+reason: "No Mux account exists yet — docs/DEPLOY.md:205 states the Phase 01.1 provisioning runbook is NOT DONE and the fake provider is the only implementation that has ever run. Corrected from an earlier pass recorded before this was confirmed."
+
 
 ### 2. Real-device HLS playback on iOS Safari and Android Chrome
 expected: HLS plays on a real iPhone (Safari) and a real Android phone (Chrome); a thumbnail/poster frame renders rather than the plain `bg-bg-tertiary` fallback.
@@ -45,11 +48,11 @@ result: pass
 ## Summary
 
 total: 5
-passed: 3
+passed: 2
 issues: 0
 pending: 0
 skipped: 0
-blocked: 2
+blocked: 3
 
 ## Gaps
 
@@ -57,6 +60,9 @@ blocked: 2
 
 ## Outstanding
 
+- test: 1
+  blocked_by: third-party
+  note: "Real Mux transcode — pending the Phase 01.1 Mux provisioning runbook (no account yet)"
 - test: 2
   blocked_by: release-build
   note: "Real-device HLS playback — pending deploy + phone test"
