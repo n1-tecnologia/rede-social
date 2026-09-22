@@ -241,10 +241,48 @@ Plans:
   3. Member can share a post through the native share sheet (copy link on desktop); opening the internal deep link while logged out routes through login and lands on the post; a member of another tenant gets 404.
   4. Post, like and comment actions emit typed domain events (`post.published`, `post.liked`, `comment.created`, ...) on the kernel bus after commit, received by a test subscriber; posts/communities/stories carry a generic `author_user_id` and a per-tenant posting policy so member posting in V2 is a permission flip; feed pages execute a bounded number of queries (no N+1, keyset cursors) checked in CI.
 
-**Plans**: TBD
+**Plans**: 10 plans
 **UI hint**: yes
 **Research needed**: None beyond the conventions doc; acceptance checks (`EXPLAIN`, query count, depth trigger) cover the risks. SSRF-safe unfurl (deny private ranges, follow-redirect limits, timeouts) is implementation detail for the worker job.
 **Notes**: `feed.comments` reserves a `story_id` slot and `feed.likes` uses nullable FKs + partial unique indexes so Phase 5 reuses them. Counters are trigger-maintained. The admin composer is the first prototype-less screen designed under the Phase 2 UI-SPEC pattern (ADMIN-04 is verified across all composers in Phase 8).
+
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Tracer: `@tria/module-feed` + `feed_posts` + keyset `GET /v1/feed` + permission-guarded create + `post.published` + the D-55 home slot
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md — Kernel UI primitives (`InfiniteScroll`, `DoubleTapHeart`, the `--color-like` token) + the D-33 mockup gate for the six `[designed]` surfaces
+- [ ] 04-03-PLAN.md — Likes, comments and one-level replies: nullable-FK likes, the declarative depth constraint, counter triggers, the six domain events
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-04-PLAN.md — Post media composition: `feed_post_media`, gallery XOR video as a DB constraint, attachments, the carousel and the attachment row
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-05-PLAN.md — MEDIA-04: the connector-pinned SSRF guard, the unfurl worker job, the per-tenant preview cache and the no-iframe preview card *(carries the package-legitimacy checkpoint)*
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 04-06-PLAN.md — Feed interactions: infinite scroll, pull-to-refresh, the meta row, the optimistic like and the double-tap
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 04-07-PLAN.md — Comments UI: one `CommentsList` in two containers, per-root reply expansion, the removed-author row
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 04-08-PLAN.md — FEED-07: the `/post/[postId]` share target, the server-derived share URL and the one-screen 404 collapse
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 04-09-PLAN.md — FEED-01/FEED-03: the full-screen composer and edit screen, the create control, `PATCH`/`DELETE` and the overflow menu
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 04-10-PLAN.md — D-19: remove `@tria/module-example`, the forward-only drop migration, the phase-4 smoke witness and the `pnpm verify` exit gate
 
 ### Phase 5: Communities & Stories
 
