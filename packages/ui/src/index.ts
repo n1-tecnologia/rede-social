@@ -27,6 +27,7 @@ export {
 // Overlays
 export { BottomSheet, type BottomSheetProps } from './overlays/BottomSheet';
 export { ConfirmDialog, type ConfirmDialogProps } from './overlays/ConfirmDialog';
+export { DoubleTapHeart, type DoubleTapHeartProps } from './overlays/DoubleTapHeart';
 export {
   Toast,
   type ToastOptions,

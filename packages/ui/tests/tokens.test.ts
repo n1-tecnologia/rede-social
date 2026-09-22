@@ -141,3 +141,39 @@ describe('tokens.css — neutral fallback brand and the two theme layers', () =>
     }
   });
 });
+
+/**
+ * Phase 4 adds exactly ONE token (UI-D-08). `--color-like` is the affective like colour: same value
+ * as `--color-danger` today, a different meaning — a like is not destructive, and a Phase 8
+ * destructive-palette change must not move the heart. It is also deliberately not the tenant accent,
+ * because a brand-coloured heart loses a universally-read affordance.
+ */
+describe('tokens.css — --color-like, the one Phase 4 token (UI-D-08)', () => {
+  it('is declared in the light block and in the dark block, with the same value', () => {
+    expect(block(':root,\n[data-theme="light"] {')).toContain('--color-like: #ef4444');
+    expect(block('[data-theme="dark"] {')).toContain('--color-like: #ef4444');
+  });
+
+  it('is declared in the theme block so text-like, fill-like and bg-like compile', () => {
+    expect(block('@theme inline')).toContain('--color-like: #ef4444');
+  });
+
+  it('is its own value — never an alias of the destructive token or of the tenant accent', () => {
+    const declarations = css
+      .split('\n')
+      .filter((line) => !/^\s*(\/\*|\*)/.test(line))
+      .join('\n');
+    expect(declarations).not.toContain('--color-like: var(--color-danger)');
+    expect(declarations).not.toContain('--color-like: var(--brand');
+    // and the destructive token keeps its own separate declaration
+    expect(block('@theme inline')).toContain('--color-danger: #ef4444');
+  });
+
+  it('adds no second Phase 4 token', () => {
+    const introduced = [...css.matchAll(/--color-([a-z-]+):/g)].map((m) => m[1]);
+    expect(introduced).toContain('like');
+    for (const unexpected of ['like-soft', 'like-hover', 'heart']) {
+      expect(introduced, `${unexpected} not introduced`).not.toContain(unexpected);
+    }
+  });
+});
