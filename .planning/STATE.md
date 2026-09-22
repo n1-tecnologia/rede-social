@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Feed
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-09-22T16:42:04.584Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-09-22T20:02:20.580Z"
 last_activity: 2026-09-22
 last_activity_desc: Phase 04 execution started
-state_head: 3a3bbbaa93bd688322024122e1fa7788dfef3825
+state_head: d21e3efa55f428a32d2770aa3afca9adf807d491
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 50
-  completed_plans: 40
+  completed_plans: 41
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 04 (Feed) — EXECUTING
-Plan: 4 of 10
+Plan: 5 of 10
 Status: Ready to execute
 Last activity: 2026-09-22 — Phase 04 execution started
 
@@ -98,6 +98,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P01 | 31 min | 3 tasks | 39 files |
 | Phase 04 P02 | 15 min | 3 tasks | 11 files |
 | Phase 04 P03 | 27 min | 3 tasks | 15 files |
+| Phase 04 P04 | 2h 43m | 3 tasks | 35 files |
 
 ## Accumulated Context
 
@@ -264,6 +265,10 @@ Recent decisions affecting current work:
 - [Phase 04]: A repeat like is 200 with the current state, never a conflict status: the partial unique index is the idempotency arbiter, not application code
 - [Phase 04]: Counter columns are written ONLY by triggers; the comment counter fires on the deleted_at transition so a soft delete moves the number
 - [Phase 04]: A DESC keyset index must be declared .desc().nullsFirst() -- drizzle's .desc() emits DESC NULLS LAST, which order-by-desc (NULLS FIRST) cannot use, silently forcing a full sort on every page
+- [Phase 04]: D-53's gallery-XOR-video rule is enforced by the DATABASE, not the composer: feed_posts unique (id, media_kind) + a redundant post_media_kind on feed_post_media + the composite FK (post_id, post_media_kind) -> feed_posts(id, media_kind) + a CHECK binding kind to post_media_kind. — A UI-only rule is bypassed by any direct API call and would let a post exist that no renderer can draw. Expressed as an index-level fact there is no read-then-write window, no trigger and no security definer function.
+- [Phase 04]: A post's media is an ordered COLLECTION (feed_post_media rows) with a parent media_kind discriminator — there is no image_asset_id or video_asset_id column anywhere. — A singular column beside the collection would give two sources of truth for the same fact and make the carousel's ordering ambiguous. A single-image post is the one-row case, pinned by an integration test that compares the one-image and ten-image projection shapes.
+- [Phase 04]: MediaImage was promoted into @tria/core/ui; VideoPlayer was NOT — PostMedia takes the player as an already-created ReactNode. — MediaImage depends only on @tria/contracts/media and @tria/ui, so it belongs in the kernel's client-safe entry (a one-line re-export keeps every Phase 3 call site). VideoPlayer binds an app-scoped server action for its per-request playback token (D-44), so it must stay in apps/web and cross the boundary as an element — 02-08 found Flight refuses a component object.
+- [Phase 04]: The attachment download is a fetch-then-save through the stable /v1/media/{assetId}/original redirect, reading the response body rather than its Location. — 03-01 forbids a signed Storage URL in any API payload, so there is no "give me a download URL" route. Reading the redirect's body keeps the signed URL inside the chain and is what gives UI-D-23 real pending and error states; the 25 MiB PDF cap bounds the blob.
 
 ### Pending Todos
 
@@ -296,6 +301,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-22T16:41:56.163Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-09-22T20:02:20.510Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
