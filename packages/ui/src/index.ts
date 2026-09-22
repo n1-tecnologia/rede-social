@@ -8,9 +8,15 @@
 export { cn } from './cn';
 // Hooks
 export { useDebounce } from './hooks/useDebounce';
+export {
+  type UseInfiniteScrollOptions,
+  type UseInfiniteScrollResult,
+  useInfiniteScroll,
+} from './hooks/useInfiniteScroll';
 export { useMediaQuery } from './hooks/useMediaQuery';
 export { type UsePullToRefreshOptions, usePullToRefresh } from './hooks/usePullToRefresh';
 // Layout
+export { InfiniteScroll, type InfiniteScrollProps } from './layout/InfiniteScroll';
 export { PullToRefresh, type PullToRefreshProps } from './layout/PullToRefresh';
 export { SafeAreaWrapper, type SafeAreaWrapperProps } from './layout/SafeAreaWrapper';
 export {
