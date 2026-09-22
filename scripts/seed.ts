@@ -202,10 +202,6 @@ const SEED_COMMENT_BODIES = [
   'Tambem vou estar la no sabado.',
 ] as const;
 
-/** The EXPLAIN fixture lives in ONE tenant, so the other stays small and readable in the UI. */
-const EXPLAIN_FIXTURE_SLUG = 'tria-demo';
-const EXPLAIN_FIXTURE_ROWS = 200;
-
 async function ensureUser(email: string, name: string, password: string): Promise<string> {
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email,
@@ -500,58 +496,6 @@ for (const t of SEED_TENANTS) {
       });
       console.log(`seed: tenant ${t.slug} — 1 comment + 1 reply, 2 likes`);
     }
-
-    // The EXPLAIN fixture, ONE tenant only. With three rows the planner always picks a sequential
-    // scan and `supabase/tests/090-feed.sql`'s index-scan assertions would prove nothing; 200 posts
-    // and 200 root comments on one post are enough for the keyset indexes to win. `analyze` at the
-    // end of the seed is what makes the planner act on any of it.
-    if (t.slug === EXPLAIN_FIXTURE_SLUG && adminUserId && firstPostId) {
-      await withAdminTx(async (tx) => {
-        await tx.execute(sql`
-          insert into public.feed_posts (id, tenant_id, author_user_id, caption, created_at)
-          select ('0d00f1' || lpad(to_hex(g), 26, '0'))::uuid,
-                 ${tenantId}::uuid,
-                 ${adminUserId}::uuid,
-                 'Volume de planejamento ' || g,
-                 now() - (g || ' minutes')::interval
-            from generate_series(1, ${EXPLAIN_FIXTURE_ROWS}) g
-          on conflict (id) do nothing`);
-        await tx.execute(sql`
-          insert into public.feed_comments
-            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
-          select ('0d00f2' || lpad(to_hex(g), 26, '0'))::uuid,
-                 ${tenantId}::uuid,
-                 ${firstPostId}::uuid,
-                 ${adminUserId}::uuid,
-                 'Comentario de volume ' || g,
-                 0, null, null,
-                 now() - (g || ' minutes')::interval
-            from generate_series(1, ${EXPLAIN_FIXTURE_ROWS}) g
-          on conflict (id) do nothing`);
-      });
-      // …and the same volume of REPLIES under one root, so `090-feed.sql`'s third EXPLAIN
-      // assertion (the ascending reply keyset) measures a selective lookup rather than a table
-      // small enough that the planner reads all of it either way.
-      if (rootCommentId) {
-        await withAdminTx(async (tx) => {
-          await tx.execute(sql`
-            insert into public.feed_comments
-              (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
-            select ('0d00f3' || lpad(to_hex(g), 26, '0'))::uuid,
-                   ${tenantId}::uuid,
-                   ${firstPostId}::uuid,
-                   ${adminUserId}::uuid,
-                   'Resposta de volume ' || g,
-                   1, ${rootCommentId}::uuid, 0,
-                   now() - (g || ' seconds')::interval
-              from generate_series(1, ${EXPLAIN_FIXTURE_ROWS}) g
-            on conflict (id) do nothing`);
-        });
-      }
-      console.log(
-        `seed: tenant ${t.slug} — ${EXPLAIN_FIXTURE_ROWS} volume posts, ${EXPLAIN_FIXTURE_ROWS} volume comments and ${EXPLAIN_FIXTURE_ROWS} volume replies (EXPLAIN fixture)`,
-      );
-    }
   }
 
   console.log(
@@ -567,9 +511,11 @@ await withAdminTx(async (tx) => {
 });
 console.log(`seed: platform admin ${SUPER_ADMIN_EMAIL} ready (no membership, by design)`);
 
-// 04-03: the planner acts on statistics, not on row counts it has never looked at. Without this,
-// the 200-row EXPLAIN fixture above is invisible to it and `090-feed.sql`'s index-scan assertions
-// would still see the sequential scan an empty table deserves.
+// 04-03: the planner acts on statistics, not on row counts it has never looked at. A freshly
+// reset-and-seeded database otherwise hands every developer plans built from zero-row estimates.
+// (`090-feed.sql` does NOT rely on this: it builds and analyzes its own 250-row fixture inside its
+// own rolled-back transaction, precisely so the seeded tenants' feeds stay small enough for
+// `feed.test.ts`'s cursor walk and `feed.spec.ts`'s ordering assertions to stay honest.)
 await withAdminTx(async (tx) => {
   await tx.execute(sql`analyze public.feed_posts`);
   await tx.execute(sql`analyze public.feed_comments`);

@@ -11,10 +11,12 @@ begin;
 --     `deleted_at` branch of the trigger is exercised rather than assumed (Pitfall 5);
 --   * the three keyset queries are INDEX SCANS against a realistically-sized fixture.
 --
--- The EXPLAIN block needs `pnpm db:seed` to have run: it measures the 200-row volume fixture the
--- seed writes, because with three rows the planner always chooses a sequential scan and the
--- assertion would prove nothing. Everything else in this file builds its own fixture and, like its
--- siblings, the whole file rolls back.
+-- The EXPLAIN block builds and ANALYZEs its own 250-row fixture inside this file's transaction,
+-- because with three rows the planner always chooses a sequential scan and the assertion would
+-- prove nothing. It deliberately does NOT lean on `pnpm db:seed`: a volume fixture in a seeded
+-- tenant would push the demo posts off the first feed page and quietly break `feed.test.ts`'s
+-- cursor walk and `feed.spec.ts`'s ordering assertions. Like its siblings, this file rolls back, so
+-- it re-runs identically against a seeded or an empty database, twice in a row, in any order.
 select plan(20);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
@@ -162,40 +164,72 @@ select is_empty(
 -- Captured into a temp table with `execute … into`, because EXPLAIN cannot be a subquery. The
 -- predicates mirror what RLS injects (`tenant_id = app.tenant_id()`), since pg_prove connects as
 -- the table owner and therefore does not have the policy applied for it.
+-- The volume fixture: 250 posts, 250 root comments on one post and 250 replies under one root, in
+-- THIS file's own tenant. `analyze` is what makes the planner act on any of it — without it every
+-- estimate is the zero-row default and the plans below prove nothing.
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, created_at)
+select ('0c00f1' || lpad(to_hex(g), 26, '0'))::uuid,
+       '0c000000-0000-4000-8000-000000000001',
+       '0c000000-0000-4000-8000-000000000002',
+       'volume ' || g,
+       now() - (g || ' minutes')::interval
+  from generate_series(1, 250) g;
+
+insert into public.feed_comments
+  (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+select ('0c00f2' || lpad(to_hex(g), 26, '0'))::uuid,
+       '0c000000-0000-4000-8000-000000000001',
+       '0c000000-0000-4000-8000-0000000000a1',
+       '0c000000-0000-4000-8000-000000000002',
+       'volume root ' || g,
+       0, null, null,
+       now() - (g || ' minutes')::interval
+  from generate_series(1, 250) g;
+
+insert into public.feed_comments
+  (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+select ('0c00f3' || lpad(to_hex(g), 26, '0'))::uuid,
+       '0c000000-0000-4000-8000-000000000001',
+       '0c000000-0000-4000-8000-0000000000a1',
+       '0c000000-0000-4000-8000-000000000002',
+       'volume reply ' || g,
+       1, '0c000000-0000-4000-8000-0000000000b1', 0,
+       now() - (g || ' seconds')::interval
+  from generate_series(1, 250) g;
+
+analyze public.feed_posts;
+analyze public.feed_comments;
+
+-- Captured into a temp table with `execute … into`, because EXPLAIN cannot be a subquery. The
+-- predicates mirror what RLS injects (`tenant_id = app.tenant_id()`), since pg_prove connects as
+-- the table owner and therefore does not have the policy applied for it.
 create temporary table feed_plans (name text primary key, plan text);
 
 do $$
 declare
-  v_tenant uuid;
-  v_post   uuid;
-  v_root   uuid;
-  v_plan   text;
+  v_plan text;
 begin
-  select id into v_tenant from public.tenants where slug = 'tria-demo';
-  select c.post_id, c.parent_id into v_post, v_root
-    from public.feed_comments c
-   where c.tenant_id = v_tenant and c.parent_id is not null
-   limit 1;
-  if v_post is null then
-    select id into v_post from public.feed_posts where tenant_id = v_tenant order by created_at limit 1;
-  end if;
-
-  execute format(
+  execute
     'explain (format json) select p.id, p.created_at from public.feed_posts p
-      where p.tenant_id = %L and p.community_id is null and p.deleted_at is null
-      order by p.created_at desc, p.id desc limit 10', v_tenant) into v_plan;
+      where p.tenant_id = ''0c000000-0000-4000-8000-000000000001''
+        and p.community_id is null and p.deleted_at is null
+      order by p.created_at desc, p.id desc limit 10' into v_plan;
   insert into feed_plans values ('feed', v_plan);
 
-  execute format(
+  execute
     'explain (format json) select c.id, c.created_at from public.feed_comments c
-      where c.tenant_id = %L and c.post_id = %L and c.parent_id is null and c.deleted_at is null
-      order by c.created_at desc, c.id desc limit 20', v_tenant, v_post) into v_plan;
+      where c.tenant_id = ''0c000000-0000-4000-8000-000000000001''
+        and c.post_id = ''0c000000-0000-4000-8000-0000000000a1''
+        and c.parent_id is null and c.deleted_at is null
+      order by c.created_at desc, c.id desc limit 20' into v_plan;
   insert into feed_plans values ('roots', v_plan);
 
-  execute format(
+  execute
     'explain (format json) select c.id, c.created_at from public.feed_comments c
-      where c.tenant_id = %L and c.parent_id = %L and c.deleted_at is null
-      order by c.created_at asc, c.id asc limit 10', v_tenant, coalesce(v_root, v_post)) into v_plan;
+      where c.tenant_id = ''0c000000-0000-4000-8000-000000000001''
+        and c.parent_id = ''0c000000-0000-4000-8000-0000000000b1''
+        and c.deleted_at is null
+      order by c.created_at asc, c.id asc limit 10' into v_plan;
   insert into feed_plans values ('replies', v_plan);
 end
 $$;
