@@ -92,6 +92,8 @@ type Ctx = Pick<RequestContext, 'userId' | 'tenantId' | 'role'> & { requestId?: 
 type AssetRow = {
   id: string;
   tenantId: string;
+  /** Who uploaded it — the intra-tenant authorization fact `assertMayRetire` reads (T-03-50). */
+  ownerUserId: string;
   kind: string;
   purpose: string;
   status: string;
@@ -111,6 +113,7 @@ type AssetRow = {
 const ASSET_COLUMNS = {
   id: mediaAssets.id,
   tenantId: mediaAssets.tenantId,
+  ownerUserId: mediaAssets.ownerUserId,
   kind: mediaAssets.kind,
   purpose: mediaAssets.purpose,
   status: mediaAssets.status,
@@ -445,7 +448,15 @@ export async function startUpload(
   };
 }
 
-/** The caller's own asset, or `undefined`. RLS supplies the tenant predicate; the id is explicit. */
+/**
+ * The asset visible to the caller's TENANT lane, or `undefined`.
+ *
+ * The name is older than the predicate: RLS on `media_assets` supplies the tenant clause and nothing
+ * else (`media_assets_tenant_select` is `tenant_id = app.tenant_id() and deleted_at is null`), so
+ * this loads the COMMUNITY's asset, not the caller's own. Cross-tenant refusal is structural here;
+ * intra-tenant authorization is NOT, and every mutating caller must add it itself — see
+ * `assertMayRetire` (T-03-50).
+ */
 async function loadOwnAsset(ctx: Ctx, assetId: string): Promise<AssetRow | undefined> {
   return withTenantTx(ctx, async (tx) => {
     const [row] = await tx
@@ -455,6 +466,38 @@ async function loadOwnAsset(ctx: Ctx, assetId: string): Promise<AssetRow | undef
       .limit(1);
     return row as AssetRow | undefined;
   });
+}
+
+/**
+ * The intra-tenant write predicate for an asset: its UPLOADER, or the community's admin (T-03-50).
+ *
+ * It cannot be admin-only. `updateOwnProfile` retires the outgoing photo through `deleteAsset` on
+ * R-07 replace-on-write (`server/profiles/service.ts`), with the MEMBER's own ctx, so an admin-only
+ * gate would take every member's ability to change their avatar with it.
+ *
+ * The refusal is the same bare `404 NOT_FOUND` the miss branch answers, on purpose. `GET /v1/members`
+ * publishes every member's `avatarAssetId` (`memberProfileSchema`), so a caller arrives here holding
+ * an id they did not have to guess: a 403 would confirm "that id exists and is somebody else's",
+ * turning the delete lane into an ownership oracle over the whole directory. One answer for a
+ * nonexistent id, another community's asset and a fellow member's asset keeps the vocabulary closed
+ * and keeps the cross-tenant 404 (`isolation.test.ts`) structural rather than a second rule.
+ *
+ * `listAssets` answers 403 instead, and that is not a contradiction: it is a pure ROLE gate on a
+ * collection, with no id in the request, so its refusal discloses nothing about any particular row.
+ */
+function assertMayRetire(ctx: Ctx, row: AssetRow): void {
+  if (row.ownerUserId === ctx.userId || ctx.role === 'admin_tenant') return;
+  log.warn(
+    {
+      event: 'media.retire_refused',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      assetId: row.id,
+    },
+    'a member tried to retire an asset they do not own',
+  );
+  throw new ApiError(404, 'NOT_FOUND');
 }
 
 /**
@@ -604,10 +647,16 @@ export async function serveVariant(
  * `DELETE /v1/media/{assetId}`: a soft delete. The objects survive until the 03-08 sweeper collects
  * the prefix, so the request path stays fast; the row leaves every tenant-lane read immediately
  * (the select policy carries `deleted_at is null`).
+ *
+ * Two independent predicates, because RLS only supplies the first (T-03-50): the tenant lane makes
+ * another community's asset invisible, and `assertMayRetire` makes a FELLOW member's asset
+ * unretirable. Without the second, any member could destroy any photo in the community — the ids are
+ * published by `GET /v1/members` and the 03-08 sweeper makes the loss irreversible an hour later.
  */
 export async function deleteAsset(ctx: Ctx, assetId: string): Promise<MediaAsset> {
   const row = await loadOwnAsset(ctx, assetId);
   if (!row) throw new ApiError(404, 'NOT_FOUND');
+  assertMayRetire(ctx, row);
 
   const updated = await withAdminTx(async (tx) =>
     tx

@@ -35,6 +35,10 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  */
 
 const MEMBER_EMAIL = 'member@tria-demo.local';
+/** A SECOND seeded member of the SAME community — the intra-tenant half of the authorization gate. */
+const PEER_EMAIL = 'joao.goncalves@tria-demo.local';
+/** The same community's admin: the other half of the owner-OR-admin predicate. */
+const ADMIN_EMAIL = 'admin@tria-demo.local';
 /** The second seeded tenant — the isolation half of ROADMAP criterion 4. */
 const LAB_MEMBER_EMAIL = 'member@tria-lab.local';
 
@@ -582,6 +586,78 @@ describe('idempotency and concurrency — one confirmation, one job, one ladder'
     } finally {
       mediaInternals.beforeVariantWrite = original;
     }
+  });
+});
+
+/**
+ * One layer inward from the isolation suite below. Cross-tenant refusal on this lane is structural
+ * (the key is a pure function of the caller's own tenant id), but the `media_assets` select policy
+ * is deliberately TENANT-wide, so the tenant lane is not an authorization boundary between two
+ * members of the SAME community — and `GET /v1/members` publishes every member's `avatarAssetId`,
+ * so the ids need no guessing. These cases pin the second predicate `deleteAsset` now carries.
+ */
+describe('intra-tenant authorization — a fellow member is not an owner (CR-01/T-03-50)', () => {
+  let peerToken = '';
+  let adminToken = '';
+
+  /** A `ready` avatar owned by the `member@tria-demo.local` session the suite runs as. */
+  async function ownedByMember(): Promise<string> {
+    const start = await startUpload({
+      kind: 'image',
+      purpose: 'avatar',
+      mime: 'image/jpeg',
+      size: PHOTO_JPEG.length,
+    });
+    expect(start.status).toBe(201);
+    const body = (await start.json()) as { assetId: string; signedUrl: string };
+    createdAssetIds.push(body.assetId);
+    expect((await putToSignedUrl(body.signedUrl, PHOTO_JPEG, 'image/jpeg')).ok).toBe(true);
+    expect((await completeUpload(body.assetId)).status).toBe(200);
+    await deriveVariantsJob.handler({ tenantId: demoTenantId, assetId: body.assetId, attempt: 0 });
+    return body.assetId;
+  }
+
+  beforeAll(async () => {
+    peerToken = await signInAs(PEER_EMAIL, SEED_PASSWORD);
+    adminToken = await signInAs(ADMIN_EMAIL, SEED_PASSWORD);
+  });
+
+  it('another member of the SAME community cannot retire the asset: 404, and the row is untouched', async () => {
+    const assetId = await ownedByMember();
+
+    const res = await media(`/${assetId}`, { method: 'DELETE', token: peerToken });
+    expect(res.status).toBe(404);
+    const error = await envelope(res);
+    expect(error.code).toBe('NOT_FOUND');
+    // The SAME bare 404 the nonexistent and cross-tenant branches answer: no `details`, nothing that
+    // confirms the id exists and belongs to somebody else.
+    expect(error.details).toBeUndefined();
+
+    const row = await assetRow(assetId);
+    expect(row?.status).toBe('ready');
+
+    // And the owner still can — the refusal was about the CALLER, not about the asset.
+    const mine = await media(`/${assetId}`, { method: 'DELETE' });
+    expect(mine.status).toBe(200);
+    expect(mediaAssetSchema.parse(await mine.json()).status).toBe('deleted');
+  });
+
+  it('a nonexistent id answers the identical refusal — the two are indistinguishable', async () => {
+    const res = await media('/8f14e45f-ce1a-4e2f-8b4a-1f0a0b0c0d0e', {
+      method: 'DELETE',
+      token: peerToken,
+    });
+    expect(res.status).toBe(404);
+    const error = await envelope(res);
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.details).toBeUndefined();
+  });
+
+  it('the community ADMIN may retire a member asset — the gate is owner-OR-admin, never admin-only', async () => {
+    const assetId = await ownedByMember();
+    const res = await media(`/${assetId}`, { method: 'DELETE', token: adminToken });
+    expect(res.status).toBe(200);
+    expect((await assetRow(assetId))?.status).toBe('deleted');
   });
 });
 
