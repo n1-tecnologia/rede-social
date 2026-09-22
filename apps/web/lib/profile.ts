@@ -114,10 +114,12 @@ export type MemberProfileResult =
 
 /**
  * `GET /v1/members/{membershipId}` (03-03). The API answers ONE indistinguishable bare 404 for every
- * miss — unknown id, another tenant's id, invited, blocked, soft-deleted (D-23/TENANT-04) — so this
- * helper collapses them to a single `not-found`, and the screen can render only one 404 for all
- * five. A transport or 5xx failure is `error`, which is a DIFFERENT screen: "Algo deu errado" must
- * never be mistaken for "this person is not in your community".
+ * miss — unknown id, another tenant's id, invited, blocked, soft-deleted (D-23/TENANT-04) — and a
+ * 400 for an id that is not a uuid at all. This helper collapses ALL SIX to a single `not-found`,
+ * so the screen can render one 404 for every reason a member can fail to reach someone.
+ *
+ * A transport or 5xx failure is `error`, which is a DIFFERENT screen: "Algo deu errado" must never
+ * be mistaken for "this person is not in your community", nor the other way round.
  */
 export async function loadMemberProfile(membershipId: string): Promise<MemberProfileResult> {
   let path: string | null = null;
@@ -126,7 +128,12 @@ export async function loadMemberProfile(membershipId: string): Promise<MemberPro
     const res = await apiFetch(`/v1/members/${encodeURIComponent(membershipId)}`);
     if (res.ok) {
       result = { status: 'ok', member: memberProfileSchema.parse(await res.json()) };
-    } else if (res.status === 404) {
+    } else if (res.status === 404 || res.status === 400) {
+      // A 400 is the API refusing a membershipId that is not even a uuid — which is what a member
+      // typing or truncating a URL actually produces. D-23 says every miss is ONE indistinguishable
+      // screen, so a malformed id joins unknown / other-tenant / blocked / soft-deleted rather than
+      // getting its own "Algo deu errado", which would tell the reader their id was at least
+      // well-formed enough to be looked up.
       result = { status: 'not-found' };
     } else {
       const error = await apiError(res);

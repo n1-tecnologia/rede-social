@@ -50,8 +50,11 @@ export function MembersSkeleton() {
   );
 }
 
+/** The canonical URL for a query — `URLSearchParams`, the same encoding `TenantToolbar` writes. */
 function listUrl(q: string): string {
-  return q ? `/membros?q=${encodeURIComponent(q)}` : '/membros';
+  if (!q) return '/membros';
+  const search = new URLSearchParams({ q });
+  return `/membros?${search.toString()}`;
 }
 
 /**
