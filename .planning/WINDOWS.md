@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 8
+open_count: 9
 waived_count: 0
 fixed_count: 6
-total_count: 14
-last_updated: 2026-09-22T03:32:56.929Z
+total_count: 15
+last_updated: 2026-09-22T04:01:20.180Z
 ---
 
 # Broken Windows Ledger
@@ -29,6 +29,7 @@ last_updated: 2026-09-22T03:32:56.929Z
 | 12 | 03 | unrun-verify | packages/core/server/media/video/mux.ts |  | The Mux adapter (createDirectUpload, webhooks.unwrap, signPlaybackId, assets.delete) is written and typed but has NEVER run against a real Mux account — no account exists and Phase 01.1 is deferred. Every proof in 03-06 runs against VIDEO_PROVIDER=fake. Closed by the docs/DEPLOY.md Phase 01.1 Mux runbook. | open |  | 2026-09-22T02:20:03.090Z |  |
 | 13 | 03 | stub | packages/core/server/media/video/index.ts |  | videoProvider.signPlayback and getAsset are implemented on both adapters but wired to no route yet: 03-07 adds GET /v1/media/{assetId}/playback, and getAsset waits for a future reconciliation job (declared so that job needs no adapter change). | open |  | 2026-09-22T02:20:08.948Z |  |
 | 14 | 03 | unrun-verify | apps/web/components/media/VideoPlayer.tsx |  | The poster/still half of the ready player has never rendered a real image. @mux/mux-player@3.13.4 only derives a thumbnail URL when the thumbnail token's decoded aud claim is 't'; the fake provider mints deterministic NON-JWT tokens, so every local and CI run exercises the 'no poster' branch and the frame's bg-bg-tertiary fallback. That a signed Mux thumbnail token really produces a still is only observable against a real account — closed by the docs/DEPLOY.md Phase 01.1 Mux runbook, alongside window 12. | open |  | 2026-09-22T03:32:56.929Z |  |
+| 15 | 03 | unrun-verify | apps/web/e2e/phase3-smoke.spec.ts |  | Real-device HLS playback was never observed: the phase smoke proves the row reaches 'Pronto' and the player mounts with a credential under Playwright's bundled Chromium, which cannot stand in for iOS Safari's HLS stack. That a ready video actually plays, with a thumbnail, on a real iPhone (Safari) and a real Android device (Chrome) is annotated in the spec and recorded in docs/DEPLOY.md as blocked on Phase 01.1, alongside windows 12 and 14. | open |  | 2026-09-22T04:01:20.180Z |  |
 
 ````json
 [
@@ -198,6 +199,18 @@ last_updated: 2026-09-22T03:32:56.929Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-22T03:32:56.929Z",
+    "resolved_at": null
+  },
+  {
+    "id": 15,
+    "kind": "unrun-verify",
+    "phase": "03",
+    "file": "apps/web/e2e/phase3-smoke.spec.ts",
+    "line": null,
+    "description": "Real-device HLS playback was never observed: the phase smoke proves the row reaches 'Pronto' and the player mounts with a credential under Playwright's bundled Chromium, which cannot stand in for iOS Safari's HLS stack. That a ready video actually plays, with a thumbnail, on a real iPhone (Safari) and a real Android device (Chrome) is annotated in the spec and recorded in docs/DEPLOY.md as blocked on Phase 01.1, alongside windows 12 and 14.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-22T04:01:20.180Z",
     "resolved_at": null
   }
 ]

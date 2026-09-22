@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Media Pipeline & Member Profiles
-status: executing
-stopped_at: Completed 03-07-PLAN.md
-last_updated: "2026-09-22T03:36:31.327Z"
+status: verifying
+stopped_at: Completed 03-08-PLAN.md
+last_updated: "2026-09-22T04:49:25.558Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 03 execution started
-state_head: 51509bae51ce2ce66313663525dba0beefddcb35
+state_head: ddd6f2355a90bf09de501f406a9792141bbc2450
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 40
-  completed_plans: 36
+  completed_plans: 37
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 Phase: 03 (Media Pipeline & Member Profiles) — EXECUTING
 Plan: 8 of 8
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-21 — Phase 03 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -94,6 +94,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P05 | 57 min | 3 tasks | 22 files |
 | Phase 03 P06 | 29 min | 3 tasks | 33 files |
 | Phase 03 P07 | 62 min | 3 tasks | 31 files |
+| Phase 03 P08 | 67 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -242,6 +243,13 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-07: CONFLICT added to ERROR_CODES for the 409 { media: 'not_ready' } playback refusal — the one distinguishable code, reachable only for the caller's own transcoding asset
 - [Phase 03]: 03-07: adding loading.tsx makes /configuracoes/midia stream, so notFound() no longer sets a 404 status — the e2e asserts the rendered screen, and pickVideo goes through the real filechooser as a hydration gate
 - [Phase 03]: 03-07: @mux/mux-player-react@3.13.4 installed under 03-06's blocking-human approval; @mux/upchunk@3.5.0 on its own OK audit verdict — two separate bases, upchunk is NOT covered by that checkpoint
+- [Phase 03]: 03-08: MEDIA_SWEEP_QUEUE/MEDIA_SWEEP_SINGLETON are declared in media/index.ts beside MEDIA_DERIVE_QUEUE, not in sweep-job.ts — service.ts owns armSweeper and the job imports the service, so a constant in the job file would invert the repo's 'service -> job direction only, no cycle' rule
+- [Phase 03]: 03-08: purgeAsset deletes in the order bytes -> provider asset -> row, and LISTS the tenant/media/assetId prefix rather than rebuilding keys from variant_widths; a Storage or provider failure returns early and leaves a re-collectable row rather than unreferenced bytes (fakeVideoInternals.failDeleteAsset proves that branch)
+- [Phase 03]: 03-08: no scheduler exists — the sweeper re-arms itself hourly with a deferred startAfter under a CONSTANT singletonKey (the kernel.domain-verify pattern); boss.schedule() stays unused
+- [Phase 03]: 03-08: every new cross-tenant isolation case asserts its POSITIVE control in the same test (T-03-56), so a globally broken route cannot make the negative pass vacuously; 020-tenant-isolation.sql went plan(38) to plan(45) adding media_provider_events and the tenant-B symmetry
+- [Phase 03]: 03-08: the Phase 3 exit gate pnpm verify is GREEN at 20m26s (unit 385, pgTAP 128, integration 313, e2e 271 passed/41 skipped, PWA 45/3) against the Phase 2 baseline of 17m30s — after catching two real regressions: an unformatted packages/contracts/src/media.ts from 03-07, and four Phase 1/2 e2e assertions stale because 03-05 removed the /perfil role pill and 03-04 wired the Editar perfil settings row
+- [Phase 03]: 03-08: two verifications stay KNOWN-BLOCKED on Phase 01.1 and are recorded in docs/DEPLOY.md, in the smoke spec annotations and as SUMMARY coverage D9/D10 — real-device HLS playback (Chromium cannot stand in for iOS Safari HLS) and a real Mux transcode (no account exists). Expect a partial UAT, the way Phase 2 closed at 9/13
+- [Phase 03]: 03-08: RESEARCH R-01 published figures CLOSE the STATE blocker '[Phase 3]: Video vendor pricing is LOW confidence' — Mux encoding free at video_quality basic, first 100,000 delivery minutes/month free, storage about USD 0.0028/min/month at 1080p (about USD 1/month for a 300-minute pilot) vs Cloudflare Stream USD 5/month floor; A6 flags them as published rates to re-verify at account creation
 
 ### Pending Todos
 
@@ -274,6 +282,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-22T03:36:31.279Z
-Stopped at: Completed 03-07-PLAN.md
+Last session: 2026-09-22T04:49:25.510Z
+Stopped at: Completed 03-08-PLAN.md
 Resume file: None

@@ -12,7 +12,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [x] **TENANT-01**: A single deployment serves every tenant on that tenant's own custom domain (a hostname the customer owns, registered in `tenant_domains`), while the platform domain serves TRIA's `super_admin`; the host only selects the tenant's public shell (login, sign-up, branding) and after login the app resolves tenant, role and modules from the user's membership, rejecting a session whose membership does not belong to the host's tenant
 - [x] **TENANT-02**: Each tenant has branding (logo, primary/secondary colors, favicon, display name) that is applied to the whole app shell after login, server-rendered so the user never sees another brand or a default brand flash
 - [x] **TENANT-03**: Every tenant-owned row carries `tenant_id`; the API runs tenant requests under a database role subject to Row Level Security (no service-role key for user traffic), so cross-tenant reads/writes are blocked at the DB even if application code has a bug
-- [ ] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
+- [x] **TENANT-04**: Storage objects (media, attachments) are stored under tenant-scoped paths and served only through signed, tenant-checked URLs
 - [x] **TENANT-05**: An automated isolation test suite with at least two tenants proves that lists, detail pages, search, notifications, chat and storage never return another tenant's data
 - [ ] **TENANT-06**: Authentication e-mails (password recovery, confirmation) are sent with the tenant's display name and logo, not TRIA's
 - [x] **TENANT-07**: `super_admin` can attach a custom domain to a tenant from the platform panel; the platform registers it with the hosting provider and the auth redirect allow-list, shows the DNS records the customer must create, and reports verification status (pilot/seed tenants get their domains from the provisioning script)
@@ -45,9 +45,9 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Member Profile
 
-- [ ] **PROF-01**: Member has a profile with photo, display name and bio, and can edit their own
-- [ ] **PROF-02**: Member can view another member's profile within the same tenant
-- [ ] **PROF-03**: Member can browse a searchable (by name) list of the tenant's members, paginated
+- [x] **PROF-01**: Member has a profile with photo, display name and bio, and can edit their own
+- [x] **PROF-02**: Member can view another member's profile within the same tenant
+- [x] **PROF-03**: Member can browse a searchable (by name) list of the tenant's members, paginated
 
 ### Feed
 
@@ -115,9 +115,9 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Media
 
-- [ ] **MEDIA-01**: Uploads go directly from the browser to Supabase Storage using signed upload URLs brokered by the API (files never transit Cloud Run); the API confirms the upload and records the asset with tenant scope
-- [ ] **MEDIA-02**: Images are resized/compressed server-side (worker) into display sizes; original size and type limits are enforced (Supabase Free plan: 50 MB per file, no native transforms)
-- [ ] **MEDIA-03**: Videos are uploaded to a streaming vendor (Mux or Cloudflare Stream, chosen in the media phase) that transcodes and serves HLS with thumbnails; playback works on iOS and Android
+- [x] **MEDIA-01**: Uploads go directly from the browser to Supabase Storage using signed upload URLs brokered by the API (files never transit Cloud Run); the API confirms the upload and records the asset with tenant scope
+- [x] **MEDIA-02**: Images are resized/compressed server-side (worker) into display sizes; original size and type limits are enforced (Supabase Free plan: 50 MB per file, no native transforms)
+- [x] **MEDIA-03**: Videos are uploaded to a streaming vendor (Mux or Cloudflare Stream, chosen in the media phase) that transcodes and serves HLS with thumbnails; playback works on iOS and Android
 - [ ] **MEDIA-04**: Link unfurling runs server-side with an SSRF guard and caches title/description/image on the post
 
 ### Design Prototype (UI source of truth)
@@ -210,7 +210,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-01 | Phase 1 | Complete |
 | TENANT-02 | Phase 2 | Complete |
 | TENANT-03 | Phase 1 | Complete |
-| TENANT-04 | Phase 3 | Pending |
+| TENANT-04 | Phase 3 | Complete |
 | TENANT-05 | Phase 1 | Complete |
 | TENANT-06 | Phase 2 | Gaps Found |
 | TENANT-07 | Phase 2 | Complete |
@@ -231,9 +231,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUTH-04 | Phase 1 | Complete |
 | AUTH-05 | Phase 1 | Complete |
 | AUTH-06 | Phase 1 | Complete |
-| PROF-01 | Phase 3 | Pending |
-| PROF-02 | Phase 3 | Pending |
-| PROF-03 | Phase 3 | Pending |
+| PROF-01 | Phase 3 | Complete |
+| PROF-02 | Phase 3 | Complete |
+| PROF-03 | Phase 3 | Complete |
 | FEED-01 | Phase 4 | Pending |
 | FEED-02 | Phase 4 | Pending |
 | FEED-03 | Phase 4 | Pending |
@@ -274,9 +274,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ADMIN-02 | Phase 8 | Pending |
 | ADMIN-03 | Phase 8 | Pending |
 | ADMIN-04 | Phase 8 | Pending |
-| MEDIA-01 | Phase 3 | Pending |
-| MEDIA-02 | Phase 3 | Pending |
-| MEDIA-03 | Phase 3 | Pending |
+| MEDIA-01 | Phase 3 | Complete |
+| MEDIA-02 | Phase 3 | Complete |
+| MEDIA-03 | Phase 3 | Complete |
 | MEDIA-04 | Phase 4 | Pending |
 | UI-01 | Phase 2 | Gaps Found |
 | UI-02 | Phase 4 | Pending |
