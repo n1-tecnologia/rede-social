@@ -3,6 +3,7 @@ import type { AppEnv } from '@tria/core/server/auth/context';
 import { flushEventsAfterHandler } from '@tria/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@tria/core/server/http/api-error';
 import { exampleRoutes } from '@tria/module-example/server';
+import { feedRoutes } from '@tria/module-feed/server';
 import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
 import { healthRoutes } from './routes/health';
@@ -61,6 +62,10 @@ const routes = app
   // value, and the RLS select policy makes another community's rows invisible rather than refused.
   .route('/v1/members', membersRoutes)
   .route('/v1/platform', platformRoutes)
+  // The module carries its own `requireAuth` + `requireModule('feed')` chain plus a per-route
+  // `requirePermission('feed.post.create')` on the write (packages/modules/feed/server/routes.ts),
+  // so the mount cannot forget a guard and V1's posting rule is a tenant setting, not a route edit.
+  .route('/v1/feed', feedRoutes)
   // The module carries its own `requireAuth` + `requireModule('example')` + `requireRole` chain
   // (packages/modules/example/server/routes.ts), so the mount cannot forget a guard.
   .route('/v1/example', exampleRoutes);

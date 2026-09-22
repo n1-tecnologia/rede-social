@@ -1,0 +1,17 @@
+{
+  "feed": {
+    "region": "Publicações da comunidade",
+    "post": {
+      "label": "Publicação de {name}"
+    },
+    "caption": {
+      "more": "… mais"
+    },
+    "empty": {
+      "title": "Nada por aqui ainda",
+      "body": "As publicações da {tenant} vão aparecer aqui.",
+      "bodyAuthor": "Publique a primeira novidade da comunidade.",
+      "cta": "Criar publicação"
+    }
+  }
+}

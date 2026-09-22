@@ -182,7 +182,7 @@ export const meRoutes = me
         },
         // Enabled keys from `tenant_modules`, decorated by the registry and sorted by nav order.
         modules: enabledModulesForBootstrap(flags.keys, flags.settings),
-        permissions: permissionsFor(membership.role, flags.keys),
+        permissions: permissionsFor(membership.role, flags.keys, flags.settings),
         counters: { unreadNotifications: 0, unreadConversations: 0 },
       };
       return c.json(body, 200);
