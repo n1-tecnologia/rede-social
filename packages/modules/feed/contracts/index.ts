@@ -1,3 +1,4 @@
+import { MEDIA_STATUSES } from '@tria/contracts/media';
 import { z } from 'zod';
 
 /**
@@ -41,9 +42,75 @@ export const feedQuerySchema = z
   .strict();
 export type FeedQuery = z.infer<typeof feedQuerySchema>;
 
+/* ── Media on a post (FEED-01, D-53) ───────────────────────────────────────────────────────────── */
+
 /**
- * `POST /v1/feed/posts`. V1 a post is caption-only, so the trimmed caption must be non-empty; 04-04
- * relaxes the refinement to "caption OR media" when `feed_post_media` lands.
+ * Per-post counts. They are NOT in `MEDIA_LIMITS` (which caps a single upload's bytes and mime);
+ * these cap how many assets one post may REFERENCE, and they are enforced twice — by the Zod array
+ * bound below, and again in the service before any row is inserted.
+ *
+ * Ten dots at 6px fit the carousel's scrim pill well inside a 320px viewport (UI-D-10), which is the
+ * concrete reason `FEED_MAX_IMAGES` is 10 and not an arbitrary larger number.
+ */
+export const FEED_MAX_IMAGES = 10;
+export const FEED_MAX_ATTACHMENTS = 5;
+
+/**
+ * The closed refusal vocabulary a post WRITE can answer with, as `details.media`. The web switches
+ * on it exhaustively and maps each to pt-BR copy, exactly as it does for `MEDIA_ISSUES`.
+ *
+ * `gallery_and_video` is the API's translation of the DATABASE's refusal (23503 on
+ * `feed_post_media_kind_fk`, 23505 on `feed_post_media_video_uq`, 23514 on the kind check) as well
+ * as of the schema's own `.superRefine`: the rule holds even for a caller that never touches the
+ * composer. `asset_not_usable` deliberately covers "unknown id", "another tenant's id", "wrong
+ * purpose", "wrong kind" and "not ready" with ONE code and NO id echoed back — a per-cause code over
+ * an enumerable uuid space would be an existence oracle (the D-23 posture, T-04-22).
+ */
+export const FEED_MEDIA_ISSUES = [
+  'too_many_images',
+  'too_many_attachments',
+  'gallery_and_video',
+  'asset_not_usable',
+] as const;
+export type FeedMediaIssue = (typeof FEED_MEDIA_ISSUES)[number];
+
+/**
+ * One media row as the feed projects it. It carries the ASSET ID and the facts the renderer needs
+ * (the ladder for `srcSet`, the stored width/height for the ratio box, the filename and byte size
+ * for an attachment row) — and NEVER a URL: `MediaImage` derives `/v1/media/{assetId}/{variant}`
+ * itself, so a cached payload can never outlive a signed URL (R-05, T-04-23).
+ *
+ * `status` rides along because a video may be published while its transcode runs (D-53): the card
+ * shows the Phase 3 `processando` placeholder rather than an empty frame.
+ */
+export const postMediaSchema = z
+  .object({
+    assetId: z.uuid(),
+    kind: z.enum(['image', 'video', 'file']),
+    position: z.number().int().min(0),
+    status: z.enum(MEDIA_STATUSES),
+    width: z.number().int().nullable(),
+    height: z.number().int().nullable(),
+    mime: z.string(),
+    bytes: z.number().int(),
+    filename: z.string().nullable(),
+    variantWidths: z.array(z.number().int()),
+  })
+  .strict();
+export type PostMediaItem = z.infer<typeof postMediaSchema>;
+
+/**
+ * `POST /v1/feed/posts`. A post is publishable with a caption, with media, or with both — never with
+ * neither (the UI-SPEC's publishable rule; 04-01's caption-non-empty refinement is relaxed here now
+ * that `feed_post_media` exists).
+ *
+ * **The arrays' ORDER IS THE GALLERY ORDER.** `imageAssetIds[i]` becomes `position = i`, and the
+ * composer's drag-to-reorder is a reorder of this array and nothing else — there is no separate
+ * position field to keep in sync.
+ *
+ * `imageAssetIds` and `videoAssetId` are mutually exclusive (D-53). The refinement below is the
+ * FRIENDLY half of that rule; the binding half is `feed_post_media_kind_fk` in the database, which
+ * refuses the same shape for a caller that never validated anything.
  *
  * Deliberately NOT idempotent (edge: idempotency): two identical requests create two distinct posts,
  * because a create endpoint with no client-supplied key cannot distinguish a retry from a genuine
@@ -52,9 +119,38 @@ export type FeedQuery = z.infer<typeof feedQuerySchema>;
  */
 export const createPostSchema = z
   .object({
-    caption: z.string().trim().min(1).max(FEED_MAX_CAPTION),
+    caption: z.string().trim().max(FEED_MAX_CAPTION).default(''),
+    imageAssetIds: z.array(z.uuid()).optional(),
+    videoAssetId: z.uuid().optional(),
+    attachmentAssetIds: z.array(z.uuid()).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const images = value.imageAssetIds ?? [];
+    const attachments = value.attachmentAssetIds ?? [];
+    if (images.length > 0 && value.videoAssetId !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['videoAssetId'], message: 'gallery_and_video' });
+    }
+    if (images.length > FEED_MAX_IMAGES) {
+      ctx.addIssue({ code: 'custom', path: ['imageAssetIds'], message: 'too_many_images' });
+    }
+    if (attachments.length > FEED_MAX_ATTACHMENTS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['attachmentAssetIds'],
+        message: 'too_many_attachments',
+      });
+    }
+    // Caption OR media — never neither. A post with no caption and no asset has nothing to render.
+    if (
+      value.caption.length === 0 &&
+      images.length === 0 &&
+      attachments.length === 0 &&
+      value.videoAssetId === undefined
+    ) {
+      ctx.addIssue({ code: 'custom', path: ['caption'], message: 'empty_post' });
+    }
+  });
 export type CreatePost = z.infer<typeof createPostSchema>;
 
 /** Authorship as the card renders it (D-52): the PERSON, reached through their membership. */
@@ -86,6 +182,14 @@ export const feedPostSchema = z
     viewerLiked: z.boolean(),
     communityId: z.uuid().nullable(),
     canManage: z.boolean(),
+    /**
+     * D-53's discriminator — what `PostMedia` BRANCHES on. It is the parent's own column, not a
+     * count over `media`, so a post with three attachments and no photos is still `'none'` and
+     * renders no media frame at all.
+     */
+    mediaKind: z.enum(['none', 'gallery', 'video']),
+    /** Images/video first in `position` order, then the attachments in their own `position` order. */
+    media: z.array(postMediaSchema),
   })
   .strict();
 export type FeedPost = z.infer<typeof feedPostSchema>;

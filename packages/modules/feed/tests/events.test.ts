@@ -37,6 +37,11 @@ const row = {
   membership_id: MEMBERSHIP_ID,
   display_name: 'Admin',
   avatar_asset_id: null,
+  // 04-04: the projection's media half. `media` is `coalesce(json_agg(...), '[]'::json)`, so it is
+  // ALWAYS an array on the wire — the fixture mirrors that rather than omitting it, which is what
+  // makes `hasMedia` on the emitted event a real assertion instead of a guarded `?? []`.
+  media_kind: 'none' as const,
+  media: [],
 };
 
 /**

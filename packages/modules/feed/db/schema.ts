@@ -1,5 +1,5 @@
 import { tenantIsolationPolicy } from '@tria/core/db/rls';
-import { tenants, users } from '@tria/core/db/schema';
+import { mediaAssets, tenants, users } from '@tria/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
   check,
@@ -99,7 +99,96 @@ export const feedPosts = pgTable(
     // "this member's posts" (a profile tab, Phase 8 moderation) without a sequential scan.
     index('feed_posts_tenant_author_idx').on(t.tenantId, t.authorUserId),
     check('feed_posts_media_kind_chk', sql`${t.mediaKind} in ('none','gallery','video')`),
+    // The target of `feed_post_media_kind_fk` (04-04). `id` is already the primary key; this pair is
+    // what lets a media row name "(this post) AND (that post's media_kind)" in ONE referential check,
+    // which is how D-53's gallery-XOR-video rule becomes a constraint rather than a convention.
+    unique('feed_posts_id_media_kind_uq').on(t.id, t.mediaKind),
     tenantIsolationPolicy('feed_posts_tenant_isolation'),
+  ],
+).enableRLS();
+
+/**
+ * A post's media, as an ORDERED COLLECTION (FEED-01, D-53) — never as columns on `feed_posts`.
+ *
+ * `feed_posts` deliberately carries NO singular per-asset column ("the post's image", "the post's
+ * video", "the post's cover"). A single-image post is the ONE-ROW case of this table, not a special
+ * column: two sources of truth for the same fact would make the carousel's ordering ambiguous and
+ * would turn D-53's rule into a coordination problem between columns instead of a referential
+ * check. A grep gate in 04-04's acceptance criteria pins that absence.
+ *
+ * **D-53 IS ENFORCED HERE, DECLARATIVELY AND RACE-FREE.** The mechanism is the same composite-foreign-key
+ * technique `feed_comments_parent_fk` uses for the one reply level:
+ *
+ *   1. `feed_posts` carries exactly ONE `media_kind` (`'none' | 'gallery' | 'video'`) and a
+ *      `unique (id, media_kind)` so that pair is nameable;
+ *   2. every media row carries a REDUNDANT `post_media_kind` and a composite foreign key
+ *      `(post_id, post_media_kind) -> feed_posts(id, media_kind)`, so a row can only claim a value
+ *      its parent actually has;
+ *   3. `feed_post_media_kind_chk` binds `kind = 'image'` to `post_media_kind = 'gallery'` and
+ *      `kind = 'video'` to `post_media_kind = 'video'`.
+ *
+ * Because a post has exactly one `media_kind`, an image row and a video row CANNOT COEXIST: whichever
+ * comes second names a `(post_id, post_media_kind)` pair that does not exist and fails with SQLSTATE
+ * 23503 (or 23514 if it lies about its own `kind`). A `before insert` trigger that counted sibling
+ * rows instead would be a read-then-write with no lock — two concurrent inserts could both observe
+ * "no video yet" and both succeed, producing exactly the post no renderer can draw. Do not
+ * "simplify" the redundant column away: it is the whole mechanism.
+ *
+ * A `kind = 'file'` row places NO constraint on the parent (the check accepts all three parent
+ * values), so an announcement may be photos plus a PDF, a video plus a PDF, or text plus a PDF.
+ *
+ * The row stores an ASSET ID and a POSITION. It never stores a URL, a signed token or a byte:
+ * images render through the stable `/v1/media/{assetId}/{variant}` redirect on every fetch (R-05,
+ * TENANT-04) and the bytes live in the private `media` bucket the Phase 3 broker owns (MEDIA-01).
+ */
+export const feedPostMedia = pgTable(
+  'feed_post_media',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    postId: uuid('post_id')
+      .notNull()
+      .references(() => feedPosts.id, { onDelete: 'cascade' }),
+    /** Redundant on purpose — the second half of `feed_post_media_kind_fk`. See the docblock. */
+    postMediaKind: text('post_media_kind').notNull(),
+    /** The Phase 3 broker's asset. Never a URL, never a signed token (MEDIA-01, TENANT-04). */
+    mediaAssetId: uuid('media_asset_id')
+      .notNull()
+      .references(() => mediaAssets.id),
+    /** 'image' | 'video' | 'file' — the same vocabulary as `media_assets.kind`. */
+    kind: text().notNull(),
+    /** The array index the composer sent. THE gallery order; a reorder is a reorder of this. */
+    position: integer().notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The callback form, not a column-level `.references()`: a composite foreign key has no
+    // column-level spelling (the same reason `feed_comments_parent_fk` is written this way).
+    foreignKey({
+      columns: [t.postId, t.postMediaKind],
+      foreignColumns: [feedPosts.id, feedPosts.mediaKind],
+      name: 'feed_post_media_kind_fk',
+    }).onDelete('cascade'),
+    // Half two of the XOR. Paired with the foreign key above and the parent's single `media_kind`,
+    // an image row and a video row on one post are mutually exclusive AT THE INDEX.
+    check(
+      'feed_post_media_kind_chk',
+      sql`(kind = 'image' and post_media_kind = 'gallery')
+       or (kind = 'video' and post_media_kind = 'video')
+       or (kind = 'file' and post_media_kind in ('none','gallery','video'))`,
+    ),
+    // At most ONE video per post — PARTIAL, so the image and file rows (which may be many) are not
+    // caught by it. A second video insert fails 23505 here, not in application code.
+    uniqueIndex('feed_post_media_video_uq').on(t.postId).where(sql`kind = 'video'`),
+    // Stable, gap-free ordering per kind: two rows cannot claim slide 3, so the carousel's order is
+    // a fact of the data rather than of whatever order the rows happened to come back in.
+    uniqueIndex('feed_post_media_position_uq').on(t.postId, t.kind, t.position),
+    // `tenant_id` first (01-08 convention); `position` last so the projection's ordered read is
+    // delivered by the index rather than sorted.
+    index('feed_post_media_tenant_post_idx').on(t.tenantId, t.postId, t.position),
+    tenantIsolationPolicy('feed_post_media_tenant_isolation'),
   ],
 ).enableRLS();
 

@@ -15,8 +15,10 @@ import type {
   FeedPost,
   FeedQuery,
   LikeResult,
+  PostMediaItem,
   RepliesQuery,
 } from '../contracts/index';
+import { FEED_MAX_ATTACHMENTS, FEED_MAX_IMAGES } from '../contracts/index';
 import { feedPosts } from '../db/schema';
 
 const log = moduleLogger('module-feed');
@@ -49,6 +51,9 @@ type FeedRow = {
   membership_id: string;
   display_name: string;
   avatar_asset_id: string | null;
+  media_kind: 'none' | 'gallery' | 'video';
+  /** `json_agg` of the post's media rows, already ordered. `[]` when the post carries none. */
+  media: PostMediaItem[];
 };
 
 /**
@@ -75,6 +80,17 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  * lookup is a LEFT JOIN in this same statement, bounded to one row by `feed_likes_post_uq`, so the
  * page still costs ONE statement and `feed-query-budget.test.ts` still passes at
  * `FEED_LIST_STATEMENT_BUDGET = 1`. Taking the viewer as a parameter is what keeps that true.
+ *
+ * 04-04 closed the `hasMedia` stub the SAME way: the media collection is a `left join lateral` that
+ * aggregates `feed_post_media` joined to `media_assets` INSIDE this statement, not a second round
+ * trip per post. Two consequences worth stating, because both are load-bearing:
+ *   - the `join media_assets` runs in the tenant lane, so `media_assets_tenant_select`
+ *     (`tenant_id = app.tenant_id() and deleted_at is null`) is what decides visibility. A
+ *     soft-deleted asset simply drops out of the array — the card renders one slide fewer rather
+ *     than a broken frame;
+ *   - the payload carries an ASSET ID and a ladder, never a URL. `MediaImage` derives
+ *     `/v1/media/{assetId}/{variant}` on the client, so a cached page can never outlive a signed
+ *     Storage URL (R-05, T-04-23).
  */
 const postProjection = (viewerUserId: string) => sql`
     select p.id,
@@ -86,13 +102,41 @@ const postProjection = (viewerUserId: string) => sql`
            p.comment_count,
            (pl.id is not null) as viewer_liked,
            p.author_user_id,
+           p.media_kind,
+           pm.media,
            ms.id as membership_id,
            mp.display_name,
            mp.avatar_asset_id
       from feed_posts p
       join memberships ms on ms.user_id = p.author_user_id
       join member_profiles mp on mp.membership_id = ms.id
-      left join feed_likes pl on pl.post_id = p.id and pl.user_id = ${viewerUserId}::uuid`;
+      left join feed_likes pl on pl.post_id = p.id and pl.user_id = ${viewerUserId}::uuid
+      left join lateral (
+        select coalesce(
+                 json_agg(
+                   json_build_object(
+                     'assetId', m.media_asset_id,
+                     'kind', m.kind,
+                     'position', m.position,
+                     'status', a.status,
+                     'width', a.width,
+                     'height', a.height,
+                     'mime', a.mime,
+                     'bytes', a.bytes,
+                     'filename', a.filename,
+                     'variantWidths', a.variant_widths
+                   )
+                   -- Gallery/video first, attachments after, each in its own position order. A bare
+                   -- "order by kind" would sort 'file' ahead of 'image' alphabetically and put the
+                   -- PDFs above the photos.
+                   order by (m.kind = 'file'), m.position
+                 ),
+                 '[]'::json
+               ) as media
+          from feed_post_media m
+          join media_assets a on a.id = m.media_asset_id
+         where m.post_id = p.id
+      ) pm on true`;
 
 /**
  * Row → published contract. Timestamps cross the wire as ISO strings, never as `Date` — and here
@@ -117,6 +161,11 @@ const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
   viewerLiked: row.viewer_liked,
   communityId: row.community_id,
   canManage: row.author_user_id === viewerUserId,
+  mediaKind: row.media_kind,
+  // `coalesce(..., '[]'::json)` inside the lateral means the array is always present; the `?? []`
+  // guards only the `left join` miss (a post row with no lateral match cannot happen, but a future
+  // projection that drops the join would otherwise crash the map rather than render no media).
+  media: row.media ?? [],
 });
 
 /**
@@ -209,16 +258,101 @@ export async function getPost(ctx: RequestContext, postId: string): Promise<Feed
  *   therefore never observe a post that a rollback erased (MOD-03, criterion 4).
  */
 export async function createPost(ctx: RequestContext, input: CreatePost): Promise<FeedPost> {
+  const images = input.imageAssetIds ?? [];
+  const attachments = input.attachmentAssetIds ?? [];
+  const video = input.videoAssetId;
+
+  // The counts and the XOR again, in the SERVICE. The schema already refuses these shapes, and this
+  // is not redundant defence: `createPost` is also reachable from the seed, from a future admin
+  // import and from any handler that assembles its own `CreatePost`, none of which pass through the
+  // route's validator.
+  if (images.length > 0 && video !== undefined) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'gallery_and_video' });
+  }
+  if (images.length > FEED_MAX_IMAGES) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'too_many_images' });
+  }
+  if (attachments.length > FEED_MAX_ATTACHMENTS) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'too_many_attachments' });
+  }
+
+  // D-53's discriminator, derived from the input — never sent by the client. The parent's single
+  // `media_kind` is what `feed_post_media_kind_fk` then constrains every media row against.
+  const mediaKind: 'none' | 'gallery' | 'video' =
+    video !== undefined ? 'video' : images.length > 0 ? 'gallery' : 'none';
+
+  /** Every referenced asset, in insert order, with the (kind, purpose) pair it MUST have. */
+  const wanted: { assetId: string; kind: 'image' | 'video' | 'file'; position: number }[] = [
+    ...images.map((assetId, position) => ({ assetId, kind: 'image' as const, position })),
+    ...(video !== undefined ? [{ assetId: video, kind: 'video' as const, position: 0 }] : []),
+    ...attachments.map((assetId, position) => ({ assetId, kind: 'file' as const, position })),
+  ];
+
   const created = await withTenantTx(ctx, async (tx) => {
+    if (wanted.length > 0) {
+      // ONE validation read for every referenced id, inside the writing transaction. The read runs
+      // in the TENANT LANE, so `media_assets_tenant_select` is what scopes it: another tenant's
+      // asset id simply does not come back, and the refusal below is the same one an unknown id
+      // gets — there is nothing here that compares tenant ids, so no later edit can turn this into
+      // a 403 that confirms the asset exists somewhere (T-04-22).
+      const ids = wanted.map((item) => item.assetId);
+      // `in (…)` over individually-cast literals rather than `= any($1::uuid[])`: the driver binds a
+      // JS string array as `text[]`, and the cast to `uuid[]` is the kind of implicit conversion
+      // that works until one id is malformed and the statement fails as a 500 instead of a 400.
+      const idList = sql.join(
+        ids.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      );
+      const rows = await tx.execute<{ id: string; kind: string; purpose: string; status: string }>(
+        sql`select id, kind, purpose, status from media_assets where id in (${idList})`,
+      );
+      const byId = new Map(rows.map((row) => [row.id, row]));
+
+      for (const item of wanted) {
+        const asset = byId.get(item.assetId);
+        // A duplicate id in the array would pass this loop but fail `feed_post_media_position_uq`
+        // only if it landed on the same position, so it is refused here instead.
+        const expectedPurpose = item.kind === 'file' ? 'attachment' : 'post';
+        // D-53 / Phase 3: a video may be published while its transcode runs — the card shows the
+        // `processando` placeholder. Everything else must already be `ready`.
+        const statusOk =
+          asset?.status === 'ready' || (item.kind === 'video' && asset?.status === 'processing');
+        if (!asset || asset.kind !== item.kind || asset.purpose !== expectedPurpose || !statusOk) {
+          throw new ApiError(400, 'VALIDATION_FAILED', { media: 'asset_not_usable' });
+        }
+      }
+      if (new Set(ids).size !== ids.length) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { media: 'asset_not_usable' });
+      }
+    }
+
     const [inserted] = await tx
       .insert(feedPosts)
       .values({
         tenantId: ctx.tenantId,
         authorUserId: ctx.userId,
         caption: input.caption,
+        mediaKind,
       })
       .returning();
     if (!inserted) throw new ApiError(500, 'INTERNAL');
+
+    if (wanted.length > 0) {
+      // ONE multi-row insert. `post_media_kind` is the parent's own `media_kind`, so the composite
+      // foreign key has something to match; a row that disagreed would be refused by the database
+      // rather than by this function.
+      const values = sql.join(
+        wanted.map(
+          (item) =>
+            sql`(${ctx.tenantId}::uuid, ${inserted.id}::uuid, ${mediaKind}, ${item.assetId}::uuid, ${item.kind}, ${item.position})`,
+        ),
+        sql`, `,
+      );
+      await tx.execute(sql`
+        insert into feed_post_media
+          (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+        values ${values}`);
+    }
 
     // The author's own membership + profile, in the SAME transaction: the created post is returned
     // in exactly the shape the list returns, so the composer can prepend it without a re-read.
@@ -229,6 +363,13 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
     const row = rows[0];
     if (!row) throw new ApiError(500, 'INTERNAL');
     return row;
+  }).catch((error: unknown) => {
+    // The DATABASE's own refusal of D-53, translated. Named constraints only: an unrelated
+    // integrity error must still surface as a 500 rather than a 400 the client would act on.
+    if (isMediaShapeViolation(error)) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { media: 'gallery_and_video' });
+    }
+    throw error;
   });
 
   emit(ctx, 'post.published', {
@@ -236,8 +377,10 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
     postId: created.id,
     authorUserId: ctx.userId,
     communityId: created.community_id,
-    // 04-04 sets this from `media_kind` once `feed_post_media` exists.
-    hasMedia: false,
+    // 04-04 closed 04-01's stub (WINDOWS #17). "Has media" is "carries any asset at all" — a
+    // PDF-only announcement is a media post for Phase 7's purposes even though its `media_kind` is
+    // `'none'`, which is why this reads the projected collection rather than the discriminator.
+    hasMedia: created.media.length > 0,
     occurredAt: created.created_at,
   });
 
@@ -249,11 +392,56 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
       requestId: ctx.requestId,
       postId: created.id,
       captionLength: input.caption.length,
+      // The SHAPE of the media, never an id or a filename (T-04-05): a filename is member content.
+      mediaKind,
+      mediaCount: created.media.length,
     },
     'post created',
   );
 
   return toPost(created, ctx.userId);
+}
+
+/**
+ * The constraint names that mean "you tried to build a post the renderer could not draw", and
+ * nothing else:
+ *   - `feed_post_media_kind_fk`  — 23503, a media row naming a `(post_id, media_kind)` pair the
+ *     parent does not have (an image row on a video post, or the reverse);
+ *   - `feed_post_media_kind_chk` — 23514, a row lying about its own `kind`/`post_media_kind` pair;
+ *   - `feed_post_media_video_uq` — 23505, a second video on one post.
+ *
+ * All three answer `400 { media: 'gallery_and_video' }`: from the caller's side they are one rule.
+ * The cause chain is walked exactly as `isReplyDepthViolation` walks it, `seen` set included.
+ */
+const MEDIA_SHAPE_CONSTRAINTS = new Set([
+  'feed_post_media_kind_fk',
+  'feed_post_media_kind_chk',
+  'feed_post_media_video_uq',
+]);
+
+function isMediaShapeViolation(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const e = current as {
+      code?: unknown;
+      constraint_name?: unknown;
+      constraint?: unknown;
+      cause?: unknown;
+    };
+    if (e.code === '23503' || e.code === '23505' || e.code === '23514') {
+      const name =
+        typeof e.constraint_name === 'string'
+          ? e.constraint_name
+          : typeof e.constraint === 'string'
+            ? e.constraint
+            : '';
+      return MEDIA_SHAPE_CONSTRAINTS.has(name);
+    }
+    current = e.cause;
+  }
+  return false;
 }
 
 /* ── Interactions: likes, comments, replies (FEED-04, FEED-05, FEED-06) ────────────────────────── */

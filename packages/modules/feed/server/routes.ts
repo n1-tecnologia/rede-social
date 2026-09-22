@@ -10,6 +10,7 @@ import {
   commentsQuerySchema,
   createCommentSchema,
   createPostSchema,
+  FEED_MEDIA_ISSUES,
   feedPageSchema,
   feedPostSchema,
   feedQuerySchema,
@@ -42,9 +43,21 @@ import {
  * hard-code V1's "only the admin publishes" into the route, and flipping
  * `tenant_modules['feed'].settings.postingPolicy` to `'members'` would then still need a code change.
  */
+/**
+ * The media refusals `createPostSchema`'s refinement raises, as a lookup. The refinement carries the
+ * MACHINE CODE as its issue `message` (there is nowhere else on a Zod issue to put one), and this
+ * hook lifts it to `details.media` so the web switches on the same closed vocabulary the service
+ * uses when it refuses the same shape — one code per rule, whichever layer caught it.
+ */
+const MEDIA_ISSUE_SET: ReadonlySet<string> = new Set(FEED_MEDIA_ISSUES);
+
 const feed = new OpenAPIHono<AppEnv>({
   defaultHook: (result) => {
     if (!result.success) {
+      const media = result.error.issues
+        .map((issue) => issue.message)
+        .find((message) => MEDIA_ISSUE_SET.has(message));
+      if (media) throw new ApiError(400, 'VALIDATION_FAILED', { media });
       throw new ApiError(400, 'VALIDATION_FAILED', {
         issues: result.error.issues.map((issue) => ({
           path: issue.path.map(String).join('.'),
@@ -99,6 +112,10 @@ const createPostRoute = createRoute({
     201: {
       description: 'The created post, in the same shape the feed list returns',
       content: { 'application/json': { schema: feedPostSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED` with `details.media` carrying exactly one machine code: `gallery_and_video` (D-53 — photos and a video on one post, refused by the schema AND by `feed_post_media_kind_fk`), `too_many_images`, `too_many_attachments`, or `asset_not_usable` (an asset that is not this tenant's, not the right kind/purpose, or not in a usable status — ONE code for all of them, and no id echoed back).",
     },
     403: {
       description: "The tenant's posting policy does not grant this caller `feed.post.create`",
