@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 6
+open_count: 5
 waived_count: 0
-fixed_count: 5
+fixed_count: 6
 total_count: 11
-last_updated: 2026-09-22T00:37:02.401Z
+last_updated: 2026-09-22T01:40:51.643Z
 ---
 
 # Broken Windows Ledger
@@ -25,7 +25,7 @@ last_updated: 2026-09-22T00:37:02.401Z
 | 8 | 01 | stub | apps/api/src/modules/registry.ts |  | MODULE_REGISTRY is empty until 01-07 registers @tria/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels | fixed |  | 2026-09-13T14:52:56.229Z | 2026-09-13T16:00:54.360Z |
 | 9 | 01 | stub | packages/modules/example/module.ts |  | throwaway reference module @tria/module-example (D-19) — must be deleted with its table and registry entry in Phase 4 | open |  | 2026-09-13T15:21:32.750Z |  |
 | 10 | 02 | stub | apps/web/app/(app)/configuracoes/page.tsx |  | Settings rows 'Editar perfil' and 'Notificações' are static placeholders with an 'Em breve' pill (D-42); Phase 3 wires profile edit, Phase 7 wires push | open |  | 2026-09-16T23:53:19.085Z |  |
-| 11 | 03 | deviation | apps/web/app/(app)/perfil/page.tsx |  | The /perfil 'Membros' row points at /membros, which 03-05 lands in the next wave — a known one-wave dead link | open |  | 2026-09-22T00:37:02.401Z |  |
+| 11 | 03 | deviation | apps/web/app/(app)/perfil/page.tsx |  | The /perfil 'Membros' row points at /membros, which 03-05 lands in the next wave — a known one-wave dead link | fixed |  | 2026-09-22T00:37:02.401Z | 2026-09-22T01:40:51.643Z |
 
 ````json
 [
@@ -156,10 +156,10 @@ last_updated: 2026-09-22T00:37:02.401Z
     "file": "apps/web/app/(app)/perfil/page.tsx",
     "line": null,
     "description": "The /perfil 'Membros' row points at /membros, which 03-05 lands in the next wave — a known one-wave dead link",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-22T00:37:02.401Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-22T01:40:51.643Z"
   }
 ]
 ````

@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Media Pipeline & Member Profiles
 status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-09-22T00:39:42.503Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-09-22T01:41:14.983Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 03 execution started
-state_head: 93df1c4e81a8a4481b510e2615df88a928afb98e
+state_head: 9a8191610adaa12a8abdf5fc0cd500ba6f30b10a
 progress:
   total_phases: 9
   completed_phases: 0
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 03 (Media Pipeline & Member Profiles) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-09-21 — Phase 03 execution started
 
@@ -91,6 +91,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P02 | 28 min | 3 tasks | 20 files |
 | Phase 03 P03 | 17 min | 2 tasks | 8 files |
 | Phase 03 P04 | 1h 2m | 3 tasks | 33 files |
+| Phase 03 P05 | 57 min | 3 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -216,6 +217,12 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-04: an image failure is read from the element on mount (complete && naturalWidth === 0) as well as from onError — a server-rendered img that 404s before hydration never delivers its error event to React
 - [Phase 03]: 03-04: FileDropZone gained screen (default true, 02-14 unchanged) so the photo zone can hand a dropped phone-format or over-cap file to the browser re-encode instead of refusing it (R-12); Avatar gained the neutral-icon fallback so E9 holds for the shell too
 - [Phase 03]: 03-04: the e2e HEIC case branches on the browser's own decode capability (Chromium has no HEIC decoder, so the prepare-failed copy is its correct answer) and asserts format silence in both branches; the silent-success half stays RESEARCH A1's real-device check in 03-08's UAT
+- [Phase 03]: 03-05: /membros and /membros/[id] pass stickyTop=0px to PageHeader — CSS shrinks a sticky element's constraint rectangle by the scrollport's padding, so the primitive's default calc(var(--safe-top)+3rem) pushes the header 60px DOWN over the content that follows it
+- [Phase 03]: 03-05: the member fetch has ONE implementation (getMembers in lib/profile.ts), shared by the page and loadMoreMembersAction, so the first page and the Carregar mais button cannot drift on page size or query encoding
+- [Phase 03]: 03-05: a 400 from GET /v1/members/{id} is mapped to notFound(), not to the error screen — a malformed id is a miss like the other five, and D-23 wants one indistinguishable screen for all of them
+- [Phase 03]: 03-05: the E5/error backstop is closed with 'no optimistic removal plus the generic error toast' — a card that vanishes on click and returns on the next load reads as a bug AND re-nags
+- [Phase 03]: 03-05: e2e throwaway tenants get a per-RUN host (slug carries a timestamp) because web and API each cache host-to-tenant for 60s; re-using one host points a fresh session at a deleted tenant and every request is refused with TENANT_HOST_MISMATCH
+- [Phase 03]: 03-05: the directory specs set serviceWorkers:'block' — the PWA service worker handles navigations itself and those requests are outside Playwright's page.route, so GET interception silently no-ops without it
 
 ### Pending Todos
 
@@ -248,6 +255,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-22T00:39:31.766Z
-Stopped at: Completed 03-04-PLAN.md
+Last session: 2026-09-22T01:40:58.737Z
+Stopped at: Completed 03-05-PLAN.md
 Resume file: None
