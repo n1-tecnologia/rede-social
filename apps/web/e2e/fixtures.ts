@@ -37,6 +37,19 @@ export const seededFeed = {
   labAuthor: 'Admin TRIA Lab',
 } as const;
 
+/**
+ * 04-04's media fixtures, identical in both tenants (SCHEMA-CONVENTIONS §(j)). The captions are what
+ * `scripts/seed.ts` writes; the filename is the 94-character one UI-SPEC E07's long-text row needs.
+ */
+export const seededFeedMedia = {
+  textOnlyCaption: 'Bem-vindos! Esta é a primeira publicação da comunidade.',
+  galleryCaption: 'Fotos do ultimo encontro da comunidade.',
+  videoCaption: 'Um recado rapido em video para todo mundo.',
+  attachmentCaption: 'Segue o calendario do semestre em PDF.',
+  attachmentFilename:
+    'calendario-completo-do-semestre-com-todas-as-atividades-e-os-encontros-da-nossa-comunidade.pdf',
+} as const;
+
 /** Distinct origins (D-20/D-21). Chromium resolves `*.localhost` to loopback without /etc/hosts. */
 export const hosts = {
   demo: process.env.PLAYWRIGHT_DEMO_URL ?? 'http://tria-demo.localhost:3000',

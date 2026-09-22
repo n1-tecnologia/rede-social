@@ -11,6 +11,7 @@
     "contracts/**/*.ts",
     "server/**/*.ts",
     "tests/**/*.ts",
+    "tests/**/*.tsx",
     "ui/**/*.tsx",
     "ui/**/*.ts"
   ]
