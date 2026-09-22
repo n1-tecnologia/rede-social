@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Media Pipeline & Member Profiles
 status: executing
-stopped_at: Completed 03-06-PLAN.md
-last_updated: "2026-09-22T02:23:47.849Z"
+stopped_at: Completed 03-07-PLAN.md
+last_updated: "2026-09-22T03:36:31.327Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 03 execution started
-state_head: 09b4c600816a97ed7d3b396c1ec27c49ea2578ac
+state_head: 51509bae51ce2ce66313663525dba0beefddcb35
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 40
-  completed_plans: 35
+  completed_plans: 36
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 03 (Media Pipeline & Member Profiles) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 Status: Ready to execute
 Last activity: 2026-09-21 — Phase 03 execution started
 
@@ -93,6 +93,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P04 | 1h 2m | 3 tasks | 33 files |
 | Phase 03 P05 | 57 min | 3 tasks | 22 files |
 | Phase 03 P06 | 29 min | 3 tasks | 33 files |
+| Phase 03 P07 | 62 min | 3 tasks | 31 files |
 
 ## Accumulated Context
 
@@ -234,6 +235,13 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-06: both event-job predicates are status not in ('ready','deleted') — the plan's action text said <> 'ready' for errored, but status='deleted' is the handle 03-08's sweeper collects by, so flipping a soft-deleted row to failed would strand its provider asset forever
 - [Phase 03]: 03-06: NODE_ENV added to the kernel env as the ONE production signal (the Mux adapter's test:true rule); it is deliberately NOT an adapter selector, so a missing NODE_ENV can never switch a vendor on
 - [Phase 03]: 03-06: the Mux adapter has NEVER run against a real account (none exists; Phase 01.1 deferred) — docs/DEPLOY.md carries a seven-step Mux runbook and the real transcode + real-device HLS playback are the two known-blocked UAT lines 03-08 records
+- [Phase 03]: 03-07: @mux/upchunk chunkSize is in KiB (chunkByteSize = chunkSize * 1024, verified in dist/upchunk.mjs) — 5120 is 5 MiB, a 256 KiB multiple
+- [Phase 03]: 03-07: <mux-player> tokens is a PROPERTY-only path — set tokens stores a private field and never reflects a playback-token attribute; the e2e reads the element getter
+- [Phase 03]: 03-07: @mux/mux-player only derives a poster when the thumbnail token decoded aud is 't'; the fake mints non-JWT tokens, so locally the no-poster branch is always the one exercised (broken-windows 14)
+- [Phase 03]: 03-07: a provider-owned upload skips complete entirely — completeUpload would run inspectPdf on an MP4 and reject a good asset; useSignedUpload branches on started.upload.provider via onHandedToProvider
+- [Phase 03]: 03-07: CONFLICT added to ERROR_CODES for the 409 { media: 'not_ready' } playback refusal — the one distinguishable code, reachable only for the caller's own transcoding asset
+- [Phase 03]: 03-07: adding loading.tsx makes /configuracoes/midia stream, so notFound() no longer sets a 404 status — the e2e asserts the rendered screen, and pickVideo goes through the real filechooser as a hydration gate
+- [Phase 03]: 03-07: @mux/mux-player-react@3.13.4 installed under 03-06's blocking-human approval; @mux/upchunk@3.5.0 on its own OK audit verdict — two separate bases, upchunk is NOT covered by that checkpoint
 
 ### Pending Todos
 
@@ -266,6 +274,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-22T02:23:31.956Z
-Stopped at: Completed 03-06-PLAN.md
+Last session: 2026-09-22T03:36:31.279Z
+Stopped at: Completed 03-07-PLAN.md
 Resume file: None
