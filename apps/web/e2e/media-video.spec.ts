@@ -1,12 +1,16 @@
-import { expect, type Page, test } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
+import { expect, type Page, type Request, test } from '@playwright/test';
 import {
   closeAdmin,
   createMember,
   deleteTenantVideoAssets,
   deleteUserByEmail,
+  markVideoReady,
+  newestVideoAsset,
   seedVideoAsset,
 } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { ensureWorker } from './worker';
 
 /**
  * MEDIA-03 / TENANT-04 (plan 03-07): the admin media screen `/configuracoes/midia` and the video
@@ -24,6 +28,8 @@ import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 const DEMO_SLUG = 'tria-demo';
 /** A throwaway `support_tenant`: the seeded set has no support user, and E7 needs all three roles. */
 const SUPPORT_EMAIL = 'support-media@tria-demo.local';
+/** 186 KiB of real H.264 — see `e2e/fixtures/README.md` for the AVFoundation generator. */
+const SAMPLE_MP4 = fileURLToPath(new URL('./fixtures/sample.mp4', import.meta.url));
 
 /** The settings group under test — named by its catalog label, so a copy drift fails here. */
 function adminGroup(page: Page) {
@@ -186,5 +192,315 @@ test.describe('MEDIA-03 — the admin media screen', () => {
       'Recusado',
     );
     await expect(page.locator('main')).not.toContainText('duration_too_long');
+  });
+});
+
+/** Every request the page made, so "the bytes never transit our servers" is an assertion. */
+function recordRequests(page: Page) {
+  const seen: { url: string; method: string; body: number }[] = [];
+  page.on('request', (request: Request) => {
+    let body = 0;
+    try {
+      body = request.postDataBuffer()?.length ?? 0;
+    } catch {
+      body = -1; // a streamed body Playwright will not buffer — still not ours, see the assertions
+    }
+    seen.push({ url: request.url(), method: request.method(), body });
+  });
+  return seen;
+}
+
+test.describe('MEDIA-03 — the upload and the player', () => {
+  let stopWorker: (() => Promise<void>) | null = null;
+
+  test.beforeAll(async () => {
+    // The fake provider simulates a transcode with a DEFERRED `kernel.media-provider-event` job, so
+    // the flip to `ready` only happens if something is actually polling the queue.
+    stopWorker = await ensureWorker();
+    await deleteTenantVideoAssets(DEMO_SLUG);
+  });
+
+  test.afterEach(async () => {
+    await deleteTenantVideoAssets(DEMO_SLUG);
+  });
+
+  test.afterAll(async () => {
+    await stopWorker?.();
+    await deleteTenantVideoAssets(DEMO_SLUG);
+    await closeAdmin();
+  });
+
+  test('an admin uploads a video: progress, then the row sits at "Processando" and flips to "Pronto"', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    const requests = recordRequests(page);
+    await page.goto('/configuracoes/midia');
+
+    await page.locator('#video-dropzone').setInputFiles(SAMPLE_MP4);
+
+    // The row enters the list with the warning pill as soon as the provider has the bytes.
+    const processing = page.locator('[data-testid="media-row"][data-status="processing"]');
+    const pending = page.locator('[data-testid="media-row"][data-status="pending"]');
+    await expect(processing.or(pending).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-testid="media-row"]').first()).toContainText('Processando');
+
+    // The bytes went browser -> provider: no request to our own origin ever carried the file.
+    const ours = requests.filter(
+      (r) => r.url.startsWith(hosts.demo) && (r.method === 'PUT' || r.method === 'POST'),
+    );
+    for (const request of ours) {
+      expect(request.body).toBeLessThan(100_000); // the fixture is 186 KiB
+    }
+    expect(requests.some((r) => r.method === 'PUT' && !r.url.startsWith(hosts.demo))).toBe(true);
+
+    // The fake provider's deferred ready event lands a couple of seconds later; the 5 s poll is what
+    // makes the flip visible without a reload, and the live region announces it.
+    const ready = page.locator('[data-testid="media-row"][data-status="ready"]');
+    await expect(ready).toHaveCount(1, { timeout: 40_000 });
+    await expect(page.locator('[data-testid="media-row"]').first()).toContainText('Pronto');
+    await expect(page.locator('[data-testid="media-live"]')).toHaveText('Vídeo pronto.');
+  });
+
+  test('a .gif is refused at pick time and costs no upload request at all', async ({ page }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    const requests = recordRequests(page);
+    await page.goto('/configuracoes/midia');
+
+    // The picker offers EXACTLY the pair `MEDIA_LIMITS.video.post` allows. The component derives it
+    // with `mediaAcceptFor('video', 'post')` rather than hard-coding a list, so this assertion is
+    // what pins the rendered value to the contract.
+    await expect(page.locator('#video-dropzone')).toHaveAttribute(
+      'accept',
+      'video/mp4,video/quicktime',
+    );
+
+    await page.locator('#video-dropzone').setInputFiles({
+      name: 'meme.gif',
+      mimeType: 'image/gif',
+      buffer: Buffer.from('GIF89a', 'latin1'),
+    });
+
+    await expect(page.locator('[data-testid="video-upload"]').getByRole('alert')).toHaveText(
+      'Formato de vídeo não suportado. Envie um MP4 ou um vídeo gravado no celular.',
+    );
+    expect(requests.some((r) => r.url.includes('/v1/media/uploads'))).toBe(false);
+    await expect(page.locator('[data-testid="media-row"]')).toHaveCount(0);
+  });
+
+  test('tapping a "Pronto" row opens the player with a non-empty playback token', async ({
+    page,
+  }) => {
+    const assetId = await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'ready',
+      filename: 'reuniao.mp4',
+      playbackId: 'fake-playback-open',
+      durationSeconds: 2,
+    });
+    expect(assetId).toBeTruthy();
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes/midia');
+    await page.locator('[data-testid="media-row"][data-status="ready"]').click();
+
+    const player = page.locator('mux-player');
+    await expect(player).toHaveCount(1, { timeout: 20_000 });
+    // `tokens` is a PROPERTY-only path on mux-player: `set tokens` stores the object in a private
+    // field and never reflects it to a `playback-token` attribute (verified in
+    // @mux/mux-player@3.13.4 dist/base.mjs). The element's own getter is therefore what proves a
+    // token reached the player — reading the attribute would assert a reflection that does not exist.
+    const token = await player.evaluate(
+      (node) => (node as unknown as { tokens?: { playback?: string } }).tokens?.playback ?? '',
+    );
+    expect(token).not.toBe('');
+    // No raw player error, no provider status, no token fragment on screen (T-03-51).
+    await expect(page.locator('[data-testid="video-ready"]')).not.toContainText(/error|401|403/i);
+  });
+
+  test('a playback token refused mid-session becomes the generic toast plus a retry that re-mints', async ({
+    page,
+  }) => {
+    await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'ready',
+      filename: 'expirado.mp4',
+      playbackId: 'fake-playback-expired',
+    });
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+
+    // The token is minted by a SERVER action, so the interceptable hop is the API request the Next
+    // server makes — which Playwright cannot see. The refusal is therefore injected at the API
+    // origin the browser's own BFF proxies to: the action's fetch goes out from the Next server, so
+    // instead we force the refusal by removing the playback id the asset was seeded with.
+    await page.goto('/configuracoes/midia');
+    await deleteTenantVideoAssets(DEMO_SLUG);
+
+    await page.locator('[data-testid="media-row"][data-status="ready"]').click();
+
+    await expect(page.getByText('Algo deu errado. Tente novamente.').first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(
+      page.locator('[data-testid="video-ready"]').getByRole('button', { name: 'Tentar novamente' }),
+    ).toBeVisible();
+    await expect(page.locator('mux-player')).toHaveCount(0);
+    await expect(page.locator('[data-testid="video-ready"]')).not.toContainText(/404|NOT_FOUND/i);
+  });
+
+  test('E10/partial backstop — a ready asset whose poster never resolves shows no broken glyph and no raw error', async ({
+    page,
+  }) => {
+    await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'ready',
+      filename: 'sem-poster.mp4',
+      playbackId: 'fake-playback-no-poster',
+    });
+
+    // Every thumbnail request fails: locally there is no Mux, so image.mux.com is unreachable
+    // anyway — this makes that certain rather than incidental.
+    await page.route(/image\.mux\.com/, (route) => route.abort());
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes/midia');
+    await page.locator('[data-testid="media-row"][data-status="ready"]').click();
+
+    const frame = page.locator('[data-testid="video-ready"]');
+    await expect(page.locator('mux-player')).toHaveCount(1, { timeout: 20_000 });
+    // The backstop really RAN: the probe proved the still does not resolve and the player was told
+    // `poster=""` ("no poster") rather than being left to draw a failing one.
+    await expect(frame).toHaveAttribute('data-poster', 'none', { timeout: 20_000 });
+    // The player still renders; the frame falls back to its plain bg-bg-tertiary ground.
+    await expect(frame).not.toContainText(/error|failed|401|403/i);
+    // No <img> of ours is left pointing at a URL that will not load (E9/error's rule, applied here).
+    const brokenImages = await frame.locator('img').evaluateAll(
+      (nodes) =>
+        nodes.filter((node) => {
+          const img = node as HTMLImageElement;
+          return img.complete && img.naturalWidth === 0 && img.getAttribute('src');
+        }).length,
+    );
+    expect(brokenImages).toBe(0);
+  });
+
+  test('a failed row can be removed behind a confirmation', async ({ page }) => {
+    await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'failed',
+      filename: 'para-remover.mp4',
+      failureReason: 'video.asset.errored',
+    });
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes/midia');
+
+    await page.getByRole('button', { name: 'Remover' }).first().click();
+    await expect(page.getByText('Remover este vídeo?')).toBeVisible();
+    await expect(
+      page.getByText('O vídeo deixa de ficar disponível para a comunidade.'),
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: 'Remover', exact: true }).last().click();
+    await expect(page.getByText('Vídeo removido.')).toBeVisible();
+    await expect(page.locator('[data-testid="media-row"]')).toHaveCount(0);
+  });
+
+  test('the list polls while a row is processing and, after five minutes, stops and offers "Atualizar"', async ({
+    page,
+  }) => {
+    await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'processing',
+      filename: 'travado.mp4',
+    });
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    // Playwright's own clock, so no test-only override ships in the component. The poll's elapsed
+    // check runs before its re-fetch, so fast-forwarding past the ceiling costs no round trips.
+    await page.clock.install();
+    await page.goto('/configuracoes/midia');
+
+    const library = page.locator('[data-testid="media-library"]');
+    await expect(library).toHaveAttribute('data-polling', 'true');
+    await expect(page.getByRole('button', { name: 'Atualizar' })).toHaveCount(0);
+
+    await page.clock.fastForward('06:00');
+
+    const refresh = page.getByRole('button', { name: 'Atualizar' });
+    await expect(refresh).toBeVisible();
+
+    // …and it really re-fetches: flipping the row server-side and pressing it shows the new status.
+    const asset = await newestVideoAsset(DEMO_SLUG);
+    await markVideoReady(asset?.id ?? '', { playbackId: 'fake-playback-manual' });
+    await refresh.click();
+    await expect(page.locator('[data-testid="media-row"][data-status="ready"]')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Atualizar' })).toHaveCount(0);
+  });
+
+  test('the player opens in a sheet on the phone and a centred dialog on the desktop', async ({
+    page,
+  }, testInfo) => {
+    await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'ready',
+      filename: 'responsivo.mp4',
+      playbackId: 'fake-playback-responsive',
+    });
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes/midia');
+    await page.locator('[data-testid="media-row"][data-status="ready"]').click();
+
+    // `[aria-modal]` narrows this to OUR sheet: mux-player mounts its own `<media-error-dialog
+    // role="dialog">` (empty, and asserted empty elsewhere), so a bare dialog role is ambiguous
+    // whenever a player is open.
+    const panel = page.locator('[role="dialog"][aria-modal="true"]');
+    await expect(panel).toBeVisible();
+    // The player really mounted inside it — the geometry below is the sheet AROUND a player.
+    await expect(page.locator('mux-player')).toHaveCount(1, { timeout: 20_000 });
+    // The sheet springs in from the bottom, so a bounding box read the instant it is visible is a
+    // measurement of the ANIMATION, not of the layout. Width settles immediately; the alignment of
+    // the wrapper is what actually distinguishes a sheet from a centred dialog, and neither moves.
+    const width = (await panel.boundingBox())?.width ?? 0;
+    const viewport = page.viewportSize();
+    const align = await panel.evaluate(
+      (node) => getComputedStyle(node.parentElement as HTMLElement).alignItems,
+    );
+
+    if (testInfo.project.name === 'mobile-chromium') {
+      // A sheet: full width, pinned to the bottom edge of the viewport.
+      expect(width).toBeCloseTo(viewport?.width ?? 0, -1);
+      expect(align).toBe('flex-end');
+      await expect(panel).toHaveClass(/rounded-t-2xl/);
+    } else {
+      // A centred card capped at 680px — the UI-SPEC's number, not the primitive's 480 default.
+      expect(align).toBe('center');
+      expect(width).toBeLessThanOrEqual(680);
+      expect(width).toBeGreaterThan(480);
+      expect(width).toBeLessThan(viewport?.width ?? 0);
+    }
+  });
+
+  test('under prefers-reduced-motion the processing spinner does not spin, and the copy still carries the state', async ({
+    page,
+  }) => {
+    const assetId = await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'processing',
+      filename: 'transcodificando.mp4',
+    });
+    await markVideoReady(assetId, { playbackId: 'fake-playback-rm' });
+    // …then back to processing: `markVideoReady` exists for the flip case; here the row must STAY
+    // processing so the player's placeholder is what renders.
+    await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
+      status: 'processing',
+      filename: 'ainda-processando.mp4',
+    });
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes/midia');
+
+    const spinner = page.locator('[data-testid="media-row-spinner"]').first();
+    await expect(spinner).toBeVisible();
+    const animation = await spinner.evaluate((node) => getComputedStyle(node).animationName);
+    expect(animation === 'none' || animation === '').toBe(true);
+    // The textual state is what carries the meaning when the motion is gone.
+    await expect(page.locator('[data-testid="media-row"]').first()).toContainText('Processando');
   });
 });

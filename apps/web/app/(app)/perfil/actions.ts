@@ -138,6 +138,8 @@ export type StartMediaUploadResult =
       ok: true;
       upload: {
         assetId: string;
+        /** Which broker owns the object — the transfer router in `lib/upload.ts` branches on it. */
+        provider: string;
         signedUrl: string;
         token: string | null;
         path: string | null;
@@ -181,6 +183,7 @@ export async function startMediaUploadAction(input: {
         ok: true,
         upload: {
           assetId: start.assetId,
+          provider: start.provider,
           signedUrl: start.signedUrl,
           token: start.token,
           path: start.path,

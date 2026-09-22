@@ -305,6 +305,41 @@ export async function seedVideoAsset(
   return id;
 }
 
+/**
+ * Flips a video asset to `ready` with a playback id, the way the provider's webhook job would
+ * (03-06's `kernel.media-provider-event`). The fake provider already schedules that job on its own;
+ * this is the deterministic handle for a spec that must not wait on a worker poll.
+ */
+export async function markVideoReady(
+  assetId: string,
+  values: { playbackId?: string; durationSeconds?: number } = {},
+): Promise<void> {
+  await sql()`
+    update public.media_assets
+       set status = 'ready',
+           playback_id = ${values.playbackId ?? `fake-playback-${assetId}`},
+           duration_seconds = ${values.durationSeconds ?? 2},
+           aspect_ratio = '16:9',
+           ready_at = now()
+     where id = ${assetId}::uuid`;
+}
+
+/** The newest video asset of a tenant as the screens read it (03-07 upload assertions). */
+export async function newestVideoAsset(
+  tenantSlug: string,
+): Promise<{ id: string; status: string; provider: string; filename: string | null } | null> {
+  const rows = await sql()<
+    { id: string; status: string; provider: string; filename: string | null }[]
+  >`
+    select a.id, a.status, a.provider, a.filename
+      from public.media_assets a
+      join public.tenants t on t.id = a.tenant_id
+     where t.slug = ${tenantSlug} and a.kind = 'video'
+     order by a.created_at desc
+     limit 1`;
+  return rows[0] ?? null;
+}
+
 /** The newest `tenant_invites.status` for an e-mail, or `null` (02-10 lifecycle assertions). */
 export async function inviteStatusForEmail(email: string): Promise<string | null> {
   const rows = await sql()<{ status: string }[]>`

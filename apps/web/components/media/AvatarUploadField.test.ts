@@ -74,6 +74,7 @@ function photo(name = 'photo.jpg', type = 'image/jpeg', size = 1024): File {
 const startedOk = {
   ok: true as const,
   upload: {
+    provider: 'supabase',
     assetId: '11111111-1111-4111-8111-111111111111',
     signedUrl: 'http://storage.test/put',
     token: 'tok',

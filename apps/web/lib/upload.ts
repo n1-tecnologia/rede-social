@@ -129,6 +129,12 @@ export const SUPABASE_TUS_ENDPOINT = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/st
 
 /** What `POST /v1/media/uploads` answers, narrowed to what a transfer needs (`mediaStartSchema`). */
 export type StartedUpload = {
+  /**
+   * WHO owns the object. `supabase` means a Storage target and the 6 MiB threshold routing below;
+   * anything else (`mux`, `fake` — 03-06's `VideoProvider` seam) means the provider minted its own
+   * direct-upload URL and the transfer is chunked and resumable instead.
+   */
+  provider: string;
   signedUrl: string;
   token: string | null;
   path: string | null;
@@ -230,18 +236,96 @@ export async function uploadResumable(
 }
 
 /**
- * The threshold router: the plain PUT at or below `resumableThresholdBytes` (6 MiB), TUS above it.
- * The boundary belongs to the SERVER's answer, not to a client constant, so a later change to
- * Supabase's ceiling moves in one place.
+ * UpChunk's chunk size, **in kibibytes** — `@mux/upchunk@3.5.0` multiplies it by 1024 internally
+ * (`chunkByteSize = chunkSize * 1024`, verified in `dist/upchunk.mjs`, not assumed from the README).
+ * 5120 KiB = 5 MiB, a multiple of the 256 KiB Mux requires and inside UpChunk's own 256…524288 KiB
+ * bounds. A non-multiple is rejected by `isValidChunkSize` at construction.
+ */
+const UPCHUNK_CHUNK_SIZE_KB = 5120;
+
+/**
+ * Resumable, chunked upload to a streaming provider's own direct-upload URL (MEDIA-03, R-04).
+ *
+ * `@mux/upchunk` is what makes a 100 MB phone video survive a dropped mobile connection: it PUTs
+ * 5 MiB slices with `Content-Range`, retries a failed slice, and understands the provider's
+ * `308 Resume Incomplete` continue semantics — which is precisely the wheel RESEARCH §Don't
+ * Hand-Roll says not to reinvent. The bytes go browser -> provider and never touch Cloud Run.
+ *
+ * The library is imported dynamically so every screen that never uploads a video keeps it out of
+ * its bundle, exactly as `uploadResumable` does with `tus-js-client`.
+ */
+export async function uploadChunked(
+  uploadUrl: string,
+  file: File,
+  opts: Pick<TransferOptions, 'onProgress' | 'signal'>,
+): Promise<UploadOutcome> {
+  const UpChunk = await import('@mux/upchunk');
+
+  return new Promise<UploadOutcome>((resolve) => {
+    let settled = false;
+    let highest = 0;
+    const settle = (outcome: UploadOutcome) => {
+      if (settled) return;
+      settled = true;
+      opts.signal?.removeEventListener('abort', onAbort);
+      resolve(outcome);
+    };
+    function onAbort() {
+      upload.abort();
+      settle({ ok: false, reason: 'aborted' });
+    }
+
+    const upload = UpChunk.createUpload({
+      endpoint: uploadUrl,
+      file,
+      chunkSize: UPCHUNK_CHUNK_SIZE_KB,
+    });
+
+    upload.on('progress', (event: CustomEvent<number>) => {
+      if (!opts.onProgress) return;
+      const percent = Math.min(100, Math.round(event.detail ?? 0));
+      // Monotonic by construction: a chunk retry re-sends bytes, and the bar must never walk back.
+      if (percent <= highest) return;
+      highest = percent;
+      opts.onProgress(percent);
+    });
+    upload.on('success', () => settle({ ok: true }));
+    upload.on('error', (event: CustomEvent<{ message?: string }>) => {
+      // The raw reason goes to the console only; the member sees the catalog string (T-02-147).
+      console.error('media.chunked_failed', { error: String(event.detail?.message ?? '') });
+      settle({ ok: false, reason: 'transfer' });
+    });
+
+    if (opts.signal?.aborted) {
+      onAbort();
+      return;
+    }
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * The transfer router.
+ *
+ * A `supabase`-brokered object keeps 03-04's threshold routing (plain PUT at or below
+ * `resumableThresholdBytes`, TUS above it); the boundary belongs to the SERVER's answer, not to a
+ * client constant, so a later change to Supabase's ceiling moves in one place.
+ *
+ * Any OTHER provider owns its own storage (03-06's `VideoProvider` seam), so the destination is its
+ * direct-upload URL and the transfer is chunked and resumable regardless of size — a phone video is
+ * never small enough for a single PUT to be the kind thing to do.
  */
 export async function uploadBytes(
   started: StartedUpload,
   file: File,
   opts: TransferOptions,
 ): Promise<UploadOutcome> {
-  return file.size <= started.resumableThresholdBytes
-    ? uploadToSignedUrl(started.signedUrl, file, opts)
-    : uploadResumable(started, file, opts);
+  if (started.provider === 'supabase') {
+    return file.size <= started.resumableThresholdBytes
+      ? uploadToSignedUrl(started.signedUrl, file, opts)
+      : uploadResumable(started, file, opts);
+  }
+  return uploadChunked(started.signedUrl, file, opts);
 }
 
 /** What the browser re-encodes TO — the one format every target decodes (R-12). */

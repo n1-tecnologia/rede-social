@@ -108,6 +108,7 @@ function stubXhr(): { urls: string[] } {
 }
 
 const started = {
+  provider: 'supabase',
   signedUrl: 'http://storage.test/object/upload/sign/media/x',
   token: 'signed-token',
   path: 'tenant/media/asset/original',

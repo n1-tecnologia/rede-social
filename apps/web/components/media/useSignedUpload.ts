@@ -22,6 +22,15 @@ export interface UseSignedUploadOptions {
   purpose: MediaPurpose;
   /** The completed asset — the caller decides what to do with it (set the avatar, add a row…). */
   onCompleted: (asset: MediaAsset) => void | Promise<void>;
+  /**
+   * Called INSTEAD of `onCompleted` when the object belongs to a streaming provider rather than to
+   * Storage (03-06's `VideoProvider` seam), because that path has no `complete` call at all: the
+   * provider owns the bytes and the row reaches `ready` when its signed webhook lands. Calling
+   * `complete` there would hand a video to the image/PDF decoder and reject a perfectly good upload.
+   * The asset already exists server-side as `pending`, so the caller re-reads it rather than being
+   * handed a payload this hook would have to invent.
+   */
+  onHandedToProvider?: (assetId: string) => void | Promise<void>;
   /** The file that will actually be uploaded (already normalised), for a local preview. */
   onPicked?: (file: File) => void;
   /** Catalog key of the success toast, under the `media` namespace. */
@@ -54,6 +63,7 @@ export function useSignedUpload({
   kind,
   purpose,
   onCompleted,
+  onHandedToProvider,
   onPicked,
   successKey = 'toasts.photoUpdated',
 }: UseSignedUploadOptions) {
@@ -81,13 +91,21 @@ export function useSignedUpload({
     setState('error');
   };
 
+  /**
+   * "Formato não suportado. Use JPEG, PNG ou WebP." is the wrong sentence for a video, so the
+   * refusal copy is chosen by KIND rather than by screen: the video zone says what a video may be
+   * ("Envie um MP4 ou um vídeo gravado no celular."), which is also the only advice a member can act
+   * on with a phone in their hand (UI-SPEC §Copywriting Contract).
+   */
+  const typeMessage = (): string => (kind === 'video' ? t('errors.videoType') : t('errors.type'));
+
   /** Exhaustive over `MEDIA_ISSUES`: a new refusal code cannot compile until it has copy. */
   const messageFor = (issue: MediaIssue | 'generic', answeredMaxBytes?: number): string => {
     const limitText = formatLimit(answeredMaxBytes ?? maxBytes);
     const seconds = limit?.maxDurationSeconds ?? 0;
     const durationText = seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${seconds} s`;
     const map: Record<MediaIssue | 'generic', string> = {
-      type_not_allowed: t('errors.type'),
+      type_not_allowed: typeMessage(),
       heic_unsupported: t('errors.prepare'),
       too_large: t('errors.size', { limit: limitText }),
       quota_exceeded: t('errors.quota'),
@@ -107,7 +125,7 @@ export function useSignedUpload({
   const reject = (reason: 'type' | 'size') => {
     if (busy.current) return;
     setError(
-      reason === 'type' ? t('errors.type') : t('errors.size', { limit: formatLimit(maxBytes) }),
+      reason === 'type' ? typeMessage() : t('errors.size', { limit: formatLimit(maxBytes) }),
     );
     setState('error');
   };
@@ -118,7 +136,7 @@ export function useSignedUpload({
       setError(null);
       const verdict = classifyMediaFile(file, kind, purpose);
       // A wrong TYPE is refused at pick time and costs no request at all (criterion 3, first half).
-      if (verdict === 'type') return fail(t('errors.type'));
+      if (verdict === 'type') return fail(typeMessage());
 
       busy.current = true;
       let payload = file;
@@ -166,6 +184,21 @@ export function useSignedUpload({
       }
 
       setState('processing');
+
+      // A provider-owned object has NO `complete` call (03-06): `complete` re-reads the object from
+      // Storage and decodes it as an image or a PDF, which would reject the video the provider just
+      // accepted. The row is already `pending` server-side and the provider's webhook is what moves
+      // it to `ready`, so the caller re-reads the list instead of confirming anything here.
+      if (started.upload.provider !== 'supabase') {
+        busy.current = false;
+        transfer.current = null;
+        setProgress(100);
+        setState('done');
+        await onHandedToProvider?.(started.upload.assetId);
+        toast.show({ tone: 'success', message: t(successKey) });
+        return;
+      }
+
       const completed = await completeMediaUploadAction(started.upload.assetId);
       if (!completed.ok) return fail(messageFor(completed.code, completed.maxBytes));
 
