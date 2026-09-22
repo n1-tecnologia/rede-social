@@ -43,6 +43,9 @@ const { sql } = await import('drizzle-orm');
 /** The widths the worker derives for an avatar — the seed writes exactly the same ladder (R-06). */
 const AVATAR_WIDTHS = PURPOSE_WIDTHS.avatar;
 
+/** The post ladder (320/640/1080/1600). The gallery fixtures carry exactly it — never a hand list. */
+const POST_WIDTHS = PURPOSE_WIDTHS.post;
+
 /**
  * D-28: both seed tenants carry a real favicon + PWA icon set derived from their seed logo at a FIXED
  * version: re-runs overwrite the same five objects (`uploadIconSet` upserts), so the seed stays
@@ -190,6 +193,85 @@ const SEED_FEED_POST_IDS: Record<string, readonly string[]> = {
   'tria-lab': ['0e000000-0000-4000-8000-000000000001', '0e000000-0000-4000-8000-000000000002'],
 };
 
+/**
+ * 04-04 — a post of EVERY media shape (FEED-01, D-53), in both tenants, with identical-looking
+ * content on the two sides (SCHEMA-CONVENTIONS §(j)).
+ *
+ * The two 04-01 posts above are the text-only case. These three add the gallery (three images), the
+ * video (through the `fake` provider, so the whole Phase 3 broker path is exercised without a Mux
+ * account) and the text-plus-PDF case. Fixed ids, so the pgTAP file, the integration suite and
+ * `apps/web/e2e/feed-media.spec.ts` can each name a specific row without querying for it first.
+ */
+const SEED_FEED_MEDIA_IDS: Record<
+  string,
+  {
+    galleryPost: string;
+    videoPost: string;
+    attachmentPost: string;
+    images: readonly [string, string, string];
+    video: string;
+    attachment: string;
+  }
+> = {
+  'tria-demo': {
+    galleryPost: '0d000000-0000-4000-8000-000000000003',
+    videoPost: '0d000000-0000-4000-8000-000000000004',
+    attachmentPost: '0d000000-0000-4000-8000-000000000005',
+    images: [
+      '0d000000-0000-4000-8000-0000000000a1',
+      '0d000000-0000-4000-8000-0000000000a2',
+      '0d000000-0000-4000-8000-0000000000a3',
+    ],
+    video: '0d000000-0000-4000-8000-0000000000a4',
+    attachment: '0d000000-0000-4000-8000-0000000000a5',
+  },
+  'tria-lab': {
+    galleryPost: '0e000000-0000-4000-8000-000000000003',
+    videoPost: '0e000000-0000-4000-8000-000000000004',
+    attachmentPost: '0e000000-0000-4000-8000-000000000005',
+    images: [
+      '0e000000-0000-4000-8000-0000000000a1',
+      '0e000000-0000-4000-8000-0000000000a2',
+      '0e000000-0000-4000-8000-0000000000a3',
+    ],
+    video: '0e000000-0000-4000-8000-0000000000a4',
+    attachment: '0e000000-0000-4000-8000-0000000000a5',
+  },
+};
+
+/** Identical in both tenants, for the same reason the 04-01 captions are. */
+const SEED_MEDIA_CAPTIONS = {
+  gallery: 'Fotos do ultimo encontro da comunidade.',
+  video: 'Um recado rapido em video para todo mundo.',
+  attachment: 'Segue o calendario do semestre em PDF.',
+} as const;
+
+/**
+ * Ninety-four characters, on purpose — comfortably past the 90 UI-SPEC E07's long-text row names.
+ * That row is a 🧪 backstop asking that a filename this long truncates with an accessible `title`
+ * at 14/700 without growing the row past `min-h-14`; a shorter fixture would pass it vacuously.
+ */
+const SEED_ATTACHMENT_FILENAME =
+  'calendario-completo-do-semestre-com-todas-as-atividades-e-os-encontros-da-nossa-comunidade.pdf';
+
+/**
+ * A minimal, genuinely `%PDF-`-prefixed document. The magic-byte check lives at `complete` (Phase 3)
+ * and the seed writes the row directly, but a fixture that is not really a PDF would make the
+ * attachment row's download an untested lie the first time anyone opened it.
+ */
+const SEED_PDF = Buffer.from(
+  [
+    '%PDF-1.4',
+    '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj',
+    '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj',
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>endobj',
+    'trailer<</Root 1 0 R/Size 4>>',
+    '%%EOF',
+    '',
+  ].join('\n'),
+  'utf8',
+);
+
 /** 04-03: [root, reply]. Fixed ids, so a test can name the thread without querying for it first. */
 const SEED_COMMENT_IDS: Record<string, readonly string[]> = {
   'tria-demo': ['0d000000-0000-4000-8000-0000000000c1', '0d000000-0000-4000-8000-0000000000c2'],
@@ -201,6 +283,130 @@ const SEED_COMMENT_BODIES = [
   'Que bom ver a comunidade comecando!',
   'Tambem vou estar la no sabado.',
 ] as const;
+
+/**
+ * A REAL `ready` post image asset at a fixed id: the SVG is rendered by sharp into the post width
+ * ladder and an original, every derivative is `putObject`-ed under the broker's own key shape, and
+ * the row records exactly the widths that were written. Idempotent — `putObject` upserts and the
+ * row insert is `on conflict do nothing`, so a re-run never accumulates assets or objects.
+ *
+ * No pg-boss job is enqueued: the seed is the fixture writer of record; jobs belong to runtime
+ * mutations (the 02-13 / 03-01 rule this function restates for `purpose: 'post'`).
+ */
+async function seedPostImageAsset(
+  tenantId: string,
+  ownerUserId: string,
+  assetId: string,
+  geometry: { width: number; height: number; hex: string },
+): Promise<void> {
+  const svg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}"><rect width="${geometry.width}" height="${geometry.height}" fill="${geometry.hex}"/><circle cx="${Math.round(geometry.width / 2)}" cy="${Math.round(geometry.height / 2)}" r="${Math.round(Math.min(geometry.width, geometry.height) / 3)}" fill="#ffffff" fill-opacity="0.8"/></svg>`,
+  );
+  const widths = [...POST_WIDTHS];
+  const variants = await deriveVariants(svg, widths);
+  const [original] = await deriveVariants(svg, [geometry.width]);
+  if (!original) throw new Error(`could not derive the seed post image ${assetId}`);
+
+  await putObject(mediaOriginalKey(tenantId, assetId), original.body, {
+    contentType: 'image/webp',
+  });
+  for (const variant of variants) {
+    await putObject(mediaVariantKey(tenantId, assetId, variant.width), variant.body, {
+      contentType: 'image/webp',
+    });
+  }
+
+  await withAdminTx(async (tx) => {
+    await tx
+      .insert(mediaAssets)
+      .values({
+        id: assetId,
+        tenantId,
+        ownerUserId,
+        kind: 'image',
+        purpose: 'post',
+        status: 'ready',
+        provider: 'supabase',
+        mime: 'image/webp',
+        bytes: original.body.length,
+        width: geometry.width,
+        height: geometry.height,
+        // Only the rungs at or below the source width are actually produced (`withoutEnlargement`),
+        // so the row must not claim a ladder the Storage prefix does not carry.
+        variantWidths: widths.filter((width) => width <= geometry.width),
+        filename: 'foto.webp',
+        readyAt: new Date(),
+      })
+      .onConflictDoNothing();
+  });
+}
+
+/** A REAL `ready` PDF attachment asset: the bytes go to the private bucket under `…/original`. */
+async function seedAttachmentAsset(
+  tenantId: string,
+  ownerUserId: string,
+  assetId: string,
+): Promise<void> {
+  await putObject(mediaOriginalKey(tenantId, assetId), SEED_PDF, {
+    contentType: 'application/pdf',
+  });
+  await withAdminTx(async (tx) => {
+    await tx
+      .insert(mediaAssets)
+      .values({
+        id: assetId,
+        tenantId,
+        ownerUserId,
+        kind: 'file',
+        purpose: 'attachment',
+        status: 'ready',
+        provider: 'supabase',
+        mime: 'application/pdf',
+        bytes: SEED_PDF.length,
+        // A PDF derives no ladder — `PURPOSE_WIDTHS.attachment` is empty, and the row says so.
+        variantWidths: [],
+        filename: SEED_ATTACHMENT_FILENAME,
+        readyAt: new Date(),
+      })
+      .onConflictDoNothing();
+  });
+}
+
+/**
+ * A `ready` video asset brokered through the `fake` provider (03-06): the bytes are not in Storage
+ * and there is no `complete` step, which is precisely the provider-owned shape the card must render
+ * without special-casing. `provider_asset_id` is derived from the asset id so a re-run upserts the
+ * same row rather than tripping `media_assets_provider_asset_uq`.
+ */
+async function seedVideoAsset(
+  tenantId: string,
+  ownerUserId: string,
+  assetId: string,
+): Promise<void> {
+  await withAdminTx(async (tx) => {
+    await tx
+      .insert(mediaAssets)
+      .values({
+        id: assetId,
+        tenantId,
+        ownerUserId,
+        kind: 'video',
+        purpose: 'post',
+        status: 'ready',
+        provider: 'fake',
+        providerAssetId: `fake-seed-${assetId}`,
+        playbackId: `fake-playback-${assetId}`,
+        mime: 'video/mp4',
+        bytes: 1_048_576,
+        durationSeconds: 12,
+        aspectRatio: '16:9',
+        variantWidths: [],
+        filename: 'recado.mp4',
+        readyAt: new Date(),
+      })
+      .onConflictDoNothing();
+  });
+}
 
 async function ensureUser(email: string, name: string, password: string): Promise<string> {
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
@@ -496,6 +702,78 @@ for (const t of SEED_TENANTS) {
       });
       console.log(`seed: tenant ${t.slug} — 1 comment + 1 reply, 2 likes`);
     }
+
+    // 04-04: a post of EVERY media shape (FEED-01, D-53), built through the REAL Phase 3 broker
+    // shape rather than by hand — real Storage objects under the broker's key layout, a real width
+    // ladder, a real `fake`-provider video row. The three posts are written with fixed ids and
+    // identical-looking captions in both tenants (§(j)).
+    const mediaIds = SEED_FEED_MEDIA_IDS[t.slug];
+    if (mediaIds) {
+      await seedPostImageAsset(tenantId, authorUserId, mediaIds.images[0], {
+        width: 1200,
+        height: 800,
+        hex: t.colors.primary,
+      });
+      await seedPostImageAsset(tenantId, authorUserId, mediaIds.images[1], {
+        // Deliberately a DIFFERENT native ratio from the first slide: UI-D-09 says every slide
+        // renders at the FIRST image's clamped ratio, and a gallery of three identical shapes could
+        // not tell a correct renderer from one that read each slide's own ratio.
+        width: 900,
+        height: 1200,
+        hex: t.colors.secondary,
+      });
+      await seedPostImageAsset(tenantId, authorUserId, mediaIds.images[2], {
+        width: 1000,
+        height: 1000,
+        hex: t.colors.primary,
+      });
+      await seedVideoAsset(tenantId, authorUserId, mediaIds.video);
+      await seedAttachmentAsset(tenantId, authorUserId, mediaIds.attachment);
+
+      await withAdminTx(async (tx) => {
+        // Raw SQL for the same reason the posts above are raw SQL: the seed lives in the ROOT
+        // workspace package, and a dependency on a `module`-tagged package makes `turbo boundaries`
+        // mis-attribute the edge onto the kernel-tagged packages.
+        const post = async (id: string, caption: string, mediaKind: string, minutesAgo: number) => {
+          await tx.execute(sql`
+            insert into public.feed_posts (id, tenant_id, author_user_id, caption, media_kind, created_at)
+            values (
+              ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid, ${caption}, ${mediaKind},
+              ${new Date(Date.now() - minutesAgo * 60_000).toISOString()}::timestamptz
+            )
+            on conflict (id) do nothing`);
+        };
+        const media = async (
+          postId: string,
+          postMediaKind: string,
+          assetId: string,
+          kind: string,
+          position: number,
+        ) => {
+          await tx.execute(sql`
+            insert into public.feed_post_media
+              (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+            values (
+              ${tenantId}::uuid, ${postId}::uuid, ${postMediaKind}, ${assetId}::uuid, ${kind}, ${position}
+            )
+            on conflict (post_id, kind, position) do nothing`);
+        };
+
+        await post(mediaIds.galleryPost, SEED_MEDIA_CAPTIONS.gallery, 'gallery', 3);
+        for (const [index, assetId] of mediaIds.images.entries()) {
+          await media(mediaIds.galleryPost, 'gallery', assetId, 'image', index);
+        }
+
+        await post(mediaIds.videoPost, SEED_MEDIA_CAPTIONS.video, 'video', 2);
+        await media(mediaIds.videoPost, 'video', mediaIds.video, 'video', 0);
+
+        // `media_kind = 'none'` with a `kind = 'file'` row: an attachment constrains the parent's
+        // discriminator not at all, so this post renders no media frame and one attachment row.
+        await post(mediaIds.attachmentPost, SEED_MEDIA_CAPTIONS.attachment, 'none', 1);
+        await media(mediaIds.attachmentPost, 'none', mediaIds.attachment, 'file', 0);
+      });
+      console.log(`seed: tenant ${t.slug} — gallery, video and attachment posts`);
+    }
   }
 
   console.log(
@@ -520,8 +798,9 @@ await withAdminTx(async (tx) => {
   await tx.execute(sql`analyze public.feed_posts`);
   await tx.execute(sql`analyze public.feed_comments`);
   await tx.execute(sql`analyze public.feed_likes`);
+  await tx.execute(sql`analyze public.feed_post_media`);
 });
-console.log('seed: analyze on feed_posts, feed_comments, feed_likes');
+console.log('seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media');
 
 console.log(`seed: hosts — platform=${PLATFORM_HOST} tria-demo=${DEMO_HOST} tria-lab=${LAB_HOST}`);
 await sqlClient.end();

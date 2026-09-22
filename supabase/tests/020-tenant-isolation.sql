@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(69);
+select plan(75);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -64,6 +64,23 @@ insert into public.feed_likes (id, tenant_id, user_id, post_id) values
    '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-0000000000f1'),
   ('0b000000-0000-4000-8000-0000000000f3', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000000f1');
+
+-- 04-04: an attachment on each tenant's post, with the SAME filename and the same `kind`/`position`
+-- on both sides. `media_kind` stays 'none' on the parent posts above — a file row constrains the
+-- discriminator not at all — so this fixture is also the "attachment with no media" shape.
+insert into public.media_assets
+  (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, filename) values
+  ('0a000000-0000-4000-8000-0000000000f4', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', 'file', 'attachment', 'ready', 'application/pdf', 10, 'x.pdf'),
+  ('0b000000-0000-4000-8000-0000000000f4', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-000000000002', 'file', 'attachment', 'ready', 'application/pdf', 10, 'x.pdf');
+
+insert into public.feed_post_media
+  (id, tenant_id, post_id, post_media_kind, media_asset_id, kind, position) values
+  ('0a000000-0000-4000-8000-0000000000f5', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-0000000000f1', 'none', '0a000000-0000-4000-8000-0000000000f4', 'file', 0),
+  ('0b000000-0000-4000-8000-0000000000f5', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-0000000000f1', 'none', '0b000000-0000-4000-8000-0000000000f4', 'file', 0);
 
 insert into public.notifications (tenant_id, user_id, kind) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'k'),
@@ -278,6 +295,45 @@ select results_eq(
   'USING: an unlike aimed at B''s rows touches nothing'
 );
 
+-- ── feed_post_media: the same five cases, plus its own positive control (04-04) ────────────────
+select results_eq(
+  $$ select count(*)::int from public.feed_post_media
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own feed_post_media row'
+);
+select results_eq(
+  $$ select count(*)::int from public.feed_post_media where kind = 'file' and position = 0 $$,
+  ARRAY[1],
+  'adjacency: both tenants attached a file at position 0, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.feed_post_media where kind = 'file' and position = 0 $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the media row it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.feed_post_media where id = '0b000000-0000-4000-8000-0000000000f5' $$,
+  'detail by id: B''s media row is not found through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.feed_post_media
+       (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000000f1',
+             'none', '0b000000-0000-4000-8000-0000000000f4', 'file', 1) $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot attach media stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with d as (
+       delete from public.feed_post_media
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from d $$,
+  ARRAY[0],
+  'USING: a detach aimed at B''s media rows touches nothing'
+);
+
 select is_empty(
   $$ select id from public.memberships
       where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
@@ -380,8 +436,12 @@ select is_empty(
       where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
   'media_assets: B''s assets are invisible'
 );
+-- Scoped to the AVATAR the assertion names (04-04): this file's fixture now also carries one
+-- `attachment` asset per tenant for the `feed_post_media` block below, and an unqualified
+-- `count(*)` would silently start measuring "how many fixtures does this file write" instead of
+-- "how many of the OTHER tenant's rows leak", which is the only question here.
 select results_eq(
-  $$ select count(*)::int from public.media_assets $$,
+  $$ select count(*)::int from public.media_assets where purpose = 'avatar' $$,
   ARRAY[1],
   'media_assets: adjacency — both tenants own an identical-looking avatar, the lane returns exactly A''s live one'
 );
@@ -519,7 +579,7 @@ select results_eq(
 -- soft-delete predicate — A's retired asset (the row the 03-08 sweeper collects by) is invisible to
 -- B's lane for BOTH reasons at once, tenant scope and `deleted_at is null`.
 select results_eq(
-  $$ select count(*)::int from public.media_assets $$,
+  $$ select count(*)::int from public.media_assets where purpose = 'avatar' $$,
   ARRAY[1],
   'symmetry: B''s lane returns exactly its own live media asset'
 );
