@@ -141,14 +141,16 @@ test.describe('UI-D-23 — the attachment row gives real pending feedback', () =
       await route.continue();
     });
 
-    const download = page.waitForEvent('download').catch(() => null);
     await row.click();
 
     await expect(row).toHaveAttribute('aria-busy', 'true');
     await expect(card.getByTestId('attachment-spinner')).toBeVisible();
 
+    // What UI-D-23 promises is the PENDING state and its clean exit, so that is what is asserted.
+    // The OS-level save is deliberately not: a headless `download` event is a property of the
+    // browser's download handling, and waiting on one turns an unrelated Storage hiccup into a
+    // 30-second timeout rather than the honest failure it is.
     await expect(row).toHaveAttribute('aria-busy', 'false', { timeout: 15_000 });
     await expect(card.getByTestId('attachment-download-glyph')).toBeVisible();
-    await download;
   });
 });
