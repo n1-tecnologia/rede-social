@@ -142,14 +142,23 @@ allowed_mime_types = ["image/png", "image/svg+xml", "image/webp", "image/jpeg", 
 # built from the CALLER's own tenant id, so cross-tenant access is structurally impossible.
 # There is deliberately NO storage.objects policy for this bucket (R-15): the browser never holds a
 # Supabase JWT for Storage, so a policy would grant nothing that is used while creating a latent
-# widening the day a token leaks. Member uploads are jpeg/png/webp + pdf only — never a vector
-# format, which as a member-uploaded avatar would be a stored-XSS surface (T-03-09).
+# widening the day a token leaks. Never a vector format, which as a member-uploaded avatar would be
+# a stored-XSS surface (T-03-09).
+#
+# The allow-list is exactly the union of `MEDIA_LIMITS` in @tria/contracts/media — jpeg/png/webp
+# (images), pdf (files) and mp4/quicktime (video). Video is here for 03-06's `VIDEO_PROVIDER=fake`,
+# which is what every non-production environment runs: it mints its direct-upload target in THIS
+# bucket under the asset's own prefix rather than accepting bytes at a dev-only API route, which
+# would put a body parser in the API and contradict MEDIA-01. With `VIDEO_PROVIDER=mux` the streaming
+# vendor owns the object and nothing mints a Storage URL for a video at all, so the two entries are
+# unused in production; a video that reached this bucket by another route would still be refused at
+# `complete`, which compares the object's contentType against the row's declared mime.
 # This block seeds LOCAL stacks only — hosted projects get the same row from
 # supabase/migrations/*_media_bucket.sql.
 [storage.buckets.media]
 public = false
 file_size_limit = "50MiB"
-allowed_mime_types = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
+allowed_mime_types = ["image/jpeg", "image/png", "image/webp", "application/pdf", "video/mp4", "video/quicktime"]
 
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]

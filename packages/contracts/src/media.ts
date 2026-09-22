@@ -42,7 +42,13 @@ export const MEDIA_STATUSES = [
 ] as const;
 export type MediaStatus = (typeof MEDIA_STATUSES)[number];
 
-export const MEDIA_PROVIDERS = ['supabase', 'mux'] as const;
+/**
+ * Where the asset's bytes actually live. `fake` is the local video provider (03-06): it stores into
+ * the same private `media` bucket but is reached through the `VideoProvider` seam, so a row must be
+ * able to say so — otherwise every non-production video asset would have to lie about its provider
+ * and 03-07's screen could not tell a simulated transcode from a real one.
+ */
+export const MEDIA_PROVIDERS = ['supabase', 'mux', 'fake'] as const;
 export type MediaProvider = (typeof MEDIA_PROVIDERS)[number];
 
 /** Every width the ladder may ever contain; `mediaVariantParamSchema` accepts exactly these. */
@@ -115,6 +121,9 @@ export const MEDIA_ISSUES = [
   'duration_too_long',
   'not_ready',
   'transcode_failed',
+  // 03-01's named video seam. 03-06 replaced the 501 branch with the `VideoProvider` adapter, so
+  // nothing emits this any more; the member is kept in the closed set because the web switches on
+  // `MEDIA_ISSUES` exhaustively and a value that once shipped may still sit in an old payload.
   'video_provider_missing',
 ] as const;
 export type MediaIssue = (typeof MEDIA_ISSUES)[number];

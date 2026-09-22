@@ -412,6 +412,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@mux/mux-node':
+        specifier: 15.2.0
+        version: 15.2.0
       '@supabase/supabase-js':
         specifier: 2.116.0
         version: 2.116.0
@@ -1527,6 +1530,10 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@mux/mux-node@15.2.0':
+    resolution: {integrity: sha512-KQPkKXhHZ/01aW5Sfbonfmg0r16jYkZC0p8lPzs0MEuRRolSsbFfJEqPJdVFSY9U2Nnpm09WpSN3wHS11WQTvg==}
+    hasBin: true
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     resolution: {integrity: sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==}
@@ -4474,6 +4481,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  '@mux/mux-node@15.2.0': {}
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true

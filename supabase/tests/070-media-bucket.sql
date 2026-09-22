@@ -14,7 +14,7 @@ begin;
 -- a latent widening the day a token does leak. The assertion is what keeps that count at zero.
 --
 -- Runs in one transaction that rolls back, so it re-runs identically in any order.
-select plan(6);
+select plan(7);
 
 select is(
   (select count(*)::int from storage.buckets where id = 'media'),
@@ -43,6 +43,17 @@ select ok(
 select ok(
   (select not ('image/svg+xml' = any(allowed_mime_types)) from storage.buckets where id = 'media'),
   'T-03-09: a vector upload is NOT accepted — unlike the admin-only brand logo there is no safety-scan escape hatch for a member avatar'
+);
+
+-- 03-06: the allow-list is exactly the union of MEDIA_LIMITS in @tria/contracts/media. The two video
+-- mimes are here for `VIDEO_PROVIDER=fake`, which mints its direct-upload target in THIS bucket
+-- rather than at a dev-only byte-accepting API route (that route would contradict MEDIA-01). With
+-- `VIDEO_PROVIDER=mux` the vendor owns the object and they are unused. Pinned as a SET, so neither
+-- a silent widening nor a silent narrowing can pass.
+select results_eq(
+  $$ select array(select unnest(allowed_mime_types) from storage.buckets where id = 'media' order by 1) $$,
+  $$ values (array['application/pdf','image/jpeg','image/png','image/webp','video/mp4','video/quicktime']) $$,
+  'MEDIA-01/MEDIA-03: the media bucket allow-list is exactly the contract union — images, pdf and the two video mimes, no vector'
 );
 
 select is(

@@ -3,6 +3,7 @@ import { deriveIconsJob } from '@tria/core/server/branding/derive-icons-job';
 import { domainVerifyJob } from '@tria/core/server/domains/verify-job';
 import { createBoss, createQueues } from '@tria/core/server/jobs/boss';
 import { deriveVariantsJob } from '@tria/core/server/media/derive-job';
+import { mediaProviderEventJob } from '@tria/core/server/media/video/event-job';
 import type { AnyJobDefinition } from '@tria/core/server/modules/manifest';
 import { Hono } from 'hono';
 import { env } from './env';
@@ -34,6 +35,7 @@ export async function startWorker(): Promise<void> {
     domainVerifyJob,
     deriveIconsJob,
     deriveVariantsJob,
+    mediaProviderEventJob,
     ...Object.values(MODULE_REGISTRY).flatMap((manifest) => manifest?.jobs ?? []),
   ];
 

@@ -12,6 +12,7 @@ import { mediaRoutes } from './routes/media';
 import { membersRoutes } from './routes/members';
 import { platformRoutes } from './routes/platform';
 import { publicRoutes } from './routes/public';
+import { muxWebhookRoutes } from './routes/webhooks/mux';
 
 const app = new OpenAPIHono<AppEnv>();
 
@@ -47,6 +48,10 @@ const routes = app
   .route('/v1/health', healthRoutes)
   .route('/v1/public', publicRoutes)
   .route('/v1/hooks', hookRoutes)
+  // `/v1/webhooks` is called by the video provider (server-to-server), carries no auth middleware
+  // and authenticates each call by the provider's own HMAC signature over the RAW body (MEDIA-03,
+  // R-03, routes/webhooks/mux.ts) — the same posture as `/v1/hooks`.
+  .route('/v1/webhooks', muxWebhookRoutes)
   .route('/v1/me', meRoutes)
   // `/v1/media` is the tenant-lane media broker (03-01): it carries its own `requireAuth`, so
   // `ctx.tenantId` (the membership of record) is the ONLY source of a Storage key prefix.

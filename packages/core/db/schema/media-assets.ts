@@ -87,7 +87,9 @@ export const mediaAssets = pgTable(
       'media_assets_status_chk',
       sql`${t.status} in ('pending','processing','ready','failed','rejected','deleted')`,
     ),
-    check('media_assets_provider_chk', sql`${t.provider} in ('supabase','mux')`),
+    // `fake` is the local video provider (03-06): the bytes are in the same private bucket, but the
+    // asset was brokered through the `VideoProvider` seam, so the row says so rather than lying.
+    check('media_assets_provider_chk', sql`${t.provider} in ('supabase','mux','fake')`),
     pgPolicy('media_assets_tenant_select', {
       for: 'select',
       to: authenticatedRole,

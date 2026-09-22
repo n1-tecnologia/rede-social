@@ -364,15 +364,24 @@ describe('refusals at start — the declared facts buy a fast, specific answer (
     expect((await envelope(res)).details?.media).toBe('type_not_allowed');
   });
 
-  it('video answers the named 03-06 seam, never a silent gap', async () => {
+  // 03-06 replaced 03-01's named `501 { media: 'video_provider_missing' }` seam with the
+  // `VideoProvider` adapter. This session is a MEMBER, and V1 publishes admin-only, so the answer
+  // is now the role refusal — never a 501 and never a silent gap. The admin's happy path and the
+  // rest of the video contract live in `mux-webhook.test.ts`.
+  it('video is no longer a 501 seam: a member is refused by ROLE, and no asset is created', async () => {
     const res = await startUpload({
       kind: 'video',
       purpose: 'post',
       mime: 'video/mp4',
       size: 1024,
     });
-    expect(res.status).toBe(501);
-    expect((await envelope(res)).details?.media).toBe('video_provider_missing');
+    expect(res.status).toBe(403);
+    expect((await envelope(res)).code).toBe('FORBIDDEN');
+
+    const rows = await adminSql<{ count: string }[]>`
+      select count(*)::text as count from public.media_assets
+       where tenant_id = ${demoTenantId}::uuid and kind = 'video'`;
+    expect(rows[0]?.count).toBe('0');
   });
 });
 

@@ -1,5 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi';
-import { apiErrorEnvelopeSchema } from '@tria/contracts';
+import { apiErrorEnvelopeSchema, normalizeHost, TENANT_HOST_HEADER } from '@tria/contracts';
 import {
   mediaAssetSchema,
   mediaStartBodySchema,
@@ -7,6 +7,7 @@ import {
   mediaVariantParamSchema,
 } from '@tria/contracts/media';
 import { requireAuth } from '@tria/core/server/auth/require-auth';
+import { publicWebOrigin } from '@tria/core/server/env';
 import {
   completeUpload,
   deleteAsset,
@@ -52,16 +53,18 @@ const startRoute = createRoute({
   responses: {
     201: {
       description:
-        'A signed Storage target for `<tenant_id>/media/<assetId>/original` in the PRIVATE media bucket; PUT the bytes there below `resumableThresholdBytes`, TUS above it (`token` goes in `x-signature`, `path` is the objectName), then confirm with complete',
+        'An upload TARGET. For an image or a file: a signed Storage URL for `<tenant_id>/media/<assetId>/original` in the PRIVATE media bucket; PUT the bytes there below `resumableThresholdBytes`, TUS above it (`token` goes in `x-signature`, `path` is the objectName), then confirm with complete. For a video: the streaming provider own direct-upload URL, with `token` and `path` null — the provider owns the object, there is no complete call, and the asset reaches `ready` when the provider signed webhook lands',
       content: { 'application/json': { schema: mediaStartSchema } },
     },
     400: envelope(
       'VALIDATION_FAILED { media: "type_not_allowed" | "heic_unsupported" } — the (kind, purpose) pair or the declared mime is not accepted',
     ),
-    413: envelope(
-      'VALIDATION_FAILED { media: "too_large", maxBytes } above the kind+purpose cap, or { media: "quota_exceeded" } when the tenant storage ceiling is reached (no row is created)',
+    403: envelope(
+      'FORBIDDEN — only an admin may start a video upload in V1; members publish nothing yet',
     ),
-    501: envelope('NOT_IMPLEMENTED { media: "video_provider_missing" } — video lands in 03-06'),
+    413: envelope(
+      'VALIDATION_FAILED { media: "too_large", maxBytes } above the kind+purpose cap, or { media: "quota_exceeded" } when the community storage ceiling (images, files) or stored-minutes ceiling (video) is reached — no row is created',
+    ),
   },
 });
 
@@ -112,7 +115,14 @@ export const mediaRoutes = media
   .openapi(startRoute, async (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');
-    const start = await startUpload(ctx, body);
+    // The video provider's CORS rule for the direct PUT must name the tenant's own origin. The host
+    // header was already validated by `requireAuth` (it can only DENY a session, never select the
+    // tenant), so composing an origin from it here is safe; a caller that sent none gets the
+    // tenant's verified primary domain instead. Header parsing stays out of the broker.
+    const host = normalizeHost(c.req.header(TENANT_HOST_HEADER));
+    const start = await startUpload(ctx, body, {
+      corsOrigin: host ? publicWebOrigin(host) : null,
+    });
     c.header('Cache-Control', 'no-store');
     return c.json(start, 201);
   })

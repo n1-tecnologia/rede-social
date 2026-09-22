@@ -34,3 +34,8 @@ export * from './inspect';
 export * from './keys';
 export * from './limits';
 export * from './variants';
+
+// The video seam's queue name, re-exported so "one import point for the media area" stays true.
+// The `videoProvider` singleton itself is deliberately NOT re-exported: importing it constructs an
+// adapter, and this barrel is imported by pure call sites that must stay free of that.
+export { MEDIA_PROVIDER_EVENT_QUEUE } from './video/types';

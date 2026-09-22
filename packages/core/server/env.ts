@@ -4,10 +4,11 @@ import { z } from 'zod';
 /**
  * Kernel environment. `DATABASE_URL` must be the `api_user` connection (never `postgres`/service role).
  *
- * Phase 2 adapters (domain provider, auth allow-list, mail transport) are selected here. Every
- * selector defaults to its LOCAL implementation (`fake` / `local`) so a clean machine or a
- * misconfigured deploy never talks to Vercel, Resend or the Supabase Management API by accident;
- * `assertProductionEnv()` refuses a real selection that is missing its credentials (T-02-10).
+ * Every adapter is selected here — Phase 2's domain provider, auth allow-list and mail transport,
+ * plus Phase 3's video provider. Every selector defaults to its LOCAL implementation
+ * (`fake` / `local`) so a clean machine or a misconfigured deploy never talks to Vercel, Resend, the
+ * Supabase Management API or Mux by accident; `assertProductionEnv()` refuses a real selection that
+ * is missing its credentials (T-02-10, T-03-43).
  */
 export const env = createEnv({
   server: {
@@ -16,6 +17,14 @@ export const env = createEnv({
     SUPABASE_SERVICE_KEY: z.string().min(1),
     /** Read once by `server/logging.ts`; every logger in the codebase is a child of that root. */
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+
+    /**
+     * The one place the kernel asks "is this production?". Today only the video adapter reads it,
+     * to create throwaway `test` assets everywhere else (RESEARCH Pitfall 7). It is NOT a second
+     * adapter selector: which implementation runs is always an explicit `*_PROVIDER` value, so a
+     * missing NODE_ENV can never silently switch a vendor on.
+     */
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
     /**
      * The platform domain (D-21) — where TRIA's `super_admin` works. The API reads it so the
@@ -34,6 +43,26 @@ export const env = createEnv({
     AUTH_ALLOW_LIST: z.enum(['local', 'supabase']).default('local'),
     SUPABASE_PAT: z.string().min(1).optional(),
     SUPABASE_PROJECT_REF: z.string().min(1).optional(),
+
+    /**
+     * Video provider (MEDIA-03, D-43). `fake` mints a Storage signed upload URL into the private
+     * `media` bucket and simulates transcoding with a deferred synthetic ready event, so no e2e or
+     * CI run can ingest into a real Mux account (RESEARCH Pitfall 7).
+     */
+    VIDEO_PROVIDER: z.enum(['fake', 'mux']).default('fake'),
+    MUX_TOKEN_ID: z.string().min(1).optional(),
+    MUX_TOKEN_SECRET: z.string().min(1).optional(),
+    /** D-44: signed playback. The key pair mints a short-lived playback JWT per request. */
+    MUX_SIGNING_KEY_ID: z.string().min(1).optional(),
+    /** base64-encoded PEM private key, mounted from GCP Secret Manager. Never in git. */
+    MUX_SIGNING_KEY_PRIVATE: z.string().min(1).optional(),
+    /** Mux webhook signing secret — the ONLY authentication of `POST /v1/webhooks/mux` (R-03). */
+    MUX_WEBHOOK_SECRET: z.string().min(1).optional(),
+    /**
+     * Local-stack secret the FAKE provider's `verifyWebhook` HMACs against, so the fake exercises the
+     * same code-path SHAPE the real one does instead of being a no-op. Defaulted in `fake.ts`.
+     */
+    FAKE_VIDEO_WEBHOOK_SECRET: z.string().min(1).optional(),
 
     /** Send Email Hook transport (RESEARCH Pattern 6). `local` posts to Mailpit's HTTP API. */
     MAIL_TRANSPORT: z.enum(['local', 'resend']).default('local'),
@@ -74,6 +103,12 @@ export function assertProductionEnv(
     | 'SUPABASE_PROJECT_REF'
     | 'MAIL_TRANSPORT'
     | 'RESEND_API_KEY'
+    | 'VIDEO_PROVIDER'
+    | 'MUX_TOKEN_ID'
+    | 'MUX_TOKEN_SECRET'
+    | 'MUX_SIGNING_KEY_ID'
+    | 'MUX_SIGNING_KEY_PRIVATE'
+    | 'MUX_WEBHOOK_SECRET'
   > = env,
 ): void {
   const missing: string[] = [];
@@ -89,6 +124,19 @@ export function assertProductionEnv(
   }
   if (e.MAIL_TRANSPORT === 'resend' && !e.RESEND_API_KEY) {
     missing.push('RESEND_API_KEY (required when MAIL_TRANSPORT=resend)');
+  }
+  // MEDIA-03: all five, or none. A partially configured Mux selection would boot, hand out upload
+  // URLs and then fail to verify a single webhook — every asset stuck in `pending` forever.
+  if (e.VIDEO_PROVIDER === 'mux') {
+    for (const key of [
+      'MUX_TOKEN_ID',
+      'MUX_TOKEN_SECRET',
+      'MUX_SIGNING_KEY_ID',
+      'MUX_SIGNING_KEY_PRIVATE',
+      'MUX_WEBHOOK_SECRET',
+    ] as const) {
+      if (!e[key]) missing.push(`${key} (required when VIDEO_PROVIDER=mux)`);
+    }
   }
   if (missing.length > 0) {
     throw new Error(`Invalid kernel environment:\n  - ${missing.join('\n  - ')}`);

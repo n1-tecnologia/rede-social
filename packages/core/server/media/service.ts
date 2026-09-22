@@ -1,6 +1,7 @@
 import {
   type MediaAsset,
   type MediaKind,
+  type MediaLimit,
   type MediaPurpose,
   type MediaStart,
   type MediaStartBody,
@@ -8,11 +9,12 @@ import {
   REFUSED_IMAGE_MIMES,
   RESUMABLE_THRESHOLD_BYTES,
 } from '@tria/contracts/media';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
-import { mediaAssets } from '../../db/schema';
+import { mediaAssets, tenantDomains } from '../../db/schema';
 import { withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
+import { env, publicWebOrigin } from '../env';
 import { ApiError } from '../http/api-error';
 import { enqueueInTx } from '../jobs/boss';
 import { moduleLogger } from '../logging';
@@ -26,7 +28,13 @@ import {
   mediaVariantKey,
   parseVariant,
 } from './keys';
-import { limitFor, MEDIA_TENANT_BYTES_CEILING, MediaLimitError, widthsForPurpose } from './limits';
+import {
+  limitFor,
+  MEDIA_TENANT_BYTES_CEILING,
+  MEDIA_TENANT_VIDEO_SECONDS_CEILING,
+  MediaLimitError,
+  widthsForPurpose,
+} from './limits';
 import {
   downloadObject,
   invalidateSignedUrl,
@@ -38,6 +46,7 @@ import {
   signUpload,
 } from './storage';
 import { deriveVariants, probeSize } from './variants';
+import { videoProvider } from './video/index';
 
 /**
  * The media broker (MEDIA-01, MEDIA-02, TENANT-04) — a tenant-lane service that returns upload
@@ -144,6 +153,162 @@ const tooLarge = (maxBytes: number): ApiError =>
   new ApiError(413, 'VALIDATION_FAILED', { media: 'too_large', maxBytes });
 
 /**
+ * `corsOrigin` is the tenant's own browser-facing origin, which the provider's CORS rule for the
+ * direct PUT must name. The ROUTE derives it from the validated `x-tenant-host` header so this file
+ * stays free of header parsing; when the caller sent no host (a server-to-server client, the
+ * integration suite) the video branch falls back to the tenant's verified primary domain.
+ */
+export type StartUploadOptions = { corsOrigin?: string | null };
+
+/**
+ * `POST /v1/media/uploads { kind: 'video' }` (MEDIA-03) — the branch that replaced 03-01's named
+ * `501 { media: 'video_provider_missing' }` seam.
+ *
+ * The bytes go browser -> provider and never through Cloud Run, exactly like an image: the answer is
+ * a TARGET. What differs is who stores them (`videoProvider`, not Storage — unless the provider is
+ * the fake, which deliberately targets the same private bucket) and what is charged: video is
+ * metered in MINUTES, so the ceiling is `sum(duration_seconds)` rather than `sum(bytes)`.
+ *
+ * Like the byte ceiling (R-16), the minutes ceiling is a SOFT quota: read and insert share one admin
+ * transaction with no row lock, because the arbiter is a ceiling and not a balance. It is also
+ * necessarily approximate in a second way — a `pending` video has no duration yet, so a tenant can
+ * start several uploads that only later prove to exceed the ceiling. The per-purpose duration cap in
+ * the event job is the backstop that deletes the provider asset when that happens.
+ */
+async function startVideoUpload(
+  ctx: Ctx,
+  body: MediaStartBody,
+  limit: MediaLimit,
+  opts: StartUploadOptions,
+): Promise<MediaStart> {
+  const assetId = crypto.randomUUID();
+
+  const decision = await withAdminTx(async (tx) => {
+    const [totals] = await tx
+      .select({ total: sql<string>`coalesce(sum(${mediaAssets.durationSeconds}), 0)` })
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.tenantId, ctx.tenantId), isNull(mediaAssets.deletedAt)));
+    if (Number(totals?.total ?? 0) >= MEDIA_TENANT_VIDEO_SECONDS_CEILING) {
+      return { accepted: false as const };
+    }
+
+    // Only when the route could not derive it: one indexed read on a rare, admin-only path.
+    let corsOrigin = opts.corsOrigin ?? null;
+    if (!corsOrigin) {
+      const [primary] = await tx
+        .select({ host: tenantDomains.host })
+        .from(tenantDomains)
+        .where(
+          and(
+            eq(tenantDomains.tenantId, ctx.tenantId),
+            eq(tenantDomains.isPrimary, true),
+            isNotNull(tenantDomains.verifiedAt),
+          ),
+        )
+        .limit(1);
+      corsOrigin = primary ? publicWebOrigin(primary.host) : null;
+    }
+
+    await tx.insert(mediaAssets).values({
+      id: assetId,
+      tenantId: ctx.tenantId,
+      ownerUserId: ctx.userId,
+      kind: body.kind,
+      purpose: body.purpose,
+      status: 'pending',
+      provider: videoProvider.name,
+      mime: body.mime,
+      bytes: body.size,
+      filename: body.filename ?? null,
+    });
+    return { accepted: true as const, corsOrigin };
+  });
+
+  if (!decision.accepted) {
+    log.warn(
+      {
+        event: 'media.upload_rejected',
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        requestId: ctx.requestId,
+        kind: 'video',
+        reason: 'quota_exceeded',
+      },
+      'video upload refused: the tenant stored-minutes ceiling is reached',
+    );
+    throw new ApiError(413, 'VALIDATION_FAILED', { media: 'quota_exceeded' });
+  }
+
+  if (!decision.corsOrigin) {
+    // A community with no verified domain has no origin a browser could upload from. Never reached
+    // through the web app, which always sends `x-tenant-host`.
+    log.error(
+      { event: 'media.upload_start_failed', tenantId: ctx.tenantId, assetId, reason: 'no_origin' },
+      'no browser origin for a video upload: the community has no verified primary domain',
+    );
+    throw new ApiError(500, 'INTERNAL');
+  }
+
+  let upload: Awaited<ReturnType<typeof videoProvider.createDirectUpload>>;
+  try {
+    upload = await videoProvider.createDirectUpload({
+      assetId,
+      tenantId: ctx.tenantId,
+      corsOrigin: decision.corsOrigin,
+      test: env.NODE_ENV !== 'production',
+    });
+  } catch (error) {
+    log.error(
+      {
+        event: 'media.upload_start_failed',
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        assetId,
+        provider: videoProvider.name,
+        // A `VideoProviderError` message carries a kind and a status and nothing else (T-03-41).
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'the video provider refused to mint a direct upload',
+    );
+    throw new ApiError(500, 'INTERNAL');
+  }
+
+  await withAdminTx(async (tx) => {
+    await tx
+      .update(mediaAssets)
+      .set({ providerAssetId: upload.providerUploadId })
+      .where(and(eq(mediaAssets.id, assetId), eq(mediaAssets.tenantId, ctx.tenantId)));
+  });
+
+  log.info(
+    {
+      event: 'media.upload_start',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      assetId,
+      kind: body.kind,
+      purpose: body.purpose,
+      mime: body.mime,
+      size: body.size,
+      provider: videoProvider.name,
+    },
+    'video upload started',
+  );
+
+  return {
+    assetId,
+    provider: videoProvider.name,
+    signedUrl: upload.uploadUrl,
+    // The provider owns the object: there is no Storage token and no object name to hand back.
+    token: null,
+    path: null,
+    maxBytes: limit.maxBytes,
+    resumableThresholdBytes: RESUMABLE_THRESHOLD_BYTES,
+  };
+}
+
+/**
  * `POST /v1/media/uploads` (MEDIA-01): validates the DECLARED facts, charges the tenant's storage
  * ceiling, records a `pending` row and mints a signed Storage target. Nothing is decoded here — the
  * declared mime buys a fast refusal, `complete` is where the bytes are judged.
@@ -155,7 +320,19 @@ const tooLarge = (maxBytes: number): ApiError =>
  * the same millisecond is acceptable and far cheaper than serialising every upload of a tenant
  * behind a row lock. What matters is that no row exists when the ceiling refuses (R-16, T-03-06).
  */
-export async function startUpload(ctx: Ctx, body: MediaStartBody): Promise<MediaStart> {
+export async function startUpload(
+  ctx: Ctx,
+  body: MediaStartBody,
+  opts: StartUploadOptions = {},
+): Promise<MediaStart> {
+  // V1 publishes admin-only (PROJECT.md, ROADMAP criterion 4): only an `admin_tenant` may spend the
+  // community's video minutes. Checked FIRST for the video kind so a member never learns which
+  // video mimes or caps exist. V2's member posting removes this one predicate; Phase 5's stories
+  // add a `story` purpose to the same table rather than a second rule (T-03-44).
+  if (body.kind === 'video' && ctx.role !== 'admin_tenant') {
+    throw new ApiError(403, 'FORBIDDEN');
+  }
+
   let limit: ReturnType<typeof limitFor>;
   try {
     limit = limitFor(body.kind, body.purpose);
@@ -171,11 +348,7 @@ export async function startUpload(ctx: Ctx, body: MediaStartBody): Promise<Media
   if (!limit.mimes.includes(body.mime)) throw validationFailed('type_not_allowed');
   if (body.size > limit.maxBytes) throw tooLarge(limit.maxBytes);
 
-  // 03-06 replaces this branch with the `VideoProvider` adapter (`env.VIDEO_PROVIDER`). A named,
-  // tested seam rather than a silent gap: the columns and the contract already carry video.
-  if (body.kind === 'video') {
-    throw new ApiError(501, 'NOT_IMPLEMENTED', { media: 'video_provider_missing' });
-  }
+  if (body.kind === 'video') return startVideoUpload(ctx, body, limit, opts);
 
   const assetId = crypto.randomUUID();
   const key = mediaOriginalKey(ctx.tenantId, assetId);
