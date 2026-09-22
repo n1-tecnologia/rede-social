@@ -87,7 +87,12 @@ select is_empty(
         -- Phase 4 (04-01). `feed_posts` carries `tenant_id` and the standard isolation policy, so
         -- assertions 1-2 already cover it; it is listed here so a migration that silently stopped
         -- being applied cannot let those assertions pass vacuously. It is NOT exempted anywhere.
-        ('feed_posts')
+        ('feed_posts'),
+        -- Phase 4 (04-03). `feed_comments` and `feed_likes` both carry `tenant_id` and the standard
+        -- isolation policy, so assertions 1-2 already cover them; they are listed here for the same
+        -- reason `feed_posts` is — a migration that silently stopped being applied must not let
+        -- those assertions pass vacuously. NEITHER is exempted anywhere.
+        ('feed_comments'), ('feed_likes')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,

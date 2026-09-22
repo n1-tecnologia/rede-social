@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(53);
+select plan(69);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -49,6 +49,21 @@ insert into public.feed_posts (id, tenant_id, caption, author_user_id) values
    '0a000000-0000-4000-8000-000000000002'),
   ('0b000000-0000-4000-8000-0000000000f1', '0b000000-0000-4000-8000-000000000001', 'x',
    '0b000000-0000-4000-8000-000000000002');
+
+-- 04-03: the interaction tables, again with IDENTICAL content on both sides. The comment body is
+-- 'x' in both tenants and each member likes their own tenant's post, so every assertion below is
+-- about WHICH tenant's row came back, never about what it contained.
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth) values
+  ('0a000000-0000-4000-8000-0000000000f2', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-0000000000f1', '0a000000-0000-4000-8000-000000000002', 'x', 0, null, null),
+  ('0b000000-0000-4000-8000-0000000000f2', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-0000000000f1', '0b000000-0000-4000-8000-000000000002', 'x', 0, null, null);
+
+insert into public.feed_likes (id, tenant_id, user_id, post_id) values
+  ('0a000000-0000-4000-8000-0000000000f3', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-0000000000f1'),
+  ('0b000000-0000-4000-8000-0000000000f3', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000000f1');
 
 insert into public.notifications (tenant_id, user_id, kind) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'k'),
@@ -185,6 +200,82 @@ select results_eq(
      ) select count(*)::int from u $$,
   ARRAY[0],
   'USING: an update aimed at B''s posts touches nothing'
+);
+
+-- ── feed_comments: the same five cases (04-03) ──────────────────────────────────────────────────
+select results_eq(
+  $$ select count(*)::int from public.feed_comments
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own feed_comments row'
+);
+select results_eq(
+  $$ select count(*)::int from public.feed_comments where body = 'x' $$,
+  ARRAY[1],
+  'adjacency: both tenants have a comment whose body is x, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.feed_comments where body = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the feed comment it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.feed_comments where id = '0b000000-0000-4000-8000-0000000000f2' $$,
+  'detail by id: B''s comment is not found through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000000f1',
+             '0a000000-0000-4000-8000-000000000002', 'y') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a comment stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with u as (
+       update public.feed_comments set body = 'y'
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: an update aimed at B''s comments touches nothing'
+);
+
+-- ── feed_likes: the same five cases (04-03) ─────────────────────────────────────────────────────
+select results_eq(
+  $$ select count(*)::int from public.feed_likes
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own feed_likes row'
+);
+select results_eq(
+  $$ select count(*)::int from public.feed_likes where kind = 'like' $$,
+  ARRAY[1],
+  'adjacency: both tenants have a like of kind "like", the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.feed_likes where kind = 'like' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the like it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.feed_likes where id = '0b000000-0000-4000-8000-0000000000f3' $$,
+  'detail by id: B''s like is not found through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002',
+             '0b000000-0000-4000-8000-0000000000f1') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a like stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with d as (
+       delete from public.feed_likes
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from d $$,
+  ARRAY[0],
+  'USING: an unlike aimed at B''s rows touches nothing'
 );
 
 select is_empty(
@@ -395,6 +486,24 @@ select results_eq(
 select is_empty(
   $$ select id from public.feed_posts where id = '0a000000-0000-4000-8000-0000000000f1' $$,
   'symmetry: A''s post is not found through B''s lane'
+);
+select results_eq(
+  $$ select tenant_id::text from public.feed_comments where body = 'x' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s comment for the same body'
+);
+select is_empty(
+  $$ select id from public.feed_comments where id = '0a000000-0000-4000-8000-0000000000f2' $$,
+  'symmetry: A''s comment is not found through B''s lane'
+);
+select results_eq(
+  $$ select tenant_id::text from public.feed_likes where kind = 'like' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s like for the same kind'
+);
+select is_empty(
+  $$ select id from public.feed_likes where id = '0a000000-0000-4000-8000-0000000000f3' $$,
+  'symmetry: A''s like is not found through B''s lane'
 );
 select results_eq(
   $$ select host::text from public.tenant_domains $$,

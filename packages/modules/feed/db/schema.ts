@@ -76,12 +76,26 @@ export const feedPosts = pgTable(
   (t) => [
     // FEED-02's list query verbatim, tie-breaker included, so `(created_at, id)` is a TOTAL order the
     // index carries: a page boundary can neither duplicate nor skip a row.
+    //
+    // `.nullsFirst()` is NOT decoration (04-03, caught by `090-feed.sql`'s EXPLAIN assertion):
+    // drizzle's `.desc()` alone emits `DESC NULLS LAST`, while SQL's `order by x desc` means
+    // `desc NULLS FIRST`. The two do not match, so the planner cannot use the index to DELIVER the
+    // ordering and falls back to a full sort of the tenant's posts on every page. Both columns are
+    // NOT NULL, so this changes no result — only whether the index is usable at all.
     index('feed_posts_tenant_community_created_idx').on(
       t.tenantId,
       t.communityId,
-      t.createdAt.desc(),
-      t.id.desc(),
+      t.createdAt.desc().nullsFirst(),
+      t.id.desc().nullsFirst(),
     ),
+    // V1's main feed is `community_id is null`, and a NULL TEST on a key column does NOT pin that
+    // column the way an equality does — so the composite index above can serve Phase 5's
+    // `community_id = <id>` page but can never deliver the ordering for this one. The predicate
+    // therefore moves into the index, which drops `community_id` out of the key entirely. Both
+    // indexes are justified: this one for the tenant feed, the one above for a community feed.
+    index('feed_posts_tenant_created_idx')
+      .on(t.tenantId, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst())
+      .where(sql`community_id is null`),
     // "this member's posts" (a profile tab, Phase 8 moderation) without a sequential scan.
     index('feed_posts_tenant_author_idx').on(t.tenantId, t.authorUserId),
     check('feed_posts_media_kind_chk', sql`${t.mediaKind} in ('none','gallery','video')`),
@@ -176,8 +190,10 @@ export const feedComments = pgTable(
     // D-62's root list verbatim — `order by created_at desc, id desc` over the live roots of one
     // post. `id` is in the index because it is in the order: ties are impossible, so a page
     // boundary can neither duplicate nor skip.
+    // `.nullsFirst()` for the same reason the post index carries it: `order by created_at desc`
+    // is `desc NULLS FIRST`, and an index built `DESC NULLS LAST` cannot deliver that ordering.
     index('feed_comments_tenant_post_root_idx')
-      .on(t.tenantId, t.postId, t.createdAt.desc(), t.id.desc())
+      .on(t.tenantId, t.postId, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst())
       .where(sql`parent_id is null`),
     // D-62's reply list verbatim — `order by created_at, id` under one root. The OPPOSITE direction
     // from the roots, which is why it is a second index and not a reuse of the first.

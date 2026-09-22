@@ -190,6 +190,22 @@ const SEED_FEED_POST_IDS: Record<string, readonly string[]> = {
   'tria-lab': ['0e000000-0000-4000-8000-000000000001', '0e000000-0000-4000-8000-000000000002'],
 };
 
+/** 04-03: [root, reply]. Fixed ids, so a test can name the thread without querying for it first. */
+const SEED_COMMENT_IDS: Record<string, readonly string[]> = {
+  'tria-demo': ['0d000000-0000-4000-8000-0000000000c1', '0d000000-0000-4000-8000-0000000000c2'],
+  'tria-lab': ['0e000000-0000-4000-8000-0000000000c1', '0e000000-0000-4000-8000-0000000000c2'],
+};
+
+/** Identical in both tenants on purpose: a leak cannot hide behind "the rows look different". */
+const SEED_COMMENT_BODIES = [
+  'Que bom ver a comunidade comecando!',
+  'Tambem vou estar la no sabado.',
+] as const;
+
+/** The EXPLAIN fixture lives in ONE tenant, so the other stays small and readable in the UI. */
+const EXPLAIN_FIXTURE_SLUG = 'tria-demo';
+const EXPLAIN_FIXTURE_ROWS = 200;
+
 async function ensureUser(email: string, name: string, password: string): Promise<string> {
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email,
@@ -351,13 +367,17 @@ for (const t of SEED_TENANTS) {
   let memberCount = 0;
   let photoCount = 0;
   let adminUserId: string | null = null;
+  const memberUserIds: string[] = [];
   for (const p of people) {
     const userId = await ensureUser(p.email, p.name, seedPassword);
     await withAdminTx(async (tx) => {
       await tx.insert(memberships).values({ tenantId, userId, role: p.role }).onConflictDoNothing();
     });
     if (p.role === 'admin_tenant') adminUserId = userId;
-    if (p.role === 'member') memberCount += 1;
+    if (p.role === 'member') {
+      memberCount += 1;
+      memberUserIds.push(userId);
+    }
     if (!('profile' in p)) continue;
     if (await seedMemberProfile(tenantId, userId, p.profile)) photoCount += 1;
   }
@@ -439,6 +459,99 @@ for (const t of SEED_TENANTS) {
       }
     });
     console.log(`seed: tenant ${t.slug} — ${feedPostIds.length} feed posts`);
+
+    // 04-03: the interaction layer, IDENTICAL-LOOKING in both tenants (SCHEMA-CONVENTIONS §(j)) —
+    // one root comment, one reply to it from a different member, one like on the post and one like
+    // on the root comment. The counters are NOT seeded: `like_count` and `comment_count` are
+    // written by the triggers in `*_feed_counters.sql` as these rows land, which is what makes the
+    // pgTAP reconciliation assertion a real check rather than a restatement of the seed.
+    const rootCommentId = SEED_COMMENT_IDS[t.slug]?.[0];
+    const replyCommentId = SEED_COMMENT_IDS[t.slug]?.[1];
+    const firstPostId = feedPostIds[0];
+    const commenterUserId = memberUserIds[0];
+    const replierUserId = memberUserIds[1] ?? adminUserId;
+    if (rootCommentId && replyCommentId && firstPostId && commenterUserId && replierUserId) {
+      await withAdminTx(async (tx) => {
+        await tx.execute(sql`
+          insert into public.feed_comments
+            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+          values (
+            ${rootCommentId}::uuid, ${tenantId}::uuid, ${firstPostId}::uuid,
+            ${commenterUserId}::uuid, ${SEED_COMMENT_BODIES[0]}, 0, null, null
+          )
+          on conflict (id) do nothing`);
+        // depth 1 with parent_depth 0: the only shape `feed_comments_parent_fk` accepts.
+        await tx.execute(sql`
+          insert into public.feed_comments
+            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+          values (
+            ${replyCommentId}::uuid, ${tenantId}::uuid, ${firstPostId}::uuid,
+            ${replierUserId}::uuid, ${SEED_COMMENT_BODIES[1]}, 1, ${rootCommentId}::uuid, 0
+          )
+          on conflict (id) do nothing`);
+        await tx.execute(sql`
+          insert into public.feed_likes (tenant_id, user_id, post_id)
+          values (${tenantId}::uuid, ${commenterUserId}::uuid, ${firstPostId}::uuid)
+          on conflict (user_id, post_id) where post_id is not null do nothing`);
+        await tx.execute(sql`
+          insert into public.feed_likes (tenant_id, user_id, comment_id)
+          values (${tenantId}::uuid, ${replierUserId}::uuid, ${rootCommentId}::uuid)
+          on conflict (user_id, comment_id) where comment_id is not null do nothing`);
+      });
+      console.log(`seed: tenant ${t.slug} — 1 comment + 1 reply, 2 likes`);
+    }
+
+    // The EXPLAIN fixture, ONE tenant only. With three rows the planner always picks a sequential
+    // scan and `supabase/tests/090-feed.sql`'s index-scan assertions would prove nothing; 200 posts
+    // and 200 root comments on one post are enough for the keyset indexes to win. `analyze` at the
+    // end of the seed is what makes the planner act on any of it.
+    if (t.slug === EXPLAIN_FIXTURE_SLUG && adminUserId && firstPostId) {
+      await withAdminTx(async (tx) => {
+        await tx.execute(sql`
+          insert into public.feed_posts (id, tenant_id, author_user_id, caption, created_at)
+          select ('0d00f1' || lpad(to_hex(g), 26, '0'))::uuid,
+                 ${tenantId}::uuid,
+                 ${adminUserId}::uuid,
+                 'Volume de planejamento ' || g,
+                 now() - (g || ' minutes')::interval
+            from generate_series(1, ${EXPLAIN_FIXTURE_ROWS}) g
+          on conflict (id) do nothing`);
+        await tx.execute(sql`
+          insert into public.feed_comments
+            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+          select ('0d00f2' || lpad(to_hex(g), 26, '0'))::uuid,
+                 ${tenantId}::uuid,
+                 ${firstPostId}::uuid,
+                 ${adminUserId}::uuid,
+                 'Comentario de volume ' || g,
+                 0, null, null,
+                 now() - (g || ' minutes')::interval
+            from generate_series(1, ${EXPLAIN_FIXTURE_ROWS}) g
+          on conflict (id) do nothing`);
+      });
+      // …and the same volume of REPLIES under one root, so `090-feed.sql`'s third EXPLAIN
+      // assertion (the ascending reply keyset) measures a selective lookup rather than a table
+      // small enough that the planner reads all of it either way.
+      if (rootCommentId) {
+        await withAdminTx(async (tx) => {
+          await tx.execute(sql`
+            insert into public.feed_comments
+              (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+            select ('0d00f3' || lpad(to_hex(g), 26, '0'))::uuid,
+                   ${tenantId}::uuid,
+                   ${firstPostId}::uuid,
+                   ${adminUserId}::uuid,
+                   'Resposta de volume ' || g,
+                   1, ${rootCommentId}::uuid, 0,
+                   now() - (g || ' seconds')::interval
+              from generate_series(1, ${EXPLAIN_FIXTURE_ROWS}) g
+            on conflict (id) do nothing`);
+        });
+      }
+      console.log(
+        `seed: tenant ${t.slug} — ${EXPLAIN_FIXTURE_ROWS} volume posts, ${EXPLAIN_FIXTURE_ROWS} volume comments and ${EXPLAIN_FIXTURE_ROWS} volume replies (EXPLAIN fixture)`,
+      );
+    }
   }
 
   console.log(
@@ -453,6 +566,16 @@ await withAdminTx(async (tx) => {
   await tx.insert(platformAdmins).values({ userId: superAdminId }).onConflictDoNothing();
 });
 console.log(`seed: platform admin ${SUPER_ADMIN_EMAIL} ready (no membership, by design)`);
+
+// 04-03: the planner acts on statistics, not on row counts it has never looked at. Without this,
+// the 200-row EXPLAIN fixture above is invisible to it and `090-feed.sql`'s index-scan assertions
+// would still see the sequential scan an empty table deserves.
+await withAdminTx(async (tx) => {
+  await tx.execute(sql`analyze public.feed_posts`);
+  await tx.execute(sql`analyze public.feed_comments`);
+  await tx.execute(sql`analyze public.feed_likes`);
+});
+console.log('seed: analyze on feed_posts, feed_comments, feed_likes');
 
 console.log(`seed: hosts — platform=${PLATFORM_HOST} tria-demo=${DEMO_HOST} tria-lab=${LAB_HOST}`);
 await sqlClient.end();
