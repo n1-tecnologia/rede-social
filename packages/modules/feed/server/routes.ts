@@ -5,12 +5,30 @@ import { ApiError } from '@tria/core/server/http/api-error';
 import { requireModule } from '@tria/core/server/modules/require-module';
 import { requirePermission } from '@tria/core/server/rbac/permissions';
 import {
+  commentPageSchema,
+  commentSchema,
+  commentsQuerySchema,
+  createCommentSchema,
   createPostSchema,
   feedPageSchema,
   feedPostSchema,
   feedQuerySchema,
+  likeResultSchema,
+  repliesQuerySchema,
 } from '../contracts/index';
-import { createPost, getPost, listFeed } from './service';
+import {
+  createComment,
+  createPost,
+  deleteComment,
+  getPost,
+  likeComment,
+  likePost,
+  listComments,
+  listFeed,
+  listReplies,
+  unlikeComment,
+  unlikePost,
+} from './service';
 
 /**
  * The module owns its guard chain: the mount in `apps/api/src/app.ts` is a plain
@@ -88,6 +106,127 @@ const createPostRoute = createRoute({
   },
 });
 
+/* ── Interactions (FEED-04, FEED-05, FEED-06) ─────────────────────────────────────────────────── */
+
+/**
+ * Every route below is MEMBER-REACHABLE: `requireAuth` + `requireModule('feed')` and nothing else.
+ * There is deliberately no per-route permission — the posting policy gates AUTHORING a post, not
+ * interacting with one, and every member of the tenant may like and comment (FEED-04/05/06).
+ *
+ * Two response facts a reader should not have to dig for:
+ *  - a like or unlike ALWAYS answers 200 with the current `{ liked, likeCount }`. A repeat is a
+ *    no-op, not a conflict — there is no conflict status anywhere in this file, on purpose;
+ *  - a miss is a BARE 404 with no `details` (unknown id, another tenant's, removed, or — for a
+ *    delete — someone else's). Only the reply-depth refusal carries a machine code.
+ */
+const postIdParam = z.object({ postId: z.uuid() });
+const commentIdParam = z.object({ commentId: z.uuid() });
+
+const likeResponses = {
+  200: {
+    description:
+      'The CURRENT state after the toggle, read back in the same transaction. Idempotent: a repeat returns the identical body.',
+    content: { 'application/json': { schema: likeResultSchema } },
+  },
+  404: {
+    description: 'No such post/comment is visible to this tenant — unknown, foreign, or removed.',
+  },
+} as const;
+
+const likePostRoute = createRoute({
+  method: 'post',
+  path: '/posts/{postId}/like',
+  request: { params: postIdParam },
+  responses: likeResponses,
+});
+
+const unlikePostRoute = createRoute({
+  method: 'delete',
+  path: '/posts/{postId}/like',
+  request: { params: postIdParam },
+  responses: likeResponses,
+});
+
+const likeCommentRoute = createRoute({
+  method: 'post',
+  path: '/comments/{commentId}/like',
+  request: { params: commentIdParam },
+  responses: likeResponses,
+});
+
+const unlikeCommentRoute = createRoute({
+  method: 'delete',
+  path: '/comments/{commentId}/like',
+  request: { params: commentIdParam },
+  responses: likeResponses,
+});
+
+const listCommentsRoute = createRoute({
+  method: 'get',
+  path: '/posts/{postId}/comments',
+  request: { params: postIdParam, query: commentsQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One keyset page of the post's ROOT comments, newest first (D-62). Replies are not included — `replyCount` says how many there are and `/comments/{commentId}/replies` fetches them.",
+      content: { 'application/json': { schema: commentPageSchema } },
+    },
+    404: { description: 'No such post is visible to this tenant.' },
+  },
+});
+
+const createCommentRoute = createRoute({
+  method: 'post',
+  path: '/posts/{postId}/comments',
+  request: {
+    params: postIdParam,
+    body: { content: { 'application/json': { schema: createCommentSchema } }, required: true },
+  },
+  responses: {
+    201: {
+      description: 'The created comment or reply, in the same shape the comment list returns',
+      content: { 'application/json': { schema: commentSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED` with `details.comment = 'reply_depth_exceeded'` when `parentId` names a reply: the DATABASE refused the second reply level (SQLSTATE 23503/23514) and this is its translation.",
+    },
+    404: {
+      description:
+        'No such post is visible to this tenant, or `parentId` is not a live comment on this post.',
+    },
+  },
+});
+
+const deleteCommentRoute = createRoute({
+  method: 'delete',
+  path: '/comments/{commentId}',
+  request: { params: commentIdParam },
+  responses: {
+    200: {
+      description: 'The comment was soft-deleted (D-61). The row stays for Phase 8 moderation.',
+      content: { 'application/json': { schema: z.object({ deleted: z.literal(true) }).strict() } },
+    },
+    404: {
+      description:
+        "Not this member's comment, unknown, or already removed — one bare code for all three.",
+    },
+  },
+});
+
+const listRepliesRoute = createRoute({
+  method: 'get',
+  path: '/comments/{commentId}/replies',
+  request: { params: commentIdParam, query: repliesQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One keyset page of a root comment's replies, OLDEST first (D-62). Its cursor is not interchangeable with the root list's.",
+      content: { 'application/json': { schema: commentPageSchema } },
+    },
+  },
+});
+
 export const feedRoutes = feed
   .openapi(listRoute, async (c) => c.json(await listFeed(c.get('ctx'), c.req.valid('query')), 200))
   .openapi(getPostRoute, async (c) => {
@@ -96,4 +235,37 @@ export const feedRoutes = feed
   })
   .openapi(createPostRoute, async (c) =>
     c.json(await createPost(c.get('ctx'), c.req.valid('json')), 201),
-  );
+  )
+  .openapi(likePostRoute, async (c) => {
+    const { postId } = c.req.valid('param');
+    return c.json(await likePost(c.get('ctx'), postId), 200);
+  })
+  .openapi(unlikePostRoute, async (c) => {
+    const { postId } = c.req.valid('param');
+    return c.json(await unlikePost(c.get('ctx'), postId), 200);
+  })
+  .openapi(listCommentsRoute, async (c) => {
+    const { postId } = c.req.valid('param');
+    return c.json(await listComments(c.get('ctx'), postId, c.req.valid('query')), 200);
+  })
+  .openapi(createCommentRoute, async (c) => {
+    const { postId } = c.req.valid('param');
+    return c.json(await createComment(c.get('ctx'), postId, c.req.valid('json')), 201);
+  })
+  .openapi(deleteCommentRoute, async (c) => {
+    const { commentId } = c.req.valid('param');
+    await deleteComment(c.get('ctx'), commentId);
+    return c.json({ deleted: true } as const, 200);
+  })
+  .openapi(likeCommentRoute, async (c) => {
+    const { commentId } = c.req.valid('param');
+    return c.json(await likeComment(c.get('ctx'), commentId), 200);
+  })
+  .openapi(unlikeCommentRoute, async (c) => {
+    const { commentId } = c.req.valid('param');
+    return c.json(await unlikeComment(c.get('ctx'), commentId), 200);
+  })
+  .openapi(listRepliesRoute, async (c) => {
+    const { commentId } = c.req.valid('param');
+    return c.json(await listReplies(c.get('ctx'), commentId, c.req.valid('query')), 200);
+  });

@@ -3,4 +3,16 @@
  * path inside the package (the `exports` map has no `./server/*`, and Biome blocks deep imports).
  */
 export { feedRoutes } from './routes';
-export { createPost, getPost, listFeed } from './service';
+export {
+  createComment,
+  createPost,
+  deleteComment,
+  getPost,
+  likeComment,
+  likePost,
+  listComments,
+  listFeed,
+  listReplies,
+  unlikeComment,
+  unlikePost,
+} from './service';

@@ -36,6 +36,44 @@ export const feedModule = defineModule({
         log.info({ event: 'post.published', ...payload }, 'post published');
       },
     },
+    // 04-03's five interaction events. Every payload is ids and flags only: a comment BODY never
+    // reaches a log line either (T-04-19), which is why the payloads carry none.
+    {
+      event: 'post.liked',
+      handler: async (payload) => {
+        log.info({ event: 'post.liked', ...payload }, 'post liked');
+      },
+    },
+    {
+      event: 'post.unliked',
+      handler: async (payload) => {
+        log.info({ event: 'post.unliked', ...payload }, 'post unliked');
+      },
+    },
+    {
+      event: 'comment.created',
+      handler: async (payload) => {
+        log.info({ event: 'comment.created', ...payload }, 'comment created');
+      },
+    },
+    {
+      event: 'comment.deleted',
+      handler: async (payload) => {
+        log.info({ event: 'comment.deleted', ...payload }, 'comment deleted');
+      },
+    },
+    {
+      event: 'comment.liked',
+      handler: async (payload) => {
+        log.info({ event: 'comment.liked', ...payload }, 'comment liked');
+      },
+    },
+    {
+      event: 'comment.unliked',
+      handler: async (payload) => {
+        log.info({ event: 'comment.unliked', ...payload }, 'comment unliked');
+      },
+    },
   ],
   defaultRolePermissions: {
     admin_tenant: [FEED_PERMISSIONS.create, FEED_PERMISSIONS.manage],
