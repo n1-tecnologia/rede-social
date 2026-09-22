@@ -19,6 +19,24 @@ export const users = {
   labAdmin: 'admin@tria-lab.local',
 } as const;
 
+/**
+ * The feed posts `scripts/seed.ts` writes for BOTH seed tenants (04-01). The captions are identical
+ * on the two sides on purpose — that is what makes "a lab member never sees the demo post" an honest
+ * assertion about tenancy rather than about copy — so an e2e that asserts a caption must ALSO assert
+ * which tenant it is on. `newest` is the second entry, one minute after `oldest`, so it heads the
+ * feed.
+ *
+ * Mirrored here rather than imported: `scripts/seed.ts` is a top-level-await script that requires
+ * `SEED_PASSWORD` and opens a database connection at import time. This is the same convention
+ * `members.spec.ts`'s `SEEDED` block uses for the seeded member names.
+ */
+export const seededFeed = {
+  oldest: 'Bem-vindos! Esta é a primeira publicação da comunidade.',
+  newest: 'Encontro de sábado confirmado. Levem água e um caderno.',
+  demoAuthor: 'Admin TRIA Demo',
+  labAuthor: 'Admin TRIA Lab',
+} as const;
+
 /** Distinct origins (D-20/D-21). Chromium resolves `*.localhost` to loopback without /etc/hosts. */
 export const hosts = {
   demo: process.env.PLAYWRIGHT_DEMO_URL ?? 'http://tria-demo.localhost:3000',

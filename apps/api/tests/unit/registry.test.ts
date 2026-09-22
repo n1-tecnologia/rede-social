@@ -46,9 +46,14 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       expect(MODULE_REGISTRY[key]?.key).toBe(key);
       expect(TOGGLEABLE_MODULES).toContain(key);
     }
-    // 01-07 registered the throwaway reference module (D-19); Phase 4 removes it with the package.
-    expect(keys).toEqual(['example']);
+    // 01-07 registered the throwaway reference module (D-19); 04-10 removes it with the package.
+    // 04-01 added `feed`, the first REAL module — the list is sorted so a new entry is one line.
+    expect(keys.sort()).toEqual(['example', 'feed']);
     expect(MODULE_REGISTRY.example?.nav?.order).toBe(90);
+    // D-55 (amends D-40): the feed contributes a HOME SLOT and no navigation tab, so Phases 5 and 6
+    // keep the tab budget they are planning against. A nav entry here is a regression, not a feature.
+    expect(MODULE_REGISTRY.feed?.nav).toBeUndefined();
+    expect(MODULE_REGISTRY.feed?.home).toEqual([{ order: 10 }]);
   });
 
   it('2. defineModule accepts a manifest with only a key, and it lists without nav (MOD-01 empty)', () => {
@@ -148,6 +153,48 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       for (const key of Object.keys(MODULE_REGISTRY) as ModuleKey[]) delete MODULE_REGISTRY[key];
       Object.assign(MODULE_REGISTRY, saved);
     }
+  });
+
+  it('6b. FEED-08: the posting policy is ONE value, composed here and nowhere else', () => {
+    const noSettings = new Map<ModuleKey, Record<string, unknown>>();
+    const membersPolicy = settingsFor([['feed', { postingPolicy: 'members' }]]);
+
+    // Default (`admins_only`, and also a tenant whose settings blob simply has no such key).
+    expect(permissionsFor('member', new Set<ModuleKey>(['feed']), noSettings)).not.toContain(
+      'feed.post.create',
+    );
+    expect(
+      permissionsFor('member', new Set<ModuleKey>(['feed']), settingsFor([['feed', {}]])),
+    ).not.toContain('feed.post.create');
+
+    // The ONE change that turns a member into an author — no migration, no route edit.
+    expect(permissionsFor('member', new Set<ModuleKey>(['feed']), membersPolicy)).toContain(
+      'feed.post.create',
+    );
+
+    // The admin holds both permissions from the manifest, whatever the policy says.
+    const adminPermissions = permissionsFor(
+      'admin_tenant',
+      new Set<ModuleKey>(['feed']),
+      noSettings,
+    );
+    expect(adminPermissions).toContain('feed.post.create');
+    expect(adminPermissions).toContain('feed.post.manage');
+
+    // A DISABLED module grants nothing, even with the setting turned on: turning `feed` off must
+    // revoke what it granted, or a decommissioned module would leave live permissions behind.
+    expect(permissionsFor('member', new Set<ModuleKey>(), membersPolicy)).not.toContain(
+      'feed.post.create',
+    );
+
+    // A malformed settings blob falls back to the SAFE default rather than throwing or failing open.
+    expect(
+      permissionsFor(
+        'member',
+        new Set<ModuleKey>(['feed']),
+        settingsFor([['feed', { postingPolicy: 'everyone' }]]),
+      ),
+    ).not.toContain('feed.post.create');
   });
 
   it('7. D-42 home slots: a manifest `home` array reaches the bootstrap entry verbatim', () => {
