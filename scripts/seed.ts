@@ -30,9 +30,6 @@ const {
   tenantModules,
   tenants,
 } = await import('@tria/core/db/schema');
-// The feed module's own table (04-01). `public.feed_posts` is owned by `packages/modules/feed`, and
-// the seed writes it through the module's published `./db` entry point rather than by hand.
-const { feedPosts } = await import('@tria/module-feed/db');
 const { sqlClient } = await import('@tria/core/db');
 const { supabaseAdmin } = await import('@tria/core/server/supabase-admin');
 const { deriveIconSet } = await import('@tria/core/server/branding/icons');
@@ -419,20 +416,26 @@ for (const t of SEED_TENANTS) {
   const feedPostIds = SEED_FEED_POST_IDS[t.slug] ?? [];
   const authorUserId = adminUserId;
   if (authorUserId && feedPostIds.length > 0) {
+    // Written as raw SQL rather than through `@tria/module-feed/db`: the seed belongs to the ROOT
+    // workspace package, and giving the root a dependency on a `module`-tagged package makes
+    // `turbo boundaries` (2.10.12) mis-attribute that edge to the `kernel`-tagged packages, turning
+    // the MOD-02 gate red on an import nobody wrote. `public.feed_posts` is a stable committed
+    // migration, so naming it here costs nothing the schema import would have bought.
     await withAdminTx(async (tx) => {
       for (const [index, id] of feedPostIds.entries()) {
-        await tx
-          .insert(feedPosts)
-          .values({
-            id,
-            tenantId,
-            authorUserId,
-            caption: SEED_FEED_CAPTIONS[index] ?? SEED_FEED_CAPTIONS[0],
-            // Oldest first in the array, one minute apart: the newest post is the LAST entry, which
-            // is what `created_at desc, id desc` puts at the top of the feed.
-            createdAt: new Date(Date.now() - (feedPostIds.length - index) * 60_000),
-          })
-          .onConflictDoNothing();
+        // Oldest first in the array, one minute apart: the newest post is the LAST entry, which is
+        // what `created_at desc, id desc` puts at the top of the feed.
+        const createdAt = new Date(Date.now() - (feedPostIds.length - index) * 60_000);
+        await tx.execute(sql`
+          insert into public.feed_posts (id, tenant_id, author_user_id, caption, created_at)
+          values (
+            ${id}::uuid,
+            ${tenantId}::uuid,
+            ${authorUserId}::uuid,
+            ${SEED_FEED_CAPTIONS[index] ?? SEED_FEED_CAPTIONS[0]},
+            ${createdAt.toISOString()}::timestamptz
+          )
+          on conflict (id) do nothing`);
       }
     });
     console.log(`seed: tenant ${t.slug} — ${feedPostIds.length} feed posts`);

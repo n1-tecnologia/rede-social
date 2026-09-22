@@ -178,9 +178,6 @@ importers:
       '@tria/core':
         specifier: workspace:*
         version: link:packages/core
-      '@tria/module-feed':
-        specifier: workspace:*
-        version: link:packages/modules/feed
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
