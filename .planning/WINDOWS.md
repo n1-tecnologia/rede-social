@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 13
+open_count: 12
 waived_count: 0
-fixed_count: 6
+fixed_count: 7
 total_count: 19
-last_updated: 2026-09-22T16:05:15.396Z
+last_updated: 2026-09-22T16:39:11.724Z
 ---
 
 # Broken Windows Ledger
@@ -30,7 +30,7 @@ last_updated: 2026-09-22T16:05:15.396Z
 | 13 | 03 | stub | packages/core/server/media/video/index.ts |  | videoProvider.signPlayback and getAsset are implemented on both adapters but wired to no route yet: 03-07 adds GET /v1/media/{assetId}/playback, and getAsset waits for a future reconciliation job (declared so that job needs no adapter change). | open |  | 2026-09-22T02:20:08.948Z |  |
 | 14 | 03 | unrun-verify | apps/web/components/media/VideoPlayer.tsx |  | The poster/still half of the ready player has never rendered a real image. @mux/mux-player@3.13.4 only derives a thumbnail URL when the thumbnail token's decoded aud claim is 't'; the fake provider mints deterministic NON-JWT tokens, so every local and CI run exercises the 'no poster' branch and the frame's bg-bg-tertiary fallback. That a signed Mux thumbnail token really produces a still is only observable against a real account — closed by the docs/DEPLOY.md Phase 01.1 Mux runbook, alongside window 12. | open |  | 2026-09-22T03:32:56.929Z |  |
 | 15 | 03 | unrun-verify | apps/web/e2e/phase3-smoke.spec.ts |  | Real-device HLS playback was never observed: the phase smoke proves the row reaches 'Pronto' and the player mounts with a credential under Playwright's bundled Chromium, which cannot stand in for iOS Safari's HLS stack. That a ready video actually plays, with a thumbnail, on a real iPhone (Safari) and a real Android device (Chrome) is annotated in the spec and recorded in docs/DEPLOY.md as blocked on Phase 01.1, alongside windows 12 and 14. | open |  | 2026-09-22T04:01:20.180Z |  |
-| 16 | 04 | stub | packages/modules/feed/server/service.ts | 98 | viewerLiked is hard-false for every post; 04-03 adds the feed_likes join to the SAME statement | open |  | 2026-09-22T15:43:33.315Z |  |
+| 16 | 04 | stub | packages/modules/feed/server/service.ts | 98 | viewerLiked is hard-false for every post; 04-03 adds the feed_likes join to the SAME statement | fixed |  | 2026-09-22T15:43:33.315Z | 2026-09-22T16:39:11.724Z |
 | 17 | 04 | stub | packages/modules/feed/server/service.ts | 221 | post.published carries hasMedia: false; 04-04 sets it from media_kind once feed_post_media exists | open |  | 2026-09-22T15:43:33.390Z |  |
 | 18 | 04 | stub | packages/modules/feed/ui/FeedList.tsx |  | The admin empty-state CTA renders only when the host passes createHref; 04-05 supplies it with /criar | open |  | 2026-09-22T15:43:33.463Z |  |
 | 19 | 04 | unrun-verify | .planning/sketches/002-phase-04-designed-screens/index.html |  | D-33 / UI-04 design review of the six [designed] Phase 4 surfaces is unrun: the sketch README frontmatter is still status: pending / approved: false. 04-04, 04-05 and 04-09 code against it. | open |  | 2026-09-22T16:05:15.396Z |  |
@@ -224,10 +224,10 @@ last_updated: 2026-09-22T16:05:15.396Z
     "file": "packages/modules/feed/server/service.ts",
     "line": 98,
     "description": "viewerLiked is hard-false for every post; 04-03 adds the feed_likes join to the SAME statement",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-22T15:43:33.315Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-22T16:39:11.724Z"
   },
   {
     "id": 17,
