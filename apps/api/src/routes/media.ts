@@ -2,6 +2,9 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { apiErrorEnvelopeSchema, normalizeHost, TENANT_HOST_HEADER } from '@tria/contracts';
 import {
   mediaAssetSchema,
+  mediaListQuerySchema,
+  mediaListSchema,
+  mediaPlaybackSchema,
   mediaStartBodySchema,
   mediaStartSchema,
   mediaVariantParamSchema,
@@ -11,6 +14,8 @@ import { publicWebOrigin } from '@tria/core/server/env';
 import {
   completeUpload,
   deleteAsset,
+  listAssets,
+  playbackTokens,
   serveVariant,
   startUpload,
 } from '@tria/core/server/media/service';
@@ -27,6 +32,10 @@ import { createOpenApiApp } from '../http/openapi';
  * 32 MiB HTTP/1 cap): `POST /uploads` answers a signed Storage target, the browser uploads directly,
  * and `POST /uploads/{assetId}/complete` confirms. `/uploads` is declared BEFORE
  * `/{assetId}/{variant}` so the literal segment wins the match.
+ *
+ * REGISTRATION ORDER IS PART OF THE CONTRACT (Hono matches in declaration order): `GET /` and
+ * `GET /{assetId}/playback` are declared before `GET /{assetId}/{variant}`, otherwise `playback`
+ * would be matched as a `{variant}` and answer a 400 from the variant regex instead of a token.
  */
 const media = createOpenApiApp();
 media.use('*', requireAuth);
@@ -43,6 +52,44 @@ const assetResponse = (description: string) => ({
 
 const assetParams = z.object({ assetId: z.uuid() });
 const variantParams = z.object({ assetId: z.uuid(), variant: mediaVariantParamSchema });
+
+const listRoute = createRoute({
+  method: 'get',
+  path: '/',
+  request: { query: mediaListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One keyset page of the community's own assets, newest first (`created_at desc, id desc`), optionally narrowed by `kind` and `purpose`. `cursor` is OPAQUE: pass back the previous `nextCursor` verbatim; a tampered or stale value is not an error, it answers the first page. `nextCursor` is non-null exactly when another row exists",
+      content: { 'application/json': { schema: mediaListSchema } },
+    },
+    400: envelope(
+      'VALIDATION_FAILED — `limit` outside 1..50, an unknown `kind`/`purpose`, or an unknown query key',
+    ),
+    403: envelope(
+      'FORBIDDEN — the asset list is an admin surface in V1: only an `admin_tenant` may enumerate what the community has uploaded. Checked before any tenant consideration',
+    ),
+  },
+});
+
+const playbackRoute = createRoute({
+  method: 'get',
+  path: '/{assetId}/playback',
+  request: { params: assetParams },
+  responses: {
+    200: {
+      description:
+        'A SHORT-LIVED signed playback credential minted per request against the caller own membership (D-44). The tokens are bearer credentials valid at the provider edge: they are answered with Cache-Control: no-store and must never be cached, persisted or shared',
+      content: { 'application/json': { schema: mediaPlaybackSchema } },
+    },
+    404: envelope(
+      'NOT_FOUND — one identical bare body for every miss: unknown id, another community asset, soft-deleted, failed, rejected, or not a video. No details payload and never a tenant name',
+    ),
+    409: envelope(
+      'CONFLICT { media: "not_ready" } — the caller OWN video is still transcoding. The only distinguishable refusal, and reachable only for an asset the caller provably owns',
+    ),
+  },
+});
 
 const startRoute = createRoute({
   method: 'post',
@@ -112,6 +159,25 @@ const deleteRoute = createRoute({
 });
 
 export const mediaRoutes = media
+  // FIRST, before `/uploads`: a literal collection route at the mount root.
+  .openapi(listRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const page = await listAssets(ctx, c.req.valid('query'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(page, 200);
+  })
+  // BEFORE `/{assetId}/{variant}`: Hono matches in registration order, so declaring the literal
+  // `playback` segment first is what stops the variant route from swallowing it as a `{variant}`.
+  .openapi(playbackRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { assetId } = c.req.valid('param');
+    const playback = await playbackTokens(ctx, assetId);
+    // NEVER cacheable, unlike the 302 variant route: this body carries bearer credentials that are
+    // valid outside our infrastructure, so a shared cache holding one would hand a community's video
+    // to whoever reads that cache (T-03-47).
+    c.header('Cache-Control', 'no-store');
+    return c.json(playback, 200);
+  })
   .openapi(startRoute, async (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');

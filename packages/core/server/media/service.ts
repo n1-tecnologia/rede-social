@@ -2,14 +2,18 @@ import {
   type MediaAsset,
   type MediaKind,
   type MediaLimit,
+  type MediaList,
+  type MediaListQuery,
+  type MediaPlayback,
   type MediaPurpose,
   type MediaStart,
   type MediaStartBody,
   mediaVariantUrl,
+  PLAYBACK_TOKEN_TTL_SECONDS,
   REFUSED_IMAGE_MIMES,
   RESUMABLE_THRESHOLD_BYTES,
 } from '@tria/contracts/media';
-import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { mediaAssets, tenantDomains } from '../../db/schema';
 import { withTenantTx } from '../../db/tenant-tx';
@@ -18,6 +22,7 @@ import { env, publicWebOrigin } from '../env';
 import { ApiError } from '../http/api-error';
 import { enqueueInTx } from '../jobs/boss';
 import { moduleLogger } from '../logging';
+import { decodeCursor, encodeCursor } from '../paging';
 import { MEDIA_DERIVE_QUEUE } from './index';
 import { inspectMediaImage, inspectPdf, MediaImageError } from './inspect';
 import {
@@ -630,6 +635,155 @@ export async function deleteAsset(ctx: Ctx, assetId: string): Promise<MediaAsset
   );
 
   return assetView({ ...row, status: 'deleted', deletedAt: new Date() });
+}
+
+/**
+ * `GET /v1/media/{assetId}/playback` (MEDIA-03, TENANT-04, D-44) — a SHORT-LIVED signed playback
+ * credential, minted per request against the CALLER's own membership.
+ *
+ * The refusal vocabulary is deliberately almost closed (T-03-49): the only distinguishable code is
+ * `409 { media: 'not_ready' }`, and it is reachable only for the caller's OWN still-transcoding
+ * asset. An unknown id, another community's asset, a soft-deleted row, a `failed`/`rejected` one and
+ * a non-video kind ALL take the same bare `404 NOT_FOUND` with no details payload — the foreign row
+ * is not "denied", it is invisible to the tenant lane, so the 404 is structural rather than a rule
+ * this function has to remember (T-03-46).
+ *
+ * The token itself is never persisted, never cached and never logged: the log line carries the asset
+ * id, the route answers `Cache-Control: no-store`, and the value dies with the response (T-03-47).
+ */
+export async function playbackTokens(ctx: Ctx, assetId: string): Promise<MediaPlayback> {
+  const row = await withTenantTx(ctx, async (tx) => {
+    const [found] = await tx
+      .select({
+        id: mediaAssets.id,
+        kind: mediaAssets.kind,
+        status: mediaAssets.status,
+        playbackId: mediaAssets.playbackId,
+      })
+      .from(mediaAssets)
+      .where(eq(mediaAssets.id, assetId))
+      .limit(1);
+    return found;
+  });
+
+  // One bare 404 for every miss. Ordered so the ONE extra code below can only ever describe an asset
+  // the caller already provably owns.
+  if (row?.kind !== 'video') throw new ApiError(404, 'NOT_FOUND');
+  if (row.status === 'pending' || row.status === 'processing') {
+    throw new ApiError(409, 'CONFLICT', { media: 'not_ready' });
+  }
+  if (row.status !== 'ready' || !row.playbackId) throw new ApiError(404, 'NOT_FOUND');
+
+  let tokens: Awaited<ReturnType<typeof videoProvider.signPlayback>>;
+  try {
+    tokens = await videoProvider.signPlayback(row.playbackId, {
+      expiresInSeconds: PLAYBACK_TOKEN_TTL_SECONDS,
+    });
+  } catch (error) {
+    log.error(
+      {
+        event: 'media.playback_token_failed',
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        requestId: ctx.requestId,
+        assetId,
+        provider: videoProvider.name,
+        // A `VideoProviderError` message carries a kind and a status and nothing else (T-03-41).
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'the video provider refused to mint a playback token',
+    );
+    throw new ApiError(500, 'INTERNAL');
+  }
+
+  // The asset id, never the token: this line ends up in Cloud Logging, where a playback credential
+  // would be readable by anyone with log access long after the response was discarded.
+  log.info(
+    {
+      event: 'media.playback_token',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      assetId,
+    },
+    'playback token minted',
+  );
+
+  return {
+    playbackId: row.playbackId,
+    tokens,
+    expiresAt: new Date(Date.now() + PLAYBACK_TOKEN_TTL_SECONDS * 1000).toISOString(),
+  };
+}
+
+/**
+ * `GET /v1/media?kind=&purpose=&cursor=&limit=` (MEDIA-03) — one keyset page of the community's
+ * assets, newest first.
+ *
+ * **`admin_tenant` ONLY in V1** (this plan's objective decision). The `media_assets` select policy is
+ * tenant-wide because Phase 4's feed needs it, but the LISTING endpoint is an admin surface: a member
+ * has no screen that enumerates the community's assets and exposing one would hand every member a
+ * browsable inventory of everything ever uploaded (T-03-48). The refusal is checked BEFORE any tenant
+ * consideration, so it cannot be used to probe another community either. Phase 4 widens this one
+ * predicate when the composer's "pick an existing asset" affordance ships.
+ *
+ * Ordering is `created_at desc, id desc`, which is the leading pair of
+ * `media_assets_tenant_status_created_idx`'s sibling ordering and TOTAL: two assets created in the
+ * same microsecond occupy two stable adjacent slots that a page boundary can neither duplicate nor
+ * skip. The cursor's `n` is the row's own `created_at`, read back from the projection.
+ */
+export async function listAssets(ctx: Ctx, query: MediaListQuery): Promise<MediaList> {
+  if (ctx.role !== 'admin_tenant') throw new ApiError(403, 'FORBIDDEN');
+
+  const limit = query.limit;
+  const after = decodeCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx
+      .select(ASSET_COLUMNS)
+      .from(mediaAssets)
+      .where(
+        and(
+          query.kind ? eq(mediaAssets.kind, query.kind) : undefined,
+          query.purpose ? eq(mediaAssets.purpose, query.purpose) : undefined,
+          // The tenant predicate is RLS, never the cursor (T-03-52): a tampered envelope can only
+          // move the page boundary inside what this lane may already read.
+          afterAt
+            ? sql`(${mediaAssets.createdAt}, ${mediaAssets.id}) < (${afterAt}::timestamptz, ${afterId}::uuid)`
+            : undefined,
+        ),
+      )
+      .orderBy(desc(mediaAssets.createdAt), desc(mediaAssets.id))
+      // Over-fetch by one: `nextCursor` is non-null EXACTLY when another row exists, so the screen
+      // never renders a "Carregar mais" that comes back empty.
+      .limit(limit + 1),
+  );
+
+  const page = (rows as AssetRow[]).slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last
+      ? encodeCursor({ n: last.createdAt.toISOString(), id: last.id })
+      : null;
+
+  log.info(
+    {
+      event: 'media.list',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      kind: query.kind ?? null,
+      purpose: query.purpose ?? null,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'media assets listed',
+  );
+
+  return { items: page.map(assetView), nextCursor };
 }
 
 export type DeriveOutcome = { outcome: 'derived' | 'skipped' | 'gone'; widths: number[] };

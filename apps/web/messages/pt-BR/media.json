@@ -11,6 +11,37 @@
     "progress": "{percent}% enviado",
     "cancel": "Cancelar envio",
     "retry": "Tentar novamente",
+    "library": {
+      "title": "Mídia",
+      "back": "Voltar",
+      "upload": "Enviar vídeo",
+      "uploading": "Enviando… {percent}%",
+      "loadMore": "Carregar mais",
+      "loadingMore": "Carregando…",
+      "refresh": "Atualizar",
+      "remove": "Remover",
+      "empty": {
+        "title": "Nenhum vídeo ainda",
+        "body": "Envie um vídeo para testar a reprodução no celular."
+      }
+    },
+    "player": {
+      "processing": {
+        "title": "Processando o vídeo…",
+        "body": "Isso pode levar alguns minutos. Você pode sair desta tela."
+      },
+      "failed": "Não foi possível processar este vídeo.",
+      "ready": "Vídeo pronto.",
+      "close": "Fechar"
+    },
+    "confirm": {
+      "removeVideo": {
+        "title": "Remover este vídeo?",
+        "body": "O vídeo deixa de ficar disponível para a comunidade.",
+        "confirm": "Remover",
+        "cancel": "Cancelar"
+      }
+    },
     "toasts": {
       "photoUpdated": "Foto atualizada.",
       "photoRemoved": "Foto removida.",

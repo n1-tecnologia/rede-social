@@ -32,13 +32,15 @@
       "groups": {
         "account": "Conta",
         "preferences": "Preferências",
-        "about": "Sobre"
+        "about": "Sobre",
+        "admin": "Administração"
       },
       "rows": {
         "editProfile": "Editar perfil",
         "darkTheme": "Tema escuro",
         "notifications": "Notificações",
-        "version": "Versão {version}"
+        "version": "Versão {version}",
+        "media": "Mídia"
       },
       "soon": "Em breve",
       "logoutFailed": "Algo deu errado. Tente novamente."

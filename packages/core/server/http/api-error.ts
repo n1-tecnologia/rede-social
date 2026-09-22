@@ -20,6 +20,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   TENANT_NOT_FOUND: 'Comunidade não encontrada.',
   VALIDATION_FAILED: 'Dados inválidos.',
   NOT_FOUND: 'Não encontrado.',
+  CONFLICT: 'Este recurso ainda não está pronto.',
   NOT_IMPLEMENTED: 'Este recurso ainda não está disponível.',
   INTERNAL: 'Erro interno',
 };

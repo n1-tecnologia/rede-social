@@ -28,6 +28,10 @@ export const ERROR_CODES = [
   'TENANT_NOT_FOUND',
   'VALIDATION_FAILED',
   'NOT_FOUND',
+  // 03-07: the ONE distinguishable refusal of `GET /v1/media/{id}/playback` — the CALLER'S OWN
+  // video is still transcoding (`details.media = 'not_ready'`). Every other miss takes the bare
+  // 404 above, so this code can never be used to probe another community (T-03-49).
+  'CONFLICT',
   // 03-01: the named 03-06 seam — `POST /v1/media/uploads { kind: 'video' }` until the
   // `VideoProvider` adapter lands. A named, tested refusal rather than a silent gap.
   'NOT_IMPLEMENTED',

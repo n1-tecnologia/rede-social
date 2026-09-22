@@ -184,6 +184,74 @@ export const mediaAssetSchema = z
   .strict();
 export type MediaAsset = z.infer<typeof mediaAssetSchema>;
 
+/**
+ * How long a minted playback credential lives (seconds). It must EXCEED the longest video the
+ * platform accepts (`MEDIA_LIMITS.video.post.maxDurationSeconds` is 300 s) with a wide margin, so a
+ * member who pauses mid-way never hits an expiry the UI would have to explain; and it must stay
+ * short enough that a leaked URL dies the same day (T-03-47).
+ */
+export const PLAYBACK_TOKEN_TTL_SECONDS = 2 * 60 * 60;
+
+/**
+ * 200 answer of `GET /v1/media/{assetId}/playback` (MEDIA-03, TENANT-04, D-44).
+ *
+ * **These tokens are minted PER REQUEST against the caller's own membership and MUST NEVER be
+ * cached, persisted, logged or embedded in a cacheable payload.** They are bearer credentials that
+ * are valid at the streaming provider's edge, outside our infrastructure: anything that stores one
+ * hands playback of a community's video to whoever reads that store. The route therefore answers
+ * `Cache-Control: no-store`, the value never reaches the database, and the log line carries the
+ * asset id and never the token.
+ */
+export const mediaPlaybackSchema = z
+  .object({
+    playbackId: z.string(),
+    tokens: z
+      .object({ playback: z.string(), thumbnail: z.string(), storyboard: z.string() })
+      .strict(),
+    expiresAt: z.string(),
+  })
+  .strict();
+export type MediaPlayback = z.infer<typeof mediaPlaybackSchema>;
+
+/**
+ * `MEDIA_LIST_PAGE_SIZE` is R-11's number — the same page the member directory uses — and is what
+ * `/configuracoes/midia` sends as `limit`; the server clamps to `1..MEDIA_LIST_MAX_PAGE_SIZE` so a
+ * crafted `?limit=100000` cannot ask for an unbounded page.
+ */
+export const MEDIA_LIST_PAGE_SIZE = 25;
+export const MEDIA_LIST_MAX_PAGE_SIZE = 50;
+
+/**
+ * The longest cursor this endpoint will look at. The envelope is a base64url JSON object carrying an
+ * ISO timestamp and a uuid, so ~200 characters is already generous; the bound exists so a megabyte
+ * of "cursor" is refused before it is decoded.
+ */
+const MEDIA_MAX_CURSOR_LENGTH = 400;
+
+/**
+ * Query of `GET /v1/media` (MEDIA-03). `cursor` is OPAQUE: pass back the previous `nextCursor`
+ * verbatim — a tampered or stale value is NOT an error, it degrades to the first page (T-03-52).
+ */
+export const mediaListQuerySchema = z
+  .object({
+    kind: z.enum(MEDIA_KINDS).optional(),
+    purpose: z.enum(MEDIA_PURPOSES).optional(),
+    cursor: z.string().max(MEDIA_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce.number().int().min(1).max(MEDIA_LIST_MAX_PAGE_SIZE).default(MEDIA_LIST_PAGE_SIZE),
+  })
+  .strict();
+export type MediaListQuery = z.infer<typeof mediaListQuerySchema>;
+
+/**
+ * One keyset page of the community's assets, newest first. `nextCursor` is non-null EXACTLY when
+ * another row exists beyond this page (the query over-fetches one row to decide it), so the screen
+ * shows "Carregar mais" while — and only while — `nextCursor !== null`.
+ */
+export const mediaListSchema = z
+  .object({ items: z.array(mediaAssetSchema), nextCursor: z.string().nullable() })
+  .strict();
+export type MediaList = z.infer<typeof mediaListSchema>;
+
 /** `original` or `w<one of VARIANT_WIDTHS>` — nothing else ever reaches a Storage key builder. */
 export const mediaVariantParamSchema = z
   .string()

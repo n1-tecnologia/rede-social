@@ -258,6 +258,53 @@ export async function memberProfileForEmail(
     : null;
 }
 
+/**
+ * Hard-deletes every video asset of a tenant (03-07): the admin media spec asserts the EMPTY state
+ * and the rows it creates itself, so it must not inherit assets another run left behind. A soft
+ * delete would not do — the screen would still be empty, but `media_assets` would accumulate across
+ * runs and the "newest first" assertions would drift.
+ */
+export async function deleteTenantVideoAssets(tenantSlug: string): Promise<void> {
+  await sql()`
+    delete from public.media_assets a
+     using public.tenants t
+     where t.id = a.tenant_id and t.slug = ${tenantSlug} and a.kind = 'video'`;
+}
+
+/**
+ * Records a video asset in a KNOWN state without a provider round trip (03-07): the failed and
+ * rejected rows the library must render, and a `ready` row with a playback id the fake provider can
+ * sign. Returns the asset id.
+ */
+export async function seedVideoAsset(
+  tenantSlug: string,
+  email: string,
+  values: {
+    status: 'pending' | 'processing' | 'ready' | 'failed' | 'rejected';
+    filename?: string;
+    playbackId?: string | null;
+    durationSeconds?: number | null;
+    failureReason?: string | null;
+  },
+): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+       mime, bytes, duration_seconds, aspect_ratio, filename, failure_reason, ready_at)
+    select t.id, u.id, 'video', 'post', ${values.status}, 'fake',
+           ${`fake-e2e-${Math.random().toString(36).slice(2)}`},
+           ${values.playbackId ?? null}, 'video/mp4', 1048576,
+           ${values.durationSeconds ?? null}, '16:9',
+           ${values.filename ?? 'gravacao.mp4'}, ${values.failureReason ?? null},
+           ${values.status === 'ready' ? new Date().toISOString() : null}::timestamptz
+      from public.tenants t, public.users u
+     where t.slug = ${tenantSlug} and u.email = ${email}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not seed a video asset for ${email} in ${tenantSlug}`);
+  return id;
+}
+
 /** The newest `tenant_invites.status` for an e-mail, or `null` (02-10 lifecycle assertions). */
 export async function inviteStatusForEmail(email: string): Promise<string | null> {
   const rows = await sql()<{ status: string }[]>`

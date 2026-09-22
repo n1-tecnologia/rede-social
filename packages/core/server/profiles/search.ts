@@ -1,5 +1,5 @@
 import { MEMBERS_MAX_QUERY_LENGTH } from '@tria/contracts/profiles';
-import { z } from 'zod';
+import type { KeysetCursor } from '../paging';
 
 /**
  * The PURE half of the member directory (PROF-03, R-10/R-11): query normalisation, `like` escaping
@@ -53,31 +53,13 @@ export function likeEscape(term: string): string {
  * JavaScript) and `id` is `member_profiles.id` — the exact tiebreaker column of
  * `member_profiles_tenant_name_idx`, so the comparison stays index-ordered.
  *
- * `v` is the envelope version. It exists so a future ordering change can retire old cursors by
- * bumping it: an unrecognised version fails validation and the caller simply starts from the top.
+ * THE IMPLEMENTATION MOVED (03-07): 03-07's admin media list needs the SAME `{ v: 1, n, id }`
+ * envelope, so `encodeCursor`/`decodeCursor` now live in `../paging.ts` and are re-exported here.
+ * Two copies would drift on the first change to the envelope; one module with two callers cannot.
+ * Every 03-03 call site and `packages/core/tests/profiles-search.test.ts` keep importing them from
+ * this file unchanged, and exactly ONE implementation exists in the repo.
  */
-const cursorSchema = z.object({ v: z.literal(1), n: z.string(), id: z.uuid() });
+export { CURSOR_VERSION, decodeCursor, encodeCursor } from '../paging';
 
-export type MemberCursor = { n: string; id: string };
-
-/** Opaque to every consumer: base64url of `{ v: 1, n, id }`. Never parsed outside this module. */
-export function encodeCursor({ n, id }: MemberCursor): string {
-  return Buffer.from(JSON.stringify({ v: 1, n, id })).toString('base64url');
-}
-
-/**
- * The inverse, and TOTAL: not base64url, not JSON, a wrong version, a missing key or an `id` that is
- * not a uuid all answer `null`, which the page query reads as "no cursor" — the first page. Nothing
- * from this string reaches SQL until it has passed `cursorSchema`.
- */
-export function decodeCursor(raw: string | undefined): MemberCursor | null {
-  if (typeof raw !== 'string' || raw === '') return null;
-  let candidate: unknown;
-  try {
-    candidate = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-  } catch {
-    return null;
-  }
-  const parsed = cursorSchema.safeParse(candidate);
-  return parsed.success ? { n: parsed.data.n, id: parsed.data.id } : null;
-}
+/** The directory's name of the shared envelope — `{ n: <folded display name>, id: <profile id> }`. */
+export type MemberCursor = KeysetCursor;

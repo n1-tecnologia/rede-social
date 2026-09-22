@@ -90,8 +90,15 @@ export default async function SettingsPage({
     searchParams,
   ]);
   const platform = hostTenant.mode === 'platform';
+  let role: string | null = null;
   if (platform) await requirePlatformTenants();
-  else await requireBootstrap();
+  else role = (await requireBootstrap()).membership.role;
+
+  // E7/partial + E7/zero-one-many: the whole group — its `SectionTitle` included — is ABSENT from
+  // the DOM for every role but `admin_tenant`, never rendered-and-disabled. A member must not learn
+  // that an admin media screen exists, which is also why `/configuracoes/midia` itself answers
+  // `notFound()` rather than a 403 screen.
+  const isTenantAdmin = role === 'admin_tenant';
 
   const theme = cookieStore.get(THEME_COOKIE)?.value === 'dark' ? 'dark' : 'light';
   const version =
@@ -131,6 +138,16 @@ export default async function SettingsPage({
             <Row icon="bell" label={t('settings.rows.notifications')} trailing={soon} />
           )}
         </Group>
+        {isTenantAdmin ? (
+          <Group title={t('settings.groups.admin')}>
+            <Row
+              icon="film"
+              label={t('settings.rows.media')}
+              href="/configuracoes/midia"
+              trailing={null}
+            />
+          </Group>
+        ) : null}
         {platform ? null : (
           <Group title={t('settings.groups.about')}>
             <Row icon="info" label={t('settings.rows.version', { version })} trailing={null} />
