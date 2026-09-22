@@ -16,6 +16,14 @@ export interface FileDropZoneProps {
   /** MIME types / extensions, as on `<input accept>`. */
   accept?: string;
   maxBytes?: number;
+  /**
+   * Whether the zone itself refuses a file that `accept`/`maxBytes` would exclude (default `true`).
+   *
+   * Set `false` when the CALLER owns the verdict: a photo zone re-encodes an over-cap or
+   * phone-format image in the browser instead of refusing it (R-12), and a drop must reach that
+   * decision. `accept` still narrows the OS picker either way.
+   */
+  screen?: boolean;
   state?: FileDropZoneState;
   /** 0–100 while `state === 'progress'`. */
   progress?: number;
@@ -56,6 +64,7 @@ export function FileDropZone({
   onReject,
   accept,
   maxBytes,
+  screen = true,
   state = 'idle',
   progress = 0,
   error,
@@ -73,8 +82,10 @@ export function FileDropZone({
 
   const handleFile = (file: File | undefined) => {
     if (!file) return;
-    if (!matchesAccept(file, accept)) return onReject?.('type', file);
-    if (maxBytes !== undefined && file.size > maxBytes) return onReject?.('size', file);
+    if (screen) {
+      if (!matchesAccept(file, accept)) return onReject?.('type', file);
+      if (maxBytes !== undefined && file.size > maxBytes) return onReject?.('size', file);
+    }
     onFile(file);
   };
 

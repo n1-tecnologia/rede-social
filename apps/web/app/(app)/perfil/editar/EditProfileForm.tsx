@@ -1,13 +1,12 @@
 'use client';
 
-import { PURPOSE_WIDTHS } from '@tria/contracts/media';
 import { MAX_BIO_LENGTH, MAX_DISPLAY_NAME_LENGTH } from '@tria/contracts/profiles';
-import { Avatar, Button, Input, Textarea, useToast } from '@tria/ui';
+import { Button, Input, Textarea, useToast } from '@tria/ui';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState, useTransition } from 'react';
 import type { saveProfileAction } from '@/app/(app)/perfil/actions';
-import { MediaImage } from '@/components/media/MediaImage';
+import { AvatarUploadField } from '@/components/media/AvatarUploadField';
 
 export interface EditProfileFormProps {
   displayName: string;
@@ -69,24 +68,8 @@ export function EditProfileForm({ displayName, bio, avatarAssetId, save }: EditP
         submit();
       }}
     >
-      {/* Photo block — the named mount point the picker (03-04 Task 2) replaces in place. */}
-      <div data-photo-field className="flex flex-col items-center gap-3">
-        {avatarAssetId ? (
-          <MediaImage
-            assetId={avatarAssetId}
-            widths={PURPOSE_WIDTHS.avatar}
-            baseWidth={320}
-            alt={displayName}
-            sizes="80px"
-            eager
-            ratio="aspect-square"
-            className="h-20 w-20 shrink-0 rounded-full"
-            fallback={<Avatar size="xl" alt={displayName} />}
-          />
-        ) : (
-          <Avatar size="xl" alt={displayName} />
-        )}
-      </div>
+      {/* The photo commits on its own, independently of the button below (UI-SPEC E2/partial). */}
+      <AvatarUploadField displayName={name} avatarAssetId={avatarAssetId} />
 
       <Input
         id="displayName"

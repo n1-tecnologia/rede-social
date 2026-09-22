@@ -1,6 +1,9 @@
+import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import { closeAdmin, memberProfileForEmail, resetMemberProfile } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { pickPhoto } from './media-fixtures';
+import { ensureWorker } from './worker';
 
 /**
  * PROF-01 (plan 03-04): the member's own profile and its edit form, on the phone
@@ -94,5 +97,79 @@ test.describe('PROF-01 — /perfil and /perfil/editar', () => {
       displayName: name,
       bio,
     });
+  });
+});
+
+/**
+ * The photo half of PROF-01 (MEDIA-02): a committed photo really renders from the stable
+ * `/v1/media/{assetId}/{variant}` endpoint in the worker's display sizes, and removing it puts the
+ * neutral icon back. A `ROLE=worker` is spawned because the variant ladder is derived off the
+ * request path.
+ */
+test.describe('PROF-01 — the member photo on /perfil', () => {
+  let stopWorker: (() => Promise<void>) | null = null;
+
+  test.beforeAll(async () => {
+    stopWorker = await ensureWorker();
+  });
+
+  test.afterEach(async () => {
+    await resetMemberProfile(users.demoMember, {
+      displayName: SEEDED.displayName,
+      bio: SEEDED.bio,
+      avatarAssetId: null,
+    });
+  });
+
+  test.afterAll(async () => {
+    await stopWorker?.();
+    await closeAdmin();
+  });
+
+  test('a photo renders from /v1/media in the derived widths, and "Remover foto" puts the icon back', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil/editar');
+
+    await pickPhoto(page, fileURLToPath(new URL('./fixtures/large.jpg', import.meta.url)));
+    await expect(page.getByRole('status')).toHaveText('Foto atualizada.', { timeout: 30_000 });
+
+    // The photo commits on its own: the form was never submitted, yet the row already points at it.
+    const committed = await expect
+      .poll(async () => (await memberProfileForEmail(users.demoMember))?.avatarAssetId ?? null, {
+        timeout: 15_000,
+      })
+      .not.toBeNull()
+      .then(async () => (await memberProfileForEmail(users.demoMember))?.avatarAssetId as string);
+
+    // …and the worker derives the ladder off the request path, so the display size really exists.
+    await expect
+      .poll(async () => (await page.request.get(`/v1/media/${committed}/w320`)).status(), {
+        timeout: 30_000,
+      })
+      .toBe(200);
+
+    await page.goto('/perfil');
+    const photo = page.locator('main img[src^="/v1/media/"]');
+    await expect(photo).toHaveAttribute('src', `/v1/media/${committed}/w320`);
+    await expect(photo).toHaveAttribute('srcset', /w128 128w.*w320 320w/);
+    await expect(photo).toHaveAttribute('alt', SEEDED.displayName);
+    // Rendered, not merely addressed: a 404 would have cleared `src` through `onError`.
+    expect(await photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+
+    await page.goto('/perfil/editar');
+    await page.getByRole('button', { name: 'Remover foto' }).click();
+    await expect(page.getByText('Remover sua foto?')).toBeVisible();
+    await expect(page.getByText('Seu perfil volta a mostrar o ícone padrão.')).toBeVisible();
+    await page.getByRole('button', { name: 'Remover', exact: true }).click();
+
+    await expect(page.getByRole('status')).toHaveText('Foto removida.');
+    await page.goto('/perfil');
+    await expect(page.locator('main img[src^="/v1/media/"]')).toHaveCount(0);
+    await expect(
+      page.locator(`main [role="img"][aria-label="${SEEDED.displayName}"]`),
+    ).toBeVisible();
+    expect((await memberProfileForEmail(users.demoMember))?.avatarAssetId).toBeNull();
   });
 });

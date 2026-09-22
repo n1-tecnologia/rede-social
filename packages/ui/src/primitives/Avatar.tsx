@@ -1,7 +1,7 @@
 'use client';
 
 import { User } from 'lucide-react';
-import type { MouseEventHandler } from 'react';
+import { type MouseEventHandler, useState } from 'react';
 import { cn } from '../cn';
 
 const sizeMap = {
@@ -25,18 +25,34 @@ export interface AvatarProps {
   className?: string;
 }
 
-/** Circular avatar with the `User` fallback on the tertiary surface. */
+/**
+ * Circular avatar with the `User` fallback on the tertiary surface.
+ *
+ * A photo that cannot be fetched — an expired signed redirect, a variant the worker has not derived
+ * yet, another tenant's asset — falls back to exactly that neutral icon: a broken-image glyph is
+ * never shown (UI-SPEC §Media rendering contract E9/error). The failure is keyed by `src`, so
+ * pointing the avatar at another photo retries instead of inheriting the previous one's failure.
+ */
 export function Avatar({ src, alt, size = 'md', onClick, className }: AvatarProps) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const shown = src && src !== failedSrc ? src : null;
+
   const surface = (
     <span
       className={cn(
         'relative flex items-center justify-center overflow-hidden rounded-full',
         sizeMap[size],
-        !src && 'bg-bg-tertiary',
+        !shown && 'bg-bg-tertiary',
       )}
     >
-      {src ? (
-        <img src={src} alt={alt} className="h-full w-full object-cover" draggable={false} />
+      {shown ? (
+        <img
+          src={shown}
+          alt={alt}
+          className="h-full w-full object-cover"
+          draggable={false}
+          onError={() => setFailedSrc(shown)}
+        />
       ) : (
         <User aria-hidden className="text-text-tertiary" size={fallbackIconSize[size]} />
       )}
