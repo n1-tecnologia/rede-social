@@ -3,7 +3,7 @@
 import { mediaVariantUrl } from '@tria/contracts/media';
 import { cn } from '@tria/ui';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface MediaImageProps {
   /** The `media_assets` id; the serving path is derived from it, never handed over in a payload. */
@@ -53,6 +53,15 @@ export function MediaImage({
   // instead of inheriting the previous one's failure.
   const [failedId, setFailedId] = useState<string | null>(null);
   const failed = failedId === assetId;
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // A server-rendered image can fail BEFORE React hydrates, and that `error` event is never
+  // delivered to the handler below. The element remembers it: `complete` with a zero natural width
+  // is a fetch that ended without an image, so the fallback is applied on mount as well.
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img?.complete && img.naturalWidth === 0) setFailedId(assetId);
+  }, [assetId]);
 
   const ladder = widths.length > 0 ? widths : [];
   const base = baseWidth ?? ladder[0];
@@ -70,6 +79,7 @@ export function MediaImage({
           signed redirect; next/image would re-fetch it server-side and duplicate the worker's variant
           ladder. The same posture as the branding `LogoUpload` preview. */}
       <img
+        ref={imgRef}
         src={src}
         srcSet={srcSet}
         sizes={sizes}

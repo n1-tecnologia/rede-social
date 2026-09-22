@@ -1,6 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
-import { closeAdmin, memberProfileForEmail, resetMemberProfile } from './admin';
+import {
+  closeAdmin,
+  memberProfileForEmail,
+  resetMemberProfile,
+  stubUnfetchableAvatar,
+} from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 import { pickPhoto } from './media-fixtures';
 import { ensureWorker } from './worker';
@@ -171,5 +176,115 @@ test.describe('PROF-01 — the member photo on /perfil', () => {
       page.locator(`main [role="img"][aria-label="${SEEDED.displayName}"]`),
     ).toBeVisible();
     expect((await memberProfileForEmail(users.demoMember))?.avatarAssetId).toBeNull();
+  });
+});
+
+/**
+ * The UI states the approved contract enumerates for these screens (UI-SPEC E1, E2, E9): what the
+ * member sees with nothing filled in, with the longest values the form allows, when a field is
+ * refused, and when a photo cannot be fetched at all.
+ */
+test.describe('PROF-01 — the states of the profile screens', () => {
+  test.afterEach(async () => {
+    await resetMemberProfile(users.demoMember, {
+      displayName: SEEDED.displayName,
+      bio: SEEDED.bio,
+      avatarAssetId: null,
+    });
+  });
+
+  test.afterAll(async () => {
+    await closeAdmin();
+  });
+
+  test('E1/E2 empty: no photo, no bio paragraph, and "Salvar alterações" disabled until dirty', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+
+    // The bio block is OMITTED, not replaced by a placeholder: the rows follow the name directly.
+    await expect(page.getByText('Sem bio')).toHaveCount(0);
+    await expect(page.locator('main p')).toHaveCount(1); // the e-mail, and nothing else
+
+    await page.goto('/perfil/editar');
+    await expect(page.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled();
+    await expect(page.locator('#bio')).toHaveValue('');
+    await expect(page.locator('#bio-counter')).toHaveText('0/150');
+    // With no photo there is nothing to remove.
+    await expect(page.getByRole('button', { name: 'Remover foto' })).toHaveCount(0);
+  });
+
+  test('E1 overflow/long-text: the longest allowed name and bio wrap instead of truncating', async ({
+    page,
+  }, testInfo) => {
+    const name = 'Maria Aparecida Gonçalves de Albuquerque Nóbrega Sá'.slice(0, 60);
+    const bio = 'Conto histórias da comunidade. '.repeat(5).slice(0, 150);
+    await resetMemberProfile(users.demoMember, { displayName: name, bio });
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+
+    const heading = profileName(page);
+    await expect(heading).toHaveText(name);
+    // Nothing is clipped at either width, and the class that would clip it is absent…
+    expect(await heading.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false);
+    await expect(heading).not.toHaveClass(/truncate/);
+    // …and on the phone, where 60 characters cannot fit on one line, it really wraps.
+    if (testInfo.project.name === 'mobile-chromium') {
+      const box = await heading.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThan(36);
+    }
+
+    const paragraph = page.getByText(bio.trim());
+    await expect(paragraph).toBeVisible();
+    const bioBox = await paragraph.boundingBox();
+    expect(bioBox?.width ?? 999).toBeLessThanOrEqual(320); // the max-w-xs measure
+  });
+
+  test('E2 error: a blank name is refused with the catalog message on the field', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil/editar');
+
+    // Whitespace passes the native `required` gate and is refused by the schema the API runs.
+    await page.locator('#displayName').fill('   ');
+    await page.getByRole('button', { name: 'Salvar alterações' }).click();
+
+    // The refusal is ANNOUNCED, not merely printed: the `Input` renders it with role="alert",
+    // linked to the field through aria-describedby.
+    const fieldError = page.locator('main').getByRole('alert');
+    await expect(fieldError).toHaveText('Informe seu nome.');
+    await expect(fieldError).toHaveAttribute('id', 'displayName-error');
+    await expect(page).toHaveURL(/\/perfil\/editar$/);
+    expect((await memberProfileForEmail(users.demoMember))?.displayName).toBe(SEEDED.displayName);
+  });
+
+  test('E9 error: a photo that cannot be fetched degrades to the neutral icon, never a broken glyph', async ({
+    page,
+  }) => {
+    // A `ready` asset no object backs — what an expired, deleted or cross-tenant photo looks like.
+    await stubUnfetchableAvatar(users.demoMember);
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+
+    await expect(
+      page.locator(`main [role="img"][aria-label="${SEEDED.displayName}"]`),
+    ).toBeVisible();
+    await expect(page.locator('main img[src^="/v1/media/"]')).toHaveCount(0);
+  });
+
+  test('E7: the settings "Editar perfil" row is a real link now, and Notificações keeps its pill', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes');
+
+    await expect(page.locator('main').getByText('Em breve')).toHaveCount(1); // Notificações only
+    await page.locator('main').getByRole('link', { name: 'Editar perfil' }).click();
+    await expect(page).toHaveURL(/\/perfil\/editar$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Editar perfil' })).toBeVisible();
   });
 });

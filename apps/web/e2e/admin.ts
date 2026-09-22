@@ -208,6 +208,38 @@ export async function resetMemberProfile(
   }
 }
 
+/**
+ * Records a `ready` avatar asset for a member WITHOUT writing any Storage object, and points the
+ * profile at it (03-04 E9): the row exists, so the foreign key holds and the screens render the
+ * `/v1/media/...` path — but every fetch of it fails, which is exactly what an expired, deleted or
+ * cross-tenant photo looks like to the browser. Returns the asset id.
+ */
+export async function stubUnfetchableAvatar(email: string): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    with member as (
+      select m.tenant_id, m.user_id
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where u.email = ${email}
+       limit 1
+    ), asset as (
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths, ready_at)
+      select tenant_id, user_id, 'image', 'avatar', 'ready', 'supabase', 'image/webp', 1024,
+             array[128, 320], now()
+        from member
+      returning id, tenant_id, owner_user_id
+    )
+    update public.member_profiles p
+       set avatar_asset_id = asset.id, updated_at = now()
+      from asset
+     where p.tenant_id = asset.tenant_id and p.user_id = asset.owner_user_id
+    returning asset.id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no member profile for ${email}`);
+  return id;
+}
+
 /** A seeded member's profile row as the screens read it (03-04 assertions on persistence). */
 export async function memberProfileForEmail(
   email: string,

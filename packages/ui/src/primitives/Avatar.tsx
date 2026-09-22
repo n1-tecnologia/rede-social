@@ -1,7 +1,7 @@
 'use client';
 
 import { User } from 'lucide-react';
-import { type MouseEventHandler, useState } from 'react';
+import { type MouseEventHandler, useEffect, useRef, useState } from 'react';
 import { cn } from '../cn';
 
 const sizeMap = {
@@ -36,6 +36,15 @@ export interface AvatarProps {
 export function Avatar({ src, alt, size = 'md', onClick, className }: AvatarProps) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const shown = src && src !== failedSrc ? src : null;
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // A server-rendered photo can fail BEFORE React hydrates, and that `error` event never reaches the
+  // handler below. The element remembers it: `complete` with a zero natural width is a fetch that
+  // ended without an image.
+  useEffect(() => {
+    const img = imgRef.current;
+    if (shown && img?.complete && img.naturalWidth === 0) setFailedSrc(shown);
+  }, [shown]);
 
   const surface = (
     <span
@@ -47,6 +56,7 @@ export function Avatar({ src, alt, size = 'md', onClick, className }: AvatarProp
     >
       {shown ? (
         <img
+          ref={imgRef}
           src={shown}
           alt={alt}
           className="h-full w-full object-cover"

@@ -2,6 +2,7 @@ import { THEME_COOKIE } from '@tria/contracts/branding';
 import { iconFor, ThemeToggle } from '@tria/core/ui';
 import { Button, Card, PageHeader, SectionTitle, StatusPill } from '@tria/ui';
 import { cookies } from 'next/headers';
+import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
@@ -10,16 +11,46 @@ import { getHostTenant } from '@/lib/tenant-host';
 import { logout, setTheme } from '../actions';
 import { ActionToast } from './ActionToast';
 
-/** Prototype settings row geometry (UI-SPEC §Shell Contract, Settings): icon 20, 14px label, trailing slot. */
-function Row({ icon, label, trailing }: { icon: string; label: string; trailing: ReactNode }) {
+/**
+ * Prototype settings row geometry (UI-SPEC §Shell Contract, Settings): icon 20, 14px label,
+ * trailing slot. With `href` the WHOLE row becomes the link and the trailing slot defaults to the
+ * chevron every navigating row carries (03-04: "Editar perfil" stopped being an "Em breve" pill).
+ */
+function Row({
+  icon,
+  label,
+  trailing,
+  href,
+}: {
+  icon: string;
+  label: string;
+  trailing: ReactNode;
+  href?: string;
+}) {
   const Icon = iconFor(icon);
-  return (
-    <div className="flex w-full items-center gap-3 px-4 py-3.5">
+  const Chevron = iconFor('chevron-right');
+  const inner = (
+    <>
       <Icon aria-hidden size={20} className="shrink-0 text-text-secondary" />
       <span className="min-w-0 flex-1 truncate text-sm text-text">{label}</span>
-      {trailing}
-    </div>
+      {href
+        ? (trailing ?? <Chevron aria-hidden size={18} className="shrink-0 text-text-tertiary" />)
+        : trailing}
+    </>
   );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="flex w-full items-center gap-3 px-4 py-3.5 transition-colors hover:bg-bg-hover"
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return <div className="flex w-full items-center gap-3 px-4 py-3.5">{inner}</div>;
 }
 
 function Group({
@@ -80,7 +111,12 @@ export default async function SettingsPage({
       <Card className="rounded-none bg-transparent shadow-none md:rounded-xl md:bg-card md:shadow-[0_1px_3px_rgba(22,35,59,.06)]">
         {platform ? null : (
           <Group title={t('settings.groups.account')} first>
-            <Row icon="user-circle" label={t('settings.rows.editProfile')} trailing={soon} />
+            <Row
+              icon="user-circle"
+              label={t('settings.rows.editProfile')}
+              href="/perfil/editar"
+              trailing={null}
+            />
           </Group>
         )}
         <Group title={t('settings.groups.preferences')} first={platform}>
