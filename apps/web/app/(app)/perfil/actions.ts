@@ -309,3 +309,41 @@ export async function setAvatarAction(assetId: string): Promise<AvatarResult> {
 export async function removeAvatarAction(): Promise<AvatarResult> {
   return patchAvatar(null);
 }
+
+export type DismissNudgeResult = { ok: true } | { ok: false; code: 'generic' };
+
+/**
+ * `POST /v1/me/profile/dismiss-nudge` — "Agora não" on the D-02 card (R-13).
+ *
+ * The write is SERVER state (`member_profiles.nudge_dismissed_at`), which is the whole point: an
+ * installed PWA whose storage the OS evicts, or the same member on a second device, must not be
+ * nagged again. `revalidatePath('/inicio')` is what actually removes the card — the component never
+ * removes it optimistically, so a failed dismissal leaves it on screen with an error toast rather
+ * than silently pretending it worked and re-nagging on the next load.
+ */
+export async function dismissNudgeAction(): Promise<DismissNudgeResult> {
+  let refusal: string | null = null;
+  let result: DismissNudgeResult = { ok: false, code: 'generic' };
+  try {
+    const res = await apiFetch('/v1/me/profile/dismiss-nudge', { method: 'POST' });
+    if (res.ok) {
+      result = { ok: true };
+      revalidatePath('/inicio');
+      revalidateProfile();
+    } else {
+      const envelope = await readEnvelope(res);
+      refusal = refusalPath(res.status, envelope);
+      if (!refusal) {
+        console.error('profile.nudge_dismiss_failed', {
+          status: res.status,
+          code: envelope?.code,
+        });
+      }
+    }
+  } catch (error) {
+    console.error('profile.nudge_dismiss_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}

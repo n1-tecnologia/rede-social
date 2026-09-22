@@ -3,17 +3,20 @@ import { HomeSlots, TenantLogo } from '@tria/core/ui';
 import { EmptyState } from '@tria/ui';
 import { Sparkles } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { ProfileNudgeCard } from '@/components/profile/ProfileNudgeCard';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { requirePlatformTenants } from '@/lib/platform';
+import { loadOwnProfile } from '@/lib/profile';
 import { homeSlotsFor } from '@/lib/registry';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /**
  * `/inicio` — the kernel home (D-42, amends D-07): the branded welcome (logo as-is + "Bem-vindo(a) à
- * {tenant}") and the home slots the tenant's ENABLED modules registered, or the "Em breve" card when
- * there is none. Server-rendered from the bootstrap (deduped with the layout by React `cache`), so
- * there is no client loading state for the brand or the widgets.
+ * {tenant}"), the D-02 profile nudge while the member still owes a photo or a bio (R-13), and the
+ * home slots the tenant's ENABLED modules registered, or the "Em breve" card when there is none.
+ * Server-rendered from the bootstrap (deduped with the layout by React `cache`), so there is no
+ * client loading state for the brand, the nudge or the widgets.
  *
  * On the platform host it renders the D-21 landing (02-12 owns the panel at `/plataforma`).
  */
@@ -58,7 +61,7 @@ export default async function InicioPage() {
   const bootstrap = await requireBootstrap();
   const { tenant } = bootstrap;
   const branding = resolveBranding(tenant.branding);
-  const slots = await homeSlotsFor(bootstrap);
+  const [slots, profile] = await Promise.all([homeSlotsFor(bootstrap), loadOwnProfile()]);
 
   return (
     <div className="flex flex-col gap-6 px-4 md:px-0">
@@ -73,6 +76,15 @@ export default async function InicioPage() {
           {t('home.welcome', { tenant: tenant.displayName })}
         </h1>
       </div>
+
+      {/* The D-02 nudge sits BETWEEN the welcome block and the home slots, and deliberately NOT
+          inside `HomeSlots`: it is kernel, not a module widget, so it must not compete for slot
+          ordering (D-42). With zero module slots the page reads welcome → nudge → the existing
+          "Em breve" card; the nudge does not suppress that empty state. `needsNudge` is the
+          SERVER's flag (R-13), never a client recomputation and never `localStorage`. */}
+      {profile?.needsNudge ? (
+        <ProfileNudgeCard displayName={profile.displayName} avatarAssetId={profile.avatarAssetId} />
+      ) : null}
 
       <HomeSlots
         slots={slots}

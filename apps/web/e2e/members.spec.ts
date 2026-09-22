@@ -1,6 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import { MEMBERS_PAGE_SIZE } from '@tria/contracts/profiles';
-import { closeAdmin, membershipIdFor } from './admin';
+import { closeAdmin, membershipIdFor, stubUnfetchableAvatar } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 import {
   closeMembersAdmin,
@@ -428,5 +428,153 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
       expect(text).not.toContain(big.blocked.displayName.toLowerCase());
       expect(text).not.toContain(big.softDeleted.displayName.toLowerCase());
     }
+  });
+});
+
+/**
+ * PROF-01, the D-02 first-access nudge (03-05 Task 3).
+ *
+ * Runs against its own throwaway community so nothing here mutates the shared seed: the dismissal
+ * is a WRITE (`member_profiles.nudge_dismissed_at`), and a member who has said "Agora não" can
+ * never be un-said for the next spec that needs the card.
+ */
+test.describe('PROF-01 — the D-02 nudge on /inicio', () => {
+  // Same reason as the directory states: the PWA service worker would otherwise swallow the
+  // interception the forced-failure case depends on.
+  test.use({ serviceWorkers: 'block' });
+
+  let tenant: MembersTenant;
+
+  test.beforeAll(async ({ browserName }, testInfo) => {
+    test.setTimeout(180_000);
+    void browserName;
+    tenant = await createMembersTenant(
+      membersTenantSlug('mbrn', testInfo.project.name),
+      SEED_PASSWORD,
+      4,
+    );
+    // Member 04 gets a photo on top of their bio, so they owe the profile nothing.
+    await stubUnfetchableAvatar(tenant.members[3]?.email ?? '');
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteMembersTenant(tenant.slug);
+    await closeMembersAdmin();
+    await closeAdmin();
+  });
+
+  /** Member 02 has neither a photo nor a bio; member 01 has a bio but no photo; member 04 has both. */
+  const nudge = (page: Page) => page.locator('[data-nudge]');
+
+  test('is shown to a member who owes a photo or a bio, between the welcome block and the slots', async ({
+    page,
+  }) => {
+    const neither = tenant.members[1];
+    if (!neither) throw new Error('fixture: no second member');
+    await login(page, neither.email, tenant.password, tenant.origin);
+
+    await expect(nudge(page)).toBeVisible();
+    await expect(page.getByText('Complete seu perfil')).toBeVisible();
+    await expect(
+      page.getByText('Adicione uma foto e uma bio para a comunidade te reconhecer.'),
+    ).toBeVisible();
+
+    // One visible dismissal only — no second affordance for the same action (no X glyph).
+    await expect(page.locator('main').getByRole('button', { name: 'Agora não' })).toHaveCount(1);
+
+    // It is a CARD in the page, not a modal: the page behind it is fully reachable.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // It sits between the welcome block and the slot area, and does NOT suppress the "Em breve"
+    // empty state that stands in for the (still empty) module slots.
+    const order = await page
+      .locator('main h1, main [data-nudge], main h3')
+      .evaluateAll((els) => els.map((el) => el.tagName.toLowerCase()));
+    expect(order[0]).toBe('h1');
+    expect(order[1]).toBe('div');
+    await expect(page.getByText('Em breve')).toBeVisible();
+  });
+
+  test('is shown to a member who has only a bio (E5/partial), and never to one who has both', async ({
+    page,
+  }) => {
+    const onlyBio = tenant.members[0];
+    const complete = tenant.members[3];
+    if (!onlyBio || !complete) throw new Error('fixture: missing members');
+
+    await login(page, onlyBio.email, tenant.password, tenant.origin);
+    await expect(nudge(page)).toBeVisible();
+
+    await login(page, complete.email, tenant.password, tenant.origin);
+    await expect(nudge(page)).toHaveCount(0);
+    await expect(page.getByText('Complete seu perfil')).toHaveCount(0);
+  });
+
+  test('"Completar perfil" goes to the edit form', async ({ page }) => {
+    const neither = tenant.members[1];
+    if (!neither) throw new Error('fixture: no second member');
+    await login(page, neither.email, tenant.password, tenant.origin);
+
+    await nudge(page).getByRole('link', { name: 'Completar perfil' }).click();
+    await expect(page).toHaveURL(/\/perfil\/editar$/);
+  });
+
+  test('"Agora não" writes server state: it is gone on a NEW browser context too (R-13)', async ({
+    page,
+    browser,
+  }) => {
+    const member = tenant.members[2];
+    if (!member) throw new Error('fixture: no third member');
+
+    await login(page, member.email, tenant.password, tenant.origin);
+    await expect(nudge(page)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Agora não' }).click();
+    await expect(nudge(page)).toHaveCount(0);
+
+    // A different browser context is a different device with different storage — the card must stay
+    // gone, which only server state can deliver.
+    const fresh = await browser.newContext();
+    try {
+      const other = await fresh.newPage();
+      await login(other, member.email, tenant.password, tenant.origin);
+      await expect(other.locator('[data-nudge]')).toHaveCount(0);
+      await expect(other.getByText('Complete seu perfil')).toHaveCount(0);
+    } finally {
+      await fresh.close();
+    }
+  });
+
+  test('a FAILED dismissal keeps the card and says so — it never vanishes silently (E5/error)', async ({
+    page,
+  }) => {
+    const member = tenant.members[0];
+    if (!member) throw new Error('fixture: no first member');
+
+    await login(page, member.email, tenant.password, tenant.origin);
+    await expect(nudge(page)).toBeVisible();
+
+    // The API call (`POST /v1/me/profile/dismiss-nudge`) is made by the Next server, so it cannot be
+    // intercepted from the browser; the server ACTION that wraps it posts to the current URL, and
+    // failing that is the same failure from the member's side.
+    await page.route(/\/inicio/, async (route) => {
+      if (route.request().method() === 'POST') {
+        await route.fulfill({ status: 500, contentType: 'text/plain', body: 'forced failure' });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.getByRole('button', { name: 'Agora não' }).click();
+
+    // (a) it is STILL THERE — no optimistic removal that would reappear on the next load…
+    await expect(nudge(page)).toBeVisible();
+    // …(b) and the failure is surfaced rather than swallowed.
+    await expect(page.getByText('Algo deu errado. Tente novamente.')).toBeVisible();
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    // The dismissal never happened, so a reload still shows the card.
+    await page.reload();
+    await expect(nudge(page)).toBeVisible();
   });
 });

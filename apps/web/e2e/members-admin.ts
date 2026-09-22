@@ -221,10 +221,25 @@ export async function createMembersTenant(
   };
 }
 
-/** Removes the tenant, its memberships and every identity this fixture created for it. */
+/**
+ * Removes the tenant, its memberships and every identity this fixture created for it.
+ *
+ * `media_assets` goes first: a spec that gave a member a photo (`stubUnfetchableAvatar`) leaves a
+ * row pointing at the tenant, and that foreign key does NOT cascade — without this the tenant
+ * delete fails and every later run inherits the leftovers.
+ */
 export async function deleteMembersTenant(slug: string): Promise<void> {
   const ids = await sql()<{ id: string }[]>`
     select u.id from public.users u where u.email like ${`%@${slug}.local`}`;
+  await sql()`
+    update public.member_profiles p
+       set avatar_asset_id = null
+      from public.tenants t
+     where t.id = p.tenant_id and t.slug = ${slug}`;
+  await sql()`
+    delete from public.media_assets a
+     using public.tenants t
+     where t.id = a.tenant_id and t.slug = ${slug}`;
   await deleteTenantBySlug(slug);
   await inBatches(ids.map((row) => () => deleteUser(row.id)));
 }
