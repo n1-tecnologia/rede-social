@@ -25,10 +25,10 @@ select throws_ok(
   'NOINHERIT: api_user cannot read a public table without opening a lane'
 );
 select throws_ok(
-  'select count(*) from public.example_items',
+  'select count(*) from public.feed_posts',
   '42501',
   null,
-  'NOINHERIT: the same holds for a module table'
+  'NOINHERIT: the same holds for a module table (feed_posts, owned by packages/modules/feed)'
 );
 
 -- ── the tenant lane ─────────────────────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ reset role;
 select tests.tenant('pgtap-lane', 'Comunidade Lane', '0c000000-0000-4000-8000-000000000001');
 select tests.auth_user('member@lane.local', '0c000000-0000-4000-8000-000000000002');
 select tests.member('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-000000000002');
-insert into public.example_items (tenant_id, title, created_by_user_id)
+insert into public.feed_posts (tenant_id, caption, author_user_id)
 values ('0c000000-0000-4000-8000-000000000001', 'lane', '0c000000-0000-4000-8000-000000000002');
 
 select tests.as_api_user();
@@ -48,7 +48,7 @@ select is(
   'app.tenant_id() reads the claims withTenantTx bound to this transaction'
 );
 select results_eq(
-  $$ select count(*)::int from public.example_items $$,
+  $$ select count(*)::int from public.feed_posts $$,
   ARRAY[1],
   'the lane sees exactly the rows of the tenant in its claims'
 );
@@ -59,7 +59,7 @@ select tests.as_api_user();
 select tests.as_tenant_without_claims();
 select is(current_user::text, 'authenticated', 'a claimless lane is still the authenticated role');
 select results_eq(
-  $$ select count(*)::int from public.example_items $$,
+  $$ select count(*)::int from public.feed_posts $$,
   ARRAY[0],
   'empty claims: app.tenant_id() is NULL, so every policy matches nothing — fail closed'
 );
@@ -69,7 +69,7 @@ reset role;
 select tests.as_service();
 select is(current_user::text, 'service_role', 'the admin lane switches to service_role');
 select results_eq(
-  $$ select count(*)::int from public.example_items
+  $$ select count(*)::int from public.feed_posts
       where tenant_id = '0c000000-0000-4000-8000-000000000001' $$,
   ARRAY[1],
   'service_role reads without claims: withAdminTx is the only lane allowed to'

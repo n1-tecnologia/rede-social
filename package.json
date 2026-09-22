@@ -30,6 +30,7 @@
     "@playwright/test": "1.63.0",
     "@tria/contracts": "workspace:*",
     "@tria/core": "workspace:*",
+    "@tria/module-feed": "workspace:*",
     "@types/node": "24.13.4",
     "@vitest/coverage-v8": "5.0.0",
     "drizzle-orm": "0.45.2",

@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(45);
+select plan(53);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -39,6 +39,15 @@ insert into public.example_items (id, tenant_id, title, created_by_user_id) valu
   ('0a000000-0000-4000-8000-000000000003', '0a000000-0000-4000-8000-000000000001', 'x',
    '0a000000-0000-4000-8000-000000000002'),
   ('0b000000-0000-4000-8000-000000000003', '0b000000-0000-4000-8000-000000000001', 'x',
+   '0b000000-0000-4000-8000-000000000002');
+
+-- 04-01: the module's own table, with IDENTICAL captions on both sides (§(j) adjacency). The rows
+-- are authored by each tenant's own member through the generic `author_user_id` column — there is no
+-- admin-flavoured authorship column to seed, which is FEED-08 stated as data.
+insert into public.feed_posts (id, tenant_id, caption, author_user_id) values
+  ('0a000000-0000-4000-8000-0000000000f1', '0a000000-0000-4000-8000-000000000001', 'x',
+   '0a000000-0000-4000-8000-000000000002'),
+  ('0b000000-0000-4000-8000-0000000000f1', '0b000000-0000-4000-8000-000000000001', 'x',
    '0b000000-0000-4000-8000-000000000002');
 
 insert into public.notifications (tenant_id, user_id, kind) values
@@ -136,6 +145,46 @@ select results_eq(
      ) select count(*)::int from u $$,
   ARRAY[0],
   'USING: an update aimed at B''s rows touches nothing'
+);
+
+-- ── feed_posts: the same five cases, on the table Phase 4 actually ships (04-01) ────────────────
+-- These land BEFORE 04-10 removes the example module, so the exit gate can never be weakened by that
+-- removal: it is already proving itself against a feed table when `example_items` disappears.
+select results_eq(
+  $$ select count(*)::int from public.feed_posts
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own feed_posts row'
+);
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where caption = 'x' $$,
+  ARRAY[1],
+  'adjacency: both tenants have a post captioned x, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.feed_posts where caption = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the feed post it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.feed_posts where id = '0b000000-0000-4000-8000-0000000000f1' $$,
+  'detail by id: B''s post is not found through A''s lane (the bare 404 of FEED-07, one layer down)'
+);
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, caption, author_user_id)
+     values ('0b000000-0000-4000-8000-000000000001', 'y',
+             '0a000000-0000-4000-8000-000000000002') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a post stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with u as (
+       update public.feed_posts set caption = 'y'
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: an update aimed at B''s posts touches nothing'
 );
 
 select is_empty(
@@ -337,6 +386,15 @@ select results_eq(
 select is_empty(
   $$ select id from public.example_items where id = '0a000000-0000-4000-8000-000000000003' $$,
   'symmetry: A''s item is not found through B''s lane'
+);
+select results_eq(
+  $$ select tenant_id::text from public.feed_posts where caption = 'x' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s post for the same caption'
+);
+select is_empty(
+  $$ select id from public.feed_posts where id = '0a000000-0000-4000-8000-0000000000f1' $$,
+  'symmetry: A''s post is not found through B''s lane'
 );
 select results_eq(
   $$ select host::text from public.tenant_domains $$,

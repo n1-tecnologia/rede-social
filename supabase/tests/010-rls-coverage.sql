@@ -83,11 +83,15 @@ select is_empty(
         -- global; the tenant comes from the asset it names), so assertions 1-2 never reach it and
         -- it needs no exemption there. Assertion 3 covers its RLS, and 040 pins its policy count at
         -- ZERO — the `tenant_invites` / `platform_admins` posture.
-        ('media_provider_events')
+        ('media_provider_events'),
+        -- Phase 4 (04-01). `feed_posts` carries `tenant_id` and the standard isolation policy, so
+        -- assertions 1-2 already cover it; it is listed here so a migration that silently stopped
+        -- being applied cannot let those assertions pass vacuously. It is NOT exempted anywhere.
+        ('feed_posts')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-3 declare exists in public'
+  'every table Phases 1-4 declare exists in public'
 );
 
 select * from finish();

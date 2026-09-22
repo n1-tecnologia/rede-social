@@ -30,6 +30,9 @@ const {
   tenantModules,
   tenants,
 } = await import('@tria/core/db/schema');
+// The feed module's own table (04-01). `public.feed_posts` is owned by `packages/modules/feed`, and
+// the seed writes it through the module's published `./db` entry point rather than by hand.
+const { feedPosts } = await import('@tria/module-feed/db');
 const { sqlClient } = await import('@tria/core/db');
 const { supabaseAdmin } = await import('@tria/core/server/supabase-admin');
 const { deriveIconSet } = await import('@tria/core/server/branding/icons');
@@ -168,6 +171,27 @@ const SEED_TENANTS: SeedTenant[] = [
     ],
   },
 ];
+
+/**
+ * The seeded feed (04-01, FEED-02). The two captions are IDENTICAL in both tenants ON PURPOSE:
+ * `supabase/tests/020-tenant-isolation.sql`'s adjacency case asks "both communities have a post with
+ * this caption — does the lane return exactly one?", and a query that filtered on a VALUE instead of
+ * on `tenant_id` would otherwise pass by returning something that merely looks right
+ * (SCHEMA-CONVENTIONS §(j)).
+ *
+ * Post ids are fixed literals and the two `created_at` values are one minute apart, so
+ * `order by created_at desc, id desc` is deterministic and the pgTAP fixtures, the integration suite
+ * and `apps/web/e2e/feed.spec.ts` can all name a specific row without querying for it first.
+ */
+const SEED_FEED_CAPTIONS = [
+  'Bem-vindos! Esta é a primeira publicação da comunidade.',
+  'Encontro de sábado confirmado. Levem água e um caderno.',
+] as const;
+
+const SEED_FEED_POST_IDS: Record<string, readonly string[]> = {
+  'tria-demo': ['0d000000-0000-4000-8000-000000000001', '0d000000-0000-4000-8000-000000000002'],
+  'tria-lab': ['0e000000-0000-4000-8000-000000000001', '0e000000-0000-4000-8000-000000000002'],
+};
 
 async function ensureUser(email: string, name: string, password: string): Promise<string> {
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
@@ -329,11 +353,13 @@ for (const t of SEED_TENANTS) {
   ];
   let memberCount = 0;
   let photoCount = 0;
+  let adminUserId: string | null = null;
   for (const p of people) {
     const userId = await ensureUser(p.email, p.name, seedPassword);
     await withAdminTx(async (tx) => {
       await tx.insert(memberships).values({ tenantId, userId, role: p.role }).onConflictDoNothing();
     });
+    if (p.role === 'admin_tenant') adminUserId = userId;
     if (p.role === 'member') memberCount += 1;
     if (!('profile' in p)) continue;
     if (await seedMemberProfile(tenantId, userId, p.profile)) photoCount += 1;
@@ -386,6 +412,31 @@ for (const t of SEED_TENANTS) {
         set: { tenantId, isPrimary: true, verifiedAt: new Date(), verificationStatus: 'verified' },
       });
   });
+
+  // 04-01: two posts per tenant, authored by that tenant's admin through the generic
+  // `author_user_id` column (FEED-08 — "only the admin posts" is a permission value, never a schema
+  // fact). `onConflictDoNothing` on the fixed id keeps the seed idempotent across re-runs.
+  const feedPostIds = SEED_FEED_POST_IDS[t.slug] ?? [];
+  const authorUserId = adminUserId;
+  if (authorUserId && feedPostIds.length > 0) {
+    await withAdminTx(async (tx) => {
+      for (const [index, id] of feedPostIds.entries()) {
+        await tx
+          .insert(feedPosts)
+          .values({
+            id,
+            tenantId,
+            authorUserId,
+            caption: SEED_FEED_CAPTIONS[index] ?? SEED_FEED_CAPTIONS[0],
+            // Oldest first in the array, one minute apart: the newest post is the LAST entry, which
+            // is what `created_at desc, id desc` puts at the top of the feed.
+            createdAt: new Date(Date.now() - (feedPostIds.length - index) * 60_000),
+          })
+          .onConflictDoNothing();
+      }
+    });
+    console.log(`seed: tenant ${t.slug} — ${feedPostIds.length} feed posts`);
+  }
 
   console.log(
     `seed: tenant ${t.slug} (${t.displayName}) ready with admin + member and ${t.modules.length} module(s) on`,
