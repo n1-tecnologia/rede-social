@@ -63,3 +63,33 @@ export function widthsForPurpose(purpose: MediaPurpose, originalWidth: number): 
   const fitting = ladder.filter((width) => width <= originalWidth);
   return fitting.length > 0 ? [...fitting] : [ladder[0] as number];
 }
+
+/**
+ * Orphan-sweeper cadence and windows (R-07). Named constants next to the ceilings they live with,
+ * the `domains/types.ts:86-96` pattern (`DOMAIN_VERIFY_INTERVAL_S` / `DOMAIN_VERIFY_DEADLINE_MS`):
+ * the job reads them, the integration suite back-dates against them, and nobody re-derives a number.
+ */
+
+/** Sweeper cadence (seconds). The job re-arms itself with this `startAfter`; no scheduler exists. */
+export const MEDIA_SWEEP_INTERVAL_S = 60 * 60;
+
+/**
+ * How long a `pending` asset may sit before it is an abandoned upload (24 h).
+ *
+ * The number is NOT arbitrary and must not be tightened casually: the Supabase resumable (TUS)
+ * upload URL handed out at `start` is itself "valid for up to 24 hours"
+ * [supabase.com/docs/guides/storage/uploads/resumable-uploads; RESEARCH R-07 and Pitfall 3], so a
+ * member who picked a file on a train can still legitimately finish the PUT up to that moment.
+ * Past it nothing legitimate can still be in flight, which is exactly when collecting is safe.
+ */
+export const MEDIA_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a soft-deleted (`deleted`) or `rejected` asset keeps its bytes (1 h). Short enough that a
+ * tenant is not billed for retired photos, long enough that a member who removes their photo and
+ * immediately puts it back is not racing the collector.
+ */
+export const MEDIA_DELETED_TTL_MS = 60 * 60 * 1000;
+
+/** Rows collected per sweeper run. One run is bounded; the re-arm picks up the remainder. */
+export const MEDIA_SWEEP_BATCH = 100;

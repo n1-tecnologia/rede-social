@@ -101,6 +101,28 @@ export async function putObject(key: string, body: Buffer, opts: PutOptions): Pr
   if (error) throw new Error(`could not upload ${key}: ${error.message}`);
 }
 
+/**
+ * Every object key directly under `prefix` (03-08, the sweeper's "delete ALL of its bytes" half).
+ *
+ * `@supabase/storage-js` has no "delete a prefix" call: you list the folder and hand the names to
+ * `remove`. `list` returns a name RELATIVE to the prefix, so the keys are rebuilt here — the caller
+ * never has to know that. Folder entries (`id === null`) are skipped: an asset prefix is flat
+ * (`original` plus `w<width>.webp`), so a folder there would not be ours to delete anyway.
+ *
+ * Bounded by `limit`: an asset has at most one original and the purpose's width ladder, so the
+ * default is already an order of magnitude of headroom, and an unbounded list is never useful here.
+ */
+export async function listObjects(prefix: string, limit = 100): Promise<string[]> {
+  // Supabase lists a FOLDER: `a/b` and `a/b/` are the same folder, but the trailing slash would be
+  // echoed into the search prefix, so it is stripped before the call and re-added when rebuilding.
+  const folder = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  const { data, error } = await bucket().list(folder, { limit });
+  if (error) throw new Error(`could not list ${folder}: ${error.message}`);
+  return (data ?? [])
+    .filter((entry) => entry.id !== null)
+    .map((entry) => `${folder}/${entry.name}`);
+}
+
 export async function removeObjects(keys: readonly string[]): Promise<void> {
   if (keys.length === 0) return;
   const { error } = await bucket().remove([...keys]);

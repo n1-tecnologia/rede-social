@@ -3,6 +3,8 @@ import { deriveIconsJob } from '@tria/core/server/branding/derive-icons-job';
 import { domainVerifyJob } from '@tria/core/server/domains/verify-job';
 import { createBoss, createQueues } from '@tria/core/server/jobs/boss';
 import { deriveVariantsJob } from '@tria/core/server/media/derive-job';
+import { armSweeper } from '@tria/core/server/media/service';
+import { sweepOrphansJob } from '@tria/core/server/media/sweep-job';
 import { mediaProviderEventJob } from '@tria/core/server/media/video/event-job';
 import type { AnyJobDefinition } from '@tria/core/server/modules/manifest';
 import { Hono } from 'hono';
@@ -29,6 +31,11 @@ import { MODULE_REGISTRY } from './modules/registry';
  * probe listener: `GET /v1/health` answers `{ ok, service: 'worker', role }` and nothing else. It is
  * bound AFTER `boss.start()` on purpose — a 200 means "the worker really started", not "the process
  * exists". `tests/integration/worker.test.ts` boots this branch in a fresh process and asserts it.
+ *
+ * The orphan sweeper (`kernel.media-sweep-orphans`, 03-08) has NO scheduler: it re-arms itself with a
+ * deferred job after every run, the `kernel.domain-verify` pattern, so the worker only has to open
+ * the cadence once at start. That arm is best-effort — a worker must boot even if the first enqueue
+ * fails, and the next successful run re-opens it.
  */
 export async function startWorker(): Promise<void> {
   const jobs: AnyJobDefinition[] = [
@@ -36,6 +43,7 @@ export async function startWorker(): Promise<void> {
     deriveIconsJob,
     deriveVariantsJob,
     mediaProviderEventJob,
+    sweepOrphansJob,
     ...Object.values(MODULE_REGISTRY).flatMap((manifest) => manifest?.jobs ?? []),
   ];
 
@@ -56,6 +64,13 @@ export async function startWorker(): Promise<void> {
     await boss.work(job.name, async (batch) => {
       for (const item of batch) await job.handler(item.data);
     });
+  }
+
+  try {
+    const armed = await armSweeper();
+    rootLogger.info({ armed }, 'media.sweep.armed');
+  } catch (err) {
+    rootLogger.error({ err }, 'could not arm the media orphan sweeper; the next run re-opens it');
   }
 
   const probe = new Hono().get('/v1/health', (c) =>

@@ -23,7 +23,7 @@ import { ApiError } from '../http/api-error';
 import { enqueueInTx } from '../jobs/boss';
 import { moduleLogger } from '../logging';
 import { decodeCursor, encodeCursor } from '../paging';
-import { MEDIA_DERIVE_QUEUE } from './index';
+import { MEDIA_DERIVE_QUEUE, MEDIA_SWEEP_QUEUE, MEDIA_SWEEP_SINGLETON } from './index';
 import { inspectMediaImage, inspectPdf, MediaImageError } from './inspect';
 import {
   assertTenantKey,
@@ -35,6 +35,7 @@ import {
 } from './keys';
 import {
   limitFor,
+  MEDIA_SWEEP_INTERVAL_S,
   MEDIA_TENANT_BYTES_CEILING,
   MEDIA_TENANT_VIDEO_SECONDS_CEILING,
   MediaLimitError,
@@ -43,9 +44,11 @@ import {
 import {
   downloadObject,
   invalidateSignedUrl,
+  listObjects,
   MEDIA_VARIANT_CACHE_CONTROL,
   objectInfo,
   putObject,
+  removeObjects,
   removeQuietly,
   signRead,
   signUpload,
@@ -868,4 +871,139 @@ export async function deriveAssetVariants(
     'media variants derived',
   );
   return { outcome: 'derived', widths: producedWidths };
+}
+
+/**
+ * Queues the NEXT orphan sweep (03-08, R-07). Called from exactly two places: once when the worker
+ * starts, and by `kernel.media-sweep-orphans` itself at the end of every run. Together those two are
+ * the whole cadence — `boss.schedule()` stays unused in this codebase, and `kernel.domain-verify`
+ * paces itself the same way (`jobs/boss.ts`, the `startAfter` paragraph of the `enqueueInTx`
+ * docblock). One mechanism for periodic work, so the one the team already debugs is the one this
+ * uses.
+ *
+ * The `singletonKey` is the CONSTANT `MEDIA_SWEEP_SINGLETON`: under `QUEUE_POLICY = 'short'` a
+ * second arm while the first is still `created` is dropped by the `job_i1` partial unique index and
+ * `send` returns `null`, so a worker restart that races a run's own re-arm cannot double the
+ * cadence. Returns whether THIS call is the one that queued the job (a `null` id is the dropped
+ * duplicate, which is a success, not a failure).
+ */
+export async function armSweeper(): Promise<boolean> {
+  const id = await withAdminTx(async (tx) =>
+    enqueueInTx(
+      tx,
+      MEDIA_SWEEP_QUEUE,
+      {},
+      { singletonKey: MEDIA_SWEEP_SINGLETON, startAfter: MEDIA_SWEEP_INTERVAL_S },
+    ),
+  );
+  return id !== null;
+}
+
+/** What `purgeAsset` needs off a row; the sweeper selects exactly these four columns. */
+export type PurgeableAsset = {
+  id: string;
+  tenantId: string;
+  kind: string;
+  providerAssetId: string | null;
+};
+
+export type PurgeOutcome = { purged: boolean; objects: number };
+
+/**
+ * Removes EVERY trace of one collected asset (03-08). The ordering is the whole contract, and it is
+ * deliberate:
+ *
+ *   1. the Storage objects under `<tenant_id>/media/<assetId>/` — the original AND every derived
+ *      `w<width>.webp`, listed rather than guessed, so a ladder that changed since the derivation
+ *      still leaves nothing behind;
+ *   2. the in-process signed-URL memo for that prefix, so no instance can hand out a URL to an
+ *      object that no longer exists;
+ *   3. the provider-side asset, when the row carries a `provider_asset_id` (a Mux/fake video);
+ *   4. and only THEN the `media_assets` row.
+ *
+ * The row dies LAST because it is the only pointer to the bytes. Deleting it first and then failing
+ * would leave unreferenced objects the tenant is still billed for and nothing left to find them by.
+ * In this order a Storage or provider failure returns early and leaves a row the NEXT run collects
+ * again — the "a failure leaves a recoverable state" discipline 02-09 established for `checkDomain`.
+ * Everything here is therefore safe to re-run: an already-empty prefix and an already-deleted
+ * provider asset both converge on the same end state.
+ */
+export async function purgeAsset(row: PurgeableAsset): Promise<PurgeOutcome> {
+  const prefix = mediaAssetPrefix(row.tenantId, row.id);
+  // The prefix itself is not a key; assert the one key that always exists under it, which is what
+  // pins the whole listing to this tenant's own space before any Storage call (T-03-55).
+  assertTenantKey(mediaOriginalKey(row.tenantId, row.id), row.tenantId);
+
+  let keys: string[];
+  try {
+    keys = await listObjects(prefix);
+  } catch (error) {
+    log.warn(
+      {
+        event: 'media.purge.list_failed',
+        tenantId: row.tenantId,
+        assetId: row.id,
+        err: error instanceof Error ? error.message : String(error),
+      },
+      'could not list the asset prefix; the row is left for the next sweep',
+    );
+    return { purged: false, objects: 0 };
+  }
+
+  if (keys.length > 0) {
+    for (const key of keys) assertTenantKey(key, row.tenantId);
+    try {
+      await removeObjects(keys);
+    } catch (error) {
+      log.warn(
+        {
+          event: 'media.purge.storage_failed',
+          tenantId: row.tenantId,
+          assetId: row.id,
+          objects: keys.length,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'could not remove the asset objects; the row is left for the next sweep',
+      );
+      return { purged: false, objects: 0 };
+    }
+  }
+  // The prefix form drops every memoised variant URL in one call (`storage.ts:invalidateSignedUrl`).
+  invalidateSignedUrl(prefix);
+
+  if (row.providerAssetId && row.kind === 'video') {
+    try {
+      await videoProvider.deleteAsset(row.providerAssetId);
+    } catch (error) {
+      log.warn(
+        {
+          event: 'media.purge.provider_failed',
+          tenantId: row.tenantId,
+          assetId: row.id,
+          kind: row.kind,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'the provider refused to delete the asset; the row is left for the next sweep',
+      );
+      return { purged: false, objects: keys.length };
+    }
+  }
+
+  await withAdminTx(async (tx) =>
+    tx
+      .delete(mediaAssets)
+      .where(and(eq(mediaAssets.id, row.id), eq(mediaAssets.tenantId, row.tenantId))),
+  );
+
+  log.info(
+    {
+      event: 'media.purged',
+      tenantId: row.tenantId,
+      assetId: row.id,
+      objects: keys.length,
+      hadProviderAsset: Boolean(row.providerAssetId),
+    },
+    'media asset purged',
+  );
+  return { purged: true, objects: keys.length };
 }

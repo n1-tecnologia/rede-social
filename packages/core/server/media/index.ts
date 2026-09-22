@@ -16,6 +16,21 @@ export const MEDIA_DERIVE_QUEUE = 'kernel.media-derive-variants';
 /** Bounded crash re-arm: after this many attempts the asset is flipped to a terminal `failed`. */
 export const MEDIA_DERIVE_MAX_ATTEMPTS = 3;
 
+/**
+ * `kernel.media-sweep-orphans` (03-08, R-07) — the orphan collector. Its NAME lives here rather
+ * than in `./sweep-job.ts` for the same reason `MEDIA_DERIVE_QUEUE` does: `./service.ts` needs it
+ * for `armSweeper`, the job file imports the service, and a constant declared in the job file would
+ * make that a cycle. Import direction stays service -> job only.
+ */
+export const MEDIA_SWEEP_QUEUE = 'kernel.media-sweep-orphans';
+
+/**
+ * A CONSTANT singleton key, not a per-row one: under `QUEUE_POLICY = 'short'` at most one sweeper
+ * can sit in `created` at a time, so a re-arm that races a worker restart's arm is dropped by the
+ * `job_i1` partial unique index instead of doubling the cadence.
+ */
+export const MEDIA_SWEEP_SINGLETON = 'media-sweep';
+
 export type DeriveVariantsPayload = { tenantId: string; assetId: string; attempt: number };
 
 export const deriveVariantsPayloadSchema = z.object({
@@ -28,7 +43,7 @@ export const deriveVariantsPayloadSchema = z.object({
 // `apps/api/src/modules/registry.ts` (which lists MODULE queues only, MOD-02). Every enqueue path
 // (`media/service.ts`) imports this barrel at module top, so the API's lazy `startedBoss()` always
 // knows the queue before the first `send`; the worker creates it from its explicit job list.
-registerJobQueues([MEDIA_DERIVE_QUEUE]);
+registerJobQueues([MEDIA_DERIVE_QUEUE, MEDIA_SWEEP_QUEUE]);
 
 export * from './inspect';
 export * from './keys';
