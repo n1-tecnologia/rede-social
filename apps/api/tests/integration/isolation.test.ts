@@ -1,10 +1,11 @@
+import { createClient } from '@supabase/supabase-js';
 import { TENANT_HOST_HEADER } from '@tria/contracts';
 import { sqlClient } from '@tria/core/db';
 import { stopBoss } from '@tria/core/server/jobs/boss';
 import { moduleFlags } from '@tria/core/server/modules/flags-cache';
 import type { ExampleItem } from '@tria/module-example/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
 
 /**
  * TENANT-05 — the phase's exit gate at the API level, and every later phase's regression gate.
@@ -17,6 +18,18 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setu
  * TENANT-05 adjacency: both seeded tenants get items with the SAME title and their members share
  * the `member@…` local part, so a leak that matched on a value rather than on `tenant_id` cannot
  * pass by looking plausible. Every assertion below compares IDS, never contents.
+ *
+ * Phase 3 (03-08) grew the file to every surface that phase added — the private `media` bucket's
+ * signed URLs, the provider's playback tokens, the member directory and the profile's avatar gate —
+ * because SCHEMA-CONVENTIONS §(j) rule 2 makes that mandatory, not optional: every new table,
+ * endpoint, bucket and topic re-runs this matrix. Those cases were LIFTED from `media.test.ts`,
+ * `media-playback.test.ts`, `members.test.ts` and `profile.test.ts` rather than re-derived, which is
+ * the whole point of a shared suite: one place where the whole matrix runs.
+ *
+ * **Every Phase 3 case asserts the POSITIVE CONTROL beside its negative** — each community really
+ * can reach its OWN asset, member and profile. Without that, a globally broken route (a 404 for
+ * everyone, a disabled module, a dead migration) would make the isolation assertion pass vacuously
+ * and certify a guarantee that had stopped existing (T-03-56).
  *
  * Deeper single-concern cases already live elsewhere and are deliberately NOT duplicated here:
  *   - `auth-middleware.test.ts` — token verification, blocked/suspended semantics, host matching
@@ -44,6 +57,8 @@ const THROWAWAY_PASSWORD = 'Segredo123';
 const tokens = {
   demoMember: '',
   labMember: '',
+  demoAdmin: '',
+  labAdmin: '',
   emptyMember: '',
   blockedMember: '',
   superAdmin: '',
@@ -52,6 +67,12 @@ const tenantIds = { demo: '', lab: '', empty: '', suspended: '' };
 const itemIds = { demo: [] as string[], lab: [] as string[] };
 const throwawayUsers: string[] = [];
 let blockedUserId = '';
+
+/** Phase 3 fixtures: a ready image and a ready video on EACH side, so every negative has a control. */
+const assets = { demoImage: '', labImage: '', demoVideo: '', labVideo: '' };
+const mediaAssetIds: string[] = [];
+const displayNames = { demo: '', lab: '' };
+const membershipIds = { demo: '', lab: '' };
 
 const request = (path: string, token?: string, headers: Record<string, string> = {}) =>
   api.request(path, {
@@ -94,6 +115,65 @@ async function throwawayMember(tenantId: string, email: string): Promise<string>
     insert into public.memberships (tenant_id, user_id, role, status)
     values (${tenantId}::uuid, ${data.user.id}::uuid, 'member', 'active')`;
   return signInAs(email, THROWAWAY_PASSWORD);
+}
+
+/**
+ * A READY video in a known state, written directly (the `media-playback.test.ts` fixture). The
+ * ingest path is 03-06's subject and is proved end to end there; what matters here is what the
+ * playback endpoint does to a row, which does not depend on how the row got there.
+ */
+async function seedVideo(tenantId: string, email: string, filename: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+       mime, bytes, duration_seconds, aspect_ratio, filename, ready_at)
+    select ${tenantId}::uuid, u.id, 'video', 'post', 'ready', 'fake',
+           ${`fake-iso-${crypto.randomUUID()}`}, ${`fake-playback-iso-${filename}`},
+           'video/mp4', 1048576, 12, '16:9', ${filename}, now()
+      from public.users u where u.email = ${email}
+    returning id`;
+  if (!row) throw new Error(`could not seed a video for ${email}`);
+  mediaAssetIds.push(row.id);
+  return row.id;
+}
+
+/**
+ * Service-key Storage client for fixture cleanup only (direct deletes from `storage.objects` are
+ * refused — the 02-13 finding). Built here like `authAdmin()` rather than importing
+ * `@tria/core/server/supabase-admin`, which Biome confines to the kernel's admin lane.
+ */
+function storageAdmin() {
+  return createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
+    auth: { persistSession: false, autoRefreshToken: false },
+  }).storage;
+}
+
+async function removeMediaObjects(tenantId: string, assetId: string): Promise<void> {
+  const rows = await adminSql<{ name: string }[]>`
+    select name from storage.objects
+     where bucket_id = 'media' and name like ${`${tenantId}/media/${assetId}/%`}`;
+  if (rows.length === 0) return;
+  await storageAdmin()
+    .from('media')
+    .remove(rows.map((row) => row.name));
+}
+
+async function displayNameOf(tenantId: string, email: string): Promise<string> {
+  const [row] = await adminSql<{ display_name: string }[]>`
+    select p.display_name from public.member_profiles p
+      join public.users u on u.id = p.user_id
+     where p.tenant_id = ${tenantId}::uuid and u.email = ${email}`;
+  if (!row) throw new Error(`${email} has no profile in ${tenantId}`);
+  return row.display_name;
+}
+
+async function membershipIdOf(tenantId: string, email: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    select m.id from public.memberships m
+      join public.users u on u.id = m.user_id
+     where m.tenant_id = ${tenantId}::uuid and u.email = ${email}`;
+  if (!row) throw new Error(`${email} is not a member of ${tenantId}`);
+  return row.id;
 }
 
 beforeAll(async () => {
@@ -141,15 +221,46 @@ beforeAll(async () => {
 
   tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
   tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
+  tokens.labAdmin = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
   tokens.superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
   tokens.emptyMember = await throwawayMember(tenantIds.empty, `member@${EMPTY_SLUG}.local`);
   tokens.blockedMember = await throwawayMember(tenantIds.demo, `blocked-${RUN}@tria-demo.local`);
   blockedUserId = throwawayUsers[throwawayUsers.length - 1] ?? '';
 
   for (const id of [tenantIds.demo, tenantIds.lab, tenantIds.empty]) moduleFlags.invalidate(id);
+
+  // Phase 3 fixtures. A REAL upload on each side (start -> PUT straight to Storage -> complete ->
+  // the worker derives the ladder), so the signed-URL case runs against objects that really exist.
+  assets.demoImage = await uploadAvatar(tokens.demoMember);
+  assets.labImage = await uploadAvatar(tokens.labMember);
+  mediaAssetIds.push(assets.demoImage, assets.labImage);
+  assets.demoVideo = await seedVideo(
+    tenantIds.demo,
+    'admin@tria-demo.local',
+    'privado-da-demo.mp4',
+  );
+  assets.labVideo = await seedVideo(tenantIds.lab, 'admin@tria-lab.local', 'privado-do-lab.mp4');
+
+  displayNames.demo = await displayNameOf(tenantIds.demo, 'member@tria-demo.local');
+  displayNames.lab = await displayNameOf(tenantIds.lab, 'member@tria-lab.local');
+  membershipIds.demo = await membershipIdOf(tenantIds.demo, 'member@tria-demo.local');
+  membershipIds.lab = await membershipIdOf(tenantIds.lab, 'member@tria-lab.local');
 });
 
 afterAll(async () => {
+  for (const [tenantId, assetId] of [
+    [tenantIds.demo, assets.demoImage],
+    [tenantIds.lab, assets.labImage],
+  ] as const) {
+    if (assetId) await removeMediaObjects(tenantId, assetId);
+  }
+  // `uploadAvatar` only creates the asset — no profile row points at it here — so the rows can be
+  // deleted outright once their objects are gone.
+  for (const id of [...new Set(mediaAssetIds)].filter(Boolean)) {
+    await adminSql`delete from public.media_assets where id = ${id}::uuid`;
+  }
+
   const items = [...itemIds.demo, ...itemIds.lab];
   if (items.length > 0) {
     await adminSql`delete from public.example_items where id = any(${items}::uuid[])`;
@@ -324,5 +435,167 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       slug: SUSPENDED_SLUG,
       status: 'suspended',
     });
+  });
+});
+
+/**
+ * Phase 3's surface (03-08): the private `media` bucket, the video provider's playback tokens, the
+ * member directory and the profile's avatar gate. Same question, same two communities, same
+ * case-letter convention — and every negative carries its positive control in the SAME test, so a
+ * globally broken route cannot make an isolation assertion pass vacuously (T-03-56).
+ */
+describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile', () => {
+  it("j. Storage signed URL: tenant B cannot obtain one for tenant A's object (criterion 4)", async () => {
+    const foreign = await api.request(`/v1/media/${assets.demoImage}/w320`, {
+      headers: { authorization: `Bearer ${tokens.labMember}` },
+      redirect: 'manual',
+    });
+    // 404 with NO redirect: the key is built from the CALLER's own tenant id, so B's request
+    // resolves under B's prefix, where nothing exists. Isolation is structural, not check-dependent.
+    expect(foreign.status).toBe(404);
+    expect(foreign.headers.get('location')).toBeNull();
+
+    const body = JSON.stringify(await foreign.json());
+    for (const needle of ['tria-demo', 'TRIA Demo', tenantIds.demo, displayNames.demo]) {
+      expect(body).not.toContain(needle);
+    }
+
+    // Positive control — each community really can reach its OWN asset, so the 404 above is about
+    // the caller and not about a dead route.
+    for (const [token, assetId, tenantId] of [
+      [tokens.demoMember, assets.demoImage, tenantIds.demo],
+      [tokens.labMember, assets.labImage, tenantIds.lab],
+    ] as const) {
+      const own = await api.request(`/v1/media/${assetId}/w320`, {
+        headers: { authorization: `Bearer ${token}` },
+        redirect: 'manual',
+      });
+      expect(own.status).toBe(302);
+      expect(own.headers.get('location')).toContain(`${tenantId}/media/${assetId}/w320.webp`);
+    }
+  });
+
+  it("k. playback token: tenant B's admin cannot mint one for tenant A's ready video", async () => {
+    const foreign = await request(`/v1/media/${assets.demoVideo}/playback`, tokens.labAdmin);
+    expect(foreign.status).toBe(404);
+
+    const raw = await foreign.text();
+    // Not just "no valid token" — the word `tokens` and the playback id must not appear at all.
+    expect(raw).not.toContain('tokens');
+    expect(raw).not.toContain('playbackId');
+    expect(raw).not.toContain('fake-playback-iso-privado-da-demo.mp4');
+    expect(raw).not.toContain('privado-da-demo');
+
+    // Positive control — each community mints tokens for its own video.
+    for (const [token, assetId] of [
+      [tokens.demoAdmin, assets.demoVideo],
+      [tokens.labAdmin, assets.labVideo],
+    ] as const) {
+      const own = await request(`/v1/media/${assetId}/playback`, token);
+      expect(own.status).toBe(200);
+      const payload = (await own.json()) as { tokens: { playback: string } };
+      expect(payload.tokens.playback.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("l. completing tenant A's assetId from B takes the same 404 a nonexistent id gets", async () => {
+    const res = await api.request(`/v1/media/uploads/${assets.demoImage}/complete`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${tokens.labMember}` },
+    });
+    expect(res.status).toBe(404);
+    const { error } = (await res.json()) as Envelope;
+    expect((error.details as { media?: string } | undefined)?.media).toBe('object_missing');
+  });
+
+  it("m. deleting tenant A's asset from B answers 404 and leaves A's row untouched", async () => {
+    const res = await api.request(`/v1/media/${assets.demoImage}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${tokens.labMember}` },
+    });
+    expect(res.status).toBe(404);
+
+    const [row] = await adminSql<{ status: string; tenant_id: string }[]>`
+      select status, tenant_id from public.media_assets where id = ${assets.demoImage}::uuid`;
+    expect(row?.status).toBe('ready');
+    expect(row?.tenant_id).toBe(tenantIds.demo);
+  });
+
+  it("n. the directory: B cannot open A's membershipId and never lists A's names", async () => {
+    const detail = await request(`/v1/members/${membershipIds.demo}`, tokens.labMember);
+    expect(detail.status).toBe(404);
+    const refusal = JSON.stringify(await detail.json());
+    expect(refusal).not.toContain('tria-demo');
+    expect(refusal).not.toContain(displayNames.demo);
+
+    const list = await request('/v1/members?limit=50', tokens.labMember);
+    expect(list.status).toBe(200);
+    const listed = (await list.json()) as {
+      items: { membershipId: string; displayName: string }[];
+    };
+    expect(listed.items.map((i) => i.membershipId)).not.toContain(membershipIds.demo);
+    expect(listed.items.map((i) => i.displayName)).not.toContain(displayNames.demo);
+
+    // Positive control — each community sees its own member in its own directory.
+    expect(listed.items.map((i) => i.membershipId)).toContain(membershipIds.lab);
+    const ownDetail = await request(`/v1/members/${membershipIds.demo}`, tokens.demoMember);
+    expect(ownDetail.status).toBe(200);
+  });
+
+  it("o. the avatar gate: B cannot point its profile at A's asset (400 invalid, no oracle)", async () => {
+    const res = await api.request('/v1/me/profile', {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${tokens.labMember}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ avatarAssetId: assets.demoImage }),
+    });
+    expect(res.status).toBe(400);
+    const { error } = (await res.json()) as Envelope;
+    expect(error.code).toBe('VALIDATION_FAILED');
+    expect((error.details as { avatarAssetId?: string } | undefined)?.avatarAssetId).toBe(
+      'invalid',
+    );
+    // The refusal names nothing about the other community, and A's asset is untouched by it.
+    expect(JSON.stringify(error)).not.toContain('tria-demo');
+    const [row] = await adminSql<{ deleted_at: string | null }[]>`
+      select deleted_at from public.media_assets where id = ${assets.demoImage}::uuid`;
+    expect(row?.deleted_at).toBeNull();
+
+    // Positive control — B CAN point its profile at its own asset, then puts it back.
+    const own = await api.request('/v1/me/profile', {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${tokens.labMember}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ avatarAssetId: assets.labImage }),
+    });
+    expect(own.status).toBe(200);
+    await api.request('/v1/me/profile', {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${tokens.labMember}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ avatarAssetId: null }),
+    });
+  });
+
+  it('p. the platform identity has no membership: every Phase 3 route refuses it, never a 500 (Pitfall 8)', async () => {
+    const uploads = await api.request('/v1/media/uploads', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${tokens.superAdmin}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'image', purpose: 'avatar', mime: 'image/jpeg', size: 1024 }),
+    });
+    expect(uploads.status).toBe(403);
+    expect(await code(uploads)).toBe('NO_MEMBERSHIP');
+
+    for (const path of ['/v1/members', '/v1/me/profile']) {
+      const res = await request(path, tokens.superAdmin);
+      expect(res.status, path).toBe(403);
+      expect(await code(res), path).toBe('NO_MEMBERSHIP');
+    }
   });
 });

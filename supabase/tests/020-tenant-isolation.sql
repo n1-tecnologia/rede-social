@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(38);
+select plan(45);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -72,6 +72,14 @@ insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, st
    '0b000000-0000-4000-8000-000000000002', 'image', 'avatar', 'ready', 'image/jpeg', 1024, null),
   ('0a000000-0000-4000-8000-000000000006', '0a000000-0000-4000-8000-000000000001',
    '0a000000-0000-4000-8000-000000000002', 'image', 'avatar', 'deleted', 'image/jpeg', 1024, now());
+
+-- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
+-- global) and RLS with ZERO policies, like platform_admins and tenant_invites: one community's
+-- transcode traffic is not another community's business, and with the schema-wide SELECT grant a
+-- policy is the only thing that could ever expose it (T-03-45, SCHEMA-CONVENTIONS (i)).
+insert into public.media_provider_events (id, provider, type) values
+  ('evt-pgtap-a', 'fake', 'video.asset.ready'),
+  ('evt-pgtap-b', 'fake', 'video.asset.ready');
 
 insert into public.consent_records (tenant_id, user_id, kind, text_version) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'tenant_rules', 1),
@@ -243,6 +251,19 @@ select is_empty(
 );
 
 select results_eq(
+  $$ select count(*)::int from public.media_provider_events $$,
+  ARRAY[0],
+  'media_provider_events: provider traffic is invisible to a tenant lane (RLS, zero policies)'
+);
+select throws_ok(
+  $$ insert into public.media_provider_events (id, provider, type)
+     values ('evt-pgtap-forged', 'fake', 'video.asset.ready') $$,
+  '42501',
+  null,
+  'media_provider_events: the lane cannot record an event — webhook ingest is an admin-lane operation'
+);
+
+select results_eq(
   $$ select count(*)::int from public.platform_admins $$,
   ARRAY[0],
   'platform_admins: a real row is invisible to a tenant lane (RLS, zero policies)'
@@ -327,6 +348,28 @@ select results_eq(
   ARRAY[0],
   'symmetry: B''s lane sees no invite either'
 );
+-- 03-01/03-08, the media half of the symmetry: the same adjacency assertion from B's side, plus the
+-- soft-delete predicate — A's retired asset (the row the 03-08 sweeper collects by) is invisible to
+-- B's lane for BOTH reasons at once, tenant scope and `deleted_at is null`.
+select results_eq(
+  $$ select count(*)::int from public.media_assets $$,
+  ARRAY[1],
+  'symmetry: B''s lane returns exactly its own live media asset'
+);
+select is_empty(
+  $$ select id from public.media_assets where id = '0a000000-0000-4000-8000-000000000006' $$,
+  'symmetry: A''s soft-deleted asset is invisible through B''s lane too'
+);
+select is_empty(
+  $$ select id from public.member_profiles
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  'symmetry: A''s member_profiles rows are invisible through B''s lane'
+);
+select results_eq(
+  $$ select count(*)::int from public.media_provider_events $$,
+  ARRAY[0],
+  'symmetry: B''s lane sees no provider event either'
+);
 
 -- ── the admin lane (withAdminTx behind requireSuperAdmin) is the only reader of invites ─────────
 reset role;
@@ -335,6 +378,11 @@ select results_eq(
   $$ select tenant_id::text from public.tenant_invites where email = 'CONVIDADO@A.LOCAL' $$,
   ARRAY['0a000000-0000-4000-8000-000000000001'],
   'tenant_invites: the admin lane reads the row, and email is citext (case-insensitive lookup)'
+);
+select results_eq(
+  $$ select count(*)::int from public.media_provider_events $$,
+  ARRAY[2],
+  'media_provider_events: the admin lane — the webhook''s own lane — reads every recorded event'
 );
 
 reset role;

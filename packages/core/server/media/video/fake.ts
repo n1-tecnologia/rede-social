@@ -64,12 +64,16 @@ export function signFakeVideoWebhook(rawBody: string, timestampSeconds: number):
  * Test seam (the `mediaInternals` / `brandingInternals` style). `signUpload` and `scheduleReady` are
  * injectable so the PURE kernel unit suite can exercise the adapter's contract with no Storage call
  * and no database, while the integration suite keeps the real ones and therefore keeps the
- * "bytes go straight to Storage" invariant honest. `deletedAssetIds` records the duration-cap path.
+ * "bytes go straight to Storage" invariant honest. `deletedAssetIds` records the duration-cap path
+ * and the 03-08 sweeper's provider-delete path; `failDeleteAsset` is the forced-refusal switch that
+ * proves the sweeper leaves a RE-COLLECTABLE row when a provider says no, rather than orphaning the
+ * vendor-side asset behind a deleted row.
  */
 export const fakeVideoInternals = {
   durationSeconds: DEFAULT_DURATION_SECONDS,
   aspectRatio: DEFAULT_ASPECT_RATIO,
   deletedAssetIds: [] as string[],
+  failDeleteAsset: false,
   signUpload: (key: string): Promise<{ signedUrl: string }> => signUpload(key),
   scheduleReady: (event: VideoProviderEvent): Promise<void> => enqueueSyntheticReady(event),
 };
@@ -79,6 +83,7 @@ export function resetFakeVideoInternals(): void {
   fakeVideoInternals.durationSeconds = DEFAULT_DURATION_SECONDS;
   fakeVideoInternals.aspectRatio = DEFAULT_ASPECT_RATIO;
   fakeVideoInternals.deletedAssetIds = [];
+  fakeVideoInternals.failDeleteAsset = false;
   fakeVideoInternals.signUpload = (key) => signUpload(key);
   fakeVideoInternals.scheduleReady = (event) => enqueueSyntheticReady(event);
 }
@@ -137,6 +142,9 @@ export function createFakeVideoProvider(): VideoProvider {
     },
 
     async deleteAsset(providerAssetId: string): Promise<void> {
+      // The refusal is raised BEFORE the recorder so a forced failure leaves no trace of a delete
+      // that did not happen — otherwise a test could not tell "refused" from "deleted and retried".
+      if (fakeVideoInternals.failDeleteAsset) throw new VideoProviderError('unavailable', 503);
       fakeVideoInternals.deletedAssetIds.push(providerAssetId);
     },
 

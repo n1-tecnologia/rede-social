@@ -1,11 +1,13 @@
 import { sqlClient } from '@tria/core/db';
 import { stopBoss } from '@tria/core/server/jobs/boss';
+import { MEDIA_SWEEP_BATCH } from '@tria/core/server/media/limits';
 import {
   MEDIA_SWEEP_QUEUE,
   MEDIA_SWEEP_SINGLETON,
   sweepOrphansJob,
 } from '@tria/core/server/media/sweep-job';
 import { encodeJpeg } from '@tria/core/server/media/variants';
+import { fakeVideoInternals, resetFakeVideoInternals } from '@tria/core/server/media/video/fake';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
@@ -98,6 +100,68 @@ async function cleanup(): Promise<void> {
   await clearSweepJobs();
 }
 
+/**
+ * A row in a KNOWN state, written straight through the admin connection. The ingest path is proved
+ * end to end by the tracer above and by `media.test.ts`; what these cases are about is which rows
+ * the PREDICATE selects, which does not depend on how a row got there — and writing it directly is
+ * the only way to place a `processing`, `failed` or `rejected` row at an arbitrary age.
+ */
+async function seedAsset(values: {
+  status: 'pending' | 'processing' | 'ready' | 'failed' | 'rejected' | 'deleted';
+  kind?: 'image' | 'video';
+  ageHours?: number;
+  deletedMinutesAgo?: number | null;
+  providerAssetId?: string | null;
+}): Promise<string> {
+  const rows = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+       mime, bytes, created_at, deleted_at)
+    select ${demoTenantId}::uuid, u.id, ${values.kind ?? 'image'},
+           ${values.kind === 'video' ? 'post' : 'avatar'}, ${values.status},
+           ${values.providerAssetId ? 'fake' : 'supabase'}, ${values.providerAssetId ?? null},
+           ${values.providerAssetId ? `fake-playback-${values.providerAssetId}` : null},
+           ${values.kind === 'video' ? 'video/mp4' : 'image/jpeg'}, 1024,
+           now() - make_interval(hours => ${values.ageHours ?? 0}::int),
+           case when ${values.deletedMinutesAgo ?? null}::int is null then null
+                else now() - make_interval(mins => ${values.deletedMinutesAgo ?? null}::int) end
+      from public.users u where u.email = ${MEMBER_EMAIL}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error('could not seed a media asset');
+  createdAssetIds.push(id);
+  return id;
+}
+
+/**
+ * Runs the sweeper until it collects nothing, so a case that counts what a run collected is not
+ * measuring a sibling file's leftovers. The sweeper is global by design; this is the test-side
+ * consequence of that, not a workaround.
+ */
+async function drain(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    const before = await collectableCount();
+    if (before === 0) return;
+    await sweepOrphansJob.handler({});
+  }
+}
+
+/** How many rows the sweeper's own predicate would select right now, asked in the same SQL. */
+async function collectableCount(): Promise<number> {
+  const rows = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.media_assets
+     where (status = 'pending' and created_at < now() - interval '24 hours')
+        or (status in ('deleted','rejected')
+            and coalesce(deleted_at, created_at) < now() - interval '1 hour')`;
+  return rows[0]?.n ?? 0;
+}
+
+async function existingIds(ids: readonly string[]): Promise<number> {
+  const rows = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.media_assets where id = any(${ids as string[]}::uuid[])`;
+  return rows[0]?.n ?? 0;
+}
+
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   memberToken = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
@@ -172,5 +236,127 @@ describe('tracer — an abandoned upload disappears, bytes first, and the run qu
     await sweepOrphansJob.handler({});
     await sweepOrphansJob.handler({});
     expect(await sweepJobs()).toHaveLength(1);
+  });
+});
+
+describe('safety — the sweeper touches ONLY what the two windows name (T-03-53)', () => {
+  it('leaves a `processing` and a `ready` asset alone even at 48 hours old', async () => {
+    const processing = await seedAsset({ status: 'processing', ageHours: 48 });
+    const ready = await seedAsset({ status: 'ready', ageHours: 48 });
+
+    await sweepOrphansJob.handler({});
+
+    // Out of scope by CONSTRUCTION: neither status appears in either window's status list, so no
+    // runtime guard has to remember them and no later edit can invert one.
+    expect(await assetStatus(processing)).toBe('processing');
+    expect(await assetStatus(ready)).toBe('ready');
+  });
+
+  it('keeps a `deleted` asset for the first hour and collects it after it', async () => {
+    const fresh = await seedAsset({ status: 'deleted', ageHours: 5, deletedMinutesAgo: 30 });
+    const stale = await seedAsset({ status: 'deleted', ageHours: 5, deletedMinutesAgo: 90 });
+
+    await sweepOrphansJob.handler({});
+
+    // 30 minutes: a member who removes their photo and puts it back is not racing the collector.
+    expect(await assetStatus(fresh)).toBe('deleted');
+    expect(await assetStatus(stale)).toBeNull();
+  });
+
+  it('collects a `rejected` asset older than an hour', async () => {
+    const rejected = await seedAsset({ status: 'rejected', ageHours: 3 });
+    const freshReject = await seedAsset({ status: 'rejected', ageHours: 0 });
+
+    await sweepOrphansJob.handler({});
+
+    expect(await assetStatus(rejected)).toBeNull();
+    expect(await assetStatus(freshReject)).toBe('rejected');
+  });
+
+  it('measures the age with the DATABASE clock: `deleted_at` wins over `created_at`', async () => {
+    // Created a week ago, soft-deleted a minute ago — the row is young by the window that applies.
+    const id = await seedAsset({ status: 'deleted', ageHours: 168, deletedMinutesAgo: 1 });
+    await sweepOrphansJob.handler({});
+    expect(await assetStatus(id)).toBe('deleted');
+  });
+});
+
+describe('bounded and idempotent — one run cannot stall the worker, and re-running is free', () => {
+  it(`collects exactly MEDIA_SWEEP_BATCH rows per run and the re-armed run takes the rest`, async () => {
+    await drain();
+    const ids: string[] = [];
+    for (let i = 0; i < MEDIA_SWEEP_BATCH + 5; i += 1) {
+      ids.push(await seedAsset({ status: 'rejected', ageHours: 2 }));
+    }
+    expect(await existingIds(ids)).toBe(MEDIA_SWEEP_BATCH + 5);
+
+    await sweepOrphansJob.handler({});
+    expect(await existingIds(ids)).toBe(5);
+
+    await sweepOrphansJob.handler({});
+    expect(await existingIds(ids)).toBe(0);
+  });
+
+  it('re-running over the same set converges: a row whose prefix is already empty is still deleted', async () => {
+    // No object was ever uploaded for this row, so `listObjects` answers an empty prefix. The purge
+    // must still delete the row — otherwise a single failed upload would be collected forever.
+    const id = await seedAsset({ status: 'pending', ageHours: 30 });
+    await sweepOrphansJob.handler({});
+    expect(await assetStatus(id)).toBeNull();
+
+    // And a second run over the same (now empty) set is a no-op rather than an error.
+    await sweepOrphansJob.handler({});
+    expect(await assetStatus(id)).toBeNull();
+  });
+});
+
+describe('the provider path — a collected video does not linger at the vendor', () => {
+  it('deletes the provider asset through the seam, then the row', async () => {
+    resetFakeVideoInternals();
+    try {
+      const providerAssetId = `fake-sweep-${Date.now()}`;
+      const id = await seedAsset({
+        status: 'deleted',
+        kind: 'video',
+        ageHours: 5,
+        deletedMinutesAgo: 120,
+        providerAssetId,
+      });
+
+      await sweepOrphansJob.handler({});
+
+      expect(fakeVideoInternals.deletedAssetIds).toContain(providerAssetId);
+      expect(await assetStatus(id)).toBeNull();
+    } finally {
+      resetFakeVideoInternals();
+    }
+  });
+
+  it('a provider that REFUSES leaves the row for the next run instead of orphaning the asset', async () => {
+    resetFakeVideoInternals();
+    const providerAssetId = `fake-sweep-refused-${Date.now()}`;
+    const id = await seedAsset({
+      status: 'deleted',
+      kind: 'video',
+      ageHours: 5,
+      deletedMinutesAgo: 120,
+      providerAssetId,
+    });
+
+    try {
+      fakeVideoInternals.failDeleteAsset = true;
+      await sweepOrphansJob.handler({});
+      // The row SURVIVES: deleting it here would have left a vendor-side asset nothing can find.
+      expect(await assetStatus(id)).toBe('deleted');
+      expect(fakeVideoInternals.deletedAssetIds).not.toContain(providerAssetId);
+    } finally {
+      fakeVideoInternals.failDeleteAsset = false;
+    }
+
+    // …and the next run, once the provider answers again, collects it.
+    await sweepOrphansJob.handler({});
+    expect(fakeVideoInternals.deletedAssetIds).toContain(providerAssetId);
+    expect(await assetStatus(id)).toBeNull();
+    resetFakeVideoInternals();
   });
 });
