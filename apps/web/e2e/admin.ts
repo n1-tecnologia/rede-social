@@ -306,6 +306,27 @@ export async function seedVideoAsset(
 }
 
 /**
+ * Seeds `count` `ready` videos in one statement (03-07 pagination): the keyset page is 25, so a
+ * "Carregar mais" case needs more rows than a per-row insert loop should pay for.
+ */
+export async function seedVideoAssets(
+  tenantSlug: string,
+  email: string,
+  count: number,
+): Promise<void> {
+  await sql()`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+       mime, bytes, duration_seconds, aspect_ratio, filename, created_at, ready_at)
+    select t.id, u.id, 'video', 'post', 'ready', 'fake',
+           'fake-e2e-bulk-' || g::text, 'fake-playback-bulk-' || g::text,
+           'video/mp4', 1048576, 5, '16:9', 'lote-' || g::text || '.mp4',
+           now() - (g || ' seconds')::interval, now()
+      from generate_series(1, ${count}) g, public.tenants t, public.users u
+     where t.slug = ${tenantSlug} and u.email = ${email}`;
+}
+
+/**
  * Flips a video asset to `ready` with a playback id, the way the provider's webhook job would
  * (03-06's `kernel.media-provider-event`). The fake provider already schedules that job on its own;
  * this is the deterministic handle for a spec that must not wait on a worker poll.

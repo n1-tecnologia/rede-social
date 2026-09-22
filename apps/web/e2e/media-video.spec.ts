@@ -8,6 +8,7 @@ import {
   markVideoReady,
   newestVideoAsset,
   seedVideoAsset,
+  seedVideoAssets,
 } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 import { ensureWorker } from './worker';
@@ -38,6 +39,41 @@ function adminGroup(page: Page) {
 
 function mediaRow(page: Page) {
   return page.locator('main a[href="/configuracoes/midia"]');
+}
+
+/**
+ * Picks a video the way the admin does: tap the primary CTA, answer the OS picker.
+ *
+ * It is also the HYDRATION GATE. The route has a `loading.tsx`, so the client island mounts behind a
+ * Suspense boundary; a bare `setInputFiles` can land on server-rendered HTML where nothing is
+ * listening and the pick is silently lost (the same trap `media-fixtures.ts` documents for the photo
+ * zone). `waitForEvent('filechooser')` cannot resolve until React's own `onClick` has run, so the
+ * file is only handed over once the zone is genuinely interactive.
+ */
+async function pickVideo(
+  page: Page,
+  file: string | { name: string; mimeType: string; buffer: Buffer },
+): Promise<void> {
+  const opening = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Enviar vídeo' }).click();
+  await (await opening).setFiles(file);
+}
+
+/**
+ * What a role that may not see the media screen gets. The assertion is on the RENDERED SCREEN, not
+ * on `response.status()`: the route has a `loading.tsx`, so Next streams it and the shell commits
+ * `200` before the server component reaches `notFound()`. The status of a streamed shell is an
+ * implementation detail of rendering; what the isolation rule actually promises is that the screen
+ * is not there and no refusal is explained.
+ */
+async function expectNotFound(page: Page): Promise<void> {
+  await expect(page.locator('[data-testid="media-library"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="media-skeleton"]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Mídia' })).toHaveCount(0);
+  await expect(page.locator('#video-dropzone')).toHaveCount(0);
+  // Never a 403 screen: the repo's isolation convention is one indistinguishable miss.
+  await expect(page.getByText('Acesso negado')).toHaveCount(0);
+  await expect(page.getByText(/403|Forbidden|permiss/i)).toHaveCount(0);
 }
 
 test.describe('MEDIA-03 — the admin media screen', () => {
@@ -87,11 +123,8 @@ test.describe('MEDIA-03 — the admin media screen', () => {
     await expect(page.getByText('Editar perfil')).toBeVisible();
     await expect(page.getByText('Em breve')).toBeVisible();
 
-    const response = await page.goto('/configuracoes/midia');
-    expect(response?.status()).toBe(404);
-    await expect(page.locator('[data-testid="media-library"]')).toHaveCount(0);
-    // Never a 403 screen: the repo's isolation convention is one indistinguishable miss.
-    await expect(page.getByText('Acesso negado')).toHaveCount(0);
+    await page.goto('/configuracoes/midia');
+    await expectNotFound(page);
   });
 
   test('a support_tenant is refused exactly like a member', async ({ page }) => {
@@ -101,9 +134,8 @@ test.describe('MEDIA-03 — the admin media screen', () => {
     await expect(adminGroup(page)).toHaveCount(0);
     await expect(mediaRow(page)).toHaveCount(0);
 
-    const response = await page.goto('/configuracoes/midia');
-    expect(response?.status()).toBe(404);
-    await expect(page.locator('[data-testid="media-library"]')).toHaveCount(0);
+    await page.goto('/configuracoes/midia');
+    await expectNotFound(page);
   });
 
   test('the library lists the community videos newest-first with their real statuses', async ({
@@ -178,6 +210,28 @@ test.describe('MEDIA-03 — the admin media screen', () => {
     await expect(row).not.toContainText('video.asset.errored');
   });
 
+  test('pagination is the directory contract: 25 rows, then "Carregar mais" appends the rest', async ({
+    page,
+  }) => {
+    await seedVideoAssets(DEMO_SLUG, users.demoAdmin, 27);
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/configuracoes/midia');
+
+    const rows = page.locator('[data-testid="media-row"]');
+    await expect(rows).toHaveCount(25);
+
+    const more = page.getByRole('button', { name: 'Carregar mais' });
+    await expect(more).toBeVisible();
+    await more.click();
+
+    // APPENDS — the first page's rows keep their order and their DOM position.
+    await expect(rows).toHaveCount(27);
+    await expect(rows.nth(0)).toContainText('lote-1.mp4');
+    // The button is gone exactly when the cursor is exhausted; it never comes back empty.
+    await expect(more).toHaveCount(0);
+  });
+
   test('a rejected row reads "Recusado" — the duration cap refusal', async ({ page }) => {
     await seedVideoAsset(DEMO_SLUG, users.demoAdmin, {
       status: 'rejected',
@@ -237,7 +291,7 @@ test.describe('MEDIA-03 — the upload and the player', () => {
     const requests = recordRequests(page);
     await page.goto('/configuracoes/midia');
 
-    await page.locator('#video-dropzone').setInputFiles(SAMPLE_MP4);
+    await pickVideo(page, SAMPLE_MP4);
 
     // The row enters the list with the warning pill as soon as the provider has the bytes.
     const processing = page.locator('[data-testid="media-row"][data-status="processing"]');
@@ -275,7 +329,7 @@ test.describe('MEDIA-03 — the upload and the player', () => {
       'video/mp4,video/quicktime',
     );
 
-    await page.locator('#video-dropzone').setInputFiles({
+    await pickVideo(page, {
       name: 'meme.gif',
       mimeType: 'image/gif',
       buffer: Buffer.from('GIF89a', 'latin1'),

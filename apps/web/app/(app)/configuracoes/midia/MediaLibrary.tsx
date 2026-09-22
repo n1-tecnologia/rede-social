@@ -7,6 +7,7 @@ import {
   Card,
   ConfirmDialog,
   EmptyState,
+  Skeleton,
   useMediaQuery,
   useToast,
 } from '@tria/ui';
@@ -26,6 +27,33 @@ const POLL_CEILING_MS = 5 * 60 * 1000;
 /** The two statuses that can still change on their own. */
 function isPending(asset: MediaAsset): boolean {
   return asset.status === 'pending' || asset.status === 'processing';
+}
+
+/** Three rows (E6/loading) — the directory's eight, at the size this list actually opens at. */
+const SKELETON_ROWS = [0, 1, 2];
+
+/**
+ * The library's loading shape, shared with `loading.tsx` so the route-level shell and any in-page
+ * load look identical — the same rule `MembersSkeleton` follows for the directory (03-05). The
+ * vocabulary is the row's: a `w-24 aspect-video` thumbnail block and two text bars, never a spinner.
+ */
+export function MediaLibrarySkeleton() {
+  return (
+    <div aria-busy data-testid="media-skeleton" className="flex flex-col">
+      {SKELETON_ROWS.map((index) => (
+        <div
+          key={index}
+          className="flex min-h-14 items-center gap-3 border-b border-divider px-4 py-3 last:border-0"
+        >
+          <Skeleton variant="rect" className="w-24 shrink-0 rounded-lg aspect-video" />
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <Skeleton variant="text" width="55%" className="h-3.5" />
+            <Skeleton variant="text" width="35%" className="h-3" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export interface MediaLibraryProps {
