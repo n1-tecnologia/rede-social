@@ -229,6 +229,69 @@ Phase 2's four blocked items. Steps:
    Record the outcome here, including whether Mux's `test: true` assets (which this codebase sets
    outside production) behaved as documented — watermarked, 10 seconds, deleted after 24 h.
 
+## Phase 3 runtime state (media & member profiles, 03-01 … 03-08)
+
+Phase 3 creates state **outside git**. Everything below is applied by `supabase db push`, so a
+hosted deploy must **run `supabase db push` BEFORE the `api`/`worker` revision is rolled out** — the
+bucket row, the two extensions and the profile backfill all come from migrations, and an API that
+boots first answers `POST /v1/media/uploads` with a 500 against a bucket that does not exist yet.
+
+**1. Stored data (new tables).**
+
+| Table | Migration | Notes |
+|---|---|---|
+| `media_assets` | `20260921182418_media_assets.sql` | every upload of every kind; one tenant-wide `select` policy carrying `deleted_at is null`, every write through the admin lane |
+| `member_profiles` | `20260921190226_member_profiles.sql` | one row per membership; created going forward by the `member_profiles_from_membership` trigger and **backfilled for existing memberships by `20260921190227_member_profiles_search.sql`**. The backfill is `on conflict (membership_id) do nothing`, so re-applying it is harmless |
+| `media_provider_events` | `20260922020438_media_provider_events.sql` | the webhook replay defence, keyed by the PROVIDER's event id. No `tenant_id`, RLS with **zero policies** — admin lane only |
+
+**2. Live service configuration (not in the database schema).**
+
+- **The private `media` Storage bucket.** Local comes from `[storage.buckets.media]` in
+  `supabase/config.toml`; hosted comes from `supabase/migrations/20260921182426_media_bucket.sql`
+  (widened for the fake provider's two video mimes by `20260922020621_media_bucket_video.sql`).
+  **The two must agree**: the API's 413 threshold and its accepted mime list are pinned to the
+  bucket's own `file_size_limit` (50 MiB) and `allowed_mime_types` (exactly the `MEDIA_LIMITS` union
+  in `@tria/contracts/media`), and `supabase/tests/070-media-bucket.sql` pins that set so neither a
+  widening nor a narrowing passes silently. `supabase config push` does **not** create buckets.
+- **The `unaccent` and `pg_trgm` extensions**, created into schema `extensions` by
+  `20260921190227_member_profiles_search.sql` together with the `app.imm_unaccent(text)` IMMUTABLE
+  wrapper and the GIN trigram index behind the directory's accent-insensitive search. Without them
+  `GET /v1/members?q=…` cannot be planned at all.
+
+**3. Secrets.** The five Mux entries plus the `VIDEO_PROVIDER` selector — see
+[Video (MEDIA-03)](#video-media-03-d-43d-44) above. `VIDEO_PROVIDER` defaults to `fake` and
+`assertProductionEnv()` refuses a `mux` selection missing any of the five at boot, so a
+half-configured revision fails its startup probe instead of handing out upload URLs it cannot
+confirm.
+
+**4. OS-registered state: none.** Phase 3 introduces **no scheduler, no cron and no new service**.
+Its three background jobs — `kernel.media-derive-variants` (03-01),
+`kernel.media-provider-event` (03-06) and `kernel.media-sweep-orphans` (03-08) — all run in the
+existing `ROLE=worker` Cloud Run service. The sweeper paces itself with a deferred `startAfter`
+re-arm under a constant `singletonKey`, the `kernel.domain-verify` pattern; `boss.schedule()` stays
+unused. The worker arms it once at start, and every run queues the next one an hour later, so
+restarting the worker is the only operational action it ever needs.
+
+### Phase 3's known-blocked verifications (Phase 01.1)
+
+Two checks could not be closed in Phase 3 and are recorded as **blocked, not passed** — the honest
+analogue of Phase 2's four blocked items ("UAT partial — 9/13 passed, 4 blocked on Phase 01.1").
+`apps/web/e2e/phase3-smoke.spec.ts` annotates both in its own run output as well.
+
+| # | Blocked verification | Why it cannot be closed here | How to close it |
+|---|---|---|---|
+| 1 | **Real-device HLS playback** | Playwright bundles Chromium, which cannot stand in for iOS Safari's HLS stack — the same class of finding as 02-11's standalone-install check. The local fake also mints non-JWT thumbnail tokens, so `@mux/mux-player` never derives a poster and only the no-poster branch is ever exercised (broken-windows 14). | After step 6 of the Mux runbook: as `admin_tenant`, upload a phone-recorded HEVC video, confirm the "Processando" placeholder, then confirm playback **with a thumbnail** on a real iPhone (Safari) and a real Android device (Chrome). |
+| 2 | **A real Mux transcode** | No Mux account and no GCP Secret Manager exist yet (Phase 01.1 is deferred to the end of the milestone), so every automated proof in Phase 3 runs against `VIDEO_PROVIDER=fake`. The Mux adapter is written and typed but has never run against a real account (broken-windows 12). | Run the seven-step Mux runbook above, set `VIDEO_PROVIDER=mux`, and upload one real video end to end: `video.asset.ready` must land on `POST /v1/webhooks/mux` and flip the row to `ready` with a `playback_id`. |
+
+**Video vendor pricing — the STATE blocker "[Phase 3]: Video vendor pricing is LOW confidence" is
+CLOSED by published figures** (RESEARCH R-01): Mux encoding is free at `video_quality: 'basic'`, the
+first **100,000** delivery minutes per month are free, and storage is about USD **0.0028**/min/month
+at 1080p — so a 300-minute pilot library costs roughly **USD 1/month**, against **Cloudflare
+Stream's USD 5/month floor** (USD 5 per 1,000 minutes stored). Mux is therefore the pilot choice and
+Cloudflare Stream stays the documented alternative behind the same seam. Assumption **A6** flags
+these as *published* rates for a Brazilian account with no negotiated contract: **re-verify them in
+the dashboard at account creation** (step 1 of the runbook).
+
 ## Supabase hosted auth settings (Phase 2)
 
 **Email OTP Expiration = 86400** (24 h) on the hosted projects — Dashboard → Authentication →

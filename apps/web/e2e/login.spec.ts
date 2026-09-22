@@ -22,16 +22,19 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     expect(cookies.find((c) => c.name === 'tenant_slug')).toBeUndefined();
   });
 
-  test('a seeded member logs in and lands on /inicio with tenant, role and e-mail', async ({
+  test('a seeded member logs in and lands on /inicio, with the identity on /perfil', async ({
     page,
     context,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD);
     await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo');
-    // D-42: role and e-mail live on the profile page (the Perfil tab), not on the home.
+    // D-42: the signed-in identity lives on the profile page (the Perfil tab), not on the home.
+    // The e-mail is what proves WHICH identity landed there. The role pill this line used to look
+    // for was deliberately removed from `/perfil` in 03-05 (UI-D-01/D-45: a profile is a person,
+    // not a rank), so it is asserted ABSENT instead — a removal worth keeping is worth pinning.
     await page.goto('/perfil');
-    await expect(page.getByText('Membro', { exact: true })).toBeVisible();
     await expect(page.getByText(users.demoMember)).toBeVisible();
+    await expect(page.getByText('Membro', { exact: true })).toHaveCount(0);
 
     // T-02-01: the session lives in HttpOnly cookies set by the server, never in client JS.
     const session = (await context.cookies()).filter((c) => c.name.startsWith('sb-'));

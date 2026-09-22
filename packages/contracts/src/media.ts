@@ -237,7 +237,12 @@ export const mediaListQuerySchema = z
     kind: z.enum(MEDIA_KINDS).optional(),
     purpose: z.enum(MEDIA_PURPOSES).optional(),
     cursor: z.string().max(MEDIA_MAX_CURSOR_LENGTH).optional(),
-    limit: z.coerce.number().int().min(1).max(MEDIA_LIST_MAX_PAGE_SIZE).default(MEDIA_LIST_PAGE_SIZE),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(MEDIA_LIST_MAX_PAGE_SIZE)
+      .default(MEDIA_LIST_PAGE_SIZE),
   })
   .strict();
 export type MediaListQuery = z.infer<typeof mediaListQuerySchema>;

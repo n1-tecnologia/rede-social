@@ -113,9 +113,13 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
       timeout: 20_000,
     });
-    // D-42: the role lives on the profile page now, not on the home.
+    // D-42: the new member's own identity lives on the profile page, not on the home — and since
+    // 03-05 that screen carries a display name and no role word at all (UI-D-01/D-45), so the name
+    // the form supplied is the witness and the role pill is asserted absent.
     await page.goto('/perfil');
-    await expect(page.getByText('Membro', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Perfil');
+    await expect(page.getByText('Pessoa de Teste').first()).toBeVisible();
+    await expect(page.getByText('Membro', { exact: true })).toHaveCount(0);
   });
 
   test('2. register -> Sair -> login: the tenant survives the round trip through the HOST', async ({

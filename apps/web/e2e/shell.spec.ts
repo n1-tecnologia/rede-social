@@ -169,14 +169,17 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/configuracoes`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Configurações');
-    await expect(page.getByText('Em breve', { exact: true })).toHaveCount(2);
+    // ONE "Em breve" pill is left: 03-04 turned "Editar perfil" into a real navigating row, and
+    // "Notificações" keeps its placeholder until Phase 7 wires push (broken-windows 10).
+    await expect(page.getByText('Em breve', { exact: true })).toHaveCount(1);
+    await expect(page.locator('main a[href="/perfil/editar"]')).toBeVisible();
     await page.locator('main').getByRole('button', { name: 'Sair' }).click();
     await expect(page).toHaveURL(/\/entrar$/);
     await page.goto(`${hosts.demo}/inicio`);
     await expect(page).toHaveURL(/\/entrar$/);
   });
 
-  test('/perfil: e-mail + role, Perfil tab current, TopBar avatar current on the phone', async ({
+  test('/perfil: e-mail, no role pill, Perfil tab current, TopBar avatar current on the phone', async ({
     page,
   }, testInfo) => {
     const mobile = testInfo.project.name === 'mobile-chromium';
@@ -184,7 +187,8 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await page.goto(`${hosts.demo}/perfil`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Perfil');
     await expect(page.getByText(users.demoMember)).toBeVisible();
-    await expect(page.getByText('Membro', { exact: true })).toBeVisible();
+    // The role pill left this screen in 03-05 (UI-D-01/D-45); pinned absent so it cannot return.
+    await expect(page.getByText('Membro', { exact: true })).toHaveCount(0);
 
     const nav = visibleNav(page, mobile);
     await expect(nav.getByRole('link', { name: 'Perfil' })).toHaveAttribute('aria-current', 'page');
