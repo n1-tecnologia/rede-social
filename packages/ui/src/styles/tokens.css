@@ -45,6 +45,12 @@
   --theme-overlay: rgba(10, 18, 32, 0.4);
   --theme-handle: #c3cede;
 
+  /* UI-D-08 — the affective "like" colour. Deliberately NOT the tenant accent (a brand-coloured
+     heart loses a universally-read affordance) and deliberately NOT --color-danger (a Phase 8
+     destructive-palette change must not move it, even though the value matches today). Used only as
+     a filled glyph, never behind text. Same value in dark: the heart does not theme-shift. */
+  --color-like: #ef4444;
+
   /* floating glass bar: in light mode the rim is ink, not light */
   --theme-glass-bar: rgba(255, 255, 255, 0.82);
   --theme-rim-strong: rgba(22, 35, 59, 0.22);
@@ -92,6 +98,10 @@
 
   --theme-overlay: rgba(0, 0, 0, 0.7);
   --theme-handle: #3c4658;
+
+  /* UI-D-08 — identical in dark (see the light block): the like heart is the one colour that does
+     not shift with the theme, because the affordance it carries is read the same way in both. */
+  --color-like: #ef4444;
 
   --theme-glass-bar: rgba(24, 28, 38, 0.82);
   --theme-rim-strong: rgba(255, 255, 255, 0.22);
@@ -171,6 +181,9 @@
 
   --color-success: #16a34a;
   --color-danger: #ef4444;
+  /* UI-D-08 — its OWN declaration, never `var(--color-danger)`: text-like / fill-like / bg-like
+     compile from here, and the destructive palette can move without moving the heart. */
+  --color-like: #ef4444;
   --color-warning: #d97706;
   --color-info: #2563eb;
 
