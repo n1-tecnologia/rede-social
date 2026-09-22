@@ -1,0 +1,876 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIA — Fase 4 · telas [designed] (mockup estático para revisão do time de design)</title>
+<style>
+/* =====================================================================================
+   0. NENHUM ASSET EXTERNO. Um arquivo, zero rede: nenhuma fonte remota, nenhum script
+      remoto, nenhuma folha de estilo remota. Manrope aparece se estiver instalada na
+      máquina (`local()` abaixo); sem ela o fallback do sistema renderiza com as MESMAS
+      medidas de tipo. É de propósito — o arquivo pode ser aberto offline e enviado por
+      e-mail ao time de design como está, e a revisão é de layout/cor/copy, não de
+      renderização de webfont.
+
+   1. TOKENS — packages/ui/src/styles/tokens.css copiado verbatim (mesmos nomes, mesmos
+      valores, mesmas duas camadas). Inclui o ÚNICO token novo da Fase 4: --color-like.
+   ===================================================================================== */
+@font-face { font-family: "Manrope"; src: local("Manrope"), local("Manrope Regular"); font-weight: 400; }
+@font-face { font-family: "Manrope"; src: local("Manrope Bold"), local("Manrope-Bold"); font-weight: 700; }
+
+:root, [data-theme="light"] {
+  --theme-bg: #f5f7fb;
+  --theme-bg-secondary: #ffffff;
+  --theme-bg-tertiary: #e9eef7;
+  --theme-bg-input: #eef2f9;
+  --theme-bg-hover: rgba(31, 58, 95, 0.04);
+  --theme-bg-active: rgba(31, 58, 95, 0.08);
+  --theme-text: #16233b;
+  --theme-text-secondary: #51617c;
+  --theme-text-tertiary: #8595ad;
+  --theme-text-inverse: #ffffff;
+  --theme-border: rgba(22, 35, 59, 0.1);
+  --theme-border-secondary: rgba(22, 35, 59, 0.16);
+  --theme-divider: rgba(22, 35, 59, 0.06);
+  --theme-card: #ffffff;
+  --theme-card-hover: #f8fafd;
+  --theme-overlay: rgba(10, 18, 32, 0.4);
+  --theme-handle: #c3cede;
+  --theme-glass-bar: rgba(255, 255, 255, 0.82);
+  --theme-chip: rgba(22, 35, 59, 0.06);
+  /* UI-D-08 — o único token novo da Fase 4. Não é o accent do tenant e não é o destrutivo. */
+  --color-like: #ef4444;
+}
+:root {
+  --brand-primary: #2e6fd0;
+  --brand-secondary: #5b9cf8;
+  --brand-on-primary: #ffffff;
+  --brand-primary-dark: #5b9cf8;
+  --brand-on-primary-dark: #0f1118;
+  --color-success: #16a34a;
+  --color-danger: #ef4444;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
+  --safe-top: 12px;
+  --safe-bottom: 8px;
+  --nav-height: 64px;
+}
+[data-theme="dark"] {
+  --theme-bg: #0f1118;
+  --theme-bg-secondary: #181c26;
+  --theme-bg-tertiary: #232937;
+  --theme-bg-input: #232937;
+  --theme-bg-hover: rgba(255, 255, 255, 0.06);
+  --theme-bg-active: rgba(255, 255, 255, 0.1);
+  --theme-text: #f2f5fa;
+  --theme-text-secondary: #a6b1c4;
+  --theme-text-tertiary: #64718a;
+  --theme-text-inverse: #0f1118;
+  --theme-border: rgba(255, 255, 255, 0.08);
+  --theme-border-secondary: rgba(255, 255, 255, 0.12);
+  --theme-divider: rgba(255, 255, 255, 0.05);
+  --theme-card: #181c26;
+  --theme-card-hover: #232937;
+  --theme-overlay: rgba(0, 0, 0, 0.7);
+  --theme-handle: #3c4658;
+  --theme-glass-bar: rgba(24, 28, 38, 0.82);
+  --theme-chip: rgba(255, 255, 255, 0.1);
+  --color-like: #ef4444;
+}
+* {
+  --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+}
+[data-theme="dark"], [data-theme="dark"] * {
+  --brand-accent: var(--brand-primary-dark);
+  --brand-on-accent: var(--brand-on-primary-dark);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
+}
+
+/* =====================================================================================
+   2. BASE + CHROME DO MOCKUP (barra de controles, cabeçalhos de seção) — fora do produto
+   ===================================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { font-family: Manrope, system-ui, -apple-system, sans-serif; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--theme-bg); color: var(--theme-text); font-size: 14px; line-height: 1.5; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.i-16 { width: 16px; height: 16px; } .i-20 { width: 20px; height: 20px; } .i-28 { width: 28px; height: 28px; } .i-40 { width: 40px; height: 40px; }
+
+.toolbar { position: sticky; top: 0; z-index: 200; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 24px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); }
+.toolbar .brandname { font-weight: 700; letter-spacing: -0.02em; font-size: 16px; }
+.toolbar .brandname small { font-weight: 400; color: var(--theme-text-secondary); margin-left: 8px; font-size: 12px; }
+.toolbar label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--theme-text-secondary); }
+.toolbar input[type="color"] { width: 32px; height: 32px; padding: 0; border: 1px solid var(--theme-border); border-radius: 8px; background: none; }
+.toolbar .preset, .toolbar .toggle { height: 32px; padding: 0 12px; border-radius: 999px; background: var(--theme-bg-input); font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.toolbar .toggle { background: var(--theme-bg-tertiary); color: var(--theme-text); }
+.toolbar .preset:hover { background: var(--theme-bg-tertiary); }
+.toolbar nav { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; width: 100%; }
+.toolbar nav a { color: var(--theme-text-tertiary); } .toolbar nav a:hover { color: var(--brand-accent); }
+.readout { font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+
+main.sheet { max-width: 1320px; margin: 0 auto; padding: 24px 24px 120px; }
+section.screen { padding: 40px 0; border-bottom: 1px solid var(--theme-divider); }
+section.screen > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+section.screen > header h2 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+section.screen > header code { font-size: 12px; color: var(--theme-text-tertiary); background: var(--theme-bg-input); padding: 2px 8px; border-radius: 6px; }
+section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(--theme-text-secondary); max-width: 960px; }
+.frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.caption { font-size: 12px; color: var(--theme-text-tertiary); margin: 8px 0 0; max-width: 390px; }
+.note { font-size: 12px; color: var(--theme-text-secondary); margin: 12px 0 0; max-width: 960px; }
+.stack { display: flex; flex-direction: column; }
+
+/* =====================================================================================
+   3. MOLDURAS — telefone 390px e coluna desktop de 680px
+   ===================================================================================== */
+.phone { width: 390px; height: 800px; border: 1px solid var(--theme-border-secondary); border-radius: 40px; overflow: hidden; background: var(--theme-bg); position: relative; flex: none; display: flex; flex-direction: column; }
+.phone .body { flex: 1; overflow: auto; }
+.phone .bottomnav { position: absolute; left: 14px; width: calc(100% - 28px); bottom: calc(var(--safe-bottom) + 8px); border-radius: 999px; padding: 4px 6px; display: flex; z-index: 50; background: var(--theme-glass-bar); border: 1px solid var(--theme-border-secondary); box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16); backdrop-filter: blur(2px) saturate(1.5); }
+.bottomnav a { flex: 1; display: grid; place-items: center; padding: 6px 0; }
+.bottomnav .chip { width: 50px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.bottomnav a[aria-current="page"] .chip { background: var(--theme-chip); color: var(--brand-accent); }
+.desk { width: 100%; max-width: 900px; min-height: 520px; border: 1px solid var(--theme-border-secondary); border-radius: 16px; background: var(--theme-bg); padding: 24px; display: flex; justify-content: center; }
+.desk > .column { width: 100%; max-width: 680px; }
+
+/* cabeçalho de página fixo (PageHeader stickyTop="0px") */
+.page-header { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 4px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); }
+.page-header h1 { flex: 1; margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+
+/* =====================================================================================
+   4. PRIMITIVAS — @tria/ui (Button, IconButton, Card, Textarea, EmptyState, BottomSheet,
+      ConfirmDialog, Avatar, Skeleton). Mesmas medidas, escrito em CSS puro.
+   ===================================================================================== */
+.icon-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--theme-text); flex: none; }
+.icon-btn:hover { background: var(--theme-bg-hover); }
+.icon-btn.tertiary { color: var(--theme-text-tertiary); }
+.btn { height: 44px; padding: 0 20px; border-radius: 12px; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn.sm { height: 36px; padding: 0 14px; border-radius: 10px; }
+.btn.brand { background: var(--brand-accent); color: var(--brand-on-accent); }
+.btn.brand:hover { background: var(--brand-primary-hover); }
+.btn.outline { border: 1px solid var(--theme-border-secondary); color: var(--theme-text); }
+.btn.ghost { color: var(--theme-text-secondary); }
+.btn.ghost.danger { color: var(--color-danger); }
+.btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.btn[aria-busy="true"] { opacity: 0.75; }
+.card { background: var(--theme-card); border-radius: 12px; box-shadow: 0 1px 3px rgba(22, 35, 59, 0.06); overflow: hidden; }
+[data-theme="dark"] .card { border: 1px solid var(--theme-border); }
+.avatar { width: 32px; height: 32px; border-radius: 999px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.t12 { font-size: 12px; } .t12b { font-size: 12px; font-weight: 700; }
+.t14 { font-size: 14px; } .t14b { font-size: 14px; font-weight: 700; }
+.t16 { font-size: 16px; } .t16b { font-size: 16px; font-weight: 700; }
+.sec { color: var(--theme-text-secondary); } .ter { color: var(--theme-text-tertiary); } .dgr { color: var(--color-danger); }
+.num { font-variant-numeric: tabular-nums; }
+.trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* =====================================================================================
+   5. COMPOSER /criar e /post/[id]/editar — [designed], D-57 / UI-D-11 / UI-D-17
+   ===================================================================================== */
+.composer { display: flex; flex-direction: column; gap: 24px; padding: 16px; }
+.field-label { font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); margin-bottom: 8px; }
+.textarea { width: 100%; min-height: 104px; resize: none; background: var(--theme-bg-input); border: 1px solid var(--theme-border); border-radius: 12px; padding: 12px 14px; font-size: 16px; line-height: 1.5; color: var(--theme-text); }
+.textarea::placeholder { color: var(--theme-text-tertiary); }
+.textarea.focused { border-color: var(--brand-accent); box-shadow: 0 0 0 2px var(--brand-primary-soft); }
+.counter { margin-top: 6px; text-align: right; font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+.picker { width: 100%; min-height: 56px; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--theme-border); border-radius: 12px; background: var(--theme-bg-secondary); text-align: left; }
+.picker:hover { background: var(--theme-card-hover); }
+.picker[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.picker .lead { width: 40px; height: 40px; border-radius: 12px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.dropzone { border: 1px dashed var(--theme-border-secondary); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--theme-text-tertiary); background: var(--theme-bg-secondary); }
+.helper { font-size: 14px; color: var(--theme-text-secondary); margin-top: 8px; }
+.thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.thumb { position: relative; aspect-ratio: 1 / 1; border-radius: 12px; overflow: hidden; background: var(--theme-bg-tertiary); display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.thumb .rm { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: grid; place-items: center; }
+.thumb .rm span { width: 28px; height: 28px; border-radius: 999px; background: rgba(10, 18, 32, 0.6); color: #ffffff; display: grid; place-items: center; }
+.thumb .drag { position: absolute; bottom: 4px; left: 4px; width: 28px; height: 28px; border-radius: 8px; background: rgba(10, 18, 32, 0.45); color: #ffffff; display: grid; place-items: center; }
+.video-prev { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: var(--theme-bg-tertiary); display: grid; place-items: center; color: var(--theme-text-tertiary); margin-top: 12px; }
+.progress { height: 4px; border-radius: 999px; background: var(--theme-bg-tertiary); overflow: hidden; margin-top: 12px; }
+.progress > i { display: block; height: 100%; background: var(--brand-accent); }
+.alert { border: 1px solid color-mix(in oklch, var(--color-danger), transparent 70%); background: color-mix(in oklch, var(--color-danger), transparent 92%); color: var(--color-danger); border-radius: 12px; padding: 12px 14px; font-size: 14px; display: flex; gap: 10px; align-items: flex-start; }
+
+/* linha de prévia do link no composer (UI-D-11) — inerte, sem card e sem esqueleto */
+.preview-row { display: flex; align-items: center; gap: 12px; border: 1px solid var(--theme-border); border-radius: 12px; padding: 12px 14px; background: var(--theme-bg-secondary); }
+
+/* =====================================================================================
+   6. LinkPreviewCard — [designed], UI-D-11 / UI-D-12
+   ===================================================================================== */
+.link-card { display: block; border: 1px solid var(--theme-border); border-radius: 12px; overflow: hidden; background: var(--theme-bg-secondary); max-width: 340px; }
+.link-card:hover { background: var(--theme-card-hover); }
+.link-card .img { position: relative; aspect-ratio: 16 / 9; background: var(--theme-bg-tertiary); display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.link-card .body { padding: 12px 16px; display: flex; flex-direction: column; gap: 4px; }
+.link-card .title { font-size: 14px; font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.link-card .desc { font-size: 14px; color: var(--theme-text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.play-badge { position: absolute; width: 56px; height: 56px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); color: #ffffff; display: grid; place-items: center; }
+.play-badge svg { fill: currentColor; stroke: none; }
+
+/* =====================================================================================
+   7. AttachmentRow — [designed], UI-D-23
+   ===================================================================================== */
+.attach { display: flex; align-items: center; gap: 12px; min-height: 56px; border: 1px solid var(--theme-border); border-radius: 12px; padding: 12px; background: var(--theme-bg-secondary); max-width: 340px; width: 100%; text-align: left; }
+.attach:hover { background: var(--theme-card-hover); }
+.attach .lead { width: 40px; height: 40px; border-radius: 12px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.attach .body { min-width: 0; flex: 1; }
+.attach[aria-busy="true"] { opacity: 0.7; cursor: progress; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* =====================================================================================
+   8. FAB, menu "…", diálogos, estado vazio
+   ===================================================================================== */
+.fab { position: absolute; right: 16px; bottom: calc(var(--safe-bottom) + 84px); width: 56px; height: 56px; border-radius: 999px; background: var(--brand-accent); color: var(--brand-on-accent); display: grid; place-items: center; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.28); z-index: 60; }
+.fab:active { transform: scale(0.95); }
+.scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 70; }
+.sheet-menu { position: absolute; left: 0; right: 0; bottom: 0; z-index: 80; background: var(--theme-bg-secondary); border-radius: 16px 16px 0 0; padding: 8px 0 calc(var(--safe-bottom) + 8px); }
+.sheet-menu .handle { width: 40px; height: 4px; border-radius: 999px; background: var(--theme-handle); margin: 4px auto 8px; }
+.sheet-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px; font-size: 14px; text-align: left; }
+.sheet-row:hover { background: var(--theme-bg-hover); }
+.sheet-row.danger { color: var(--color-danger); }
+.dialog { width: 320px; background: var(--theme-bg-secondary); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 24px 48px rgba(15, 23, 42, 0.24); }
+[data-theme="dark"] .dialog { border: 1px solid var(--theme-border); }
+.dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.empty { padding: 64px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.empty .circle { width: 64px; height: 64px; border-radius: 999px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; }
+.empty p { margin: 0; max-width: 260px; font-size: 14px; color: var(--theme-text-secondary); }
+.empty h3 { margin: 0; font-size: 16px; font-weight: 700; }
+
+/* cartão de publicação usado apenas como contexto ao redor das peças revisadas */
+.post .head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; }
+.post .media { aspect-ratio: 4 / 5; background: var(--theme-bg-tertiary); display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.post .cap { padding: 12px 16px 0; font-size: 16px; }
+.post .acts { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px 12px; }
+.post .acts .left { display: flex; margin-left: -10px; }
+.liked { color: var(--color-like); }
+.liked svg { fill: var(--color-like); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-images" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M13.2 6.3 7 12.5a3.5 3.5 0 0 0 5 5l6.9-6.9a5 5 0 0 0-7-7L5 10.4a6.5 6.5 0 0 0 9.2 9.2l5.5-5.5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h6"/><path d="M9 13h6"/><path d="M9 17h4"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4v16l14-8z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16V4a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 5.7a5 5 0 0 0-7 0l-.9.9-.9-.9a5 5 0 0 0-7 7l8 8 8-8a5 5 0 0 0 0-7Z"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 20.5l1.6-4.8A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5Z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8Z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.2"/><circle cx="15" cy="6" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="18" r="1.2"/><circle cx="15" cy="18" r="1.2"/></symbol>
+</svg>
+
+<!-- ============ barra do mockup (não é superfície do produto) ============ -->
+<div class="toolbar" role="region" aria-label="Controles do mockup">
+  <span class="brandname">TRIA · Fase 4 <small>telas [designed] · 04-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
+  <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
+  <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
+  <span>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
+    <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
+    <button class="preset" type="button" data-p="#b91c1c" data-s="#f87171">Vermelho</button>
+  </span>
+  <span class="readout" id="brand-readout"></span>
+  <nav aria-label="Telas">
+    <a href="#criar">/criar</a><a href="#criar-cheio">/criar preenchido</a><a href="#criar-video">/criar com vídeo</a><a href="#criar-desktop">/criar desktop</a><a href="#editar">/post/[id]/editar</a><a href="#entrada">FAB e CTA desktop</a><a href="#link-card">Prévia do link</a><a href="#anexos">Linha de anexo</a><a href="#menu">Menu "…" e diálogos</a>
+  </nav>
+</div>
+
+<main class="sheet">
+
+<!-- ===================================================================================== -->
+<section id="criar" class="screen">
+  <header><h2>Composer — estado inicial</h2><code>/criar · [designed] · D-57, UI-D-17</code>
+    <p>Rota de tela cheia, nunca um bottom sheet (D-57). Cabeçalho fixo com o fechar 44×44, o título 16/700 e o "Publicar" desabilitado enquanto não há legenda nem mídia. O <strong>Textarea</strong> com foco automático é a âncora visual; o "Publicar" é o único preenchimento com a cor da marca na tela. Os dois seletores de mídia são mutuamente exclusivos (D-53) e a linha de anexos vem depois.</p>
+  </header>
+  <div class="frames">
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova publicação</h1>
+          <span class="btn brand sm" aria-disabled="true">Publicar</span>
+        </div>
+        <div class="composer">
+          <div>
+            <textarea class="textarea focused" placeholder="Escreva o que quer contar para a comunidade…" aria-label="Legenda"></textarea>
+            <div class="counter">0/2200</div>
+          </div>
+          <div class="stack" style="gap:8px">
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-images"/></svg></span><span class="t14b">Adicionar fotos</span></button>
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-video"/></svg></span><span class="t14b">Adicionar vídeo</span></button>
+          </div>
+          <div class="stack" style="gap:8px">
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-clip"/></svg></span><span class="t14b">Anexar arquivo</span></button>
+            <p class="helper sec" style="margin:0">PDF de até 25 MB.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova publicação</h1>
+          <span class="btn brand sm" aria-busy="true">Publicando…</span>
+        </div>
+        <div class="composer">
+          <div class="alert" role="alert"><svg class="i i-20"><use href="#i-alert"/></svg><span>Não foi possível publicar. Revise os campos e tente novamente.</span></div>
+          <div>
+            <textarea class="textarea" aria-label="Legenda">Assembleia geral na próxima terça, às 19h, no auditório. Quem não puder ir presencialmente recebe o link por aqui no dia.</textarea>
+            <div class="counter dgr">2200/2200</div>
+          </div>
+          <div class="stack" style="gap:8px">
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-images"/></svg></span><span class="t14b">Adicionar fotos</span></button>
+            <button class="picker" type="button" aria-disabled="true"><span class="lead"><svg class="i i-20"><use href="#i-video"/></svg></span><span class="t14b">Adicionar vídeo</span></button>
+            <p class="helper" style="margin:0">Uma publicação leva fotos ou um vídeo — não os dois.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="caption">À esquerda: nada escrito, "Publicar" desabilitado, contador em 0/2200. À direita: o contador no limite (12/400 <code>text-danger</code>), o seletor de vídeo desabilitado pela regra D-53 com a linha de ajuda logo abaixo, o "Publicando…" com <code>aria-busy</code> e o card de erro <code>role="alert"</code> no topo.</p>
+</section>
+
+<!-- ===================================================================================== -->
+<section id="criar-cheio" class="screen">
+  <header><h2>Composer — fotos escolhidas, prévia de link e anexos</h2><code>/criar · UI-D-11, UI-D-23</code>
+    <p>Miniaturas em grade de 3 colunas com o remover 44×44 e a alça de reordenar; a linha "Prévia do link" aparece assim que uma URL é reconhecida na legenda e é <strong>inerte</strong> — não há card de prévia e não há esqueleto no composer (UI-D-11); os anexos escolhidos aparecem como as mesmas linhas que o cartão renderiza.</p>
+  </header>
+  <div class="frames">
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova publicação</h1>
+          <span class="btn brand sm">Publicar</span>
+        </div>
+        <div class="composer">
+          <div>
+            <textarea class="textarea" aria-label="Legenda">Fotos da confraternização de sábado. A ata completa está no PDF e o vídeo do coral está em tria.example/coral</textarea>
+            <div class="counter">118/2200</div>
+          </div>
+          <div>
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-images"/></svg></span><span class="t14b">Adicionar fotos</span></button>
+            <div class="thumbs">
+              <div class="thumb"><svg class="i i-28"><use href="#i-images"/></svg><button class="rm" type="button" aria-label="Remover foto 1"><span><svg class="i i-16"><use href="#i-x"/></svg></span></button><span class="drag" aria-hidden="true"><svg class="i i-16"><use href="#i-grip"/></svg></span></div>
+              <div class="thumb"><svg class="i i-28"><use href="#i-images"/></svg><button class="rm" type="button" aria-label="Remover foto 2"><span><svg class="i i-16"><use href="#i-x"/></svg></span></button><span class="drag" aria-hidden="true"><svg class="i i-16"><use href="#i-grip"/></svg></span></div>
+              <div class="thumb"><svg class="i i-28"><use href="#i-images"/></svg><button class="rm" type="button" aria-label="Remover foto 3"><span><svg class="i i-16"><use href="#i-x"/></svg></span></button><span class="drag" aria-hidden="true"><svg class="i i-16"><use href="#i-grip"/></svg></span></div>
+            </div>
+            <p class="helper" style="margin-top:8px">Uma publicação leva fotos ou um vídeo — não os dois.</p>
+          </div>
+          <div class="preview-row">
+            <span class="lead" style="width:40px;height:40px;border-radius:12px;background:var(--theme-bg-tertiary);color:var(--theme-text-tertiary);display:grid;place-items:center;flex:none"><svg class="i i-20"><use href="#i-link"/></svg></span>
+            <span class="body" style="min-width:0;flex:1">
+              <span class="t12b sec" style="display:block">Prévia do link</span>
+              <span class="t12 ter" style="display:block">A prévia aparece assim que carregarmos o link.</span>
+            </span>
+            <button class="btn ghost sm" type="button">Remover prévia</button>
+          </div>
+          <div class="stack" style="gap:8px">
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-clip"/></svg></span><span class="t14b">Anexar arquivo</span></button>
+            <div class="attach" style="max-width:none">
+              <span class="lead"><svg class="i i-20"><use href="#i-file"/></svg></span>
+              <span class="body"><span class="t14b trunc" style="display:block">ata-assembleia-2026-03.pdf</span><span class="t12 ter num" style="display:block">PDF · 1,2 MB</span></span>
+              <button class="icon-btn tertiary" type="button" aria-label="Remover anexo"><svg class="i i-20"><use href="#i-x"/></svg></button>
+            </div>
+            <p class="helper sec" style="margin:0">PDF de até 25 MB.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="caption">O único preenchimento com a marca continua sendo o "Publicar" do cabeçalho. Miniatura, alça e remover usam o mesmo cinza de scrim em cima da foto, nunca o accent.</p>
+</section>
+
+<!-- ===================================================================================== -->
+<section id="criar-video" class="screen">
+  <header><h2>Composer — vídeo em envio e em transcodificação</h2><code>/criar · D-53 + estados de upload da Fase 3</code>
+    <p>Escolhido o vídeo, o seletor de fotos fica desabilitado. A barra de progresso de 4px é o segundo lugar da tela onde a marca aparece (lista de accent reservado, item 6). Publicar com o vídeo ainda transcodificando é permitido — a publicação entra no feed no estado "processando".</p>
+  </header>
+  <div class="frames">
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova publicação</h1>
+          <span class="btn brand sm" aria-disabled="true">Publicar</span>
+        </div>
+        <div class="composer">
+          <div>
+            <textarea class="textarea" aria-label="Legenda">Trecho do coral no encerramento.</textarea>
+            <div class="counter">32/2200</div>
+          </div>
+          <div>
+            <button class="picker" type="button" aria-disabled="true"><span class="lead"><svg class="i i-20"><use href="#i-images"/></svg></span><span class="t14b">Adicionar fotos</span></button>
+            <p class="helper" style="margin-top:8px">Uma publicação leva fotos ou um vídeo — não os dois.</p>
+            <div class="video-prev"><svg class="i i-40"><use href="#i-video"/></svg></div>
+            <div class="progress"><i style="width:62%"></i></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+              <span class="t12 ter num" aria-live="polite">62% enviado</span>
+              <button class="btn ghost sm" type="button">Cancelar envio</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova publicação</h1>
+          <span class="btn brand sm">Publicar</span>
+        </div>
+        <div class="composer">
+          <div>
+            <textarea class="textarea" aria-label="Legenda">Trecho do coral no encerramento.</textarea>
+            <div class="counter">32/2200</div>
+          </div>
+          <div>
+            <button class="picker" type="button" aria-disabled="true"><span class="lead"><svg class="i i-20"><use href="#i-images"/></svg></span><span class="t14b">Adicionar fotos</span></button>
+            <div class="video-prev">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;text-align:center">
+                <svg class="i i-28 spin" style="color:var(--brand-accent)"><use href="#i-loader"/></svg>
+                <span class="t14b">Processando o vídeo…</span>
+                <span class="t12 ter">Isso pode levar alguns minutos. Você pode sair desta tela.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="caption">À esquerda o envio (62%, "Cancelar envio", "Publicar" aguardando). À direita a transcodificação, com o mesmo texto que a Fase 3 já usa no player.</p>
+</section>
+
+<!-- ===================================================================================== -->
+<section id="criar-desktop" class="screen">
+  <header><h2>Composer no desktop</h2><code>/criar · ≥ 768px · coluna de 680px, página cheia</code>
+    <p>O composer continua sendo uma página, não um painel: mesma coluna de 680px do resto do app, gutter de 24px, e os seletores de mídia viram <code>FileDropZone</code>. Nada muda de tipografia nem de espaçamento.</p>
+  </header>
+  <div class="frames">
+    <div class="desk">
+      <div class="column">
+        <div class="page-header" style="border-radius:12px 12px 0 0">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova publicação</h1>
+          <span class="btn brand sm">Publicar</span>
+        </div>
+        <div class="composer" style="padding:24px">
+          <div>
+            <textarea class="textarea focused" style="min-height:140px" aria-label="Legenda">Assembleia geral na próxima terça, às 19h, no auditório.</textarea>
+            <div class="counter">56/2200</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div class="dropzone"><svg class="i i-40"><use href="#i-images"/></svg><span class="t14b" style="color:var(--theme-text)">Adicionar fotos</span></div>
+            <div class="dropzone"><svg class="i i-40"><use href="#i-video"/></svg><span class="t14b" style="color:var(--theme-text)">Adicionar vídeo</span></div>
+          </div>
+          <div class="stack" style="gap:8px">
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-clip"/></svg></span><span class="t14b">Anexar arquivo</span></button>
+            <p class="helper sec" style="margin:0">PDF de até 25 MB.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================================== -->
+<section id="editar" class="screen">
+  <header><h2>Edição — o mesmo formulário, pré-preenchido</h2><code>/post/[id]/editar · [designed] · FEED-03, UI-D-15</code>
+    <p>Mesmo <code>ComposerForm</code>, só mudam o título e o rótulo do botão. Excluir <strong>não</strong> vive aqui: fica no menu "…" do cartão. Salvar marca <code>edited_at</code> e o cartão passa a mostrar "editado" ao lado do horário.</p>
+  </header>
+  <div class="frames">
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Editar publicação</h1>
+          <span class="btn brand sm">Salvar alterações</span>
+        </div>
+        <div class="composer">
+          <div>
+            <textarea class="textarea" aria-label="Legenda">Assembleia geral na próxima terça, às 19h, no auditório. Atualizado: a sala mudou para o auditório B.</textarea>
+            <div class="counter">104/2200</div>
+          </div>
+          <div>
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-images"/></svg></span><span class="t14b">Adicionar fotos</span></button>
+            <div class="thumbs">
+              <div class="thumb"><svg class="i i-28"><use href="#i-images"/></svg><button class="rm" type="button" aria-label="Remover foto 1"><span><svg class="i i-16"><use href="#i-x"/></svg></span></button><span class="drag" aria-hidden="true"><svg class="i i-16"><use href="#i-grip"/></svg></span></div>
+              <div class="thumb"><svg class="i i-28"><use href="#i-images"/></svg><button class="rm" type="button" aria-label="Remover foto 2"><span><svg class="i i-16"><use href="#i-x"/></svg></span></button><span class="drag" aria-hidden="true"><svg class="i i-16"><use href="#i-grip"/></svg></span></div>
+            </div>
+          </div>
+          <div class="stack" style="gap:8px">
+            <button class="picker" type="button"><span class="lead"><svg class="i i-20"><use href="#i-clip"/></svg></span><span class="t14b">Anexar arquivo</span></button>
+            <p class="helper sec" style="margin:0">PDF de até 25 MB.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Editar publicação</h1>
+          <span class="btn brand sm" aria-busy="true">Salvando…</span>
+        </div>
+        <div class="composer">
+          <div class="card post" style="margin:0">
+            <div class="head">
+              <div style="display:flex;align-items:center;gap:10px;min-width:0">
+                <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+                <span style="min-width:0">
+                  <span class="t14b trunc" style="display:block">Direção TRIA Demo</span>
+                  <span class="t12 ter" style="display:block">há 2 h <span aria-hidden="true">·</span> editado</span>
+                </span>
+              </div>
+              <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
+            </div>
+            <div class="media"><svg class="i i-40"><use href="#i-images"/></svg></div>
+            <div class="cap">Assembleia geral na próxima terça, às 19h, no auditório.</div>
+            <div class="acts">
+              <span class="left">
+                <button class="icon-btn liked" type="button" aria-label="Descurtir" aria-pressed="true"><svg class="i i-20"><use href="#i-heart"/></svg></button>
+                <button class="icon-btn" type="button" aria-label="Comentar"><svg class="i i-20"><use href="#i-chat"/></svg></button>
+                <button class="icon-btn" type="button" aria-label="Compartilhar"><svg class="i i-20"><use href="#i-send"/></svg></button>
+              </span>
+              <span class="t12 ter num">12 curtidas <span aria-hidden="true">·</span> 3 comentários <span aria-hidden="true">·</span> há 2 h <span aria-hidden="true">·</span> editado</span>
+            </div>
+          </div>
+          <p class="caption" style="max-width:none;margin:0">Contexto: como o cartão fica depois de salvar. "editado" é texto simples colado no horário, sem data própria (UI-D-15), e o coração curtido usa <code>--color-like</code>, nunca a cor da marca nem o token destrutivo (UI-D-08).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================================== -->
+<section id="entrada" class="screen">
+  <header><h2>Entrada do composer — FAB no celular, botão no cabeçalho no desktop</h2><code>[designed] · D-57, UI-D-17, UI-D-20</code>
+    <p>O FAB de 56px fica em <code>bottom: calc(var(--safe-bottom) + 5.25rem)</code>, acima da BottomNav flutuante, e nunca sobe até o título de boas-vindas. No desktop <strong>não existe botão flutuante</strong>: o "Criar publicação" é um <code>Button variant="brand"</code> na linha de cabeçalho do widget. Com o feed vazio e o CTA do estado vazio na tela, o FAB é suprimido.</p>
+  </header>
+  <div class="frames">
+    <div class="phone">
+      <div class="body" style="padding:16px 16px 120px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
+          <div style="width:64px;height:64px;border-radius:16px;background:var(--brand-accent);color:var(--brand-on-accent);display:grid;place-items:center;font-weight:700;font-size:22px">TD</div>
+          <h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.02em">Bem-vindo(a) à TRIA Demo</h1>
+        </div>
+        <div class="card post" style="margin-bottom:12px">
+          <div class="head">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+            </div>
+            <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
+          </div>
+          <div class="media"><svg class="i i-40"><use href="#i-images"/></svg></div>
+          <div class="cap">Fotos da confraternização de sábado.</div>
+          <div class="acts">
+            <span class="left">
+              <button class="icon-btn" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-20"><use href="#i-heart"/></svg></button>
+              <button class="icon-btn" type="button" aria-label="Comentar"><svg class="i i-20"><use href="#i-chat"/></svg></button>
+              <button class="icon-btn" type="button" aria-label="Compartilhar"><svg class="i i-20"><use href="#i-send"/></svg></button>
+            </span>
+            <span class="t12 ter num">8 curtidas <span aria-hidden="true">·</span> há 2 h</span>
+          </div>
+        </div>
+      </div>
+      <button class="fab" type="button" aria-label="Criar publicação"><svg class="i"><use href="#i-plus"/></svg></button>
+      <div class="bottomnav">
+        <a href="#entrada" aria-current="page"><span class="chip"><svg class="i"><use href="#i-home"/></svg></span></a>
+        <a href="#entrada"><span class="chip"><svg class="i"><use href="#i-user"/></svg></span></a>
+      </div>
+    </div>
+
+    <div class="phone">
+      <div class="body" style="padding:16px 16px 120px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
+          <div style="width:64px;height:64px;border-radius:16px;background:var(--brand-accent);color:var(--brand-on-accent);display:grid;place-items:center;font-weight:700;font-size:22px">TD</div>
+          <h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.02em">Bem-vindo(a) à TRIA Demo</h1>
+        </div>
+        <div class="card">
+          <div class="empty">
+            <div class="circle"><svg class="i i-28"><use href="#i-sparkles"/></svg></div>
+            <h3>Nada por aqui ainda</h3>
+            <p>Publique a primeira novidade da comunidade.</p>
+            <button class="btn brand" type="button">Criar publicação</button>
+          </div>
+        </div>
+      </div>
+      <div class="bottomnav">
+        <a href="#entrada" aria-current="page"><span class="chip"><svg class="i"><use href="#i-home"/></svg></span></a>
+        <a href="#entrada"><span class="chip"><svg class="i"><use href="#i-user"/></svg></span></a>
+      </div>
+    </div>
+
+    <div class="desk">
+      <div class="column">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px">
+          <h2 style="margin:0;font-size:16px;font-weight:700">Feed</h2>
+          <button class="btn brand sm" type="button">Criar publicação</button>
+        </div>
+        <div class="card post">
+          <div class="head">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+            </div>
+            <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
+          </div>
+          <div class="media" style="aspect-ratio:1.91/1"><svg class="i i-40"><use href="#i-images"/></svg></div>
+          <div class="cap">Fotos da confraternização de sábado.</div>
+          <div class="acts">
+            <span class="left">
+              <button class="icon-btn" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-20"><use href="#i-heart"/></svg></button>
+              <button class="icon-btn" type="button" aria-label="Comentar"><svg class="i i-20"><use href="#i-chat"/></svg></button>
+              <button class="icon-btn" type="button" aria-label="Compartilhar"><svg class="i i-20"><use href="#i-send"/></svg></button>
+            </span>
+            <span class="t12 ter num">8 curtidas <span aria-hidden="true">·</span> há 2 h</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="caption">Da esquerda para a direita: o FAB acima da BottomNav; o feed vazio do admin, onde o CTA está na tela e o FAB some; e o desktop, onde o botão mora na linha de cabeçalho do widget e não existe controle flutuante.</p>
+</section>
+
+<!-- ===================================================================================== -->
+<section id="link-card" class="screen">
+  <header><h2>LinkPreviewCard — quatro estados</h2><code>@tria/module-feed/ui · [designed] · UI-D-11, UI-D-12</code>
+    <p>Um cartão por publicação, sempre <code>target="_blank" rel="noopener noreferrer"</code>. <strong>Não existe estado pendente e não existe esqueleto</strong>: enquanto a prévia não resolve (ou o alvo não tem tags OG, ou a política recusou o host), a publicação mostra só a URL auto-linkada dentro da legenda — é o primeiro exemplo abaixo. YouTube e Vimeo usam o MESMO cartão com miniatura e selo de play de 56px: abrem externamente, sem player incorporado nesta fase (UI-D-12).</p>
+  </header>
+  <div class="frames">
+    <div style="max-width:340px">
+      <div class="card" style="padding:12px 16px"><span class="t16">A ata completa está em <a href="#link-card" style="color:var(--brand-accent)">tria.example/atas/2026-03</a></span></div>
+      <p class="caption">Pendente · falhou · sem tags OG — a URL crua na legenda, nenhum quadro vazio.</p>
+    </div>
+    <div>
+      <a class="link-card" href="#link-card" aria-label="Abrir Assembleia geral: pauta e documentos em nova aba">
+        <span class="img"><svg class="i i-40"><use href="#i-images"/></svg></span>
+        <span class="body">
+          <span class="t12 ter">tria.example</span>
+          <span class="title">Assembleia geral: pauta e documentos</span>
+          <span class="desc">A pauta completa, as contas do trimestre e o formulário de procuração para quem não puder comparecer.</span>
+        </span>
+      </a>
+      <p class="caption">Resolvido com imagem — capa 16:9 sobre <code>bg-bg-tertiary</code>, host 12/400, título 14/700 em duas linhas, descrição 14/400 secundária em duas linhas.</p>
+    </div>
+    <div>
+      <a class="link-card" href="#link-card" aria-label="Abrir Calendário de eventos 2026 em nova aba">
+        <span class="body">
+          <span class="t12 ter">agenda.tria.example</span>
+          <span class="title">Calendário de eventos 2026</span>
+          <span class="desc">Todas as datas do ano, já com os feriados marcados.</span>
+        </span>
+      </a>
+      <p class="caption">Sem imagem — o cartão é só corpo, nunca um quadro cinza vazio.</p>
+      <a class="link-card" href="#link-card" style="margin-top:12px" aria-label="Abrir Regimento interno atualizado em nova aba">
+        <span class="body">
+          <span class="t12 ter">docs.tria.example</span>
+          <span class="title">Regimento interno atualizado</span>
+        </span>
+      </a>
+      <p class="caption">Sem descrição — só host e título; o cartão encolhe em vez de reservar espaço.</p>
+    </div>
+    <div>
+      <a class="link-card" href="#link-card" aria-label="Abrir Coral da confraternização 2026 em nova aba">
+        <span class="img"><svg class="i i-40"><use href="#i-video"/></svg><span class="play-badge"><svg class="i" viewBox="0 0 24 24"><use href="#i-play"/></svg></span></span>
+        <span class="body">
+          <span class="t12 ter">YouTube</span>
+          <span class="title">Coral da confraternização 2026</span>
+          <span class="desc">Apresentação completa, 12 minutos.</span>
+        </span>
+      </a>
+      <p class="caption">YouTube / Vimeo — selo de play de 56px sobre <code>bg-black/60</code>, nome do provedor no lugar do host. Abre fora do app.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================================== -->
+<section id="anexos" class="screen">
+  <header><h2>AttachmentRow — cinco variações</h2><code>@tria/module-feed/ui · [designed] · UI-D-23</code>
+    <p>Linha de 56px mínimos: quadrado de 40px com <code>FileText</code> 20, nome 14/700 truncado, segunda linha "PDF · tamanho" 12/400 terciária com <code>tabular-nums</code>, e <code>Download</code> 20 terciário no fim. Tocar pede uma URL assinada de vida curta: enquanto isso o glifo vira um spinner e a linha fica <code>aria-busy</code> — um segundo toque não faz nada. Falhando, o glifo volta e o toast genérico de erro dispara; a linha não cresce e a lista não reflui.</p>
+  </header>
+  <div class="frames">
+    <div style="max-width:360px;width:100%">
+      <button class="attach" type="button" aria-label="Baixar ata-assembleia-2026-03.pdf">
+        <span class="lead"><svg class="i i-20"><use href="#i-file"/></svg></span>
+        <span class="body"><span class="t14b trunc" style="display:block">ata-assembleia-2026-03.pdf</span><span class="t12 ter num" style="display:block">PDF · 1,2 MB</span></span>
+        <svg class="i i-20 ter"><use href="#i-download"/></svg>
+      </button>
+      <p class="caption">Uma linha.</p>
+    </div>
+    <div style="max-width:360px;width:100%;display:flex;flex-direction:column;gap:8px">
+      <button class="attach" type="button" aria-label="Baixar ata-assembleia-2026-03.pdf"><span class="lead"><svg class="i i-20"><use href="#i-file"/></svg></span><span class="body"><span class="t14b trunc" style="display:block">ata-assembleia-2026-03.pdf</span><span class="t12 ter num" style="display:block">PDF · 1,2 MB</span></span><svg class="i i-20 ter"><use href="#i-download"/></svg></button>
+      <button class="attach" type="button" aria-label="Baixar prestacao-de-contas.pdf"><span class="lead"><svg class="i i-20"><use href="#i-file"/></svg></span><span class="body"><span class="t14b trunc" style="display:block">prestacao-de-contas.pdf</span><span class="t12 ter num" style="display:block">PDF · 860 KB</span></span><svg class="i i-20 ter"><use href="#i-download"/></svg></button>
+      <button class="attach" type="button" aria-label="Baixar procuracao-modelo.pdf"><span class="lead"><svg class="i i-20"><use href="#i-file"/></svg></span><span class="body"><span class="t14b trunc" style="display:block">procuracao-modelo.pdf</span><span class="t12 ter num" style="display:block">PDF · 210 KB</span></span><svg class="i i-20 ter"><use href="#i-download"/></svg></button>
+      <p class="caption">Três linhas empilhadas com <code>gap-2</code>. A lista nunca rola por dentro.</p>
+    </div>
+    <div style="max-width:360px;width:100%;display:flex;flex-direction:column;gap:8px">
+      <button class="attach" type="button" title="ata-da-assembleia-geral-extraordinaria-de-marco-de-2026-versao-final.pdf" aria-label="Baixar ata-da-assembleia-geral-extraordinaria-de-marco-de-2026-versao-final.pdf">
+        <span class="lead"><svg class="i i-20"><use href="#i-file"/></svg></span>
+        <span class="body"><span class="t14b trunc" style="display:block">ata-da-assembleia-geral-extraordinaria-de-marco-de-2026-versao-final.pdf</span><span class="t12 ter num" style="display:block">PDF · 3,4 MB</span></span>
+        <svg class="i i-20 ter"><use href="#i-download"/></svg>
+      </button>
+      <p class="caption">Nome de 90 caracteres: trunca com reticências, mantém a linha de tipo/tamanho e o controle de download, e o nome completo fica no <code>title</code>.</p>
+      <button class="attach" type="button" aria-label="Baixar anexo-sem-tamanho.pdf">
+        <span class="lead"><svg class="i i-20"><use href="#i-file"/></svg></span>
+        <span class="body"><span class="t14b trunc" style="display:block">anexo-sem-tamanho.pdf</span><span class="t12 ter" style="display:block">PDF</span></span>
+        <svg class="i i-20 ter"><use href="#i-download"/></svg>
+      </button>
+      <p class="caption">Sem tamanho armazenado: a segunda linha fica só com o tipo, sem middot solto.</p>
+      <button class="attach" type="button" aria-busy="true" aria-label="Baixar prestacao-de-contas.pdf">
+        <span class="lead"><svg class="i i-20"><use href="#i-file"/></svg></span>
+        <span class="body"><span class="t14b trunc" style="display:block">prestacao-de-contas.pdf</span><span class="t12 ter num" style="display:block">PDF · 860 KB</span></span>
+        <svg class="i i-20 ter spin"><use href="#i-loader"/></svg>
+      </button>
+      <p class="caption">Pendente na própria linha: o glifo vira <code>Loader2</code> 20, a linha fica <code>aria-busy</code> e um segundo toque é no-op. Sem texto novo e sem reflow.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================================== -->
+<section id="menu" class="screen">
+  <header><h2>Menu "…" da publicação e as três confirmações</h2><code>@tria/ui BottomSheet + ConfirmDialog · [designed]</code>
+    <p>Duas variantes do menu: autor/admin com três linhas (a última destrutiva) e membro com uma só. Nenhum item "Denunciar" nesta fase. As confirmações são o <code>ConfirmDialog</code> já existente, com os corpos exatos do contrato de texto.</p>
+  </header>
+  <div class="frames">
+    <div class="phone">
+      <div class="body" style="padding:16px">
+        <div class="card post">
+          <div class="head">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+            </div>
+            <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
+          </div>
+          <div class="media" style="aspect-ratio:1.91/1"><svg class="i i-40"><use href="#i-images"/></svg></div>
+        </div>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet-menu" role="dialog" aria-label="Mais opções">
+        <div class="handle"></div>
+        <button class="sheet-row" type="button"><svg class="i i-20 ter"><use href="#i-pencil"/></svg>Editar publicação</button>
+        <button class="sheet-row" type="button"><svg class="i i-20 ter"><use href="#i-copy"/></svg>Copiar link</button>
+        <button class="sheet-row danger" type="button"><svg class="i i-20"><use href="#i-trash"/></svg>Excluir publicação</button>
+      </div>
+    </div>
+
+    <div class="phone">
+      <div class="body" style="padding:16px">
+        <div class="card post">
+          <div class="head">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+            </div>
+            <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
+          </div>
+          <div class="media" style="aspect-ratio:1.91/1"><svg class="i i-40"><use href="#i-images"/></svg></div>
+        </div>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet-menu" role="dialog" aria-label="Mais opções">
+        <div class="handle"></div>
+        <button class="sheet-row" type="button"><svg class="i i-20 ter"><use href="#i-copy"/></svg>Copiar link</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="dialog" role="dialog" aria-label="Excluir publicação?">
+        <h3 class="t16b" style="margin:0">Excluir publicação?</h3>
+        <p class="t14 sec" style="margin:0">Ela sai do feed para todos os membros. Os comentários também deixam de aparecer.</p>
+        <div class="row"><button class="btn outline sm" type="button">Cancelar</button><button class="btn ghost danger sm" type="button">Excluir</button></div>
+      </div>
+      <div class="dialog" role="dialog" aria-label="Excluir comentário?">
+        <h3 class="t16b" style="margin:0">Excluir comentário?</h3>
+        <p class="t14 sec" style="margin:0">Ele sai da conversa para todos os membros.</p>
+        <div class="row"><button class="btn outline sm" type="button">Cancelar</button><button class="btn ghost danger sm" type="button">Excluir</button></div>
+      </div>
+      <div class="dialog" role="dialog" aria-label="Descartar publicação?">
+        <h3 class="t16b" style="margin:0">Descartar publicação?</h3>
+        <p class="t14 sec" style="margin:0">O texto e as mídias selecionadas serão perdidos.</p>
+        <div class="row"><button class="btn outline sm" type="button">Continuar editando</button><button class="btn ghost danger sm" type="button">Descartar</button></div>
+      </div>
+    </div>
+  </div>
+  <p class="caption">Nenhum diálogo usa preenchimento com a cor da marca: a ação destrutiva é ghost em <code>--color-danger</code> e o cancelar é <code>outline</code>.</p>
+</section>
+
+</main>
+
+<script>
+(function () {
+  const html = document.documentElement;
+  const NEUTRAL = { primary: '#2e6fd0', secondary: '#5b9cf8' };
+  const state = { ...NEUTRAL };
+
+  /* mesma derivação que brandStyleVars() faz no servidor (D-25/D-41) */
+  const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  const toHex = (rgb) => '#' + rgb.map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('');
+  const mixWhite = (c, amount) => toHex(hex(c).map((v) => v + (255 - v) * amount));
+  const lum = (c) => { const [r, g, b] = hex(c).map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+  const onColour = (c) => (ratio('#ffffff', c) >= ratio('#16233b', c) ? '#ffffff' : '#16233b');
+
+  function apply() {
+    const primary = state.primary, secondary = state.secondary;
+    const primaryDark = mixWhite(primary, 0.3);
+    const onPrimary = onColour(primary), onPrimaryDark = onColour(primaryDark);
+    const vars = {
+      '--brand-primary': primary,
+      '--brand-secondary': secondary,
+      '--brand-on-primary': onPrimary,
+      '--brand-primary-dark': primaryDark,
+      '--brand-on-primary-dark': onPrimaryDark,
+    };
+    for (const [k, v] of Object.entries(vars)) html.style.setProperty(k, v);
+    document.getElementById('pick-primary').value = primary;
+    document.getElementById('pick-secondary').value = secondary;
+    document.getElementById('brand-readout').textContent =
+      'primary ' + primary + ' · on ' + onPrimary + ' · dark ' + primaryDark + ' · on-dark ' + onPrimaryDark;
+  }
+
+  const setBrand = (p, s) => { state.primary = p.toLowerCase(); state.secondary = s.toLowerCase(); apply(); };
+  document.getElementById('pick-primary').addEventListener('input', (e) => setBrand(e.target.value, state.secondary));
+  document.getElementById('pick-secondary').addEventListener('input', (e) => setBrand(state.primary, e.target.value));
+  document.querySelectorAll('.preset').forEach((b) => b.addEventListener('click', () => setBrand(b.dataset.p, b.dataset.s)));
+
+  function setTheme(dark) {
+    html.setAttribute('data-theme', dark ? 'dark' : 'light');
+    const t = document.getElementById('theme-toggle');
+    t.setAttribute('aria-pressed', String(dark));
+    document.getElementById('theme-label').textContent = dark ? 'Tema claro' : 'Tema escuro';
+    t.querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+  }
+  const isDark = () => html.getAttribute('data-theme') === 'dark';
+  document.getElementById('theme-toggle').addEventListener('click', () => setTheme(!isDark()));
+  if (window.matchMedia('(prefers-color-scheme: dark)').matches) setTheme(true);
+  apply();
+})();
+</script>
+</body>
+</html>
