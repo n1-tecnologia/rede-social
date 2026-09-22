@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Feed
 status: executing
-stopped_at: Phase 04 UI-SPEC approved
-last_updated: "2026-09-22T15:01:46.364Z"
-last_activity: 2026-09-21
-last_activity_desc: Phase 03 execution started
-state_head: 884e2565a9b3d5a86e9e001ecc06dc04e6d79988
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-09-22T15:44:30.013Z"
+last_activity: 2026-09-22
+last_activity_desc: Phase 04 execution started
+state_head: 5443dc451848f014c4a35ee82caf97b76c2ac797
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 50
-  completed_plans: 37
+  completed_plans: 38
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-11)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 03 — Media Pipeline & Member Profiles
+**Current focus:** Phase 04 — Feed
 
 ## Current Position
 
-Phase: 04 (Feed) — READY TO EXECUTE
-Plan: 8 of 8
+Phase: 04 (Feed) — EXECUTING
+Plan: 2 of 10
 Status: Ready to execute
-Last activity: 2026-09-21 — Phase 03 execution started
+Last activity: 2026-09-22 — Phase 04 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -95,6 +95,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P06 | 29 min | 3 tasks | 33 files |
 | Phase 03 P07 | 62 min | 3 tasks | 31 files |
 | Phase 03 P08 | 67 min | 3 tasks | 16 files |
+| Phase 04 P01 | 31 min | 3 tasks | 39 files |
 
 ## Accumulated Context
 
@@ -250,6 +251,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-08: the Phase 3 exit gate pnpm verify is GREEN at 20m26s (unit 385, pgTAP 128, integration 313, e2e 271 passed/41 skipped, PWA 45/3) against the Phase 2 baseline of 17m30s — after catching two real regressions: an unformatted packages/contracts/src/media.ts from 03-07, and four Phase 1/2 e2e assertions stale because 03-05 removed the /perfil role pill and 03-04 wired the Editar perfil settings row
 - [Phase 03]: 03-08: two verifications stay KNOWN-BLOCKED on Phase 01.1 and are recorded in docs/DEPLOY.md, in the smoke spec annotations and as SUMMARY coverage D9/D10 — real-device HLS playback (Chromium cannot stand in for iOS Safari HLS) and a real Mux transcode (no account exists). Expect a partial UAT, the way Phase 2 closed at 9/13
 - [Phase 03]: 03-08: RESEARCH R-01 published figures CLOSE the STATE blocker '[Phase 3]: Video vendor pricing is LOW confidence' — Mux encoding free at video_quality basic, first 100,000 delivery minutes/month free, storage about USD 0.0028/min/month at 1080p (about USD 1/month for a 300-minute pilot) vs Cloudflare Stream USD 5/month floor; A6 flags them as published rates to re-verify at account creation
+- [Phase 04]: 04-01: the feed write guard is requirePermission('feed.post.create'), never requireRole — the V1 rule lives in tenant_modules['feed'].settings.postingPolicy — V2 member posting must stay one UPDATE with no migration and no route edit (FEED-08); a role comparison in a route would hard-code V1 into code.
+- [Phase 04]: 04-01: the kernel gains an RBAC seam (setPermissionResolver), not knowledge of modules — The inversion registerJobQueues already uses: the kernel declares the shape, apps/api fills it at import time, packages/core still imports no module (MOD-02). A missing registration throws rather than failing open.
+- [Phase 04]: 04-01: feed timestamps are formatted in SQL with microsecond precision, never through a JS Date — tx.execute returns driver rows, and a Date round-trip truncates timestamptz to milliseconds — moving the keyset boundary earlier than the row it came from and silently skipping same-millisecond posts. Caught by the tracer's own integration proof.
 
 ### Pending Todos
 
@@ -282,6 +286,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-22T13:49:34.276Z
-Stopped at: Phase 04 UI-SPEC approved
-Resume file: .planning/phases/04-feed/04-UI-SPEC.md
+Last session: 2026-09-22T15:44:21.659Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
