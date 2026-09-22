@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 5
+open_count: 7
 waived_count: 0
 fixed_count: 6
-total_count: 11
-last_updated: 2026-09-22T01:40:51.643Z
+total_count: 13
+last_updated: 2026-09-22T02:20:08.948Z
 ---
 
 # Broken Windows Ledger
@@ -26,6 +26,8 @@ last_updated: 2026-09-22T01:40:51.643Z
 | 9 | 01 | stub | packages/modules/example/module.ts |  | throwaway reference module @tria/module-example (D-19) — must be deleted with its table and registry entry in Phase 4 | open |  | 2026-09-13T15:21:32.750Z |  |
 | 10 | 02 | stub | apps/web/app/(app)/configuracoes/page.tsx |  | Settings rows 'Editar perfil' and 'Notificações' are static placeholders with an 'Em breve' pill (D-42); Phase 3 wires profile edit, Phase 7 wires push | open |  | 2026-09-16T23:53:19.085Z |  |
 | 11 | 03 | deviation | apps/web/app/(app)/perfil/page.tsx |  | The /perfil 'Membros' row points at /membros, which 03-05 lands in the next wave — a known one-wave dead link | fixed |  | 2026-09-22T00:37:02.401Z | 2026-09-22T01:40:51.643Z |
+| 12 | 03 | unrun-verify | packages/core/server/media/video/mux.ts |  | The Mux adapter (createDirectUpload, webhooks.unwrap, signPlaybackId, assets.delete) is written and typed but has NEVER run against a real Mux account — no account exists and Phase 01.1 is deferred. Every proof in 03-06 runs against VIDEO_PROVIDER=fake. Closed by the docs/DEPLOY.md Phase 01.1 Mux runbook. | open |  | 2026-09-22T02:20:03.090Z |  |
+| 13 | 03 | stub | packages/core/server/media/video/index.ts |  | videoProvider.signPlayback and getAsset are implemented on both adapters but wired to no route yet: 03-07 adds GET /v1/media/{assetId}/playback, and getAsset waits for a future reconciliation job (declared so that job needs no adapter change). | open |  | 2026-09-22T02:20:08.948Z |  |
 
 ````json
 [
@@ -160,6 +162,30 @@ last_updated: 2026-09-22T01:40:51.643Z
     "reason": "",
     "recorded_at": "2026-09-22T00:37:02.401Z",
     "resolved_at": "2026-09-22T01:40:51.643Z"
+  },
+  {
+    "id": 12,
+    "kind": "unrun-verify",
+    "phase": "03",
+    "file": "packages/core/server/media/video/mux.ts",
+    "line": null,
+    "description": "The Mux adapter (createDirectUpload, webhooks.unwrap, signPlaybackId, assets.delete) is written and typed but has NEVER run against a real Mux account — no account exists and Phase 01.1 is deferred. Every proof in 03-06 runs against VIDEO_PROVIDER=fake. Closed by the docs/DEPLOY.md Phase 01.1 Mux runbook.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-22T02:20:03.090Z",
+    "resolved_at": null
+  },
+  {
+    "id": 13,
+    "kind": "stub",
+    "phase": "03",
+    "file": "packages/core/server/media/video/index.ts",
+    "line": null,
+    "description": "videoProvider.signPlayback and getAsset are implemented on both adapters but wired to no route yet: 03-07 adds GET /v1/media/{assetId}/playback, and getAsset waits for a future reconciliation job (declared so that job needs no adapter change).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-22T02:20:08.948Z",
+    "resolved_at": null
   }
 ]
 ````

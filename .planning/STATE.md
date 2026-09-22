@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Media Pipeline & Member Profiles
 status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-09-22T01:41:14.983Z"
+stopped_at: Completed 03-06-PLAN.md
+last_updated: "2026-09-22T02:23:47.849Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 03 execution started
-state_head: 9a8191610adaa12a8abdf5fc0cd500ba6f30b10a
+state_head: 09b4c600816a97ed7d3b396c1ec27c49ea2578ac
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 40
-  completed_plans: 33
+  completed_plans: 35
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 03 (Media Pipeline & Member Profiles) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-09-21 — Phase 03 execution started
 
@@ -92,6 +92,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P03 | 17 min | 2 tasks | 8 files |
 | Phase 03 P04 | 1h 2m | 3 tasks | 33 files |
 | Phase 03 P05 | 57 min | 3 tasks | 22 files |
+| Phase 03 P06 | 29 min | 3 tasks | 33 files |
 
 ## Accumulated Context
 
@@ -223,6 +224,16 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-05: the E5/error backstop is closed with 'no optimistic removal plus the generic error toast' — a card that vanishes on click and returns on the next load reads as a bug AND re-nags
 - [Phase 03]: 03-05: e2e throwaway tenants get a per-RUN host (slug carries a timestamp) because web and API each cache host-to-tenant for 60s; re-using one host points a fresh session at a deleted tenant and every request is refused with TENANT_HOST_MISMATCH
 - [Phase 03]: 03-05: the directory specs set serviceWorkers:'block' — the PWA service worker handles navigations itself and those requests are outside Playwright's page.route, so GET interception silently no-ops without it
+- [Phase 03]: 03-06: package-legitimacy checkpoint approved by the user 2026-09-21 — verbatim "Approved — install both." — covering @mux/mux-node@15.2.0 (installed here in 03-06) and @mux/mux-player-react@3.13.4 (03-07 installs under the SAME approval, do NOT re-ask). Scope: Phase 3 only, mirroring 02-02's Phase-2-only scope. file-type@22.1.1 is NOT installed (03-01 replaced it with a 5-byte %PDF- magic check); sharp@0.35.4 was already in the tree from 02-03. CLAUDE.md pins 15.1.0/3.13.3 — the bump to 15.2.0/3.13.4 is recorded for the user to reconcile.
+- [Phase 03]: 03-06: the VideoProvider seam — mux.ts is the ONLY file importing @mux/mux-node and types.ts names the vendor on exactly one line; the event job, the row and every later surface consume a NORMALISED VideoProviderEvent, so Cloudflare Stream is a new file beside mux.ts rather than a rewrite (D-43)
+- [Phase 03]: 03-06: both implementations share ONE normaliser (video/wire.ts, no SDK import) — the fake verifies and normalises through the same code the real adapter does, so a synthetic webhook is evidence about the real path instead of about a second hand-written translation
+- [Phase 03]: 03-06: mux.jwt.signPlaybackId returns Tokens keyed by 'playback-token'/'thumbnail-token'/'storyboard-token', NOT playback/thumbnail/storyboard — 03-RESEARCH Code Example 6 shows @mux/playback-core's PLAYER shape; following it literally compiles and returns three undefineds at real playback
+- [Phase 03]: 03-06: the webhook's admin transaction lives in the kernel (media/video/inbox.ts recordProviderEvent) because Biome confines @tria/core/db/admin-tx to server/{tenancy,platform,media}; the route only reads the raw body, verifies the signature and answers 2xx
+- [Phase 03]: 03-06: 'fake' is a real value in MEDIA_PROVIDERS and in media_assets_provider_chk — a fake-brokered video recorded as 'supabase' would be a lie 03-07's screen could not see through
+- [Phase 03]: 03-06: the private media bucket's allowed_mime_types is now exactly the MEDIA_LIMITS union (adds video/mp4 + video/quicktime) because the fake stores its bytes there; pinned as a SET in 070 so neither a widening nor a narrowing passes. Unused under VIDEO_PROVIDER=mux; the 50 MiB cap, the zero storage.objects policies and the complete-time contentType check are unchanged
+- [Phase 03]: 03-06: both event-job predicates are status not in ('ready','deleted') — the plan's action text said <> 'ready' for errored, but status='deleted' is the handle 03-08's sweeper collects by, so flipping a soft-deleted row to failed would strand its provider asset forever
+- [Phase 03]: 03-06: NODE_ENV added to the kernel env as the ONE production signal (the Mux adapter's test:true rule); it is deliberately NOT an adapter selector, so a missing NODE_ENV can never switch a vendor on
+- [Phase 03]: 03-06: the Mux adapter has NEVER run against a real account (none exists; Phase 01.1 deferred) — docs/DEPLOY.md carries a seven-step Mux runbook and the real transcode + real-device HLS playback are the two known-blocked UAT lines 03-08 records
 
 ### Pending Todos
 
@@ -255,6 +266,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-22T01:40:58.737Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-09-22T02:23:31.956Z
+Stopped at: Completed 03-06-PLAN.md
 Resume file: None
