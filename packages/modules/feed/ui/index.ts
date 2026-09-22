@@ -6,7 +6,12 @@ export {
 } from './AttachmentRow';
 export { FeedList, type FeedListProps } from './FeedList';
 export { PostCaption, type PostCaptionProps } from './PostCaption';
-export { PostCard, type PostCardProps, type PostCardView } from './PostCard';
+export {
+  PostCard,
+  type PostCardMediaView,
+  type PostCardProps,
+  type PostCardView,
+} from './PostCard';
 export { PostHeader, type PostHeaderProps } from './PostHeader';
 export {
   PostMedia,

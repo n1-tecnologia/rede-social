@@ -199,7 +199,14 @@ async function cleanup(): Promise<void> {
         .remove(objects.map((row) => row.name));
       if (error) throw new Error(`storage cleanup failed: ${error.message}`);
     }
-    await adminSql`delete from public.media_assets where tenant_id = ${demoTenantId}::uuid and kind = 'video'`;
+    // 04-04: `feed_post_media.media_asset_id` references this table, and `scripts/seed.ts` attaches
+    // real assets to the seeded gallery/video/attachment posts. The sweep below exists to clear a
+    // previous run's leftovers, so it must skip anything a post still points at — otherwise it
+    // fails on the foreign key AND destroys seeded content the e2e measures.
+    await adminSql`
+      delete from public.media_assets
+       where tenant_id = ${demoTenantId}::uuid and kind = 'video'
+         and id not in (select media_asset_id from public.feed_post_media)`;
   }
   for (const id of [...new Set(createdEventIds)]) {
     await adminSql`delete from public.media_provider_events where id = ${id}`;

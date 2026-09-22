@@ -88,11 +88,18 @@ test.describe('UI-D-09 / UI-D-10 — the gallery is a shared-ratio snap carousel
   });
 });
 
+/**
+ * The video case reads tria-LAB on purpose. `media-video.spec.ts` hard-resets the tria-demo video
+ * library before and after every one of its tests (its empty-state, newest-first and pagination
+ * assertions are absolute counts), which detaches the demo tenant's seeded video post. The lab
+ * tenant carries the identical fixture (SCHEMA-CONVENTIONS §(j)) and no spec resets it, so this is
+ * order-independent rather than "passes when it happens to run first".
+ */
 test.describe('D-53 — the video post renders a player frame and no carousel', () => {
   test('the seeded video post shows the Phase 3 player, never a gallery strip', async ({
     page,
   }) => {
-    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
 
     const card = cardFor(page, seededFeedMedia.videoCaption);
     await expect(card).toBeVisible();

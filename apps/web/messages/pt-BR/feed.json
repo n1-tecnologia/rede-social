@@ -7,6 +7,20 @@
     "caption": {
       "more": "… mais"
     },
+    "gallery": {
+      "carousel": "carrossel",
+      "slide": "{index} de {total}"
+    },
+    "attachment": {
+      "download": "Baixar {name}",
+      "type": {
+        "pdf": "PDF",
+        "other": "Arquivo"
+      }
+    },
+    "errors": {
+      "generic": "Algo deu errado. Tente novamente."
+    },
     "empty": {
       "title": "Nada por aqui ainda",
       "body": "As publicações da {tenant} vão aparecer aqui.",

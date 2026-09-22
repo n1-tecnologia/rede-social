@@ -265,6 +265,18 @@ export async function memberProfileForEmail(
  * runs and the "newest first" assertions would drift.
  */
 export async function deleteTenantVideoAssets(tenantSlug: string): Promise<void> {
+  // 04-04: `feed_post_media.media_asset_id` references `media_assets`, so the attachments have to be
+  // detached before the rows can go. This stays a HARD, TOTAL reset of the tenant's video library
+  // because that is exactly what the media spec's empty-state, newest-first and pagination
+  // assertions measure — anything left behind is an off-by-one in those counts.
+  //
+  // The consequence is deliberate: the seeded video POST in THIS tenant loses its media row, which
+  // is why `feed-media.spec.ts` reads the video case from tria-lab, a tenant no spec resets.
+  await sql()`
+    delete from public.feed_post_media m
+     using public.media_assets a, public.tenants t
+     where m.media_asset_id = a.id and a.tenant_id = t.id
+       and t.slug = ${tenantSlug} and a.kind = 'video'`;
   await sql()`
     delete from public.media_assets a
      using public.tenants t

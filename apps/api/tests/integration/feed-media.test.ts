@@ -335,13 +335,14 @@ describe('what a legal post carries back', () => {
 
 describe('the assumption-delta companion invariant — media is a COLLECTION, never a column', () => {
   it('round-trips a one-image and a ten-image post through the SAME shape', async () => {
-    const image = await postImage();
+    // TEN DISTINCT assets: `createPost` refuses a repeated id on purpose (a gallery slide has to be
+    // a distinct photograph), so the ten-image case has to be built from ten real uploads.
+    const gallery: string[] = [];
+    for (let index = 0; index < FEED_MAX_IMAGES; index++) gallery.push(await postImage());
+    const image = gallery[0] as string;
 
     const one = await created({ caption: 'uma foto', imageAssetIds: [image] });
-    const many = await created({
-      caption: 'dez fotos',
-      imageAssetIds: Array.from({ length: FEED_MAX_IMAGES }, () => image),
-    });
+    const many = await created({ caption: 'dez fotos', imageAssetIds: gallery });
 
     expect(one.mediaKind).toBe('gallery');
     expect(many.mediaKind).toBe('gallery');

@@ -4,12 +4,19 @@ import type { HomeSlot } from '@tria/core/ui';
 import { exampleItemsSchema } from '@tria/module-example/contracts';
 import { ExampleWidget } from '@tria/module-example/ui';
 import { FEED_CAPTION_TRUNCATE_AT, type FeedPost } from '@tria/module-feed/contracts';
-import { FeedList, type PostCardView } from '@tria/module-feed/ui';
+import {
+  type AttachmentDescriptor,
+  FeedList,
+  type PostCardMediaView,
+  type PostCardView,
+  type PostMediaImage,
+} from '@tria/module-feed/ui';
 import { EmptyState } from '@tria/ui';
 import { TriangleAlert } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { createExampleItem } from '@/app/(app)/inicio/example-actions';
+import { VideoPlayer } from '@/components/media/VideoPlayer';
 import { apiFetch } from '@/lib/api';
 import { loadFeed } from '@/lib/feed';
 
@@ -102,11 +109,80 @@ function relativeFrom(iso: string, now: number): string {
 }
 
 /**
+ * Byte sizes in pt-BR ("1,2 MB"). The FORMATTING lives here rather than inside the module for the
+ * same reason the timestamps do: `@tria/module-feed` ships no language (PWA-03), and a locale baked
+ * into a reusable package would travel to every other TRIA project that installs it.
+ *
+ * Binary units, one decimal, and `null` when the stored size is unknown — the row then renders the
+ * type ALONE, never a dangling separator (UI-SPEC E07/partial).
+ */
+const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
+const sizeFormat = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+
+function formatBytes(bytes: number | null): string | null {
+  if (bytes === null || !Number.isFinite(bytes) || bytes < 0) return null;
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < SIZE_UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${sizeFormat.format(unit === 0 ? Math.round(value) : value)} ${SIZE_UNITS[unit]}`;
+}
+
+/**
+ * The post's media band, resolved for the presentational card (04-04): the gallery in `position`
+ * order with its per-slide labels already interpolated, the attachment rows with their formatted
+ * sizes, and — only on the video branch — the ALREADY-CREATED `VideoPlayer` element.
+ *
+ * Passing the ELEMENT rather than the component is what lets an app-scoped client component cross
+ * into a module package: `VideoPlayer` binds a server action for its per-request playback token
+ * (D-44) and the next-intl catalog, and 02-08 found Flight refuses a component object outright.
+ *
+ * `alt` is deliberately the empty string: `media_assets` carries no alt text, and a filename is not
+ * a description — UI-SPEC asks for a decorative empty alt rather than a guessed one.
+ */
+function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
+  const images = post.media.filter((item) => item.kind === 'image');
+  const video = post.media.find((item) => item.kind === 'video');
+
+  return {
+    mediaKind: post.mediaKind,
+    images: images.map(
+      (item, index): PostMediaImage => ({
+        assetId: item.assetId,
+        variantWidths: item.variantWidths,
+        alt: '',
+        label: tf('gallery.slide', { index: index + 1, total: images.length }),
+        width: item.width,
+        height: item.height,
+      }),
+    ),
+    attachments: post.media
+      .filter((item) => item.kind === 'file')
+      .map((item): AttachmentDescriptor => {
+        const filename = item.filename ?? '';
+        return {
+          assetId: item.assetId,
+          filename,
+          typeLabel:
+            item.mime === 'application/pdf'
+              ? tf('attachment.type.pdf')
+              : tf('attachment.type.other'),
+          sizeLabel: formatBytes(item.bytes),
+          downloadLabel: tf('attachment.download', { name: filename }),
+        };
+      }),
+    video: video ? <VideoPlayer assetId={video.assetId} status={video.status} /> : undefined,
+  };
+}
+
+/**
  * `FeedPost` (the wire contract) → `PostCardView` (what the presentational card needs). The module's
  * UI resolves no URL, formats no date and knows no route table; this is the one place that does.
  * 04-06 lifts this helper into a shared module when the post page needs the same mapping.
  */
-function postCardView(post: FeedPost, now: number, label: (name: string) => string): PostCardView {
+function postCardView(post: FeedPost, now: number, tf: Translator): PostCardView {
   return {
     id: post.id,
     caption: post.caption,
@@ -119,7 +195,8 @@ function postCardView(post: FeedPost, now: number, label: (name: string) => stri
     createdAtIso: post.createdAt,
     createdAtRelative: relativeFrom(post.createdAt, now),
     createdAtAbsolute: absoluteTime.format(new Date(post.createdAt)),
-    ariaLabel: label(post.author.displayName),
+    ariaLabel: tf('post.label', { name: post.author.displayName }),
+    media: postMediaView(post, tf),
   };
 }
 
@@ -142,16 +219,17 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
     getTranslations('app.error'),
   ]);
   const now = Date.now();
-  const postLabel = (name: string) => tf('post.label', { name });
 
   return (
     <FeedList
-      items={page === null ? null : page.items.map((post) => postCardView(post, now, postLabel))}
+      items={page === null ? null : page.items.map((post) => postCardView(post, now, tf))}
       canPost={bootstrap.permissions.includes('feed.post.create')}
       captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
       labels={{
         region: tf('region'),
         more: tf('caption.more'),
+        carousel: tf('gallery.carousel'),
+        attachmentError: tf('errors.generic'),
         emptyTitle: tf('empty.title'),
         emptyBody: tf('empty.body', { tenant: bootstrap.tenant.displayName }),
         emptyBodyAuthor: tf('empty.bodyAuthor'),

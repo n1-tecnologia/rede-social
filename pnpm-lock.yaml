@@ -607,6 +607,9 @@ importers:
       happy-dom:
         specifier: 20.14.5
         version: 20.14.5
+      motion:
+        specifier: 13.3.0
+        version: 13.3.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react:
         specifier: 19.3.0
         version: 19.3.0

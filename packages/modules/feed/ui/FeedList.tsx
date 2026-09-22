@@ -31,6 +31,10 @@ export type FeedListProps = {
     region: string;
     /** The caption's "… mais" toggle. */
     more: string;
+    /** `aria-roledescription` of the gallery strip — "carrossel" (UI-SPEC §Gallery). */
+    carousel: string;
+    /** The GENERIC message a failed attachment download raises as a toast (UI-D-23). */
+    attachmentError: string;
     emptyTitle: string;
     /** Shown to a member: the community's posts will appear here. */
     emptyBody: string;
@@ -90,6 +94,7 @@ export function FeedList({ items, canPost, captionTruncateAt, createHref, labels
           post={post}
           captionTruncateAt={captionTruncateAt}
           moreLabel={labels.more}
+          mediaLabels={{ carousel: labels.carousel, attachmentError: labels.attachmentError }}
         />
       ))}
     </section>

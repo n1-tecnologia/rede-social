@@ -159,7 +159,14 @@ async function removeTenantMediaObjects(tenantId: string): Promise<void> {
 async function cleanup(): Promise<void> {
   for (const tenantId of [demoTenantId, labTenantId].filter(Boolean)) {
     await removeTenantMediaObjects(tenantId);
-    await adminSql`delete from public.media_assets where tenant_id = ${tenantId}::uuid`;
+    // 04-04: `feed_post_media.media_asset_id` references this table, and `scripts/seed.ts` attaches
+    // real assets to the seeded gallery/video/attachment posts. The sweep below exists to clear a
+    // previous run's leftovers, so it must skip anything a post still points at — otherwise it
+    // fails on the foreign key AND destroys seeded content the e2e measures.
+    await adminSql`
+      delete from public.media_assets
+       where tenant_id = ${tenantId}::uuid
+         and id not in (select media_asset_id from public.feed_post_media)`;
   }
   const ids = [...new Set(createdAssetIds)];
   for (const id of ids) {
@@ -382,6 +389,17 @@ describe('refusals at start — the declared facts buy a fast, specific answer (
   // is now the role refusal — never a 501 and never a silent gap. The admin's happy path and the
   // rest of the video contract live in `mux-webhook.test.ts`.
   it('video is no longer a 501 seam: a member is refused by ROLE, and no asset is created', async () => {
+    // A DELTA, not an absolute count: 04-04's seed attaches a real `fake`-provider video to the
+    // seeded video post, so "how many video rows does this tenant have" now measures the seed
+    // rather than what this refusal did (the 04-03 adjacency-assertion lesson).
+    const videoCount = async () => {
+      const rows = await adminSql<{ count: string }[]>`
+        select count(*)::text as count from public.media_assets
+         where tenant_id = ${demoTenantId}::uuid and kind = 'video'`;
+      return rows[0]?.count;
+    };
+    const before = await videoCount();
+
     const res = await startUpload({
       kind: 'video',
       purpose: 'post',
@@ -391,10 +409,7 @@ describe('refusals at start — the declared facts buy a fast, specific answer (
     expect(res.status).toBe(403);
     expect((await envelope(res)).code).toBe('FORBIDDEN');
 
-    const rows = await adminSql<{ count: string }[]>`
-      select count(*)::text as count from public.media_assets
-       where tenant_id = ${demoTenantId}::uuid and kind = 'video'`;
-    expect(rows[0]?.count).toBe('0');
+    expect(await videoCount()).toBe(before);
   });
 });
 

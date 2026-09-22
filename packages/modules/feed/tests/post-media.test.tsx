@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ToastProvider } from '@tria/ui';
+import { MotionGlobalConfig } from 'motion/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AttachmentDescriptor, AttachmentRow } from '../ui/AttachmentRow';
@@ -18,6 +19,10 @@ import { PostMedia, type PostMediaImage } from '../ui/PostMedia';
  * Every label arrives as a prop, so the fixtures below use sentinel ASCII strings. A pt-BR literal
  * appearing in either component is caught separately by `scripts/check-ui-literals.sh`.
  */
+
+// Springs have nothing to animate under happy-dom, and a cancelled one rejects AFTER the run ends.
+// Skipping them makes mount/exit synchronous, exactly as the `packages/ui` harness does.
+MotionGlobalConfig.skipAnimations = true;
 
 const LABELS = { carousel: 'carousel-roledescription', attachmentError: 'attachment-error' };
 
