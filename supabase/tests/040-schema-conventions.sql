@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(36);
+select plan(38);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -75,6 +75,25 @@ select is(
 );
 select has_index('public', 'tenant_invites', 'tenant_invites_tenant_email_key',
   'one invite per (tenant_id, email) — tenant-first, like every other tenant index');
+
+-- ── media_provider_events: the same zero-policy protection, on the webhook inbox (03-06, MEDIA-03) ─
+-- The table records every delivery a video provider ever made, keyed by the PROVIDER's own event id
+-- (that primary key IS the replay defence). It carries no tenant_id — a provider event id is global
+-- and the tenant is resolved from the asset it names — so 010's tenant-table assertions do not
+-- reach it and THIS pair is the whole protection: RLS on, zero policies, exactly like
+-- `platform_admins` and `tenant_invites`. A tenant lane has no business reading another community's
+-- transcode traffic, and with the schema-wide SELECT grant a policy is the only thing that could
+-- expose it (T-03-45).
+select results_eq(
+  $$ select count(*)::int from pg_policy where polrelid = 'public.media_provider_events'::regclass $$,
+  ARRAY[0],
+  'media_provider_events has ZERO policies: webhook traffic is admin-lane only, no tenant lane can read it'
+);
+select results_eq(
+  $$ select relrowsecurity from pg_class where oid = 'public.media_provider_events'::regclass $$,
+  ARRAY[true],
+  'media_provider_events still has RLS enabled — without it the schema-wide SELECT grant would apply'
+);
 
 -- ── consent_records is append-only evidence: the lane may read, never rewrite ───────────────────
 select results_eq(

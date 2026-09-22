@@ -78,7 +78,12 @@ select is_empty(
         ('media_assets'),
         -- Phase 3 (03-02). `member_profiles` needs no exemption either — it carries TWO policies
         -- (a tenant-wide select and a self-scoped update); 080 pins that count.
-        ('member_profiles')
+        ('member_profiles'),
+        -- Phase 3 (03-06). `media_provider_events` carries NO tenant_id (a provider's event id is
+        -- global; the tenant comes from the asset it names), so assertions 1-2 never reach it and
+        -- it needs no exemption there. Assertion 3 covers its RLS, and 040 pins its policy count at
+        -- ZERO — the `tenant_invites` / `platform_admins` posture.
+        ('media_provider_events')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,

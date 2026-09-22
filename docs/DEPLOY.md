@@ -94,6 +94,11 @@ Readable by `RUNTIME_SA` only. Names are referenced literally in `deploy-api.yml
 | `supabase-url-prod` | `SUPABASE_URL` | both production services |
 | `vercel-token-prod` | `VERCEL_TOKEN` | `api`, `worker` (custom domains, D-34 — see below) |
 | `supabase-pat-prod` | `SUPABASE_PAT` | `api`, `worker` (auth allow-list, D-34 — see below) |
+| `mux-token-id-prod` | `MUX_TOKEN_ID` | `api`, `worker` (video, D-43 — see below) |
+| `mux-token-secret-prod` | `MUX_TOKEN_SECRET` | `api`, `worker` |
+| `mux-signing-key-id-prod` | `MUX_SIGNING_KEY_ID` | `api`, `worker` (signed playback, D-44) |
+| `mux-signing-key-private-prod` | `MUX_SIGNING_KEY_PRIVATE` | `api`, `worker` (base64 PEM) |
+| `mux-webhook-secret-prod` | `MUX_WEBHOOK_SECRET` | `api` (the webhook's only authentication) |
 
 `DATABASE_URL` is always the **`api_user`** connection through the Supavisor **transaction** pooler
 (port 6543); `BOSS_DATABASE_URL` is the same role through the **session** pooler (port 5432) because
@@ -166,6 +171,64 @@ failing the first attach. The adapters call only the documented project-level en
 / config / verify / detach) — the platform never writes the customer's DNS, buys a domain or deletes
 one at the Vercel account level (`.planning/phases/02-…/COVERAGE.md`).
 
+## Video (MEDIA-03, D-43/D-44)
+
+Video is reached through the `VideoProvider` seam (`packages/core/server/media/video/`), which has
+two implementations selected by `VIDEO_PROVIDER`. **`fake` is the default everywhere and the only
+thing that has ever run**: it mints its direct-upload target in the private `media` bucket and
+simulates transcoding with a deferred `kernel.media-provider-event` job, so no automated run — local,
+CI or a Preview deployment — can ingest into a real Mux account and accumulate stored minutes. The
+documented cheaper alternative (Cloudflare Stream) would be a new file next to `mux.ts`, not a
+rewrite.
+
+Variables read by the **`api` and `worker`** Cloud Run services (both run the same image; the API
+answers the webhook and mints upload targets, the worker applies the events):
+
+| Variable | staging | production | Source |
+|---|---|---|---|
+| `VIDEO_PROVIDER` | `fake` | `mux` (only after the runbook item below) | plain env |
+| `MUX_TOKEN_ID` | — | Secret Manager `mux-token-id-prod` | Mux → Settings → Access Tokens (Video read+write) |
+| `MUX_TOKEN_SECRET` | — | Secret Manager `mux-token-secret-prod` | shown ONCE at token creation |
+| `MUX_SIGNING_KEY_ID` | — | Secret Manager `mux-signing-key-id-prod` | Mux → Settings → Signing Keys |
+| `MUX_SIGNING_KEY_PRIVATE` | — | Secret Manager `mux-signing-key-private-prod` | the signing key's private key, **base64-encoded** |
+| `MUX_WEBHOOK_SECRET` | — | Secret Manager `mux-webhook-secret-prod` | Mux → Settings → Webhooks → the endpoint's signing secret |
+
+`assertProductionEnv()` (kernel `env.ts`) refuses `VIDEO_PROVIDER=mux` without **all five** at boot,
+so a half-configured revision fails its startup probe instead of handing out upload URLs it can
+never confirm. `FAKE_VIDEO_WEBHOOK_SECRET` is a local-stack-only override for the fake's own HMAC and
+belongs in no hosted environment. Only publishable keys ever reach Vercel — nothing about Mux does.
+
+`POST /v1/webhooks/mux` is **unauthenticated by design**: the provider's HMAC signature over the raw
+body is its authentication (5-minute tolerance, timing-safe compare). Do not put an IAM or IAP guard
+in front of it; do rotate `MUX_WEBHOOK_SECRET` together with the endpoint in the Mux dashboard.
+
+**Phase 01.1 runbook — provision Mux (NOT DONE; no Mux account exists yet).** Until every step below
+has run, `VIDEO_PROVIDER` stays `fake`, every automated proof runs against the fake, and **the real
+transcode and the real-device HLS playback are known-blocked UAT lines** — the honest analogue of
+Phase 2's four blocked items. Steps:
+
+1. Create the Mux account and confirm the published pay-as-you-go rates still match the Phase 3
+   cost model (`video_quality: 'basic'` ⇒ free encoding; the first 100,000 delivery minutes per
+   month free; storage ≈ USD 0.0028/min/month at 1080p). Assumption A6 — a Brazilian account with no
+   negotiated contract — is verified HERE, at account creation.
+2. Settings → Access Tokens → create an **API access token pair** with Mux Video read+write. Store
+   the id and the secret as `mux-token-id-prod` / `mux-token-secret-prod`.
+3. Settings → Signing Keys → create a **signing key**. Store the key id as
+   `mux-signing-key-id-prod` and the private key **base64-encoded** as
+   `mux-signing-key-private-prod` (`base64 -i private.pem`).
+4. Settings → Webhooks → create an endpoint pointing at `https://<api host>/v1/webhooks/mux`,
+   subscribed to `video.asset.ready`, `video.asset.errored` and `video.upload.errored`. Copy its
+   signing secret into `mux-webhook-secret-prod`.
+5. Confirm the environment's **default playback policy is `signed`** (D-44). Every asset is created
+   with `playback_policies: ['signed']` regardless, but a public default is a trap for anything
+   created outside this codebase.
+6. Set `VIDEO_PROVIDER=mux` on `api` and `worker` and redeploy. A missing secret fails the startup
+   probe rather than the first upload.
+7. Close the two blocked UAT lines: (a) an `admin_tenant` uploads a real phone-recorded video and it
+   reaches `ready` with a playback id; (b) it plays on a real iOS Safari and a real Android Chrome.
+   Record the outcome here, including whether Mux's `test: true` assets (which this codebase sets
+   outside production) behaved as documented — watermarked, 10 seconds, deleted after 24 h.
+
 ## Supabase hosted auth settings (Phase 2)
 
 **Email OTP Expiration = 86400** (24 h) on the hosted projects — Dashboard → Authentication →
@@ -176,6 +239,13 @@ e2e suite never approaches. The Send Email Hook values (secret, transport, rotat
 `docs/deploy/auth-mail.md`.
 
 ## Storage buckets
+
+The private `media` bucket (03-01) accepts `image/jpeg`, `image/png`, `image/webp`,
+`application/pdf`, `video/mp4` and `video/quicktime` — exactly the union of `MEDIA_LIMITS` in
+`@tria/contracts/media`, pinned as a set by `supabase/tests/070-media-bucket.sql`. The two video
+entries exist for `VIDEO_PROVIDER=fake`, which stores its bytes there; with `VIDEO_PROVIDER=mux` the
+vendor owns the object and nothing mints a Storage URL for a video at all. The bucket stays PRIVATE,
+caps files at 50 MiB and carries zero `storage.objects` policies.
 
 `[storage.buckets.branding]` in `supabase/config.toml` applies to the **local stack only**
 (`supabase start`). Hosted projects get the public `branding` bucket (2 MiB cap, image MIME
