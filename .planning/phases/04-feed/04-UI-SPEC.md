@@ -1,7 +1,8 @@
 ---
 phase: "04"
 slug: "feed"
-status: draft
+status: approved
+reviewed_at: "2026-09-22"
 shadcn_initialized: false
 preset: none
 created: "2026-09-22"
@@ -13,7 +14,7 @@ created: "2026-09-22"
 
 **Design authority.** `reference/frontend-design/` (git `05f68b1`) is the visual source of truth for everything it covers. Values marked **[proto]** are extracted verbatim from `components/feed/*`, `components/comments/*`, `components/create/CaptionInput.tsx`, `components/ui/DoubleTapHeart.tsx` and `hooks/useInfiniteScroll.ts`. Surfaces the prototype lacks — the composer `/criar`, the edit screen `/post/[id]/editar`, the link-preview card, the attachment row, the composer FAB and its desktop equivalent — are marked **[designed]** and use only tokens and primitives already shipped in `@tria/ui` / `@tria/core/ui`. The design language, spacing scale, typography scale and colour model are **inherited unchanged** from the approved `02-UI-SPEC.md` and `03-UI-SPEC.md`; this document restates them for the checker and records only the Phase 4 deltas.
 
-**Upstream decisions.** `04-CONTEXT.md` decisions are cited as **D-nn** (this phase owns D-51..D-65); `04-RESEARCH.md` patterns/assumptions as **R-Pn** / **A-n**. Nothing in those documents is re-litigated here. Questions that both left open and that are purely visual are decided below as **UI-D-07..UI-D-20** (numbering continues from `03-UI-SPEC.md`, which used UI-D-01..UI-D-06).
+**Upstream decisions.** `04-CONTEXT.md` decisions are cited as **D-nn** (this phase owns D-51..D-65); `04-RESEARCH.md` patterns/assumptions as **R-Pn** / **A-n**. Nothing in those documents is re-litigated here. Questions that both left open and that are purely visual are decided below as **UI-D-07..UI-D-24** (UI-D-21..UI-D-24 were raised by the Step 9.5 UI-consideration probe and answered by the user) (numbering continues from `03-UI-SPEC.md`, which used UI-D-01..UI-D-06).
 
 **Review pattern (D-33, UI-04).** The `[designed]` surfaces — `/criar`, `/post/[id]/editar`, the FAB / desktop compose CTA, the link-preview card, the attachment row and the post "…" menu — go through `/gsd-sketch 4` (static HTML mockup rendered from this contract) and design-team approval **before they are coded**. `[proto]` surfaces (the post card family, the comment sheet, the comment list) do not. The same package is the vehicle for telling the design team that PROTOTYPE.md open question 2 is answered "drop titles and type chips" (D-51) and for requesting the composer designs named in open question 3.
 
@@ -37,6 +38,10 @@ created: "2026-09-22"
 | **UI-D-18** | Comment-sheet height. `[proto]` `CommentSheet` sets `max-h-[calc(var(--screen-h)*0.7)]`; the shipped `BottomSheet` uses `0.8`. | **0.8** — the shipped primitive's value, unmodified. | One sheet geometry across the app. A per-caller override is the drift `@tria/ui` exists to prevent. |
 | **UI-D-19** | Does the D-02 profile nudge stay above the feed once the feed has content? | **Yes, unchanged.** The nudge is the server's `needsNudge` flag and disappears on its own when the profile is complete. | Suppressing it whenever the feed has posts would make it permanently invisible on any active tenant — i.e. never shown to the members who most need it. Zero code. |
 | **UI-D-20** | What `/inicio` shows a member of a tenant with no posts, given `HomeSlots` already owns an "Em breve" empty. | The feed widget renders **its own** `EmptyState variant="card"`; `HomeSlots`' "Em breve" card no longer appears because a slot **is** registered. Admin variant of the same empty carries the "Criar publicação" CTA. | `HomeSlots`' empty means "no module contributed anything", which stops being true this phase. Two different truths must not share one card. |
+| **UI-D-21** | What a post card's meta row shows when both counts are zero (Step 9.5 probe, `empty`/`partial`/`zero-one-many` @ E02). | **Zero counts drop out.** Each of "{n} curtidas" and "{n} comentários" is omitted until it reaches 1; a brand-new post's meta row is the relative time alone. The row joins only the present segments with `<span aria-hidden>·</span>` — never a leading, trailing or doubled middot. | The comment row already hides its own like count at zero **[proto]**, so "0 curtidas · 0 comentários" would be the one place in the product that announces the absence of engagement — on every post in a new tenant's feed, which is exactly when it reads worst. No new copy. Reversible: one conditional. |
+| **UI-D-22** | What renders when the **comment list itself** fails to load — opening the sheet, or tapping "Ver N respostas" (probe, `error` @ E10/E11). The spec covered comment *submit* failure only. | **Inline error + retry in both containers.** A 14 `text-danger` line plus an `outline` "Tentar novamente" renders where the rows would be, with the input still usable; a failed replies query renders the same inline retry under the toggle without collapsing it. Two new copy rows. | Falling back to the empty-comments copy would assert something false — the user would read "Nenhum comentário ainda" on a post that has comments, and would have no way to recover. A generic toast alone leaves the sheet showing the same wrong fact. Reversible. |
+| **UI-D-23** | Tapping an `AttachmentRow` requests a short-TTL signed download URL — a round trip that can be slow or fail (probe, `loading`/`error` @ E07). | **Row-local pending, generic toast on failure.** The trailing `Download` glyph swaps to a 20px `Loader2` and the row goes `aria-busy` while the URL is fetched; a second tap while busy is a no-op. On failure the glyph returns and the generic error toast fires, leaving the row tappable. No reflow, no new copy. | A tap with no feedback reads as a dead control and invites repeat taps, each one burning a signed URL. Growing the row with an inline error line instead would reflow the card mid-list. Reuses the existing generic-error rule (same as the like failure). Reversible. |
+| **UI-D-24** | What a comment renders once its author's membership is soft-deleted (probe, `partial` @ E11). Phase 8 moderation will build on this. | **The row stays; the author reads "Membro removido".** Text and replies are preserved, the avatar falls back to the neutral placeholder, and the name is plain text, not a profile link. One new copy row. | Hiding the comment would orphan every reply under it and force the trigger-maintained counts to be recomputed; keeping the real name would give a removed member continued presence in the community. This keeps threads readable while removing the person. Reversible, and it is the shape Phase 8 (MODER-01) will extend. |
 
 ---
 
@@ -232,6 +237,9 @@ All strings live in `apps/web/messages/pt-BR/feed.json` (root key `feed`) — no
 | Attachment row | Filename as stored · "PDF · {size}" · download `aria-label` "Baixar {name}" |
 | Link card | Host or provider name in the meta slot ("YouTube", "Vimeo", else the hostname); external-link `aria-label` "Abrir {title} em nova aba" |
 | Video states | Inherited verbatim from Phase 3: "Processando o vídeo…" / "Isso pode levar alguns minutos. Você pode sair desta tela." / the `Falhou` pill |
+| Error state — comment list load (UI-D-22) | Inline 14 `text-danger` in the sheet/list body: "Não foi possível carregar os comentários." + `outline` "Tentar novamente" |
+| Error state — replies load (UI-D-22) | Inline 14 `text-danger` under the toggle: "Não foi possível carregar as respostas." + `outline` "Tentar novamente" |
+| Removed comment author (UI-D-24) | "Membro removido" — plain 14/700 text, not a link, with the neutral `Avatar` placeholder |
 
 Catalog root keys after this phase: existing set **plus `feed`**, **minus `example`** (deleted with the module, D-19).
 
@@ -360,75 +368,130 @@ Full-screen route `/criar` (create) and `/post/[postId]/editar` (edit) — the s
 > Empty-state and error-state COPY live in `## Copywriting Contract` above — this section covers
 > state coverage and REFERENCES those rows rather than restating the copy (de-dup).
 
+**Probe run.** `ui-consideration-probe.cjs` over the 18 elements below, 2026-09-22 — **116 applicable considerations**, 111 `✅ covered` (verification: explicit), 5 `🧪 backstop`, 0 `✖ dismissed`, 0 `⚠ unresolved`. Kind classification was confirmed against the authored kinds in the inventory: the engine's detected set was a **superset** of the authored set for all 18 elements (no kind missed), so no `elements` override was applied. Four considerations had no answer anywhere upstream and were resolved by the user at this step → **UI-D-21..UI-D-24**.
+
 **Element inventory for the probe** (ids referenced by the resolution table):
 
-| Id | Surface | Element kinds |
+| Id | Surface | Element kinds (authored / detected) |
 |----|---------|---------------|
 | E01 | `FeedList` home slot on `/inicio` | list-collection, interactive-control |
-| E02 | `PostCard` shell + meta row | static-content |
+| E02 | `PostCard` shell + meta row | static-content (+ list-collection detected) |
 | E03 | `PostHeader` + "…" menu | nav, media, interactive-control |
-| E04 | `PostMedia` gallery carousel | media, interactive-control |
+| E04 | `PostMedia` gallery carousel | media, interactive-control (+ list-collection, nav) |
 | E05 | `PostMedia` video | media |
-| E06 | `LinkPreviewCard` | media, static-content |
-| E07 | `AttachmentRow` list | list-collection, interactive-control |
+| E06 | `LinkPreviewCard` | media, static-content (+ list-collection) |
+| E07 | `AttachmentRow` list | list-collection, interactive-control (+ media) |
 | E08 | `PostCaption` | static-content |
-| E09 | `PostActions` / `LikeButton` / `DoubleTapHeart` | interactive-control |
-| E10 | `CommentSheet` + inline `CommentsList` | list-collection |
-| E11 | `CommentItem` + replies toggle | list-collection, static-content, interactive-control |
-| E12 | `CommentInput` + reply chip | form, interactive-control |
-| E13 | `/post/[postId]` page | static-content, nav |
-| E14 | `ComposerForm` (`/criar`, `/post/[id]/editar`) | form, media, interactive-control |
+| E09 | `PostActions` / `LikeButton` / `DoubleTapHeart` | interactive-control (+ list-collection, media) |
+| E10 | `CommentSheet` + inline `CommentsList` | list-collection (+ form) |
+| E11 | `CommentItem` + replies toggle | list-collection, static-content, interactive-control (+ media) |
+| E12 | `CommentInput` + reply chip | form, interactive-control (+ media, static-content) |
+| E13 | `/post/[postId]` page | static-content, nav (+ list-collection, interactive-control) |
+| E14 | `ComposerForm` (`/criar`, `/post/[id]/editar`) | form, media, interactive-control (+ list-collection, static-content) |
 | E15 | `ComposeFab` / desktop compose CTA | interactive-control |
 | E16 | Share action + toast | interactive-control |
 | E17 | `InfiniteScroll` sentinel + skeletons | list-collection |
 | E18 | Delete/discard `ConfirmDialog`s | static-content, interactive-control |
 
-Applicable state considerations resolved: pre-populated below; the probe REPLACES these rows on its run (idempotent).
+### Resolved considerations
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
-| empty | E01 `FeedList` | ✅ covered | Zero posts renders the feed's own `EmptyState variant="card"` (member vs admin copy in the Copywriting Contract); `HomeSlots`' "Em breve" card does not appear because a slot is registered (UI-D-20). |
-| empty | E04 gallery; E05 video; E06 link card; E07 attachments | ✅ covered | A post with no media renders no frame at all — the caption is the card's anchor (Visual Anchors). A `pending`/`failed` preview renders the bare link, never an empty card (UI-D-11). |
-| empty | E08 `PostCaption` | ✅ covered | A media-only post renders no caption node (no blank line, no placeholder). |
-| empty | E10 comments | ✅ covered | "Nenhum comentário ainda. Seja o primeiro!" centred 14/400 tertiary at `py-10` **[proto]**; the input stays available. |
-| empty | E11 replies | ✅ covered | A root with zero replies renders no rule and no toggle. |
-| empty | E14 composer | ✅ covered | Unfilled form shows the placeholder only; "Publicar" is disabled until there is a caption or media; no inline error before the first submit. |
+| empty | E01 | ✅ covered | Zero posts renders the feed's own `EmptyState variant="card"` (member vs admin copy in the Copywriting Contract); `HomeSlots`' "Em breve" card does not appear because a slot is registered (UI-D-20). |
+| empty | E02 | ✅ covered | **UI-D-21.** A post with zero likes and zero comments renders **only** the relative time — each count segment is omitted until it reaches 1, matching the comment row, which already hides its like count at zero. A fresh post never reads as "0 curtidas · 0 comentários". |
+| empty | E03 | ✅ covered | A member with no photo gets the shipped `Avatar` initials fallback (Phase 3); the display name is never absent (`member_profiles` guarantees a non-empty name). |
+| empty | E04, E05, E06, E07 | ✅ covered | A post with no media renders no frame at all — the caption is the card's anchor (Visual Anchors). A `pending`/`failed` preview renders the bare link, never an empty card (UI-D-11). Zero attachments renders no list node. |
+| empty | E09 | ✅ covered | The action row is always present; an unliked post shows the unfilled `Heart` at `text-text`. There is no "no actions" state. |
+| empty | E10 | ✅ covered | "Nenhum comentário ainda. Seja o primeiro!" centred 14/400 tertiary at `py-10` **[proto]**; the input stays available. |
+| empty | E11 | ✅ covered | A root with zero replies renders no rule and no toggle. |
+| empty | E12 | ✅ covered | An empty field shows the placeholder only; the `Send` glyph is absent until the trimmed value is non-empty **[proto]**. |
+| empty | E13 | ✅ covered | The page always resolves to a post or to the 404 screen (UI-D-16) — there is no empty post page. |
+| empty | E14 | ✅ covered | Unfilled form shows the placeholder only; "Publicar" is disabled until there is a caption or media; no inline error before the first submit. |
+| empty | E17 | ✅ covered | With no next cursor the sentinel renders nothing — no "fim da lista" copy, no terminal spacer. |
 | loading | E01, E17 | ✅ covered | First load: 3 skeleton cards (`Skeleton` circle + 2 text + ratio `rect` + 2 text **[proto]**). Sentinel: one skeleton card. Pull-to-refresh: the `text-brand` loader only, no skeleton swap. |
+| loading | E02, E03 | ✅ covered | The skeleton card carries the header's circle + 2 text lines and the meta row's 2 text lines at the real geometry, so the swap to content does not shift. |
 | loading | E04, E05, E06 | ✅ covered | Every image sits in an explicit-ratio `bg-bg-tertiary` box so nothing reflows (UI-D-09); video shows the Phase 3 `Processando o vídeo…` placeholder; no spinner is ever drawn over an image. |
-| loading | E09 like | ✅ covered | Optimistic — no spinner, no disabled state; the server value reconciles on response. |
+| loading | E07 | ✅ covered | **UI-D-23.** Tapping a row swaps the trailing `Download` glyph for a 20px `Loader2` and sets the row `aria-busy` while the short-TTL signed URL is fetched. The row's geometry does not change; a second tap while busy is a no-op. |
+| loading | E09 | ✅ covered | Optimistic — no spinner, no disabled state; the server value reconciles on response. |
 | loading | E10, E11 | ✅ covered | Sheet open fetches page 1 with 3 comment-row skeletons; "Ver N respostas" shows an inline 2-row skeleton under the toggle while its own query runs. |
-| loading | E12, E14, E16 | ✅ covered | `SubmitButton` pending labels with `aria-busy` ("Publicando…", "Salvando…"); the comment submit glyph is replaced by a 20px `Loader2` while in flight; uploads follow the Phase 3 progress machine with `aria-live` at 25/50/75/100. |
+| loading | E12, E14, E16 | ✅ covered | `SubmitButton` pending labels with `aria-busy` ("Publicando…", "Salvando…"); the comment submit glyph is replaced by a 20px `Loader2` while in flight; uploads follow the Phase 3 progress machine with `aria-live` at 25/50/75/100. The share control has no pending state — `navigator.share` and the clipboard write both resolve within a frame. |
+| loading | E13 | ✅ covered | Server-rendered: the route's existing `(app)` loading boundary renders the `PageHeader` chrome plus one skeleton card; the comment list streams in beneath with its own 3 skeleton rows. |
+| loading | E15 | ✅ covered | Both entry points are navigations, not submissions — no pending state of their own; the composer route owns its loading boundary. |
+| loading | E18 | ✅ covered | The confirm button takes its pending label with `aria-busy` and the dialog stays open and non-dismissible until the action settles; the cancel control is disabled while in flight. |
 | error | E01, E17 | ✅ covered | First-load failure → the generic `EmptyState` + "Tentar novamente". Load-more failure → inline 14 `text-danger` + `outline` retry at the sentinel; already-loaded posts are never discarded. |
+| error | E02 | ✅ covered | Counts are trigger-maintained and arrive with the card — they have no independent fetch and therefore no independent failure mode. |
+| error | E03 | ✅ covered | An avatar that fails to load degrades through `MediaImage.onError` to the initials fallback — never a broken-image glyph (Phase 3). |
 | error | E04, E05, E06 | ✅ covered | `MediaImage.onError` degrades to the neutral `bg-bg-tertiary` box — never a broken-image glyph (Phase 3). A failed transcode shows the `Falhou` pill and no player frame. A failed/refused unfurl renders the bare link silently (UI-D-11, UI-D-13). |
-| error | E09 like | ✅ covered | Revert + generic error toast; no inline message and **no optimistic removal** of the card (03-05 rule). |
-| error | E12 comment submit | ✅ covered | The typed text is kept in the field and the inline `text-danger` message renders above it. |
-| error | E13 post page | ✅ covered | Cross-tenant and soft-deleted both render the identical "Publicação não encontrada" `EmptyState` + "Ir para o início" (UI-D-16); other refusals map through the existing redirect table. |
-| error | E14 composer | ✅ covered | Field-level errors on the caption counter and the media pickers; a server refusal renders as a `role="alert"` card at the top; upload refusals reuse the Phase 3 copy verbatim. |
-| error | E18 dialogs | ✅ covered | On failure the dialog closes and the generic error toast fires; on success it closes with the matching success toast. |
-| populated | E02, E03 | ✅ covered | Header `px-4 py-3` with `Avatar sm` + 14/700 name + 12 tertiary `<time>`; meta row "{n} curtidas · {n} comentários · {relative} · editado" with `tabular-nums`. |
+| error | E07 | ✅ covered | **UI-D-23.** A failed signed-URL request restores the `Download` glyph, clears `aria-busy` and fires the generic error toast; the row stays tappable so a retry is one tap. No inline message, no row reflow. |
+| error | E09 | ✅ covered | Revert + generic error toast; no inline message and **no optimistic removal** of the card (03-05 rule). |
+| error | E10, E11 | ✅ covered | **UI-D-22.** A failed comment-list load renders a 14 `text-danger` line plus an `outline` "Tentar novamente" **where the rows would be**, with the input still usable — never the empty-comments copy, which would assert the wrong fact. A failed "Ver N respostas" renders the same inline retry under the toggle without collapsing it. Two new copy rows. |
+| error | E12 | ✅ covered | The typed text is kept in the field and the inline `text-danger` message renders above it. |
+| error | E13 | ✅ covered | Cross-tenant and soft-deleted both render the identical "Publicação não encontrada" `EmptyState` + "Ir para o início" (UI-D-16); other refusals map through the existing redirect table. A post that loads while its comments fail still renders (E10 above). |
+| error | E14 | ✅ covered | Field-level errors on the caption counter and the media pickers; a server refusal renders as a `role="alert"` card at the top; upload refusals reuse the Phase 3 copy verbatim. |
+| error | E15 | ✅ covered | A navigation has no failure surface of its own; a permission change between render and tap lands on the composer route's own `requireBootstrap()` refusal. |
+| error | E16 | ✅ covered | An `AbortError` from `navigator.share` is the viewer dismissing the OS sheet and is **silently ignored** — never an error toast. Any other share rejection, and a denied clipboard write, fall through to the generic error toast (the same rule as the like failure). |
+| error | E18 | ✅ covered | On failure the dialog closes and the generic error toast fires; on success it closes with the matching success toast. |
+| populated | E01 | ✅ covered | Cards stack `gap-3` in the existing `/inicio` column (`px-4 md:px-0`, 680px inner max-width on desktop, D-39), below the welcome block and the D-02 nudge. |
+| populated | E02, E03 | ✅ covered | Header `px-4 py-3` with `Avatar sm` + 14/700 name + 12 tertiary `<time>`; meta row renders the present segments joined by middots with `tabular-nums` (UI-D-21). |
 | populated | E04 | ✅ covered | Snap carousel, all slides at the first image's clamped ratio, dots in a `bg-black/45` scrim pill, `aria-live` index announcement (UI-D-09/UI-D-10). |
+| populated | E05 | ✅ covered | `VideoPlayer` in its `ready` state, inline at `aspect-video rounded-none`, full-bleed inside the card; `DoubleTapHeart` deliberately does not wrap it. |
+| populated | E06 | ✅ covered | The resolved OG card: optional `aspect-video` image, hostname 12/400 tertiary, title 14/700 `line-clamp-2`, description 14/400 secondary `line-clamp-2`. YouTube/Vimeo get the provider thumbnail plus the 56px play badge (UI-D-12). |
 | populated | E07 | ✅ covered | Up to `FEED_MAX_ATTACHMENTS` rows at `min-h-14`, 40px icon square, filename 14/700 `truncate`, "PDF · {size}" 12 tertiary. |
+| populated | E09 | ✅ covered | Three 44×44 `IconButton`s (glyph 20 stroke 1.5) offset `-ml-2.5`; a liked post shows `Heart` `fill-like text-like` (UI-D-07/UI-D-08). |
 | populated | E10, E11 | ✅ covered | Roots newest-first with `border-b border-border mx-4` separators; expanded replies at `pl-14` oldest→newest with no reply affordance of their own (D-60/D-62). |
-| populated | E15 | ✅ covered | Mobile: 56px brand FAB above the nav pill. Desktop: a `brand` "Criar publicação" in the widget header, no FAB (UI-D-17). Both hidden without `feed.post.create`. |
+| populated | E12 | ✅ covered | `Avatar sm` + 16px field + the `Send` glyph once non-empty, with the reply chip row above when a target is set **[proto]**. |
+| populated | E13 | ✅ covered | `PageHeader` (`stickyTop="0px"`) + the full `PostCard` at identical geometry + `CommentsList` inline; the desktop 680px column and rail are unchanged. |
+| populated | E14 | ✅ covered | Auto-focused caption `Textarea` with its counter, the chosen picker's preview (3-column thumbnail grid or the `aspect-video` video preview), the link-preview row and the attachment rows, under a sticky brand submit. |
+| populated | E17 | ✅ covered | While a next cursor exists the sentinel sits below the last card and renders one skeleton on intersection; with none it renders nothing. |
 | partial | E01 | ✅ covered | The D-02 nudge stays above the feed whatever the feed contains (UI-D-19); the admin FAB is suppressed only while the empty-state CTA is on screen. |
-| partial | E04/E05 | ✅ covered | Gallery and video are mutually exclusive by DB constraint, composer rule and renderer branch (D-53) — a post can never present both, and the composer disables the other picker with its helper line. |
+| partial | E02 | ✅ covered | **UI-D-21.** Any subset of the meta segments may be absent; the row joins only the present ones with `<span aria-hidden>·</span>` and never renders a leading, trailing or doubled middot. |
+| partial | E04 | ✅ covered | Gallery and video are mutually exclusive by DB constraint, composer rule and renderer branch (D-53) — a post can never present both, and the composer disables the other picker with its helper line. |
 | partial | E06 | ✅ covered | A resolved preview with no image renders body-only; with no description renders title-only; neither collapses the card's padding. |
+| partial | E07 | ✅ covered | An attachment whose stored size is missing renders the second line as "PDF" alone — never "PDF · undefined" and never a blank segment. |
+| partial | E09 | ✅ covered | The like state reconciles independently of the comment count; a stale count never blocks or reverts the like. |
+| partial | E10, E13 | ✅ covered | The post renders in full even when the comment list fails or is still loading — the card is never withheld behind its comments (UI-D-22). |
+| partial | E11 | ✅ covered | **UI-D-24.** A comment whose author's membership was soft-deleted keeps its row, its text and its replies: the avatar falls back to the neutral placeholder and the name renders as a non-link "Membro removido". Threads stay readable and replies never orphan. One new copy row. |
+| partial | E12 | ✅ covered | The reply chip and the field are independent — a chip with no text, or text with no chip, are both valid; `Send` is gated on the trimmed text only, and submitting without a chip creates a root comment. |
 | partial | E14 | ✅ covered | Partial fill never disables the close path; publishing validates and marks each offending control; a video still transcoding is publishable, an image still uploading is not. |
+| partial | E17 | ✅ covered | A page that fails mid-list leaves every already-loaded card in place and puts the retry at the sentinel (03-05 rule). |
 | overflow | E01, E13 | ✅ covered | The column scrolls inside `<main class="app-scroll">`; `vh/dvh` are banned inside pages; the 680px desktop column bounds width. |
+| overflow | E03 | ✅ covered | The display name `truncate`s beside the avatar; the `<time>` line below it is bounded by the formatter. See the long-text backstop for the 320px evidence. |
 | overflow | E04 | ✅ covered | The strip is the only horizontal scroller and is `overflow-hidden` at the card edge; 10 dots at 6px+6px fit the scrim pill well inside 320px. |
+| overflow | E06 | ✅ covered | Title and description are `line-clamp-2`; the hostname `truncate`s; no OG string can grow the card. |
 | overflow | E07 | ✅ covered | Filenames `truncate` with `title`; the row grows vertically to `min-h-14`; the list never scrolls internally. |
+| overflow | E08 | ✅ covered | Collapsed at 100 characters; expanded the caption wraps and the page scrolls — the card never gains an inner scroller. |
+| overflow | E09 | ✅ covered | The action row is exactly three fixed 44×44 controls and never wraps; the meta row to its right shrinks first. |
 | overflow | E10 | ✅ covered | The sheet caps at 80% of `--screen-h` (UI-D-18) and the list scrolls inside it with the input pinned and `pb-safe`; inline on `/post/[id]` the page scrolls instead. |
+| overflow | E11 | ✅ covered | Comment text wraps with `whitespace-pre-wrap` inside a `min-w-0` body; the `pl-14` reply indent is preserved at 320px without clipping the avatar. |
 | overflow | E12 | ✅ covered | With the mobile keyboard open the sheet's input stays pinned above it; the field is single-line and scrolls horizontally rather than growing the sheet. |
 | overflow | E14 | ✅ covered | The `Textarea` grows to content and the page scrolls; the thumbnail strip is a 3-column grid that wraps; the sticky header keeps "Publicar" reachable at any scroll position. |
+| overflow | E17 | ✅ covered | The sentinel is a single skeleton card of fixed height; it cannot exceed its container. |
+| overflow | E18 | ✅ covered | All three dialog bodies are fixed, non-interpolated strings that fit the dialog at 320px — no post caption or comment text is ever quoted into a confirmation. |
+| overflow | E02 | 🧪 backstop | Counts above 999 (`formatCount`-style pt-BR abbreviation) plus "editado" on a 320px viewport: the row wraps rather than clipping. Verify with a seeded high-count post. |
+| zero-one-many | E01 | ✅ covered | Zero → the empty state; one → a single card at identical geometry with no separator artefacts; many → `gap-3` stacking under `InfiniteScroll`. |
+| zero-one-many | E02 | ✅ covered | ICU plurals on "# curtida/curtidas" and "# comentário/comentários"; the zero case drops the segment entirely (UI-D-21). |
 | zero-one-many | E04 | ✅ covered | One image: no strip, no dots, still double-tappable. Many: strip + dots, one shared ratio. Ten is the cap (`FEED_MAX_IMAGES`). |
+| zero-one-many | E06 | ✅ covered | At most one preview per post by construction — there is no multi-preview layout to degrade. |
 | zero-one-many | E07 | ✅ covered | Zero attachments renders nothing; one renders a single row with identical geometry to many. |
-| zero-one-many | E11 | ✅ covered | ICU plurals on "# resposta/respostas", "# curtida/curtidas", "# comentário/comentários"; a single reply uses the same toggle and the same indent. |
-| zero-one-many | E16 | ✅ covered | `navigator.share` when present, clipboard + toast otherwise; both produce the same primary-host URL. |
-| long-text | E08 `PostCaption` | ✅ covered | Truncated at 100 characters with "… mais" **[proto]**; expanded text wraps with `whitespace-pre-wrap` and preserved newlines (D-54); the cap is `FEED_MAX_CAPTION` enforced by `maxLength` + the counter. |
-| long-text | E03, E11 | 🧪 backstop | A 40-character display name: the post header name `truncate`s beside the avatar, the comment author's inline name wraps with the comment text. Verify with a seeded 40-char member in the feed e2e at 320px. |
+| zero-one-many | E09 | ✅ covered | A single like control regardless of the count beside it; the control's geometry is independent of the number it reports. |
+| zero-one-many | E10 | ✅ covered | Zero → the empty copy; one → a single row with no separator drawn above the first; many → `border-b` between roots and cursor paging. |
+| zero-one-many | E11 | ✅ covered | ICU plurals on "# resposta/respostas"; a single reply uses the same toggle and the same `pl-14` indent as many. |
+| zero-one-many | E13 | ✅ covered | Exactly one post per page by route shape; the comment list beneath follows E10. |
+| zero-one-many | E14 | ✅ covered | One through `FEED_MAX_IMAGES` thumbnails render in the same 3-column grid — a single picked image is not special-cased into a large preview. |
+| zero-one-many | E17 | ✅ covered | With a single page of results the sentinel never mounts a skeleton; with many it mounts exactly one at a time (re-entrancy guard on `isLoading`). |
+| long-text | E01 | ✅ covered | The widget holds no text of its own; every child is bounded by the 680px column. |
 | long-text | E06 | ✅ covered | Link-card title and description are `line-clamp-2`; the hostname `truncate`s; no OG string can grow the card. |
+| long-text | E04 | ✅ covered | Slide labels are the generated "{i} de {n}" and the `aria-roledescription` — both fixed-length; no user string enters the carousel chrome. |
+| long-text | E08 | ✅ covered | Truncated at 100 characters with "… mais" **[proto]**; expanded text wraps with `whitespace-pre-wrap` and preserved newlines (D-54); the cap is `FEED_MAX_CAPTION` enforced by `maxLength` + the counter. |
+| long-text | E09, E15, E16 | ✅ covered | Every label is a fixed catalog string ("Curtir"/"Descurtir", "Comentar", "Compartilhar", "Criar publicação", "Link copiado.") with no interpolation; the share URL is never rendered as text. |
+| long-text | E10 | ✅ covered | The sheet title "Comentários" is fixed. Long comment text inside the list wraps with `whitespace-pre-wrap` in a `min-w-0` body, and "Membro removido" (UI-D-24) is fixed-length and cannot overflow. (Row-level author-name evidence is the E03/E11 backstop below.) |
+| long-text | E12 | ✅ covered | A long draft scrolls horizontally inside the single-line field rather than growing the sheet; the reply chip's "{name}" `truncate`s within the chip so the dismiss control stays reachable. |
+| long-text | E13 | ✅ covered | The `PageHeader` title is the fixed "Publicação"; the post body follows E08. |
+| long-text | E14 | ✅ covered | The `Textarea` grows to content with the page scrolling; `FEED_MAX_CAPTION` plus the `{n}/{max}` counter (turning `text-danger` at the cap) bound the input. |
+| long-text | E18 | ✅ covered | All three confirmation bodies are fixed strings — no caption, comment or filename is interpolated into a destructive dialog. |
+| long-text | E03, E11 | 🧪 backstop | A 40-character display name: the post header name `truncate`s beside the avatar, the comment author's inline name wraps with the comment text. Verify with a seeded 40-char member in the feed e2e at 320px. |
+| long-text | E02 | 🧪 backstop | The abbreviated count strings themselves at their longest (`formatCount` pt-BR, e.g. "999,9 mil curtidas") plus "editado" in one 12px row. Pinned together with the overflow backstop above by the same seeded high-count post. |
 | long-text | E07 | 🧪 backstop | A 90-character PDF filename `truncate`s with `title` at 14/700. Verify with a long-named fixture in the feed e2e. |
-| long-text | E02 meta row | 🧪 backstop | Counts above 999 (`formatCount`-style pt-BR abbreviation) plus "editado" on a 320px viewport: the row wraps rather than clipping. Verify with a seeded high-count post. |
 
 <!-- Status vocabulary (locked by probe-core projectTruths):
      ✅ covered   → a plain truth string lifted into must_haves.truths
