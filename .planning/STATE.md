@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 03
 current_phase_name: Media Pipeline & Member Profiles
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-09-21T23:41:50.787Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-09-22T00:39:42.503Z"
 last_activity: 2026-09-21
 last_activity_desc: Phase 03 execution started
-state_head: 1cf365f5c145e1b2dc6ee3ada7f76b540fd464b1
+state_head: 93df1c4e81a8a4481b510e2615df88a928afb98e
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 40
-  completed_plans: 32
+  completed_plans: 33
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 03 (Media Pipeline & Member Profiles) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Last activity: 2026-09-21 — Phase 03 execution started
 
@@ -90,6 +90,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P01 | 29 min | 3 tasks | 30 files |
 | Phase 03 P02 | 28 min | 3 tasks | 20 files |
 | Phase 03 P03 | 17 min | 2 tasks | 8 files |
+| Phase 03 P04 | 1h 2m | 3 tasks | 33 files |
 
 ## Accumulated Context
 
@@ -210,6 +211,11 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-03: D-47 lives as TWO predicates at two call sites, not a shared helper — listMembers filters role='member' while getMemberProfile filters no role at all, so a staff profile stays openable by direct link; the asymmetry is pinned mechanically by an awk/grep acceptance criterion
 - [Phase 03]: 03-03: memberListQuerySchema is .strict() (platformTenantsQuerySchema is not) — an unknown query key such as ?role=admin_tenant must fail loudly rather than be silently ignored
 - [Phase 03]: 03-03: likeEscape is re-derived in profiles/search.ts rather than imported from platform/tenants.ts — likeContains is a module-private const inside the PRIVILEGED lane, which profiles/** may not import at all (Biome 'Admin lane is kernel-only')
+- [Phase 03]: 03-04: the signed TUS endpoint is /storage/v1/upload/resumable/sign (RESEARCH Code Example 2 shows the bare /upload/resumable, which is the session-JWT path and answers 400 Invalid Compact JWS for an x-signature token)
+- [Phase 03]: 03-04: /v1/media/{assetId}/{variant} needs a Next BFF route handler — an <img> cannot carry the HttpOnly session, so without it no photo renders anywhere, including the shell avatar 03-02 already points at that path; the handler forwards the API's 302 so bytes still come from Storage
+- [Phase 03]: 03-04: an image failure is read from the element on mount (complete && naturalWidth === 0) as well as from onError — a server-rendered img that 404s before hydration never delivers its error event to React
+- [Phase 03]: 03-04: FileDropZone gained screen (default true, 02-14 unchanged) so the photo zone can hand a dropped phone-format or over-cap file to the browser re-encode instead of refusing it (R-12); Avatar gained the neutral-icon fallback so E9 holds for the shell too
+- [Phase 03]: 03-04: the e2e HEIC case branches on the browser's own decode capability (Chromium has no HEIC decoder, so the prepare-failed copy is its correct answer) and asserts format silence in both branches; the silent-success half stays RESEARCH A1's real-device check in 03-08's UAT
 
 ### Pending Todos
 
@@ -242,6 +248,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-21T23:41:11.060Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-09-22T00:39:31.766Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
