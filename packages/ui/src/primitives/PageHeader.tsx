@@ -11,7 +11,13 @@ type BackProps =
   | { onBack?: undefined; backHref?: undefined; backLabel?: undefined };
 
 export type PageHeaderProps = BackProps & {
-  title: string;
+  /**
+   * The screen's `h1`. OMITTED only when the screen's single `h1` lives in its own body — the member
+   * profile `/membros/[membershipId]`, where the display name IS the heading (UI-SPEC §Member
+   * profile). With no title the header is the back control alone and renders no heading element at
+   * all, so the one-h1 rule still holds.
+   */
+  title?: string;
   /** Trailing slot (actions). */
   trailing?: ReactNode;
   /** CSS `top` of the sticky header — defaults to just below the TopBar. */
@@ -47,9 +53,13 @@ export function PageHeader({
       ) : back.onBack !== undefined ? (
         <IconButton icon={ChevronLeft} label={back.backLabel} onClick={back.onBack} />
       ) : null}
-      <h1 className={cn('flex-1 truncate text-base font-bold text-text', !hasBack && 'px-2')}>
-        {title}
-      </h1>
+      {title === undefined ? (
+        <div className="flex-1" />
+      ) : (
+        <h1 className={cn('flex-1 truncate text-base font-bold text-text', !hasBack && 'px-2')}>
+          {title}
+        </h1>
+      )}
       {trailing ? <div className="flex items-center gap-1">{trailing}</div> : null}
     </header>
   );

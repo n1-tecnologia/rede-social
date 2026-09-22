@@ -1,0 +1,35 @@
+{
+  "members": {
+    "title": "Membros",
+    "back": "Voltar",
+    "search": {
+      "label": "Buscar por nome",
+      "placeholder": "Buscar por nome",
+      "clear": "Limpar busca"
+    },
+    "loadMore": "Carregar mais",
+    "loadingMore": "Carregando…",
+    "results": {
+      "one": "1 membro encontrado",
+      "other": "{count} membros encontrados"
+    },
+    "empty": {
+      "title": "Nenhum membro ainda",
+      "body": "Quando outras pessoas entrarem na comunidade, elas aparecem aqui."
+    },
+    "searchEmpty": {
+      "title": "Nenhum membro encontrado",
+      "body": "Tente outro nome."
+    },
+    "notFound": {
+      "title": "Membro não encontrado",
+      "body": "Esta pessoa não faz parte da sua comunidade.",
+      "cta": "Voltar para membros"
+    },
+    "errors": {
+      "title": "Algo deu errado",
+      "generic": "Algo deu errado. Tente novamente.",
+      "retry": "Tentar novamente"
+    }
+  }
+}

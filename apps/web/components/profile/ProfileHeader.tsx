@@ -9,6 +9,12 @@ export interface ProfileHeaderProps {
   bio: string | null;
   /** Rendered ONLY on the owner's own screen; a member never sees another member's e-mail (D-45/D-46). */
   email?: string;
+  /**
+   * `1` when this header carries the screen's ONLY heading — `/membros/[membershipId]`, whose
+   * `PageHeader` deliberately has no title (UI-SPEC §Member profile). `/perfil` keeps the default
+   * `2`, because there the `PageHeader` title "Perfil" is the h1.
+   */
+  headingLevel?: 1 | 2;
 }
 
 /**
@@ -23,7 +29,14 @@ export interface ProfileHeaderProps {
  * The photo goes through `MediaImage` at `w320` (an 80px avatar at 3× DPR) with the avatar ladder's
  * `srcSet`, and falls back to the same neutral `Avatar` as "no photo" when it cannot be fetched.
  */
-export function ProfileHeader({ displayName, avatarAssetId, bio, email }: ProfileHeaderProps) {
+export function ProfileHeader({
+  displayName,
+  avatarAssetId,
+  bio,
+  email,
+  headingLevel = 2,
+}: ProfileHeaderProps) {
+  const Heading = headingLevel === 1 ? 'h1' : 'h2';
   return (
     <div className="flex flex-col items-center gap-3 px-4 pt-6 pb-4 text-center">
       {avatarAssetId ? (
@@ -43,9 +56,9 @@ export function ProfileHeader({ displayName, avatarAssetId, bio, email }: Profil
       )}
 
       <div className="flex flex-col items-center gap-1">
-        <h2 className="text-2xl font-bold tracking-[-0.02em] break-words text-text">
+        <Heading className="text-2xl font-bold tracking-[-0.02em] break-words text-text">
           {displayName}
-        </h2>
+        </Heading>
         {email ? <p className="text-sm text-text-secondary">{email}</p> : null}
       </div>
 

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Bell, Mail } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -8,6 +8,8 @@ import {
   Chip,
   IconButton,
   Input,
+  PageHeader,
+  SearchBar,
   SectionTitle,
   StatusPill,
   Textarea,
@@ -96,6 +98,68 @@ describe('Input', () => {
     expect(input.className).toContain('text-base');
     expect(input.className).toContain('pl-10');
     expect(input).not.toHaveAttribute('aria-invalid');
+  });
+});
+
+describe('SearchBar', () => {
+  it('is a 44px, 16px search field named by its required aria-label (UI-D-04)', () => {
+    render(
+      <SearchBar
+        value=""
+        onChange={() => {}}
+        ariaLabel="Buscar por nome"
+        clearLabel="Limpar busca"
+        placeholder="Buscar por nome"
+      />,
+    );
+    const field = screen.getByLabelText('Buscar por nome');
+    expect(field).toHaveAttribute('type', 'search');
+    expect(field.className).toContain('h-11');
+    expect(field.className).toContain('text-base');
+    expect(field.className).toContain('rounded-full');
+    // The prototype's 14px pill is the thing UI-D-04 departs from.
+    expect(field.className).not.toContain('text-sm');
+  });
+
+  it('shows the clear control ONLY when the value is non-empty', () => {
+    const { rerender } = render(
+      <SearchBar value="" onChange={() => {}} ariaLabel="Buscar" clearLabel="Limpar busca" />,
+    );
+    expect(screen.queryByRole('button', { name: 'Limpar busca' })).not.toBeInTheDocument();
+
+    rerender(
+      <SearchBar value="gon" onChange={() => {}} ariaLabel="Buscar" clearLabel="Limpar busca" />,
+    );
+    expect(screen.getByRole('button', { name: 'Limpar busca' })).toBeInTheDocument();
+  });
+
+  it('is controlled: typing and clearing both report through onChange and never self-mutate', () => {
+    const onChange = vi.fn();
+    render(
+      <SearchBar value="gon" onChange={onChange} ariaLabel="Buscar" clearLabel="Limpar busca" />,
+    );
+    const field = screen.getByLabelText('Buscar') as HTMLInputElement;
+
+    fireEvent.change(field, { target: { value: 'goncal' } });
+    expect(onChange).toHaveBeenCalledWith('goncal');
+    // The caller owns the value: without a re-render the field still shows what it was given.
+    expect(field.value).toBe('gon');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Limpar busca' }));
+    expect(onChange).toHaveBeenLastCalledWith('');
+  });
+});
+
+describe('PageHeader', () => {
+  it('renders the title as the screen h1', () => {
+    render(<PageHeader title="Membros" backHref="/perfil" backLabel="Voltar" />);
+    expect(screen.getByRole('heading', { level: 1, name: 'Membros' })).toBeInTheDocument();
+  });
+
+  it('renders NO heading when the title is omitted, so the body owns the one h1', () => {
+    render(<PageHeader backHref="/membros" backLabel="Voltar" />);
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Voltar' })).toHaveAttribute('href', '/membros');
   });
 });
 

@@ -44,6 +44,7 @@ export {
 export { IconButton, type IconButtonProps } from './primitives/IconButton';
 export { Input, type InputProps } from './primitives/Input';
 export { PageHeader, type PageHeaderProps } from './primitives/PageHeader';
+export { SearchBar, type SearchBarProps } from './primitives/SearchBar';
 export { SectionTitle, type SectionTitleProps } from './primitives/SectionTitle';
 export { Skeleton, type SkeletonProps } from './primitives/Skeleton';
 export { StatusPill, type StatusPillProps, type StatusTone } from './primitives/StatusPill';

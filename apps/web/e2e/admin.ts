@@ -267,3 +267,21 @@ export async function inviteStatusForEmail(email: string): Promise<string | null
      limit 1`;
   return rows[0]?.status ?? null;
 }
+
+/**
+ * The ACTIVE membership id of an e-mail in a tenant — the identity `/membros/[membershipId]` is
+ * keyed by (03-02: the profile hangs off the membership, not off `users`). Used by the directory
+ * spec to reach a member by direct link and to prove the caller's own id redirects to `/perfil`.
+ */
+export async function membershipIdFor(email: string, tenantSlug: string): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    select m.id
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+      join public.tenants t on t.id = m.tenant_id
+     where u.email = ${email} and t.slug = ${tenantSlug} and m.deleted_at is null
+     limit 1`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no membership for ${email} in ${tenantSlug}`);
+  return id;
+}
