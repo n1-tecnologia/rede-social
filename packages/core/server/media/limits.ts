@@ -53,15 +53,25 @@ export function limitFor(kind: MediaKind, purpose: MediaPurpose): MediaLimit {
 }
 
 /**
- * The purpose's ladder filtered to widths at or below the original, ALWAYS keeping the smallest
- * entry: a tiny source still produces one variant rather than an empty ladder (which would leave a
- * `ready` asset with nothing to render). `attachment` derives nothing and stays empty.
+ * The purpose's WHOLE ladder. `attachment` derives nothing and stays empty.
+ *
+ * The source width is deliberately NOT a parameter (T-03-51). This used to clamp the ladder to
+ * widths at or below the original, which made the set of URLs an asset answers a function of the
+ * SOURCE SIZE — a fact no payload carries and no `<img srcset>` can know. Every profile surface
+ * renders `PURPOSE_WIDTHS.avatar` with `baseWidth={320}` (`ProfileHeader`, `AvatarUploadField`,
+ * `MemberRow`, `ProfileNudgeCard`, and `avatarSrcSet` in the contracts), because `ownProfileSchema`
+ * and `memberProfileSchema` carry only an `avatarAssetId`. A member who uploaded a 200 px photo got
+ * `w128` and nothing else, so at DPR >= 2 the browser chose the `w320` candidate, the serving route
+ * 404'd, `MediaImage.onError` fired, and their photo silently became the neutral "no photo" icon on
+ * exactly the phone this PWA is built for.
+ *
+ * Deriving every rung costs nothing and lies to nobody: `deriveVariants` resizes with
+ * `withoutEnlargement`, so the `w320` rung of a 200 px original is a 200 px WebP — present, correct,
+ * never upscaled, and a few kilobytes. The ladder is now a pure function of the purpose, which is
+ * precisely what every call site already assumes.
  */
-export function widthsForPurpose(purpose: MediaPurpose, originalWidth: number): number[] {
-  const ladder = PURPOSE_WIDTHS[purpose] ?? [];
-  if (ladder.length === 0) return [];
-  const fitting = ladder.filter((width) => width <= originalWidth);
-  return fitting.length > 0 ? [...fitting] : [ladder[0] as number];
+export function widthsForPurpose(purpose: MediaPurpose): number[] {
+  return [...(PURPOSE_WIDTHS[purpose] ?? [])];
 }
 
 /**

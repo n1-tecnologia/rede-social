@@ -872,7 +872,10 @@ export async function deriveAssetVariants(
   if (!buf) return { outcome: 'gone', widths: [] };
 
   const probed = await probeSize(buf);
-  const widths = widthsForPurpose(row.purpose as MediaPurpose, probed.width);
+  // The ladder depends on the PURPOSE alone, never on `probed.width` (T-03-51): the serving URLs an
+  // asset answers must be knowable from a payload that carries only its id. `deriveVariants` resizes
+  // with `withoutEnlargement`, so a rung above the source is the source, not an upscale.
+  const widths = widthsForPurpose(row.purpose as MediaPurpose);
   const derived = await deriveVariants(buf, widths);
 
   await mediaInternals.beforeVariantWrite();

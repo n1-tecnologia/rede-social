@@ -102,13 +102,25 @@ describe('limits — the table invariants the ladder depends on', () => {
     }
   });
 
-  it('widthsForPurpose clamps to the original and never yields an empty ladder for an image', () => {
-    expect(widthsForPurpose('post', 500)).toEqual([320]);
-    // A tiny source still produces the smallest entry: a `ready` asset always has something to render.
-    expect(widthsForPurpose('post', 40)).toEqual([320]);
-    expect(widthsForPurpose('avatar', 5000)).toEqual([128, 320]);
+  it('widthsForPurpose is a function of the PURPOSE ALONE — the source size never enters it', () => {
+    // The whole ladder, every time. It used to be clamped to widths at or below the original, which
+    // made the set of URLs an asset answers depend on the source size — a fact no payload carries
+    // and no `<img srcset>` can know, so a 200 px avatar 404'd the `w320` every profile surface
+    // requests and the member's photo silently degraded to the neutral icon (CR-02/T-03-51).
+    expect(widthsForPurpose('avatar')).toEqual([...PURPOSE_WIDTHS.avatar]);
+    expect(widthsForPurpose('post')).toEqual([...PURPOSE_WIDTHS.post]);
+    expect(widthsForPurpose('cover')).toEqual([...PURPOSE_WIDTHS.cover]);
     // An attachment derives nothing at all.
-    expect(widthsForPurpose('attachment', 5000)).toEqual([]);
+    expect(widthsForPurpose('attachment')).toEqual([]);
+    // It returns a fresh array: a caller cannot mutate the shared contract table through it.
+    expect(widthsForPurpose('avatar')).not.toBe(PURPOSE_WIDTHS.avatar);
+  });
+
+  it('every purpose an image can carry derives at least one rung — a ready asset always renders', () => {
+    for (const purpose of MEDIA_PURPOSES) {
+      if (purpose === 'attachment') continue;
+      expect(widthsForPurpose(purpose).length).toBeGreaterThan(0);
+    }
   });
 
   it('limitFor refuses an unknown (kind, purpose) pair instead of defaulting', () => {

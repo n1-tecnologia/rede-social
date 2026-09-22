@@ -56,6 +56,13 @@ type Envelope = { error: { code: string; message: string; details?: Record<strin
 /** A 900x600 photo-ish fixture: an inline rect rendered by sharp, then encoded as a real JPEG. */
 const PHOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600"><rect width="900" height="600" fill="#0ea5e9"/><circle cx="450" cy="300" r="180" fill="#f59e0b"/></svg>`;
 
+/**
+ * A 200x200 photo — under every cap, so the browser's `normaliseImage` returns it untouched and the
+ * server stores it as-is. It is SMALLER than the `w320` rung every profile surface requests, which
+ * is the whole point of the CR-02 regression below.
+ */
+const SMALL_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="#16a34a"/><circle cx="100" cy="100" r="70" fill="#fef08a"/></svg>`;
+
 let memberToken = '';
 let labToken = '';
 let demoTenantId = '';
@@ -64,6 +71,7 @@ let labTenantId = '';
 let labSlug = '';
 let labDisplayName = '';
 let PHOTO_JPEG: Buffer;
+let SMALL_JPEG: Buffer;
 let PHOTO_PNG: Buffer;
 
 const createdAssetIds: string[] = [];
@@ -170,6 +178,7 @@ beforeAll(async () => {
   if (!tenant) throw new Error('the tria-demo tenant is not seeded');
   demoTenantId = tenant.id;
   PHOTO_JPEG = await encodeJpeg(Buffer.from(PHOTO_SVG));
+  SMALL_JPEG = await encodeJpeg(Buffer.from(SMALL_SVG));
   // A real PNG, built through the 02-13 kernel helper — the api package has no `sharp` dependency.
   PHOTO_PNG = (
     await deriveIconSet(Buffer.from(PHOTO_SVG), { primaryHex: '#0ea5e9', mime: 'image/svg+xml' })
@@ -586,6 +595,64 @@ describe('idempotency and concurrency — one confirmation, one job, one ladder'
     } finally {
       mediaInternals.beforeVariantWrite = original;
     }
+  });
+});
+
+/**
+ * CR-02. The profile payloads (`ownProfileSchema`, `memberProfileSchema`) carry only an
+ * `avatarAssetId`, so every profile surface renders the STATIC `PURPOSE_WIDTHS.avatar` ladder with
+ * `baseWidth={320}`. The derived ladder therefore has to be knowable from the purpose alone — if it
+ * depended on the source size, a small photo would 404 the `w320` the browser picks at DPR >= 2 and
+ * `MediaImage.onError` would silently show the neutral "no photo" icon instead.
+ */
+describe('the derived ladder is a function of the PURPOSE, not of the source size (CR-02/T-03-51)', () => {
+  it('a 200 px avatar still answers the w320 every profile surface requests — with a 200 px WebP, never an upscale', async () => {
+    expect((await probeSize(SMALL_JPEG)).width).toBe(200);
+
+    const start = await startUpload({
+      kind: 'image',
+      purpose: 'avatar',
+      mime: 'image/jpeg',
+      size: SMALL_JPEG.length,
+      filename: 'pequena.jpg',
+    });
+    expect(start.status).toBe(201);
+    const body = (await start.json()) as { assetId: string; signedUrl: string };
+    const assetId = body.assetId;
+    createdAssetIds.push(assetId);
+    expect((await putToSignedUrl(body.signedUrl, SMALL_JPEG, 'image/jpeg')).ok).toBe(true);
+    expect((await completeUpload(assetId)).status).toBe(200);
+    await deriveVariantsJob.handler({ tenantId: demoTenantId, assetId, attempt: 0 });
+
+    // The whole avatar ladder, even though the source is smaller than its top rung.
+    const asset = mediaAssetSchema.parse(await (await completeUpload(assetId)).json());
+    expect(asset.status).toBe('ready');
+    expect(asset.width).toBe(200);
+    expect(asset.variants).toEqual([
+      { width: 128, url: `/v1/media/${assetId}/w128` },
+      { width: 320, url: `/v1/media/${assetId}/w320` },
+    ]);
+    expect((await assetRow(assetId))?.variant_widths).toEqual([128, 320]);
+
+    // The rung the srcset advertises really resolves — this is the 404 that used to erase the photo.
+    const res = await media(`/${assetId}/w320`, { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    const location = res.headers.get('location') ?? '';
+    expect(location).toContain(`/object/sign/media/${demoTenantId}/media/${assetId}/w320.webp`);
+
+    const fetched = await fetch(location);
+    expect(fetched.status).toBe(200);
+    expect(fetched.headers.get('content-type')).toContain('image/webp');
+    // `withoutEnlargement`: the w320 rung of a 200 px source is a 200 px WebP, not a blurred upscale.
+    const probed = await probeSize(Buffer.from(await fetched.arrayBuffer()));
+    expect(probed.format).toBe('webp');
+    expect(probed.width).toBe(200);
+
+    // The smaller rung is a genuine downscale, so the ladder still gives the browser a real choice.
+    const small = await media(`/${assetId}/w128`, { redirect: 'manual' });
+    expect(small.status).toBe(302);
+    const smallBytes = await fetch(small.headers.get('location') ?? '');
+    expect((await probeSize(Buffer.from(await smallBytes.arrayBuffer()))).width).toBe(128);
   });
 });
 
