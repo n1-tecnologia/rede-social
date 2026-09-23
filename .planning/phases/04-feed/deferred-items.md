@@ -53,3 +53,23 @@ had not arrived yet.
 Out of scope for 04-07 (the scope-boundary rule: this file was not touched by this plan). If CI ever
 runs the e2e suite with repeats or higher parallelism, the fix is to give these round-trip
 assertions an explicit longer timeout rather than to relax what they assert.
+
+## From 04-10
+
+### 5. `apps/web/e2e/feed-composer.spec.ts:125` times out inside a FULL `pnpm verify`, passes alone
+
+"two images through the real file chooser, then the card on the home route" failed the first exit-gate
+run with `only fewer than 2 post images reached 'ready' within 120000ms — saw processing=2`. The
+diagnostic's own wording is the diagnosis: `processing=2` means the rows reached `complete` and the
+WORKER did not drain `kernel.media-derive-variants`. Run on its own against the same stack the file
+is green in 6.4 s, and the second full exit-gate run (with no change to this spec, the composer, the
+worker or the media pipeline between them) was green too — 328 e2e passed, zero failures.
+
+The same class as items 2 and 4 above: several specs spawn and stop their own worker through
+`ensureWorker()`/`afterAll`, so a worker stopped by an earlier file while this one's rows are still
+pending is a cross-spec interaction, not a product defect. Nothing in 04-10's diff touches media
+derivation — the removal changed the registry by one module and one pg-boss queue
+(`example.process`), neither of which the media queue depends on.
+
+Out of scope for 04-10 (the scope-boundary rule). If it recurs, the fix is to make `ensureWorker()`
+reference-counted across specs rather than to lengthen the timeout, which would only hide it.

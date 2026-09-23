@@ -21,7 +21,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 - [x] **MOD-01**: The codebase is a monorepo where each feature (feed, communities, stories, events, chat, notifications, moderation, profiles) is a self-contained module package containing its own DB schema/migrations, API routes, domain logic and UI components
 - [x] **MOD-02**: A core kernel package provides tenancy, auth/session, roles, feature flags, media broker and shared UI primitives; feature modules depend only on the kernel and on published contracts of other modules, never on another module's internals (enforced by lint/dependency rules)
-- [ ] **MOD-03**: Modules communicate through domain events (e.g. `post.liked`, `event.rsvp`) consumed by other modules (e.g. notifications) so a module can be removed or replaced without touching the others
+- [x] **MOD-03**: Modules communicate through domain events (e.g. `post.liked`, `event.rsvp`) consumed by other modules (e.g. notifications) so a module can be removed or replaced without touching the others
 - [x] **MOD-04**: Each module is registered in a module registry that declares its routes, navigation entries, feature-flag key and event subscriptions; the API mounts and the app renders only registered, enabled modules
 - [ ] **MOD-05**: A module can be reused in another TRIA project by copying/publishing its package and providing the kernel contracts, documented in a per-module README with its public interface
 
@@ -216,7 +216,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-07 | Phase 2 | Complete |
 | MOD-01 | Phase 1 | Complete |
 | MOD-02 | Phase 1 | Complete |
-| MOD-03 | Phase 4 | Pending |
+| MOD-03 | Phase 4 | Complete |
 | MOD-04 | Phase 2 | Complete |
 | MOD-05 | Phase 8 | Pending |
 | ROLE-01 | Phase 1 | Complete |

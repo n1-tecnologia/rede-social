@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Feed
-status: executing
-stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-09-23T03:46:09.867Z"
+status: verifying
+stopped_at: Completed 04-10-PLAN.md
+last_updated: "2026-09-23T05:16:54.118Z"
 last_activity: 2026-09-22
 last_activity_desc: Phase 04 execution started
-state_head: 42bbd5845c6af6698fb434cdb6b4e386d642c538
+state_head: 7788edacb4a9abf501c315ca4b9a8cfb8328f111
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 50
-  completed_plans: 46
+  completed_plans: 47
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 Phase: 04 (Feed) — EXECUTING
 Plan: 10 of 10
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-22 — Phase 04 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -104,6 +104,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P07 | 35 min | 3 tasks | 19 files |
 | Phase 04 P08 | 26 min | 3 tasks | 23 files |
 | Phase 04 P09 | 46 min | 3 tasks | 34 files |
+| Phase 04 P10 | 87 min | 3 tasks | 52 files |
 
 ## Accumulated Context
 
@@ -291,6 +292,12 @@ Recent decisions affecting current work:
 - [Phase 04]: Authorisation on a post write is BOTH the route permission (feed.post.manage) and the author_user_id predicate in the statement; the live-row predicate makes delete win a concurrent edit
 - [Phase 04]: edited_at advances on a byte-identical re-save: 'edited' means the author saved it again, not that the bytes differ (UI-D-15)
 - [Phase 04]: A 'use server' module cannot re-export another one under Turbopack, so shared non-action helpers live in a plain module (apps/web/lib/feed-write.ts)
+- [Phase 04]: 04-10: D-19 closed by DELETION — the reference module is gone from the workspace, registry, catalog, seed and database; MOD-03 is now demonstrated (one module removed, nothing else changed) rather than asserted
+- [Phase 04]: 04-10: a retired per-key special case is replaced by an assertion on the rule that SURVIVES (the key vocabulary: route enum, defineModule, tenant_modules_key_chk by SQLSTATE 23514) — never simply deleted
+- [Phase 04]: 04-10: the boundary fixture now DECLARES @tria/module-feed, so turbo reports the real module-to-module violation instead of only 'undeclared import' — the negative check got stronger across the removal
+- [Phase 04]: 04-10: the removal migration hand-extends the GENERATED file rather than splitting into --custom: rows, then table, then the narrowed CHECK, because the narrowed constraint refuses to be created while a retired-key row exists; the snapshot is untouched so db:generate stays idempotent
+- [Phase 04]: 04-10: no seed tenant carries a module TAB any more (feed is a home slot, D-55), so shell.spec asserts the same nav on both tenants; the tab-bearing module-flag witness moved to phase4-smoke.spec.ts on a throwaway tenant
+- [Phase 04]: 04-10: Phase 4 exit gate pnpm verify GREEN at 21m51s (unit 512, pgTAP 191, integration 373, e2e 328 passed/58 skipped, PWA 45/3) against the Phase 3 baseline of 20m26s — after the gate caught shell.spec.ts still asserting the deleted module's tab, a file the RESEARCH removal inventory had missed
 
 ### Pending Todos
 
@@ -323,6 +330,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T03:46:01.678Z
-Stopped at: Completed 04-09-PLAN.md
+Last session: 2026-09-23T05:16:42.638Z
+Stopped at: Completed 04-10-PLAN.md
 Resume file: None
