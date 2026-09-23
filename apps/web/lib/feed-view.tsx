@@ -1,7 +1,8 @@
 import { avatarUrlFor } from '@tria/contracts/profiles';
-import type { FeedPost } from '@tria/module-feed/contracts';
+import type { FeedComment, FeedPost } from '@tria/module-feed/contracts';
 import type {
   AttachmentDescriptor,
+  CommentView,
   PostCardMediaView,
   PostCardView,
   PostMediaImage,
@@ -10,7 +11,7 @@ import type { getTranslations } from 'next-intl/server';
 import { VideoPlayer } from '@/components/media/VideoPlayer';
 
 /**
- * `FeedPost` (the wire contract) → `PostCardView` (what the presentational card needs).
+ * `FeedPost` / `FeedComment` (the wire contracts) → the views the presentational components need.
  *
  * **Why this is its own module and not part of `lib/registry.tsx`.** The home slot renders page 1
  * and `inicio/feed-actions.ts` renders every page after it; if each built its own view the two
@@ -190,5 +191,49 @@ export function postCardView(post: FeedPost, now: number, tf: Translator): PostC
     viewerLiked: post.viewerLiked,
     ariaLabel: tf('post.label', { name: post.author.displayName }),
     media: postMediaView(post, tf),
+  };
+}
+
+/**
+ * `FeedComment` (the wire contract) → `CommentView` (what the presentational row needs), and the
+ * one place UI-D-24 becomes pixels.
+ *
+ * **A removed author gets NO name and NO link here.** The API already nulls `displayName` and
+ * `membershipId` when `authorRemoved` is true, and this function does not try to fill either in:
+ * the row's label comes from the catalog inside the component, and `profileHref` stays null so
+ * there is no href for a member to follow to a profile that is gone (T-04-45). Reconstructing
+ * `/membros/{id}` from anything else would defeat the projection's whole point.
+ *
+ * `canDelete` is copied THROUGH from the server (T-04-44) — never recomputed here by comparing the
+ * viewer's id to the author's. The control it draws is a convenience; the API's own predicate is
+ * what actually decides, and a client-side guess that disagreed with it would either hide a
+ * legitimate control or offer one that always 404s.
+ */
+export function commentView(comment: FeedComment, now: number, nowLabel: string): CommentView {
+  // A comment written seconds ago reads "agora" rather than "há 0 s" (UI-D-14); the ISO value and
+  // the absolute title are still real, so the `<time>` element stays machine-readable.
+  const elapsed = now - new Date(comment.createdAt).getTime();
+  const relative = elapsed < 60_000 ? nowLabel : relativeFrom(comment.createdAt, now);
+
+  return {
+    id: comment.id,
+    body: comment.body,
+    author: {
+      displayName: comment.author.displayName,
+      profileHref:
+        comment.authorRemoved || comment.author.membershipId === null
+          ? null
+          : `/membros/${comment.author.membershipId}`,
+      avatarUrl: avatarUrlFor(comment.author.avatarAssetId),
+    },
+    authorRemoved: comment.authorRemoved,
+    createdAtIso: comment.createdAt,
+    createdAtRelative: relative,
+    createdAtAbsolute: absoluteTime.format(new Date(comment.createdAt)),
+    likeCount: comment.likeCount,
+    viewerLiked: comment.viewerLiked,
+    replyCount: comment.replyCount,
+    isReply: comment.isReply,
+    canDelete: comment.canDelete,
   };
 }

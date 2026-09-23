@@ -1,13 +1,29 @@
 'use server';
 
-import { feedQuerySchema } from '@tria/module-feed/contracts';
-import type { PostCardView } from '@tria/module-feed/ui';
+import {
+  commentsQuerySchema,
+  createCommentSchema,
+  type FeedComment,
+  feedQuerySchema,
+  repliesQuerySchema,
+} from '@tria/module-feed/contracts';
+import type { CommentView, PostCardView } from '@tria/module-feed/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import { getFeed, likePost, unlikePost } from '@/lib/feed';
-import { postCardView } from '@/lib/feed-view';
+import {
+  createComment,
+  deleteComment,
+  getComments,
+  getFeed,
+  getReplies,
+  likeComment,
+  likePost,
+  unlikeComment,
+  unlikePost,
+} from '@/lib/feed';
+import { commentView, postCardView } from '@/lib/feed-view';
 
 /**
  * The feed's four write/read actions (FEED-02, FEED-04), in the `membros/actions.ts` conventions —
@@ -118,4 +134,201 @@ export async function likePostAction(postId: string): Promise<LikeActionResult> 
 
 export async function unlikePostAction(postId: string): Promise<LikeActionResult> {
   return toggle(postId, unlikePost);
+}
+
+/* ── Comments, replies and their writes (FEED-05, FEED-06, D-59..D-62) ──────────────────────────── */
+
+/**
+ * The six comment actions (04-07), in the same three conventions as everything above: the API's own
+ * Zod runs BEFORE the request, a refusal is a catalog KEY and never pt-BR copy, and every one of
+ * them goes through `lib/feed.ts` — the ONE fetch implementation the sheet and the inline list on
+ * `/post/[id]` both read (D-59).
+ *
+ * `now` is read HERE rather than in the client so a comment's relative time is formatted on the
+ * server exactly as a post's is (UI-D-14); the only clock the client touches is for the optimistic
+ * row it has not sent yet.
+ */
+
+export type CommentPageResult =
+  | { ok: true; items: CommentView[]; nextCursor: string | null }
+  | { ok: false; code: 'generic' };
+
+export type CommentCreateResult =
+  | { ok: true; comment: CommentView }
+  /** `reply_depth_exceeded` is the API's translation of the database's one-level refusal (D-60). */
+  | { ok: false; code: 'generic' | 'reply_depth_exceeded' };
+
+export type CommentDeleteResult = { ok: true } | { ok: false; code: 'generic' };
+
+/** A comment id: a uuid or nothing. The API answers a bare 404 for every miss (T-04-21). */
+const commentIdSchema = z.uuid();
+
+/** Reads the comment issue the API put in `details.comment`, and nothing else from the envelope. */
+function commentIssue(error: unknown): 'reply_depth_exceeded' | null {
+  if (!(error instanceof ApiClientError)) return null;
+  const issue = (error.details as { comment?: unknown } | undefined)?.comment;
+  return issue === 'reply_depth_exceeded' ? 'reply_depth_exceeded' : null;
+}
+
+/** Shared by the two page actions: the only difference is which client they call. */
+async function commentPage(
+  run: () => Promise<{ items: FeedComment[]; nextCursor: string | null }>,
+  nowLabel: string,
+): Promise<CommentPageResult> {
+  let refusal: string | null = null;
+  let result: CommentPageResult = { ok: false, code: 'generic' };
+  try {
+    const page = await run();
+    const now = Date.now();
+    result = {
+      ok: true,
+      items: page.items.map((comment) => commentView(comment, now, nowLabel)),
+      nextCursor: page.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    // Shape only: a comment body is member content and never reaches a log line (T-04-19/T-04-40).
+    if (!refusal) console.error('feed.comments.load_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * One page of a post's ROOT comments, newest first (D-62).
+ *
+ * The cursor is OPAQUE: forwarded exactly as the previous page returned it, never parsed or rebuilt
+ * here. `limit` is never taken from the caller — `commentsQuerySchema`'s default is
+ * `COMMENTS_PAGE_SIZE` and the API REFUSES an oversized one rather than clamping it.
+ */
+export async function loadCommentsAction(
+  postId: string,
+  cursor?: string,
+): Promise<CommentPageResult> {
+  const id = postIdSchema.safeParse(postId);
+  const query = commentsQuerySchema.safeParse(cursor ? { cursor } : {});
+  if (!id.success || !query.success) return { ok: false, code: 'generic' };
+
+  const tf = await getTranslations('feed');
+  return commentPage(
+    () => getComments(id.data, { cursor: query.data.cursor, limit: query.data.limit }),
+    tf('comments.now'),
+  );
+}
+
+/**
+ * One page of ONE root's replies, oldest first (D-60, D-62).
+ *
+ * Its own schema, because its cursor walks the opposite direction over a different index and the
+ * two are NOT interchangeable — feeding one to the other degrades to page 1 rather than erroring.
+ */
+export async function loadRepliesAction(
+  commentId: string,
+  cursor?: string,
+): Promise<CommentPageResult> {
+  const id = commentIdSchema.safeParse(commentId);
+  const query = repliesQuerySchema.safeParse(cursor ? { cursor } : {});
+  if (!id.success || !query.success) return { ok: false, code: 'generic' };
+
+  const tf = await getTranslations('feed');
+  return commentPage(
+    () => getReplies(id.data, { cursor: query.data.cursor, limit: query.data.limit }),
+    tf('comments.now'),
+  );
+}
+
+/**
+ * Create a comment, or a reply when `parentId` is present (FEED-05).
+ *
+ * A reply to a reply comes back from the API as a 400 carrying `details.comment =
+ * 'reply_depth_exceeded'`; this maps it to its OWN result code so the client can show the catalog's
+ * sentence for it. The raw machine code never crosses to the DOM (T-04-42), and it is deliberately
+ * the one comment issue a client branches on — every other miss is a bare 404 that reads as
+ * `generic`.
+ */
+export async function createCommentAction(
+  postId: string,
+  body: string,
+  parentId?: string,
+): Promise<CommentCreateResult> {
+  const id = postIdSchema.safeParse(postId);
+  const input = createCommentSchema.safeParse(parentId ? { body, parentId } : { body });
+  if (!id.success || !input.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: CommentCreateResult = { ok: false, code: 'generic' };
+  try {
+    const [created, tf] = await Promise.all([
+      createComment(id.data, input.data.body, input.data.parentId ?? undefined),
+      getTranslations('feed'),
+    ]);
+    result = { ok: true, comment: commentView(created, Date.now(), tf('comments.now')) };
+  } catch (error) {
+    const issue = commentIssue(error);
+    if (issue) {
+      result = { ok: false, code: issue };
+    } else {
+      if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+      if (!refusal) console.error('feed.comment.create_failed', { error: String(error) });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * Soft-delete the caller's OWN comment or reply (D-61).
+ *
+ * The authority lives in the API's predicate, not in the `canDelete` flag the row carried: someone
+ * else's comment, an unknown id and an already-removed one are one bare 404 here, which reads as
+ * `generic` (T-04-44).
+ */
+export async function deleteCommentAction(commentId: string): Promise<CommentDeleteResult> {
+  const id = commentIdSchema.safeParse(commentId);
+  if (!id.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: CommentDeleteResult = { ok: false, code: 'generic' };
+  try {
+    await deleteComment(id.data);
+    result = { ok: true };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) console.error('feed.comment.delete_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/** Shared by the comment like and unlike, exactly as `toggle` is by the post's (FEED-06). */
+async function toggleComment(
+  commentId: string,
+  run: (id: string) => Promise<{ liked: boolean; likeCount: number }>,
+): Promise<LikeActionResult> {
+  const id = commentIdSchema.safeParse(commentId);
+  if (!id.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: LikeActionResult = { ok: false, code: 'generic' };
+  try {
+    const outcome = await run(id.data);
+    result = { ok: true, liked: outcome.liked, likeCount: outcome.likeCount };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) console.error('feed.comment.like_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+export async function likeCommentAction(commentId: string): Promise<LikeActionResult> {
+  return toggleComment(commentId, likeComment);
+}
+
+export async function unlikeCommentAction(commentId: string): Promise<LikeActionResult> {
+  return toggleComment(commentId, unlikeComment);
 }

@@ -10,9 +10,15 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { createExampleItem } from '@/app/(app)/inicio/example-actions';
 import {
+  createCommentAction,
+  deleteCommentAction,
+  likeCommentAction,
   likePostAction,
+  loadCommentsAction,
   loadMoreFeedAction,
+  loadRepliesAction,
   refreshFeedAction,
+  unlikeCommentAction,
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
 import { apiFetch } from '@/lib/api';
@@ -99,6 +105,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
       onRefresh={refreshFeedAction}
       onLike={likePostAction}
       onUnlike={unlikePostAction}
+      comments={commentsProps(locale, tf, bootstrap)}
       labels={{
         region: tf('region'),
         more: tf('caption.more'),
@@ -130,6 +137,78 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
     />
   );
 };
+
+/**
+ * Everything D-59's comment surface needs, composed HERE for the same reason every other label
+ * block is: `@tria/module-feed` ships no language (PWA-03) and knows no route table (MOD-02).
+ *
+ * The six handlers are SERVER ACTIONS, which is what lets them cross into the client component that
+ * owns the sheet. `canDelete` is NOT computed here and not computed in the client either — it rides
+ * each row from the API, which derives it from the caller's own user id and re-checks it on the
+ * delete itself (T-04-44). A client-side comparison would either hide a legitimate control or offer
+ * one that always 404s.
+ *
+ * `viewer` feeds the OPTIMISTIC row only, and is replaced by the server's reconciled row a moment
+ * later. `profileHref` is null there because the bootstrap carries the viewer's profile but not
+ * their membership id — and for the ~200 ms a pending row lives, a name without a link is the
+ * honest rendering rather than a guessed route.
+ */
+function commentsProps(locale: string, tf: Translator, bootstrap: Bootstrap) {
+  return {
+    title: tf('comments.title'),
+    locale,
+    viewer: {
+      displayName: bootstrap.membership.profile.displayName,
+      profileHref: null,
+      avatarUrl: bootstrap.membership.profile.avatarUrl,
+    },
+    onLoadComments: loadCommentsAction,
+    onLoadReplies: loadRepliesAction,
+    onCreateComment: createCommentAction,
+    onDeleteComment: deleteCommentAction,
+    onLikeComment: likeCommentAction,
+    onUnlikeComment: unlikeCommentAction,
+    labels: {
+      region: tf('comments.region'),
+      emptyLabel: tf('comments.empty'),
+      errorLabel: tf('errors.comments'),
+      errorRepliesLabel: tf('errors.replies'),
+      retryLabel: tf('comments.retry'),
+      submitErrorLabel: tf('errors.commentSubmit'),
+      replyDepthErrorLabel: tf('errors.replyDepth'),
+      loadMoreLabel: tf('comments.loadMore'),
+      loadMoreRepliesLabel: tf('comments.loadMoreReplies'),
+      // `raw`, not `tf(...)`: these are TEMPLATES the module fills with the count it is showing at
+      // that instant, so the placeholder must survive the catalog lookup (the meta-row rule).
+      showReplies: {
+        one: tf.raw('comments.showReplies.one'),
+        other: tf.raw('comments.showReplies.other'),
+      },
+      hideReplies: {
+        one: tf.raw('comments.hideReplies.one'),
+        other: tf.raw('comments.hideReplies.other'),
+      },
+      replyChip: tf.raw('comments.replyChip'),
+      replyChipDismiss: tf('comments.replyChipDismiss'),
+      placeholder: tf('comments.placeholder'),
+      submitLabel: tf('comments.submit'),
+      viewerLabel: tf('comments.viewerAvatar'),
+      nowLabel: tf('comments.now'),
+      deleteTitle: tf('comments.delete.title'),
+      deleteBody: tf('comments.delete.body'),
+      deleteConfirm: tf('comments.delete.confirm'),
+      deleteCancel: tf('comments.delete.cancel'),
+      item: {
+        removedAuthor: tf('comments.removedAuthor'),
+        like: tf('comments.like'),
+        unlike: tf('comments.unlike'),
+        likes: { one: tf.raw('comments.likes.one'), other: tf.raw('comments.likes.other') },
+        reply: tf('comments.reply'),
+        delete: tf('comments.delete.label'),
+      },
+    },
+  };
+}
 
 export const WEB_MODULE_REGISTRY: Partial<Record<ModuleKey, WebModule>> = {
   example: { home: [exampleHome] },

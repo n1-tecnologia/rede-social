@@ -4,7 +4,34 @@ export {
   AttachmentRow,
   type AttachmentRowProps,
 } from './AttachmentRow';
-export { FeedList, type FeedListProps } from './FeedList';
+export {
+  CommentInput,
+  type CommentInputProps,
+  type ReplyTarget,
+} from './CommentInput';
+export {
+  type CommentAuthorView,
+  CommentItem,
+  type CommentItemLabels,
+  type CommentItemProps,
+  type CommentView,
+} from './CommentItem';
+export { CommentSheet, type CommentSheetProps } from './CommentSheet';
+export {
+  type CommentCreateOutcome,
+  type CommentLikeOutcome,
+  type CommentPageOutcome,
+  CommentsList,
+  type CommentsListLabels,
+  type CommentsListProps,
+  CommentsListSkeleton,
+  type CommentViewer,
+} from './CommentsList';
+export {
+  type FeedCommentsProps,
+  FeedList,
+  type FeedListProps,
+} from './FeedList';
 export {
   LikeButton,
   type LikeButtonProps,
@@ -17,6 +44,7 @@ export {
   type LinkPreviewCardProps,
   type LinkPreviewView,
 } from './LinkPreviewCard';
+export { linkify } from './linkify';
 export { buildPostMeta, type CountTemplates, formatCountLabel, type PostMetaInput } from './meta';
 export { PostActions, type PostActionsProps } from './PostActions';
 export { PostCaption, type PostCaptionProps } from './PostCaption';

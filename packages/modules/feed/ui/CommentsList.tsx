@@ -1,0 +1,755 @@
+'use client';
+
+import { Button, ConfirmDialog, cn, Skeleton } from '@tria/ui';
+import { Trash2 } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { CommentInput, type ReplyTarget } from './CommentInput';
+import { CommentItem, type CommentItemLabels, type CommentView } from './CommentItem';
+import { type CountTemplates, formatCountLabel } from './meta';
+
+/**
+ * THE comment list (D-59) — ONE implementation, two containers.
+ *
+ * `CommentSheet` wraps it for the feed and `/post/[id]` renders it inline; the only difference
+ * between them is `variant`, which pins the composer inside the sheet's scrollport and lets it flow
+ * at the end of the column on the page. A second renderer for the second surface is the thing this
+ * component exists to prevent: two copies would drift on ordering, on paging, on whether the delete
+ * control is offered, and the divergence would surface as "it behaves differently in the sheet".
+ *
+ * **Container-agnostic and copy-free.** It reads no catalog, formats no date and resolves no URL —
+ * every string arrives as a prop and every row arrives already mapped (PWA-03, MOD-02). The one
+ * clock it touches is `new Date()` inside the SUBMIT handler, for the row the member just wrote;
+ * that is an event, not a render, so UI-D-14's hydration rule is untouched.
+ *
+ * **Every callback prop is a SERVER ACTION or a client-side handler — never a plain function
+ * smuggled across the RSC boundary.** The optimistic row is therefore built from DATA the host
+ * passes (`viewer`, `nowLabel`), not from a builder function: a server component may hand a client
+ * component values and server actions, and nothing else.
+ *
+ * **Replies load per root, on demand** (D-60). Rendering N roots issues ZERO reply requests; each
+ * expansion issues exactly one bounded request for THAT root, so a comment page's query count stays
+ * flat in the number of threads on it (criterion 4). A root with `replyCount === 0` draws neither
+ * the hairline rule nor the toggle.
+ *
+ * **The error branch and the empty branch are mutually exclusive by construction** (UI-D-22,
+ * T-04-46). The body below is a single if/else-if chain: `loading` → `listError` → `empty` → rows.
+ * There is no path on which a failed load reaches the empty copy, because reaching it would mean
+ * telling a member that a post they know has comments has none — a false statement with no recovery
+ * affordance. A failed load renders an inline error plus a retry WHERE THE ROWS WOULD BE, and the
+ * composer stays usable throughout.
+ *
+ * **Optimism is never left standing.** A new comment appears immediately and is RECONCILED against
+ * the server's row on response; on failure it is removed, the text returns to the field and the
+ * inline error renders (T-04-48). The list never shows a comment the server does not have.
+ *
+ * **Counts are server-owned.** Every like count on every row, and the `onCountChange` delta the host
+ * moves the card's meta count with, come from the API's trigger-maintained values. Nothing here
+ * derives a count by summing the rows it happens to be holding.
+ */
+
+/** What a comment/replies page action answers. A refusal and a rejection are the same outcome. */
+export type CommentPageOutcome =
+  | { ok: true; items: CommentView[]; nextCursor: string | null }
+  | { ok: false };
+
+/**
+ * What a create action answers: the server's own row, or a refusal the field recovers from.
+ *
+ * `code` is a CATALOG KEY the host already chose, never the API's raw machine code (T-04-42) — the
+ * list picks which of its two error labels to render from it and nothing server-controlled reaches
+ * the DOM. `reply_depth_exceeded` earns its own sentence because it is the one refusal a member can
+ * act on: they replied to a reply, and the answer is to reply to the root instead.
+ */
+export type CommentCreateOutcome =
+  | { ok: true; comment: CommentView }
+  | { ok: false; code?: 'generic' | 'reply_depth_exceeded' };
+
+/** What a comment like/unlike answers — the authoritative pair, read back in the writing txn. */
+export type CommentLikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false };
+
+/** The viewer, for the optimistic row only. The server's reconciled row replaces all of it. */
+export type CommentViewer = {
+  displayName: string;
+  /** `/membros/{membershipId}` (D-52). */
+  profileHref: string | null;
+  avatarUrl: string | null;
+};
+
+export type CommentsListLabels = {
+  /** Accessible name of the list region. */
+  region: string;
+  /** UI-SPEC E10/empty: the centred single line, shown ONLY when the page really is empty. */
+  emptyLabel: string;
+  /** UI-D-22: the comment list itself could not be read. */
+  errorLabel: string;
+  /** UI-D-22: one root's replies could not be read; the thread does NOT collapse. */
+  errorRepliesLabel: string;
+  /** "Tentar novamente", shared by both retries. */
+  retryLabel: string;
+  /** Shown above the field when a submit is refused; the draft stays put. */
+  submitErrorLabel: string;
+  /** The one refusal with its own sentence: the member replied to a reply (D-60). */
+  replyDepthErrorLabel: string;
+  /** The root list's own paging control. */
+  loadMoreLabel: string;
+  /** One root's replies paging control, beneath the expanded thread. */
+  loadMoreRepliesLabel: string;
+  /** "Ver {count} resposta(s)" / "Ocultar {count} resposta(s)" — ICU plurals from the host. */
+  showReplies: CountTemplates;
+  hideReplies: CountTemplates;
+  /** "Respondendo a {name}" with `{name}` still in it: the list interpolates the target. */
+  replyChip: string;
+  replyChipDismiss: string;
+  placeholder: string;
+  submitLabel: string;
+  viewerLabel: string;
+  /** UI-D-14: what a comment the member JUST wrote shows instead of a relative time. */
+  nowLabel: string;
+  /** The confirmation the own-comment delete opens (D-61). */
+  deleteTitle: string;
+  deleteBody: string;
+  deleteConfirm: string;
+  deleteCancel: string;
+  item: CommentItemLabels;
+};
+
+export type CommentsListProps = {
+  postId: string;
+  /**
+   * The page the SERVER rendered, when there is one (the post page). `undefined` means "nothing is
+   * seeded" — the sheet, which fetches page 1 on mount behind the skeletons.
+   */
+  initialItems?: CommentView[];
+  initialCursor?: string | null;
+  /** `true` when the server tried to read page 1 and could not (UI-D-22). */
+  initialError?: boolean;
+  variant?: 'sheet' | 'inline';
+  viewer: CommentViewer;
+  /** BCP-47 tag from the host: the module formats numbers for it but ships no words (PWA-03). */
+  locale: string;
+  labels: CommentsListLabels;
+  onLoadComments: (postId: string, cursor?: string) => Promise<CommentPageOutcome>;
+  onLoadReplies: (commentId: string, cursor?: string) => Promise<CommentPageOutcome>;
+  onCreateComment: (
+    postId: string,
+    body: string,
+    parentId?: string,
+  ) => Promise<CommentCreateOutcome>;
+  onDeleteComment: (commentId: string) => Promise<{ ok: boolean }>;
+  onLikeComment: (commentId: string) => Promise<CommentLikeOutcome>;
+  onUnlikeComment: (commentId: string) => Promise<CommentLikeOutcome>;
+  /** `+1` / `-1` as the post's comment count moves, so the card's meta row follows the sheet. */
+  onCountChange?: (delta: number) => void;
+};
+
+/** One root's reply thread. Absent from the map until the member first expands that root. */
+type ReplyThread = {
+  expanded: boolean;
+  items: CommentView[];
+  cursor: string | null;
+  loading: boolean;
+  error: boolean;
+};
+
+const SKELETON_ROWS = [0, 1, 2];
+const REPLY_SKELETON_ROWS = [0, 1];
+const EMPTY_THREAD: ReplyThread = {
+  expanded: false,
+  items: [],
+  cursor: null,
+  loading: false,
+  error: false,
+};
+
+/** The geometry of a real row: circle, a name-plus-body line and a meta line. */
+function CommentRowSkeleton({ indented = false }: { indented?: boolean }) {
+  return (
+    <div aria-hidden className={cn('flex gap-3 px-4 py-3', indented && 'pl-14')}>
+      <Skeleton variant="circle" className="h-8 w-8" />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <Skeleton variant="text" width="70%" className="h-3.5" />
+        <Skeleton variant="text" width="30%" className="h-3" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Three rows, exported so both containers' loading boundaries have the SAME geometry as the list
+ * they stand in for and the swap to content does not shift the sheet.
+ */
+export function CommentsListSkeleton() {
+  return (
+    <div aria-busy data-testid="comments-skeleton">
+      {SKELETON_ROWS.map((index) => (
+        <CommentRowSkeleton key={index} />
+      ))}
+    </div>
+  );
+}
+
+export function CommentsList({
+  postId,
+  initialItems,
+  initialCursor = null,
+  initialError = false,
+  variant = 'inline',
+  viewer,
+  locale,
+  labels,
+  onLoadComments,
+  onLoadReplies,
+  onCreateComment,
+  onDeleteComment,
+  onLikeComment,
+  onUnlikeComment,
+  onCountChange,
+}: CommentsListProps) {
+  const [items, setItems] = useState<CommentView[]>(initialItems ?? []);
+  const [cursor, setCursor] = useState<string | null>(initialCursor);
+  const [loading, setLoading] = useState(initialItems === undefined && !initialError);
+  const [listError, setListError] = useState(initialError);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const [threads, setThreads] = useState<Record<string, ReplyThread>>({});
+  const [replyTarget, setReplyTarget] = useState<{ commentId: string; name: string } | null>(null);
+  const [focusKey, setFocusKey] = useState(0);
+  const [submitError, setSubmitError] = useState<'generic' | 'reply_depth_exceeded' | null>(null);
+  const [confirming, setConfirming] = useState<CommentView | null>(null);
+
+  const patchThread = useCallback((rootId: string, patch: Partial<ReplyThread>) => {
+    setThreads((previous) => ({
+      ...previous,
+      [rootId]: { ...(previous[rootId] ?? EMPTY_THREAD), ...patch },
+    }));
+  }, []);
+
+  /** Page 1. Shared by the mount fetch and the UI-D-22 retry, so the two cannot diverge. */
+  const loadFirstPage = useCallback(async () => {
+    setLoading(true);
+    setListError(false);
+    let page: CommentPageOutcome = { ok: false };
+    try {
+      page = await onLoadComments(postId);
+    } catch (error) {
+      console.error('feed.comments.load_failed', { error: String(error) });
+    }
+    setLoading(false);
+    if (!page.ok) {
+      setListError(true);
+      return;
+    }
+    setItems(page.items);
+    setCursor(page.nextCursor);
+  }, [onLoadComments, postId]);
+
+  // Fetch page 1 exactly once when nothing was seeded (the sheet). A seeded list never runs this.
+  const fetched = useRef(false);
+  useEffect(() => {
+    if (initialItems !== undefined || initialError || fetched.current) return;
+    fetched.current = true;
+    void loadFirstPage();
+  }, [initialItems, initialError, loadFirstPage]);
+
+  /** APPEND: every row already on screen keeps its order and its DOM position. */
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore) return;
+    const from = cursor;
+    setLoadingMore(true);
+    let page: CommentPageOutcome = { ok: false };
+    try {
+      page = await onLoadComments(postId, from);
+    } catch (error) {
+      console.error('feed.comments.load_more_failed', { error: String(error) });
+    }
+    setLoadingMore(false);
+    if (!page.ok) {
+      setListError(true);
+      return;
+    }
+    setItems((previous) => [...previous, ...page.items]);
+    setCursor(page.nextCursor);
+  }, [cursor, loadingMore, onLoadComments, postId]);
+
+  /** Fetch (or re-fetch) ONE root's first page of replies. The retry and the first tap share it. */
+  const fetchReplies = useCallback(
+    async (rootId: string) => {
+      patchThread(rootId, { expanded: true, loading: true, error: false });
+      let page: CommentPageOutcome = { ok: false };
+      try {
+        page = await onLoadReplies(rootId);
+      } catch (error) {
+        console.error('feed.replies.load_failed', { error: String(error) });
+      }
+      // UI-D-22: a failed replies query renders its retry UNDER the toggle and leaves the thread
+      // EXPANDED. Collapsing it here would hide the very control the member needs to try again.
+      if (!page.ok) {
+        patchThread(rootId, { expanded: true, loading: false, error: true });
+        return;
+      }
+      patchThread(rootId, {
+        expanded: true,
+        items: page.items,
+        cursor: page.nextCursor,
+        loading: false,
+        error: false,
+      });
+    },
+    [onLoadReplies, patchThread],
+  );
+
+  /**
+   * Expand or collapse ONE root (D-60). The first expansion fetches that root's own page; a later
+   * collapse keeps what was loaded, so re-expanding costs no request at all.
+   */
+  const toggleThread = useCallback(
+    (comment: CommentView) => {
+      const existing = threads[comment.id];
+      if (existing?.expanded) {
+        patchThread(comment.id, { expanded: false });
+        return;
+      }
+      if (existing && existing.items.length > 0 && !existing.error) {
+        patchThread(comment.id, { expanded: true });
+        return;
+      }
+      void fetchReplies(comment.id);
+    },
+    [fetchReplies, patchThread, threads],
+  );
+
+  /** One more page of a root's replies, appended oldest-first (D-62). */
+  const loadMoreReplies = useCallback(
+    async (rootId: string) => {
+      const thread = threads[rootId];
+      if (!thread?.cursor || thread.loading) return;
+      const from = thread.cursor;
+      patchThread(rootId, { loading: true, error: false });
+
+      let page: CommentPageOutcome = { ok: false };
+      try {
+        page = await onLoadReplies(rootId, from);
+      } catch (error) {
+        console.error('feed.replies.load_more_failed', { error: String(error) });
+      }
+      if (!page.ok) {
+        patchThread(rootId, { loading: false, error: true });
+        return;
+      }
+      setThreads((previous) => {
+        const current = previous[rootId] ?? EMPTY_THREAD;
+        return {
+          ...previous,
+          [rootId]: {
+            ...current,
+            items: [...current.items, ...page.items],
+            cursor: page.nextCursor,
+            loading: false,
+            error: false,
+          },
+        };
+      });
+    },
+    [onLoadReplies, patchThread, threads],
+  );
+
+  /**
+   * Submit. Optimistic insert → server row → reconcile, or → remove and hand the text back.
+   *
+   * A root is PREPENDED (roots are newest-first, D-62) and a reply is APPENDED to its thread
+   * (replies are oldest-first). Both land where the server's own ordering would put them, so the
+   * reconciliation never moves a row the member is already looking at.
+   */
+  const submit = useCallback(
+    async (body: string): Promise<boolean> => {
+      const parentId = replyTarget?.commentId;
+      // A clock in an EVENT handler, not in render — UI-D-14's hydration rule is about render.
+      const nowIso = new Date().toISOString();
+      const optimistic: CommentView = {
+        id: `optimistic-${nowIso}-${Math.random().toString(36).slice(2)}`,
+        body,
+        author: {
+          displayName: viewer.displayName,
+          profileHref: viewer.profileHref,
+          avatarUrl: viewer.avatarUrl,
+        },
+        authorRemoved: false,
+        createdAtIso: nowIso,
+        createdAtRelative: labels.nowLabel,
+        createdAtAbsolute: labels.nowLabel,
+        likeCount: 0,
+        viewerLiked: false,
+        replyCount: 0,
+        isReply: parentId !== undefined,
+        canDelete: false,
+        pending: true,
+      };
+      setSubmitError(null);
+
+      if (parentId) {
+        setThreads((previous) => {
+          const current = previous[parentId] ?? EMPTY_THREAD;
+          return {
+            ...previous,
+            [parentId]: { ...current, expanded: true, items: [...current.items, optimistic] },
+          };
+        });
+        setItems((previous) =>
+          previous.map((row) =>
+            row.id === parentId ? { ...row, replyCount: row.replyCount + 1 } : row,
+          ),
+        );
+      } else {
+        setItems((previous) => [optimistic, ...previous]);
+      }
+
+      let outcome: CommentCreateOutcome = { ok: false };
+      try {
+        outcome = await onCreateComment(postId, body, parentId);
+      } catch (error) {
+        console.error('feed.comment.create_failed', { error: String(error) });
+      }
+
+      if (!outcome.ok) {
+        // The optimistic row is REMOVED, not left standing (T-04-48): a comment the server does not
+        // have must not sit in the list looking as though it does.
+        if (parentId) {
+          setThreads((previous) => {
+            const current = previous[parentId];
+            if (!current) return previous;
+            return {
+              ...previous,
+              [parentId]: {
+                ...current,
+                items: current.items.filter((row) => row.id !== optimistic.id),
+              },
+            };
+          });
+          setItems((previous) =>
+            previous.map((row) =>
+              row.id === parentId ? { ...row, replyCount: Math.max(0, row.replyCount - 1) } : row,
+            ),
+          );
+        } else {
+          setItems((previous) => previous.filter((row) => row.id !== optimistic.id));
+        }
+        setSubmitError(
+          outcome.code === 'reply_depth_exceeded' ? 'reply_depth_exceeded' : 'generic',
+        );
+        return false;
+      }
+
+      const created = outcome.comment;
+      if (parentId) {
+        setThreads((previous) => {
+          const current = previous[parentId];
+          if (!current) return previous;
+          return {
+            ...previous,
+            [parentId]: {
+              ...current,
+              items: current.items.map((row) => (row.id === optimistic.id ? created : row)),
+            },
+          };
+        });
+      } else {
+        setItems((previous) => previous.map((row) => (row.id === optimistic.id ? created : row)));
+      }
+      setReplyTarget(null);
+      onCountChange?.(1);
+      return true;
+    },
+    [labels.nowLabel, onCountChange, onCreateComment, postId, replyTarget, viewer],
+  );
+
+  /**
+   * The like toggle for one row, optimistic in exactly the way the card's is (04-06): flip now,
+   * replace with the server's authoritative pair on response, revert on refusal. It patches BOTH
+   * lists because a row's identity is its id — a reply and a root take the identical path.
+   */
+  const toggleLike = useCallback(
+    async (comment: CommentView) => {
+      const apply = (patch: Partial<CommentView>) => {
+        const patchRow = (row: CommentView) => (row.id === comment.id ? { ...row, ...patch } : row);
+        setItems((previous) => previous.map(patchRow));
+        setThreads((previous) => {
+          const next: Record<string, ReplyThread> = {};
+          for (const [rootId, thread] of Object.entries(previous)) {
+            next[rootId] = { ...thread, items: thread.items.map(patchRow) };
+          }
+          return next;
+        });
+      };
+
+      const nextLiked = !comment.viewerLiked;
+      apply({
+        viewerLiked: nextLiked,
+        likeCount: Math.max(0, comment.likeCount + (nextLiked ? 1 : -1)),
+      });
+
+      let outcome: CommentLikeOutcome = { ok: false };
+      try {
+        outcome = nextLiked ? await onLikeComment(comment.id) : await onUnlikeComment(comment.id);
+      } catch (error) {
+        console.error('feed.comment.like_failed', { error: String(error) });
+      }
+      apply(
+        outcome.ok
+          ? { viewerLiked: outcome.liked, likeCount: outcome.likeCount }
+          : { viewerLiked: comment.viewerLiked, likeCount: comment.likeCount },
+      );
+    },
+    [onLikeComment, onUnlikeComment],
+  );
+
+  /** D-61. The row leaves the list only once the SERVER has confirmed it — never optimistically. */
+  const confirmDelete = useCallback(async () => {
+    const target = confirming;
+    if (!target) return;
+    let deleted = false;
+    try {
+      deleted = (await onDeleteComment(target.id)).ok;
+    } catch (error) {
+      console.error('feed.comment.delete_failed', { error: String(error) });
+    }
+    // The row leaves only on a CONFIRMED delete: a refusal keeps the comment exactly where it is
+    // rather than removing it from the member's view while it still exists for everyone else.
+    if (!deleted) return;
+
+    if (target.isReply) {
+      const parentId = Object.entries(threads).find(([, thread]) =>
+        thread.items.some((row) => row.id === target.id),
+      )?.[0];
+      setThreads((previous) => {
+        const next: Record<string, ReplyThread> = {};
+        for (const [rootId, thread] of Object.entries(previous)) {
+          next[rootId] = { ...thread, items: thread.items.filter((row) => row.id !== target.id) };
+        }
+        return next;
+      });
+      if (parentId) {
+        setItems((previous) =>
+          previous.map((row) =>
+            row.id === parentId ? { ...row, replyCount: Math.max(0, row.replyCount - 1) } : row,
+          ),
+        );
+      }
+    } else {
+      setItems((previous) => previous.filter((row) => row.id !== target.id));
+    }
+    onCountChange?.(-1);
+  }, [confirming, onCountChange, onDeleteComment, threads]);
+
+  const startReply = useCallback((comment: CommentView) => {
+    setReplyTarget({ commentId: comment.id, name: comment.author.displayName ?? '' });
+    setFocusKey((key) => key + 1);
+  }, []);
+
+  const chip: ReplyTarget | null = replyTarget
+    ? {
+        commentId: replyTarget.commentId,
+        chipLabel: labels.replyChip.replace('{name}', replyTarget.name),
+        dismissLabel: labels.replyChipDismiss,
+      }
+    : null;
+
+  /** The toggle beneath a root's body: a short rule, then the ICU-plural label **[proto]**. */
+  const renderToggle = (comment: CommentView): ReactNode => {
+    // E11/empty: zero replies draws NEITHER the hairline rule NOR the toggle.
+    if (comment.replyCount < 1) return null;
+    const expanded = Boolean(threads[comment.id]?.expanded);
+    const label = formatCountLabel(
+      comment.replyCount,
+      expanded ? labels.hideReplies : labels.showReplies,
+      locale,
+    );
+    if (!label) return null;
+
+    return (
+      <button
+        type="button"
+        data-replies-toggle
+        aria-expanded={expanded}
+        onClick={() => toggleThread(comment)}
+        className="mt-2 flex items-center gap-2 text-xs font-bold text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      >
+        <span aria-hidden className="h-px w-6 bg-border" />
+        {label}
+      </button>
+    );
+  };
+
+  /**
+   * The expanded thread, rendered as a SIBLING of the root's row rather than inside its body: the
+   * reply indent is `pl-14` measured from the LIST's own left edge **[proto]**, and nesting it
+   * inside the root's already-indented body would compound the two.
+   */
+  const renderThread = (comment: CommentView): ReactNode => {
+    const thread = threads[comment.id];
+    if (!thread?.expanded) return null;
+
+    return (
+      <div data-replies-of={comment.id}>
+        {thread.loading && thread.items.length === 0
+          ? REPLY_SKELETON_ROWS.map((index) => <CommentRowSkeleton key={index} indented />)
+          : null}
+
+        {thread.items.map((reply) => (
+          <CommentItem
+            key={reply.id}
+            comment={reply}
+            locale={locale}
+            labels={labels.item}
+            // NO `onReply` — a reply has no reply affordance and no toggle of its own (D-60). The
+            // one-level cap is visible here, not merely refused by the database.
+            onDelete={reply.canDelete ? setConfirming : undefined}
+            onToggleLike={(row) => void toggleLike(row)}
+          />
+        ))}
+
+        {thread.error ? (
+          <div data-replies-error className="flex flex-col items-start gap-2 py-2 pr-4 pl-14">
+            <p className="text-sm font-normal text-danger">{labels.errorRepliesLabel}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                void (thread.items.length > 0
+                  ? loadMoreReplies(comment.id)
+                  : fetchReplies(comment.id))
+              }
+            >
+              {labels.retryLabel}
+            </Button>
+          </div>
+        ) : null}
+
+        {!thread.error && thread.cursor ? (
+          <div className="py-1 pr-4 pl-14">
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={thread.loading}
+              onClick={() => void loadMoreReplies(comment.id)}
+            >
+              {labels.loadMoreRepliesLabel}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  /**
+   * ONE chain, four outcomes, no overlap. `listError` can never fall through to `emptyLabel`
+   * (UI-D-22): a failed load says so and offers a retry, and the empty copy is reachable only when
+   * a page really did come back with nothing in it.
+   */
+  let body: ReactNode;
+  if (loading) {
+    body = <CommentsListSkeleton />;
+  } else if (listError) {
+    body = (
+      <div data-comments-error className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+        <p className="text-sm font-normal text-danger">{labels.errorLabel}</p>
+        <Button variant="outline" onClick={() => void loadFirstPage()}>
+          {labels.retryLabel}
+        </Button>
+      </div>
+    );
+  } else if (items.length === 0) {
+    body = (
+      <p
+        data-comments-empty
+        className="px-4 py-10 text-center text-sm font-normal text-text-tertiary"
+      >
+        {labels.emptyLabel}
+      </p>
+    );
+  } else {
+    body = (
+      <div data-comments-rows>
+        {items.map((comment, index) => (
+          <div
+            key={comment.id}
+            // E10/zero-one-many: the separator sits BETWEEN roots — never above the first one.
+            className={cn(index > 0 && 'border-t border-border')}
+          >
+            <CommentItem
+              comment={comment}
+              locale={locale}
+              labels={labels.item}
+              onReply={startReply}
+              onDelete={comment.canDelete ? setConfirming : undefined}
+              onToggleLike={(row) => void toggleLike(row)}
+            >
+              {renderToggle(comment)}
+            </CommentItem>
+            {renderThread(comment)}
+          </div>
+        ))}
+
+        {cursor ? (
+          <div className="px-4 py-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              fullWidth
+              loading={loadingMore}
+              onClick={() => void loadMore()}
+            >
+              {labels.loadMoreLabel}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <section
+      aria-label={labels.region}
+      data-comments-list
+      // The sheet's own scroll container already pads by 16; the list draws its own gutters, so it
+      // cancels that padding rather than doubling it. The sheet's HEIGHT is never touched (UI-D-18).
+      className={cn('flex flex-col', variant === 'sheet' && '-mx-4 -my-4')}
+    >
+      {/* E10/partial: the body and the composer are independent — the composer is rendered OUTSIDE
+          the chain above, so a failed or still-loading list never takes the input away. */}
+      <div className={cn(variant === 'sheet' && 'flex-1')}>{body}</div>
+
+      <CommentInput
+        viewerAvatarUrl={viewer.avatarUrl}
+        viewerLabel={labels.viewerLabel}
+        placeholder={labels.placeholder}
+        submitLabel={labels.submitLabel}
+        replyTarget={chip}
+        onDismissReply={() => setReplyTarget(null)}
+        onSubmit={submit}
+        errorLabel={
+          submitError === null
+            ? null
+            : submitError === 'reply_depth_exceeded'
+              ? labels.replyDepthErrorLabel
+              : labels.submitErrorLabel
+        }
+        onClearError={() => setSubmitError(null)}
+        focusKey={focusKey}
+        variant={variant}
+      />
+
+      <ConfirmDialog
+        open={confirming !== null}
+        title={labels.deleteTitle}
+        body={labels.deleteBody}
+        icon={Trash2}
+        tone="danger"
+        confirmLabel={labels.deleteConfirm}
+        cancelLabel={labels.deleteCancel}
+        onConfirm={confirmDelete}
+        onClose={() => setConfirming(null)}
+        onError={(error) => console.error('feed.comment.delete_failed', { error: String(error) })}
+      />
+    </section>
+  );
+}

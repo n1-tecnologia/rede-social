@@ -11,6 +11,7 @@ import {
 } from '@tria/ui';
 import { Newspaper, TriangleAlert } from 'lucide-react';
 import { type ReactNode, useCallback, useState, useTransition } from 'react';
+import { CommentSheet, type CommentSheetProps } from './CommentSheet';
 import type { CountTemplates } from './meta';
 import { type LikeOutcome, PostCard, type PostCardMediaView, type PostCardView } from './PostCard';
 
@@ -37,6 +38,19 @@ import { type LikeOutcome, PostCard, type PostCardMediaView, type PostCardView }
 export type FeedPageOutcome =
   | { ok: true; items: PostCardView[]; nextCursor: string | null }
   | { ok: false };
+
+/**
+ * Everything `CommentSheet` needs except which post it is open on and whether it is open at all —
+ * those two are the LIST's state (04-07, D-59).
+ *
+ * ONE sheet for the whole column, not one per card. A sheet per card would mount a dialog, a focus
+ * trap and a confirmation dialog for every post on screen, and paging the feed would multiply them.
+ * The card raises "open comments for this id"; the list decides what is on screen.
+ */
+export type FeedCommentsProps = Omit<
+  CommentSheetProps,
+  'open' | 'onClose' | 'postId' | 'initialItems' | 'initialCursor' | 'onCountChange'
+>;
 
 export type FeedListLabels = {
   /** Accessible name of the widget's region. */
@@ -92,6 +106,12 @@ export type FeedListProps = {
   onRefresh: () => Promise<FeedPageOutcome>;
   onLike: (postId: string) => Promise<LikeOutcome>;
   onUnlike: (postId: string) => Promise<LikeOutcome>;
+  /**
+   * D-59's sheet. Present → the card's comment control and its meta comment count open the SHARED
+   * sheet over the feed; absent → 04-06's seam stays inert and `onOpenComments` (if the host passes
+   * one) still fires, which is what `/post/[id]` uses to navigate instead.
+   */
+  comments?: FeedCommentsProps;
   onOpenComments?: (postId: string) => void;
   onShare?: (postId: string) => void;
   onMore?: (postId: string) => void;
@@ -127,6 +147,28 @@ export function FeedCardSkeleton() {
   );
 }
 
+/**
+ * The card as it should render RIGHT NOW: the host's media override if there is one, and the post's
+ * comment count moved by however far the sheet has moved it since the server sent this page.
+ *
+ * Returns the ORIGINAL object when neither applies, so an untouched card keeps its identity and
+ * React skips it — a fresh object per render would re-render every card in the column on every
+ * keystroke in the sheet.
+ */
+function commentCountApplied(
+  post: PostCardView,
+  renderMedia: ((item: PostCardView) => PostCardMediaView) | undefined,
+  delta: number,
+): PostCardView {
+  if (!renderMedia && delta === 0) return post;
+  return {
+    ...post,
+    ...(renderMedia ? { media: renderMedia(post) } : {}),
+    // Never below zero: a delete that races a refresh must not print a negative count.
+    commentCount: Math.max(0, post.commentCount + delta),
+  };
+}
+
 const SKELETON_CARDS = [0, 1, 2];
 
 /**
@@ -156,6 +198,7 @@ export function FeedList({
   onRefresh,
   onLike,
   onUnlike,
+  comments,
   onOpenComments,
   onShare,
   onMore,
@@ -169,6 +212,10 @@ export function FeedList({
   const [pageFailed, setPageFailed] = useState(false);
   const [, startTransition] = useTransition();
 
+  /** Which post the shared sheet is open on, and how far each post's count has moved since. */
+  const [commentsOpenFor, setCommentsOpenFor] = useState<string | null>(null);
+  const [countDeltas, setCountDeltas] = useState<Record<string, number>>({});
+
   // The SERVER sent a different first page (a navigation, not a refresh): re-seed rather than merge.
   // Adjusting state during render is React's documented alternative to an effect.
   const [seed, setSeed] = useState(initialItems);
@@ -178,6 +225,8 @@ export function FeedList({
     setCursor(initialCursor);
     setFirstLoadFailed(Boolean(initialError));
     setPageFailed(false);
+    // The server's counts are authoritative again, so every locally tracked delta is stale.
+    setCountDeltas({});
   }
 
   const failToast = useCallback(() => {
@@ -206,6 +255,7 @@ export function FeedList({
     setCursor(page.nextCursor);
     setFirstLoadFailed(false);
     setPageFailed(false);
+    setCountDeltas({});
   }, [onRefresh, failToast]);
 
   /** APPEND: every card already on screen keeps its order and its DOM position. */
@@ -245,6 +295,29 @@ export function FeedList({
       void refresh();
     });
   }, [refresh]);
+
+  /**
+   * The comment control's destination. With a sheet configured it opens over the feed WITHOUT
+   * navigating away (D-59); without one, the host's own handler runs — which is how a surface that
+   * would rather route to `/post/[id]` opts out.
+   */
+  const openComments = useCallback(
+    (postId: string) => {
+      if (comments) setCommentsOpenFor(postId);
+      onOpenComments?.(postId);
+    },
+    [comments, onOpenComments],
+  );
+
+  /**
+   * The card's meta count follows the sheet (E09/partial): the DELTA is tracked per post and added
+   * to the server's value at render. Rewriting `items` instead would fight the next refresh, which
+   * legitimately replaces the whole list with the server's authoritative counts — at which point
+   * the delta is stale by construction and is cleared with it.
+   */
+  const bumpCount = useCallback((postId: string, delta: number) => {
+    setCountDeltas((previous) => ({ ...previous, [postId]: (previous[postId] ?? 0) + delta }));
+  }, []);
 
   // A LINK, not a `Button`: the shipped button is a `<button>` and the composer is a route (04-09).
   // The brand styling is the button's, read through the tenant tokens exactly as `Button` reads them.
@@ -291,7 +364,7 @@ export function FeedList({
           {items.map((post) => (
             <PostCard
               key={post.id}
-              post={renderMedia ? { ...post, media: renderMedia(post) } : post}
+              post={commentCountApplied(post, renderMedia, countDeltas[post.id] ?? 0)}
               captionTruncateAt={captionTruncateAt}
               locale={locale}
               labels={{
@@ -309,7 +382,7 @@ export function FeedList({
               onLike={onLike}
               onUnlike={onUnlike}
               onLikeError={failToast}
-              onOpenComments={onOpenComments}
+              onOpenComments={comments || onOpenComments ? openComments : undefined}
               onShare={onShare}
               onMore={onMore}
             />
@@ -348,6 +421,20 @@ export function FeedList({
       {createCta ? <div className="mb-3 hidden justify-end md:flex">{createCta}</div> : null}
 
       <PullToRefresh onRefresh={refresh}>{body}</PullToRefresh>
+
+      {/* ONE sheet for the column (D-59). It stays mounted with `open=false` so `AnimatePresence`
+          can play its exit and `BottomSheet` can return focus to the control that opened it. */}
+      {comments ? (
+        <CommentSheet
+          {...comments}
+          open={commentsOpenFor !== null}
+          onClose={() => setCommentsOpenFor(null)}
+          postId={commentsOpenFor ?? ''}
+          onCountChange={(delta) => {
+            if (commentsOpenFor) bumpCount(commentsOpenFor, delta);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

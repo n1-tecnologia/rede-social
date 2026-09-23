@@ -1,11 +1,17 @@
 import {
+  COMMENTS_PAGE_SIZE,
+  commentPageSchema,
+  commentSchema,
   FEED_PAGE_SIZE,
+  type FeedComment,
+  type FeedCommentPage,
   type FeedPage,
   type FeedPost,
   feedPageSchema,
   feedPostSchema,
   type LikeResult,
   likeResultSchema,
+  REPLIES_PAGE_SIZE,
 } from '@tria/module-feed/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -145,4 +151,121 @@ export async function likePost(postId: string): Promise<LikeResult> {
 
 export async function unlikePost(postId: string): Promise<LikeResult> {
   return toggleLike(postId, 'DELETE');
+}
+
+/* ── Comments, replies and their writes (FEED-05, FEED-06, D-59..D-62) ──────────────────────────── */
+
+/**
+ * The comment clients (04-07). Same module, same `apiFetch`, same refusal reading as everything
+ * above — the sheet over the feed and the inline list on `/post/[id]` are ONE implementation
+ * (D-59), so giving them two request paths would reintroduce exactly the drift the component
+ * structure removes.
+ *
+ * Every page here is parsed with the SAME contract schema the API answers with, so a field the API
+ * stops sending (`authorRemoved`, say) fails loudly at the boundary instead of rendering as
+ * `undefined` three components deeper.
+ */
+
+/** The query both comment lists send; `cursor` is OPAQUE and forwarded verbatim (03-03). */
+export type CommentQueryInput = { cursor?: string; limit?: number };
+
+function pageSearch(query: CommentQueryInput, fallbackLimit: number): string {
+  const search = new URLSearchParams();
+  if (query.cursor) search.set('cursor', query.cursor);
+  search.set('limit', String(query.limit ?? fallbackLimit));
+  return search.toString();
+}
+
+/**
+ * `GET /v1/feed/posts/{postId}/comments` (D-62) — ROOT comments, newest first.
+ *
+ * Replies are deliberately NOT in this page: `replyCount` tells the toggle how many there are and
+ * `getReplies` fetches them when the member expands that root (D-60). A foreign-tenant or removed
+ * post answers the same bare 404 the detail read gives.
+ */
+export async function getComments(
+  postId: string,
+  query: CommentQueryInput = {},
+): Promise<FeedCommentPage> {
+  const res = await apiFetch(
+    `/v1/feed/posts/${encodeURIComponent(postId)}/comments?${pageSearch(query, COMMENTS_PAGE_SIZE)}`,
+  );
+  if (!res.ok) throw await apiError(res);
+  return commentPageSchema.parse(await res.json());
+}
+
+/**
+ * `GET /v1/feed/comments/{commentId}/replies` (D-60, D-62) — ONE root's replies, OLDEST first.
+ *
+ * Its cursor is NOT interchangeable with the root list's: the two walk opposite directions over
+ * different indexes, and feeding one to the other degrades to page 1 rather than erroring.
+ */
+export async function getReplies(
+  commentId: string,
+  query: CommentQueryInput = {},
+): Promise<FeedCommentPage> {
+  const res = await apiFetch(
+    `/v1/feed/comments/${encodeURIComponent(commentId)}/replies?${pageSearch(query, REPLIES_PAGE_SIZE)}`,
+  );
+  if (!res.ok) throw await apiError(res);
+  return commentPageSchema.parse(await res.json());
+}
+
+/**
+ * `POST /v1/feed/posts/{postId}/comments` (FEED-05).
+ *
+ * `parentId` present means "this is a reply". Whether that parent may HAVE children is the
+ * database's decision, not this function's: a reply to a reply comes back as a 400 carrying
+ * `details.comment = 'reply_depth_exceeded'`, which the action maps to its own catalog key.
+ */
+export async function createComment(
+  postId: string,
+  body: string,
+  parentId?: string,
+): Promise<FeedComment> {
+  const res = await apiFetch(`/v1/feed/posts/${encodeURIComponent(postId)}/comments`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parentId ? { body, parentId } : { body }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return commentSchema.parse(await res.json());
+}
+
+/**
+ * `DELETE /v1/feed/comments/{commentId}` (D-61) — a member removes their OWN comment or reply.
+ *
+ * The authority is in the API's own predicate (`author_user_id = caller`), so someone else's
+ * comment, an unknown id and an already-removed one are ONE bare 404 (T-04-44). `canDelete` on the
+ * row is a convenience for the UI; it is never what decides the outcome.
+ */
+export async function deleteComment(commentId: string): Promise<void> {
+  const res = await apiFetch(`/v1/feed/comments/${encodeURIComponent(commentId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw await apiError(res);
+}
+
+/**
+ * `POST` / `DELETE /v1/feed/comments/{commentId}/like` (FEED-06) — the post toggle's twin.
+ *
+ * Idempotent at the API exactly as the post's is: a repeated like returns the same body with a 200,
+ * never a 409, and both answer the CURRENT `{ liked, likeCount }` read back inside the writing
+ * transaction — the value that replaces the row's optimistic pair.
+ */
+async function toggleCommentLike(
+  commentId: string,
+  method: 'POST' | 'DELETE',
+): Promise<LikeResult> {
+  const res = await apiFetch(`/v1/feed/comments/${encodeURIComponent(commentId)}/like`, { method });
+  if (!res.ok) throw await apiError(res);
+  return likeResultSchema.parse(await res.json());
+}
+
+export async function likeComment(commentId: string): Promise<LikeResult> {
+  return toggleCommentLike(commentId, 'POST');
+}
+
+export async function unlikeComment(commentId: string): Promise<LikeResult> {
+  return toggleCommentLike(commentId, 'DELETE');
 }

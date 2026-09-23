@@ -32,7 +32,11 @@
     },
     "errors": {
       "generic": "Algo deu errado. Tente novamente.",
-      "loadMore": "Não foi possível carregar mais publicações."
+      "loadMore": "Não foi possível carregar mais publicações.",
+      "comments": "Não foi possível carregar os comentários.",
+      "replies": "Não foi possível carregar as respostas.",
+      "commentSubmit": "Não foi possível publicar seu comentário. Tente novamente.",
+      "replyDepth": "Só é possível responder ao comentário principal."
     },
     "empty": {
       "title": "Nada por aqui ainda",
@@ -57,6 +61,43 @@
         "other": "{count} comentários"
       },
       "edited": "editado"
+    },
+    "comments": {
+      "title": "Comentários",
+      "region": "Comentários da publicação",
+      "placeholder": "Adicione um comentário…",
+      "submit": "Enviar comentário",
+      "viewerAvatar": "Sua foto de perfil",
+      "now": "agora",
+      "empty": "Nenhum comentário ainda. Seja o primeiro!",
+      "retry": "Tentar novamente",
+      "loadMore": "Ver mais comentários",
+      "loadMoreReplies": "Ver mais respostas",
+      "reply": "Responder",
+      "replyChip": "Respondendo a {name}",
+      "replyChipDismiss": "Cancelar resposta",
+      "removedAuthor": "Membro removido",
+      "like": "Curtir comentário",
+      "unlike": "Descurtir comentário",
+      "likes": {
+        "one": "{count} curtida",
+        "other": "{count} curtidas"
+      },
+      "showReplies": {
+        "one": "Ver {count} resposta",
+        "other": "Ver {count} respostas"
+      },
+      "hideReplies": {
+        "one": "Ocultar {count} resposta",
+        "other": "Ocultar {count} respostas"
+      },
+      "delete": {
+        "label": "Excluir comentário",
+        "title": "Excluir comentário?",
+        "body": "Ele sai da conversa para todos os membros.",
+        "confirm": "Excluir",
+        "cancel": "Cancelar"
+      }
     }
   }
 }
