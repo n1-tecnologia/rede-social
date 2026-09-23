@@ -47,29 +47,12 @@ const absoluteTime = new Intl.DateTimeFormat('pt-BR', {
   minute: '2-digit',
 });
 
-const relativeTime = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto', style: 'narrow' });
-
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-const WEEK = 7 * DAY;
-const MONTH = 30 * DAY;
-const YEAR = 365 * DAY;
-
 /**
- * "há 2 h" — computed on the SERVER and passed down as a string (UI-D-14): the card never calls a
- * clock in render, so there is no hydration mismatch and no per-second re-render.
+ * "há 2 h" — re-exported from `lib/relative-time.ts`, which is where it lives since 05-06 so that a
+ * module needing only the formatter does not also pull `VideoPlayer` and the env-validating server
+ * action behind it. Every existing caller of `relativeFrom` from this module is unchanged.
  */
-export function relativeFrom(iso: string, now: number): string {
-  const elapsed = now - new Date(iso).getTime();
-  if (elapsed < MINUTE) return relativeTime.format(0, 'second');
-  if (elapsed < HOUR) return relativeTime.format(-Math.floor(elapsed / MINUTE), 'minute');
-  if (elapsed < DAY) return relativeTime.format(-Math.floor(elapsed / HOUR), 'hour');
-  if (elapsed < WEEK) return relativeTime.format(-Math.floor(elapsed / DAY), 'day');
-  if (elapsed < MONTH) return relativeTime.format(-Math.floor(elapsed / WEEK), 'week');
-  if (elapsed < YEAR) return relativeTime.format(-Math.floor(elapsed / MONTH), 'month');
-  return relativeTime.format(-Math.floor(elapsed / YEAR), 'year');
-}
+export { relativeFrom } from '@/lib/relative-time';
 
 /**
  * Byte sizes in pt-BR ("1,2 MB"). The FORMATTING lives here rather than inside the module for the
