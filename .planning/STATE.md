@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Feed
 status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-09-22T20:02:20.580Z"
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-09-23T01:15:07.411Z"
 last_activity: 2026-09-22
 last_activity_desc: Phase 04 execution started
-state_head: d21e3efa55f428a32d2770aa3afca9adf807d491
+state_head: 53fe13d07a0e57b6af976b124c9236e2c26cf8e4
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 50
-  completed_plans: 41
+  completed_plans: 42
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 04 (Feed) — EXECUTING
-Plan: 5 of 10
+Plan: 6 of 10
 Status: Ready to execute
 Last activity: 2026-09-22 — Phase 04 execution started
 
@@ -99,6 +99,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P02 | 15 min | 3 tasks | 11 files |
 | Phase 04 P03 | 27 min | 3 tasks | 15 files |
 | Phase 04 P04 | 2h 43m | 3 tasks | 35 files |
+| Phase 04 P05 | 78 min | 3 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -269,6 +270,10 @@ Recent decisions affecting current work:
 - [Phase 04]: A post's media is an ordered COLLECTION (feed_post_media rows) with a parent media_kind discriminator — there is no image_asset_id or video_asset_id column anywhere. — A singular column beside the collection would give two sources of truth for the same fact and make the carousel's ordering ambiguous. A single-image post is the one-row case, pinned by an integration test that compares the one-image and ten-image projection shapes.
 - [Phase 04]: MediaImage was promoted into @tria/core/ui; VideoPlayer was NOT — PostMedia takes the player as an already-created ReactNode. — MediaImage depends only on @tria/contracts/media and @tria/ui, so it belongs in the kernel's client-safe entry (a one-line re-export keeps every Phase 3 call site). VideoPlayer binds an app-scoped server action for its per-request playback token (D-44), so it must stay in apps/web and cross the boundary as an element — 02-08 found Flight refuses a component object.
 - [Phase 04]: The attachment download is a fetch-then-save through the stable /v1/media/{assetId}/original redirect, reading the response body rather than its Location. — 03-01 forbids a signed Storage URL in any API payload, so there is no "give me a download URL" route. Reading the redirect's body keeps the signed URL inside the chain and is what gives UI-D-23 real pending and error states; the 25 MiB PDF cap bounds the blob.
+- [Phase 04]: The SSRF guard is a connector function, not a resolver hook: net.connect never consults the resolver for an IP literal, so a lookup-only guard blocks localhost and walks straight through to 127.0.0.1 and the cloud metadata address
+- [Phase 04]: Node's BlockList widens an IPv4 argument to its IPv4-mapped form before comparing it against IPv6 rules, so an ::ffff:0:0/96 deny entry blocks the entire public IPv4 internet — mapped spellings must be unwrapped and re-checked instead
+- [Phase 04]: Link previews are cached per tenant (unique on tenant_id + url_hash): the key is the privacy boundary and the no-second-fetch mechanism at once
+- [Phase 04]: No third-party frame ships in the feed: YouTube and Vimeo resolve through oEmbed into the same card, opening externally — inline playback waits for a real CSP in Phase 8
 
 ### Pending Todos
 
@@ -301,6 +306,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-22T20:02:20.510Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-09-23T01:14:57.829Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None

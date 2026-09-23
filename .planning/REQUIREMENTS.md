@@ -118,7 +118,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [x] **MEDIA-01**: Uploads go directly from the browser to Supabase Storage using signed upload URLs brokered by the API (files never transit Cloud Run); the API confirms the upload and records the asset with tenant scope
 - [x] **MEDIA-02**: Images are resized/compressed server-side (worker) into display sizes; original size and type limits are enforced (Supabase Free plan: 50 MB per file, no native transforms)
 - [x] **MEDIA-03**: Videos are uploaded to a streaming vendor (Mux or Cloudflare Stream, chosen in the media phase) that transcodes and serves HLS with thumbnails; playback works on iOS and Android
-- [ ] **MEDIA-04**: Link unfurling runs server-side with an SSRF guard and caches title/description/image on the post
+- [x] **MEDIA-04**: Link unfurling runs server-side with an SSRF guard and caches title/description/image on the post
 
 ### Design Prototype (UI source of truth)
 
@@ -277,7 +277,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |
-| MEDIA-04 | Phase 4 | Pending |
+| MEDIA-04 | Phase 4 | Complete |
 | UI-01 | Phase 2 | Gaps Found |
 | UI-02 | Phase 4 | Pending |
 | UI-03 | Phase 2 | Gaps Found |
