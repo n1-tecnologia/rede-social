@@ -103,11 +103,21 @@ select is_empty(
         -- siblings are — a migration that silently stopped being applied must not let those
         -- assertions pass vacuously. It is NOT exempted anywhere, and its isolation matters more
         -- than most: the row records what one organisation chose to share (T-04-34).
-        ('feed_link_previews')
+        ('feed_link_previews'),
+        -- Phase 5 (05-01). `communities` and `community_members` both carry `tenant_id` and the
+        -- standard isolation policy, so assertions 1-2 already cover them; they are listed here for
+        -- the same reason their Phase 4 siblings are — a migration that silently stopped being
+        -- applied must not let those assertions pass vacuously. NEITHER is exempted anywhere, and
+        -- `community_members` matters most of the two: it is born UNUSED in V1 (COMM-02 answers
+        -- "every member sees every community" as a POLICY value, never as a join), and the only
+        -- thing that makes V2-CONT-02 a policy change rather than a migration is that its policy
+        -- already exists. This entry is what fails the build the day someone drops it as dead
+        -- weight.
+        ('communities'), ('community_members')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-4 declare exists in public'
+  'every table Phases 1-5 declare exists in public'
 );
 
 select * from finish();

@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(73);
+select plan(85);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -88,6 +88,28 @@ insert into public.feed_link_previews (id, tenant_id, url_hash, url, status, tit
    'cccc3333', 'https://exemplo.invalid/c', 'resolved', 'Materia'),
   ('0b000000-0000-4000-8000-0000000000f6', '0b000000-0000-4000-8000-000000000001',
    'cccc3333', 'https://exemplo.invalid/c', 'resolved', 'Materia');
+
+-- 05-01: the community container and its born-unused membership join, with IDENTICAL name, slug
+-- and description on both sides. The shared SLUG is the point: `communities_tenant_slug_uq` is
+-- per tenant, so the same segment is legal in both, and a query that filtered on the slug instead
+-- of on `tenant_id` would match BOTH rows — which is exactly the leak the adjacency cases below
+-- refuse to let through.
+insert into public.communities
+  (id, tenant_id, created_by_user_id, name, slug, description) values
+  ('0a000000-0000-4000-8000-0000000000c1', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', 'Avisos', 'avisos', 'x'),
+  ('0b000000-0000-4000-8000-0000000000c1', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-000000000002', 'Avisos', 'avisos', 'x');
+
+-- `community_members` carries NO row in V1's product surface (COMM-02 is a policy value: the list
+-- never joins this table). It is seeded here anyway, because the point of the case below is that the
+-- POLICY is already right on the day V2-CONT-02 starts writing rows — a table proved isolated only
+-- once it is used is a table proved isolated too late.
+insert into public.community_members (id, tenant_id, community_id, user_id, role) values
+  ('0a000000-0000-4000-8000-0000000000c2', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-0000000000c1', '0a000000-0000-4000-8000-000000000002', 'member'),
+  ('0b000000-0000-4000-8000-0000000000c2', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-0000000000c1', '0b000000-0000-4000-8000-000000000002', 'member');
 
 insert into public.notifications (tenant_id, user_id, kind) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'k'),
@@ -340,6 +362,83 @@ select results_eq(
      ) select count(*)::int from u $$,
   ARRAY[0],
   'USING: the unfurl job''s write aimed at B''s previews touches nothing — a forged job payload can name a tenant, never reach one'
+);
+
+-- ── communities: the same five cases, plus its own positive control (05-01) ───────────────────
+select results_eq(
+  $$ select count(*)::int from public.communities
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own communities row'
+);
+select results_eq(
+  $$ select count(*)::int from public.communities where slug = 'avisos' and description = 'x' $$,
+  ARRAY[1],
+  'adjacency: both tenants named a community ''avisos'' with the same description, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.communities where slug = 'avisos' and description = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the community it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.communities where id = '0b000000-0000-4000-8000-0000000000c1' $$,
+  'detail by id: B''s community is not found through A''s lane — the read path''s bare 404 (D-23) has a policy under it'
+);
+select throws_ok(
+  $$ insert into public.communities (tenant_id, created_by_user_id, name, slug)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002',
+             'Avisos', 'avisos-2') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot create a community stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with u as (
+       update public.communities set status = 'archived'
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: an archive aimed at B''s communities touches nothing'
+);
+
+-- ── community_members: the same five cases (05-01). The table is UNUSED in V1 and still proved:
+--    V2-CONT-02 is only a policy change if the policy is already correct today. ─────────────────
+select results_eq(
+  $$ select count(*)::int from public.community_members
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own community_members row'
+);
+select results_eq(
+  $$ select count(*)::int from public.community_members where role = 'member' $$,
+  ARRAY[1],
+  'adjacency: both tenants hold an identical-looking membership row, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.community_members where role = 'member' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the membership row it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.community_members where id = '0b000000-0000-4000-8000-0000000000c2' $$,
+  'detail by id: B''s community membership is not found through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.community_members (tenant_id, community_id, user_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000000c1',
+             '0b000000-0000-4000-8000-000000000002') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot join B''s community with a row stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with d as (
+       delete from public.community_members
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from d $$,
+  ARRAY[0],
+  'USING: a leave aimed at B''s membership rows touches nothing'
 );
 
 select is_empty(

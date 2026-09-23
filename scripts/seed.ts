@@ -331,6 +331,87 @@ const SEED_PDF = Buffer.from(
 );
 
 /**
+ * 05-01 (COMM-01..03) — FOUR communities per tenant, identical-looking on both sides (§(j)).
+ *
+ * Four rather than three, because `apps/api/tests/integration/communities.test.ts` walks the keyset
+ * with `limit=2` and needs two full pages to prove the boundary neither repeats nor skips a row.
+ *
+ * The fixture carries four deliberate shapes, each of which some assertion downstream depends on:
+ *   - `eventos` has NO COVER, so D-69's `--brand-gradient` fallback has a real row to render
+ *     (`apps/web/e2e/comunidades.spec.ts` asserts it by computed background, not by screenshot);
+ *   - every description is long enough to overflow one line, so `line-clamp-1` is exercised rather
+ *     than merely present;
+ *   - the fourth community's NAME is 60 characters, so the card's `truncate` and the community
+ *     page's wrapping backstop have something to run against;
+ *   - the third and fourth share an IDENTICAL `last_activity_at`. That tie is the point: it is what
+ *     forces the `(last_activity_at, id)` tuple comparison to be a TOTAL order, and with fixed ids
+ *     the `id desc` tie-break is deterministic (`…c4` sorts before `…c3`).
+ *
+ * `last_activity_at` is TRIGGER-owned at runtime (05-03 installs the function on `feed_posts`); the
+ * seed writes it directly for the same reason it writes `created_at` on posts — it is the fixture
+ * writer of record, running in the admin lane, and the ordering it is setting up is the thing under
+ * test.
+ */
+const SEED_COMMUNITY_IDS: Record<string, readonly [string, string, string, string]> = {
+  'tria-demo': [
+    '0d000000-0000-4000-8000-0000000000c1',
+    '0d000000-0000-4000-8000-0000000000c2',
+    '0d000000-0000-4000-8000-0000000000c3',
+    '0d000000-0000-4000-8000-0000000000c4',
+  ],
+  'tria-lab': [
+    '0e000000-0000-4000-8000-0000000000c1',
+    '0e000000-0000-4000-8000-0000000000c2',
+    '0e000000-0000-4000-8000-0000000000c3',
+    '0e000000-0000-4000-8000-0000000000c4',
+  ],
+};
+
+/** Exactly 60 characters — the long-name backstop (index 3 below). */
+export const SEED_LONG_COMMUNITY_NAME =
+  'Grupo de trabalho de comunicacao interna e eventos do ano 26';
+
+/**
+ * Name, slug, description and minutes-ago per community. `coverIndex` names a slide of the gallery
+ * post's already-seeded images (a real `media_assets` row with a real variant ladder); `null` is the
+ * cover-less case. Indexes 2 and 3 share `minutesAgo`, which is the tie.
+ */
+const SEED_COMMUNITIES = [
+  {
+    name: 'Avisos da diretoria',
+    slug: 'avisos-da-diretoria',
+    description:
+      'Comunicados oficiais, mudancas de calendario e tudo o que a diretoria precisa anunciar.',
+    coverIndex: 0,
+    minutesAgo: 1,
+  },
+  {
+    name: 'Eventos e encontros',
+    slug: 'eventos-e-encontros',
+    description:
+      'Encontros presenciais, mutiroes e a agenda completa das atividades abertas a todos.',
+    coverIndex: null,
+    minutesAgo: 2,
+  },
+  {
+    name: 'Projetos em andamento',
+    slug: 'projetos-em-andamento',
+    description:
+      'Acompanhe o que esta sendo construido agora e quem esta a frente de cada frente de trabalho.',
+    coverIndex: 1,
+    minutesAgo: 3,
+  },
+  {
+    name: SEED_LONG_COMMUNITY_NAME,
+    slug: 'grupo-de-trabalho-de-comunicacao-interna-e-eventos-do-ano-26',
+    description:
+      'Uma descricao propositalmente longa para que o recorte de uma unica linha tenha o que cortar.',
+    coverIndex: 2,
+    minutesAgo: 3,
+  },
+] as const;
+
+/**
  * 04-05 (MEDIA-04) — one RESOLVED and one FAILED link preview per tenant, with the posts that carry
  * them. Identical-looking on both sides (SCHEMA-CONVENTIONS §(j)), so a query that filtered on a
  * value instead of on `tenant_id` could not pass by returning something that merely looks right.
@@ -1067,6 +1148,38 @@ for (const t of SEED_TENANTS) {
         await media(mediaIds.attachmentPost, 'none', mediaIds.attachment, 'file', 0);
       });
       console.log(`seed: tenant ${t.slug} — gallery, video and attachment posts`);
+
+      // 05-01 (COMM-01..03): four communities, one of them WITHOUT a cover. Seeded here rather than
+      // in its own block because the covers reuse the gallery post's assets above — a real
+      // `media_assets` row with a real width ladder, so the card's `srcSet` is exercised instead of
+      // stubbed. Raw SQL for the same reason the posts are: the seed lives in the ROOT workspace
+      // package, and a dependency on a `module`-tagged package makes `turbo boundaries`
+      // mis-attribute the edge onto the kernel-tagged packages.
+      const communityIds = SEED_COMMUNITY_IDS[t.slug];
+      if (communityIds) {
+        await withAdminTx(async (tx) => {
+          for (const [index, community] of SEED_COMMUNITIES.entries()) {
+            const id = communityIds[index];
+            const coverAssetId =
+              community.coverIndex === null ? null : mediaIds.images[community.coverIndex];
+            await tx.execute(sql`
+              insert into public.communities
+                (id, tenant_id, created_by_user_id, name, slug, description, cover_asset_id,
+                 last_activity_at, created_at)
+              values (
+                ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid,
+                ${community.name}, ${community.slug}, ${community.description},
+                ${coverAssetId}::uuid,
+                ${new Date(Date.now() - community.minutesAgo * 60_000).toISOString()}::timestamptz,
+                ${new Date(Date.now() - community.minutesAgo * 60_000).toISOString()}::timestamptz
+              )
+              on conflict (id) do nothing`);
+          }
+        });
+        console.log(
+          `seed: tenant ${t.slug} — ${SEED_COMMUNITIES.length} communities (1 without a cover, 1 activity tie)`,
+        );
+      }
     }
 
     // 04-05 (MEDIA-04): one resolved and one failed preview, and the two posts that carry them.
@@ -1143,9 +1256,10 @@ await withAdminTx(async (tx) => {
   await tx.execute(sql`analyze public.feed_likes`);
   await tx.execute(sql`analyze public.feed_post_media`);
   await tx.execute(sql`analyze public.feed_link_previews`);
+  await tx.execute(sql`analyze public.communities`);
 });
 console.log(
-  'seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media, feed_link_previews',
+  'seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media, feed_link_previews, communities',
 );
 
 console.log(`seed: hosts — platform=${PLATFORM_HOST} tria-demo=${DEMO_HOST} tria-lab=${LAB_HOST}`);

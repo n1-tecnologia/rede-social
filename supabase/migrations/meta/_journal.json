@@ -176,6 +176,13 @@
       "when": 1790135977172,
       "tag": "20260923035937_drop_example_module",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790183703811,
+      "tag": "20260923171503_communities",
+      "breakpoints": true
     }
   ]
 }
