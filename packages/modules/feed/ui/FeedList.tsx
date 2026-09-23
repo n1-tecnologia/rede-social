@@ -1,154 +1,331 @@
 'use client';
 
-import { EmptyState } from '@tria/ui';
+import {
+  Button,
+  Card,
+  EmptyState,
+  InfiniteScroll,
+  PullToRefresh,
+  Skeleton,
+  useToast,
+} from '@tria/ui';
 import { Newspaper, TriangleAlert } from 'lucide-react';
+import { type ReactNode, useCallback, useState, useTransition } from 'react';
 import type { CountTemplates } from './meta';
-import { type LikeOutcome, PostCard, type PostCardView } from './PostCard';
+import { type LikeOutcome, PostCard, type PostCardMediaView, type PostCardView } from './PostCard';
 
 /**
- * The D-55 home-slot widget: the feed is the main content of `/inicio`, below the branded welcome and
- * the D-02 nudge, and it adds NO navigation tab.
+ * The D-55 home-slot widget: the feed is the main content of `/inicio`, below the branded welcome
+ * and the D-02 nudge (UI-D-19), and it adds NO navigation tab.
  *
- * Presentational only, the `ExampleWidget` posture: it fetches nothing, imports nothing from the
- * kernel server or db, and every string arrives as a prop so the module ships no language (PWA-03).
- * Authorisation also arrives as a prop — `canPost` is `bootstrap.permissions.includes(
- * 'feed.post.create')` computed server-side, never a role comparison here (FEED-08, R-P8).
+ * Presentational and props-only, the `ExampleWidget` posture: it fetches nothing, imports nothing
+ * from the kernel server or db, reads no catalog, and every string arrives as a prop so the module
+ * ships no language (PWA-03). Authorisation also arrives as a prop — `canPost` is the composed
+ * `feed.post.create` permission computed server-side, never a role comparison here (FEED-08, R-P8).
  *
- * UI-D-20: an empty feed renders THIS card, not `HomeSlots`' "Em breve" — those are two different
- * truths ("the community has published nothing" vs "no module contributed anything") and must not
- * share one card. `items: null` is the load-error branch (UI-SPEC E4/error).
+ * **Four states, and only four.** An unreadable first page renders the generic error card with a
+ * retry; zero posts renders the feed's OWN empty card (UI-D-20 — `HomeSlots`' "Em breve" means
+ * "no module contributed anything", which stops being true once a slot is registered, and two
+ * different truths must not share one card); anything else renders the column. A LOAD-MORE failure
+ * is the fourth and is deliberately not any of the other three: it renders an inline line plus a
+ * retry AT the sentinel and keeps every card already on screen (the 03-05 rule).
  *
- * Infinite scroll and pull-to-refresh (D-58) attach here in 04-02; the composer CTA's `createHref`
- * is supplied by 04-05 once `/criar` exists, which is why the slot is optional rather than a link to
- * a route that would 404 today.
+ * **Paging in both directions goes through the host's ONE fetch implementation** (D-58, Pitfall 9):
+ * the sentinel appends with `onLoadMore(cursor)`, pull-to-refresh replaces with `onRefresh()`, and
+ * neither is a second request path. The cursor is opaque here and is forwarded verbatim.
  */
+export type FeedPageOutcome =
+  | { ok: true; items: PostCardView[]; nextCursor: string | null }
+  | { ok: false };
+
+export type FeedListLabels = {
+  /** Accessible name of the widget's region. */
+  region: string;
+  /** The caption's "more" toggle. */
+  more: string;
+  /** `aria-roledescription` of the gallery strip (UI-SPEC Gallery). */
+  carousel: string;
+  /** The GENERIC message a failed attachment download raises as a toast (UI-D-23). */
+  attachmentError: string;
+  /** The three action labels plus the overflow control's, all `aria-label`s. */
+  like: string;
+  unlike: string;
+  comment: string;
+  share: string;
+  moreOptions: string;
+  /** The meta row's count templates and the edited marker (UI-D-15, UI-D-21). */
+  likes: CountTemplates;
+  comments: CountTemplates;
+  edited: string;
+  emptyTitle: string;
+  /** Shown to a member: the community's posts will appear here. */
+  emptyBody: string;
+  /** Shown to someone who may publish: be the first. */
+  emptyBodyAuthor: string;
+  emptyCta: string;
+  errorTitle: string;
+  errorBody: string;
+  errorRetry: string;
+  /** Inline at the sentinel when one PAGE fails; the loaded cards stay exactly where they are. */
+  loadMoreError: string;
+  loadMoreRetry: string;
+  /** The desktop header row's compose control (UI-D-17 — there is no floating control on desktop). */
+  createCta: string;
+  /** The one toast a failed like or a failed refresh raises; never an inline message (UI-SPEC E09). */
+  genericError: string;
+};
+
 export type FeedListProps = {
-  /** The page's posts, or `null` when the feed could not be read. */
-  items: PostCardView[] | null;
+  /** The page the SERVER rendered; the list is seeded from it and owns every page after it. */
+  initialItems: PostCardView[];
+  initialCursor: string | null;
+  /** `true` when the server could not read the first page at all (UI-SPEC E1/error). */
+  initialError?: boolean;
   canPost: boolean;
   captionTruncateAt: number;
+  /** Rendered as the empty-state CTA and the desktop header control once the composer route exists. */
+  createHref?: string;
   /** BCP-47 tag from the host: the module formats numbers for it but ships no words (PWA-03). */
   locale: string;
+  labels: FeedListLabels;
+  onLoadMore: (cursor: string) => Promise<FeedPageOutcome>;
+  onRefresh: () => Promise<FeedPageOutcome>;
   onLike: (postId: string) => Promise<LikeOutcome>;
   onUnlike: (postId: string) => Promise<LikeOutcome>;
-  /** Raised after a failed like has already reverted; the host shows the generic error toast. */
-  onLikeError?: () => void;
   onOpenComments?: (postId: string) => void;
   onShare?: (postId: string) => void;
   onMore?: (postId: string) => void;
-  /** Rendered as the empty-state CTA when the caller may post AND the composer route exists. */
-  createHref?: string;
-  labels: {
-    /** Accessible name of the widget's region. */
-    region: string;
-    /** The caption's "more" toggle. */
-    more: string;
-    /** The three action labels plus the overflow control's, all `aria-label`s. */
-    like: string;
-    unlike: string;
-    comment: string;
-    share: string;
-    moreOptions: string;
-    /** The meta row's count templates and the edited marker (UI-D-15, UI-D-21). */
-    likes: CountTemplates;
-    comments: CountTemplates;
-    edited: string;
-    /** `aria-roledescription` of the gallery strip — "carrossel" (UI-SPEC §Gallery). */
-    carousel: string;
-    /** The GENERIC message a failed attachment download raises as a toast (UI-D-23). */
-    attachmentError: string;
-    emptyTitle: string;
-    /** Shown to a member: the community's posts will appear here. */
-    emptyBody: string;
-    /** Shown to someone who may publish: be the first. */
-    emptyBodyAuthor: string;
-    emptyCta: string;
-    errorTitle: string;
-    errorBody: string;
-    errorRetry: string;
-  };
+  /**
+   * Per-item media override (04-04's injection point).
+   *
+   * The DEFAULT is `item.media`, which the host already built on the server — including the
+   * already-created `VideoPlayer` element, which survives both boundaries an item crosses (a server
+   * component's props and a server action's return value). The hook exists for a host that has to
+   * build a media node on the CLIENT side instead; a host that does not pass it gets the server's
+   * node unchanged.
+   */
+  renderMedia?: (item: PostCardView) => PostCardMediaView;
 };
 
+/** The geometry of a real card: circle + two meta lines, a ratio box, two caption lines. */
+export function FeedCardSkeleton() {
+  return (
+    <Card aria-hidden className="flex flex-col gap-4 overflow-hidden p-4">
+      <div className="flex items-center gap-3">
+        <Skeleton variant="circle" />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Skeleton variant="text" width="40%" className="h-3.5" />
+          <Skeleton variant="text" width="20%" className="h-3" />
+        </div>
+      </div>
+      <Skeleton variant="rect" height={240} className="rounded-xl" />
+      <div className="flex flex-col gap-2">
+        <Skeleton variant="text" width="30%" className="h-3.5" />
+        <Skeleton variant="text" width="80%" className="h-3.5" />
+      </div>
+    </Card>
+  );
+}
+
+const SKELETON_CARDS = [0, 1, 2];
+
+/**
+ * Three cards, shared with the home slot's own loading boundary so the first paint and the skeleton
+ * have the SAME geometry and the swap to content does not shift the page (UI-SPEC E1/loading).
+ */
+export function FeedListSkeleton() {
+  return (
+    <div aria-busy data-testid="feed-skeleton" className="flex flex-col gap-3">
+      {SKELETON_CARDS.map((index) => (
+        <FeedCardSkeleton key={index} />
+      ))}
+    </div>
+  );
+}
+
 export function FeedList({
-  items,
+  initialItems,
+  initialCursor,
+  initialError,
   canPost,
   captionTruncateAt,
   createHref,
   locale,
   labels,
+  onLoadMore,
+  onRefresh,
   onLike,
   onUnlike,
-  onLikeError,
   onOpenComments,
   onShare,
   onMore,
+  renderMedia,
 }: FeedListProps) {
-  if (items === null) {
-    return (
-      <section aria-label={labels.region}>
-        <EmptyState
-          variant="card"
-          icon={TriangleAlert}
-          title={labels.errorTitle}
-          body={labels.errorBody}
-          action={
-            <a href="/inicio" className="text-sm font-bold text-brand">
-              {labels.errorRetry}
-            </a>
-          }
-        />
-      </section>
-    );
+  const toast = useToast();
+
+  const [items, setItems] = useState(initialItems);
+  const [cursor, setCursor] = useState(initialCursor);
+  const [firstLoadFailed, setFirstLoadFailed] = useState(Boolean(initialError));
+  const [pageFailed, setPageFailed] = useState(false);
+  const [, startTransition] = useTransition();
+
+  // The SERVER sent a different first page (a navigation, not a refresh): re-seed rather than merge.
+  // Adjusting state during render is React's documented alternative to an effect.
+  const [seed, setSeed] = useState(initialItems);
+  if (seed !== initialItems) {
+    setSeed(initialItems);
+    setItems(initialItems);
+    setCursor(initialCursor);
+    setFirstLoadFailed(Boolean(initialError));
+    setPageFailed(false);
   }
 
-  if (items.length === 0) {
-    return (
-      <section aria-label={labels.region}>
-        <EmptyState
-          variant="card"
-          icon={Newspaper}
-          title={labels.emptyTitle}
-          body={canPost ? labels.emptyBodyAuthor : labels.emptyBody}
-          action={
-            canPost && createHref ? (
-              <a href={createHref} className="text-sm font-bold text-brand">
-                {labels.emptyCta}
-              </a>
-            ) : undefined
-          }
+  const failToast = useCallback(() => {
+    toast.show({ tone: 'error', message: labels.genericError });
+  }, [toast, labels.genericError]);
+
+  /** Page 1 again. Replaces the list; the cards never become skeletons (UI-SPEC E1/loading). */
+  const refresh = useCallback(async () => {
+    const page = await onRefresh();
+    if (!page.ok) {
+      failToast();
+      return;
+    }
+    setItems(page.items);
+    setCursor(page.nextCursor);
+    setFirstLoadFailed(false);
+    setPageFailed(false);
+  }, [onRefresh, failToast]);
+
+  /** APPEND: every card already on screen keeps its order and its DOM position. */
+  const loadMore = useCallback(async () => {
+    if (!cursor) return;
+    const from = cursor;
+    const page = await onLoadMore(from);
+    if (!page.ok) {
+      setPageFailed(true);
+      return;
+    }
+    setPageFailed(false);
+    setItems((previous) => [...previous, ...page.items]);
+    setCursor(page.nextCursor);
+  }, [cursor, onLoadMore]);
+
+  const retryPage = useCallback(() => {
+    setPageFailed(false);
+    startTransition(() => {
+      void loadMore();
+    });
+  }, [loadMore]);
+
+  const retryFirst = useCallback(() => {
+    startTransition(() => {
+      void refresh();
+    });
+  }, [refresh]);
+
+  // A LINK, not a `Button`: the shipped button is a `<button>` and the composer is a route (04-09).
+  // The brand styling is the button's, read through the tenant tokens exactly as `Button` reads them.
+  const createCta =
+    canPost && createHref ? (
+      <a
+        href={createHref}
+        className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+      >
+        {labels.createCta}
+      </a>
+    ) : null;
+
+  let body: ReactNode;
+  if (firstLoadFailed && items.length === 0) {
+    body = (
+      <EmptyState
+        variant="card"
+        icon={TriangleAlert}
+        title={labels.errorTitle}
+        body={labels.errorBody}
+        action={
+          <Button variant="outline" onClick={retryFirst}>
+            {labels.errorRetry}
+          </Button>
+        }
+      />
+    );
+  } else if (items.length === 0) {
+    // UI-D-20: the feed's OWN empty, with the author variant carrying the create CTA.
+    body = (
+      <EmptyState
+        variant="card"
+        icon={Newspaper}
+        title={labels.emptyTitle}
+        body={canPost ? labels.emptyBodyAuthor : labels.emptyBody}
+        action={createCta ?? undefined}
+      />
+    );
+  } else {
+    body = (
+      <>
+        <div className="flex flex-col gap-3">
+          {items.map((post) => (
+            <PostCard
+              key={post.id}
+              post={renderMedia ? { ...post, media: renderMedia(post) } : post}
+              captionTruncateAt={captionTruncateAt}
+              locale={locale}
+              labels={{
+                more: labels.more,
+                like: labels.like,
+                unlike: labels.unlike,
+                comment: labels.comment,
+                share: labels.share,
+                moreOptions: labels.moreOptions,
+                likes: labels.likes,
+                comments: labels.comments,
+                edited: labels.edited,
+                media: { carousel: labels.carousel, attachmentError: labels.attachmentError },
+              }}
+              onLike={onLike}
+              onUnlike={onUnlike}
+              onLikeError={failToast}
+              onOpenComments={onOpenComments}
+              onShare={onShare}
+              onMore={onMore}
+            />
+          ))}
+        </div>
+
+        {/* The sentinel stands down while a page is refused, so a failed page cannot spin: the
+            member asks for the retry explicitly (T-04-41). */}
+        <InfiniteScroll
+          hasMore={cursor !== null}
+          enabled={!pageFailed}
+          onLoadMore={loadMore}
+          skeleton={<FeedCardSkeleton />}
+          className="mt-3"
         />
-      </section>
+
+        {pageFailed ? (
+          <div
+            data-feed-page-error
+            className="mt-3 flex flex-col items-center gap-3 px-4 text-center"
+          >
+            <p className="text-sm font-normal text-danger">{labels.loadMoreError}</p>
+            <Button variant="outline" onClick={retryPage}>
+              {labels.loadMoreRetry}
+            </Button>
+          </div>
+        ) : null}
+      </>
     );
   }
 
   return (
-    <section aria-label={labels.region} className="flex flex-col gap-3">
-      {items.map((post) => (
-        <PostCard
-          key={post.id}
-          post={post}
-          captionTruncateAt={captionTruncateAt}
-          locale={locale}
-          labels={{
-            more: labels.more,
-            like: labels.like,
-            unlike: labels.unlike,
-            comment: labels.comment,
-            share: labels.share,
-            moreOptions: labels.moreOptions,
-            likes: labels.likes,
-            comments: labels.comments,
-            edited: labels.edited,
-            media: { carousel: labels.carousel, attachmentError: labels.attachmentError },
-          }}
-          onLike={onLike}
-          onUnlike={onUnlike}
-          onLikeError={onLikeError}
-          onOpenComments={onOpenComments}
-          onShare={onShare}
-          onMore={onMore}
-        />
-      ))}
+    <section aria-label={labels.region} className="flex flex-col">
+      {/* Desktop only (UI-D-17): a floating control over a centred column next to a rail has no
+          rationale, and it would collide with the desktop toast anchor. The mobile FAB is 04-09's. */}
+      {createCta ? <div className="mb-3 hidden justify-end md:flex">{createCta}</div> : null}
+
+      <PullToRefresh onRefresh={refresh}>{body}</PullToRefresh>
     </section>
   );
 }

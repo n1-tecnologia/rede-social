@@ -4,6 +4,8 @@ import {
   type FeedPost,
   feedPageSchema,
   feedPostSchema,
+  type LikeResult,
+  likeResultSchema,
 } from '@tria/module-feed/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -117,4 +119,30 @@ export async function loadPost(postId: string): Promise<FeedPostResult> {
 
   if (path) redirect(path);
   return result;
+}
+
+/**
+ * `POST` / `DELETE /v1/feed/posts/{postId}/like` (FEED-04).
+ *
+ * These are the ONLY feed mutation clients: the like server actions go through them exactly as the
+ * page and the load-more action go through `getFeed`, so nothing in the feed opens a second request
+ * path that could drift on the tenant header or on how a refusal is read.
+ *
+ * The toggle is IDEMPOTENT at the API: liking an already-liked post returns the same body with a
+ * 200, never a 409, so a double tap that also lands as two taps cannot produce two rows. Both
+ * helpers answer the CURRENT `{ liked, likeCount }` read back in the writing transaction, which is
+ * the value that replaces the client's optimistic pair.
+ */
+async function toggleLike(postId: string, method: 'POST' | 'DELETE'): Promise<LikeResult> {
+  const res = await apiFetch(`/v1/feed/posts/${encodeURIComponent(postId)}/like`, { method });
+  if (!res.ok) throw await apiError(res);
+  return likeResultSchema.parse(await res.json());
+}
+
+export async function likePost(postId: string): Promise<LikeResult> {
+  return toggleLike(postId, 'POST');
+}
+
+export async function unlikePost(postId: string): Promise<LikeResult> {
+  return toggleLike(postId, 'DELETE');
 }

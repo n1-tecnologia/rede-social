@@ -31,13 +31,32 @@
       }
     },
     "errors": {
-      "generic": "Algo deu errado. Tente novamente."
+      "generic": "Algo deu errado. Tente novamente.",
+      "loadMore": "Não foi possível carregar mais publicações."
     },
     "empty": {
       "title": "Nada por aqui ainda",
       "body": "As publicações da {tenant} vão aparecer aqui.",
       "bodyAuthor": "Publique a primeira novidade da comunidade.",
       "cta": "Criar publicação"
+    },
+    "actions": {
+      "like": "Curtir",
+      "unlike": "Descurtir",
+      "comment": "Comentar",
+      "share": "Compartilhar",
+      "more": "Mais opções"
+    },
+    "meta": {
+      "likes": {
+        "one": "{count} curtida",
+        "other": "{count} curtidas"
+      },
+      "comments": {
+        "one": "{count} comentário",
+        "other": "{count} comentários"
+      },
+      "edited": "editado"
     }
   }
 }
