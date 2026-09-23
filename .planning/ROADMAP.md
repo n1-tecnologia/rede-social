@@ -298,10 +298,41 @@ Plans:
   4. A story leaves the strip 24 h after publishing (hidden by `expires_at`, record retained); a story pinned to one or more communities stays visible on those community pages after expiry until unpinned.
   5. Member can like a story and comment on it; attempts to like or reply to a story comment are rejected by the API and the DB.
 
-**Plans**: TBD
+**Plans**: 8 plans
 **UI hint**: yes
 **Research needed**: None (conventional CRUD; stories viewer reuses the prototype's reels pager gesture model). Requires the design team's answer on the community "highlights" circles as the pinned-stories UI and a viewer spec (PROTOTYPE.md open question 1).
-**Notes**: Posts scoped via `community_id`; feed query = tenant-wide OR visible community. Stories strip query is `expires_at > now()`, no cron. Admin story history view is included so expired stories remain reachable to the admin.
+**Notes**: Posts scoped via `community_id`; feed query = tenant-wide OR visible community. Stories strip query is `expires_at > now()`, no cron. Admin story history view is included so expired stories remain reachable to the admin. Research falsified D-73's index claim: the merged feed needs a third, non-partial `(tenant_id, created_at desc, id desc)` index (05-03), and `expires_at` cannot be a generated column (05-05).
+
+Plans:
+
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — Tracer: `@tria/module-communities` + `communities`/`community_members` + keyset `GET /v1/communities` + permission-guarded create + the `Comunidades` tab and the `/comunidades` list
+- [ ] 05-02-PLAN.md — The D-33/UI-04 design gate: sketch 003 for the five prototype-less surfaces, plus UI-D-46's vocabulary amendment across ten shipped catalog rows
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 05-03-PLAN.md — Feed × communities: the third index, the D-73 merged predicate with its D-74 module-flag fallback, D-71's "em {Comunidade}" label and D-72's "Publicar em" picker (COMM-04)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 05-04-PLAN.md — COMM-01/COMM-03: the community page, the cover-less brand gradient, the create/edit/archive form, archive-as-write-gate and the trigger-owned `post_count`/`last_activity_at`
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 05-05-PLAN.md — STORY-01/STORY-03: `@tria/module-stories`, `stories` with its `expires_at` predicate, the order-5 strip home slot and the `/stories/publicar` flow
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 05-06-PLAN.md — STORY-02: the rAF clock, the pointer pager, progress bars, hold-to-pause, the autoplay-blocked branch and story likes
+
+**Wave 6** *(blocked on Wave 5)*
+
+- [ ] 05-07-PLAN.md — STORY-05: the declarative `target_kind` constraint pair, the Pitfall-1 CHECK fix, and story comments in the flat `CommentsList` variant
+
+**Wave 7** *(blocked on Wave 6)*
+
+- [ ] 05-08-PLAN.md — STORY-04: `story_community_pins`, the community Destaques row, the "Seus stories" history with pin/unpin and delete, and the phase exit gate
 
 ### Phase 6: Events
 
