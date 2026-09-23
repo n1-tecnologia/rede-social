@@ -6,6 +6,7 @@
  * `tenant_modules` rows and their primary, verified `tenant_domains` rows, plus TRIA's `super_admin`
  * in `platform_admins`. Safe to re-run. Passwords come from env only, never from git.
  */
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -271,6 +272,68 @@ const SEED_PDF = Buffer.from(
   ].join('\n'),
   'utf8',
 );
+
+/**
+ * 04-05 (MEDIA-04) — one RESOLVED and one FAILED link preview per tenant, with the posts that carry
+ * them. Identical-looking on both sides (SCHEMA-CONVENTIONS §(j)), so a query that filtered on a
+ * value instead of on `tenant_id` could not pass by returning something that merely looks right.
+ *
+ * The two URLs are `.invalid` hosts — the IANA-reserved TLD that is guaranteed never to resolve.
+ * Nothing here performs a real unfurl: the seed is the fixture writer of record and the outbound
+ * fetch belongs to the worker at runtime, so both rows are written in their TERMINAL state directly.
+ * A seed that actually reached the network would make `pnpm db:seed` depend on a third party's
+ * uptime — exactly what the guard suite refuses to do.
+ *
+ * The failed row is `failure_reason = 'no_metadata'`, the most common real outcome: a page that
+ * answered fine and simply carries no Open Graph tags. It renders as the bare auto-linked URL
+ * inside the caption and NOTHING else (UI-D-11), which is the state a reviewer should be able to
+ * see in the seeded feed without constructing it.
+ */
+const SEED_LINK_PREVIEW_URLS = {
+  resolved: 'https://noticias.exemplo.invalid/encontro-anual',
+  failed: 'https://sem-metadados.exemplo.invalid/pagina',
+} as const;
+
+const SEED_LINK_PREVIEW_METADATA = {
+  title: 'Encontro anual da comunidade',
+  description: 'Como foi o encontro deste ano, com fotos e os proximos passos.',
+  siteName: 'Noticias Exemplo',
+} as const;
+
+const SEED_LINK_IDS: Record<
+  string,
+  { resolvedPreview: string; failedPreview: string; resolvedPost: string; failedPost: string }
+> = {
+  'tria-demo': {
+    resolvedPreview: '0d000000-0000-4000-8000-0000000000b1',
+    failedPreview: '0d000000-0000-4000-8000-0000000000b2',
+    resolvedPost: '0d000000-0000-4000-8000-000000000006',
+    failedPost: '0d000000-0000-4000-8000-000000000007',
+  },
+  'tria-lab': {
+    resolvedPreview: '0e000000-0000-4000-8000-0000000000b1',
+    failedPreview: '0e000000-0000-4000-8000-0000000000b2',
+    resolvedPost: '0e000000-0000-4000-8000-000000000006',
+    failedPost: '0e000000-0000-4000-8000-000000000007',
+  },
+};
+
+/**
+ * The SAME key the service computes (`urlHash(normaliseUrl(url))`), recomputed here rather than
+ * imported: the seed belongs to the ROOT workspace package, and a root dependency on a
+ * `module`-tagged package makes `turbo boundaries` mis-attribute that edge to the kernel packages
+ * (the same reason the feed inserts below are raw SQL). Both seed URLs are already normalised —
+ * lower-case host, no default port, no fragment — so `new URL(...).toString()` is a no-op on them
+ * and the two spellings cannot drift.
+ */
+const seedUrlHash = (url: string): string =>
+  createHash('sha256').update(new URL(url).toString()).digest('hex');
+
+/** The captions carry the URL inline, so the caption's auto-linker and the preview agree. */
+const SEED_LINK_CAPTIONS = {
+  resolved: `Saiu a materia sobre o nosso encontro: ${SEED_LINK_PREVIEW_URLS.resolved}`,
+  failed: `Mais um link para quem quiser ler: ${SEED_LINK_PREVIEW_URLS.failed}`,
+} as const;
 
 /** 04-03: [root, reply]. Fixed ids, so a test can name the thread without querying for it first. */
 const SEED_COMMENT_IDS: Record<string, readonly string[]> = {
@@ -774,6 +837,55 @@ for (const t of SEED_TENANTS) {
       });
       console.log(`seed: tenant ${t.slug} — gallery, video and attachment posts`);
     }
+
+    // 04-05 (MEDIA-04): one resolved and one failed preview, and the two posts that carry them.
+    // Written in their TERMINAL state — the seed never performs a real unfurl (see the docblock on
+    // SEED_LINK_PREVIEW_URLS).
+    const linkIds = SEED_LINK_IDS[t.slug];
+    if (linkIds) {
+      await withAdminTx(async (tx) => {
+        await tx.execute(sql`
+          insert into public.feed_link_previews
+            (id, tenant_id, url_hash, url, status, title, description, site_name, fetched_at)
+          values (
+            ${linkIds.resolvedPreview}::uuid, ${tenantId}::uuid,
+            ${seedUrlHash(SEED_LINK_PREVIEW_URLS.resolved)}, ${SEED_LINK_PREVIEW_URLS.resolved},
+            'resolved', ${SEED_LINK_PREVIEW_METADATA.title},
+            ${SEED_LINK_PREVIEW_METADATA.description}, ${SEED_LINK_PREVIEW_METADATA.siteName},
+            now()
+          )
+          on conflict (id) do nothing`);
+        await tx.execute(sql`
+          insert into public.feed_link_previews
+            (id, tenant_id, url_hash, url, status, failure_reason, fetched_at)
+          values (
+            ${linkIds.failedPreview}::uuid, ${tenantId}::uuid,
+            ${seedUrlHash(SEED_LINK_PREVIEW_URLS.failed)}, ${SEED_LINK_PREVIEW_URLS.failed},
+            'failed', 'no_metadata', now()
+          )
+          on conflict (id) do nothing`);
+
+        const linkPost = async (id: string, caption: string, previewId: string, agoMin: number) => {
+          await tx.execute(sql`
+            insert into public.feed_posts
+              (id, tenant_id, author_user_id, caption, media_kind, link_preview_id, created_at)
+            values (
+              ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid, ${caption}, 'none',
+              ${previewId}::uuid,
+              ${new Date(Date.now() - agoMin * 60_000).toISOString()}::timestamptz
+            )
+            on conflict (id) do nothing`);
+        };
+        await linkPost(
+          linkIds.resolvedPost,
+          SEED_LINK_CAPTIONS.resolved,
+          linkIds.resolvedPreview,
+          5,
+        );
+        await linkPost(linkIds.failedPost, SEED_LINK_CAPTIONS.failed, linkIds.failedPreview, 4);
+      });
+      console.log(`seed: tenant ${t.slug} — 1 resolved + 1 failed link preview`);
+    }
   }
 
   console.log(
@@ -799,8 +911,11 @@ await withAdminTx(async (tx) => {
   await tx.execute(sql`analyze public.feed_comments`);
   await tx.execute(sql`analyze public.feed_likes`);
   await tx.execute(sql`analyze public.feed_post_media`);
+  await tx.execute(sql`analyze public.feed_link_previews`);
 });
-console.log('seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media');
+console.log(
+  'seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media, feed_link_previews',
+);
 
 console.log(`seed: hosts — platform=${PLATFORM_HOST} tria-demo=${DEMO_HOST} tria-lab=${LAB_HOST}`);
 await sqlClient.end();

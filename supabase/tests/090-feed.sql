@@ -10,6 +10,9 @@ begin;
 --   * the counters RECONCILE against the rows they summarise, asserted AFTER a soft delete so the
 --     `deleted_at` branch of the trigger is exercised rather than assumed (Pitfall 5);
 --   * the three keyset queries are INDEX SCANS against a realistically-sized fixture;
+--   * the link-preview cache's PER-TENANT boundary is a fact of the index: the same url_hash
+--     collides inside one tenant (23505) and inserts freely across two, with the positive control
+--     in the same block — so a global cache could not be introduced without turning this red;
 --   * D-53's gallery-XOR-video rule is refused BY THE DATABASE on all four illegal shapes — an
 --     image row on a video post and a video row on a gallery post (23503 on the composite
 --     `feed_post_media_kind_fk`), a row lying about its own `kind`/`post_media_kind` pair (23514),
@@ -23,7 +26,7 @@ begin;
 -- tenant would push the demo posts off the first feed page and quietly break `feed.test.ts`'s
 -- cursor walk and `feed.spec.ts`'s ordering assertions. Like its siblings, this file rolls back, so
 -- it re-runs identically against a seeded or an empty database, twice in a row, in any order.
-select plan(30);
+select plan(35);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-feed', 'Comunidade Feed', '0c000000-0000-4000-8000-000000000001');
@@ -274,7 +277,61 @@ select throws_ok(
   'two media rows with the same (post_id, kind, position) are refused by feed_post_media_position_uq (23505)'
 );
 
--- ── 25-30. the three keyset queries are index scans ────────────────────────────────────────────
+-- ── 25-29. the link-preview cache and its per-tenant boundary (04-05, MEDIA-04) ───────────────
+-- A SECOND tenant is created here on purpose: the whole point of `unique (tenant_id, url_hash)` is
+-- that it is per tenant, and that is unprovable with one tenant in the fixture. The positive
+-- control ships in the same block, so a globally broken insert cannot make the collision pass.
+select tests.tenant('pgtap-feed-2', 'Comunidade Feed 2', '0c000000-0000-4000-8000-000000000004');
+
+select lives_ok(
+  $$ insert into public.feed_link_previews (id, tenant_id, url_hash, url, status)
+     values ('0c000000-0000-4000-8000-0000000000f1', '0c000000-0000-4000-8000-000000000001',
+             'aaaa1111', 'https://exemplo.invalid/a', 'resolved') $$,
+  'positive control: a link preview row is accepted'
+);
+
+-- 26. the same URL twice IN ONE TENANT is one cache row — which is what makes a second post of the
+-- same link cost no second outbound fetch (the service relies on this via `on conflict do nothing`).
+select throws_ok(
+  $$ insert into public.feed_link_previews (tenant_id, url_hash, url, status)
+     values ('0c000000-0000-4000-8000-000000000001', 'aaaa1111', 'https://exemplo.invalid/a', 'pending') $$,
+  '23505',
+  null,
+  'the same url_hash twice in ONE tenant collides on feed_link_previews_tenant_url_uq (23505)'
+);
+
+-- 27. THE PRIVACY BOUNDARY. The same hash in ANOTHER tenant is a separate row: one tenant can never
+-- reuse — and therefore never learn about — what another organisation already resolved (T-04-34).
+select lives_ok(
+  $$ insert into public.feed_link_previews (tenant_id, url_hash, url, status)
+     values ('0c000000-0000-4000-8000-000000000004', 'aaaa1111', 'https://exemplo.invalid/a', 'resolved') $$,
+  'the same url_hash in a DIFFERENT tenant inserts: the cache is per tenant, not global'
+);
+
+-- 28. the status vocabulary is closed, so a typo cannot create a fourth rendering state the card
+-- has no branch for.
+select throws_ok(
+  $$ insert into public.feed_link_previews (tenant_id, url_hash, url, status)
+     values ('0c000000-0000-4000-8000-000000000001', 'bbbb2222', 'https://exemplo.invalid/b', 'partial') $$,
+  '23514',
+  null,
+  'an out-of-vocabulary preview status is refused by feed_link_previews_status_chk (23514)'
+);
+
+-- 29. `on delete set null`: dropping a preview (a cache purge, a re-unfurl) must never take the post
+-- with it — the post survives and falls back to the bare auto-linked URL in its caption (UI-D-11).
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, link_preview_id) values
+  ('0c000000-0000-4000-8000-0000000000f2', '0c000000-0000-4000-8000-000000000001', 'l',
+   '0c000000-0000-4000-8000-000000000002', '0c000000-0000-4000-8000-0000000000f1');
+delete from public.feed_link_previews where id = '0c000000-0000-4000-8000-0000000000f1';
+select is(
+  (select count(*) filter (where link_preview_id is null)::int
+     from public.feed_posts where id = '0c000000-0000-4000-8000-0000000000f2'),
+  1,
+  'deleting a preview leaves its post alive with link_preview_id null (on delete set null)'
+);
+
+-- ── 30-35. the three keyset queries are index scans ────────────────────────────────────────────
 -- Captured into a temp table with `execute … into`, because EXPLAIN cannot be a subquery. The
 -- predicates mirror what RLS injects (`tenant_id = app.tenant_id()`), since pg_prove connects as
 -- the table owner and therefore does not have the policy applied for it.

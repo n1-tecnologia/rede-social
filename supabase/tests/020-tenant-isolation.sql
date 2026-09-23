@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(75);
+select plan(81);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -81,6 +81,16 @@ insert into public.feed_post_media
    '0a000000-0000-4000-8000-0000000000f1', 'none', '0a000000-0000-4000-8000-0000000000f4', 'file', 0),
   ('0b000000-0000-4000-8000-0000000000f5', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-0000000000f1', 'none', '0b000000-0000-4000-8000-0000000000f4', 'file', 0);
+
+-- 04-05: an IDENTICAL link preview on each side — the same `url_hash`, the same title. The shared
+-- hash is the point: it is legal across tenants (the cache is per tenant) and it makes the
+-- adjacency case below unfakeable, because a query that filtered on the hash instead of on
+-- `tenant_id` would match both rows.
+insert into public.feed_link_previews (id, tenant_id, url_hash, url, status, title) values
+  ('0a000000-0000-4000-8000-0000000000f6', '0a000000-0000-4000-8000-000000000001',
+   'cccc3333', 'https://exemplo.invalid/c', 'resolved', 'Materia'),
+  ('0b000000-0000-4000-8000-0000000000f6', '0b000000-0000-4000-8000-000000000001',
+   'cccc3333', 'https://exemplo.invalid/c', 'resolved', 'Materia');
 
 insert into public.notifications (tenant_id, user_id, kind) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'k'),
@@ -332,6 +342,44 @@ select results_eq(
      ) select count(*)::int from d $$,
   ARRAY[0],
   'USING: a detach aimed at B''s media rows touches nothing'
+);
+
+-- ── feed_link_previews: the same five cases, plus its own positive control (04-05) ────────────
+select results_eq(
+  $$ select count(*)::int from public.feed_link_previews
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own feed_link_previews row'
+);
+select results_eq(
+  $$ select count(*)::int from public.feed_link_previews where url_hash = 'cccc3333' $$,
+  ARRAY[1],
+  'adjacency: both tenants cached the SAME url_hash, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.feed_link_previews where url_hash = 'cccc3333' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the preview it returns belongs to A — one tenant cannot read another''s cache'
+);
+select is_empty(
+  $$ select id from public.feed_link_previews
+      where id = '0b000000-0000-4000-8000-0000000000f6' $$,
+  'detail by id: B''s preview is not found through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.feed_link_previews (tenant_id, url_hash, url, status)
+     values ('0b000000-0000-4000-8000-000000000001', 'dddd4444', 'https://exemplo.invalid/d', 'pending') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a preview stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with u as (
+       update public.feed_link_previews set status = 'failed'
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: the unfurl job''s write aimed at B''s previews touches nothing — a forged job payload can name a tenant, never reach one'
 );
 
 select is_empty(

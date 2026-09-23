@@ -368,6 +368,12 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
       // synchronous policy the worker re-applies. Two matchers would mean a card under a URL the
       // caption did not turn blue, or the reverse.
       assertAllowedUrl(raw);
+      // NOTE the create path deliberately does NOT check the target's ADDRESS. It cannot: deciding
+      // whether a hostname points into a private range needs a resolver, and a resolver in a
+      // request path is the outbound work this whole design moves to the worker. The SOCKET is the
+      // boundary (`guardedAgent`), so a refused URL costs one row and one job that lands 'failed'.
+      // Adding a partial IP-literal check here would buy no safety and would only split one rule
+      // across two places.
       return { url: raw, hash: urlHash(raw), normalised: normaliseUrl(raw) };
     } catch {
       return null;

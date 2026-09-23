@@ -97,7 +97,13 @@ select is_empty(
         -- so assertions 1-2 already cover it; it is listed here for the same reason its siblings
         -- are — a migration that silently stopped being applied must not let those assertions pass
         -- vacuously. It is NOT exempted anywhere.
-        ('feed_post_media')
+        ('feed_post_media'),
+        -- Phase 4 (04-05). `feed_link_previews` carries `tenant_id` and the standard isolation
+        -- policy, so assertions 1-2 already cover it; it is listed here for the same reason its
+        -- siblings are — a migration that silently stopped being applied must not let those
+        -- assertions pass vacuously. It is NOT exempted anywhere, and its isolation matters more
+        -- than most: the row records what one organisation chose to share (T-04-34).
+        ('feed_link_previews')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,

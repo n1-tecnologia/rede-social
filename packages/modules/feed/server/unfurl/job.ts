@@ -156,6 +156,21 @@ export async function unfurl(rawUrl: string): Promise<UnfurlResult | null> {
     // and spreads `fetchOptions` into it, so the dispatcher is honoured — and every redirect hop
     // re-enters the guard's connector.
     fetchOptions: { dispatcher: agent, redirect: 'follow' },
+  }).catch((thrown: unknown) => {
+    /**
+     * VERIFIED against open-graph-scraper@6.12.0 `dist/esm/index.js`: on failure it does not
+     * RESOLVE with `{ error: true }` — it THROWS a plain object literal
+     * `{ error, result: { error, errorDetails }, … }`, burying the real cause in `errorDetails`.
+     *
+     * Rethrowing that literal unchanged would reach `failureReasonFor` as a non-Error with no
+     * `cause` chain to walk, and EVERY refusal would be classified `unreachable` — a
+     * `BlockedTargetError` would be recorded as "the host did not answer". The distinction never
+     * reaches an admin (UI-D-13), but it is the only thing an operator reading the table has, so
+     * the cause is unwrapped here rather than lost.
+     */
+    const details = (thrown as { result?: { errorDetails?: unknown } })?.result?.errorDetails;
+    if (details instanceof Error) throw details;
+    throw thrown;
   });
   if (error) return null;
 
