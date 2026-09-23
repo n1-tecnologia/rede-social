@@ -1,7 +1,8 @@
+import { COMMUNITY_PERMISSIONS } from '@tria/module-communities/contracts';
 import { CommunityHeader } from '@tria/module-communities/ui';
 import { FEED_CAPTION_TRUNCATE_AT, FEED_PERMISSIONS } from '@tria/module-feed/contracts';
 import { EmptyState, SectionTitle, StatusPill } from '@tria/ui';
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, Pencil } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
@@ -104,6 +105,9 @@ export default async function CommunityPage({
 
   const community = result.community;
   const archived = community.status !== 'active';
+  // The SAME permission `requirePermission` evaluates on the API (T-05-03) — never a role
+  // comparison. Without it there is no edit affordance at all, not a disabled one.
+  const canManage = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.manage);
 
   // The community is readable, so its posts are asked for SECOND rather than in the `Promise.all`
   // above: a miss must not pay for a page of posts nobody will see, and a cross-tenant probe must
@@ -129,6 +133,22 @@ export default async function CommunityPage({
         coverAssetId={community.coverAssetId}
         coverVariantWidths={community.coverVariantWidths}
         coverAlt={tc('card.cover', { community: community.name })}
+        // COMM-01's edit entry, mirroring the back control on the other side of the cover. A LINK,
+        // not a button: the form is a full-screen route (the `ComposeFab` rule). It is also how an
+        // ARCHIVED community is reactivated, which is what makes "archive is reversible" reachable
+        // from a phone rather than only from the API (UI-D-37).
+        action={
+          canManage ? (
+            <a
+              href={`/comunidades/${community.id}/editar`}
+              aria-label={tc('form.editTitle')}
+              data-community-edit
+              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition-colors hover:bg-black/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black/40"
+            >
+              <Pencil aria-hidden size={20} />
+            </a>
+          ) : undefined
+        }
         statusPill={
           archived ? <StatusPill tone="neutral">{tc('archived.pill')}</StatusPill> : undefined
         }

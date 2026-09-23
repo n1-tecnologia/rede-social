@@ -17,13 +17,14 @@ import {
   Textarea,
   useToast,
 } from '@tria/ui';
-import { Archive, Image as ImageIcon, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Image as ImageIcon, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useRef, useState, useTransition } from 'react';
 import {
   archiveCommunityAction,
   createCommunityAction,
+  reactivateCommunityAction,
   updateCommunityAction,
 } from '@/app/(app)/comunidades/actions';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
@@ -69,6 +70,8 @@ export type CommunityFormProps = {
     description: string;
     coverAssetId: string | null;
     coverVariantWidths: readonly number[];
+    /** `archived` swaps the danger archive row for the outline reactivate row (UI-D-37). */
+    status: 'active' | 'archived';
   };
   /**
    * The tenant's display name, interpolated into the cover helper (UI-D-46). Both routes that render
@@ -86,6 +89,7 @@ const EMPTY = {
   description: '',
   coverAssetId: null,
   coverVariantWidths: PURPOSE_WIDTHS.cover,
+  status: 'active',
 } as const;
 
 export function CommunityForm({ mode, communityId, initial, tenantName }: CommunityFormProps) {
@@ -193,6 +197,23 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
       if (result.code === 'name_required') setNameError(t('errors.nameRequired'));
       setFormError(messageFor(result.code));
     });
+  };
+
+  /**
+   * UI-D-37's other half: archiving is REVERSIBLE, and "reversible" has to be reachable from a
+   * phone or it is only reversible in principle. The control lives where the archive control lives
+   * — the bottom of the edit form — so there is exactly one place a community's status changes, and
+   * it is `outline` rather than `ghost text-danger` because reactivating destroys nothing.
+   */
+  const reactivate = async () => {
+    if (!communityId) return;
+    const result = await reactivateCommunityAction(communityId);
+    if (!result.ok) {
+      toast.show({ tone: 'error', message: messageFor(result.code) });
+      return;
+    }
+    toast.show({ tone: 'success', message: t('toasts.reactivated') });
+    router.push(`/comunidades/${communityId}`);
   };
 
   const archive = async () => {
@@ -428,17 +449,31 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
         {mode === 'edit' && communityId ? (
           <>
             <div aria-hidden className="h-px bg-border" />
-            <Button
-              type="button"
-              variant="ghost"
-              size="md"
-              data-community-archive
-              className="justify-start px-0 text-danger"
-              onClick={() => setArchiving(true)}
-            >
-              <Archive aria-hidden size={20} />
-              {t('form.archive')}
-            </Button>
+            {start.status === 'archived' ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="md"
+                data-community-reactivate
+                className="justify-start"
+                onClick={() => void reactivate()}
+              >
+                <ArchiveRestore aria-hidden size={20} />
+                {t('archived.reactivate')}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="md"
+                data-community-archive
+                className="justify-start px-0 text-danger"
+                onClick={() => setArchiving(true)}
+              >
+                <Archive aria-hidden size={20} />
+                {t('form.archive')}
+              </Button>
+            )}
           </>
         ) : null}
       </div>

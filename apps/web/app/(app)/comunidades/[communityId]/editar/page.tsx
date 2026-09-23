@@ -47,6 +47,7 @@ export default async function EditCommunityPage({
         description: result.community.description,
         coverAssetId: result.community.coverAssetId,
         coverVariantWidths: result.community.coverVariantWidths,
+        status: result.community.status,
       }}
       tenantName={bootstrap.tenant.displayName}
     />

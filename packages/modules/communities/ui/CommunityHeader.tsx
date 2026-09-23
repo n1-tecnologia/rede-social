@@ -39,6 +39,12 @@ export interface CommunityHeaderProps {
   coverAssetId: string | null;
   coverVariantWidths: readonly number[];
   coverAlt: string;
+  /**
+   * Optional 44x44 control at `top-3 right-3`, mirroring the back control on the other side of the
+   * cover. The host decides whether there is one at all — on this surface that is the admin's
+   * "Editar comunidade" entry, and a member simply gets nothing.
+   */
+  action?: ReactNode;
   /** Optional slot BESIDE the name (the neutral "Arquivada" pill, UI-D-37). */
   statusPill?: ReactNode;
   /** Optional slot UNDER the description (the archived note). */
@@ -56,6 +62,7 @@ export function CommunityHeader({
   coverAssetId,
   coverVariantWidths,
   coverAlt,
+  action,
   statusPill,
   note,
 }: CommunityHeaderProps) {
@@ -84,6 +91,7 @@ export function CommunityHeader({
             <path d="m15 18-6-6 6-6" />
           </svg>
         </a>
+        {action ? <div className="absolute top-3 right-3 z-10">{action}</div> : null}
       </CommunityCover>
 
       <div className="px-4 pb-4">

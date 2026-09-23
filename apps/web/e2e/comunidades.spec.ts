@@ -463,3 +463,89 @@ test.describe('a community’s own page, the compose entry and the archived stat
     await expect(page.getByText(C.archived.pill, { exact: true })).toBeVisible();
   });
 });
+
+/**
+ * 05-04 — COMM-01's round trip made REACHABLE. Archive is only reversible if "Reativar" is
+ * reachable from a phone, and edit is only shipped if something navigates to the form.
+ *
+ * The case reuses the SEEDED archived community (a read for the permission assertions) and does its
+ * one write on a community it creates itself, archives and reactivates, ending with it archived
+ * again so the list is back to `SEEDED.total`.
+ */
+test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', () => {
+  test('a member sees no edit control; the admin reaches the form from the cover', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
+    await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
+    await expect(page.locator('[data-community-edit]')).toHaveCount(0);
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
+    const edit = page.locator('[data-community-edit]');
+    await expect(edit).toBeVisible();
+    await expect(edit).toHaveAttribute('href', `/comunidades/${SEEDED.archivedId}/editar`);
+  });
+
+  test('an archived community offers Reativar where an active one offers Arquivar', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+
+    // The seeded ARCHIVED community: the outline reactivate row, and no archive row at all.
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}/editar`);
+    await expect(page.locator('[data-community-reactivate]')).toBeVisible();
+    await expect(page.locator('[data-community-reactivate]')).toContainText(C.archived.reactivate);
+    await expect(page.locator('[data-community-archive]')).toHaveCount(0);
+
+    // Its ACTIVE positive control, in the same case: the danger archive row, and no reactivate row.
+    await page.goto(`${hosts.demo}/comunidades`);
+    await cardWith(page, SEEDED.first).click();
+    const activeId = page.url().split('/').pop() ?? '';
+    await page.goto(`${hosts.demo}/comunidades/${activeId}/editar`);
+    await expect(page.locator('[data-community-archive]')).toBeVisible();
+    await expect(page.locator('[data-community-reactivate]')).toHaveCount(0);
+  });
+
+  test('archive → reactivate → archive is a round trip the list follows each way', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/nova`);
+
+    const name = `${E2E_COMMUNITY_PREFIX} reversivel ${Date.now()}`;
+    await page.getByLabel(C.form.name.label).fill(name);
+    await page.getByRole('button', { name: C.actions.create }).click();
+    await page.waitForURL(/\/comunidades\/[0-9a-f-]{36}$/);
+    const communityId = page.url().split('/').pop() ?? '';
+
+    const archive = async () => {
+      await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+      await page.locator('[data-community-archive]').click();
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: C.confirm.archive.confirm })
+        .click();
+      await page.waitForURL(/\/comunidades$/);
+    };
+
+    await archive();
+    await expect(cardWith(page, name)).toHaveCount(0);
+
+    // Reactivate — from the edit form the community page's own cover control reaches.
+    await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+    await page.locator('[data-community-reactivate]').click();
+    await page.waitForURL(new RegExp(`/comunidades/${communityId}$`));
+    await expect(page.getByText(C.archived.pill, { exact: true })).toHaveCount(0);
+
+    // …and the list carries it again, which is the half that makes archive an organisational
+    // tidy-up rather than a deletion.
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(cardWith(page, name)).toHaveCount(1);
+
+    // Leave the shared seed exactly as it was found.
+    await archive();
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+  });
+});
