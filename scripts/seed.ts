@@ -331,12 +331,15 @@ const SEED_PDF = Buffer.from(
 );
 
 /**
- * 05-01 (COMM-01..03) — FOUR communities per tenant, identical-looking on both sides (§(j)).
+ * 05-01 (COMM-01..03) — FOUR ACTIVE communities per tenant plus, since 05-04, one ARCHIVED fifth.
+ * Identical-looking on both sides (§(j)).
  *
- * Four rather than three, because `apps/api/tests/integration/communities.test.ts` walks the keyset
- * with `limit=2` and needs two full pages to prove the boundary neither repeats nor skips a row.
+ * Four active rather than three, because `apps/api/tests/integration/communities.test.ts` walks the
+ * keyset with `limit=2` and needs two full pages to prove the boundary neither repeats nor skips a
+ * row. The fifth is archived and is therefore absent from every list read, which is why adding it
+ * moved no existing count.
  *
- * The fixture carries four deliberate shapes, each of which some assertion downstream depends on:
+ * The fixture carries five deliberate shapes, each of which some assertion downstream depends on:
  *   - `eventos` has NO COVER, so D-69's `--brand-gradient` fallback has a real row to render
  *     (`apps/web/e2e/comunidades.spec.ts` asserts it by computed background, not by screenshot);
  *   - every description is long enough to overflow one line, so `line-clamp-1` is exercised rather
@@ -345,31 +348,48 @@ const SEED_PDF = Buffer.from(
  *     page's wrapping backstop have something to run against;
  *   - the third and fourth share an IDENTICAL `last_activity_at`. That tie is the point: it is what
  *     forces the `(last_activity_at, id)` tuple comparison to be a TOTAL order, and with fixed ids
- *     the `id desc` tie-break is deterministic (`…c4` sorts before `…c3`).
+ *     the `id desc` tie-break is deterministic (`…c4` sorts before `…c3`);
+ *   - the fifth is ARCHIVED and carries NO posts, so UI-D-37's read-only page has a fixture that
+ *     does not depend on a test archiving something first (see `SEED_ARCHIVED_COMMUNITY_NAME`).
  *
- * `last_activity_at` is TRIGGER-owned at runtime (05-03 installs the function on `feed_posts`); the
- * seed writes it directly for the same reason it writes `created_at` on posts — it is the fixture
- * writer of record, running in the admin lane, and the ordering it is setting up is the thing under
- * test.
+ * `last_activity_at` is TRIGGER-owned at runtime (05-04 installs `app.community_post_stats()` on
+ * `feed_posts`); the seed writes it directly for the same reason it writes `created_at` on posts —
+ * it is the fixture writer of record, running in the admin lane, and the ordering it is setting up
+ * is the thing under test. Every community post it writes is OLDER than its container's own stamp,
+ * so the trigger's `greatest(last_activity_at, new.created_at)` leaves the deliberate tie intact.
  */
-const SEED_COMMUNITY_IDS: Record<string, readonly [string, string, string, string]> = {
+const SEED_COMMUNITY_IDS: Record<string, readonly [string, string, string, string, string]> = {
   'tria-demo': [
     '0d000000-0000-4000-8000-0000000000c1',
     '0d000000-0000-4000-8000-0000000000c2',
     '0d000000-0000-4000-8000-0000000000c3',
     '0d000000-0000-4000-8000-0000000000c4',
+    '0d000000-0000-4000-8000-0000000000c5',
   ],
   'tria-lab': [
     '0e000000-0000-4000-8000-0000000000c1',
     '0e000000-0000-4000-8000-0000000000c2',
     '0e000000-0000-4000-8000-0000000000c3',
     '0e000000-0000-4000-8000-0000000000c4',
+    '0e000000-0000-4000-8000-0000000000c5',
   ],
 };
 
 /** Exactly 60 characters — the long-name backstop (index 3 below). */
 export const SEED_LONG_COMMUNITY_NAME =
   'Grupo de trabalho de comunicacao interna e eventos do ano 26';
+
+/**
+ * 05-04 — the ARCHIVED community (index 4 below), one per tenant.
+ *
+ * It exists so the read-only state of UI-D-37 has a fixture of its own: an e2e that had to archive
+ * something first would be asserting its own write, would leave the shared seed in a different state
+ * than it found it, and would stop being re-runnable in any order. It carries NO posts on purpose —
+ * `seededFeedPaging.total` is pinned by `feed.spec.ts`, and "an archived community keeps its posts
+ * in the feed" is proved where it can be proved exactly (the integration suite and pgTAP) rather
+ * than by a count that three other specs depend on.
+ */
+export const SEED_ARCHIVED_COMMUNITY_NAME = 'Mutirao de 2025 (encerrado)';
 
 /**
  * Name, slug, description and minutes-ago per community. `coverIndex` names a slide of the gallery
@@ -408,6 +428,14 @@ const SEED_COMMUNITIES = [
       'Uma descricao propositalmente longa para que o recorte de uma unica linha tenha o que cortar.',
     coverIndex: 2,
     minutesAgo: 3,
+  },
+  {
+    name: SEED_ARCHIVED_COMMUNITY_NAME,
+    slug: 'mutirao-de-2025-encerrado',
+    description: 'Um mutirao que ja aconteceu, mantido para quem quiser reler o que foi publicado.',
+    coverIndex: 0,
+    minutesAgo: 4,
+    status: 'archived' as const,
   },
 ] as const;
 
@@ -1234,11 +1262,12 @@ for (const t of SEED_TENANTS) {
             await tx.execute(sql`
               insert into public.communities
                 (id, tenant_id, created_by_user_id, name, slug, description, cover_asset_id,
-                 last_activity_at, created_at)
+                 status, last_activity_at, created_at)
               values (
                 ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid,
                 ${community.name}, ${community.slug}, ${community.description},
                 ${coverAssetId}::uuid,
+                ${'status' in community ? community.status : 'active'},
                 ${stamp}::timestamptz,
                 ${stamp}::timestamptz
               )
@@ -1246,7 +1275,7 @@ for (const t of SEED_TENANTS) {
           }
         });
         console.log(
-          `seed: tenant ${t.slug} — ${SEED_COMMUNITIES.length} communities (1 without a cover, 1 activity tie)`,
+          `seed: tenant ${t.slug} — ${SEED_COMMUNITIES.length} communities (1 without a cover, 1 activity tie, 1 archived)`,
         );
 
         // 05-03 (COMM-04): the posts INSIDE those communities. They are written AFTER the

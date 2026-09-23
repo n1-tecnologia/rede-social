@@ -34,8 +34,24 @@ const SEEDED = {
   longName: 'Grupo de trabalho de comunicacao interna e eventos do ano 26',
   /** The tie partner of `longName`, one slot below it on `id desc`. */
   tied: 'Projetos em andamento',
+  /** ACTIVE communities only — the archived fifth is absent from every list read (UI-D-37). */
   total: 4,
+  /** 05-04's archived fixture: absent from the list, still reachable by its own link. */
+  archived: 'Mutirao de 2025 (encerrado)',
+  /**
+   * Its FIXED id in the demo tenant (`SEED_COMMUNITY_IDS`), because an archived community has no
+   * card anywhere to scrape a href from — which is the very property this fixture exists to prove.
+   */
+  archivedId: '0d000000-0000-4000-8000-0000000000c5',
 } as const;
+
+/**
+ * The name prefix the ONE writing case below uses. It is the SAME prefix
+ * `apps/api/tests/integration/communities.test.ts` sweeps, so a crash between "create" and
+ * "archive" leaves a row that the next integration run removes — and an archived row is invisible
+ * to every list assertion in the meantime.
+ */
+const E2E_COMMUNITY_PREFIX = 'Comunidade de teste e2e';
 
 /**
  * The prototype chrome D-75 / UI-D-42 DROPPED. Asserted as absent TEXT rather than as a snapshot,
@@ -297,5 +313,153 @@ test.describe('the merged feed and the “Publicar em” picker (D-71, D-72, COM
     );
     // …and there is no chevron and nothing to tap: the sheet cannot be opened from here at all.
     await expect(page.getByRole('dialog', { name: C.picker.title })).toHaveCount(0);
+  });
+});
+
+/**
+ * 05-04 — COMM-03's other half and COMM-01's write half, walked in a real browser: the list, a
+ * community's own page, a post inside it, the admin's pre-filled compose entry, and what an
+ * ARCHIVED community looks like from both sides.
+ *
+ * The read cases write NOTHING: the archived state has its own seeded fixture
+ * (`SEEDED.archived`, added by 05-04 precisely so a spec never has to archive a seeded container
+ * and leave the shared seed in a different state than it found it).
+ *
+ * The one WRITE case creates a community and archives it in the same test, so the list is back to
+ * `SEEDED.total` by the time it returns. It names the community with the SAME prefix
+ * `apps/api/tests/integration/communities.test.ts` sweeps, so a crash between the two steps leaves a
+ * row that the next integration run (or `pnpm db:reset`) removes — and an archived row is invisible
+ * to every list assertion in the meantime.
+ */
+test.describe('a community’s own page, the compose entry and the archived state (COMM-01, COMM-03)', () => {
+  test('list → card → page → a post, with the D-71 label suppressed inside the community', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+
+    await cardWith(page, SEEDED.first).click();
+    await expect(page).toHaveURL(/\/comunidades\/[0-9a-f-]{36}$/);
+
+    // UI-D-43: the name is the page's anchor, as its only Title-role heading, with the description
+    // beneath it — and NO owner block, which D-67 removed from the prototype's header.
+    await expect(page.getByRole('heading', { name: SEEDED.first, level: 1 })).toBeVisible();
+
+    // The posts are the identical PostCard the feed renders…
+    const posts = page.locator('[role="article"]');
+    await expect(posts.first()).toBeVisible();
+    await expect(posts.first()).toContainText(seededCommunityFeed.inCommunity);
+
+    // …with the D-71 segment SUPPRESSED (UI-D-36): inside a community the label would restate the
+    // page the reader is standing on. The positive control is `/inicio`, asserted above in this
+    // same file, where the very same post DOES carry it.
+    await expect(page.locator('[data-post-community]')).toHaveCount(0);
+
+    // The post-list landmark names the CONTAINER, not the tenant-wide feed (UI-D-46).
+    await expect(
+      page.getByRole('region', { name: C.region.replace('{community}', SEEDED.first) }),
+    ).toBeVisible();
+  });
+
+  test('the admin’s compose entry pre-fills the destination; a member has none', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await cardWith(page, SEEDED.first).click();
+    const communityId = (page.url().split('/').pop() ?? '').trim();
+    expect(communityId).toMatch(/^[0-9a-f-]{36}$/);
+
+    // T-05-03 rendered: a member holds no `feed.post.create`, so there is no compose entry at all —
+    // not a disabled one.
+    await expect(page.locator('a[href^="/criar?comunidade="]:visible')).toHaveCount(0);
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${communityId}`);
+
+    // D-70 / UI-D-44: the shipped ComposeFab on mobile, the header-row brand button on desktop —
+    // one href either way, already carrying the destination.
+    const compose = page.locator('a[href^="/criar?comunidade="]:visible').first();
+    await expect(compose).toBeVisible();
+    await expect(compose).toHaveAttribute('href', `/criar?comunidade=${communityId}`);
+
+    // …and following it opens the composer with that destination already chosen, on first paint.
+    await compose.click();
+    await expect(page.locator('[data-composer-destination-value]')).toHaveText(SEEDED.first);
+  });
+
+  test('an ARCHIVED community is absent from the list, and its page still opens read-only', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+
+    // 1. Absent from the list — the one predicate archiving changes.
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+    await expect(cardWith(page, SEEDED.archived)).toHaveCount(0);
+
+    // 2. …and still OPENS by direct link, by the seed's own FIXED id. A 404 here would break every
+    // shared link and every feed post that names the container, which is exactly what an archive
+    // must not do (UI-D-37). The id is mirrored from the seed rather than scraped, because an
+    // archived community has no card anywhere — which is the property being asserted one line up.
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
+    await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
+    await expect(page.getByText(C.archived.pill, { exact: true })).toBeVisible();
+    await expect(page.getByText(C.archived.note)).toBeVisible();
+
+    // 3. Read-only: no compose entry on either breakpoint, and the post list renders its own empty
+    // state rather than an error.
+    await expect(page.locator('a[href^="/criar?comunidade="]:visible')).toHaveCount(0);
+    await expect(page.getByText(C.emptyPosts.title)).toBeVisible();
+  });
+
+  test('an admin creates a cover-less community, lands on its page, and archives it', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/nova`);
+
+    // UI-D-38 / E13/empty: placeholders only, the gradient preview in the cover picker, and a
+    // submit that is disabled until "Nome" is non-empty.
+    await expect(page.getByRole('heading', { name: C.form.createTitle })).toBeVisible();
+    await expect(page.locator('[data-cover-preview-fallback]')).toBeVisible();
+    const submit = page.getByRole('button', { name: C.actions.create });
+    await expect(submit).toBeDisabled();
+
+    const name = `${E2E_COMMUNITY_PREFIX} ${Date.now()}`;
+    await page.getByLabel(C.form.name.label).fill(name);
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    // It lands on the community's OWN page, and the cover-less community is painted with the
+    // tenant's `--brand-gradient` rather than a neutral grey block (D-69, UI-D-35).
+    await page.waitForURL(/\/comunidades\/[0-9a-f-]{36}$/);
+    const communityId = page.url().split('/').pop() ?? '';
+    await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+    const fallback = page.locator('[data-testid="community-cover-fallback"]').first();
+    const backgroundImage = await fallback.evaluate(
+      (node) => getComputedStyle(node).backgroundImage,
+    );
+    expect(backgroundImage).toContain('gradient');
+    // UI-D-35: on the PAGE the fallback carries no text — the name renders below the cover.
+    await expect(fallback).not.toContainText(name);
+
+    // …and the archive row lives at the bottom of the EDIT form only, behind its confirmation.
+    await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+    await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
+    await page.locator('[data-community-archive]').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText(C.confirm.archive.body);
+    await dialog.getByRole('button', { name: C.confirm.archive.confirm }).click();
+
+    // Archiving returns to the list, where the community is now absent — and the seed's own count
+    // is restored, so this test leaves the shared fixture exactly as it found it.
+    await page.waitForURL(/\/comunidades$/);
+    await expect(cardWith(page, name)).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+
+    // …while its page still opens, read-only.
+    await page.goto(`${hosts.demo}/comunidades/${communityId}`);
+    await expect(page.getByText(C.archived.pill, { exact: true })).toBeVisible();
   });
 });

@@ -280,7 +280,12 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
         <div className="flex flex-col gap-2">
           <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
 
-          <div className="overflow-hidden rounded-xl md:hidden">{preview}</div>
+          {/* The preview renders on BOTH breakpoints (UI-D-38): "the admin sees exactly what
+              members will see" is the whole point of it, and it is not a phone affordance. The
+              approved drawing puts it inside the desktop drop zone; the shipped `FileDropZone`
+              takes no children, so it sits directly above it instead — same two things on screen,
+              same order, and the primitive stays the one every other upload surface uses. */}
+          <div className="overflow-hidden rounded-xl">{preview}</div>
           <div className="hidden md:block">
             <FileDropZone
               id="community-cover-dropzone"

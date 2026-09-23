@@ -473,11 +473,23 @@ describe('post.published — after commit, exactly once (MOD-03)', () => {
  * inside them); this block creates only the posts it needs and sweeps them by id.
  */
 describe('the merged feed and COMM-04’s write (D-71, D-73, COMM-04)', () => {
-  /** Every seeded community of the demo tenant, newest activity first. */
-  async function demoCommunities(): Promise<{ id: string; name: string; status: string }[]> {
-    return adminSql<{ id: string; name: string; status: string }[]>`
-      select id, name, status from public.communities
-       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null
+  /**
+   * Every ACTIVE seeded community of the demo tenant, newest activity first, with the trigger-owned
+   * `post_count` beside it.
+   *
+   * The `status = 'active'` predicate is load-bearing since 05-04: the seed now ships an ARCHIVED
+   * fifth community (the UI-D-37 fixture), which sorts LAST and carries no posts. Without the
+   * filter, case 16's "the last community" would have selected it — and would then have archived an
+   * already-archived container, found no posts of it in the feed, and RESTORED it to `active`,
+   * leaving the shared seed in a state three assertions in `communities.test.ts` depend on not
+   * being in.
+   */
+  async function demoCommunities(): Promise<
+    { id: string; name: string; status: string; post_count: number }[]
+  > {
+    return adminSql<{ id: string; name: string; status: string; post_count: number }[]>`
+      select id, name, status, post_count from public.communities
+       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and status = 'active'
        order by last_activity_at desc, id desc`;
   }
 
@@ -563,7 +575,10 @@ describe('the merged feed and COMM-04’s write (D-71, D-73, COMM-04)', () => {
 
   it('16. COMM-04: an ARCHIVED community answers 400 with details.community === "archived"', async () => {
     const communities = await demoCommunities();
-    const target = communities[communities.length - 1];
+    // A container that actually HAS posts: the second half of this case asserts that archiving
+    // leaves them in the feed, and an empty container would let that pass vacuously.
+    const target = communities.filter((row) => row.post_count > 0).at(-1);
+    expect(target, 'the seed publishes inside at least one demo community').toBeDefined();
     const communityId = target?.id ?? '';
 
     await adminSql`
