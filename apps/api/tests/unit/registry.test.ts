@@ -47,9 +47,10 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       expect(TOGGLEABLE_MODULES).toContain(key);
     }
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
-    // — the first REAL module — as the only registration. The list is sorted so a new entry is one
-    // line, and this assertion is what makes a silently-dropped registration fail rather than pass.
-    expect(keys.sort()).toEqual(['feed']);
+    // — the first REAL module — as the only registration; 05-01 added `communities`. The list is
+    // sorted so a new entry is one line, and this assertion is what makes a silently-dropped
+    // registration fail rather than pass.
+    expect(keys.sort()).toEqual(['communities', 'feed']);
     // D-55 (amends D-40): the feed contributes a HOME SLOT and no navigation tab, so Phases 5 and 6
     // keep the tab budget they are planning against. A nav entry here is a regression, not a feature.
     expect(MODULE_REGISTRY.feed?.nav).toBeUndefined();
