@@ -18,11 +18,11 @@ screens:
   - comunidade-arquivada
   - stories-meus
   - pin-story-sheet
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor Vilas Boas
+approved_at: 2026-09-23
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-05, design-review, D-33, UI-04, stories, communities]
