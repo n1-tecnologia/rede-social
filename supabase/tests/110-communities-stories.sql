@@ -52,7 +52,7 @@ begin;
 -- because with five rows the planner always chooses a sequential scan and the assertion would prove
 -- nothing. Like its siblings, this file ROLLS BACK, so it re-runs identically against a seeded or an
 -- empty database, twice in a row, in any order.
-select plan(28);
+select plan(31);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-comm', 'Comunidade Phase 5', '0f000000-0000-4000-8000-000000000001');
@@ -386,7 +386,69 @@ select lives_ok(
   'positive control: feed_likes_story_fk accepts a like on a story that DOES exist'
 );
 
--- ── 27-28. the strip keyset is an index scan on stories_tenant_expires_idx ─────────────────────
+-- ── 27-29. STORY-05: stories.like_count reconciles against the rows it summarises ─────────────
+-- The like at 26 above is already in the table (and is the positive control the plan asks for),
+-- so the counter is at 1 before this block runs. What follows is a MIXED sequence across TWO
+-- members — like, like, unlike, repeat-like — because a counter that only ever counted up would
+-- pass a test that only ever inserted.
+--
+-- `feed_likes_story_uq` is the idempotency arbiter, and 28 is what proves it: the repeat insert
+-- adjusts NOTHING, because `on conflict do nothing` means the trigger never fires a second time.
+-- That is the database half of "a repeat like is never a 409".
+select tests.auth_user('comm2@c.local', '0f000000-0000-4000-8000-000000000003');
+select tests.member('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-000000000003');
+
+insert into public.feed_likes (tenant_id, user_id, story_id)
+values ('0f000000-0000-4000-8000-000000000001',
+        '0f000000-0000-4000-8000-000000000003',
+        '0f000000-0000-4000-8000-0000000000a9'),
+       -- the EXPIRED story is liked too: expiry gates the STRIP, never the interaction (A-4)
+       ('0f000000-0000-4000-8000-000000000001',
+        '0f000000-0000-4000-8000-000000000003',
+        '0f000000-0000-4000-8000-0000000000e1');
+
+select results_eq(
+  $$ select like_count from public.stories
+      where id = '0f000000-0000-4000-8000-0000000000a9' $$,
+  ARRAY[2],
+  'STORY-05: two members liking one story leave like_count at 2 — the trigger is the only writer'
+);
+
+-- The repeat, by the member who already liked it: `feed_likes_story_uq` swallows it, so no trigger
+-- fires and the count does not move. This is why the API never answers 409.
+insert into public.feed_likes (tenant_id, user_id, story_id)
+values ('0f000000-0000-4000-8000-000000000001',
+        '0f000000-0000-4000-8000-000000000003',
+        '0f000000-0000-4000-8000-0000000000a9')
+on conflict (user_id, story_id) where story_id is not null do nothing;
+
+delete from public.feed_likes
+ where user_id = '0f000000-0000-4000-8000-000000000002'
+   and story_id = '0f000000-0000-4000-8000-0000000000a9';
+
+select results_eq(
+  $$ select like_count from public.stories
+      where id = '0f000000-0000-4000-8000-0000000000a9' $$,
+  ARRAY[1],
+  'a repeat like adjusts nothing and an unlike decrements once — no clamp, no double count'
+);
+
+-- The reconciliation itself, over EVERY story in the database rather than this file's fixture: the
+-- seeded rows went through the same trigger, so a seed that wrote a counter by hand, a backfill
+-- that missed a row or a branch that never fired all surface here (T-05-37). There is no
+-- `greatest(0, …)` clamp in the function precisely so this can go red.
+select is_empty(
+  $$ select s.id::text, s.like_count, coalesce(l.n, 0) as rows
+       from public.stories s
+       left join (select story_id, count(*)::int as n
+                    from public.feed_likes
+                   where story_id is not null
+                   group by story_id) l on l.story_id = s.id
+      where s.like_count <> coalesce(l.n, 0) $$,
+  'stories.like_count equals count(*) of that story''s like rows, for every story in the database'
+);
+
+-- ── 30-31. the strip keyset is an index scan on stories_tenant_expires_idx ─────────────────────
 -- 400 stories in THIS file's own tenant, then `analyze`: with five rows the planner always chooses
 -- a sequential scan and the assertion below would prove nothing. The windows are spread so the
 -- range predicate is selective, exactly as it is in production.

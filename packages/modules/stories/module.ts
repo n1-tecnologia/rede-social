@@ -43,6 +43,20 @@ export const storiesModule = defineModule({
         log.info({ event: 'story.deleted', ...payload }, 'story soft-deleted');
       },
     },
+    {
+      // STORY-05. Both payloads are ids only, so Phase 7's notification consumer can be written
+      // against them without ever re-reading the story — and without a caption reaching a log line.
+      event: 'story.liked',
+      handler: async (payload) => {
+        log.info({ event: 'story.liked', ...payload }, 'story liked');
+      },
+    },
+    {
+      event: 'story.unliked',
+      handler: async (payload) => {
+        log.info({ event: 'story.unliked', ...payload }, 'story unliked');
+      },
+    },
   ],
   defaultRolePermissions: {
     admin_tenant: [STORY_PERMISSIONS.publish, STORY_PERMISSIONS.manage],

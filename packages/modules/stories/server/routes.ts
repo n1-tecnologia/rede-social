@@ -7,11 +7,20 @@ import { requirePermission } from '@tria/core/server/rbac/permissions';
 import {
   publishStorySchema,
   STORY_ISSUE_SET,
+  storyLikeResultSchema,
   storyPageSchema,
   storyQuerySchema,
   storySummarySchema,
 } from '../contracts/index';
-import { deleteStory, getStory, listActiveStories, listOwnStories, publishStory } from './service';
+import {
+  deleteStory,
+  getStory,
+  likeStory,
+  listActiveStories,
+  listOwnStories,
+  publishStory,
+  unlikeStory,
+} from './service';
 
 /**
  * The module owns its guard chain: the mount in `apps/api/src/app.ts` is a plain
@@ -154,6 +163,48 @@ const deleteStoryRoute = createRoute({
   },
 });
 
+/* ── Likes (STORY-05, first half) ─────────────────────────────────────────────────────────────── */
+
+/**
+ * **Both like routes are MEMBER-REACHABLE: `requireAuth` + `requireModule('stories')` and nothing
+ * else.** There is deliberately no `requirePermission` here, and adding one would be the bug: the
+ * publishing policy gates AUTHORING a story, not interacting with one, and every member of the
+ * tenant may like — exactly as they may like a post (FEED-04's rule, restated for the same reason).
+ *
+ * Two response facts a reader should not have to dig for, and both are deliberate:
+ *  - a like or an unlike ALWAYS answers 200 with the current `{ liked, likeCount }`. A repeat is a
+ *    no-op, not a conflict; there is no conflict status anywhere in this file;
+ *  - a miss is a BARE 404 with no `details` — unknown id, another tenant's, or removed (D-23).
+ *
+ * **An EXPIRED story is likeable and that is not an oversight** (A-4). Expiry gates the strip's
+ * read; 05-08 pins expired stories to communities, and an affordance that answered 400 there would
+ * be a second copy of the 24 h window living in two more places.
+ */
+const storyLikeResponses = {
+  200: {
+    description:
+      'The CURRENT state after the toggle, read back from the row in the same transaction. Idempotent: a repeat returns the identical body and creates no second row.',
+    content: { 'application/json': { schema: storyLikeResultSchema } },
+  },
+  404: {
+    description: 'No story with that id is visible to this tenant — unknown, foreign, or removed.',
+  },
+} as const;
+
+const likeStoryRoute = createRoute({
+  method: 'post',
+  path: '/{storyId}/likes',
+  request: { params: storyIdParam },
+  responses: storyLikeResponses,
+});
+
+const unlikeStoryRoute = createRoute({
+  method: 'delete',
+  path: '/{storyId}/likes',
+  request: { params: storyIdParam },
+  responses: storyLikeResponses,
+});
+
 export const storiesRoutes = stories
   .openapi(listOwnRoute, async (c) =>
     c.json(await listOwnStories(c.get('ctx'), c.req.valid('query')), 200),
@@ -172,4 +223,12 @@ export const storiesRoutes = stories
     const { storyId } = c.req.valid('param');
     await deleteStory(c.get('ctx'), storyId);
     return c.body(null, 204);
+  })
+  .openapi(likeStoryRoute, async (c) => {
+    const { storyId } = c.req.valid('param');
+    return c.json(await likeStory(c.get('ctx'), storyId), 200);
+  })
+  .openapi(unlikeStoryRoute, async (c) => {
+    const { storyId } = c.req.valid('param');
+    return c.json(await unlikeStory(c.get('ctx'), storyId), 200);
   });

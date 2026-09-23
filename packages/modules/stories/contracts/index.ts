@@ -183,6 +183,22 @@ export const publishStorySchema = z
 export type PublishStory = z.infer<typeof publishStorySchema>;
 
 /**
+ * `POST /v1/stories/{storyId}/likes` and its DELETE (STORY-05's first half).
+ *
+ * The SAME `{ liked, likeCount }` pair the feed answers with, redeclared here rather than imported:
+ * `turbo boundaries` denies a `module -> module` package edge, so the shape is restated in three
+ * lines instead of the feed's contracts package being pulled in. `likeCount` is the AUTHORITATIVE
+ * count read back from the row inside the same transaction — never a number the client incremented.
+ */
+export const storyLikeResultSchema = z
+  .object({
+    liked: z.boolean(),
+    likeCount: z.number().int().min(0),
+  })
+  .strict();
+export type StoryLikeResult = z.infer<typeof storyLikeResultSchema>;
+
+/**
  * The permission STRINGS, exported so the manifest and the web tier never retype them.
  *
  * `manage` covers deleting a story and pinning/unpinning it to a community (D-84); `publish` is the
@@ -226,6 +242,31 @@ export interface StoryDeleted {
 }
 
 /**
+ * A member liked a story (STORY-05).
+ *
+ * **`storyAuthorUserId` OVER-CARRIES the recipient on purpose**, exactly as `PostLiked` does: Phase
+ * 7 builds its notification row straight from the payload, and without it every subscriber would
+ * have to re-read the story it is being told about. It is read INSIDE the same transaction as the
+ * like, so it cannot describe a story that a rollback erased.
+ *
+ * Ids and flags only — no caption, for the T-05-29 reason the publish payload gives.
+ */
+export interface StoryLiked {
+  tenantId: string;
+  storyId: string;
+  /** The notification recipient. */
+  storyAuthorUserId: string;
+  actorUserId: string;
+}
+
+/**
+ * The same shape for the other half of the toggle. It is emitted ONLY when a row was really
+ * removed: an unlike of something never liked is a successful no-op, and an event that counted
+ * transitions must not announce one that did not happen.
+ */
+export type StoryUnliked = StoryLiked;
+
+/**
  * MOD-02 in one block: the module teaches the KERNEL's `EventMap` about its own events instead of
  * the kernel knowing modules exist. Anything that imports this file gets `emit`/`subscribe` typed
  * for them.
@@ -234,5 +275,7 @@ declare module '@tria/contracts' {
   interface EventMap {
     'story.published': StoryPublished;
     'story.deleted': StoryDeleted;
+    'story.liked': StoryLiked;
+    'story.unliked': StoryUnliked;
   }
 }

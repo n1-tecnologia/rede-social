@@ -1539,8 +1539,40 @@ for (const t of SEED_TENANTS) {
               on conflict (id) do nothing`);
           }
         });
+        // 05-06 (STORY-05): story likes in BOTH tenants, so `stories.like_count` is never zero
+        // everywhere and the pgTAP reconciliation has a seeded row to reconcile rather than only
+        // rows a test wrote. Two members like the newest active story and one of them also likes
+        // the EXPIRED one — expiry gates the strip's read, never the interaction (A-4), and a
+        // fixture that only liked active stories would never exercise that.
+        //
+        // The counter is NOT written here: `app.feed_like_count()` is the only writer of
+        // `stories.like_count`, and a seed that set it by hand is exactly the drift the
+        // reconciliation assertion exists to catch.
+        const storyLikers = [memberUserIds[0], memberUserIds[1]].filter(
+          (id): id is string => typeof id === 'string',
+        );
+        const newestStoryId = storyIds[0];
+        const expiredStoryId = storyIds[3];
+        if (storyLikers.length > 0 && newestStoryId && expiredStoryId) {
+          await withAdminTx(async (tx) => {
+            for (const likerUserId of storyLikers) {
+              await tx.execute(sql`
+                insert into public.feed_likes (tenant_id, user_id, story_id)
+                values (${tenantId}::uuid, ${likerUserId}::uuid, ${newestStoryId}::uuid)
+                on conflict (user_id, story_id) where story_id is not null do nothing`);
+            }
+            const expiredLiker = storyLikers[0];
+            if (expiredLiker) {
+              await tx.execute(sql`
+                insert into public.feed_likes (tenant_id, user_id, story_id)
+                values (${tenantId}::uuid, ${expiredLiker}::uuid, ${expiredStoryId}::uuid)
+                on conflict (user_id, story_id) where story_id is not null do nothing`);
+            }
+          });
+        }
+
         console.log(
-          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset)`,
+          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired`,
         );
       }
     }

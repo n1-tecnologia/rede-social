@@ -7,6 +7,7 @@ import { decodeCursor, encodeCursor } from '@tria/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
   PublishStory,
+  StoryLikeResult,
   StoryMediaKind,
   StoryPage,
   StoryQuery,
@@ -424,4 +425,97 @@ export async function deleteStory(ctx: RequestContext, storyId: string): Promise
     },
     'story soft-deleted',
   );
+}
+
+/* ── Likes (STORY-05, first half) ─────────────────────────────────────────────────────────────── */
+
+/** What the read-back after a toggle needs: the authoritative count and the notification recipient. */
+type StoryCounterRow = { like_count: number; author_user_id: string };
+
+/**
+ * `POST /v1/stories/{storyId}/likes` (STORY-05) — a DIRECT copy of `likePost`, because it is the
+ * same behaviour over the same table.
+ *
+ * Four properties, each of which is one line of SQL below:
+ *
+ *  - **The insert SELECTS the story rather than trusting the path parameter** (T-05-33). A story id
+ *    this lane cannot see produces zero rows to insert, so a cross-tenant id cannot create a like
+ *    row even though the row it names exists somewhere.
+ *  - **`feed_likes_story_uq` is the idempotency arbiter, not application code.** `on conflict … do
+ *    nothing` means a repeat like inserts nothing, fires no trigger and moves no counter — and
+ *    answers 200 with the current state, NEVER a 409. A 409 would surface as an error toast on a
+ *    tap the member has every right to repeat.
+ *  - **The count is READ BACK from the row**, not computed here and not incremented here. The
+ *    trigger is the only writer of `stories.like_count`; anything else is a second writer that
+ *    drifts the day it half-succeeds.
+ *  - **EXPIRY IS NOT A PREDICATE HERE.** A pinned expired story stays likeable (A-4): expiry gates
+ *    the STRIP's read and nothing else, so there is no affordance that answers 400 and no second
+ *    copy of the window to keep in step.
+ */
+export async function likeStory(ctx: RequestContext, storyId: string): Promise<StoryLikeResult> {
+  const { likeCount, authorUserId } = await withTenantTx(ctx, async (tx) => {
+    await tx.execute(sql`
+      insert into feed_likes (tenant_id, user_id, story_id)
+      select ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, s.id
+        from stories s
+       where s.id = ${storyId}::uuid and s.deleted_at is null
+      on conflict (user_id, story_id) where story_id is not null do nothing`);
+
+    const rows = await tx.execute<StoryCounterRow>(sql`
+      select s.like_count, s.author_user_id
+        from stories s
+       where s.id = ${storyId}::uuid and s.deleted_at is null`);
+    const row = rows[0];
+    // Unknown, another tenant's, or removed — one bare 404, no details (D-23, T-05-35).
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    return { likeCount: row.like_count, authorUserId: row.author_user_id };
+  });
+
+  emit(ctx, 'story.liked', {
+    tenantId: ctx.tenantId,
+    storyId,
+    storyAuthorUserId: authorUserId,
+    actorUserId: ctx.userId,
+  });
+
+  return { liked: true, likeCount };
+}
+
+/**
+ * `DELETE /v1/stories/{storyId}/likes` — the other half, equally idempotent.
+ *
+ * Unliking something never liked is a successful NO-OP: 200 with the current count and **no
+ * event**, because nothing happened. Only a delete that really removed a row is worth telling
+ * Phase 7 about.
+ */
+export async function unlikeStory(ctx: RequestContext, storyId: string): Promise<StoryLikeResult> {
+  const { likeCount, authorUserId, removed } = await withTenantTx(ctx, async (tx) => {
+    const deleted = await tx.execute<{ id: string }>(sql`
+      delete from feed_likes
+       where user_id = ${ctx.userId}::uuid and story_id = ${storyId}::uuid
+      returning id`);
+
+    const rows = await tx.execute<StoryCounterRow>(sql`
+      select s.like_count, s.author_user_id
+        from stories s
+       where s.id = ${storyId}::uuid and s.deleted_at is null`);
+    const row = rows[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    return {
+      likeCount: row.like_count,
+      authorUserId: row.author_user_id,
+      removed: deleted.length > 0,
+    };
+  });
+
+  if (removed) {
+    emit(ctx, 'story.unliked', {
+      tenantId: ctx.tenantId,
+      storyId,
+      storyAuthorUserId: authorUserId,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  return { liked: false, likeCount };
 }

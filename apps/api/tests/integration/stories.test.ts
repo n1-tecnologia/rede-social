@@ -9,6 +9,8 @@ import {
   STORY_EXPIRY_HOURS,
   STORY_MAX_CAPTION,
   STORY_MAX_PAGE_SIZE,
+  type StoryLiked,
+  type StoryLikeResult,
   type StoryPage,
   type StoryPublished,
   type StorySummary,
@@ -53,6 +55,9 @@ const tenantIds = { demo: '', lab: '' };
 const created: string[] = [];
 const createdAssets: string[] = [];
 const events: StoryPublished[] = [];
+/** STORY-05: every like/unlike event this file's requests produced, with the name that raised it. */
+const likeEvents: { name: 'story.liked' | 'story.unliked'; payload: StoryLiked }[] = [];
+const unsubscribes: (() => void)[] = [];
 let unsubscribe: () => void = () => {};
 
 /** The prefix every story this file writes carries, so the sweep can be exact. */
@@ -208,10 +213,19 @@ beforeAll(async () => {
   unsubscribe = subscribe('story.published', async (payload) => {
     events.push(payload);
   });
+  unsubscribes.push(
+    subscribe('story.liked', async (payload) => {
+      likeEvents.push({ name: 'story.liked', payload });
+    }),
+    subscribe('story.unliked', async (payload) => {
+      likeEvents.push({ name: 'story.unliked', payload });
+    }),
+  );
 });
 
 afterAll(async () => {
   unsubscribe();
+  for (const off of unsubscribes) off();
   await sweep();
   await adminSql`
     delete from public.tenant_modules
@@ -612,6 +626,215 @@ describe('GET /v1/stories/mine and DELETE — the manage permission (D-84, T-05-
        where tenant_id = ${tenantIds.demo}::uuid and deleted_at is not null`;
     const removedIds = new Set(deleted.map((row) => row.id));
     expect(mine.some((item) => removedIds.has(item.id))).toBe(false);
+  });
+});
+
+describe('STORY-05 (first half) — the story like toggle is idempotent and counted by the database', () => {
+  /**
+   * Every case below runs against THIS FILE'S OWN stories, never the seeded ones. A test that liked
+   * a seeded row would leave the shared fixture one like heavier than `pnpm db:seed` wrote it, and
+   * `on conflict (id) do nothing` cannot repair a MUTATED row — the next run of any spec that reads
+   * a seeded count would then measure whichever ran first. `feed_likes_story_fk` is
+   * `on delete cascade`, so `sweep()` removing the story removes its likes with it.
+   */
+  let storyId = '';
+  let expiredStoryId = '';
+
+  const like = (token: string, id: string, host = HOSTS.demo) =>
+    request(`/v1/stories/${id}/likes`, token, {
+      method: 'POST',
+      headers: { 'x-tenant-host': host },
+    });
+
+  const unlike = (token: string, id: string, host = HOSTS.demo) =>
+    request(`/v1/stories/${id}/likes`, token, {
+      method: 'DELETE',
+      headers: { 'x-tenant-host': host },
+    });
+
+  /** `count(*)` of the live like rows for a story — what `like_count` must always equal. */
+  async function likeRows(id: string): Promise<number> {
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes where story_id = ${id}::uuid`;
+    return rows[0]?.n ?? 0;
+  }
+
+  async function storedCount(id: string): Promise<number> {
+    const rows = await adminSql<{ like_count: number }[]>`
+      select like_count from public.stories where id = ${id}::uuid`;
+    return rows[0]?.like_count ?? -1;
+  }
+
+  beforeAll(async () => {
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const res = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — curtidas`,
+    });
+    expect(res.status).toBe(201);
+    storyId = ((await res.json()) as StorySummary).id;
+    created.push(storyId);
+
+    // An EXPIRED story of this file's own, written directly: a story cannot be published expired
+    // (the window is a column default), and the seeded expired row must stay untouched.
+    const expiredAsset = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+    });
+    expiredStoryId = randomUUID();
+    created.push(expiredStoryId);
+    await adminSql`
+      insert into public.stories
+        (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+      select ${expiredStoryId}::uuid, ${tenantIds.demo}::uuid, m.user_id, ${expiredAsset}::uuid,
+             'image', ${`${TEST_CAPTION_PREFIX} — expirada`},
+             now() - interval '30 hours', now() - interval '6 hours'
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       limit 1`;
+  });
+
+  it('22. a member likes a story once: 200, liked true, and the AUTHORITATIVE count is 1', async () => {
+    const res = await like(tokens.demoMember, storyId);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as StoryLikeResult;
+    expect(body).toEqual({ liked: true, likeCount: 1 });
+
+    // The count came from the ROW, which only the trigger writes — not from anything the service
+    // incremented. Proving that here is what makes the pgTAP reconciliation a second opinion.
+    expect(await storedCount(storyId)).toBe(1);
+    expect(await likeRows(storyId)).toBe(1);
+  });
+
+  it('23. a REPEAT like is a no-op: the same 200 body, no second row, and NEVER a 409', async () => {
+    const res = await like(tokens.demoMember, storyId);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as StoryLikeResult).toEqual({ liked: true, likeCount: 1 });
+    // `feed_likes_story_uq` is the arbiter. A 409 here would surface as an error toast on a tap the
+    // member has every right to repeat.
+    expect(await likeRows(storyId)).toBe(1);
+  });
+
+  it('24. a SECOND member lifts it to 2, and each member sees their own viewerLiked', async () => {
+    const res = await like(tokens.demoAdmin, storyId);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as StoryLikeResult).toEqual({ liked: true, likeCount: 2 });
+
+    const asMember = await page(tokens.demoMember, '/v1/stories', `?limit=${STORY_MAX_PAGE_SIZE}`);
+    const mine = asMember.items.find((item) => item.id === storyId);
+    expect(mine?.likeCount).toBe(2);
+    expect(mine?.viewerLiked).toBe(true);
+  });
+
+  it('25. an unlike decrements once and a REPEAT unlike is a successful no-op', async () => {
+    const first = await unlike(tokens.demoMember, storyId);
+    expect(first.status).toBe(200);
+    expect((await first.json()) as StoryLikeResult).toEqual({ liked: false, likeCount: 1 });
+
+    const second = await unlike(tokens.demoMember, storyId);
+    expect(second.status).toBe(200);
+    expect((await second.json()) as StoryLikeResult).toEqual({ liked: false, likeCount: 1 });
+    expect(await likeRows(storyId)).toBe(1);
+  });
+
+  it('26. `stories.like_count` equals count(*) of its like rows after the whole mixed sequence', async () => {
+    // The reconciliation at the HTTP layer, over the sequence tests 22-25 actually performed. There
+    // is no `greatest(0, …)` clamp in the trigger, so drift shows up here rather than being hidden.
+    expect(await storedCount(storyId)).toBe(await likeRows(storyId));
+  });
+
+  it('27. liking an EXPIRED story succeeds — expiry gates the strip, never the interaction (A-4)', async () => {
+    const res = await like(tokens.demoMember, expiredStoryId);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as StoryLikeResult).toEqual({ liked: true, likeCount: 1 });
+
+    // …and it is still absent from the strip, which is the point: one predicate, in one place.
+    const strip = await page(tokens.demoMember, '/v1/stories', `?limit=${STORY_MAX_PAGE_SIZE}`);
+    expect(strip.items.some((item) => item.id === expiredStoryId)).toBe(false);
+  });
+
+  it('28. another tenant’s story and a removed one are the SAME bare 404, with no details', async () => {
+    const labStories = await adminSql<{ id: string }[]>`
+      select id from public.stories
+       where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null limit 1`;
+    const labStoryId = labStories[0]?.id;
+    expect(labStoryId, 'the lab tenant has a seeded story to probe with').toBeTruthy();
+
+    const foreign = await like(tokens.demoMember, labStoryId as string);
+    expect(foreign.status).toBe(404);
+    const foreignBody = await envelope(foreign);
+    expect(foreignBody.error.code).toBe('NOT_FOUND');
+    // T-05-35: no `details` key at all. A per-cause code over an enumerable uuid space is an
+    // existence oracle, and the removed case below must be byte-identical to this one.
+    expect(foreignBody.error).not.toHaveProperty('details');
+
+    const removedId = randomUUID();
+    created.push(removedId);
+    const removedAsset = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+    });
+    await adminSql`
+      insert into public.stories
+        (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, deleted_at)
+      select ${removedId}::uuid, ${tenantIds.demo}::uuid, m.user_id, ${removedAsset}::uuid,
+             'image', ${`${TEST_CAPTION_PREFIX} — removida`}, now()
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       limit 1`;
+
+    const removed = await like(tokens.demoMember, removedId);
+    expect(removed.status).toBe(404);
+    const removedBody = await envelope(removed);
+    expect(removedBody.error.code).toBe(foreignBody.error.code);
+    expect(removedBody.error).not.toHaveProperty('details');
+
+    // Positive control in the same test: the very same call on a story this tenant CAN see works,
+    // so the two 404s above are about visibility and not about a broken route.
+    const control = await like(tokens.demoMember, storyId);
+    expect(control.status).toBe(200);
+    await unlike(tokens.demoMember, storyId);
+  });
+
+  it('29. the events carry the story AUTHOR and no caption, and an empty unlike emits nothing', async () => {
+    likeEvents.length = 0;
+
+    await like(tokens.demoAdmin, expiredStoryId);
+    await new Promise((resolve) => setImmediate(resolve));
+    const liked = likeEvents.find((entry) => entry.name === 'story.liked');
+    expect(liked, 'the like emitted story.liked').toBeTruthy();
+    // Phase 7 builds a notification row straight from this payload; without the author id every
+    // subscriber would have to re-read the story it is being told about.
+    expect(Object.keys(liked?.payload ?? {}).sort()).toEqual([
+      'actorUserId',
+      'storyAuthorUserId',
+      'storyId',
+      'tenantId',
+    ]);
+    expect(liked?.payload.storyId).toBe(expiredStoryId);
+
+    likeEvents.length = 0;
+    // `storyId` currently carries ONE like, and it is the admin's — the member's was removed at 25
+    // and the control at 28 put it back and took it away again. So this delete removes nothing: a
+    // successful 200 with the count unmoved, and NO event, because nothing happened. An event that
+    // counts transitions must not report one that did not occur.
+    const res = await unlike(tokens.demoMember, storyId);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as StoryLikeResult).toEqual({ liked: false, likeCount: 1 });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(likeEvents).toHaveLength(0);
+  });
+
+  it('30. the like routes carry NO permission: a plain member reaches both halves', async () => {
+    // Posting is a permission; INTERACTING is not (FEED-04's rule, restated). A 403 here would mean
+    // only admins could like their own broadcasts.
+    const liked = await like(tokens.demoMember, storyId);
+    expect(liked.status).toBe(200);
+    const unliked = await unlike(tokens.demoMember, storyId);
+    expect(unliked.status).toBe(200);
   });
 });
 
