@@ -15,7 +15,7 @@ overrides:
     source: "04-UAT.md teste 6 (/gsd-verify-work 4)"
     reason: "A imagem da previa de link nao e copiada para o Storage em V1 (WINDOWS 23) — titulo, description, site_name e provider ficam em cache, a imagem nao. Estreitamento deliberado e registrado, nao defeito. O cartao sai so-texto e a variante YouTube/Vimeo nao exibe miniatura nem selo de play."
     follow_up: "deferred-items.md item 6 — copiar a miniatura remota para o Storage numa fase futura"
-covered_digest: "v1:sha256:f565d0c1246fc2a636ba96f02455faae05015a6293e8fe3c9c5a95e01261a632"
+covered_digest: "v1:sha256:2e35801f3e0af622a7fd84f27eb50fa3ada65eb9766d66f53370aa3dc8608338"
 digest_refreshed: "2026-09-23"
 digest_refreshed_reason: "Dois arquivos cobertos mudaram DEPOIS desta verificacao, ambos pelo passo Nyquist do proprio /gsd-verify-work 04 (commit cf3218d). Ver a nota de refresh no corpo. Nenhuma conclusao desta verificacao cai; a mudanca QUITA a divida B-WR-06 que esta propria verificacao registrou contra um criterio que ja marcara VERIFIED."
 covered_files:
@@ -562,6 +562,10 @@ frontmatter.
 nomeados e a alternativa de re-rodar o `gsd-verifier` inteiro oferecida e recusada.
 
 - digest anterior: `v1:sha256:21cc3f60…fa5e8c` (154 arquivos menos o pgTAP novo)
-- digest novo: `v1:sha256:f565d0c1…61a632` (154 arquivos), via `gsd-tools query verification fingerprint`
+- digest novo: `v1:sha256:2e35801f…608338` (154 arquivos), via `gsd-tools query verification fingerprint .planning/phases/04-feed <arquivos>`
+- nota: a primeira tentativa de refresh omitiu o argumento de phase-dir, então o CLI consumiu
+  `.planning/REQUIREMENTS.md` como phase dir e produziu um digest sobre 153 arquivos
+  (`f565d0c1…`). Pego e corrigido antes do commit final, conferindo o CLI contra
+  `computeCoveredDigest` diretamente — os dois agora concordam
 - `status`: `human_needed` → `passed` — os 5 itens de verificação humana foram respondidos em
   `04-UAT.md`; o sexto continua `blocked` na Fase 01.1 (Mux), sem conta provisionada
