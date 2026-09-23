@@ -113,7 +113,14 @@ select is_empty(
         -- thing that makes V2-CONT-02 a policy change rather than a migration is that its policy
         -- already exists. This entry is what fails the build the day someone drops it as dead
         -- weight.
-        ('communities'), ('community_members')
+        ('communities'), ('community_members'),
+        -- Phase 5 (05-05). `stories` carries `tenant_id` and the standard isolation policy, so
+        -- assertions 1-2 already cover it; it is listed here for the same reason its siblings are.
+        -- Its presence is also what makes `feed_comments_story_fk` / `feed_likes_story_fk`
+        -- meaningful: those two constraints are HAND-WRITTEN SQL rather than drizzle references
+        -- (a `module -> module` package edge is denied by `turbo boundaries`), so nothing in the TS
+        -- schema would notice if this table stopped being created.
+        ('stories')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,

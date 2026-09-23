@@ -47,6 +47,10 @@ const AVATAR_WIDTHS = PURPOSE_WIDTHS.avatar;
 /** The post ladder (320/640/1080/1600). The gallery fixtures carry exactly it — never a hand list. */
 const POST_WIDTHS = PURPOSE_WIDTHS.post;
 
+/** The story ladder (640/1080). A circle never needs more, and the row must not claim a rung the
+ * Storage prefix does not carry (R-06). */
+const STORY_WIDTHS = PURPOSE_WIDTHS.story;
+
 /**
  * D-28: both seed tenants carry a real favicon + PWA icon set derived from their seed logo at a FIXED
  * version: re-runs overwrite the same five objects (`uploadIconSet` upserts), so the seed stays
@@ -440,6 +444,80 @@ const SEED_COMMUNITIES = [
 ] as const;
 
 /**
+ * 05-05 (STORY-01, STORY-03) — FIVE stories per tenant, identical-looking on both sides (§(j)).
+ *
+ * The shapes are chosen so every branch of the strip's read and of D-84's history has a fixture
+ * that does NOT depend on a test writing one first:
+ *
+ *   - three ACTIVE stories (two images, one video), newest first, so the row scrolls, D-78's
+ *     one-circle-per-story is visible and the keyset has more than one page to walk at `limit=2`;
+ *   - one of the three carries NO CAPTION and another carries a deliberately LONG one, so UI
+ *     empty/E02 and the long-text row both have a real row rather than a hypothetical one;
+ *   - one EXPIRED story whose ROW IS RETAINED — STORY-03's whole claim, as a fixture: it must be
+ *     absent from the strip, present in the history, and still readable by id;
+ *   - one story whose media asset is deliberately left `processing`, so the strip's readiness
+ *     filter (R-P8) has something to exclude. Without it that filter would only ever be applied to
+ *     rows that pass it, which is a test that cannot fail.
+ *
+ * `published_at` and `expires_at` are written EXPLICITLY rather than taken from the column default,
+ * because the expired row cannot be produced any other way — the default window is always 24 h in
+ * the future. `stories_expiry_window_chk` still holds for every row: each pair is 24 h apart.
+ */
+const SEED_STORY_ASSET_IDS: Record<
+  string,
+  { images: readonly [string, string]; video: string; processing: string }
+> = {
+  'tria-demo': {
+    images: ['0d000000-0000-4000-8000-0000000000b1', '0d000000-0000-4000-8000-0000000000b2'],
+    video: '0d000000-0000-4000-8000-0000000000b3',
+    processing: '0d000000-0000-4000-8000-0000000000b4',
+  },
+  'tria-lab': {
+    images: ['0e000000-0000-4000-8000-0000000000b1', '0e000000-0000-4000-8000-0000000000b2'],
+    video: '0e000000-0000-4000-8000-0000000000b3',
+    processing: '0e000000-0000-4000-8000-0000000000b4',
+  },
+};
+
+const SEED_STORY_IDS: Record<string, readonly [string, string, string, string, string]> = {
+  'tria-demo': [
+    '0d000000-0000-4000-8000-0000000000d1',
+    '0d000000-0000-4000-8000-0000000000d2',
+    '0d000000-0000-4000-8000-0000000000d3',
+    '0d000000-0000-4000-8000-0000000000d4',
+    '0d000000-0000-4000-8000-0000000000d5',
+  ],
+  'tria-lab': [
+    '0e000000-0000-4000-8000-0000000000d1',
+    '0e000000-0000-4000-8000-0000000000d2',
+    '0e000000-0000-4000-8000-0000000000d3',
+    '0e000000-0000-4000-8000-0000000000d4',
+    '0e000000-0000-4000-8000-0000000000d5',
+  ],
+};
+
+/**
+ * 188 characters — comfortably past what a caption overlay shows before it has to wrap or clamp, so
+ * the long-text row has something to cut. It is still inside `STORY_MAX_CAPTION` (300), because a
+ * fixture that violated the cap would be testing the cap rather than the rendering.
+ */
+export const SEED_LONG_STORY_CAPTION =
+  'Encerramento do encontro de sabado com o coral completo, os agradecimentos da diretoria e o convite para a proxima edicao, que ja tem data marcada e vai acontecer no mesmo espaco de sempre.';
+
+/**
+ * `assetKey` names which of the four seeded story assets the row points at; `hoursAgo` places its
+ * PUBLICATION and the window always runs exactly 24 h from there. Index 3 is the expired one and
+ * index 4 is the one whose asset never became ready.
+ */
+const SEED_STORIES = [
+  { assetKey: 'image0' as const, caption: 'Bastidores do encontro de hoje.', hoursAgo: 1 },
+  { assetKey: 'video' as const, caption: SEED_LONG_STORY_CAPTION, hoursAgo: 6 },
+  { assetKey: 'image1' as const, caption: '', hoursAgo: 18 },
+  { assetKey: 'image0' as const, caption: 'Publicado ontem, ja fora da regua.', hoursAgo: 30 },
+  { assetKey: 'processing' as const, caption: 'Video ainda processando.', hoursAgo: 2 },
+] as const;
+
+/**
  * 05-03 (COMM-04, D-73) — SIX posts published INSIDE the communities, per tenant.
  *
  * They exist so the merged feed is a genuine MIX rather than two blocks: `minutesAgo` is chosen to
@@ -674,6 +752,98 @@ async function seedPostImageAsset(
         // so the row must not claim a ladder the Storage prefix does not carry.
         variantWidths: widths.filter((width) => width <= geometry.width),
         filename: 'foto.webp',
+        readyAt: new Date(),
+      })
+      .onConflictDoNothing();
+  });
+}
+
+/**
+ * A REAL story image asset at a fixed id, at the `story` ladder (05-05).
+ *
+ * `status` is a PARAMETER, not a constant, because the strip's readiness filter (R-P8) needs a
+ * fixture it can actually exclude: one asset per tenant is written `processing`, which is what a
+ * video looks like while the provider transcodes it. Without such a row the filter would be
+ * asserted only against rows that all pass it — a test that cannot fail.
+ */
+async function seedStoryImageAsset(
+  tenantId: string,
+  ownerUserId: string,
+  assetId: string,
+  geometry: { width: number; height: number; hex: string },
+  status: 'ready' | 'processing' = 'ready',
+): Promise<void> {
+  const svg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${geometry.width}" height="${geometry.height}" viewBox="0 0 ${geometry.width} ${geometry.height}"><rect width="${geometry.width}" height="${geometry.height}" fill="${geometry.hex}"/><circle cx="${Math.round(geometry.width / 2)}" cy="${Math.round(geometry.height / 3)}" r="${Math.round(Math.min(geometry.width, geometry.height) / 4)}" fill="#ffffff" fill-opacity="0.85"/></svg>`,
+  );
+  const widths = [...STORY_WIDTHS];
+  const variants = await deriveVariants(svg, widths);
+  const [original] = await deriveVariants(svg, [geometry.width]);
+  if (!original) throw new Error(`could not derive the seed story image ${assetId}`);
+
+  await putObject(mediaOriginalKey(tenantId, assetId), original.body, {
+    contentType: 'image/webp',
+  });
+  for (const variant of variants) {
+    await putObject(mediaVariantKey(tenantId, assetId, variant.width), variant.body, {
+      contentType: 'image/webp',
+    });
+  }
+
+  await withAdminTx(async (tx) => {
+    await tx
+      .insert(mediaAssets)
+      .values({
+        id: assetId,
+        tenantId,
+        ownerUserId,
+        kind: 'image',
+        purpose: 'story',
+        status,
+        provider: 'supabase',
+        mime: 'image/webp',
+        bytes: original.body.length,
+        width: geometry.width,
+        height: geometry.height,
+        // A `processing` asset has no ladder yet — the worker writes one at `ready`. Claiming rungs
+        // here would make the fixture lie about the state it exists to represent.
+        variantWidths: status === 'ready' ? widths.filter((w) => w <= geometry.width) : [],
+        filename: 'story.webp',
+        readyAt: status === 'ready' ? new Date() : null,
+      })
+      .onConflictDoNothing();
+  });
+}
+
+/**
+ * A `ready` story VIDEO asset brokered through the `fake` provider (03-06) — the shape a real Mux
+ * story carries once its webhook landed, with a duration comfortably inside
+ * `MEDIA_LIMITS.video.story.maxDurationSeconds`.
+ */
+async function seedStoryVideoAsset(
+  tenantId: string,
+  ownerUserId: string,
+  assetId: string,
+): Promise<void> {
+  await withAdminTx(async (tx) => {
+    await tx
+      .insert(mediaAssets)
+      .values({
+        id: assetId,
+        tenantId,
+        ownerUserId,
+        kind: 'video',
+        purpose: 'story',
+        status: 'ready',
+        provider: 'fake',
+        providerAssetId: `fake-story-${assetId}`,
+        playbackId: `fake-story-playback-${assetId}`,
+        mime: 'video/mp4',
+        bytes: 2_097_152,
+        durationSeconds: 18,
+        aspectRatio: '9:16',
+        variantWidths: [],
+        filename: 'story.mp4',
         readyAt: new Date(),
       })
       .onConflictDoNothing();
@@ -1307,6 +1477,71 @@ for (const t of SEED_TENANTS) {
             `seed: tenant ${t.slug} — ${SEED_COMMUNITY_POSTS.length} posts inside communities (merged-feed fixture)`,
           );
         }
+      }
+
+      // 05-05 (STORY-01, STORY-03): the tenant's stories, on REAL `purpose: 'story'` assets at the
+      // story ladder — so the circle's `srcSet` is exercised instead of stubbed — plus one asset
+      // deliberately left `processing` for the strip's readiness filter to exclude.
+      const storyAssetIds = SEED_STORY_ASSET_IDS[t.slug];
+      const storyIds = SEED_STORY_IDS[t.slug];
+      if (storyAssetIds && storyIds) {
+        await seedStoryImageAsset(tenantId, authorUserId, storyAssetIds.images[0], {
+          width: 1080,
+          height: 1920,
+          hex: t.colors.primary,
+        });
+        await seedStoryImageAsset(tenantId, authorUserId, storyAssetIds.images[1], {
+          width: 1080,
+          height: 1920,
+          hex: t.colors.secondary,
+        });
+        await seedStoryVideoAsset(tenantId, authorUserId, storyAssetIds.video);
+        await seedStoryImageAsset(
+          tenantId,
+          authorUserId,
+          storyAssetIds.processing,
+          { width: 1080, height: 1920, hex: t.colors.primary },
+          'processing',
+        );
+
+        const storyAssetFor = (key: (typeof SEED_STORIES)[number]['assetKey']): string => {
+          if (key === 'image0') return storyAssetIds.images[0];
+          if (key === 'image1') return storyAssetIds.images[1];
+          if (key === 'video') return storyAssetIds.video;
+          return storyAssetIds.processing;
+        };
+
+        // ONE clock read for the whole batch — the 05-01 lesson, restated. A per-row `Date.now()`
+        // would put rows that share an `hoursAgo` milliseconds apart and would make the ordering
+        // this fixture sets up approximate rather than exact.
+        const storyClock = Date.now();
+        await withAdminTx(async (tx) => {
+          for (const [index, story] of SEED_STORIES.entries()) {
+            const id = storyIds[index];
+            const publishedAt = new Date(storyClock - story.hoursAgo * 3_600_000);
+            // The window is ALWAYS 24 h from publication — the same arithmetic the column default
+            // performs. The expired row is expired because it was published 30 h ago, not because
+            // the seed shortened its life; nothing here may invent a different window.
+            const expiresAt = new Date(publishedAt.getTime() + 24 * 3_600_000);
+            await tx.execute(sql`
+              insert into public.stories
+                (id, tenant_id, author_user_id, media_asset_id, media_kind, caption,
+                 published_at, expires_at, created_at)
+              values (
+                ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid,
+                ${storyAssetFor(story.assetKey)}::uuid,
+                ${story.assetKey === 'video' ? 'video' : 'image'},
+                ${story.caption},
+                ${publishedAt.toISOString()}::timestamptz,
+                ${expiresAt.toISOString()}::timestamptz,
+                ${publishedAt.toISOString()}::timestamptz
+              )
+              on conflict (id) do nothing`);
+          }
+        });
+        console.log(
+          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset)`,
+        );
       }
     }
 

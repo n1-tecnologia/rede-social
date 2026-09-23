@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(85);
+select plan(91);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -142,6 +142,20 @@ insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, st
    '0b000000-0000-4000-8000-000000000002', 'image', 'avatar', 'ready', 'image/jpeg', 1024, null),
   ('0a000000-0000-4000-8000-000000000006', '0a000000-0000-4000-8000-000000000001',
    '0a000000-0000-4000-8000-000000000002', 'image', 'avatar', 'deleted', 'image/jpeg', 1024, now());
+
+-- 05-05: one ACTIVE story per tenant, with an IDENTICAL caption, media kind and window on both
+-- sides. The shared caption is the point, exactly as the shared community slug is above: a read
+-- that filtered on content instead of on `tenant_id` would match BOTH rows. Each story points at
+-- its own tenant's asset, because `stories.media_asset_id` is a real reference and a cross-tenant
+-- one could not be inserted here even deliberately.
+insert into public.stories
+  (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at) values
+  ('0a000000-0000-4000-8000-0000000000d1', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-000000000005', 'image',
+   'ao vivo', now() - interval '1 hour', now() + interval '23 hours'),
+  ('0b000000-0000-4000-8000-0000000000d1', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-000000000005', 'image',
+   'ao vivo', now() - interval '1 hour', now() + interval '23 hours');
 
 -- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
 -- global) and RLS with ZERO policies, like platform_admins and tenant_invites: one community's
@@ -400,6 +414,47 @@ select results_eq(
      ) select count(*)::int from u $$,
   ARRAY[0],
   'USING: an archive aimed at B''s communities touches nothing'
+);
+
+-- ── stories: the same five cases, plus its own positive control (05-05) ───────────────────────
+-- A story is the most member-visible thing this phase adds and the one with the shortest life, so
+-- "zero leakage" has to hold for it on the same six axes as every other table — never on the
+-- assumption that a 24 h window is its own protection.
+select results_eq(
+  $$ select count(*)::int from public.stories
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own stories row'
+);
+select results_eq(
+  $$ select count(*)::int from public.stories where caption = 'ao vivo' $$,
+  ARRAY[1],
+  'adjacency: both tenants published a story captioned ''ao vivo'', the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.stories where caption = 'ao vivo' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the story it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.stories where id = '0b000000-0000-4000-8000-0000000000d1' $$,
+  'detail by id: B''s story is not found through A''s lane — the read path''s bare 404 (D-23) has a policy under it'
+);
+select throws_ok(
+  $$ insert into public.stories (tenant_id, author_user_id, media_asset_id, media_kind)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002',
+             '0a000000-0000-4000-8000-000000000005', 'image') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot publish a story stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with u as (
+       update public.stories set deleted_at = now()
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: a delete aimed at B''s stories touches nothing'
 );
 
 -- ── community_members: the same five cases (05-01). The table is UNUSED in V1 and still proved:
