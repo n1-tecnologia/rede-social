@@ -1,4 +1,5 @@
-import { Avatar } from '@tria/ui';
+import { Avatar, IconButton } from '@tria/ui';
+import { MoreHorizontal } from 'lucide-react';
 
 /**
  * The card's author row (`[proto]` `feed/PostHeader.tsx` minus `@username`, `VerifiedBadge`,
@@ -6,11 +7,15 @@ import { Avatar } from '@tria/ui';
  *
  * **UI-D-14 — no clock call in render.** Both timestamp strings arrive as props, formatted on the
  * SERVER: `relative` is what the reader sees, `absolute` is the `title`, and `iso` is the machine
- * value. A `Date.now()` here would be a hydration mismatch waiting for the first slow render.
+ * value. Reading a clock here would be a hydration mismatch waiting for the first slow render.
  *
  * **D-52 — the post is attributed to the PERSON**, so the display name links to their profile. A
  * plain `<a>` rather than `next/link`: a module package must not depend on the web framework (MOD-02),
  * and the host app is free to intercept the navigation.
+ *
+ * The trailing 44x44 overflow control renders ONLY when the host passes a handler and its label:
+ * 04-09 owns the menu behind it, and a control that opens nothing would be a promise the card
+ * cannot keep.
  */
 export type PostHeaderProps = {
   displayName: string;
@@ -20,6 +25,10 @@ export type PostHeaderProps = {
   createdAtIso: string;
   createdAtRelative: string;
   createdAtAbsolute: string;
+  /** Opens the post's overflow menu (04-09). Absent, the control is not rendered at all. */
+  onMore?: () => void;
+  /** Accessible name of the overflow control; required alongside `onMore`. */
+  moreLabel?: string;
 };
 
 export function PostHeader({
@@ -29,6 +38,8 @@ export function PostHeader({
   createdAtIso,
   createdAtRelative,
   createdAtAbsolute,
+  onMore,
+  moreLabel,
 }: PostHeaderProps) {
   return (
     <div className="flex items-center justify-between px-4 py-3">
@@ -54,6 +65,10 @@ export function PostHeader({
           </time>
         </div>
       </div>
+
+      {onMore && moreLabel ? (
+        <IconButton icon={MoreHorizontal} size={20} label={moreLabel} onClick={onMore} />
+      ) : null}
     </div>
   );
 }

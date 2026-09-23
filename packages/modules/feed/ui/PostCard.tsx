@@ -1,16 +1,21 @@
+'use client';
+
 import { Card } from '@tria/ui';
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode, useCallback } from 'react';
 import type { AttachmentDescriptor } from './AttachmentRow';
+import { type LikeState, useOptimisticLike } from './LikeButton';
 import type { LinkPreviewCardProps } from './LinkPreviewCard';
+import { buildPostMeta, type CountTemplates, formatCountLabel } from './meta';
+import { PostActions } from './PostActions';
 import { PostCaption } from './PostCaption';
 import { PostHeader } from './PostHeader';
 import { PostMedia, type PostMediaImage, type PostMediaLabels } from './PostMedia';
 
 /**
  * One post, ready to render. The module's UI is PRESENTATIONAL: it fetches nothing, formats no date
- * and resolves no URL — the host (`apps/web/lib/registry.tsx`) turns a `FeedPost` from the contracts
- * into this view, because only the host knows the tenant's time zone, the media URL shape and the
- * route table.
+ * and resolves no URL — the host (`apps/web/lib/feed-view.tsx`) turns a `FeedPost` from the
+ * contracts into this view, because only the host knows the tenant's time zone, the media URL shape
+ * and the route table.
  *
  * D-51: there is no title and no type chip, so the largest type inside a card is its 16px caption.
  */
@@ -42,32 +47,108 @@ export type PostCardView = {
   createdAtIso: string;
   createdAtRelative: string;
   createdAtAbsolute: string;
+  /** UI-D-15: `edited_at` set by ANY persisted change, rendered as a marker with no date of its own. */
+  edited: boolean;
+  likeCount: number;
+  commentCount: number;
+  viewerLiked: boolean;
   /** The card's accessible name, already interpolated by the host's catalog. */
   ariaLabel: string;
   media: PostCardMediaView;
 };
 
+/**
+ * What a like/unlike server action answers. The module models the refusal as a FLAG rather than a
+ * message: the action returns a catalog key and the host owns the copy, so nothing server-controlled
+ * reaches the DOM through this path (T-04-42).
+ */
+export type LikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false };
+
+export type PostCardLabels = {
+  /** The caption's "more" toggle. */
+  more: string;
+  like: string;
+  unlike: string;
+  comment: string;
+  share: string;
+  /** Accessible name of the overflow control; the menu itself is 04-09's. */
+  moreOptions: string;
+  likes: CountTemplates;
+  comments: CountTemplates;
+  edited: string;
+  media: PostMediaLabels;
+};
+
 export type PostCardProps = {
   post: PostCardView;
   captionTruncateAt: number;
-  moreLabel: string;
-  /** The carousel role description and the attachment failure message (never literals here). */
-  mediaLabels: PostMediaLabels;
+  /** BCP-47 tag from the host: the module formats numbers for it but ships no words (PWA-03). */
+  locale: string;
+  labels: PostCardLabels;
+  onLike: (postId: string) => Promise<LikeOutcome>;
+  onUnlike: (postId: string) => Promise<LikeOutcome>;
+  /** Raised after a failed toggle has already reverted — the widget shows the generic toast. */
+  onLikeError?: () => void;
+  onOpenComments?: (postId: string) => void;
+  onShare?: (postId: string) => void;
+  onMore?: (postId: string) => void;
 };
 
 /**
- * `[proto]` `feed/PostCard.tsx` minus `useBookmark`/`onSave` and the mock hooks. The shipped `Card`
- * supplies the surface (`bg-card`, 12px radius, the dark hairline), media is full-bleed inside it and
- * text keeps the `px-4` inner gutter.
+ * `[proto]` `feed/PostCard.tsx` minus the mock hooks. The shipped `Card` supplies the surface
+ * (`bg-card`, 12px radius, the dark hairline), media is full-bleed inside it and text keeps the
+ * `px-4` inner gutter.
  *
- * The action + meta row (likes, comments, share) is 04-03's; the media band is 04-04's and sits
- * between the header and the caption, full-bleed inside the card (UI-SPEC card anatomy).
+ * **One toggle, three entry points.** The like button, the double tap on the gallery and the count
+ * in the meta row all read and write the SAME optimistic state, because a double tap that took a
+ * second code path would be a second request and a second row (FEED-04).
+ *
+ * **No clock is read here** (UI-D-14): the relative string, the absolute title and the ISO value all
+ * arrive as props, already formatted on the server.
  */
-export function PostCard({ post, captionTruncateAt, moreLabel, mediaLabels }: PostCardProps) {
+export function PostCard({
+  post,
+  captionTruncateAt,
+  locale,
+  labels,
+  onLike,
+  onUnlike,
+  onLikeError,
+  onOpenComments,
+  onShare,
+  onMore,
+}: PostCardProps) {
+  // The refusal envelope becomes a rejection, which is the one signal the optimistic engine reverts
+  // on — so a refused like and a failed request behave identically, as they must.
+  const toggleRequest = useCallback(
+    async (nextLiked: boolean): Promise<LikeState> => {
+      const outcome = nextLiked ? await onLike(post.id) : await onUnlike(post.id);
+      if (!outcome.ok) throw new Error('like_refused');
+      return { liked: outcome.liked, likeCount: outcome.likeCount };
+    },
+    [onLike, onUnlike, post.id],
+  );
+
+  const { state, toggle, pulseKey } = useOptimisticLike({
+    liked: post.viewerLiked,
+    likeCount: post.likeCount,
+    onToggle: toggleRequest,
+    onError: onLikeError,
+  });
+
+  const likeLabel = formatCountLabel(state.likeCount, labels.likes, locale);
+  const commentLabel = formatCountLabel(post.commentCount, labels.comments, locale);
+  const segments = buildPostMeta({
+    likeLabel,
+    commentLabel,
+    relativeTime: post.createdAtRelative,
+    editedLabel: post.edited ? labels.edited : null,
+  });
+
   return (
     // `role="article"` on the shipped `Card` surface rather than a nested `<article>`: the card IS
     // the post, and one element with an accessible name reads better than a div wrapping a landmark.
-    <Card role="article" aria-label={post.ariaLabel} className="pb-3">
+    <Card role="article" aria-label={post.ariaLabel} className="pb-1">
       <PostHeader
         displayName={post.author.displayName}
         profileHref={post.author.profileHref}
@@ -75,6 +156,8 @@ export function PostCard({ post, captionTruncateAt, moreLabel, mediaLabels }: Po
         createdAtIso={post.createdAtIso}
         createdAtRelative={post.createdAtRelative}
         createdAtAbsolute={post.createdAtAbsolute}
+        onMore={onMore ? () => onMore(post.id) : undefined}
+        moreLabel={onMore ? labels.moreOptions : undefined}
       />
       <PostMedia
         mediaKind={post.media.mediaKind}
@@ -82,9 +165,51 @@ export function PostCard({ post, captionTruncateAt, moreLabel, mediaLabels }: Po
         video={post.media.video}
         attachments={post.media.attachments}
         linkPreview={post.media.linkPreview}
-        labels={mediaLabels}
+        onDoubleTapLike={toggle}
+        labels={labels.media}
       />
-      <PostCaption caption={post.caption} truncateAt={captionTruncateAt} moreLabel={moreLabel} />
+      <PostCaption caption={post.caption} truncateAt={captionTruncateAt} moreLabel={labels.more} />
+
+      <div className="flex items-center justify-between gap-2 px-4 pt-2 pb-3">
+        <PostActions
+          liked={state.liked}
+          countLabel={likeLabel}
+          pulseKey={pulseKey}
+          onToggleLike={toggle}
+          onComment={onOpenComments ? () => onOpenComments(post.id) : undefined}
+          onShare={onShare ? () => onShare(post.id) : undefined}
+          labels={{
+            like: labels.like,
+            unlike: labels.unlike,
+            comment: labels.comment,
+            share: labels.share,
+          }}
+        />
+
+        {/* Wraps rather than clips: at 320px an abbreviated four-digit count plus the edited marker
+            has to stay readable, and a clipped number is a wrong number (UI-SPEC E02/overflow). */}
+        <div
+          data-post-meta
+          className="flex min-w-0 flex-wrap items-center justify-end gap-x-1 text-xs font-normal text-text-tertiary tabular-nums"
+        >
+          {segments.map((segment, index) => (
+            <Fragment key={segment}>
+              {index > 0 ? <span aria-hidden>·</span> : null}
+              {commentLabel !== null && segment === commentLabel && onOpenComments ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenComments(post.id)}
+                  className="font-bold text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                >
+                  {segment}
+                </button>
+              ) : (
+                <span>{segment}</span>
+              )}
+            </Fragment>
+          ))}
+        </div>
+      </div>
     </Card>
   );
 }

@@ -6,13 +6,24 @@ export {
 } from './AttachmentRow';
 export { FeedList, type FeedListProps } from './FeedList';
 export {
+  LikeButton,
+  type LikeButtonProps,
+  type LikeState,
+  type LikeToggle,
+  useOptimisticLike,
+} from './LikeButton';
+export {
   LinkPreviewCard,
   type LinkPreviewCardProps,
   type LinkPreviewView,
 } from './LinkPreviewCard';
+export { buildPostMeta, type CountTemplates, formatCountLabel, type PostMetaInput } from './meta';
+export { PostActions, type PostActionsProps } from './PostActions';
 export { PostCaption, type PostCaptionProps } from './PostCaption';
 export {
+  type LikeOutcome,
   PostCard,
+  type PostCardLabels,
   type PostCardMediaView,
   type PostCardProps,
   type PostCardView,

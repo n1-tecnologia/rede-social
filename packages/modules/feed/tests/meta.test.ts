@@ -110,7 +110,12 @@ describe('buildPostMeta (UI-D-21: the 18-case zero/one/many cross-product)', () 
 
   it('drops a blank relative time rather than emitting a separator around nothing', () => {
     expect(
-      buildPostMeta({ likeLabel: '1 L1', commentLabel: null, relativeTime: '  ', editedLabel: null }),
+      buildPostMeta({
+        likeLabel: '1 L1',
+        commentLabel: null,
+        relativeTime: '  ',
+        editedLabel: null,
+      }),
     ).toEqual(['1 L1']);
   });
 });

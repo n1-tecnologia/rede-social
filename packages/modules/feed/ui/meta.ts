@@ -31,16 +31,43 @@ export type PostMetaInput = {
   editedLabel: string | null;
 };
 
-/** STUB — 04-06 RED. */
-export function buildPostMeta(_input: PostMetaInput): string[] {
-  return [];
+/** The only placeholder a count template may carry; the host catalog writes it verbatim. */
+const COUNT_PLACEHOLDER = '{count}';
+
+/**
+ * The present segments, in reading order: the counts, then the time, then the edited marker.
+ *
+ * A segment that is `null`, empty or whitespace-only is DROPPED rather than rendered blank — which
+ * is what makes a leading, trailing or doubled separator impossible downstream: the component puts
+ * one separator between two segments it actually has, and there is no third thing it could emit.
+ */
+export function buildPostMeta(input: PostMetaInput): string[] {
+  return [input.likeLabel, input.commentLabel, input.relativeTime, input.editedLabel].filter(
+    (segment): segment is string => typeof segment === 'string' && segment.trim().length > 0,
+  );
 }
 
-/** STUB — 04-06 RED. */
+/**
+ * `1` with the one/other templates → the singular segment; `0` (and anything below it, or a count
+ * that is not a finite number) → `null`, i.e. NO segment at all (UI-D-21).
+ *
+ * The number itself is formatted compactly for the reader's locale, so a post with 1 234 likes
+ * reads "1,2 mil curtidas" in a 12px row instead of blowing the row open — the plural form is still
+ * chosen from the ORIGINAL count through `Intl.PluralRules`, never from the abbreviated text.
+ */
 export function formatCountLabel(
-  _count: number,
-  _templates: CountTemplates,
-  _locale: string,
+  count: number,
+  templates: CountTemplates,
+  locale: string,
 ): string | null {
-  return null;
+  if (!Number.isFinite(count) || count < 1) return null;
+
+  const value = new Intl.NumberFormat(locale, {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(count);
+  const form = new Intl.PluralRules(locale).select(count);
+  const template = form === 'one' ? templates.one : templates.other;
+
+  return template.replace(COUNT_PLACEHOLDER, value);
 }
