@@ -38,6 +38,30 @@ export const seededFeed = {
 } as const;
 
 /**
+ * 04-06's paging and meta-row fixtures, identical in both tenants. Mirrored from `scripts/seed.ts`
+ * for the same reason `seededFeed` is: the seed is a top-level-await script that requires
+ * `SEED_PASSWORD` and opens a database connection at import time.
+ *
+ * `total` is what one tenant's feed holds after `pnpm db:seed` — 8 fixtures plus 18 fillers — and
+ * `pageSize` is `FEED_PAGE_SIZE`, so the sentinel has THREE pages to walk (10 + 10 + 6).
+ */
+export const seededFeedPaging = {
+  pageSize: 10,
+  /** The DEMO tenant's post count: 9 fixtures plus 18 fillers (the lab tenant has 26). */
+  total: 27,
+  /** The post whose `edited_at` is set: its meta row carries the marker (UI-D-15). */
+  editedCaption: 'Programacao do mes, ja com a correcao dos horarios.',
+  /** Exactly 40 characters (UI-SPEC E03 long-text backstop) — a demo-tenant member. */
+  longDisplayName: 'Ana Carolina Albuquerque de Vasconcellos',
+  /** The post the 40-character member authored, so the header truncation has a real card. */
+  longNameCaption: 'Passando para dizer oi para a comunidade.',
+  /** The first filler caption; the newest of the eighteen, so it lands on page 1. */
+  firstFiller: 'Aviso 1 da comunidade: mais uma novidade para o mural.',
+  /** The second filler: page 2, and the post the failed-like case toggles. */
+  secondFiller: 'Aviso 2 da comunidade: mais uma novidade para o mural.',
+} as const;
+
+/**
  * 04-04's media fixtures, identical in both tenants (SCHEMA-CONVENTIONS §(j)). The captions are what
  * `scripts/seed.ts` writes; the filename is the 94-character one UI-SPEC E07's long-text row needs.
  */

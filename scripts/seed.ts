@@ -120,6 +120,12 @@ type SeedTenant = {
   logoUrl: string;
 };
 
+/**
+ * 04-06 — exactly 40 characters. Exported by name so `apps/web/e2e` asserts truncation against the
+ * fixture rather than against a literal that could drift from the seed on the next edit.
+ */
+export const SEED_LONG_DISPLAY_NAME = 'Ana Carolina Albuquerque de Vasconcellos';
+
 const SEED_TENANTS: SeedTenant[] = [
   {
     slug: 'tria-demo',
@@ -154,6 +160,14 @@ const SEED_TENANTS: SeedTenant[] = [
       // No bio either — two is enough to make "at least two" an honest assertion.
       { local: 'rafael.teixeira', name: 'Rafael Teixeira', bio: null },
       { local: 'sofia.davila', name: "Sofia D'Ávila", bio: 'Escrevo sobre a comunidade.' },
+      // 04-06 — EXACTLY 40 characters (UI-SPEC E03/E11 long-text backstop). The post header must
+      // truncate it beside the avatar and the comment row must wrap it with the comment text, both
+      // at 320px; a shorter fixture would pass either row vacuously.
+      {
+        local: 'ana.carolina.vasconcellos',
+        name: SEED_LONG_DISPLAY_NAME,
+        bio: 'Nome longo de proposito, para o teste de truncamento.',
+      },
     ],
   },
   {
@@ -193,6 +207,49 @@ const SEED_FEED_POST_IDS: Record<string, readonly string[]> = {
   'tria-demo': ['0d000000-0000-4000-8000-000000000001', '0d000000-0000-4000-8000-000000000002'],
   'tria-lab': ['0e000000-0000-4000-8000-000000000001', '0e000000-0000-4000-8000-000000000002'],
 };
+
+/**
+ * 04-06 — the EDITED post (UI-D-15): `edited_at` set, so the meta row appends the marker after the
+ * relative time and carries no second date of its own. Written six minutes back, which puts it on
+ * page 1 below the 04-01/04-04/04-05 fixtures without disturbing their relative order.
+ *
+ * Its like and comment counts are whatever the seeded rows below really produce — the counters are
+ * TRIGGER-owned and `supabase/tests/090-feed.sql` reconciles every post's counters against its live
+ * rows, so a hand-written four-digit count here would turn that assertion red. The >999 abbreviation
+ * is pinned instead by `packages/modules/feed/tests/meta.test.ts`.
+ */
+const SEED_EDITED_POST_IDS: Record<string, string> = {
+  'tria-demo': '0d000000-0000-4000-8000-000000000008',
+  'tria-lab': '0e000000-0000-4000-8000-000000000008',
+};
+
+export const SEED_EDITED_POST_CAPTION = 'Programacao do mes, ja com a correcao dos horarios.';
+
+/**
+ * 04-06 — the one post authored by the 40-character member rather than by the admin, so the post
+ * header's truncation backstop has a real card to run against. Only the demo tenant has that
+ * member, so only the demo tenant gets this post.
+ */
+const SEED_LONG_NAME_POST_ID = '0d000000-0000-4000-8000-000000000009';
+export const SEED_LONG_NAME_POST_CAPTION = 'Passando para dizer oi para a comunidade.';
+
+/**
+ * 04-06 — enough posts for the infinite-scroll sentinel to have something to fetch. `FEED_PAGE_SIZE`
+ * is 10, so a feed that can be paged THREE times needs more than twenty rows; eighteen fillers on
+ * top of the eight fixtures above give 26 per tenant (10 + 10 + 6).
+ *
+ * They are written an hour back and one minute apart, so every one of them sorts BELOW the fixtures
+ * the other plans' specs name — adding them cannot reorder anything already asserted.
+ */
+const SEED_FILLER_COUNT = 18;
+const SEED_FILLER_PREFIX: Record<string, string> = {
+  'tria-demo': '0d000000-0000-4000-8000-0000000001',
+  'tria-lab': '0e000000-0000-4000-8000-0000000001',
+};
+
+/** Identical in both tenants, for the same reason the 04-01 captions are (SCHEMA-CONVENTIONS §(j)). */
+export const seedFillerCaption = (index: number): string =>
+  `Aviso ${index + 1} da comunidade: mais uma novidade para o mural.`;
 
 /**
  * 04-04 — a post of EVERY media shape (FEED-01, D-53), in both tenants, with identical-looking
@@ -724,6 +781,66 @@ for (const t of SEED_TENANTS) {
       }
     });
     console.log(`seed: tenant ${t.slug} — ${feedPostIds.length} feed posts`);
+
+    // 04-06: eighteen filler posts so the infinite-scroll sentinel has three real pages to walk,
+    // and ONE edited post so the "editado" marker (UI-D-15) is a seeded fact rather than a mock.
+    const fillerPrefix = SEED_FILLER_PREFIX[t.slug];
+    const editedPostId = SEED_EDITED_POST_IDS[t.slug];
+    if (fillerPrefix && editedPostId) {
+      await withAdminTx(async (tx) => {
+        for (let index = 0; index < SEED_FILLER_COUNT; index += 1) {
+          const id = `${fillerPrefix}${String(index).padStart(2, '0')}`;
+          const createdAt = new Date(Date.now() - (60 + index) * 60_000);
+          await tx.execute(sql`
+            insert into public.feed_posts (id, tenant_id, author_user_id, caption, created_at)
+            values (
+              ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid,
+              ${seedFillerCaption(index)}, ${createdAt.toISOString()}::timestamptz
+            )
+            on conflict (id) do nothing`);
+        }
+
+        // `edited_at` is written directly: the composer's update path (04-09) is what sets it at
+        // runtime, and a seed that went through a route would be testing the route, not the marker.
+        await tx.execute(sql`
+          insert into public.feed_posts
+            (id, tenant_id, author_user_id, caption, created_at, edited_at)
+          values (
+            ${editedPostId}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid,
+            ${SEED_EDITED_POST_CAPTION},
+            ${new Date(Date.now() - 6 * 60_000).toISOString()}::timestamptz,
+            ${new Date(Date.now() - 60_000).toISOString()}::timestamptz
+          )
+          on conflict (id) do nothing`);
+
+        // Real like rows from every seeded member, so the trigger-owned counter and the live rows
+        // agree — `supabase/tests/090-feed.sql` reconciles the two for EVERY post in the database.
+        for (const likerUserId of memberUserIds) {
+          await tx.execute(sql`
+            insert into public.feed_likes (tenant_id, post_id, user_id)
+            values (${tenantId}::uuid, ${editedPostId}::uuid, ${likerUserId}::uuid)
+            on conflict do nothing`);
+        }
+
+        // `memberUserIds` follows `people`, which is [admin, member@, ...t.members] and pushes only
+        // the members — so the long-name member sits one past its index in `t.members`.
+        const longNameIndex = t.members.findIndex((m) => m.name === SEED_LONG_DISPLAY_NAME);
+        const longNameUserId = longNameIndex >= 0 ? memberUserIds[longNameIndex + 1] : undefined;
+        if (longNameUserId) {
+          await tx.execute(sql`
+            insert into public.feed_posts (id, tenant_id, author_user_id, caption, created_at)
+            values (
+              ${SEED_LONG_NAME_POST_ID}::uuid, ${tenantId}::uuid, ${longNameUserId}::uuid,
+              ${SEED_LONG_NAME_POST_CAPTION},
+              ${new Date(Date.now() - 7 * 60_000).toISOString()}::timestamptz
+            )
+            on conflict (id) do nothing`);
+        }
+      });
+      console.log(
+        `seed: tenant ${t.slug} — ${SEED_FILLER_COUNT} filler posts + 1 edited post (${memberUserIds.length} likes)`,
+      );
+    }
 
     // 04-03: the interaction layer, IDENTICAL-LOOKING in both tenants (SCHEMA-CONVENTIONS §(j)) —
     // one root comment, one reply to it from a different member, one like on the post and one like

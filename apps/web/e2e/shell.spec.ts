@@ -13,7 +13,14 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
  * tenants, at 390px (`mobile-chromium`: TopBar + floating BottomNav) and 1280px (`desktop-chromium`:
  * rail + centred column). Everything the shell shows comes from `GET /v1/me/bootstrap`: the tenant's
  * logo and `--brand-primary`, the tabs of its ENABLED modules (demo has `example`, lab does not) and
- * the home slots (the example widget on demo, the "Em breve" card on lab).
+ * the home slots.
+ *
+ * **The "Em breve" card is no longer observable on either seed tenant (04-06, UI-D-20).** It means
+ * "no module contributed anything", and since 04-01 the lab tenant has the `feed` module enabled,
+ * so a slot IS registered and the feed's own card takes that position. What the lab case proves now
+ * is the thing that actually distinguishes it from demo — no `example` tab, no `#exemplo` widget —
+ * plus the positive fact that the registered slot rendered. Asserting the placeholder here would
+ * contradict `feed.spec.ts`, which asserts the opposite for the same tenant.
  */
 
 const BRAND = {
@@ -94,7 +101,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await expect(page.locator('[data-brand-root] img[alt="TRIA"]')).toHaveCount(0);
   });
 
-  test('tria-lab: no Exemplo tab, no #exemplo, the "Em breve" card, the lab brand', async ({
+  test('tria-lab: no Exemplo tab, no #exemplo, the feed slot instead of "Em breve", the lab brand', async ({
     page,
   }, testInfo) => {
     test.skip(isRemote, 'local stack only (needs the tria-lab host)');
@@ -106,11 +113,16 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
 
     const nav = visibleNav(page, mobile);
     expect(await navLinkNames(nav)).toEqual(['Início', 'Perfil']);
-    await expect(page.getByRole('link', { name: 'Exemplo' })).toHaveCount(0);
+    // Scoped to the NAV and matched exactly: the lab feed carries 04-05's seeded link posts, whose
+    // auto-linked URLs (`…exemplo.invalid/…`) are links whose accessible name CONTAINS "exemplo".
+    // A page-wide substring match would read those as an example TAB and fail for the wrong reason.
+    await expect(nav.getByRole('link', { name: 'Exemplo', exact: true })).toHaveCount(0);
     await expect(page.locator('#exemplo')).toHaveCount(0);
-    await expect(page.getByText('Em breve', { exact: true })).toBeVisible();
+    // UI-D-20: a module DID contribute a slot here, so the kernel placeholder must be absent and
+    // the feed widget must be what fills the home column instead.
+    await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);
     await expect(
-      page.locator('main.app-scroll').getByText('Em breve', { exact: true }),
+      page.locator('main.app-scroll').getByRole('region', { name: 'Publicações da comunidade' }),
     ).toBeVisible();
 
     const html = await page.content();

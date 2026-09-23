@@ -184,9 +184,20 @@ export function FeedList({
     toast.show({ tone: 'error', message: labels.genericError });
   }, [toast, labels.genericError]);
 
-  /** Page 1 again. Replaces the list; the cards never become skeletons (UI-SPEC E1/loading). */
+  /**
+   * Page 1 again. Replaces the list; the cards never become skeletons (UI-SPEC E1/loading).
+   *
+   * A REJECTION and a refusal are the same outcome here: a server action that never reaches the
+   * server rejects, and treating that as anything other than "this refresh failed" would leave the
+   * member with a pull that silently did nothing.
+   */
   const refresh = useCallback(async () => {
-    const page = await onRefresh();
+    let page: FeedPageOutcome = { ok: false };
+    try {
+      page = await onRefresh();
+    } catch (error) {
+      console.error('feed.refresh_failed', { error: String(error) });
+    }
     if (!page.ok) {
       failToast();
       return;
@@ -201,7 +212,14 @@ export function FeedList({
   const loadMore = useCallback(async () => {
     if (!cursor) return;
     const from = cursor;
-    const page = await onLoadMore(from);
+    let page: FeedPageOutcome = { ok: false };
+    try {
+      page = await onLoadMore(from);
+    } catch (error) {
+      // The sentinel hook swallows a rejection so it cannot reach render; if this did not catch it
+      // too, a dead network would spin the sentinel forever with no retry ever offered.
+      console.error('feed.load_more_failed', { error: String(error) });
+    }
     if (!page.ok) {
       setPageFailed(true);
       return;
@@ -211,12 +229,16 @@ export function FeedList({
     setCursor(page.nextCursor);
   }, [cursor, onLoadMore]);
 
+  /**
+   * The retry RE-ARMS the sentinel rather than fetching itself. The retry control renders AT the
+   * sentinel, so the sentinel is on screen; re-enabling it rebuilds the observer, which fires
+   * immediately for a target already intersecting. Calling `loadMore()` here as well would load two
+   * pages for one tap — the sentinel's page and this one — which is exactly the duplicate the
+   * one-page-in-flight guard exists to prevent.
+   */
   const retryPage = useCallback(() => {
     setPageFailed(false);
-    startTransition(() => {
-      void loadMore();
-    });
-  }, [loadMore]);
+  }, []);
 
   const retryFirst = useCallback(() => {
     startTransition(() => {
