@@ -3,7 +3,7 @@ import type { HomeSlot } from '@tria/core/ui';
 import { exampleItemsSchema } from '@tria/module-example/contracts';
 import { ExampleWidget } from '@tria/module-example/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
-import type { PostCardLabels } from '@tria/module-feed/ui';
+import type { PostCardLabels, PostMenuLabels } from '@tria/module-feed/ui';
 import { EmptyState } from '@tria/ui';
 import { TriangleAlert } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -12,6 +12,7 @@ import { createExampleItem } from '@/app/(app)/inicio/example-actions';
 import {
   createCommentAction,
   deleteCommentAction,
+  deletePostAction,
   likeCommentAction,
   likePostAction,
   loadCommentsAction,
@@ -71,6 +72,28 @@ export function postCardLabels(tf: Translator): PostCardLabels {
     comments: { one: tf.raw('meta.comments.one'), other: tf.raw('meta.comments.other') },
     edited: tf('meta.edited'),
     media: { carousel: tf('gallery.carousel'), attachmentError: tf('errors.generic') },
+  };
+}
+
+/**
+ * The overflow menu's label block (04-09) — chosen HERE for the same reason `postCardLabels` is:
+ * `@tria/module-feed` ships no language (PWA-03), and `/inicio` and `/post/[postId]` must offer the
+ * identical rows. "Copiar link" is deliberately the `share` namespace's own string, not a second
+ * copy under `menu`: the row and the action row's share control are one handler resolving one url,
+ * and two catalog keys for one affordance is exactly how those two drift apart.
+ *
+ * The four confirmation strings are FIXED — nothing interpolates a caption, a name or a filename
+ * into a destructive dialog (T-04-58).
+ */
+export function postMenuLabels(tf: Translator): PostMenuLabels {
+  return {
+    edit: tf('menu.edit'),
+    copyLink: tf('share.copyLink'),
+    delete: tf('menu.delete'),
+    deleteTitle: tf('delete.title'),
+    deleteBody: tf('delete.body'),
+    deleteConfirm: tf('delete.confirm'),
+    deleteCancel: tf('delete.cancel'),
   };
 }
 
@@ -150,6 +173,10 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
       initialError={page === null}
       canPost={bootstrap.permissions.includes('feed.post.create')}
       captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
+      // 04-09 closes 04-01's stub (WINDOWS #18): the empty card's CTA, the desktop header button and
+      // the mobile FAB all point HERE, and the module never assembles a route (MOD-02). It was left
+      // absent until the route existed precisely so nothing linked to a 404.
+      createHref="/criar"
       locale={locale}
       onLoadMore={loadMoreFeedAction}
       onRefresh={refreshFeedAction}
@@ -160,6 +187,11 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
         title: bootstrap.tenant.displayName,
         copied: tf('share.copied'),
         error: tf('errors.generic'),
+      }}
+      menu={{
+        labels: postMenuLabels(tf),
+        deletedLabel: tf('toasts.deleted'),
+        onDelete: deletePostAction,
       }}
       labels={{
         ...card,
@@ -176,6 +208,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
         loadMoreError: tf('errors.loadMore'),
         loadMoreRetry: te('retry'),
         createCta: tf('empty.cta'),
+        createFab: tf('empty.cta'),
         genericError: tf('errors.generic'),
       }}
     />

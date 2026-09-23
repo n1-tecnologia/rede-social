@@ -39,6 +39,19 @@ export const feedModule = defineModule({
         log.info({ event: 'post.published', ...payload }, 'post published');
       },
     },
+    // 04-09's two FEED-03 write events. Ids and flags only, exactly like every payload above.
+    {
+      event: 'post.edited',
+      handler: async (payload) => {
+        log.info({ event: 'post.edited', ...payload }, 'post edited');
+      },
+    },
+    {
+      event: 'post.deleted',
+      handler: async (payload) => {
+        log.info({ event: 'post.deleted', ...payload }, 'post soft-deleted');
+      },
+    },
     // 04-03's five interaction events. Every payload is ids and flags only: a comment BODY never
     // reaches a log line either (T-04-19), which is why the payloads carry none.
     {

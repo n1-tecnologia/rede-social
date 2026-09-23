@@ -201,6 +201,14 @@ export function postCardView(
     // UI-D-15: the marker is a BOOLEAN here, not a second date — the meta row appends "editado" and
     // never a timestamp of its own.
     edited: post.editedAt !== null,
+    // FEED-03. `canManage` is the API's OWN answer (its author predicate), copied THROUGH and never
+    // recomputed here by comparing the viewer's id to the author's — the `canDelete` rule 04-07 set
+    // for comments. It selects the overflow menu's variant; the API's predicate is what decides the
+    // write. `editHref` is built here for the same reason `profileHref` and `shareUrl` are: the
+    // module knows no route table (MOD-02), and a menu row pointing at a screen the viewer would be
+    // refused on is worse than no row at all.
+    canManage: post.canManage,
+    editHref: post.canManage ? `/post/${post.id}/editar` : null,
     likeCount: post.likeCount,
     commentCount: post.commentCount,
     viewerLiked: post.viewerLiked,

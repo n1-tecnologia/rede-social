@@ -59,6 +59,15 @@ export type PostCardView = {
   shareUrl: string | null;
   /** UI-D-15: `edited_at` set by ANY persisted change, rendered as a marker with no date of its own. */
   edited: boolean;
+  /**
+   * FEED-03. The API's OWN answer to "may this viewer manage this post" — the same author predicate
+   * `updatePost`/`softDeletePost` carry in their `where` clause — copied straight through and never
+   * recomputed here by comparing ids. It selects the overflow menu's variant (04-09); it is not what
+   * decides the outcome, which stays the API's predicate (the `canDelete` rule 04-07 set).
+   */
+  canManage: boolean;
+  /** `/post/{id}/editar` when the viewer may edit it, else null. Built by the host (MOD-02). */
+  editHref: string | null;
   likeCount: number;
   commentCount: number;
   viewerLiked: boolean;

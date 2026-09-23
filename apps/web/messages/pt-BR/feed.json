@@ -109,6 +109,59 @@
     "share": {
       "copied": "Link copiado.",
       "copyLink": "Copiar link"
+    },
+    "menu": {
+      "edit": "Editar publicação",
+      "delete": "Excluir publicação"
+    },
+    "delete": {
+      "title": "Excluir publicação?",
+      "body": "Ela sai do feed para todos os membros. Os comentários também deixam de aparecer.",
+      "confirm": "Excluir",
+      "cancel": "Cancelar"
+    },
+    "toasts": {
+      "created": "Publicação criada.",
+      "saved": "Alterações salvas.",
+      "deleted": "Publicação excluída."
+    },
+    "composer": {
+      "createTitle": "Nova publicação",
+      "editTitle": "Editar publicação",
+      "publish": "Publicar",
+      "publishing": "Publicando…",
+      "save": "Salvar alterações",
+      "saving": "Salvando…",
+      "close": "Fechar",
+      "captionLabel": "Texto da publicação",
+      "captionPlaceholder": "Escreva o que quer contar para a comunidade…",
+      "addPhotos": "Adicionar fotos",
+      "addVideo": "Adicionar vídeo",
+      "addFile": "Anexar arquivo",
+      "mediaHelper": "Uma publicação leva fotos ou um vídeo — não os dois.",
+      "attachmentHelper": "PDF de até {limit}.",
+      "removePhoto": "Remover foto",
+      "removeVideo": "Remover vídeo",
+      "removeAttachment": "Remover anexo",
+      "movePhotoLeft": "Mover foto para trás",
+      "movePhotoRight": "Mover foto para a frente",
+      "photosRegion": "Fotos da publicação",
+      "attachmentsRegion": "Arquivos da publicação",
+      "discard": {
+        "title": "Descartar publicação?",
+        "body": "O texto e as mídias selecionadas serão perdidos.",
+        "confirm": "Descartar",
+        "cancel": "Continuar editando"
+      },
+      "errors": {
+        "publish": "Não foi possível publicar. Revise os campos e tente novamente.",
+        "empty": "Escreva algo ou adicione uma mídia para publicar.",
+        "tooManyImages": "Você pode adicionar até {limit} fotos.",
+        "galleryAndVideo": "Escolha fotos ou um vídeo — não os dois.",
+        "tooManyAttachments": "Você pode anexar até {limit} arquivos.",
+        "assetNotUsable": "Não foi possível usar uma das mídias. Tente enviá-la de novo.",
+        "notFound": "Esta publicação não existe mais."
+      }
     }
   }
 }

@@ -1,5 +1,6 @@
 import {
   COMMENTS_PAGE_SIZE,
+  type CreatePost,
   commentPageSchema,
   commentSchema,
   FEED_PAGE_SIZE,
@@ -12,6 +13,7 @@ import {
   type LikeResult,
   likeResultSchema,
   REPLIES_PAGE_SIZE,
+  type UpdatePost,
 } from '@tria/module-feed/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -151,6 +153,56 @@ export async function likePost(postId: string): Promise<LikeResult> {
 
 export async function unlikePost(postId: string): Promise<LikeResult> {
   return toggleLike(postId, 'DELETE');
+}
+
+/* ── The admin write paths (FEED-01, FEED-03) ──────────────────────────────────────────────────── */
+
+/**
+ * `POST /v1/feed/posts` (FEED-01) — the composer's publish.
+ *
+ * Through the SAME `apiFetch` every read above uses, so the composer cannot drift on the tenant
+ * header or on how a refusal is read. The body is already validated by `createPostSchema` in the
+ * action; the API re-validates it independently, and the asset ids inside it are re-checked against
+ * the caller's own tenant inside the writing transaction (T-04-56).
+ */
+export async function createPost(input: CreatePost): Promise<FeedPost> {
+  const res = await apiFetch('/v1/feed/posts', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return feedPostSchema.parse(await res.json());
+}
+
+/**
+ * `PATCH /v1/feed/posts/{postId}` (FEED-03) — the edit screen's save.
+ *
+ * Every miss is the SAME bare 404 the detail read gives: someone else's post, an unknown id,
+ * another tenant's, and — the race this predicate exists for — one that was soft-deleted between
+ * the form loading and the save (T-04-57). The authority is the API's own `author_user_id`
+ * predicate; nothing here decides it.
+ */
+export async function updatePost(postId: string, input: UpdatePost): Promise<FeedPost> {
+  const res = await apiFetch(`/v1/feed/posts/${encodeURIComponent(postId)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return feedPostSchema.parse(await res.json());
+}
+
+/**
+ * `DELETE /v1/feed/posts/{postId}` (FEED-03) — a SOFT delete; nothing is removed from the database.
+ *
+ * A repeat on an already-removed post answers the same bare 404 an unknown id gets, which is what
+ * makes the menu's delete idempotent from the member's side: a double tap produces one stamp, one
+ * event and one toast.
+ */
+export async function softDeletePost(postId: string): Promise<void> {
+  const res = await apiFetch(`/v1/feed/posts/${encodeURIComponent(postId)}`, { method: 'DELETE' });
+  if (!res.ok) throw await apiError(res);
 }
 
 /* ── Comments, replies and their writes (FEED-05, FEED-06, D-59..D-62) ──────────────────────────── */

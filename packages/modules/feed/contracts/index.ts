@@ -262,6 +262,80 @@ export const postLinkPreviewPatchSchema = z.object({
 });
 export type PostLinkPreviewPatch = z.infer<typeof postLinkPreviewPatchSchema>;
 
+/**
+ * `PATCH /v1/feed/posts/{postId}` (FEED-03) — the composer's edit half, and the SAME field set
+ * `createPostSchema` accepts plus the one nullable `linkPreviewId` the remove-prévia affordance
+ * writes (`postLinkPreviewPatchSchema` above, spread in here so there is one definition of it).
+ *
+ * **Every key is optional, but the body may not be empty.** A `PATCH {}` is refused: it would be a
+ * request to set `edited_at` and nothing else, which is a marker without an edit.
+ *
+ * **The media triple is a REPLACEMENT, not a merge.** Present any one of `imageAssetIds`,
+ * `videoAssetId` or `attachmentAssetIds` and the post's whole media set becomes exactly what the
+ * three keys describe (an omitted sibling meaning "none"); present none of them and the media is
+ * untouched. A per-key merge would need a second vocabulary for "remove this one", and the composer
+ * already holds the complete set on screen — it sends what the post should BE, which is also what
+ * makes `media_kind` recomputable from the body alone.
+ *
+ * **`videoAssetId` is nullable here and not in `createPostSchema`**: an edit that removes the video
+ * has to be able to SAY so while still sending the key.
+ *
+ * The publishable rule (caption OR media, never neither) is restated below for the case the body
+ * fully determines, and re-checked in the service against the RESULTING row — a body that only
+ * clears the caption cannot be judged here, because the media it keeps is in the database.
+ */
+export const updatePostSchema = z
+  .object({
+    caption: z.string().trim().max(FEED_MAX_CAPTION).optional(),
+    imageAssetIds: z.array(z.uuid()).optional(),
+    videoAssetId: z.uuid().nullable().optional(),
+    attachmentAssetIds: z.array(z.uuid()).optional(),
+    linkUrl: z.string().max(2048).optional(),
+  })
+  .extend(postLinkPreviewPatchSchema.shape)
+  .strict()
+  .superRefine((value, ctx) => {
+    if (Object.keys(value).length === 0) {
+      ctx.addIssue({ code: 'custom', path: [], message: 'empty_update' });
+      return;
+    }
+    const images = value.imageAssetIds ?? [];
+    const attachments = value.attachmentAssetIds ?? [];
+    const hasVideo = value.videoAssetId !== undefined && value.videoAssetId !== null;
+
+    if (images.length > 0 && hasVideo) {
+      ctx.addIssue({ code: 'custom', path: ['videoAssetId'], message: 'gallery_and_video' });
+    }
+    if (images.length > FEED_MAX_IMAGES) {
+      ctx.addIssue({ code: 'custom', path: ['imageAssetIds'], message: 'too_many_images' });
+    }
+    if (attachments.length > FEED_MAX_ATTACHMENTS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['attachmentAssetIds'],
+        message: 'too_many_attachments',
+      });
+    }
+
+    // Judgeable here ONLY when the body determines both halves: an empty caption together with a
+    // complete media replacement that carries nothing. Every other shape is the service's call.
+    const mediaReplaced =
+      value.imageAssetIds !== undefined ||
+      value.videoAssetId !== undefined ||
+      value.attachmentAssetIds !== undefined;
+    if (
+      value.caption !== undefined &&
+      value.caption.length === 0 &&
+      mediaReplaced &&
+      images.length === 0 &&
+      attachments.length === 0 &&
+      !hasVideo
+    ) {
+      ctx.addIssue({ code: 'custom', path: ['caption'], message: 'empty_post' });
+    }
+  });
+export type UpdatePost = z.infer<typeof updatePostSchema>;
+
 /** Authorship as the card renders it (D-52): the PERSON, reached through their membership. */
 export const feedPostAuthorSchema = z
   .object({
@@ -529,13 +603,41 @@ export interface CommentLiked {
 export type CommentUnliked = CommentLiked;
 
 /**
+ * FEED-03's two write events (04-09). Both over-carry `authorUserId` for the same reason every
+ * payload above does: Phase 7 and Phase 8 build their row straight from the event, without
+ * re-reading a post that — in the delete case — its own read path now refuses.
+ *
+ * `actorUserId` is separate from `authorUserId` even though V1's author predicate makes them equal:
+ * Phase 8's moderator delete is the SAME event with a different actor, and a payload that conflated
+ * the two would have to change shape then.
+ */
+export interface PostEdited {
+  tenantId: string;
+  postId: string;
+  authorUserId: string;
+  actorUserId: string;
+  occurredAt: string;
+}
+
+/** A SOFT delete (FEED-03): the row keeps its `deleted_at` stamp for Phase 8's moderation. */
+export interface PostDeleted {
+  tenantId: string;
+  postId: string;
+  authorUserId: string;
+  actorUserId: string;
+  occurredAt: string;
+}
+
+/**
  * MOD-02 in one block: the module teaches the KERNEL's `EventMap` about its own events instead of
  * the kernel knowing modules exist. Anything that imports this file gets `emit`/`subscribe` typed
- * for all seven.
+ * for all nine.
  */
 declare module '@tria/contracts' {
   interface EventMap {
     'post.published': PostPublished;
+    'post.edited': PostEdited;
+    'post.deleted': PostDeleted;
     'post.liked': PostLiked;
     'post.unliked': PostUnliked;
     'comment.created': CommentCreated;

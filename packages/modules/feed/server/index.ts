@@ -15,6 +15,8 @@ export {
   listFeed,
   listReplies,
   setPostLinkPreview,
+  softDeletePost,
   unlikeComment,
   unlikePost,
+  updatePost,
 } from './service';

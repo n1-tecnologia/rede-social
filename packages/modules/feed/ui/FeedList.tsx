@@ -12,6 +12,7 @@ import {
 import { Newspaper, TriangleAlert } from 'lucide-react';
 import { type ReactNode, useCallback, useState, useTransition } from 'react';
 import { CommentSheet, type CommentSheetProps } from './CommentSheet';
+import { ComposeFab } from './ComposeFab';
 import type { CountTemplates } from './meta';
 import {
   type LikeOutcome,
@@ -20,6 +21,7 @@ import {
   type PostCardView,
   type PostShareTarget,
 } from './PostCard';
+import { PostMenu, type PostMenuLabels, type PostMenuTarget } from './PostMenu';
 
 /**
  * The D-55 home-slot widget: the feed is the main content of `/inicio`, below the branded welcome
@@ -58,6 +60,21 @@ export type FeedCommentsProps = Omit<
   'open' | 'onClose' | 'postId' | 'initialItems' | 'initialCursor' | 'onCountChange'
 >;
 
+/**
+ * FEED-03's overflow menu, hosted the SAME way the comment sheet is (D-59's rule applied to a second
+ * overlay): ONE `PostMenu` for the whole column, not one per card. A menu per card would mount a
+ * dialog, a focus trap and a confirmation for every post on screen, and paging the feed would
+ * multiply them. The card raises "open the menu for this id"; the list decides what is on screen.
+ *
+ * `onDelete` must REJECT on refusal — the confirmation's own error branch is what closes the dialog
+ * without removing the card, and a promise that resolved on failure would take a post off the
+ * member's screen while it still exists for everyone else (the 03-05 "no optimistic removal" rule).
+ */
+export type FeedPostMenuProps = {
+  labels: PostMenuLabels;
+  onDelete: (postId: string) => Promise<void>;
+};
+
 export type FeedListLabels = {
   /** Accessible name of the widget's region. */
   region: string;
@@ -91,6 +108,8 @@ export type FeedListLabels = {
   loadMoreRetry: string;
   /** The desktop header row's compose control (UI-D-17 — there is no floating control on desktop). */
   createCta: string;
+  /** Accessible name of the MOBILE floating control (UI-D-17); same words, different surface. */
+  createFab: string;
   /** The one toast a failed like or a failed refresh raises; never an inline message (UI-SPEC E09). */
   genericError: string;
 };
@@ -125,6 +144,12 @@ export type FeedListProps = {
    * row. The four-outcome branch table lives at the host's composition point, not in here.
    */
   onShare?: (target: PostShareTarget) => void;
+  /**
+   * FEED-03's "…" menu. Present → the overflow control opens the SHARED sheet over the feed and the
+   * list removes a deleted card from its own column; absent → 04-06's seam stays inert and
+   * `onMore` (if the host passes one) still fires, which is what `/post/[id]` uses instead.
+   */
+  menu?: FeedPostMenuProps;
   onMore?: (postId: string) => void;
   /**
    * Per-item media override (04-04's injection point).
@@ -212,6 +237,7 @@ export function FeedList({
   comments,
   onOpenComments,
   onShare,
+  menu,
   onMore,
   renderMedia,
 }: FeedListProps) {
@@ -225,6 +251,8 @@ export function FeedList({
 
   /** Which post the shared sheet is open on, and how far each post's count has moved since. */
   const [commentsOpenFor, setCommentsOpenFor] = useState<string | null>(null);
+  /** Which post the shared OVERFLOW menu is open on (04-09) — one sheet for the whole column. */
+  const [menuTarget, setMenuTarget] = useState<PostMenuTarget | null>(null);
   const [countDeltas, setCountDeltas] = useState<Record<string, number>>({});
 
   // The SERVER sent a different first page (a navigation, not a refresh): re-seed rather than merge.
@@ -321,6 +349,45 @@ export function FeedList({
   );
 
   /**
+   * The overflow control's destination (04-09). With a menu configured it opens the SHARED sheet
+   * over the feed carrying everything the row set depends on — the share url the action row already
+   * uses, the API's own `canManage`, and the host-built edit route — so the menu can never resolve
+   * a different link than the `Send` glyph beside it. Without one, the host's own handler runs.
+   */
+  const openMenu = useCallback(
+    (postId: string) => {
+      if (menu) {
+        const post = items.find((row) => row.id === postId);
+        if (post) {
+          setMenuTarget({
+            postId: post.id,
+            shareUrl: post.shareUrl,
+            canManage: post.canManage,
+            editHref: post.editHref,
+          });
+        }
+      }
+      onMore?.(postId);
+    },
+    [menu, items, onMore],
+  );
+
+  /**
+   * The card leaves the column only on a CONFIRMED delete (the 03-05 "no optimistic removal" rule):
+   * a refusal re-throws, the confirmation's error branch closes the dialog, and the post stays
+   * exactly where it is rather than disappearing from one member's screen while it still exists for
+   * everyone else. The toasts are the host's — `onDelete` raises them either way.
+   */
+  const deletePost = useCallback(
+    async (postId: string) => {
+      if (!menu) return;
+      await menu.onDelete(postId);
+      setItems((previous) => previous.filter((row) => row.id !== postId));
+    },
+    [menu],
+  );
+
+  /**
    * The card's meta count follows the sheet (E09/partial): the DELTA is tracked per post and added
    * to the server's value at render. Rewriting `items` instead would fight the next refresh, which
    * legitimately replaces the whole list with the server's authoritative counts — at which point
@@ -341,6 +408,13 @@ export function FeedList({
         {labels.createCta}
       </a>
     ) : null;
+
+  /**
+   * True exactly when the empty card's own "Criar publicação" button is rendered — the one case the
+   * mobile FAB stands down for (UI-SPEC §Visual Anchors, "Empty feed"): two brand fills in one
+   * viewport, one of them floating over the other, is the collision UI-D-17 rules out.
+   */
+  const emptyCtaOnScreen = createCta !== null && items.length === 0 && !firstLoadFailed;
 
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
@@ -395,7 +469,10 @@ export function FeedList({
               onLikeError={failToast}
               onOpenComments={comments || onOpenComments ? openComments : undefined}
               onShare={onShare}
-              onMore={onMore}
+              // The control renders only when the menu it opens would actually carry a row: a member
+              // on a shell with no share url has nothing to copy and nothing to manage, and a
+              // control that opens an empty sheet is a promise the card cannot keep (04-06's rule).
+              onMore={(menu && (post.canManage || post.shareUrl)) || onMore ? openMenu : undefined}
             />
           ))}
         </div>
@@ -435,6 +512,29 @@ export function FeedList({
 
       {/* ONE sheet for the column (D-59). It stays mounted with `open=false` so `AnimatePresence`
           can play its exit and `BottomSheet` can return focus to the control that opened it. */}
+      {/* UI-D-17: the MOBILE create control. It is suppressed while the empty-state CTA is on screen
+          so the card's own brand button stays the single brand fill in the viewport, and it renders
+          nothing at all on desktop (`md:hidden` inside the component) or without the permission. */}
+      {createHref ? (
+        <ComposeFab
+          href={createHref}
+          label={labels.createFab}
+          visible={canPost && !emptyCtaOnScreen}
+        />
+      ) : null}
+
+      {/* ONE menu for the column (04-09), mounted like the sheet so its exit animation can play. */}
+      {menu ? (
+        <PostMenu
+          open={menuTarget !== null}
+          target={menuTarget}
+          onClose={() => setMenuTarget(null)}
+          onSharePost={onShare}
+          onDelete={deletePost}
+          labels={menu.labels}
+        />
+      ) : null}
+
       {comments ? (
         <CommentSheet
           {...comments}

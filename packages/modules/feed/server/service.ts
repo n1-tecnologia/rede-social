@@ -1,4 +1,4 @@
-import { withTenantTx } from '@tria/core/db/tenant-tx';
+import { type Tx, withTenantTx } from '@tria/core/db/tenant-tx';
 import type { RequestContext } from '@tria/core/server/auth/context';
 import { emit } from '@tria/core/server/events/bus';
 import { ApiError } from '@tria/core/server/http/api-error';
@@ -21,6 +21,7 @@ import type {
   LinkPreviewStatus,
   PostMediaItem,
   RepliesQuery,
+  UpdatePost,
 } from '../contracts/index';
 import {
   FEED_MAX_ATTACHMENTS,
@@ -307,6 +308,181 @@ export async function getPost(ctx: RequestContext, postId: string): Promise<Feed
   return toPost(row, ctx.userId);
 }
 
+/* ── Shared by the create and the edit path (04-09) ────────────────────────────────────────────── */
+
+/** One referenced asset, in insert order, with the `(kind, purpose)` pair it MUST have. */
+type WantedMedia = { assetId: string; kind: 'image' | 'video' | 'file'; position: number };
+
+/**
+ * The three body-shape rules, in the SERVICE (D-53 and the two per-post caps).
+ *
+ * The route's schema already refuses these shapes and this is not redundant defence: `createPost`
+ * and `updatePost` are also reachable from the seed, from a future admin import and from any handler
+ * that assembles its own input, none of which pass through the route's validator.
+ */
+function assertMediaShape(images: string[], attachments: string[], hasVideo: boolean): void {
+  if (images.length > 0 && hasVideo) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'gallery_and_video' });
+  }
+  if (images.length > FEED_MAX_IMAGES) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'too_many_images' });
+  }
+  if (attachments.length > FEED_MAX_ATTACHMENTS) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'too_many_attachments' });
+  }
+}
+
+/** The insert order the gallery's `position` comes from: images, then the video, then the files. */
+function wantedMediaFor(
+  images: string[],
+  video: string | null,
+  attachments: string[],
+): WantedMedia[] {
+  return [
+    ...images.map((assetId, position) => ({ assetId, kind: 'image' as const, position })),
+    ...(video !== null ? [{ assetId: video, kind: 'video' as const, position: 0 }] : []),
+    ...attachments.map((assetId, position) => ({ assetId, kind: 'file' as const, position })),
+  ];
+}
+
+/**
+ * ONE validation read for every referenced id, inside the writing transaction — shared verbatim by
+ * create and edit (T-04-56: an edit that attaches another tenant's asset must be refused by the
+ * SAME rule, not by a second copy of it that could drift).
+ *
+ * The read runs in the TENANT LANE, so `media_assets_tenant_select` is what scopes it: another
+ * tenant's asset id simply does not come back, and the refusal is the same one an unknown id gets —
+ * there is nothing here that compares tenant ids, so no later edit can turn this into a 403 that
+ * confirms the asset exists somewhere (T-04-22).
+ */
+async function validateAssets(tx: Tx, wanted: WantedMedia[]): Promise<void> {
+  if (wanted.length === 0) return;
+  const ids = wanted.map((item) => item.assetId);
+  // `in (…)` over individually-cast literals rather than `= any($1::uuid[])`: the driver binds a
+  // JS string array as `text[]`, and the cast to `uuid[]` is the kind of implicit conversion
+  // that works until one id is malformed and the statement fails as a 500 instead of a 400.
+  const idList = sql.join(
+    ids.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+  const rows = await tx.execute<{ id: string; kind: string; purpose: string; status: string }>(
+    sql`select id, kind, purpose, status from media_assets where id in (${idList})`,
+  );
+  const byId = new Map(rows.map((row) => [row.id, row]));
+
+  for (const item of wanted) {
+    const asset = byId.get(item.assetId);
+    const expectedPurpose = item.kind === 'file' ? 'attachment' : 'post';
+    // D-53 / Phase 3: a video may be published while its transcode runs — the card shows the
+    // `processando` placeholder. Everything else must already be `ready`.
+    const statusOk =
+      asset?.status === 'ready' || (item.kind === 'video' && asset?.status === 'processing');
+    if (!asset || asset.kind !== item.kind || asset.purpose !== expectedPurpose || !statusOk) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { media: 'asset_not_usable' });
+    }
+  }
+  // A duplicate id in the array would pass the loop above but fail `feed_post_media_position_uq`
+  // only if it landed on the same position, so it is refused here instead.
+  if (new Set(ids).size !== ids.length) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'asset_not_usable' });
+  }
+}
+
+/** ONE multi-row insert of the post's media. `postMediaKind` is the PARENT's own `media_kind`. */
+async function insertPostMedia(
+  tx: Tx,
+  ctx: RequestContext,
+  postId: string,
+  mediaKind: string,
+  wanted: WantedMedia[],
+): Promise<void> {
+  if (wanted.length === 0) return;
+  const values = sql.join(
+    wanted.map(
+      (item) =>
+        sql`(${ctx.tenantId}::uuid, ${postId}::uuid, ${mediaKind}, ${item.assetId}::uuid, ${item.kind}, ${item.position})`,
+    ),
+    sql`, `,
+  );
+  await tx.execute(sql`
+    insert into feed_post_media
+      (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+    values ${values}`);
+}
+
+type LinkCandidate = { url: string; hash: string; normalised: string };
+
+/**
+ * MEDIA-04, the WRITE-TIME half, shared by create and edit.
+ *
+ * **A refusal is SWALLOWED (UI-D-13).** `assertAllowedUrl` throwing means the policy said no; the
+ * post still publishes, the link still renders bare inside the caption, and the response carries
+ * nothing that separates "blocked host" from "no metadata". An error here would turn the composer
+ * into an internal-network scanner: an admin could paste `http://169.254.169.254/` and read the
+ * difference. Silence is the mitigation. An EMPTY string is the composer's "no preview, thank you"
+ * — `new URL('')` throws, so removing the prévia needs no second field on the create path.
+ *
+ * NOTE the write path deliberately does NOT check the target's ADDRESS. It cannot: deciding whether
+ * a hostname points into a private range needs a resolver, and a resolver in a request path is the
+ * outbound work this whole design moves to the worker. The SOCKET is the boundary (`guardedAgent`),
+ * so a refused URL costs one row and one job that lands 'failed'.
+ */
+function resolveLinkCandidate(raw: string | null | undefined): LinkCandidate | null {
+  if (raw === null || raw === undefined) return null;
+  try {
+    // The SAME matcher the caption renderer auto-links with (`firstUrlIn`), then the same
+    // synchronous policy the worker re-applies. Two matchers would mean a card under a URL the
+    // caption did not turn blue, or the reverse.
+    assertAllowedUrl(raw);
+    return { url: raw, hash: urlHash(raw), normalised: normaliseUrl(raw) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The per-tenant cache row for a candidate link, plus its unfurl job — resolved BEFORE the post
+ * write so `link_preview_id` is stamped in one statement.
+ *
+ * `on conflict (tenant_id, url_hash) do nothing` is what makes a second post of the same link cost
+ * NO second outbound fetch: the insert returns a row only when it actually created one, so the
+ * enqueue runs exactly once per (tenant, url). A cache hit falls through to the select and reuses
+ * whatever the first post already resolved. The uniqueness is per TENANT, so the same link in
+ * another community is a separate row and a separate fetch — the price of the isolation (T-04-34).
+ *
+ * The enqueue is in the SAME transaction as the row: a rollback takes the job with it, so there is
+ * no window where a `pending` preview exists with nothing to resolve it. `singletonKey` is the
+ * preview id, so a retried request cannot stack two fetches of one URL (T-07-04).
+ */
+async function upsertLinkPreview(
+  tx: Tx,
+  ctx: RequestContext,
+  candidate: LinkCandidate | null,
+): Promise<string | null> {
+  if (candidate === null) return null;
+
+  const insertedPreview = await tx.execute<{ id: string }>(sql`
+    insert into feed_link_previews (tenant_id, url_hash, url, status)
+    values (${ctx.tenantId}::uuid, ${candidate.hash}, ${candidate.normalised}, 'pending')
+    on conflict (tenant_id, url_hash) do nothing
+    returning id`);
+
+  const fresh = insertedPreview[0];
+  if (fresh) {
+    await enqueueInTx(
+      tx,
+      FEED_UNFURL_QUEUE,
+      { tenantId: ctx.tenantId, previewId: fresh.id, url: candidate.normalised },
+      { singletonKey: fresh.id },
+    );
+    return fresh.id;
+  }
+
+  const existing = await tx.execute<{ id: string }>(sql`
+    select id from feed_link_previews where url_hash = ${candidate.hash} limit 1`);
+  return existing[0]?.id ?? null;
+}
+
 /**
  * `POST /v1/feed/posts` (FEED-08).
  *
@@ -320,133 +496,28 @@ export async function getPost(ctx: RequestContext, postId: string): Promise<Feed
 export async function createPost(ctx: RequestContext, input: CreatePost): Promise<FeedPost> {
   const images = input.imageAssetIds ?? [];
   const attachments = input.attachmentAssetIds ?? [];
-  const video = input.videoAssetId;
+  const video = input.videoAssetId ?? null;
 
-  // The counts and the XOR again, in the SERVICE. The schema already refuses these shapes, and this
-  // is not redundant defence: `createPost` is also reachable from the seed, from a future admin
-  // import and from any handler that assembles its own `CreatePost`, none of which pass through the
-  // route's validator.
-  if (images.length > 0 && video !== undefined) {
-    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'gallery_and_video' });
-  }
-  if (images.length > FEED_MAX_IMAGES) {
-    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'too_many_images' });
-  }
-  if (attachments.length > FEED_MAX_ATTACHMENTS) {
-    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'too_many_attachments' });
-  }
+  assertMediaShape(images, attachments, video !== null);
 
   // D-53's discriminator, derived from the input — never sent by the client. The parent's single
   // `media_kind` is what `feed_post_media_kind_fk` then constrains every media row against.
   const mediaKind: 'none' | 'gallery' | 'video' =
-    video !== undefined ? 'video' : images.length > 0 ? 'gallery' : 'none';
+    video !== null ? 'video' : images.length > 0 ? 'gallery' : 'none';
 
-  /** Every referenced asset, in insert order, with the (kind, purpose) pair it MUST have. */
-  const wanted: { assetId: string; kind: 'image' | 'video' | 'file'; position: number }[] = [
-    ...images.map((assetId, position) => ({ assetId, kind: 'image' as const, position })),
-    ...(video !== undefined ? [{ assetId: video, kind: 'video' as const, position: 0 }] : []),
-    ...attachments.map((assetId, position) => ({ assetId, kind: 'file' as const, position })),
-  ];
+  const wanted = wantedMediaFor(images, video, attachments);
 
   /**
    * MEDIA-04, the CREATE-TIME half. The roadmap's "unfurled server-side at create time" is satisfied
    * here: the URL is chosen, validated and its cache row created inside the post's own transaction.
    * The bytes are fetched by the worker (`server/unfurl/job.ts`) — an outbound fetch to a host the
    * caption named has no business inside a Cloud Run request.
-   *
-   * **A refusal is SWALLOWED (UI-D-13).** `assertAllowedUrl` throwing means the policy said no; the
-   * post still publishes, the link still renders bare inside the caption, and the response carries
-   * nothing that separates "blocked host" from "no metadata". An error here would turn the composer
-   * into an internal-network scanner: an admin could paste `http://169.254.169.254/` and read the
-   * difference. Silence is the mitigation.
    */
-  const linkCandidate = (() => {
-    const raw = input.linkUrl ?? firstUrlIn(input.caption);
-    if (raw === null || raw === undefined) return null;
-    try {
-      // The SAME matcher the caption renderer auto-links with (`firstUrlIn`), then the same
-      // synchronous policy the worker re-applies. Two matchers would mean a card under a URL the
-      // caption did not turn blue, or the reverse.
-      assertAllowedUrl(raw);
-      // NOTE the create path deliberately does NOT check the target's ADDRESS. It cannot: deciding
-      // whether a hostname points into a private range needs a resolver, and a resolver in a
-      // request path is the outbound work this whole design moves to the worker. The SOCKET is the
-      // boundary (`guardedAgent`), so a refused URL costs one row and one job that lands 'failed'.
-      // Adding a partial IP-literal check here would buy no safety and would only split one rule
-      // across two places.
-      return { url: raw, hash: urlHash(raw), normalised: normaliseUrl(raw) };
-    } catch {
-      return null;
-    }
-  })();
+  const linkCandidate = resolveLinkCandidate(input.linkUrl ?? firstUrlIn(input.caption));
 
   const created = await withTenantTx(ctx, async (tx) => {
-    if (wanted.length > 0) {
-      // ONE validation read for every referenced id, inside the writing transaction. The read runs
-      // in the TENANT LANE, so `media_assets_tenant_select` is what scopes it: another tenant's
-      // asset id simply does not come back, and the refusal below is the same one an unknown id
-      // gets — there is nothing here that compares tenant ids, so no later edit can turn this into
-      // a 403 that confirms the asset exists somewhere (T-04-22).
-      const ids = wanted.map((item) => item.assetId);
-      // `in (…)` over individually-cast literals rather than `= any($1::uuid[])`: the driver binds a
-      // JS string array as `text[]`, and the cast to `uuid[]` is the kind of implicit conversion
-      // that works until one id is malformed and the statement fails as a 500 instead of a 400.
-      const idList = sql.join(
-        ids.map((id) => sql`${id}::uuid`),
-        sql`, `,
-      );
-      const rows = await tx.execute<{ id: string; kind: string; purpose: string; status: string }>(
-        sql`select id, kind, purpose, status from media_assets where id in (${idList})`,
-      );
-      const byId = new Map(rows.map((row) => [row.id, row]));
-
-      for (const item of wanted) {
-        const asset = byId.get(item.assetId);
-        // A duplicate id in the array would pass this loop but fail `feed_post_media_position_uq`
-        // only if it landed on the same position, so it is refused here instead.
-        const expectedPurpose = item.kind === 'file' ? 'attachment' : 'post';
-        // D-53 / Phase 3: a video may be published while its transcode runs — the card shows the
-        // `processando` placeholder. Everything else must already be `ready`.
-        const statusOk =
-          asset?.status === 'ready' || (item.kind === 'video' && asset?.status === 'processing');
-        if (!asset || asset.kind !== item.kind || asset.purpose !== expectedPurpose || !statusOk) {
-          throw new ApiError(400, 'VALIDATION_FAILED', { media: 'asset_not_usable' });
-        }
-      }
-      if (new Set(ids).size !== ids.length) {
-        throw new ApiError(400, 'VALIDATION_FAILED', { media: 'asset_not_usable' });
-      }
-    }
-
-    /**
-     * The per-tenant cache, resolved BEFORE the post insert so `link_preview_id` can be stamped in
-     * one write.
-     *
-     * `on conflict (tenant_id, url_hash) do nothing` is what makes a second post of the same link
-     * cost NO second outbound fetch: the insert returns a row only when it actually created one, so
-     * `enqueueInTx` below runs exactly once per (tenant, url). A cache hit falls through to the
-     * select and reuses whatever the first post already resolved. The uniqueness is per TENANT, so
-     * the same link in another community is a separate row and a separate fetch — the price of the
-     * isolation (T-04-34).
-     */
-    let previewId: string | null = null;
-    let previewIsNew = false;
-    if (linkCandidate !== null) {
-      const insertedPreview = await tx.execute<{ id: string }>(sql`
-        insert into feed_link_previews (tenant_id, url_hash, url, status)
-        values (${ctx.tenantId}::uuid, ${linkCandidate.hash}, ${linkCandidate.normalised}, 'pending')
-        on conflict (tenant_id, url_hash) do nothing
-        returning id`);
-      const fresh = insertedPreview[0];
-      if (fresh) {
-        previewId = fresh.id;
-        previewIsNew = true;
-      } else {
-        const existing = await tx.execute<{ id: string }>(sql`
-          select id from feed_link_previews where url_hash = ${linkCandidate.hash} limit 1`);
-        previewId = existing[0]?.id ?? null;
-      }
-    }
+    await validateAssets(tx, wanted);
+    const previewId = await upsertLinkPreview(tx, ctx, linkCandidate);
 
     const [inserted] = await tx
       .insert(feedPosts)
@@ -460,34 +531,7 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
       .returning();
     if (!inserted) throw new ApiError(500, 'INTERNAL');
 
-    // In the SAME transaction as the post and the cache row: a rollback takes the job with it, so
-    // there is no window where a `pending` preview exists with nothing to resolve it. `singletonKey`
-    // is the preview id, so a retried request cannot stack two fetches of one URL (T-07-04).
-    if (previewId !== null && previewIsNew) {
-      await enqueueInTx(
-        tx,
-        FEED_UNFURL_QUEUE,
-        { tenantId: ctx.tenantId, previewId, url: linkCandidate?.normalised ?? '' },
-        { singletonKey: previewId },
-      );
-    }
-
-    if (wanted.length > 0) {
-      // ONE multi-row insert. `post_media_kind` is the parent's own `media_kind`, so the composite
-      // foreign key has something to match; a row that disagreed would be refused by the database
-      // rather than by this function.
-      const values = sql.join(
-        wanted.map(
-          (item) =>
-            sql`(${ctx.tenantId}::uuid, ${inserted.id}::uuid, ${mediaKind}, ${item.assetId}::uuid, ${item.kind}, ${item.position})`,
-        ),
-        sql`, `,
-      );
-      await tx.execute(sql`
-        insert into feed_post_media
-          (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
-        values ${values}`);
-    }
+    await insertPostMedia(tx, ctx, inserted.id, mediaKind, wanted);
 
     // The author's own membership + profile, in the SAME transaction: the created post is returned
     // in exactly the shape the list returns, so the composer can prepend it without a re-read.
@@ -577,6 +621,235 @@ function isMediaShapeViolation(error: unknown): boolean {
     current = e.cause;
   }
   return false;
+}
+
+/* ── FEED-03: the edit and the soft delete (04-09) ─────────────────────────────────────────────── */
+
+/**
+ * The shape the update needs before it can decide anything: the post's current caption, its
+ * `media_kind`, its preview and HOW MANY media rows it carries — read in ONE statement behind the
+ * SAME two predicates the update itself carries.
+ */
+type EditableRow = {
+  caption: string;
+  media_kind: 'none' | 'gallery' | 'video';
+  link_preview_id: string | null;
+  media_count: number;
+};
+
+/**
+ * `PATCH /v1/feed/posts/{postId}` (FEED-03).
+ *
+ * **TWO PREDICATES, AND NEITHER IS A ROLE CHECK — do not "simplify" either away.**
+ *
+ *  - `author_user_id = ctx.userId` is the AUTHORISATION, and it lives in the statement rather than
+ *    in a branch above it. The route's `requirePermission('feed.post.manage')` says "this role may
+ *    manage posts"; this says "this one is yours". V1 needs both, because a second `admin_tenant`
+ *    of the same tenant holds the permission and must still not touch a colleague's post (T-04-54).
+ *    Replacing it with a role comparison would silently widen the route to every admin.
+ *  - `deleted_at is null` is what makes DELETE WIN a concurrent edit: an edit applied to a post that
+ *    was soft-deleted in between touches zero rows and answers the same bare 404 an unknown id gets,
+ *    rather than resurrecting or half-updating it (T-04-57).
+ *
+ * Zero rows is ONE bare 404 for all of it — someone else's post, an unknown id, another tenant's,
+ * already removed — so a second admin cannot even probe existence (D-23).
+ *
+ * **`edited_at` is set on ANY persisted change, media included** (UI-D-15), and a re-save of
+ * byte-identical content still advances it: "edited" here means "the author saved this post again",
+ * not "the bytes differ". A diff-gated marker would need a canonical comparison of caption, media
+ * order and preview, and would quietly tell the reader nothing happened when the author reordered
+ * two photos back and forth.
+ *
+ * **The media triple is a REPLACEMENT** (see `updatePostSchema`): present any of the three keys and
+ * the post's whole media set becomes what they describe. The rows are deleted BEFORE the parent's
+ * `media_kind` moves, because `feed_post_media_kind_fk` points at `(id, media_kind)` and would
+ * refuse the update while a row still named the old pair.
+ */
+export async function updatePost(
+  ctx: RequestContext,
+  postId: string,
+  input: UpdatePost,
+): Promise<FeedPost> {
+  const mediaReplaced =
+    input.imageAssetIds !== undefined ||
+    input.videoAssetId !== undefined ||
+    input.attachmentAssetIds !== undefined;
+
+  const images = input.imageAssetIds ?? [];
+  const attachments = input.attachmentAssetIds ?? [];
+  const video = input.videoAssetId ?? null;
+  if (mediaReplaced) assertMediaShape(images, attachments, video !== null);
+  const wanted = mediaReplaced ? wantedMediaFor(images, video, attachments) : [];
+  const nextMediaKind: 'none' | 'gallery' | 'video' =
+    video !== null ? 'video' : images.length > 0 ? 'gallery' : 'none';
+
+  const updated = await withTenantTx(ctx, async (tx) => {
+    // The author + live-row pair, read first so the resulting state can be judged before anything
+    // is written. `for update` holds the row for the rest of the transaction, so a delete that
+    // arrives mid-edit queues behind it instead of interleaving with the media rewrite.
+    const current = await tx.execute<EditableRow>(sql`
+      select p.caption,
+             p.media_kind,
+             p.link_preview_id,
+             (select count(*) from feed_post_media m where m.post_id = p.id)::int as media_count
+        from feed_posts p
+       where p.id = ${postId}::uuid
+         and p.author_user_id = ${ctx.userId}::uuid
+         and p.deleted_at is null
+       for update`);
+    const row = current[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+
+    const caption = input.caption ?? row.caption;
+    const mediaKind = mediaReplaced ? nextMediaKind : row.media_kind;
+    const mediaCount = mediaReplaced ? wanted.length : row.media_count;
+
+    // The publishable rule, judged against the RESULTING row rather than against the body: an edit
+    // that only clears the caption is refused exactly when the post keeps no media (FEED-01/empty).
+    // Same `empty_post` code `createPostSchema` raises, so both paths read as one rule.
+    if (caption.length === 0 && mediaCount === 0) {
+      throw new ApiError(400, 'VALIDATION_FAILED', {
+        issues: [{ path: 'caption', message: 'empty_post' }],
+      });
+    }
+
+    if (mediaReplaced) {
+      await validateAssets(tx, wanted);
+      // BEFORE the parent's `media_kind` moves — see the docblock.
+      await tx.execute(sql`delete from feed_post_media where post_id = ${postId}::uuid`);
+    }
+
+    /**
+     * The preview, in three mutually exclusive branches:
+     *  - `linkPreviewId` present (the composer's "Remover prévia", which only ever sends `null`):
+     *    that value wins. A uuid is re-read in the TENANT LANE first, so a crafted id belonging to
+     *    another tenant cannot be stamped onto this post — referential checks run as the referenced
+     *    table's owner and would not see RLS at all;
+     *  - otherwise a caption or an explicit `linkUrl` in the body re-resolves the candidate exactly
+     *    as `createPost` does, so an edited caption that drops its URL also drops the card;
+     *  - otherwise (a media-only edit) the post keeps whatever preview it had.
+     */
+    let previewId = row.link_preview_id;
+    if (input.linkPreviewId !== undefined) {
+      if (input.linkPreviewId === null) {
+        previewId = null;
+      } else {
+        const visible = await tx.execute<{ id: string }>(
+          sql`select id from feed_link_previews where id = ${input.linkPreviewId}::uuid limit 1`,
+        );
+        if (!visible[0])
+          throw new ApiError(400, 'VALIDATION_FAILED', { media: 'asset_not_usable' });
+        previewId = input.linkPreviewId;
+      }
+    } else if (input.caption !== undefined || input.linkUrl !== undefined) {
+      previewId = await upsertLinkPreview(
+        tx,
+        ctx,
+        resolveLinkCandidate(input.linkUrl ?? firstUrlIn(caption)),
+      );
+    }
+
+    const written = await tx.execute<{ id: string }>(sql`
+      update feed_posts
+         set caption = ${caption},
+             media_kind = ${mediaKind},
+             link_preview_id = ${previewId}::uuid,
+             edited_at = now()
+       where id = ${postId}::uuid
+         and author_user_id = ${ctx.userId}::uuid
+         and deleted_at is null
+      returning id`);
+    if (!written[0]) throw new ApiError(404, 'NOT_FOUND');
+
+    if (mediaReplaced) await insertPostMedia(tx, ctx, postId, mediaKind, wanted);
+
+    const rows = await tx.execute<FeedRow>(sql`
+      ${postProjection(ctx.userId)}
+       where p.id = ${postId}::uuid
+       limit 1`);
+    const projected = rows[0];
+    if (!projected) throw new ApiError(500, 'INTERNAL');
+    return projected;
+  }).catch((error: unknown) => {
+    if (isMediaShapeViolation(error)) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { media: 'gallery_and_video' });
+    }
+    throw error;
+  });
+
+  emit(ctx, 'post.edited', {
+    tenantId: ctx.tenantId,
+    postId: updated.id,
+    authorUserId: updated.author_user_id,
+    actorUserId: ctx.userId,
+    occurredAt: updated.edited_at ?? updated.created_at,
+  });
+
+  log.info(
+    {
+      event: 'feed.post.edited',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      postId: updated.id,
+      // Shape only, never a caption or a filename (T-04-05).
+      captionLength: updated.caption.length,
+      mediaKind: updated.media_kind,
+      mediaCount: updated.media.length,
+    },
+    'post edited',
+  );
+
+  return toPost(updated, ctx.userId);
+}
+
+/**
+ * `DELETE /v1/feed/posts/{postId}` (FEED-03) — a SOFT delete.
+ *
+ * **NOTHING IS DELETED.** The row keeps its `deleted_at` stamp, its `feed_post_media` rows, its
+ * comments and its media assets: Phase 8's MODER-01 has to be able to SEE a removed post through
+ * the tenant lane, and the Phase 3 sweeper collects orphaned bytes on its own schedule rather than
+ * inline on a request that a member is waiting on. A `delete from` here would also take the
+ * comments with it by cascade, which is a moderation decision this route does not get to make.
+ *
+ * The SAME two predicates `updatePost` carries, for the same two reasons: `author_user_id` is the
+ * authorisation (a second admin holding `feed.post.manage` still cannot remove a colleague's post,
+ * T-04-54) and `deleted_at is null` makes a REPEAT delete a no-op that answers the identical bare
+ * 404 an unknown id gets — idempotent from the caller's side, with no second event and no second
+ * stamp (FEED-03/idempotency). Neither is a role check; do not "simplify" either into one.
+ */
+export async function softDeletePost(ctx: RequestContext, postId: string): Promise<void> {
+  const authorUserId = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ author_user_id: string }>(sql`
+      update feed_posts
+         set deleted_at = now()
+       where id = ${postId}::uuid
+         and author_user_id = ${ctx.userId}::uuid
+         and deleted_at is null
+      returning author_user_id`);
+    const row = rows[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    return row.author_user_id;
+  });
+
+  emit(ctx, 'post.deleted', {
+    tenantId: ctx.tenantId,
+    postId,
+    authorUserId,
+    actorUserId: ctx.userId,
+    occurredAt: new Date().toISOString(),
+  });
+
+  log.info(
+    {
+      event: 'feed.post.deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      postId,
+    },
+    'post soft-deleted',
+  );
 }
 
 /* ── Interactions: likes, comments, replies (FEED-04, FEED-05, FEED-06) ────────────────────────── */

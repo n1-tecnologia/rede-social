@@ -16,6 +16,7 @@ import {
   feedQuerySchema,
   likeResultSchema,
   repliesQuerySchema,
+  updatePostSchema,
 } from '../contracts/index';
 import {
   createComment,
@@ -27,8 +28,10 @@ import {
   listComments,
   listFeed,
   listReplies,
+  softDeletePost,
   unlikeComment,
   unlikePost,
+  updatePost,
 } from './service';
 
 /**
@@ -123,6 +126,65 @@ const createPostRoute = createRoute({
   },
 });
 
+/** The post id every post-scoped route takes; a miss is a bare 404 (D-23). */
+const postIdParam = z.object({ postId: z.uuid() });
+
+/**
+ * FEED-03's two write routes.
+ *
+ * **The permission is on the route; the AUTHORSHIP is in the statement.** `feed.post.manage` says
+ * "this role may manage posts" and is what a tenant grants (never `requireRole`, FEED-08/T-04-03);
+ * `updatePost`/`softDeletePost` additionally carry `author_user_id = ctx.userId` in their own `where`
+ * clause, which is what stops a SECOND `admin_tenant` of the same tenant from editing or removing a
+ * colleague's post in V1 (T-04-54). Phase 8 widens moderation by granting a permission and relaxing
+ * that predicate deliberately — not by discovering the route was already open.
+ */
+const updatePostRoute = createRoute({
+  method: 'patch',
+  path: '/posts/{postId}',
+  // The literal, not `FEED_PERMISSIONS.manage`: this string is the one thing a reviewer greps for.
+  middleware: [requirePermission('feed.post.manage')] as const,
+  request: {
+    params: postIdParam,
+    body: { content: { 'application/json': { schema: updatePostSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The updated post, in the same shape the feed list returns. `editedAt` is set on ANY persisted change, media included (UI-D-15) — re-saving identical content still advances it.',
+      content: { 'application/json': { schema: feedPostSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED`. `details.media` carries one of the create path's machine codes; an edit that would leave the post with neither a caption nor any media answers `details.issues` with `empty_post`, exactly as the create path does.",
+    },
+    403: { description: 'The caller does not hold `feed.post.manage` in this tenant' },
+    404: {
+      description:
+        "Not this author's post, unknown, another tenant's, or soft-deleted — ONE bare code for all four, with no `details` (D-23). A soft delete therefore WINS a concurrent edit: the update's predicate carries `deleted_at is null`, so the edit touches zero rows.",
+    },
+  },
+});
+
+const deletePostRoute = createRoute({
+  method: 'delete',
+  path: '/posts/{postId}',
+  middleware: [requirePermission('feed.post.manage')] as const,
+  request: { params: postIdParam },
+  responses: {
+    200: {
+      description:
+        'The post was SOFT-deleted (FEED-03). The row keeps its `deleted_at` stamp, and its media rows, comments and assets are left for Phase 8 moderation and the Phase 3 sweeper.',
+      content: { 'application/json': { schema: z.object({ deleted: z.literal(true) }).strict() } },
+    },
+    403: { description: 'The caller does not hold `feed.post.manage` in this tenant' },
+    404: {
+      description:
+        "Not this author's post, unknown, another tenant's, or ALREADY removed — one bare code for all four, which is what makes a repeat delete a no-op with no second event.",
+    },
+  },
+});
+
 /* ── Interactions (FEED-04, FEED-05, FEED-06) ─────────────────────────────────────────────────── */
 
 /**
@@ -136,7 +198,6 @@ const createPostRoute = createRoute({
  *  - a miss is a BARE 404 with no `details` (unknown id, another tenant's, removed, or — for a
  *    delete — someone else's). Only the reply-depth refusal carries a machine code.
  */
-const postIdParam = z.object({ postId: z.uuid() });
 const commentIdParam = z.object({ commentId: z.uuid() });
 
 const likeResponses = {
@@ -253,6 +314,15 @@ export const feedRoutes = feed
   .openapi(createPostRoute, async (c) =>
     c.json(await createPost(c.get('ctx'), c.req.valid('json')), 201),
   )
+  .openapi(updatePostRoute, async (c) => {
+    const { postId } = c.req.valid('param');
+    return c.json(await updatePost(c.get('ctx'), postId, c.req.valid('json')), 200);
+  })
+  .openapi(deletePostRoute, async (c) => {
+    const { postId } = c.req.valid('param');
+    await softDeletePost(c.get('ctx'), postId);
+    return c.json({ deleted: true } as const, 200);
+  })
   .openapi(likePostRoute, async (c) => {
     const { postId } = c.req.valid('param');
     return c.json(await likePost(c.get('ctx'), postId), 200);

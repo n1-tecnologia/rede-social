@@ -3,12 +3,16 @@ import { EmptyState, PageHeader } from '@tria/ui';
 import { CircleAlert } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { likePostAction, unlikePostAction } from '@/app/(app)/inicio/feed-actions';
+import {
+  deletePostAction,
+  likePostAction,
+  unlikePostAction,
+} from '@/app/(app)/inicio/feed-actions';
 import { PostDetail } from '@/components/feed/PostDetail';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadPost, loadPostComments } from '@/lib/feed';
 import { commentView, postCardView } from '@/lib/feed-view';
-import { feedCommentsProps, postCardLabels } from '@/lib/registry';
+import { feedCommentsProps, postCardLabels, postMenuLabels } from '@/lib/registry';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -111,6 +115,11 @@ export default async function PostPage({ params }: { params: Promise<{ postId: s
         onUnlike={unlikePostAction}
         genericErrorLabel={tf('errors.generic')}
         share={{ title: bootstrap.tenant.displayName, copied: tf('share.copied') }}
+        menu={{
+          labels: postMenuLabels(tf),
+          deletedLabel: tf('toasts.deleted'),
+          onDelete: deletePostAction,
+        }}
         comments={{
           ...feedCommentsProps(locale, tf, bootstrap),
           initialItems:

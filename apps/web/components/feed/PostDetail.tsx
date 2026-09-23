@@ -7,9 +7,14 @@ import {
   PostCard,
   type PostCardLabels,
   type PostCardView,
+  PostMenu,
+  type PostMenuLabels,
 } from '@tria/module-feed/ui';
 import { useToast } from '@tria/ui';
-import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useState } from 'react';
+import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
+import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';
 
 /**
@@ -40,6 +45,12 @@ export type PostDetailProps = {
    * caption (T-04-52). The url itself rides `post.shareUrl`, composed on the server.
    */
   share: { title: string; copied: string };
+  /**
+   * FEED-03's overflow menu (04-09). The page hosts its own rather than reaching for `FeedList`'s:
+   * there is ONE card here, and a delete has nowhere to leave a column from — it navigates back to
+   * `/inicio`, because the screen the member is standing on has just stopped existing (UI-D-16).
+   */
+  menu: { labels: PostMenuLabels; deletedLabel: string; onDelete: typeof deletePostAction };
   comments: Omit<CommentsListProps, 'postId' | 'variant'>;
 };
 
@@ -52,13 +63,33 @@ export function PostDetail({
   onUnlike,
   genericErrorLabel,
   share,
+  menu,
   comments,
 }: PostDetailProps) {
   const toast = useToast();
+  const router = useRouter();
+  const [menuOpen, setMenuOpen] = useState(false);
   const onShare = useSharePost(share.title, {
     copied: share.copied,
     error: genericErrorLabel,
   });
+  const deletePost = useDeletePost(menu.onDelete, {
+    deleted: menu.deletedLabel,
+    error: genericErrorLabel,
+  });
+
+  /**
+   * The delete leaves the page only on a CONFIRMED removal: `useDeletePost` rejects on a refusal,
+   * so the navigation below is unreachable unless the API really stamped the row. Staying put after
+   * a refusal is the same "no optimistic removal" rule the feed column follows.
+   */
+  const confirmDelete = useCallback(
+    async (postId: string) => {
+      await deletePost(postId);
+      router.push('/inicio');
+    },
+    [deletePost, router],
+  );
 
   const failToast = useCallback(() => {
     toast.show({ tone: 'error', message: genericErrorLabel });
@@ -75,6 +106,22 @@ export function PostDetail({
         onUnlike={onUnlike}
         onLikeError={failToast}
         onShare={onShare}
+        // The control renders only when the menu behind it would carry a row (04-06's rule): a
+        // member on a shell with no share url has nothing to copy and nothing to manage.
+        onMore={post.canManage || post.shareUrl ? () => setMenuOpen(true) : undefined}
+      />
+      <PostMenu
+        open={menuOpen}
+        target={{
+          postId: post.id,
+          shareUrl: post.shareUrl,
+          canManage: post.canManage,
+          editHref: post.editHref,
+        }}
+        onClose={() => setMenuOpen(false)}
+        onSharePost={onShare}
+        onDelete={confirmDelete}
+        labels={menu.labels}
       />
       {/* No `onOpenComments` and no sheet: the comments ARE the screen below. Wiring the card's
           comment control to a second surface here would open a bottom sheet over a list the member

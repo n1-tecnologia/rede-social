@@ -27,12 +27,14 @@ export {
   CommentsListSkeleton,
   type CommentViewer,
 } from './CommentsList';
+export { ComposeFab, type ComposeFabProps } from './ComposeFab';
 export {
   FeedCardSkeleton,
   type FeedCommentsProps,
   FeedList,
   type FeedListProps,
   FeedListSkeleton,
+  type FeedPostMenuProps,
 } from './FeedList';
 export {
   LikeButton,
@@ -66,6 +68,12 @@ export {
   type PostMediaLabels,
   type PostMediaProps,
 } from './PostMedia';
+export {
+  PostMenu,
+  type PostMenuLabels,
+  type PostMenuProps,
+  type PostMenuTarget,
+} from './PostMenu';
 export {
   type SharePostPayload,
   type SharePostResult,
