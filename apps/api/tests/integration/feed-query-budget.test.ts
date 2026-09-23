@@ -54,6 +54,18 @@ export const FEED_REPLIES_STATEMENT_BUDGET = 1;
 export const COMMUNITY_LIST_STATEMENT_BUDGET = 1;
 
 /**
+ * `GET /v1/stories` (05-05): ONE statement against the story tables, media hydration AND
+ * `viewerLiked` included (Pitfall 11).
+ *
+ * The strip is the widget at the TOP of `/inicio`, so it pays on every home-screen render for every
+ * member — a per-circle lookup for the thumbnail ladder would be the most-executed N+1 in the
+ * product. `storyProjection` does the `join media_assets` and the `feed_likes` existence check in
+ * the same statement the story rows come from, and this budget is what keeps it there.
+ */
+// biome-ignore lint/suspicious/noExportsInTest: colocated with the only assertion that proves it
+export const STORY_LIST_STATEMENT_BUDGET = 1;
+
+/**
  * Every table the feed module reads. `feed_comments` and `feed_likes` are now real (04-03) and the
  * list budget still holds at ONE: `viewerLiked`'s `feed_likes` join landed in the SAME statement,
  * which is exactly what this regex was written in 04-01 to force. `feed_post_media` and
@@ -67,6 +79,13 @@ const FEED_TABLES_PATTERN = 'feed_(posts|post_media|comments|likes|link_previews
  * turns that into a red build rather than a silently more expensive page.
  */
 const COMMUNITY_TABLES_PATTERN = 'communit(ies|y_members)';
+
+/**
+ * The story module's own table. `feed_likes` is deliberately NOT named here even though
+ * `storyProjection` reads it: the feed regex already covers it, and naming it twice would let a
+ * story page borrow the feed's budget headroom.
+ */
+const STORY_TABLES_PATTERN = 'stories';
 
 let token = '';
 let tenantId = '';
@@ -223,6 +242,15 @@ async function communityCalls(): Promise<number> {
   return measured?.calls ?? 0;
 }
 
+/** Sum of `calls` over the STORY table since the last reset — filtered, never a total. */
+async function storyCalls(): Promise<number> {
+  const [measured] = await adminSql<{ calls: number }[]>`
+    select coalesce(sum(calls), 0)::int as calls
+      from pg_stat_statements
+     where query ~ ${STORY_TABLES_PATTERN}`;
+  return measured?.calls ?? 0;
+}
+
 describe('GET /v1/communities — the community list query budget (05-01)', () => {
   it(`costs at most ${COMMUNITY_LIST_STATEMENT_BUDGET} statement against the community tables`, async () => {
     await adminSql`select pg_stat_statements_reset()`;
@@ -243,6 +271,35 @@ describe('GET /v1/communities — the community list query budget (05-01)', () =
     const calls = await communityCalls();
     expect(calls).toBeGreaterThan(0);
     expect(calls).toBeLessThanOrEqual(COMMUNITY_LIST_STATEMENT_BUDGET);
+  });
+});
+
+describe('GET /v1/stories — the strip query budget (05-05, Pitfall 11)', () => {
+  it(`costs at most ${STORY_LIST_STATEMENT_BUDGET} statement against the story tables`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const res = await api.request('/v1/stories?limit=10', {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { mediaAssetId: string; mediaVariantWidths: number[]; viewerLiked: boolean }[];
+    };
+    // Guard against the budget passing vacuously on an empty strip, and against it passing on a
+    // page whose ladders all happened to be empty — the hydration join is the thing under
+    // measurement, so a circle that really needs a thumbnail has to be on the page.
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.some((item) => item.mediaVariantWidths.length > 0)).toBe(true);
+    // `viewerLiked` is in the same statement or it is an N+1; a page where the field is missing
+    // entirely would satisfy the count while having stopped being answered.
+    expect(body.items.every((item) => typeof item.viewerLiked === 'boolean')).toBe(true);
+
+    // BIDIRECTIONAL, for the same reason every budget above is: a zero here would mean the regex
+    // matched nothing (the table renamed, pg_stat_statements not loaded), not that the strip got
+    // cheaper. The floor is what stops an empty measurement passing at zero (B-WR-06).
+    const calls = await storyCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(STORY_LIST_STATEMENT_BUDGET);
   });
 });
 

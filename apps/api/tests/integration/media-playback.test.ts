@@ -85,6 +85,10 @@ async function seedVideo(
 
 async function cleanup(): Promise<void> {
   for (const id of [...new Set(createdAssetIds)]) {
+    // The story rows first (05-05): `stories.media_asset_id` is NOT NULL, so the asset cannot go
+    // while one still names it. This file writes no stories, but a crashed sibling run can leave
+    // one behind, and a cleanup that dies on a foreign key takes the whole FILE down with it.
+    await adminSql`delete from public.stories where media_asset_id = ${id}::uuid`;
     await adminSql`delete from public.media_assets where id = ${id}::uuid`;
   }
   createdAssetIds.length = 0;
@@ -94,10 +98,14 @@ async function cleanup(): Promise<void> {
     // real assets to the seeded gallery/video/attachment posts. The sweep below exists to clear a
     // previous run's leftovers, so it must skip anything a post still points at — otherwise it
     // fails on the foreign key AND destroys seeded content the e2e measures.
+    // 05-05 adds a SECOND referencing table: `stories.media_asset_id` is NOT NULL and real, so a
+    // story's asset must be skipped for exactly the reason a post's is — the sweep would fail on
+    // the foreign key AND destroy the seeded strip the e2e measures.
     await adminSql`
       delete from public.media_assets
        where tenant_id = ${tenantId}::uuid and kind = 'video'
-         and id not in (select media_asset_id from public.feed_post_media)`;
+         and id not in (select media_asset_id from public.feed_post_media)
+         and id not in (select media_asset_id from public.stories)`;
   }
 }
 

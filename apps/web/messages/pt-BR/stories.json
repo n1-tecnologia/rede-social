@@ -7,6 +7,31 @@
     },
     "circle": {
       "action": "Abrir story de {time}"
+    },
+    "publish": {
+      "title": "Novo story",
+      "close": "Fechar",
+      "history": "Seus stories",
+      "pickPhoto": "Escolher foto",
+      "pickVideo": "Escolher vídeo",
+      "helper": "Vídeo de até {limit}.",
+      "captionLabel": "Legenda",
+      "captionPlaceholder": "Escreva uma legenda (opcional)…",
+      "submit": "Publicar",
+      "submitting": "Publicando…",
+      "processingTitle": "Processando o vídeo…",
+      "processingNote": "Seu story aparece no início assim que o vídeo terminar de processar.",
+      "toast": "Story publicado.",
+      "errors": {
+        "noMedia": "Escolha uma foto ou um vídeo para publicar.",
+        "failed": "Não foi possível publicar seu story. Tente novamente."
+      },
+      "discard": {
+        "title": "Descartar story?",
+        "body": "A mídia escolhida será perdida.",
+        "confirm": "Descartar",
+        "cancel": "Continuar editando"
+      }
     }
   }
 }

@@ -394,6 +394,48 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("b3. stories: the other tenant's story id is 404 NOT_FOUND with no details (05-05)", async () => {
+    // The lab story ids come from the DATABASE rather than from the lab's own API: `stories` is
+    // disabled for tria-lab in the seed (D-17 gives it feed + events), and the point of this case
+    // is the DEMO session's answer, not the lab's.
+    //
+    // A story is the shortest-lived row in the product, and that is exactly why it is here: "it
+    // expires in a day anyway" is not isolation, and an EXPIRED story of another tenant must answer
+    // the same 404 an active one does — the seed gives the lab both, so this loop covers both.
+    const labStories = await adminSql<{ id: string }[]>`
+      select id from public.stories where tenant_id = ${tenantIds.lab}::uuid`;
+    expect(labStories.length).toBeGreaterThan(0);
+
+    for (const row of labStories) {
+      const res = await request(`/v1/stories/${row.id}`, tokens.demoMember, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      // 404, not 403: a 403 would confirm the row exists somewhere (D-23, T-05-30).
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      // No `details` key at all — the absence IS the existence-oracle control, so a status-only
+      // assertion would not cover it.
+      expect(Object.hasOwn(body.error, 'details')).toBe(false);
+    }
+
+    // Positive control (T-03-56) IN THE SAME TEST: the demo session really can read its OWN
+    // stories, by strip and by id — so the 404s above are isolation, not a broken route.
+    const list = await request('/v1/stories', tokens.demoMember, {
+      [TENANT_HOST_HEADER]: HOSTS.demo,
+    });
+    expect(list.status).toBe(200);
+    const { items } = (await list.json()) as { items: { id: string }[] };
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(labStories.map((row) => row.id)).not.toContain(item.id);
+      const own = await request(`/v1/stories/${item.id}`, tokens.demoMember, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      expect(own.status).toBe(200);
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,
@@ -461,10 +503,11 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
   });
 
   it("f2. a session of tenant A presented on tenant B's REGISTERED host is 403, on every route (D-23)", async () => {
-    // `/v1/communities` joins the loop for the reason SCHEMA-CONVENTIONS §(j) rule 2 gives: every
-    // new endpoint adds a cross-tenant case here. The host check fires in `requireAuth`, BEFORE
-    // `requireModule`, so the answer is the same 403 on a module the session's tenant does have.
-    for (const path of ['/v1/me/bootstrap', '/v1/feed', '/v1/communities']) {
+    // `/v1/communities` and `/v1/stories` join the loop for the reason SCHEMA-CONVENTIONS §(j)
+    // rule 2 gives: every new endpoint adds a cross-tenant case here. The host check fires in
+    // `requireAuth`, BEFORE `requireModule`, so the answer is the same 403 on a module the
+    // session's tenant does have.
+    for (const path of ['/v1/me/bootstrap', '/v1/feed', '/v1/communities', '/v1/stories']) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);
 

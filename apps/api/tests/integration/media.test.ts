@@ -163,10 +163,14 @@ async function cleanup(): Promise<void> {
     // real assets to the seeded gallery/video/attachment posts. The sweep below exists to clear a
     // previous run's leftovers, so it must skip anything a post still points at — otherwise it
     // fails on the foreign key AND destroys seeded content the e2e measures.
+    // 05-05 adds a SECOND referencing table: `stories.media_asset_id` is NOT NULL and real, so a
+    // story's asset must be skipped for exactly the reason a post's is — the sweep would fail on
+    // the foreign key AND destroy the seeded strip the e2e measures.
     await adminSql`
       delete from public.media_assets
        where tenant_id = ${tenantId}::uuid
-         and id not in (select media_asset_id from public.feed_post_media)`;
+         and id not in (select media_asset_id from public.feed_post_media)
+         and id not in (select media_asset_id from public.stories)`;
   }
   const ids = [...new Set(createdAssetIds)];
   for (const id of ids) {
