@@ -146,6 +146,11 @@ describe('GET /v1/feed — the CI query budget (criterion 4)', () => {
         from pg_stat_statements
        where query ~ ${FEED_TABLES_PATTERN}`;
 
+    // BIDIRECTIONAL. The ceiling alone is one-directional: if FEED_TABLES_PATTERN ever stops
+    // matching any statement (a table renamed, the regex edited, pg_stat_statements not loaded) the
+    // sum is 0 and the budget passes while measuring NOTHING. The floor makes a vacuous measurement
+    // red, so this assertion fails both when the cost rises and when it stops being measured.
+    expect(measured?.calls ?? 0).toBeGreaterThan(0);
     expect(measured?.calls ?? 0).toBeLessThanOrEqual(FEED_LIST_STATEMENT_BUDGET);
   });
 });
@@ -174,7 +179,11 @@ describe('the post page — the detail query budget (04-03, criterion 4)', () =>
     expect(body.items.length).toBe(10);
     expect(body.items.some((c) => c.replyCount > 0)).toBe(true);
 
-    expect(await feedCalls()).toBeLessThanOrEqual(FEED_DETAIL_STATEMENT_BUDGET);
+    // Bidirectional, same reason as the list budget: a zero here would mean the regex matched
+    // nothing, not that the post page got cheaper.
+    const calls = await feedCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(FEED_DETAIL_STATEMENT_BUDGET);
   });
 
   it(`a "ver respostas" tap costs at most ${FEED_REPLIES_STATEMENT_BUDGET} statement`, async () => {
@@ -187,6 +196,9 @@ describe('the post page — the detail query budget (04-03, criterion 4)', () =>
     const body = (await res.json()) as { items: unknown[] };
     expect(body.items.length).toBe(5);
 
-    expect(await feedCalls()).toBeLessThanOrEqual(FEED_REPLIES_STATEMENT_BUDGET);
+    // Bidirectional: a vacuous measurement is a failure, not a free pass.
+    const calls = await feedCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(FEED_REPLIES_STATEMENT_BUDGET);
   });
 });
