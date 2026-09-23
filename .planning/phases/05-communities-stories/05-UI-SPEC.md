@@ -251,7 +251,7 @@ Catalog root keys after this phase: the existing set **plus `communities` and `s
 
 ### Vocabulary amendment — the retired sense of "comunidade" (UI-D-46)
 
-The shipped catalogs carry **27** rows using the word. Every one of them is accounted for below: 10 are amended, 17 are recorded as out of scope with the reason. Nothing is left unclassified — that completeness *is* the contract, because the phase that creates the ambiguity is the only phase that can close it.
+The shipped catalogs carry **27** rows using the word. Every one of them is accounted for below: 10 are amended, 16 are recorded as out of scope with the reason, and 1 already carries the new sense. Nothing is left unclassified — that completeness *is* the contract, because the phase that creates the ambiguity is the only phase that can close it.
 
 **Amended — the authenticated member/admin app (10 rows, 5 catalogs).** These are the surfaces on which a `Comunidades` tab, a community page or a pin sheet can be co-rendered, so the word must mean exactly one thing.
 
@@ -398,26 +398,26 @@ Each screen has exactly one primary visual anchor; nothing else on that screen m
 > Empty-state and error-state COPY live in `## Copywriting Contract` above — this section covers
 > state coverage and REFERENCES those rows rather than restating the copy (de-dup).
 
-Applicable state considerations resolved: **86 covered, 5 backstop, 0 unresolved**.
+Applicable state considerations resolved: **101 of 101, 0 unresolved.** Counted as distinct (category, element) pairs: **95** resolved by a covered truth alone, **3** by a backstop alone (long-text E01, E08, E09), and **3** covered truths additionally pinned by a backstop (overflow E03, overflow E04, long-text E11) — 95 + 3 + 3 = 101, carried by 5 backstop rows. Plus **7 pairs of extra coverage** beyond the taxonomy's applicable set, marked *(extra)*: partial E02/E03/E05/E11 and zero-one-many E03/E04/E05. They are kept as honest coverage, not orphans.
 
-**Element inventory** (ids are scoped to this document):
+**Element inventory** (ids are scoped to this document). Kinds are the ones the probe's coverage was computed from — authored as an explicit `elements` override rather than left to the prose classifier, so a re-run reproduces this set exactly. Kinds marked **+** were widened beyond the component's headline role because the prose shows a real second kind.
 
 | Id | Surface | Element kinds |
 |----|---------|---------------|
-| E01 | `StoriesStrip` home slot on `/inicio` | list-collection, interactive-control |
+| E01 | `StoriesStrip` home slot on `/inicio` | list-collection, interactive-control, **+media** (circle thumbnails), **+static-content** (circle labels) |
 | E02 | `StoryCircle` (strip, Destaques, own) | media, interactive-control |
 | E03 | `StoryViewer` shell + pager + tap zones | media, interactive-control, nav |
-| E04 | `StoryProgressBars` | static-content |
-| E05 | Viewer overlay (header, caption, action row) | static-content, interactive-control |
-| E06 | Story `CommentSheet` in its flat variant | list-collection, form |
+| E04 | `StoryProgressBars` | static-content, **+list-collection** (one segment per story *is* a collection) |
+| E05 | Viewer overlay (header, caption, action row) | static-content, interactive-control, **+media** |
+| E06 | Story `CommentSheet` in its flat variant | list-collection, form, **+static-content** (comment bodies) |
 | E07 | `StoryComposer` (`/stories/publicar`) | form, media, interactive-control |
-| E08 | `StoryHistoryRow` list (`/stories/meus`) | list-collection, interactive-control, media |
-| E09 | `PinStorySheet` | list-collection, form, interactive-control |
-| E10 | `CommunityCard` list (`/comunidades`) | list-collection, media |
+| E08 | `StoryHistoryRow` list (`/stories/meus`) | list-collection, interactive-control, media, **+static-content** (caption lines) |
+| E09 | `PinStorySheet` | list-collection, form, interactive-control, **+static-content** (community names) |
+| E10 | `CommunityCard` list (`/comunidades`) | list-collection, media, **+static-content** (names, descriptions) |
 | E11 | `CommunityHeader` + `CommunityCover` | media, static-content, nav |
-| E12 | Community page post list + `ComposeFab` | list-collection, interactive-control |
+| E12 | Community page post list + `ComposeFab` | list-collection, interactive-control, **+media** (PostCard media) |
 | E13 | `CommunityForm` (`/comunidades/nova`, `…/editar`) | form, media, interactive-control |
-| E14 | "Publicar em" picker row + sheet | form, interactive-control, list-collection |
+| E14 | "Publicar em" picker row + sheet | form, interactive-control, list-collection, **+static-content** (the selected destination name) |
 
 ### Resolved considerations
 
@@ -467,13 +467,18 @@ Applicable state considerations resolved: **86 covered, 5 backstop, 0 unresolved
 | populated | E11, E12 | ✅ covered | `h-36` cover, 44×44 back control, 24/700 name, description, Destaques, hairline, then identical `PostCard`s with the community label suppressed. |
 | populated | E13 | ✅ covered | Cover picker → "Nome" → "Descrição" under a sticky brand submit; the edit form adds the danger archive row at the bottom. |
 | partial | E01 | ✅ covered | The admin's own circle renders whether or not any story is active; a member's strip is all-or-nothing. |
-| partial | E02 | ✅ covered | A circle whose thumbnail fails still renders its ring and label, so the sequence position is never lost. |
-| partial | E03 | ✅ covered | A mixed image/video sequence advances on two different clocks without a visible seam; a story that expires mid-view plays out its own segment (UI-D-30). |
-| partial | E05 | ✅ covered | Caption present/absent and like/comment counts at zero are independent; the counts follow the feed's rule and drop out at zero (UI-D-21, inherited) leaving the bare glyphs. |
+| partial | E02 | ✅ covered *(extra)* | A circle whose thumbnail fails still renders its ring and label, so the sequence position is never lost. |
+| partial | E03 | ✅ covered *(extra)* | A mixed image/video sequence advances on two different clocks without a visible seam; a story that expires mid-view plays out its own segment (UI-D-30). |
+| partial | E04 | ✅ covered | **The bars and the pager render from the same `stories[]` array**, so their lengths cannot disagree — a segment count is never computed separately. The array is **frozen for the life of a viewing session**: UI-D-30 fixes that a story expiring mid-view plays out its own segment and is absent only from the *next* strip read, and a story the admin deletes elsewhere is likewise not removed under the member's finger. A segment whose story fails to load **keeps its segment** at its current fill (the position must not shift beneath the member) while the clock stays paused on it and the viewer error copy renders — the bar row never re-flows mid-sequence. |
+| partial | E05 | ✅ covered *(extra)* | Caption present/absent and like/comment counts at zero are independent; the counts follow the feed's rule and drop out at zero (UI-D-21, inherited) leaving the bare glyphs. |
+| partial | E06 | ✅ covered | **Story comments inherit UI-D-24 unchanged.** `authorRemoved` is produced by the shared comment projection's `LEFT JOIN` on the author's membership, keyed on the **comment**, not on the post — so a story comment whose author was removed keeps its row, its text and its timestamp, renders the neutral `Avatar` placeholder and the non-link "Membro removido". The flat variant changes nothing about it: with no replies there is nothing to orphan, which is the one way a story comment is *safer* here than a post comment. |
 | partial | E07 | ✅ covered | An image publishes synchronously while a video may still be transcoding — two shapes in one screen, both terminal and both explained by copy (the processing note). |
 | partial | E08 | ✅ covered | A row may carry a pill, a pin indicator, both or neither; the caption may be absent ("Sem legenda"); the geometry is fixed by the thumbnail, so no combination reflows the list. |
+| partial | E09 | ✅ covered | The sheet lists the **active** communities from the page's own read. A community archived between render and toggle makes the write fail server-side: the optimistic `Switch` reverts and the generic error toast fires (UI-D-41), and **the row stays** rather than vanishing mid-gesture. A cover thumb that fails degrades to the neutral `bg-bg-tertiary` box through `MediaImage.onError` while the name and the `Switch` stay fully operable — a pin never depends on its artwork. |
 | partial | E10, E11 | ✅ covered | **UI-D-35.** Cover present/absent and description present/absent are independent; neither collapses the card's padding, and the fallback block never doubles the name. |
-| partial | E12 | ✅ covered | The Destaques row and the post list are independent reads: a community with pins and no posts, or posts and no pins, each render the other's section normally. |
+| partial | E11 | ✅ covered *(extra)* | The Destaques row and the post list are independent reads: a community with pins and no posts, or posts and no pins, each render the other's section normally. |
+| partial | E12 | ✅ covered | The Destaques row and the post list are independent reads; the FAB's visibility depends on the permission and the archived status, not on whether any post loaded. |
+| partial | E13 | ✅ covered | **The edit form is the create form bound to values** — there is no populated-only layout. An absent cover shows the *same* gradient preview the create state shows (UI-D-38), so "no cover yet" and "deliberately no cover" are one control; an absent description shows its placeholder. The only two create/edit differences are structural, not partial-state: the danger archive row exists solely on edit, and the "Publicar em" read-only rule belongs to E14. Submit stays gated on "Nome" alone in both. |
 | partial | E14 | ✅ covered | **UI-D-45.** In edit mode the row renders read-only with its helper rather than vanishing, so the rule is taught rather than hidden. |
 | overflow | E01, E02 | ✅ covered | The row is the only horizontal scroller, `overscroll-x-contain` so it never triggers the browser back-gesture; the label `truncate`s at `max-w-16`. |
 | overflow | E03, E04 | ✅ covered | The viewer is `fixed inset-0 overflow-hidden`; media is `object-contain` so no aspect ratio overflows. With many stories the segments shrink to `flex-1` and stay ≥ 2px wide up to ~40 stories at 320px. See the backstop below. |
@@ -481,21 +486,28 @@ Applicable state considerations resolved: **86 covered, 5 backstop, 0 unresolved
 | overflow | E06 | ✅ covered | The sheet caps at 80% of `--screen-h` (UI-D-18) and its list scrolls inside with the input pinned and `pb-safe`. |
 | overflow | E08, E09, E10 | ✅ covered | Names and captions `truncate` in `min-w-0` bodies; the community list and history scroll inside `app-scroll`; `vh/dvh` are banned inside pages. |
 | overflow | E11 | ✅ covered | The 24/700 name wraps (it is the anchor and must not clip); the description wraps freely; the cover height is fixed. |
+| overflow | E12 | ✅ covered | **The FAB never occludes the last row, by construction rather than by trial.** The community page scrollport inherits the shell's content bottom padding `pb-[calc(var(--safe-bottom)+5.25rem)]` (Phase 2, sized for the floating `BottomNav`), and `ComposeFab` is anchored at the *same* `bottom-[calc(var(--safe-bottom)+5.25rem)]` (Phase 4) — so the padding reserves a band at least as tall as the gap the FAB sits above, and both the final `PostCard` and the `InfiniteScroll` sentinel scroll fully clear of it. Desktop renders no FAB at all (UI-D-44), so the question is mobile-only. |
 | overflow | E13 | ✅ covered | The `Textarea` grows to content and the page scrolls; the sticky header keeps the submit reachable at any scroll position. |
+| overflow | E14 | ✅ covered | **The trailing glyph is protected structurally.** The row is a flex line of three children: the fixed label "Publicar em" (`shrink-0`), the selected-destination value (`min-w-0 truncate`), and the `ChevronRight` 18 / `Check` 20 (`shrink-0`). Truncation can therefore only ever fall on the destination name — the chevron is never pushed out of the row and the row never wraps to a second line, at any name length. |
 | overflow | E03, E04 | 🧪 backstop | A 25-story sequence at 320px: every progress segment stays ≥ 2px wide and the row does not wrap. Verify with a seeded 25-story fixture in the mobile e2e. |
 | zero-one-many | E01 | ✅ covered | Zero → UI-D-26; one → a single circle with identical geometry; many → the row scrolls. |
-| zero-one-many | E03, E04 | ✅ covered | A one-story sequence renders one full-width segment, and "next" closes the viewer immediately rather than looping (D-78/UI-D-30). |
-| zero-one-many | E05, E06 | ✅ covered | ICU plurals on "# curtida/curtidas" and "# comentário/comentários"; zero drops the segment. |
+| zero-one-many | E03 | ✅ covered *(extra)* | A one-story sequence renders one full-width segment, and "next" closes the viewer immediately rather than looping (D-78/UI-D-30). |
+| zero-one-many | E04 | ✅ covered *(extra)* | One story → one segment at full width; many → `flex-1` segments sharing the row. The bar count is `stories.length` by construction, so zero bars is unreachable for the same reason an empty sequence is (E03/empty). |
+| zero-one-many | E05 | ✅ covered *(extra)* | ICU plurals on "# curtida/curtidas" and "# comentário/comentários"; zero drops the segment. |
+| zero-one-many | E06 | ✅ covered | Zero → the empty-comments copy; one → a single row with no separator above it; many → the flat list pages oldest→newest on one cursor direction (D-83). |
 | zero-one-many | E08 | ✅ covered | ICU plural on "Fixado em # comunidade(s)"; a story pinned nowhere renders no pin indicator. |
 | zero-one-many | E09, E14 | ✅ covered | One community renders a single row with the same geometry as many; "Feed principal" is always present in the picker. |
 | zero-one-many | E10 | ✅ covered | Zero → the empty state; one → a single card with no separator artefacts; many → `gap-3` under `InfiniteScroll`. |
 | zero-one-many | E12 | ✅ covered | One pinned story renders one circle at the same 64px as many; the `SectionTitle` is present whenever the row is. |
 | long-text | E02 | ✅ covered | The circle label is a server-formatted relative time and "Seu story" — both bounded by the formatter and the catalog, `truncate`d at `max-w-16` regardless. |
+| long-text | E03 | ✅ covered | **Cross-reference, not a new truth: the viewer shell renders no user text of its own.** The caption and the author name belong to the overlay (E05), the segments carry no text node (E04), and the shell's only strings are fixed catalog `aria-label`s ("Fechar", "Silenciar", "Próximo story"). There is no string on the shell that a tenant's content can lengthen. |
+| long-text | E04 | ✅ covered | **N/A by construction, stated rather than left unraised: the bars contain no text node at all.** They are `aria-hidden` spans. The only string that varies with the sequence is the viewer's single `aria-live` announcement "Story {i} de {n}" (E03/E05) — a generated string bounded by the count, never user content. |
 | long-text | E05 | ✅ covered | The caption is `line-clamp-3` collapsed and scrolls within its block expanded; `STORY_MAX_CAPTION` plus the composer counter bound the input. |
+| long-text | E06 | ✅ covered | Inherited: comment text wraps with `whitespace-pre-wrap` in a `min-w-0` body; "Membro removido" (UI-D-24) is fixed-length. |
 | long-text | E07, E13 | ✅ covered | Every field carries `maxLength` plus the `{n}/{max}` counter that turns `text-danger` at the cap; the `Textarea` grows and the page scrolls. |
 | long-text | E10, E11 | ✅ covered | The card name is one line over the cover and `truncate`s; the card description is `line-clamp-1`; the page name wraps and the page description wraps freely. |
-| long-text | E14 | ✅ covered | The picker row's right-hand value `truncate`s so the chevron stays reachable; sheet row names `truncate` beside their control. |
-| long-text | E06 | ✅ covered | Inherited: comment text wraps with `whitespace-pre-wrap` in a `min-w-0` body; "Membro removido" (UI-D-24) is fixed-length. |
+| long-text | E12 | ✅ covered | **Inherited from Phase 4, with one community-specific subtraction.** The caption truncates at 100 characters with "… mais", the author display name `truncate`s beside the avatar, and link/attachment strings clamp per their Phase 4 contracts. The community-specific part is that the D-71 "em {Comunidade}" segment is **suppressed on this page** (UI-D-36), so the community post list carries strictly *less* header text than the same card in the main feed — the one surface where the Phase 4 header cannot get longer. |
+| long-text | E14 | ✅ covered | The picker row's right-hand value `truncate`s so the chevron stays reachable (see the overflow row for the structural guarantee); sheet row names `truncate` beside their control. |
 | long-text | E08 | 🧪 backstop | A 90-character story caption and a 40-character community name in the same history row at 320px: both `truncate` with `title` and the row keeps `min-h-14`. Verify with a long-text fixture in the stories e2e. |
 | long-text | E11 | 🧪 backstop | A 60-character community name at 24/700 on a 320px viewport wraps to at most three lines without clipping the cover above it. Verify with a seeded long-named community. |
 | long-text | E09 | 🧪 backstop | Twelve communities with 40-character names in the pin sheet: each row `truncate`s and the `Switch` stays fully reachable inside the 80%-height sheet. Verify in the stories e2e. |
