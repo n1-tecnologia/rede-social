@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(81);
+select plan(73);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -25,21 +25,18 @@ select tests.auth_user('orphan@a.local', '0a000000-0000-4000-8000-000000000009')
 select tests.member('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
 select tests.member('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
 
+-- One flag row per tenant (the two `tenant_modules` assertions below count on exactly one each).
+-- 04-10 moved the key from the deleted reference module to `feed`: the retired key would now be
+-- refused by `tenant_modules_key_chk`, which is the schema half of D-19's removal.
 insert into public.tenant_modules (tenant_id, module_key, enabled) values
-  ('0a000000-0000-4000-8000-000000000001', 'example', true),
-  ('0b000000-0000-4000-8000-000000000001', 'example', true);
+  ('0a000000-0000-4000-8000-000000000001', 'feed', true),
+  ('0b000000-0000-4000-8000-000000000001', 'feed', true);
 
 -- D-20: one primary, verified host each, registered on both sides so a host lookup through the lane
 -- has something to (fail to) find.
 insert into public.tenant_domains (tenant_id, host, is_primary, verified_at) values
   ('0a000000-0000-4000-8000-000000000001', 'a.test', true, now()),
   ('0b000000-0000-4000-8000-000000000001', 'b.test', true, now());
-
-insert into public.example_items (id, tenant_id, title, created_by_user_id) values
-  ('0a000000-0000-4000-8000-000000000003', '0a000000-0000-4000-8000-000000000001', 'x',
-   '0a000000-0000-4000-8000-000000000002'),
-  ('0b000000-0000-4000-8000-000000000003', '0b000000-0000-4000-8000-000000000001', 'x',
-   '0b000000-0000-4000-8000-000000000002');
 
 -- 04-01: the module's own table, with IDENTICAL captions on both sides (§(j) adjacency). The rows
 -- are authored by each tenant's own member through the generic `author_user_id` column — there is no
@@ -151,47 +148,10 @@ select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-40
 
 select is(current_user::text, 'authenticated', 'the lane runs as authenticated, never as the connection role');
 
-select results_eq(
-  $$ select count(*)::int from public.example_items
-      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
-  ARRAY[1],
-  'A sees its own example_items row'
-);
-select results_eq(
-  $$ select count(*)::int from public.example_items where title = 'x' $$,
-  ARRAY[1],
-  'adjacency: both tenants have an item titled x, the lane returns exactly one'
-);
-select results_eq(
-  $$ select tenant_id::text from public.example_items where title = 'x' $$,
-  ARRAY['0a000000-0000-4000-8000-000000000001'],
-  'and the one it returns belongs to A'
-);
-select is_empty(
-  $$ select id from public.example_items where id = '0b000000-0000-4000-8000-000000000003' $$,
-  'detail by id: B''s item is not found through A''s lane'
-);
-
-select throws_ok(
-  $$ insert into public.example_items (tenant_id, title, created_by_user_id)
-     values ('0b000000-0000-4000-8000-000000000001', 'y',
-             '0a000000-0000-4000-8000-000000000002') $$,
-  '42501',
-  null,
-  'WITH CHECK: A cannot write a row stamped with B''s tenant_id'
-);
-select results_eq(
-  $$ with u as (
-       update public.example_items set title = 'y'
-        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
-     ) select count(*)::int from u $$,
-  ARRAY[0],
-  'USING: an update aimed at B''s rows touches nothing'
-);
-
--- ── feed_posts: the same five cases, on the table Phase 4 actually ships (04-01) ────────────────
--- These land BEFORE 04-10 removes the example module, so the exit gate can never be weakened by that
--- removal: it is already proving itself against a feed table when `example_items` disappears.
+-- ── feed_posts: the six worked isolation cases, on the table Phase 4 actually ships (04-01) ─────
+-- 04-01 landed these BEFORE 04-10 dropped the reference module's table, precisely so the gate never
+-- spent a commit without a worked case. 04-10 then removed the reference blocks, and the count below
+-- fell by exactly the eight assertions those blocks held (81 -> 73) — no case was lost in the move.
 select results_eq(
   $$ select count(*)::int from public.feed_posts
       where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
@@ -577,15 +537,6 @@ select results_eq(
 reset role;
 select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
 
-select results_eq(
-  $$ select tenant_id::text from public.example_items where title = 'x' $$,
-  ARRAY['0b000000-0000-4000-8000-000000000001'],
-  'symmetry: B''s lane returns B''s item for the same title'
-);
-select is_empty(
-  $$ select id from public.example_items where id = '0a000000-0000-4000-8000-000000000003' $$,
-  'symmetry: A''s item is not found through B''s lane'
-);
 select results_eq(
   $$ select tenant_id::text from public.feed_posts where caption = 'x' $$,
   ARRAY['0b000000-0000-4000-8000-000000000001'],

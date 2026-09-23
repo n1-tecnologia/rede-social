@@ -307,9 +307,16 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     // 04-10 retired the per-key refusal branch this used to assert (D-19). What still refuses a key
     // outside the vocabulary at THIS layer is `tenant_modules_key_chk`, generated from
     // `TOGGLEABLE_MODULES` — so a key the route's enum somehow let through still cannot be stored.
-    await expect(
-      setModuleEnabled(ids.demo, 'nao-existe' as ModuleKey, true, actor),
-    ).rejects.toThrow(/tenant_modules_key_chk/);
+    // Asserted by SQLSTATE and constraint name rather than by message text, which drizzle wraps.
+    let checkViolation: { code?: string; constraint_name?: string } | null = null;
+    try {
+      await setModuleEnabled(ids.demo, 'nao-existe' as ModuleKey, true, actor);
+    } catch (error) {
+      checkViolation =
+        (error as { cause?: { code?: string; constraint_name?: string } }).cause ?? null;
+    }
+    expect(checkViolation?.code).toBe('23514');
+    expect(checkViolation?.constraint_name).toBe('tenant_modules_key_chk');
 
     await expectApiError(
       setModuleEnabled('00000000-0000-4000-8000-000000000000', 'feed', true, actor),
@@ -480,7 +487,8 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     const [modules] = await adminSql<{ n: string }[]>`
       select count(*)::text as n from public.tenant_modules tm
         join public.tenants t on t.id = tm.tenant_id where t.slug = ${slug}`;
-    expect(modules?.n).toBe('7');
+    // One row per key in the vocabulary, written once — the loser rolled back entirely.
+    expect(modules?.n).toBe('6');
   });
 
   it('13. empty: modules [] creates an empty community; an empty displayName is 400 with the field path', async () => {
@@ -496,7 +504,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(body.modules.every((m) => m.enabled === false)).toBe(true);
     const rows = await adminSql<{ enabled: boolean }[]>`
       select enabled from public.tenant_modules where tenant_id = ${body.tenant.id}::uuid`;
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(6);
     expect(rows.every((r) => r.enabled === false)).toBe(true);
 
     const invalid = await platform('/tenants', {

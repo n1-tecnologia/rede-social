@@ -104,8 +104,8 @@ settings change plus UI, not a migration that rewrites tables.
 ## (g) Naming and placement
 
 1. **snake_case** for every table, column, index, constraint and policy.
-2. **Tables stay in `public`** with a **module prefix** (`chat_conversations`, `example_items`,
-   `feed_posts`) — not one Postgres schema per module (PITFALLS §6: per-schema layouts multiply
+2. **Tables stay in `public`** with a **module prefix** (`chat_conversations`, `feed_posts`,
+   `feed_comments`) — not one Postgres schema per module (PITFALLS §6: per-schema layouts multiply
    grants, `search_path` surprises and RLS coverage gaps).
 3. Conventional suffixes: `_uq` for unique indexes, `_idx` for indexes, `_chk` for CHECK
    constraints, `_tenant_isolation` for the standard policy.

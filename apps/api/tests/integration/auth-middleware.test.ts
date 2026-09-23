@@ -190,7 +190,7 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
   it('c4. invited scope (02-10, T-02-122): the same INVITED Bearer on any other tenant-lane route -> 403 MEMBERSHIP_INVITED naming the tenant', async () => {
     await setStatus(MEMBER, 'invited');
     try {
-      const res = await api.request('/v1/example/items', {
+      const res = await api.request('/v1/feed', {
         headers: { authorization: `Bearer ${memberToken}` },
       });
       expect(res.status).toBe(403);
@@ -213,7 +213,7 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
   it('c5. invited scope: the host check wins — an INVITED Bearer on another tenant’s host -> TENANT_HOST_MISMATCH (order: host before invited scope)', async () => {
     await setStatus(MEMBER, 'invited');
     try {
-      const res = await api.request('/v1/example/items', {
+      const res = await api.request('/v1/feed', {
         headers: { authorization: `Bearer ${memberToken}`, [TENANT_HOST_HEADER]: HOSTS.lab },
       });
       expect(res.status).toBe(403);
@@ -223,11 +223,12 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
     } finally {
       await setStatus(MEMBER, 'active');
     }
-    // An ACTIVE member on the same route is untouched by the scope rule.
-    const active = await api.request('/v1/example/items', {
+    // An ACTIVE member on the same route is untouched by the scope rule — the positive control
+    // (T-03-56) without which the 403 above could be a globally broken route.
+    const active = await api.request('/v1/feed', {
       headers: { authorization: `Bearer ${memberToken}` },
     });
-    expect(active.status).not.toBe(403);
+    expect(active.status).toBe(200);
   });
 
   it('c2. WR-08: blocked_at set with status still active -> MEMBERSHIP_BLOCKED on the next request', async () => {

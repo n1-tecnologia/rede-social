@@ -70,7 +70,7 @@ select is_empty(
       from (values
         ('tenants'), ('users'), ('memberships'), ('tenant_domains'), ('platform_admins'),
         ('tenant_modules'), ('consent_records'), ('chat_conversations'), ('chat_participants'),
-        ('chat_messages'), ('notifications'), ('example_items'),
+        ('chat_messages'), ('notifications'),
         -- Phase 2 (02-03)
         ('tenant_invites'),
         -- Phase 3 (03-01). `media_assets` needs NO entry in assertion 2's exemption list: it
