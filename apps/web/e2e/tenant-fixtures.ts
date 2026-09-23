@@ -79,6 +79,29 @@ export async function createThrowawayTenant(input: ThrowawayTenant): Promise<{ i
   return { id };
 }
 
+/**
+ * Sets one module flag on ONE tenant, by slug. Scoped to a throwaway tenant by every caller: the
+ * seed tenants are shared by the whole suite and their flags sit in the API's 30 s cache, so a spec
+ * must never flip tria-demo/tria-lab. `(tenant_id, module_key)` is the primary key, so the upsert
+ * is the same shape the platform panel's own write uses.
+ *
+ * 04-10 lifted this out of `phase2-smoke.spec.ts` when `phase4-smoke.spec.ts` needed the identical
+ * thing — one implementation rather than two that could drift on the conflict clause.
+ */
+export async function setTenantModuleFlag(
+  slug: string,
+  key: string,
+  enabled: boolean,
+): Promise<void> {
+  const rows = await sql()`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    select id, ${key}, ${enabled} from public.tenants where slug = ${slug}
+    on conflict (tenant_id, module_key)
+      do update set enabled = excluded.enabled, updated_at = now()
+    returning tenant_id`;
+  if (rows.length === 0) throw new Error(`no tenant ${slug} for module ${key}`);
+}
+
 /** Flips a tenant between `active` and `suspended` (D-32). */
 export async function setTenantStatus(slug: string, status: 'active' | 'suspended'): Promise<void> {
   const updated = await sql()`

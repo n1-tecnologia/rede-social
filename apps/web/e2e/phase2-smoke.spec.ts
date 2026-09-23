@@ -20,7 +20,7 @@ import {
 } from './admin';
 import { type ApiFetch, apiSession, closeDomainsAdmin } from './domains-admin';
 import { hosts, isRemote, login, SEED_PASSWORD } from './fixtures';
-import { closeTenantFixtures, throwawayOrigin } from './tenant-fixtures';
+import { closeTenantFixtures, setTenantModuleFlag, throwawayOrigin } from './tenant-fixtures';
 import { ensureWorker } from './worker';
 
 /**
@@ -118,23 +118,6 @@ const sql = postgres(
   process.env.PLAYWRIGHT_DB_URL ?? 'postgres://postgres:postgres@127.0.0.1:54322/postgres',
   { prepare: false, max: 1 },
 );
-
-/**
- * Reads and repairs a module flag on the THROWAWAY tenant only — the seed tenants are never touched
- * (prohibition). Since 04-10 the smoke drives every flip through the panel (see the file docblock);
- * this helper survives as the `finally`-safe restore and as the direct read the panel assertions are
- * checked against, so a green switch that wrote nothing still fails. `(tenant_id, module_key)` is the
- * primary key.
- */
-async function setTenantModuleFlag(slug: string, key: string, enabled: boolean): Promise<void> {
-  const rows = await sql`
-    insert into public.tenant_modules (tenant_id, module_key, enabled)
-    select id, ${key}, ${enabled} from public.tenants where slug = ${slug}
-    on conflict (tenant_id, module_key)
-      do update set enabled = excluded.enabled, updated_at = now()
-    returning tenant_id`;
-  if (rows.length === 0) throw new Error(`no tenant ${slug} for module ${key}`);
-}
 
 // ---------------------------------------------------------------------------------------------
 // Module-private helpers (no new fixture file — the outline's file set is kept)
