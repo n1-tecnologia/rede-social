@@ -400,3 +400,39 @@ export async function membershipIdFor(email: string, tenantSlug: string): Promis
   if (!id) throw new Error(`no membership for ${email} in ${tenantSlug}`);
   return id;
 }
+
+/**
+ * The id of a seeded feed post, by tenant and caption (04-08). `/post/[postId]` is keyed by the
+ * post id and the seed does not publish one, so a spec that needs a REAL deep link has to look it
+ * up — and it must say WHICH tenant, because the two seed tenants carry the same captions on
+ * purpose (TENANT-05 adjacency).
+ */
+export async function feedPostIdFor(caption: string, tenantSlug: string): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    select p.id
+      from public.feed_posts p
+      join public.tenants t on t.id = p.tenant_id
+     where t.slug = ${tenantSlug} and p.caption = ${caption} and p.deleted_at is null
+     order by p.created_at desc
+     limit 1`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no live post "${caption}" in ${tenantSlug}`);
+  return id;
+}
+
+/**
+ * Sets or clears a post's soft-delete stamp (04-08, UI-D-16): the spec needs a post that EXISTS in
+ * the caller's own tenant and is still unreachable, which is the third of the three branches the
+ * one not-found screen has to cover.
+ *
+ * It is a toggle rather than a delete because the seeded posts are shared by the whole suite —
+ * `feed.spec.ts` counts them — so the case that removes one puts it back in its teardown.
+ */
+export async function setFeedPostRemoved(postId: string, removed: boolean): Promise<void> {
+  const updated = await sql()`
+    update public.feed_posts
+       set deleted_at = ${removed ? sql()`now()` : null}
+     where id = ${postId}::uuid
+    returning id`;
+  if (updated.length === 0) throw new Error(`no feed post ${postId}`);
+}

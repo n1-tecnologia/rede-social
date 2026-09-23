@@ -74,6 +74,14 @@ const mediaAssetIds: string[] = [];
 const displayNames = { demo: '', lab: '' };
 const membershipIds = { demo: '', lab: '' };
 
+/**
+ * 04-08 fixtures: one live post on EACH side plus one of the demo's own that is then removed. The
+ * captions are deliberately identical across the two tenants (TENANT-05 adjacency), so a leak that
+ * matched on content rather than on `tenant_id` could not pass by looking plausible.
+ */
+const SHARED_CAPTION = 'Aviso da comunidade sobre o encontro.';
+const postIds = { demo: '', lab: '', demoRemoved: '' };
+
 const request = (path: string, token?: string, headers: Record<string, string> = {}) =>
   api.request(path, {
     headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
@@ -156,6 +164,21 @@ async function removeMediaObjects(tenantId: string, assetId: string): Promise<vo
   await storageAdmin()
     .from('media')
     .remove(rows.map((row) => row.name));
+}
+
+/** A post written straight through the admin connection; `removed` sets the soft-delete stamp. */
+async function seedPost(tenantId: string, caption: string, removed = false): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.feed_posts (tenant_id, author_user_id, caption, deleted_at)
+    select ${tenantId}::uuid, u.id, ${caption},
+           ${removed ? new Date().toISOString() : null}::timestamptz
+      from public.users u
+      join public.memberships m on m.user_id = u.id
+     where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant'
+     limit 1
+    returning id`;
+  if (!row) throw new Error(`could not seed a feed post in ${tenantId}`);
+  return row.id;
 }
 
 async function displayNameOf(tenantId: string, email: string): Promise<string> {
@@ -246,6 +269,11 @@ beforeAll(async () => {
   displayNames.lab = await displayNameOf(tenantIds.lab, 'member@tria-lab.local');
   membershipIds.demo = await membershipIdOf(tenantIds.demo, 'member@tria-demo.local');
   membershipIds.lab = await membershipIdOf(tenantIds.lab, 'member@tria-lab.local');
+
+  // Phase 4 (04-08): the post-detail route FEED-07's share link points at.
+  postIds.demo = await seedPost(tenantIds.demo, SHARED_CAPTION);
+  postIds.lab = await seedPost(tenantIds.lab, SHARED_CAPTION);
+  postIds.demoRemoved = await seedPost(tenantIds.demo, SHARED_CAPTION, true);
 });
 
 afterAll(async () => {
@@ -259,6 +287,11 @@ afterAll(async () => {
   // deleted outright once their objects are gone.
   for (const id of [...new Set(mediaAssetIds)].filter(Boolean)) {
     await adminSql`delete from public.media_assets where id = ${id}::uuid`;
+  }
+
+  const posts = [postIds.demo, postIds.lab, postIds.demoRemoved].filter(Boolean);
+  if (posts.length > 0) {
+    await adminSql`delete from public.feed_posts where id = any(${posts}::uuid[])`;
   }
 
   const items = [...itemIds.demo, ...itemIds.lab];
@@ -581,6 +614,67 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
       },
       body: JSON.stringify({ avatarAssetId: null }),
     });
+  });
+
+  /**
+   * 04-08 / T-04-49. `/post/{id}` is the one URL this product hands a member to send OUTSIDE the
+   * app, which makes its id space the most enumerable surface we have: anyone holding one link
+   * holds a well-formed probe for every other post in every other community.
+   *
+   * The guarantee is therefore stronger than "B cannot read A's post". It is that B cannot LEARN
+   * anything by asking — so the three ways of missing must be one answer, byte for byte:
+   *
+   *   1. a post of ANOTHER tenant (RLS never returns the row to this lane);
+   *   2. a uuid that matches nothing at all;
+   *   3. a post of the caller's OWN tenant carrying a soft-delete stamp.
+   *
+   * The assertion is an EQUALITY between the three response bodies rather than three separate
+   * checks against a literal: a future `details` key, a different message, even a different key
+   * ORDER would fail it, which is exactly the class of change that turns a 404 into an oracle.
+   *
+   * The positive control sits in the same test (the 03-08 rule): each community really can open its
+   * own post, so a globally broken route could not certify this guarantee vacuously.
+   */
+  it('q. the post detail: cross-tenant, unknown and removed are ONE byte-identical 404 (T-04-49)', async () => {
+    const foreign = await request(`/v1/feed/posts/${postIds.demo}`, tokens.labMember);
+    const unknown = await request(`/v1/feed/posts/${crypto.randomUUID()}`, tokens.labMember);
+    const removed = await request(`/v1/feed/posts/${postIds.demoRemoved}`, tokens.demoMember);
+
+    for (const res of [foreign, unknown, removed]) expect(res.status).toBe(404);
+
+    const bodies = await Promise.all([foreign.text(), unknown.text(), removed.text()]);
+    // Byte-identical once the per-request correlation id is removed. `requestId` is the ONE field
+    // that legitimately differs between two requests — it identifies the call, not the row — and
+    // stripping it is what makes the rest of the comparison meaningful rather than always-false.
+    // Everything else, including key order, must match: a future `details` key or a different
+    // message on any one branch is exactly the change that turns a 404 into an oracle.
+    const withoutRequestId = (raw: string) => {
+      const parsed = JSON.parse(raw) as Envelope;
+      const { requestId: _requestId, ...error } = parsed.error as Envelope['error'] & {
+        requestId?: string;
+      };
+      return JSON.stringify({ error });
+    };
+    expect(withoutRequestId(bodies[1] as string)).toEqual(withoutRequestId(bodies[0] as string));
+    expect(withoutRequestId(bodies[2] as string)).toEqual(withoutRequestId(bodies[0] as string));
+
+    const envelope = JSON.parse(bodies[0] as string) as Envelope;
+    expect(envelope.error.code).toBe('NOT_FOUND');
+    expect('details' in envelope.error).toBe(false);
+    // And it names nothing about the other community — not the tenant, not the caption, not the id.
+    for (const needle of ['tria-demo', 'TRIA Demo', tenantIds.demo, SHARED_CAPTION, postIds.demo]) {
+      expect(bodies[0]).not.toContain(needle);
+    }
+
+    // Positive control — each community opens its OWN post, so the 404s above are about the caller.
+    for (const [token, postId] of [
+      [tokens.demoMember, postIds.demo],
+      [tokens.labMember, postIds.lab],
+    ] as const) {
+      const own = await request(`/v1/feed/posts/${postId}`, token);
+      expect(own.status).toBe(200);
+      expect(((await own.json()) as { id: string }).id).toBe(postId);
+    }
   });
 
   it('p. the platform identity has no membership: every Phase 3 route refuses it, never a 500 (Pitfall 8)', async () => {
