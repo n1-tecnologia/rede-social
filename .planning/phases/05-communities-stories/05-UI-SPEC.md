@@ -1,10 +1,12 @@
 ---
 phase: "05"
 slug: "communities-stories"
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: "2026-09-23"
+reviewed_at: "2026-09-23"
+dimensions_passed: "7/7"
 ---
 
 # Phase 05 — UI Design Contract
@@ -398,7 +400,7 @@ Each screen has exactly one primary visual anchor; nothing else on that screen m
 > Empty-state and error-state COPY live in `## Copywriting Contract` above — this section covers
 > state coverage and REFERENCES those rows rather than restating the copy (de-dup).
 
-Applicable state considerations resolved: **101 of 101, 0 unresolved.** Counted as distinct (category, element) pairs: **95** resolved by a covered truth alone, **3** by a backstop alone (long-text E01, E08, E09), and **3** covered truths additionally pinned by a backstop (overflow E03, overflow E04, long-text E11) — 95 + 3 + 3 = 101, carried by 5 backstop rows. Plus **7 pairs of extra coverage** beyond the taxonomy's applicable set, marked *(extra)*: partial E02/E03/E05/E11 and zero-one-many E03/E04/E05. They are kept as honest coverage, not orphans.
+Applicable state considerations resolved: **101 of 101, 0 unresolved.** Counted as distinct (category, element) pairs: **95** resolved by a covered truth alone, **3** by a backstop alone (long-text E01, E08, E09), and **3** covered truths additionally pinned by a backstop (overflow E03, overflow E04, long-text E11) — 95 + 3 + 3 = 101, carried by 5 backstop rows covering 6 pairs. Plus **6 pairs of extra coverage** beyond the taxonomy's applicable set, marked *(extra)*: partial E02/E03/E05/E11 and zero-one-many E03/E05. They are kept as honest coverage, not orphans.
 
 **Element inventory** (ids are scoped to this document). Kinds are the ones the probe's coverage was computed from — authored as an explicit `elements` override rather than left to the prose classifier, so a re-run reproduces this set exactly. Kinds marked **+** were widened beyond the component's headline role because the prose shows a real second kind.
 
@@ -492,7 +494,7 @@ Applicable state considerations resolved: **101 of 101, 0 unresolved.** Counted 
 | overflow | E03, E04 | 🧪 backstop | A 25-story sequence at 320px: every progress segment stays ≥ 2px wide and the row does not wrap. Verify with a seeded 25-story fixture in the mobile e2e. |
 | zero-one-many | E01 | ✅ covered | Zero → UI-D-26; one → a single circle with identical geometry; many → the row scrolls. |
 | zero-one-many | E03 | ✅ covered *(extra)* | A one-story sequence renders one full-width segment, and "next" closes the viewer immediately rather than looping (D-78/UI-D-30). |
-| zero-one-many | E04 | ✅ covered *(extra)* | One story → one segment at full width; many → `flex-1` segments sharing the row. The bar count is `stories.length` by construction, so zero bars is unreachable for the same reason an empty sequence is (E03/empty). |
+| zero-one-many | E04 | ✅ covered | One story → one segment at full width; many → `flex-1` segments sharing the row. The bar count is `stories.length` by construction, so zero bars is unreachable for the same reason an empty sequence is (E03/empty). |
 | zero-one-many | E05 | ✅ covered *(extra)* | ICU plurals on "# curtida/curtidas" and "# comentário/comentários"; zero drops the segment. |
 | zero-one-many | E06 | ✅ covered | Zero → the empty-comments copy; one → a single row with no separator above it; many → the flat list pages oldest→newest on one cursor direction (D-83). |
 | zero-one-many | E08 | ✅ covered | ICU plural on "Fixado em # comunidade(s)"; a story pinned nowhere renders no pin indicator. |
