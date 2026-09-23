@@ -3,7 +3,7 @@ import type { HomeSlot } from '@tria/core/ui';
 import { exampleItemsSchema } from '@tria/module-example/contracts';
 import { ExampleWidget } from '@tria/module-example/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
-import { FeedList } from '@tria/module-feed/ui';
+import { FeedList, type PostCardLabels } from '@tria/module-feed/ui';
 import { EmptyState } from '@tria/ui';
 import { TriangleAlert } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -34,6 +34,34 @@ import { postCardView } from '@/lib/feed-view';
  */
 
 type Translator = Awaited<ReturnType<typeof getTranslations>>;
+
+/**
+ * THE card's label block (04-08) — the ONE place the post's strings are chosen.
+ *
+ * `/inicio`'s home slot and `/post/[postId]` both read this, for the same reason both read
+ * `postCardView` from `lib/feed-view.tsx`: a second copy of the block would drift the first time a
+ * label changed on one surface, and the card on the post page would quietly stop matching the card
+ * in the feed. `FeedList` flattens `media` into its own label block, so the list destructures it
+ * rather than keeping a parallel literal.
+ *
+ * `raw`, not `tf(...)`, for the two count blocks: those are TEMPLATES the module fills with the
+ * count it is showing at that instant (an optimistic like changes the number without a round trip),
+ * so the placeholder must survive the catalog lookup instead of being interpolated here.
+ */
+export function postCardLabels(tf: Translator): PostCardLabels {
+  return {
+    more: tf('caption.more'),
+    like: tf('actions.like'),
+    unlike: tf('actions.unlike'),
+    comment: tf('actions.comment'),
+    share: tf('actions.share'),
+    moreOptions: tf('actions.more'),
+    likes: { one: tf.raw('meta.likes.one'), other: tf.raw('meta.likes.other') },
+    comments: { one: tf.raw('meta.comments.one'), other: tf.raw('meta.comments.other') },
+    edited: tf('meta.edited'),
+    media: { carousel: tf('gallery.carousel'), attachmentError: tf('errors.generic') },
+  };
+}
 
 /** Renders one home slot for a module; receives the whole bootstrap (permissions, tenant, …). */
 export type HomeSlotRenderer = (ctx: { bootstrap: Bootstrap }) => Promise<ReactNode>;
@@ -92,6 +120,9 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
     getTranslations('app.error'),
   ]);
   const now = Date.now();
+  // The SAME block `/post/[postId]` renders its card with; `FeedList` flattens `media` into its own
+  // labels, so it is destructured here rather than duplicated as a second literal.
+  const { media, ...card } = postCardLabels(tf);
 
   return (
     <FeedList
@@ -105,23 +136,12 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
       onRefresh={refreshFeedAction}
       onLike={likePostAction}
       onUnlike={unlikePostAction}
-      comments={commentsProps(locale, tf, bootstrap)}
+      comments={{ title: tf('comments.title'), ...feedCommentsProps(locale, tf, bootstrap) }}
       labels={{
+        ...card,
         region: tf('region'),
-        more: tf('caption.more'),
-        carousel: tf('gallery.carousel'),
-        attachmentError: tf('errors.generic'),
-        like: tf('actions.like'),
-        unlike: tf('actions.unlike'),
-        comment: tf('actions.comment'),
-        share: tf('actions.share'),
-        moreOptions: tf('actions.more'),
-        // `raw`, not `tf(...)`: these are TEMPLATES the module fills with the count it is showing at
-        // that instant (an optimistic like changes the number without a round trip), so the
-        // placeholder must survive the catalog lookup instead of being interpolated here.
-        likes: { one: tf.raw('meta.likes.one'), other: tf.raw('meta.likes.other') },
-        comments: { one: tf.raw('meta.comments.one'), other: tf.raw('meta.comments.other') },
-        edited: tf('meta.edited'),
+        carousel: media.carousel,
+        attachmentError: media.attachmentError,
         emptyTitle: tf('empty.title'),
         emptyBody: tf('empty.body', { tenant: bootstrap.tenant.displayName }),
         emptyBodyAuthor: tf('empty.bodyAuthor'),
@@ -142,6 +162,11 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
  * Everything D-59's comment surface needs, composed HERE for the same reason every other label
  * block is: `@tria/module-feed` ships no language (PWA-03) and knows no route table (MOD-02).
  *
+ * **Both containers read this one block** (04-08): the `CommentSheet` over the feed adds its own
+ * `title` at the call site, and `/post/[postId]` spreads the rest straight into the INLINE
+ * `CommentsList`. The sheet's title is the only thing the two surfaces do not share, which is
+ * exactly D-59's claim — one implementation, one label block, two containers.
+ *
  * The six handlers are SERVER ACTIONS, which is what lets them cross into the client component that
  * owns the sheet. `canDelete` is NOT computed here and not computed in the client either — it rides
  * each row from the API, which derives it from the caller's own user id and re-checks it on the
@@ -153,9 +178,8 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
  * their membership id — and for the ~200 ms a pending row lives, a name without a link is the
  * honest rendering rather than a guessed route.
  */
-function commentsProps(locale: string, tf: Translator, bootstrap: Bootstrap) {
+export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Bootstrap) {
   return {
-    title: tf('comments.title'),
     locale,
     viewer: {
       displayName: bootstrap.membership.profile.displayName,

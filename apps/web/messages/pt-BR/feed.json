@@ -2,7 +2,9 @@
   "feed": {
     "region": "Publicações da comunidade",
     "post": {
-      "label": "Publicação de {name}"
+      "label": "Publicação de {name}",
+      "pageTitle": "Publicação",
+      "back": "Voltar"
     },
     "caption": {
       "more": "… mais"
@@ -98,6 +100,11 @@
         "confirm": "Excluir",
         "cancel": "Cancelar"
       }
+    },
+    "notFound": {
+      "title": "Publicação não encontrada",
+      "body": "Este link não existe mais ou não é desta comunidade.",
+      "cta": "Ir para o início"
     }
   }
 }

@@ -28,9 +28,11 @@ export {
   type CommentViewer,
 } from './CommentsList';
 export {
+  FeedCardSkeleton,
   type FeedCommentsProps,
   FeedList,
   type FeedListProps,
+  FeedListSkeleton,
 } from './FeedList';
 export {
   LikeButton,

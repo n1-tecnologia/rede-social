@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { isRegistrableHost, normalizeHost } from '@tria/contracts';
 import { type NextRequest, NextResponse } from 'next/server';
+import { CONTINUE_COOKIE, CONTINUE_MAX_AGE_S, isContinuablePath } from '@/lib/continue-path';
 import { env } from '@/lib/env';
 import { sessionCookieOptions } from '@/lib/supabase/cookie-options';
 import {
@@ -209,6 +210,18 @@ export async function proxy(request: NextRequest) {
     const target = url.clone();
     target.pathname = '/entrar';
     target.search = '';
+    // FEED-07: a shared `/post/{id}` link is the one private path meant to be opened cold, from a
+    // message, on a device with no session. Remember it — server-side only, HttpOnly, ten minutes —
+    // so the login lands on the post instead of one navigation short of it. Every other private
+    // path is deliberately NOT remembered: see `lib/continue-path.ts`.
+    if (isContinuablePath(path)) {
+      response.cookies.set(CONTINUE_COOKIE, path, {
+        maxAge: CONTINUE_MAX_AGE_S,
+        sameSite: 'lax',
+        path: '/',
+        httpOnly: true,
+      });
+    }
     return withCookies(NextResponse.redirect(target), response);
   }
 

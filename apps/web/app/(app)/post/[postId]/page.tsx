@@ -1,0 +1,122 @@
+import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
+import { EmptyState, PageHeader } from '@tria/ui';
+import { CircleAlert } from 'lucide-react';
+import { notFound, redirect } from 'next/navigation';
+import { getLocale, getTranslations } from 'next-intl/server';
+import { likePostAction, unlikePostAction } from '@/app/(app)/inicio/feed-actions';
+import { PostDetail } from '@/components/feed/PostDetail';
+import { requireBootstrap } from '@/lib/bootstrap';
+import { loadPost, loadPostComments } from '@/lib/feed';
+import { commentView, postCardView } from '@/lib/feed-view';
+import { feedCommentsProps, postCardLabels } from '@/lib/registry';
+import { getHostTenant } from '@/lib/tenant-host';
+
+/**
+ * `/post/[postId]` (D-56, FEED-07, UI-SPEC §Post page contract) — the share target, the destination
+ * Phase 7's notifications will point at, and therefore a URL that is effectively permanent the
+ * moment the pilot tenant's members start sending it.
+ *
+ * Its shape is the member profile route's, three files and all (`/membros/[membershipId]`, 03-05),
+ * because that route already solves every problem this one has: the async `params`, the host-mode
+ * redirect, the `Promise.all` of translations plus loads, and — the part that matters — the split
+ * between "this post is not reachable" and "we could not reach the server".
+ *
+ * **The body is the FULL `PostCard` with `CommentsList` inline beneath it** — the identical
+ * components the feed renders, at identical geometry, never a "detail variant" that would drift on
+ * every later change to the card (D-56, D-59). Both are reached through `components/feed/PostDetail`
+ * for one reason only: a failed like raises the generic toast, `useToast` is a hook, and a server
+ * component cannot hold one. Every view, label and server action below is composed HERE, on the
+ * server, and passed through that shell untouched.
+ *
+ * **Every miss is ONE screen** (UI-D-16). An unknown id, a post belonging to ANOTHER tenant and a
+ * soft-deleted post all arrive here as `loadPost`'s single `not-found`, because the API answers one
+ * indistinguishable bare 404 for all three (D-23/T-04-01) and a 400 for an id that is not a uuid.
+ * `notFound()` then renders `not-found.tsx`, which says nothing about which it was. A transport or
+ * 5xx failure is a DIFFERENT screen below: "we could not reach the server" must never be dressed up
+ * as "this post is not in your community", nor the other way round.
+ *
+ * **There is no public render path.** The route lives inside the `(app)` group, so `proxy.ts`
+ * bounces a session-less visitor to `/entrar` before this file runs (T-04-50), and the page reads
+ * the session and the host headers at request time — which is what keeps it OUT of the static route
+ * list (`scripts/check-static-routes.sh`).
+ *
+ * `redirect()` and `notFound()` both throw (Next 16), so both sit OUTSIDE any try/catch.
+ */
+export default async function PostPage({ params }: { params: Promise<{ postId: string }> }) {
+  const hostTenant = await getHostTenant();
+  if (hostTenant.mode === 'platform') redirect('/inicio');
+
+  const { postId } = await params;
+  const [tf, te, locale, bootstrap, result] = await Promise.all([
+    getTranslations('feed'),
+    getTranslations('app.error'),
+    getLocale(),
+    requireBootstrap(),
+    loadPost(postId),
+  ]);
+
+  if (result.status === 'not-found') notFound();
+
+  const header = (
+    <PageHeader
+      title={tf('post.pageTitle')}
+      backHref="/inicio"
+      backLabel={tf('post.back')}
+      stickyTop="0px"
+      className="md:static md:px-0"
+    />
+  );
+
+  if (result.status === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
+        {header}
+        <EmptyState
+          variant="card"
+          icon={CircleAlert}
+          title={te('title')}
+          body={te('body')}
+          action={
+            <a
+              href={`/post/${encodeURIComponent(postId)}`}
+              className="inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover"
+            >
+              {te('retry')}
+            </a>
+          }
+        />
+      </div>
+    );
+  }
+
+  // The post is readable, so its comments are asked for SECOND rather than in the `Promise.all`
+  // above: a miss must not pay for a comment page nobody will see, and the cross-tenant probe must
+  // not cost the API a second query either.
+  const commentPage = await loadPostComments(result.post.id);
+  const now = Date.now();
+  const nowLabel = tf('comments.now');
+
+  return (
+    <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
+      {header}
+      <PostDetail
+        post={postCardView(result.post, now, tf)}
+        captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
+        locale={locale}
+        labels={postCardLabels(tf)}
+        onLike={likePostAction}
+        onUnlike={unlikePostAction}
+        genericErrorLabel={tf('errors.generic')}
+        comments={{
+          ...feedCommentsProps(locale, tf, bootstrap),
+          initialItems:
+            commentPage === null
+              ? undefined
+              : commentPage.items.map((comment) => commentView(comment, now, nowLabel)),
+          initialCursor: commentPage?.nextCursor ?? null,
+          initialError: commentPage === null,
+        }}
+      />
+    </div>
+  );
+}

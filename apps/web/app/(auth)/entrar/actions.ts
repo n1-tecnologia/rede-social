@@ -1,7 +1,9 @@
 'use server';
 
 import { loginSchema } from '@tria/contracts';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { CONTINUE_COOKIE, safeContinuePath } from '@/lib/continue-path';
 import { getHostBrand } from '@/lib/host-brand';
 import { createClient } from '@/lib/supabase/server';
 
@@ -28,5 +30,13 @@ export async function login(formData: FormData): Promise<void> {
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) redirect('/entrar?erro=credenciais');
 
-  redirect('/inicio');
+  // FEED-07: a shared `/post/{id}` link that bounced through here comes back. `safeContinuePath`
+  // re-validates the cookie rather than trusting it — one leading slash, this origin, that one
+  // route — so a forged value can never turn the login into an open redirect. The cookie is spent
+  // either way, so a stale destination cannot resurface on the next login.
+  const jar = await cookies();
+  const target = safeContinuePath(jar.get(CONTINUE_COOKIE)?.value);
+  if (jar.get(CONTINUE_COOKIE)) jar.delete(CONTINUE_COOKIE);
+
+  redirect(target ?? '/inicio');
 }

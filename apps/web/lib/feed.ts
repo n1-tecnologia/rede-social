@@ -269,3 +269,35 @@ export async function likeComment(commentId: string): Promise<LikeResult> {
 export async function unlikeComment(commentId: string): Promise<LikeResult> {
   return toggleCommentLike(commentId, 'DELETE');
 }
+
+/** One page of a post's root comments, or `null` when the API could not answer (UI-D-22). */
+export type FeedCommentPageResult = FeedCommentPage | null;
+
+/**
+ * The post page's FIRST page of root comments (D-59, 04-08).
+ *
+ * `null` is "we could not read them", which the inline list renders as its own error-with-retry
+ * WHERE THE ROWS WOULD BE — the post itself still renders in full above it (UI-SPEC E10/E13
+ * partial: the card is never withheld behind its comments). A refusal `bootstrapRedirectPath` knows
+ * becomes a navigation, performed OUTSIDE the try/catch because `redirect()` throws in Next 16.
+ *
+ * It goes through the SAME `getComments` the sheet uses: one implementation for both containers,
+ * so the seeded page and the sheet's page can never disagree about ordering or page size.
+ */
+export async function loadPostComments(
+  postId: string,
+  query: CommentQueryInput = {},
+): Promise<FeedCommentPageResult> {
+  let path: string | null = null;
+  let page: FeedCommentPage | null = null;
+  try {
+    page = await getComments(postId, query);
+  } catch (error) {
+    if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
+    // Shape only: a comment body is member content and never reaches a log line (T-04-19/T-04-40).
+    if (!path) console.error('feed.comments.load_failed', { error: String(error) });
+  }
+
+  if (path) redirect(path);
+  return page;
+}
