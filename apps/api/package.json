@@ -22,6 +22,7 @@
     "@t3-oss/env-core": "0.13.11",
     "@tria/contracts": "workspace:*",
     "@tria/core": "workspace:*",
+    "@tria/module-communities": "workspace:*",
     "@tria/module-feed": "workspace:*",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.7",

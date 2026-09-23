@@ -2,6 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@tria/core/server/auth/context';
 import { flushEventsAfterHandler } from '@tria/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@tria/core/server/http/api-error';
+import { communitiesRoutes } from '@tria/module-communities/server';
 import { feedRoutes } from '@tria/module-feed/server';
 import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
@@ -64,7 +65,13 @@ const routes = app
   // The module carries its own `requireAuth` + `requireModule('feed')` chain plus a per-route
   // `requirePermission('feed.post.create')` on the write (packages/modules/feed/server/routes.ts),
   // so the mount cannot forget a guard and V1's posting rule is a tenant setting, not a route edit.
-  .route('/v1/feed', feedRoutes);
+  .route('/v1/feed', feedRoutes)
+  // Same shape, one phase later: the communities module carries its own
+  // `requireAuth` + `requireModule('communities')` chain plus a per-route
+  // `requirePermission('communities.community.manage')` on the write
+  // (packages/modules/communities/server/routes.ts). Turning the module off 404s every route below
+  // and removes the Comunidades tab from the bootstrap — no migration, no edit here (MOD-04, D-40).
+  .route('/v1/communities', communitiesRoutes);
 
 export type AppType = typeof routes;
 export { app };

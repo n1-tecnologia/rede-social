@@ -1,0 +1,36 @@
+{
+  "communities": {
+    "nav": "Comunidades",
+    "region": "Comunidades de {tenant}",
+    "list": {
+      "title": "Comunidades",
+      "subtitle": "Escolha onde você quer entrar hoje."
+    },
+    "card": {
+      "posts": "{count, plural, one {# publicação} other {# publicações}}",
+      "cover": "Capa da comunidade {community}"
+    },
+    "actions": {
+      "create": "Criar comunidade",
+      "creating": "Criando…",
+      "viewAll": "Ver comunidades"
+    },
+    "empty": {
+      "title": "Nenhuma comunidade ainda",
+      "body": "As comunidades de {tenant} vão aparecer aqui.",
+      "bodyAdmin": "Crie a primeira comunidade para organizar as publicações."
+    },
+    "notFound": {
+      "title": "Comunidade não encontrada",
+      "body": "Este link não existe mais ou não é de {tenant}."
+    },
+    "errors": {
+      "title": "Algo deu errado",
+      "generic": "Não foi possível carregar as comunidades. Tente novamente.",
+      "retry": "Tentar novamente",
+      "loadMore": "Não foi possível carregar mais comunidades.",
+      "nameRequired": "Dê um nome para a comunidade.",
+      "archived": "Esta comunidade foi arquivada. Não é possível publicar nela."
+    }
+  }
+}

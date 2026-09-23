@@ -9,6 +9,7 @@ import { registerJobQueues } from '@tria/core/server/jobs/boss';
 import type { ModuleManifest } from '@tria/core/server/modules/manifest';
 import { setPermissionResolver } from '@tria/core/server/rbac/permissions';
 import { KERNEL_ROLE_PERMISSIONS } from '@tria/core/server/rbac/require-role';
+import { communitiesModule } from '@tria/module-communities/module';
 import { FEED_PERMISSIONS, feedSettingsSchema } from '@tria/module-feed/contracts';
 import { feedModule } from '@tria/module-feed/module';
 
@@ -22,6 +23,7 @@ import { feedModule } from '@tria/module-feed/module';
  * out the same way it went in.
  */
 export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
+  communities: communitiesModule,
   feed: feedModule,
 };
 
