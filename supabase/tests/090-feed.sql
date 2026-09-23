@@ -9,7 +9,13 @@ begin;
 --   * "exactly one target" on both tables;
 --   * the counters RECONCILE against the rows they summarise, asserted AFTER a soft delete so the
 --     `deleted_at` branch of the trigger is exercised rather than assumed (Pitfall 5);
---   * the three keyset queries are INDEX SCANS against a realistically-sized fixture;
+--   * the FOUR keyset queries are INDEX SCANS against a realistically-sized fixture — and the
+--     fourth, the 05-03 MERGED feed (no predicate on `community_id` at all), is pinned BY NAME to
+--     `feed_posts_tenant_created_all_idx`. That one is here because it is the assertion whose
+--     absence would be invisible: 05-RESEARCH §Pattern 3 measured the merged feed as `Sort` +
+--     `Seq Scan` WITHOUT that index, a plan that costs nothing at pilot volume and everything at a
+--     few thousand posts, so without this block a future "we have two indexes on the same columns"
+--     cleanup would drop it with nothing going red;
 --   * the link-preview cache's PER-TENANT boundary is a fact of the index: the same url_hash
 --     collides inside one tenant (23505) and inserts freely across two, with the positive control
 --     in the same block — so a global cache could not be introduced without turning this red;
@@ -26,7 +32,7 @@ begin;
 -- tenant would push the demo posts off the first feed page and quietly break `feed.test.ts`'s
 -- cursor walk and `feed.spec.ts`'s ordering assertions. Like its siblings, this file rolls back, so
 -- it re-runs identically against a seeded or an empty database, twice in a row, in any order.
-select plan(35);
+select plan(39);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-feed', 'Comunidade Feed', '0c000000-0000-4000-8000-000000000001');
@@ -331,7 +337,37 @@ select is(
   'deleting a preview leaves its post alive with link_preview_id null (on delete set null)'
 );
 
--- ── 30-35. the three keyset queries are index scans ────────────────────────────────────────────
+-- ── 30-31. COMM-04: `feed_posts.community_id` carries a REAL foreign key (05-03) ───────────────
+-- Phase 4 reserved the column with no constraint ("`communities` does not exist until Phase 5").
+-- It exists now, so the reference does too — declared as hand-written SQL in
+-- `20260923185730_feed_communities.sql` because a drizzle `.references()` would need a
+-- `module -> module` import the boundary allowlist denies (MOD-02). The constraint is the same
+-- either way, and THIS is where that claim is checked: the negative below is what a cross-tenant or
+-- fabricated `communityId` hits if every application check above it were ever removed, and the
+-- positive control in the same block is what stops a globally broken insert from making it pass
+-- vacuously.
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, description)
+values ('0c000000-0000-4000-8000-0000000000c1', '0c000000-0000-4000-8000-000000000001',
+        '0c000000-0000-4000-8000-000000000002', 'Comunidade pgtap', 'comunidade-pgtap', 'x');
+
+select lives_ok(
+  $$ insert into public.feed_posts (id, tenant_id, caption, author_user_id, community_id)
+     values ('0c000000-0000-4000-8000-0000000000c9', '0c000000-0000-4000-8000-000000000001', 'c',
+             '0c000000-0000-4000-8000-000000000002',
+             '0c000000-0000-4000-8000-0000000000c1') $$,
+  'positive control: a post naming an EXISTING community of this tenant is accepted'
+);
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, caption, author_user_id, community_id)
+     values ('0c000000-0000-4000-8000-000000000001', 'x',
+             '0c000000-0000-4000-8000-000000000002',
+             '0c000000-0000-4000-8000-00000000ffff') $$,
+  '23503',
+  null,
+  'COMM-04: a post naming a community that does not exist is refused by feed_posts_community_fk'
+);
+
+-- ── 32-39. the FOUR keyset queries are index scans ─────────────────────────────────────────────
 -- Captured into a temp table with `execute … into`, because EXPLAIN cannot be a subquery. The
 -- predicates mirror what RLS injects (`tenant_id = app.tenant_id()`), since pg_prove connects as
 -- the table owner and therefore does not have the policy applied for it.
@@ -368,8 +404,32 @@ select ('0c00f3' || lpad(to_hex(g), 26, '0'))::uuid,
        now() - (g || ' seconds')::interval
   from generate_series(1, 250) g;
 
+-- 05-03: the MERGED feed's own half of the volume fixture — 250 more posts, spread across FOUR
+-- communities and interleaved in time with the 250 tenant-wide ones above (offset by 30 seconds, so
+-- the two sources alternate rather than forming two blocks). That interleaving is what makes the
+-- merged plan a real question: a fixture where every community post is older than every tenant-wide
+-- one could be answered by the partial index plus a filter and would prove nothing.
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, description)
+select ('0c00c0' || lpad(to_hex(g), 26, '0'))::uuid,
+       '0c000000-0000-4000-8000-000000000001',
+       '0c000000-0000-4000-8000-000000000002',
+       'Volume ' || g,
+       'volume-' || g,
+       ''
+  from generate_series(1, 4) g;
+
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, community_id, created_at)
+select ('0c00f4' || lpad(to_hex(g), 26, '0'))::uuid,
+       '0c000000-0000-4000-8000-000000000001',
+       '0c000000-0000-4000-8000-000000000002',
+       'volume comunidade ' || g,
+       ('0c00c0' || lpad(to_hex((g % 4) + 1), 26, '0'))::uuid,
+       now() - (g || ' minutes')::interval - interval '30 seconds'
+  from generate_series(1, 250) g;
+
 analyze public.feed_posts;
 analyze public.feed_comments;
+analyze public.communities;
 
 -- Captured into a temp table with `execute … into`, because EXPLAIN cannot be a subquery. The
 -- predicates mirror what RLS injects (`tenant_id = app.tenant_id()`), since pg_prove connects as
@@ -386,6 +446,18 @@ begin
         and p.community_id is null and p.deleted_at is null
       order by p.created_at desc, p.id desc limit 10' into v_plan;
   insert into feed_plans values ('feed', v_plan);
+
+  -- 05-03 / D-73: the MERGED feed. The ONLY difference from the query above is the ABSENCE of
+  -- `and p.community_id is null` — which is exactly the point, because that absence is what makes
+  -- both Phase 4 indexes unusable for delivering the ordering (a middle key column that is neither
+  -- pinned by an equality nor dropped from the key cannot be skipped). Measured without
+  -- `feed_posts_tenant_created_all_idx`, this plans as `Sort` + `Seq Scan`.
+  execute
+    'explain (format json) select p.id, p.created_at from public.feed_posts p
+      where p.tenant_id = ''0c000000-0000-4000-8000-000000000001''
+        and p.deleted_at is null
+      order by p.created_at desc, p.id desc limit 10' into v_plan;
+  insert into feed_plans values ('merged', v_plan);
 
   execute
     'explain (format json) select c.id, c.created_at from public.feed_comments c
@@ -414,6 +486,22 @@ select doesnt_match(
   (select plan from feed_plans where name = 'feed'),
   'Seq Scan on feed_posts',
   '…and never a sequential scan of feed_posts'
+);
+-- D-73, pinned BY NAME rather than by shape. `matches('Index Scan')` would pass on the partial
+-- index plus a filter, which is a different plan with a different cost; naming the index is what
+-- makes "the merged feed is served by the index 05-03 added" a falsifiable statement, and it is
+-- what turns a future `drop index` into a red run instead of a silent regression.
+select matches(
+  (select plan from feed_plans where name = 'merged'),
+  'feed_posts_tenant_created_all_idx',
+  'D-73: the MERGED feed (no community_id predicate) is served by feed_posts_tenant_created_all_idx'
+);
+-- The negative half, in the SAME captured plan: without it the assertion above would pass on a plan
+-- that merely MENTIONS the index in a subnode while sequentially scanning the table at the top.
+select doesnt_match(
+  (select plan from feed_plans where name = 'merged'),
+  'Seq Scan on feed_posts',
+  '…and never a sequential scan of feed_posts — the plan 05-RESEARCH measured without the index'
 );
 select matches(
   (select plan from feed_plans where name = 'roots'),

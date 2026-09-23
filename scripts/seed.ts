@@ -412,6 +412,69 @@ const SEED_COMMUNITIES = [
 ] as const;
 
 /**
+ * 05-03 (COMM-04, D-73) — SIX posts published INSIDE the communities, per tenant.
+ *
+ * They exist so the merged feed is a genuine MIX rather than two blocks: `minutesAgo` is chosen to
+ * fall BETWEEN the tenant-wide fixtures (1-3 min for the media posts, 6 min for the edited one,
+ * 7 min for the long-name one, 60-77 min for the fillers), and two of them land with a half-minute
+ * offset INSIDE the filler block so the interleaving is still visible on page 2. A fixture where
+ * every community post were older than every tenant-wide one would let a feed that simply appended
+ * the two sources pass the ordering assertions.
+ *
+ * `communityIndex` points into `SEED_COMMUNITIES`. Index 3 — the 60-character community — carries
+ * two of the six ON PURPOSE: it is the container 05-04's archive case is meant to archive, and
+ * archive must be shown to LEAVE those posts in the feed (05-RESEARCH §Pattern 7). Archiving a
+ * community with nothing in it would prove nothing.
+ *
+ * Fixed ids, `on conflict (id) do nothing`, identical-looking in both tenants (§(j)) — the rules
+ * every other post fixture in this file follows.
+ */
+const SEED_COMMUNITY_POST_IDS: Record<string, readonly string[]> = {
+  'tria-demo': [
+    '0d000000-0000-4000-8000-0000000000d1',
+    '0d000000-0000-4000-8000-0000000000d2',
+    '0d000000-0000-4000-8000-0000000000d3',
+    '0d000000-0000-4000-8000-0000000000d4',
+    '0d000000-0000-4000-8000-0000000000d5',
+    '0d000000-0000-4000-8000-0000000000d6',
+  ],
+  'tria-lab': [
+    '0e000000-0000-4000-8000-0000000000d1',
+    '0e000000-0000-4000-8000-0000000000d2',
+    '0e000000-0000-4000-8000-0000000000d3',
+    '0e000000-0000-4000-8000-0000000000d4',
+    '0e000000-0000-4000-8000-0000000000d5',
+    '0e000000-0000-4000-8000-0000000000d6',
+  ],
+};
+
+/** `minutesAgo` may be fractional: the two deep entries sit BETWEEN two filler posts, not on one. */
+const SEED_COMMUNITY_POSTS = [
+  { communityIndex: 0, minutesAgo: 4, caption: 'Pauta da reuniao de diretoria desta semana.' },
+  {
+    communityIndex: 1,
+    minutesAgo: 5,
+    caption: 'Inscricoes abertas para o encontro do proximo sabado.',
+  },
+  {
+    communityIndex: 2,
+    minutesAgo: 8,
+    caption: 'Atualizacao semanal do projeto de comunicacao interna.',
+  },
+  {
+    communityIndex: 3,
+    minutesAgo: 9,
+    caption: 'Checklist do grupo de trabalho para o proximo ciclo.',
+  },
+  { communityIndex: 0, minutesAgo: 62.5, caption: 'Resumo das decisoes da ultima reuniao.' },
+  {
+    communityIndex: 3,
+    minutesAgo: 64.5,
+    caption: 'Materiais de apoio do grupo de trabalho, revisados.',
+  },
+] as const;
+
+/**
  * 04-05 (MEDIA-04) — one RESOLVED and one FAILED link preview per tenant, with the posts that carry
  * them. Identical-looking on both sides (SCHEMA-CONVENTIONS §(j)), so a query that filtered on a
  * value instead of on `tenant_id` could not pass by returning something that merely looks right.
@@ -1185,6 +1248,36 @@ for (const t of SEED_TENANTS) {
         console.log(
           `seed: tenant ${t.slug} — ${SEED_COMMUNITIES.length} communities (1 without a cover, 1 activity tie)`,
         );
+
+        // 05-03 (COMM-04): the posts INSIDE those communities. They are written AFTER the
+        // communities in the same block because `feed_posts_community_fk` now refuses a post whose
+        // container does not exist yet — the constraint is the ordering, not a convention.
+        //
+        // ONE clock read for the whole batch, the 05-01 lesson: a per-row `Date.now()` would move
+        // every offset by a few milliseconds and make the deliberate placement between two
+        // tenant-wide fixtures approximate rather than exact.
+        const communityPostIds = SEED_COMMUNITY_POST_IDS[t.slug];
+        if (communityPostIds) {
+          const postClock = Date.now();
+          await withAdminTx(async (tx) => {
+            for (const [index, entry] of SEED_COMMUNITY_POSTS.entries()) {
+              const id = communityPostIds[index];
+              const communityId = communityIds[entry.communityIndex];
+              const createdAt = new Date(postClock - entry.minutesAgo * 60_000).toISOString();
+              await tx.execute(sql`
+                insert into public.feed_posts
+                  (id, tenant_id, author_user_id, caption, community_id, created_at)
+                values (
+                  ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid, ${entry.caption},
+                  ${communityId}::uuid, ${createdAt}::timestamptz
+                )
+                on conflict (id) do nothing`);
+            }
+          });
+          console.log(
+            `seed: tenant ${t.slug} — ${SEED_COMMUNITY_POSTS.length} posts inside communities (merged-feed fixture)`,
+          );
+        }
       }
     }
 
