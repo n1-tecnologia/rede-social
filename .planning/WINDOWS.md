@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 16
+open_count: 17
 waived_count: 0
 fixed_count: 9
-total_count: 25
-last_updated: 2026-09-23T02:30:01.337Z
+total_count: 26
+last_updated: 2026-09-23T02:59:24.075Z
 ---
 
 # Broken Windows Ledger
@@ -40,6 +40,7 @@ last_updated: 2026-09-23T02:30:01.337Z
 | 23 | 04 | stub | packages/modules/feed/db/schema.ts |  | feed_link_previews.image_asset_id is null in V1 by decision — the preview card renders body-only; the image branch is grep-pinned but unexercised by any seeded or runtime row | open |  | 2026-09-23T01:14:50.647Z |  |
 | 24 | 04 | unrun-verify | apps/web/e2e/feed.spec.ts |  | The >999 meta-row backstop (UI-SPEC E02 overflow/long-text) is pinned only as a STRING by packages/modules/feed/tests/meta.test.ts, never as pixels: supabase/tests/090-feed.sql reconciles every post's like_count against its live feed_likes rows, so a four-digit seeded count would need 1000+ auth users and a hand-written counter would turn that assertion red. The abbreviated row has never been rendered at 320px. | open |  | 2026-09-23T01:46:35.102Z |  |
 | 25 | 04 | stub | apps/web/lib/registry.tsx | 162 | Viewer's optimistic comment row carries profileHref: null — the bootstrap has no membershipId; bounded to a pending row's lifetime, intentional | open |  | 2026-09-23T02:30:01.337Z |  |
+| 26 | 04 | unrun-verify | apps/web/e2e/feed-share.spec.ts |  | Native OS share sheet on a real iPhone/Android is manual-only (outside the browser-automation boundary); carried as phase UAT coverage entry D6 | open |  | 2026-09-23T02:59:24.075Z |  |
 
 ````json
 [
@@ -341,6 +342,18 @@ last_updated: 2026-09-23T02:30:01.337Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T02:30:01.337Z",
+    "resolved_at": null
+  },
+  {
+    "id": 26,
+    "kind": "unrun-verify",
+    "phase": "04",
+    "file": "apps/web/e2e/feed-share.spec.ts",
+    "line": null,
+    "description": "Native OS share sheet on a real iPhone/Android is manual-only (outside the browser-automation boundary); carried as phase UAT coverage entry D6",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T02:59:24.075Z",
     "resolved_at": null
   }
 ]

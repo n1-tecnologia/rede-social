@@ -57,7 +57,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [x] **FEED-04**: Member can like/unlike a post (idempotent toggle) and see the like count
 - [x] **FEED-05**: Member can comment on a post and reply to a comment; replies are limited to one level (enforced by a DB constraint)
 - [x] **FEED-06**: Member can like/unlike comments and replies
-- [ ] **FEED-07**: Member can share a post via the native share sheet (or copy link on desktop) using an internal deep link; opening the link requires login and lands on the post if it belongs to the user's tenant (otherwise 404)
+- [x] **FEED-07**: Member can share a post via the native share sheet (or copy link on desktop) using an internal deep link; opening the link requires login and lands on the post if it belongs to the user's tenant (otherwise 404)
 - [x] **FEED-08**: Posts, communities and stories carry a generic `author_id` and per-tenant posting policy so V2 member posting is a permission change, not a schema change
 
 ### Communities
@@ -240,7 +240,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FEED-04 | Phase 4 | Complete |
 | FEED-05 | Phase 4 | Complete |
 | FEED-06 | Phase 4 | Complete |
-| FEED-07 | Phase 4 | Pending |
+| FEED-07 | Phase 4 | Complete |
 | FEED-08 | Phase 4 | Complete |
 | COMM-01 | Phase 5 | Pending |
 | COMM-02 | Phase 5 | Pending |
