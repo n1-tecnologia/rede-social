@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-09-23T17:36:00.722Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-09-23T18:38:52.930Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 05 execution started
-state_head: 33bc9e756ba2ce6f3a8cb4bc1dd858adbef7fe5a
+state_head: e6f56624b6b0c92cbd2ab00c924e672937d98bd8
 progress:
   total_phases: 9
   completed_phases: 0
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 05 (Communities & Stories) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-09-23 — Phase 05 execution started
 
@@ -106,6 +106,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P09 | 46 min | 3 tasks | 34 files |
 | Phase 04 P10 | 87 min | 3 tasks | 52 files |
 | Phase 05 P01 | 28 min | 3 tasks | 34 files |
+| Phase 05 P02 | 65 min | 3 tasks | 27 files |
 
 ## Accumulated Context
 
@@ -302,6 +303,8 @@ Recent decisions affecting current work:
 - [Phase 05]: The kernel does NOT re-export module schemas: packages/core/db/schema/index.ts stays untouched for communities, because turbo boundaries denies kernel -> module and drizzle.config.ts already globs packages/modules/*/db/schema.ts
 - [Phase 05]: GET /v1/communities CLAMPS limit instead of refusing it (the feed 400s): a tab-reachable list must land a hand-edited ?limit= on a page, not an error screen. T-05-04 holds either way, because no client value widens the read
 - [Phase 05]: communities.last_activity_at is NOT NULL, seeded at creation and trigger-owned from 05-03. It is the keyset key: an aggregate over feed_posts is not pageable, and a nullable column would float post-less communities to the top
+- [Phase 05]: UI-D-46 ships a 6/4 split, not the spec's 4/6: media.errors.quota drops the word instead of gaining {tenant} — The string resolves in useSignedUpload, whose platform-panel callers (LogoUpload, IconOverrideUpload) run as super_admin on app.seusistema.com where no tenant display name exists. Interpolating there would render a stray brace on the platform host.
+- [Phase 05]: The two 404 components now read the host tenant; their existence-oracle guarantee is unchanged — post/[postId]/not-found.tsx and membros/[membershipId]/not-found.tsx still take no props and read no param, so the requested id can never be echoed. The tenant name is host-derived and therefore byte-identical across every 404 cause, so it leaks nothing about the resource.
 
 ### Pending Todos
 
@@ -334,6 +337,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T17:35:07.495Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-09-23T18:38:45.368Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
