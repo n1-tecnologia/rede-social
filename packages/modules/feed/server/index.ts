@@ -13,6 +13,7 @@ export {
   listComments,
   listFeed,
   listReplies,
+  setPostLinkPreview,
   unlikeComment,
   unlikePost,
 } from './service';

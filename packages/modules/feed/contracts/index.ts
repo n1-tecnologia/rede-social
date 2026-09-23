@@ -123,6 +123,12 @@ export const createPostSchema = z
     imageAssetIds: z.array(z.uuid()).optional(),
     videoAssetId: z.uuid().optional(),
     attachmentAssetIds: z.array(z.uuid()).optional(),
+    /**
+     * An EXPLICIT link to preview. Omitted, the service takes the first URL in the caption
+     * (`firstUrlIn`). Either way the URL is validated synchronously and, if the policy refuses it,
+     * SILENTLY dropped — the post still publishes and the admin is told nothing (UI-D-13).
+     */
+    linkUrl: z.string().max(2048).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -152,6 +158,109 @@ export const createPostSchema = z
     }
   });
 export type CreatePost = z.infer<typeof createPostSchema>;
+
+/* ── Link previews (MEDIA-04, UI-D-11 / UI-D-12 / UI-D-13) ─────────────────────────────────────── */
+
+/**
+ * THE URL matcher, exported so the caption renderer and the create path can never disagree about
+ * what counts as a link in a post.
+ *
+ * Two copies of this rule would mean a caption that renders a link the unfurler never saw, or a
+ * preview card under a URL the caption did not turn blue. Deliberately conservative: a run of
+ * non-space characters after `http://` or `https://`, with trailing sentence punctuation pushed
+ * back into the text so "veja https://exemplo.com." matches the URL and not the full stop. The
+ * scheme restriction is load-bearing — a `javascript:` or `data:` URL simply is not a match, so it
+ * can never become an `href` and can never be enqueued.
+ */
+export const FEED_URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
+export const FEED_URL_TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
+
+/** One match, trimmed of trailing punctuation. `matchAll` clones the regex, so `lastIndex` is safe. */
+export function trimMatchedUrl(raw: string): string {
+  const trailing = FEED_URL_TRAILING_PUNCTUATION.exec(raw);
+  return trailing ? raw.slice(0, raw.length - trailing[0].length) : raw;
+}
+
+/** The FIRST link in a caption — the one, and only one, a post may preview. */
+export function firstUrlIn(text: string): string | null {
+  for (const match of text.matchAll(FEED_URL_PATTERN)) {
+    const url = trimMatchedUrl(match[0]);
+    if (url.length > 0) return url;
+  }
+  return null;
+}
+
+/** The queue the create path enqueues onto and the worker binds. */
+export const FEED_UNFURL_QUEUE = 'feed.unfurl-link';
+
+/**
+ * The unfurl job's payload.
+ *
+ * `tenantId` is DATA, NOT AUTHORITY (T-07-03). The handler re-enters the tenant lane with it and
+ * lets RLS decide what may be written: a payload naming the wrong tenant updates zero rows rather
+ * than another tenant's preview. The field exists so the worker knows WHICH lane to enter, never to
+ * grant access to one.
+ */
+export interface FeedUnfurlJob {
+  tenantId: string;
+  previewId: string;
+  url: string;
+}
+
+/** The status vocabulary, mirrored by `feed_link_previews_status_chk`. */
+export const LINK_PREVIEW_STATUSES = ['pending', 'resolved', 'failed'] as const;
+export type LinkPreviewStatus = (typeof LINK_PREVIEW_STATUSES)[number];
+
+/** The oEmbed providers that resolve to a thumbnail card rather than an Open Graph scrape. */
+export const LINK_PREVIEW_PROVIDERS = ['youtube', 'vimeo'] as const;
+export type LinkPreviewProvider = (typeof LINK_PREVIEW_PROVIDERS)[number];
+
+/**
+ * The MACHINE failure codes a preview row can carry. They never cross the wire and never reach the
+ * admin: UI-D-13 makes every refusal silent, because a message separating "blocked host" from "no
+ * metadata" is an internal-network oracle an admin could point at the VPC.
+ */
+export const LINK_PREVIEW_FAILURE_REASONS = [
+  'blocked',
+  'timeout',
+  'unreachable',
+  'no_metadata',
+] as const;
+export type LinkPreviewFailureReason = (typeof LINK_PREVIEW_FAILURE_REASONS)[number];
+
+/**
+ * A preview as the feed projects it. `hostname` is derived server-side from the stored URL so the
+ * card never parses one, and `failureReason` is deliberately ABSENT from this shape — the client is
+ * told the status and nothing about why (UI-D-13).
+ *
+ * Every string here is untrusted remote metadata. It crosses the wire as PLAIN TEXT and is rendered
+ * through React's default escaping; nothing in the card is an HTML-injection sink (T-04-32).
+ */
+export const linkPreviewSchema = z
+  .object({
+    status: z.enum(LINK_PREVIEW_STATUSES),
+    url: z.string(),
+    title: z.string().nullable(),
+    description: z.string().nullable(),
+    siteName: z.string().nullable(),
+    hostname: z.string(),
+    provider: z.enum(LINK_PREVIEW_PROVIDERS).nullable(),
+    imageAssetId: z.uuid().nullable(),
+  })
+  .strict();
+export type LinkPreview = z.infer<typeof linkPreviewSchema>;
+
+/**
+ * The remove affordance, as one nullable field (04-09 spreads it into the post-edit body).
+ *
+ * There is no override: an admin may DROP a resolved preview, never supply their own title, image
+ * or description. Letting one hand-write the card would turn a post into an arbitrary link-styled
+ * banner that looks like it came from the linked site.
+ */
+export const postLinkPreviewPatchSchema = z.object({
+  linkPreviewId: z.uuid().nullable().optional(),
+});
+export type PostLinkPreviewPatch = z.infer<typeof postLinkPreviewPatchSchema>;
 
 /** Authorship as the card renders it (D-52): the PERSON, reached through their membership. */
 export const feedPostAuthorSchema = z
@@ -190,6 +299,12 @@ export const feedPostSchema = z
     mediaKind: z.enum(['none', 'gallery', 'video']),
     /** Images/video first in `position` order, then the attachments in their own `position` order. */
     media: z.array(postMediaSchema),
+    /**
+     * At most one, and null until it actually RESOLVES. The card draws only on `'resolved'`
+     * (UI-D-11), so a `'pending'` or `'failed'` row is indistinguishable here from a post that
+     * carried no link at all — which is exactly the silence UI-D-13 asks for.
+     */
+    linkPreview: linkPreviewSchema.nullable(),
   })
   .strict();
 export type FeedPost = z.infer<typeof feedPostSchema>;

@@ -1,6 +1,7 @@
 import { moduleLogger } from '@tria/core/server/logging';
 import { defineModule } from '@tria/core/server/modules/manifest';
 import { FEED_PERMISSIONS } from './contracts/index';
+import { feedUnfurlJob } from './server/jobs';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-feed');
@@ -27,7 +28,9 @@ export const feedModule = defineModule({
   key: 'feed',
   home: [{ order: 10 }],
   routes: () => import('./server/routes').then((m) => m.feedRoutes),
-  jobs: [],
+  // MEDIA-04: the link unfurl runs in the WORKER, never in a request. The kernel creates the queue
+  // from this array and the worker binds the handler through MODULE_REGISTRY.
+  jobs: [feedUnfurlJob],
   events: [
     {
       event: 'post.published',

@@ -5,6 +5,11 @@ export {
   type AttachmentRowProps,
 } from './AttachmentRow';
 export { FeedList, type FeedListProps } from './FeedList';
+export {
+  LinkPreviewCard,
+  type LinkPreviewCardProps,
+  type LinkPreviewView,
+} from './LinkPreviewCard';
 export { PostCaption, type PostCaptionProps } from './PostCaption';
 export {
   PostCard,

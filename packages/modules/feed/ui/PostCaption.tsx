@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode, useState } from 'react';
+import { FEED_URL_PATTERN, trimMatchedUrl } from '../contracts/index';
 
 /**
  * The caption (`[proto]` `feed/PostCaption.tsx` minus the leading username span), and the single
@@ -28,12 +29,14 @@ export type PostCaptionProps = {
 };
 
 /**
- * Deliberately conservative: a run of non-space characters after `http://` or `https://`. Trailing
- * sentence punctuation is pushed back into the text so "veja https://exemplo.com." links the URL and
- * not the full stop.
+ * THE matcher, imported from the module's contracts rather than declared here (MEDIA-04).
+ *
+ * The create path picks the URL it unfurls with this exact function. Two copies would drift on the
+ * first change and produce the two shapes nobody can explain: a preview card under a URL the caption
+ * did not turn blue, or a blue URL the unfurler never saw. It is still deliberately conservative —
+ * a run of non-space characters after `http://` or `https://`, with trailing sentence punctuation
+ * pushed back into the text so "veja https://exemplo.com." links the URL and not the full stop.
  */
-const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
-const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
 
 /**
  * Splits `text` into plain runs and `<a>` elements. Keys carry the match offset, so they are stable
@@ -43,11 +46,9 @@ function linkify(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let cursor = 0;
 
-  for (const match of text.matchAll(URL_PATTERN)) {
+  for (const match of text.matchAll(FEED_URL_PATTERN)) {
     const start = match.index;
-    let url = match[0];
-    const trailing = TRAILING_PUNCTUATION.exec(url);
-    if (trailing) url = url.slice(0, url.length - trailing[0].length);
+    const url = trimMatchedUrl(match[0]);
     if (url.length === 0) continue;
 
     if (start > cursor) nodes.push(text.slice(cursor, start));

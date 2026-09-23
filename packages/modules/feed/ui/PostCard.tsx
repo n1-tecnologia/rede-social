@@ -1,6 +1,7 @@
 import { Card } from '@tria/ui';
 import type { ReactNode } from 'react';
 import type { AttachmentDescriptor } from './AttachmentRow';
+import type { LinkPreviewCardProps } from './LinkPreviewCard';
 import { PostCaption } from './PostCaption';
 import { PostHeader } from './PostHeader';
 import { PostMedia, type PostMediaImage, type PostMediaLabels } from './PostMedia';
@@ -25,6 +26,8 @@ export type PostCardMediaView = {
   images: PostMediaImage[];
   attachments: AttachmentDescriptor[];
   video?: ReactNode;
+  /** MEDIA-04: present only for a RESOLVED preview — the host projects nothing else (UI-D-11). */
+  linkPreview?: LinkPreviewCardProps;
 };
 
 export type PostCardView = {
@@ -78,6 +81,7 @@ export function PostCard({ post, captionTruncateAt, moreLabel, mediaLabels }: Po
         images={post.media.images}
         video={post.media.video}
         attachments={post.media.attachments}
+        linkPreview={post.media.linkPreview}
         labels={mediaLabels}
       />
       <PostCaption caption={post.caption} truncateAt={captionTruncateAt} moreLabel={moreLabel} />

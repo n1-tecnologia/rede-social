@@ -174,6 +174,33 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
         };
       }),
     video: video ? <VideoPlayer assetId={video.assetId} status={video.status} /> : undefined,
+    // MEDIA-04. The API projects a preview ONLY once it has resolved, so `post.linkPreview` is
+    // already null while one is pending, failed or refused — the card is simply absent and the
+    // caption's auto-linked URL is the whole rendering (UI-D-11 / UI-D-13). `imageAssetId` is null
+    // in V1 (the worker does not copy remote thumbnails into Storage), so the ladder is empty and
+    // the card renders body-only rather than hot-linking a third-party host into the tenant's page.
+    linkPreview:
+      post.linkPreview === null
+        ? undefined
+        : {
+            preview: {
+              status: post.linkPreview.status,
+              url: post.linkPreview.url,
+              hostname: post.linkPreview.hostname,
+              title: post.linkPreview.title,
+              description: post.linkPreview.description,
+              provider: post.linkPreview.provider,
+              imageAssetId: post.linkPreview.imageAssetId,
+              imageVariantWidths: [],
+            },
+            ariaLabel: tf('linkPreview.label', {
+              title: post.linkPreview.title ?? post.linkPreview.hostname,
+            }),
+            providerLabel:
+              post.linkPreview.provider === null
+                ? undefined
+                : tf(`linkPreview.provider.${post.linkPreview.provider}`),
+          },
   };
 }
 

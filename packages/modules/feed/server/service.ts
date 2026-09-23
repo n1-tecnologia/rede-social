@@ -2,6 +2,7 @@ import { withTenantTx } from '@tria/core/db/tenant-tx';
 import type { RequestContext } from '@tria/core/server/auth/context';
 import { emit } from '@tria/core/server/events/bus';
 import { ApiError } from '@tria/core/server/http/api-error';
+import { enqueueInTx } from '@tria/core/server/jobs/boss';
 import { moduleLogger } from '@tria/core/server/logging';
 import { decodeCursor, encodeCursor } from '@tria/core/server/paging';
 import { sql } from 'drizzle-orm';
@@ -15,11 +16,20 @@ import type {
   FeedPost,
   FeedQuery,
   LikeResult,
+  LinkPreview,
+  LinkPreviewProvider,
+  LinkPreviewStatus,
   PostMediaItem,
   RepliesQuery,
 } from '../contracts/index';
-import { FEED_MAX_ATTACHMENTS, FEED_MAX_IMAGES } from '../contracts/index';
+import {
+  FEED_MAX_ATTACHMENTS,
+  FEED_MAX_IMAGES,
+  FEED_UNFURL_QUEUE,
+  firstUrlIn,
+} from '../contracts/index';
 import { feedPosts } from '../db/schema';
+import { assertAllowedUrl, normaliseUrl, urlHash } from './unfurl/guard';
 
 const log = moduleLogger('module-feed');
 
@@ -54,6 +64,14 @@ type FeedRow = {
   media_kind: 'none' | 'gallery' | 'video';
   /** `json_agg` of the post's media rows, already ordered. `[]` when the post carries none. */
   media: PostMediaItem[];
+  /** The `left join feed_link_previews` half — all null when the post carries no preview row. */
+  link_preview_status: LinkPreviewStatus | null;
+  link_preview_url: string | null;
+  link_preview_title: string | null;
+  link_preview_description: string | null;
+  link_preview_site_name: string | null;
+  link_preview_provider: LinkPreviewProvider | null;
+  link_preview_image_asset_id: string | null;
 };
 
 /**
@@ -104,6 +122,13 @@ const postProjection = (viewerUserId: string) => sql`
            p.author_user_id,
            p.media_kind,
            pm.media,
+           lp.status as link_preview_status,
+           lp.url as link_preview_url,
+           lp.title as link_preview_title,
+           lp.description as link_preview_description,
+           lp.site_name as link_preview_site_name,
+           lp.provider as link_preview_provider,
+           lp.image_asset_id as link_preview_image_asset_id,
            ms.id as membership_id,
            mp.display_name,
            mp.avatar_asset_id
@@ -111,6 +136,11 @@ const postProjection = (viewerUserId: string) => sql`
       join memberships ms on ms.user_id = p.author_user_id
       join member_profiles mp on mp.membership_id = ms.id
       left join feed_likes pl on pl.post_id = p.id and pl.user_id = ${viewerUserId}::uuid
+      -- MEDIA-04 rides the statement that already exists (Pitfall 3 / the query budget): a preview
+      -- is ONE nullable foreign key, so this is a plain left join and the page still costs ONE
+      -- statement. The join carries no tenant condition: feed_link_previews_tenant_isolation
+      -- scopes it, exactly like every other table in this lane.
+      left join feed_link_previews lp on lp.id = p.link_preview_id
       left join lateral (
         select coalesce(
                  json_agg(
@@ -146,6 +176,35 @@ const postProjection = (viewerUserId: string) => sql`
  * per post, and not from application state. `canManage` is "I wrote it" for now; Phase 8's MODER-01
  * widens it to the moderator case.
  */
+/**
+ * The preview, projected ONLY when it actually resolved (UI-D-11).
+ *
+ * A `'pending'` or `'failed'` row returns null here, so a post whose link was refused is
+ * INDISTINGUISHABLE on the wire from a post that carried no link at all — which is UI-D-13's
+ * silence expressed as an absence rather than as a field the client would have to be trusted to
+ * ignore. `hostname` is derived here so the card never parses a URL; if the stored URL somehow will
+ * not parse, the preview degrades to null rather than raising.
+ */
+function toLinkPreview(row: FeedRow): LinkPreview | null {
+  if (row.link_preview_status !== 'resolved' || row.link_preview_url === null) return null;
+  let hostname: string;
+  try {
+    hostname = new URL(row.link_preview_url).hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+  return {
+    status: 'resolved',
+    url: row.link_preview_url,
+    title: row.link_preview_title,
+    description: row.link_preview_description,
+    siteName: row.link_preview_site_name,
+    hostname,
+    provider: row.link_preview_provider,
+    imageAssetId: row.link_preview_image_asset_id,
+  };
+}
+
 const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
   id: row.id,
   createdAt: row.created_at,
@@ -166,6 +225,7 @@ const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
   // guards only the `left join` miss (a post row with no lateral match cannot happen, but a future
   // projection that drops the join would otherwise crash the map rather than render no media).
   media: row.media ?? [],
+  linkPreview: toLinkPreview(row),
 });
 
 /**
@@ -288,6 +348,32 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
     ...attachments.map((assetId, position) => ({ assetId, kind: 'file' as const, position })),
   ];
 
+  /**
+   * MEDIA-04, the CREATE-TIME half. The roadmap's "unfurled server-side at create time" is satisfied
+   * here: the URL is chosen, validated and its cache row created inside the post's own transaction.
+   * The bytes are fetched by the worker (`server/unfurl/job.ts`) — an outbound fetch to a host the
+   * caption named has no business inside a Cloud Run request.
+   *
+   * **A refusal is SWALLOWED (UI-D-13).** `assertAllowedUrl` throwing means the policy said no; the
+   * post still publishes, the link still renders bare inside the caption, and the response carries
+   * nothing that separates "blocked host" from "no metadata". An error here would turn the composer
+   * into an internal-network scanner: an admin could paste `http://169.254.169.254/` and read the
+   * difference. Silence is the mitigation.
+   */
+  const linkCandidate = (() => {
+    const raw = input.linkUrl ?? firstUrlIn(input.caption);
+    if (raw === null || raw === undefined) return null;
+    try {
+      // The SAME matcher the caption renderer auto-links with (`firstUrlIn`), then the same
+      // synchronous policy the worker re-applies. Two matchers would mean a card under a URL the
+      // caption did not turn blue, or the reverse.
+      assertAllowedUrl(raw);
+      return { url: raw, hash: urlHash(raw), normalised: normaliseUrl(raw) };
+    } catch {
+      return null;
+    }
+  })();
+
   const created = await withTenantTx(ctx, async (tx) => {
     if (wanted.length > 0) {
       // ONE validation read for every referenced id, inside the writing transaction. The read runs
@@ -326,6 +412,36 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
       }
     }
 
+    /**
+     * The per-tenant cache, resolved BEFORE the post insert so `link_preview_id` can be stamped in
+     * one write.
+     *
+     * `on conflict (tenant_id, url_hash) do nothing` is what makes a second post of the same link
+     * cost NO second outbound fetch: the insert returns a row only when it actually created one, so
+     * `enqueueInTx` below runs exactly once per (tenant, url). A cache hit falls through to the
+     * select and reuses whatever the first post already resolved. The uniqueness is per TENANT, so
+     * the same link in another community is a separate row and a separate fetch — the price of the
+     * isolation (T-04-34).
+     */
+    let previewId: string | null = null;
+    let previewIsNew = false;
+    if (linkCandidate !== null) {
+      const insertedPreview = await tx.execute<{ id: string }>(sql`
+        insert into feed_link_previews (tenant_id, url_hash, url, status)
+        values (${ctx.tenantId}::uuid, ${linkCandidate.hash}, ${linkCandidate.normalised}, 'pending')
+        on conflict (tenant_id, url_hash) do nothing
+        returning id`);
+      const fresh = insertedPreview[0];
+      if (fresh) {
+        previewId = fresh.id;
+        previewIsNew = true;
+      } else {
+        const existing = await tx.execute<{ id: string }>(sql`
+          select id from feed_link_previews where url_hash = ${linkCandidate.hash} limit 1`);
+        previewId = existing[0]?.id ?? null;
+      }
+    }
+
     const [inserted] = await tx
       .insert(feedPosts)
       .values({
@@ -333,9 +449,22 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
         authorUserId: ctx.userId,
         caption: input.caption,
         mediaKind,
+        linkPreviewId: previewId,
       })
       .returning();
     if (!inserted) throw new ApiError(500, 'INTERNAL');
+
+    // In the SAME transaction as the post and the cache row: a rollback takes the job with it, so
+    // there is no window where a `pending` preview exists with nothing to resolve it. `singletonKey`
+    // is the preview id, so a retried request cannot stack two fetches of one URL (T-07-04).
+    if (previewId !== null && previewIsNew) {
+      await enqueueInTx(
+        tx,
+        FEED_UNFURL_QUEUE,
+        { tenantId: ctx.tenantId, previewId, url: linkCandidate?.normalised ?? '' },
+        { singletonKey: previewId },
+      );
+    }
 
     if (wanted.length > 0) {
       // ONE multi-row insert. `post_media_kind` is the parent's own `media_kind`, so the composite
@@ -960,4 +1089,44 @@ export async function listReplies(
   );
 
   return { items: page.map((row) => toComment(row, ctx.userId)), nextCursor };
+}
+
+/**
+ * The post-edit path's REMOVE affordance (MEDIA-04, UI-D-11), called by 04-09's edit route.
+ *
+ * Nulling `link_preview_id` is the WHOLE affordance: an admin may drop a resolved preview and may
+ * not override it. There is no title, image or description parameter here and there must never be
+ * one — letting an admin hand-write the card would turn a post into an arbitrary banner that looks
+ * like it came from the linked site.
+ *
+ * Runs in the tenant lane, so a post id from another tenant simply updates zero rows and answers
+ * the same 404 an unknown id gets — there is nothing here that compares tenant ids (FEED-07).
+ */
+export async function setPostLinkPreview(
+  ctx: RequestContext,
+  postId: string,
+  linkPreviewId: string | null,
+): Promise<void> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ id: string }>(sql`
+      update feed_posts
+         set link_preview_id = ${linkPreviewId}::uuid,
+             edited_at = now()
+       where id = ${postId}::uuid
+         and deleted_at is null
+     returning id`),
+  );
+  if (rows.length === 0) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'feed.post.link_preview_set',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      postId,
+      cleared: linkPreviewId === null,
+    },
+    'post link preview set',
+  );
 }

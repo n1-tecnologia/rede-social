@@ -7,6 +7,7 @@ import { MediaImage } from '@tria/core/ui';
 import { cn, DoubleTapHeart, useToast } from '@tria/ui';
 import { type KeyboardEvent, type ReactNode, useCallback, useRef, useState } from 'react';
 import { type AttachmentDescriptor, AttachmentRow } from './AttachmentRow';
+import { LinkPreviewCard, type LinkPreviewCardProps } from './LinkPreviewCard';
 
 /**
  * The post's media band: one of THREE branches (D-53) — an image gallery, one video, or nothing —
@@ -51,6 +52,13 @@ export type PostMediaProps = {
   /** The already-created player element; absent for every other branch. */
   video?: ReactNode;
   attachments: readonly AttachmentDescriptor[];
+  /**
+   * MEDIA-04. Absent when the post carries no link, and — because the server projects a preview
+   * ONLY once it has resolved — also absent while one is pending, failed or refused. The card
+   * itself returns null for a non-resolved status as well, so the "no pending card" rule (UI-D-11)
+   * holds at both ends and the post renders the bare auto-linked URL inside its caption.
+   */
+  linkPreview?: LinkPreviewCardProps;
   onDoubleTapLike?: () => void;
   labels: PostMediaLabels;
 };
@@ -84,6 +92,7 @@ export function PostMedia({
   images,
   video,
   attachments,
+  linkPreview,
   onDoubleTapLike,
   labels,
 }: PostMediaProps): ReactNode {
@@ -159,6 +168,10 @@ export function PostMedia({
       <AttachmentList attachments={attachments} errorMessage={labels.attachmentError} />
     ) : null;
 
+  // Under the media band in every branch — including `none`, where a link-only post is still a
+  // caption with a card beneath it.
+  const linkCard = linkPreview ? <LinkPreviewCard {...linkPreview} /> : null;
+
   // The player is returned BARE, with no gesture wrapper around it: a double tap on a video is a
   // SEEK gesture, not a like (UI-SPEC §Video). The keyboard/AT path to the like is the LikeButton
   // beside the card. A grep gate in 04-04's plan pins this branch as wrapper-free.
@@ -169,6 +182,7 @@ export function PostMedia({
           {video}
         </div>
         {attachmentList}
+        {linkCard}
       </>
     );
   }
@@ -233,13 +247,21 @@ export function PostMedia({
           </span>
         </DoubleTapHeart>
         {attachmentList}
+        {linkCard}
       </>
     );
   }
 
-  // `none` — no media frame at all, so the caption becomes the card's anchor. Attachments still
-  // render: a `kind = 'file'` row constrains the parent's discriminator not at all.
-  return attachmentList;
+  // `none` — no media frame at all, so the caption becomes the card's anchor. Attachments and the
+  // link card still render: a `kind = 'file'` row constrains the parent's discriminator not at all,
+  // and a link-only post has no media by definition.
+  if (attachmentList === null && linkCard === null) return null;
+  return (
+    <>
+      {attachmentList}
+      {linkCard}
+    </>
+  );
 }
 
 /**

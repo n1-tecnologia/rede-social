@@ -18,6 +18,18 @@
         "other": "Arquivo"
       }
     },
+    "linkPreview": {
+      "label": "Abrir link externo: {title}",
+      "provider": {
+        "youtube": "YouTube",
+        "vimeo": "Vimeo"
+      },
+      "composer": {
+        "label": "Prévia do link",
+        "body": "A prévia aparece assim que carregarmos o link.",
+        "remove": "Remover prévia"
+      }
+    },
     "errors": {
       "generic": "Algo deu errado. Tente novamente."
     },

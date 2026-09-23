@@ -69,6 +69,16 @@ export const feedPosts = pgTable(
     likeCount: integer('like_count').notNull().default(0),
     commentCount: integer('comment_count').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * At most ONE preview per post, BY CONSTRUCTION (MEDIA-04): a single nullable foreign key, not a
+     * collection — so there is no multi-preview layout that could degrade (UI-SPEC E06
+     * zero-one-many). `on delete set null` is what lets a preview row be dropped (a cache purge, a
+     * re-unfurl) without taking the post with it; the post then renders the bare auto-linked URL.
+     * Nulling this column is ALSO the admin's entire remove affordance — there is no override path.
+     */
+    linkPreviewId: uuid('link_preview_id').references(() => feedLinkPreviews.id, {
+      onDelete: 'set null',
+    }),
     /** Set on ANY persisted change, media included (FEED-03 / UI-D-15). Renders as "editado". */
     editedAt: timestamp('edited_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -342,5 +352,60 @@ export const feedLikes = pgTable(
     uniqueIndex('feed_likes_story_uq').on(t.userId, t.storyId).where(sql`story_id is not null`),
     index('feed_likes_tenant_post_idx').on(t.tenantId, t.postId),
     tenantIsolationPolicy('feed_likes_tenant_isolation'),
+  ],
+).enableRLS();
+
+/**
+ * The per-tenant link-preview cache (MEDIA-04, T-04-34).
+ *
+ * **`unique (tenant_id, url_hash)` IS THE PRIVACY BOUNDARY, not a performance detail.** A global
+ * cache keyed on the URL alone would be cheaper and would leak: any tenant could probe whether a
+ * given link had already been resolved and learn what another organisation had shared. The key is
+ * scoped to the tenant, so the same article posted in two communities is two rows and two fetches —
+ * that is the price of the isolation the product's core value rests on. `pgTAP` asserts BOTH
+ * directions: a second insert of the same hash in ONE tenant collides (23505), and the same hash in
+ * two tenants inserts twice.
+ *
+ * The same uniqueness is also the "no second outbound fetch" mechanism: `createPost` does
+ * `insert … on conflict (tenant_id, url_hash) do nothing`, and only a NEWLY created row enqueues an
+ * unfurl job. A cache hit reuses the resolved row and issues no request at all.
+ *
+ * `image_asset_id` is a SLOT, deliberately left null in V1 — see `server/unfurl/job.ts`. Copying a
+ * remote thumbnail into Storage is the work that would fill it; until then the card renders
+ * body-only rather than hot-linking a remote host into a tenant's branded page.
+ *
+ * `status` is the whole rendering contract (UI-D-11): the card draws ONLY on `'resolved'`. A
+ * `'pending'` or `'failed'` row renders as the bare auto-linked URL already in the caption, because
+ * a skeleton that may never resolve is indistinguishable from a broken one.
+ */
+export const feedLinkPreviews = pgTable(
+  'feed_link_previews',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    /** sha256 of the NORMALISED url (`server/unfurl/guard.ts`), so two spellings share one row. */
+    urlHash: text('url_hash').notNull(),
+    url: text().notNull(),
+    /** 'pending' | 'resolved' | 'failed' — see `feed_link_previews_status_chk`. */
+    status: text().notNull().default('pending'),
+    title: text(),
+    description: text(),
+    siteName: text('site_name'),
+    /** 'youtube' | 'vimeo' when the target resolved through oEmbed; null for an ordinary OG page. */
+    provider: text(),
+    providerVideoId: text('provider_video_id'),
+    /** The V1 null slot — see the docblock. */
+    imageAssetId: uuid('image_asset_id').references(() => mediaAssets.id),
+    /** A MACHINE code ('blocked' | 'timeout' | 'unreachable' | 'no_metadata'), never a message. */
+    failureReason: text('failure_reason'),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('feed_link_previews_tenant_url_uq').on(t.tenantId, t.urlHash),
+    check('feed_link_previews_status_chk', sql`${t.status} in ('pending','resolved','failed')`),
+    tenantIsolationPolicy('feed_link_previews_tenant_isolation'),
   ],
 ).enableRLS();
