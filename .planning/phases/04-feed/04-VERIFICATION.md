@@ -1,7 +1,7 @@
 ---
 phase: 04-feed
 verified: 2026-09-23T05:45:05Z
-status: human_needed
+status: passed
 score: 4/4 must-haves verified
 behavior_unverified: 0
 overrides_applied: 1
@@ -15,7 +15,9 @@ overrides:
     source: "04-UAT.md teste 6 (/gsd-verify-work 4)"
     reason: "A imagem da previa de link nao e copiada para o Storage em V1 (WINDOWS 23) — titulo, description, site_name e provider ficam em cache, a imagem nao. Estreitamento deliberado e registrado, nao defeito. O cartao sai so-texto e a variante YouTube/Vimeo nao exibe miniatura nem selo de play."
     follow_up: "deferred-items.md item 6 — copiar a miniatura remota para o Storage numa fase futura"
-covered_digest: "v1:sha256:21cc3f6064afce0c22e02b1e7d3eb3e23c2a10b6bf04a49ee1fe0a3141fa5e8c"
+covered_digest: "v1:sha256:f565d0c1246fc2a636ba96f02455faae05015a6293e8fe3c9c5a95e01261a632"
+digest_refreshed: "2026-09-23"
+digest_refreshed_reason: "Dois arquivos cobertos mudaram DEPOIS desta verificacao, ambos pelo passo Nyquist do proprio /gsd-verify-work 04 (commit cf3218d). Ver a nota de refresh no corpo. Nenhuma conclusao desta verificacao cai; a mudanca QUITA a divida B-WR-06 que esta propria verificacao registrou contra um criterio que ja marcara VERIFIED."
 covered_files:
   - ".planning/REQUIREMENTS.md"
   - ".planning/phases/04-feed/04-01-PLAN.md"
@@ -170,6 +172,7 @@ covered_files:
   - "supabase/tests/020-tenant-isolation.sql"
   - "supabase/tests/030-lanes.sql"
   - "supabase/tests/090-feed.sql"
+  - "supabase/tests/100-module-example-removal.sql"
 decision_coverage:
   honored: 12
   total: 12
@@ -531,3 +534,34 @@ provável da instabilidade e2e entre specs já registrada três vezes em `deferr
 
 _Verified: 2026-09-23T05:45:05Z_
 _Verifier: Claude (gsd-verifier)_
+
+---
+
+## Refresh de digest — 2026-09-23
+
+Esta verificação ficou `stale` **durante** o `/gsd-verify-work 04` que a consumiu, não por deriva de
+uma mudança não verificada. O passo `verify:post → validate-phase` do mesmo workflow tocou um
+arquivo coberto, o que por construção invalida o `covered_digest`.
+
+**Exatamente dois arquivos não-planning mudaram** entre o commit desta verificação (`6cb87a6`) e o
+refresh, medidos com `git diff --name-only 6cb87a6..HEAD`:
+
+| Arquivo | Em `covered_files` antes? | Mudança | Por quê |
+|---------|---------------------------|---------|---------|
+| `apps/api/tests/integration/feed-query-budget.test.ts` | Sim — **é o que tornou o digest stale** | Piso `toBeGreaterThan(0)` ao lado de cada teto existente, nos três orçamentos | Fecha B-WR-06, a dívida que **esta própria verificação** registrou na Test Quality Audit ao marcar `feed-query-budget.test.ts` como ⚠️ Enfraquecido |
+| `supabase/tests/100-module-example-removal.sql` | Não — novo | Arquivo novo, 4 asserções | Fecha B-WR-11, também registrado aqui: nada no pgTAP afirmava que a remoção de 04-10 tinha acontecido. **Acrescentado a `covered_files` neste refresh** |
+
+**Nenhuma conclusão desta verificação cai.** As duas mudanças são só de teste — nenhum arquivo de
+implementação foi tocado — e ambas *endurecem* asserções que esta verificação já havia examinado e
+explicitamente registrado como dívida. O critério 4 de FEED-02 estava `✓ VERIFIED, com a forma da
+asserção como dívida`; a dívida agora está paga. O veredito de 4/4 must-haves e o mapeamento dos 11
+requisitos permanecem como escritos, com MEDIA-04 em PARTIAL sob o `override` registrado no
+frontmatter.
+
+**Decidido pelo product owner** (Igor Vilas Boas) em 2026-09-23, apresentado com os dois arquivos
+nomeados e a alternativa de re-rodar o `gsd-verifier` inteiro oferecida e recusada.
+
+- digest anterior: `v1:sha256:21cc3f60…fa5e8c` (154 arquivos menos o pgTAP novo)
+- digest novo: `v1:sha256:f565d0c1…61a632` (154 arquivos), via `gsd-tools query verification fingerprint`
+- `status`: `human_needed` → `passed` — os 5 itens de verificação humana foram respondidos em
+  `04-UAT.md`; o sexto continua `blocked` na Fase 01.1 (Mux), sem conta provisionada
