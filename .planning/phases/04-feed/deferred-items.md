@@ -73,3 +73,23 @@ derivation — the removal changed the registry by one module and one pg-boss qu
 
 Out of scope for 04-10 (the scope-boundary rule). If it recurs, the fix is to make `ensureWorker()`
 reference-counted across specs rather than to lengthen the timeout, which would only hide it.
+
+
+## From 04-UAT (teste 6)
+
+### 6. O cartão de prévia de link nunca guarda imagem — MEDIA-04 fica PARTIAL
+
+`feed_link_previews.image_asset_id` é sempre nulo. A coluna, o FK e o ramo de render em
+`packages/modules/feed/client/LinkPreviewCard.tsx:83` existem e estão ligados, mas nenhuma linha
+jamais os preenche — artefato classificado ⚠️ HOLLOW pelo verificador. Consequência visível: o
+cartão sai só-texto e a variante YouTube/Vimeo não exibe miniatura nem o selo de play que o próprio
+UI-D-12 especificou.
+
+Estreitamento deliberado de V1 (WINDOWS 23), não defeito. O product owner **aceitou o desvio** em
+2026-09-23T11:08:55Z (`override` registrado no frontmatter de `04-VERIFICATION.md`) e abriu este
+acompanhamento no mesmo ato — MEDIA-04 permanece o único dos 11 requisitos da fase marcado PARTIAL.
+
+**O trabalho, quando for feito:** o worker que já faz o unfurl (`open-graph-scraper`) passa a baixar
+a `og:image` sob o mesmo guarda de SSRF, grava no bucket `media` sob a chave de tenant e preenche
+`image_asset_id`. O ramo de render já existe e acende sozinho quando a coluna deixar de ser nula —
+nenhuma mudança de UI é necessária. Para YouTube/Vimeo a miniatura vem do oEmbed, não do OG.

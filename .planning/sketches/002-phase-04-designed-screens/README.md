@@ -13,11 +13,11 @@ screens:
   - link-preview-card
   - attachment-row
   - menu-da-publicacao-e-confirmacoes
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor Vilas Boas (product owner)
+approved_at: 2026-09-23
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-04, design-review, D-33, UI-04, composer, feed]
@@ -129,7 +129,15 @@ contexto ao redor das peças que estão sendo revisadas.
 
 ## Review outcome
 
-Pendente. Seguindo o precedente de 02-04, **uma aprovação provisória do product owner já desbloqueia
-a codificação**; deltas posteriores do designer são um passe de polimento, não um bloqueio. Ao
-registrar o resultado, preencha no frontmatter `status`, `approved`, `approved_by`, `approved_at`,
-`approval_kind` e `changes_requested`.
+**Aprovado provisoriamente pelo product owner em 2026-09-23** (`/gsd-verify-work 4`, teste 1 de
+`04-UAT.md`). Nenhuma mudança pedida — `changes_requested: []`, e por isso nenhuma seção "Design
+review deltas" foi acrescentada a `04-UI-SPEC.md`.
+
+Resposta verbatim do product owner ao checkpoint:
+
+> pass
+
+Seguindo o precedente de 02-04, **uma aprovação provisória do product owner já desbloqueia a
+codificação**; deltas posteriores do designer são um passe de polimento, não um bloqueio. As seis
+telas já foram codificadas contra este desenho em 04-04, 04-05 e 04-09 por decisão explícita do
+orquestrador, com a aprovação carregada para este portão.

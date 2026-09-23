@@ -4,7 +4,17 @@ verified: 2026-09-23T05:45:05Z
 status: human_needed
 score: 4/4 must-haves verified
 behavior_unverified: 0
-overrides_applied: 0
+overrides_applied: 1
+overrides:
+  - requirement: MEDIA-04
+    artifact: "feed_link_previews.image_asset_id / LinkPreviewCard.tsx:83"
+    verdict: accepted
+    kind: deliberate-narrowing
+    accepted_by: "Igor Vilas Boas (product owner)"
+    accepted_at: 2026-09-23T11:08:55Z
+    source: "04-UAT.md teste 6 (/gsd-verify-work 4)"
+    reason: "A imagem da previa de link nao e copiada para o Storage em V1 (WINDOWS 23) — titulo, description, site_name e provider ficam em cache, a imagem nao. Estreitamento deliberado e registrado, nao defeito. O cartao sai so-texto e a variante YouTube/Vimeo nao exibe miniatura nem selo de play."
+    follow_up: "deferred-items.md item 6 — copiar a miniatura remota para o Storage numa fase futura"
 covered_digest: "v1:sha256:21cc3f6064afce0c22e02b1e7d3eb3e23c2a10b6bf04a49ee1fe0a3141fa5e8c"
 covered_files:
   - ".planning/REQUIREMENTS.md"
