@@ -179,7 +179,7 @@ artifact.
 
 ## (k) Checklist for a new module
 
-Copy this into the PR description and tick every line (shape of D-19's `@tria/module-example`):
+Copy this into the PR description and tick every line (shape of `@tria/module-feed`, the reference module since 04-10 closed D-19):
 
 - [ ] Module is its own package `packages/modules/<name>` with `db/schema.ts`, routes, service and
       UI; it depends on the kernel and on other modules' published contracts only.

@@ -6,11 +6,16 @@ export const TOGGLEABLE_MODULES = [
   'events',
   'chat',
   'notifications',
-  'example',
 ] as const;
 export type ModuleKey = (typeof TOGGLEABLE_MODULES)[number];
 
-/** Modules a newly created real tenant gets by default (D-17). `example` is never here (D-19). */
+/**
+ * Modules a newly created real tenant gets by default (D-17). Identical to `TOGGLEABLE_MODULES`
+ * since 04-10 closed D-19 and deleted the reference module: there is no longer any key a tenant can
+ * hold that a new tenant is not offered. The two lists stay SEPARATE names because they answer
+ * different questions — "what may exist" and "what a new tenant gets" — and the day a module ships
+ * behind a paid tier, only the second one changes.
+ */
 export const REAL_TENANT_DEFAULT_MODULES: readonly ModuleKey[] = [
   'feed',
   'communities',

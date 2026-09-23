@@ -3,9 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "MOD-02 NEGATIVE FIXTURE \u2014 a module-tagged package that breaks every boundary on purpose. It must FAIL `turbo boundaries` and Biome; `pnpm boundaries:negative` (scripts/check-boundaries.sh) asserts exactly that. `@tria/module-example` is imported but deliberately NOT declared as a dependency, so the violation is also an undeclared import \u2014 the truthful shape of reaching into another module's internals, since that path was never published in its `exports`. It declares no lint/typecheck/build/test script, so `turbo run \u2026` never picks it up.",
+  "description": "MOD-02 NEGATIVE FIXTURE — a module-tagged package that breaks every boundary on purpose. It must FAIL `turbo boundaries` and Biome; `pnpm boundaries:negative` (scripts/check-boundaries.sh) asserts exactly that. `@tria/module-feed` is DECLARED here on purpose (04-10): a `module` depending on another `module` is itself forbidden by turbo.json's tag allowlist, and the import reaches a path the feed package never published in its `exports` — the truthful shape of reaching into another module's internals. It declares no lint/typecheck/build/test script, so `turbo run …` never picks it up.",
   "dependencies": {
     "@tria/api": "workspace:*",
-    "@tria/core": "workspace:*"
+    "@tria/core": "workspace:*",
+    "@tria/module-feed": "workspace:*"
   }
 }

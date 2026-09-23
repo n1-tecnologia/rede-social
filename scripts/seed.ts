@@ -133,9 +133,9 @@ const SEED_TENANTS: SeedTenant[] = [
     rulesText:
       'Regras da comunidade TRIA Demo: respeite as pessoas, não compartilhe conteúdo de terceiros sem autorização e use o chat de suporte para dúvidas.',
     host: DEMO_HOST,
-    // D-17 all six + D-19: `example` (the throwaway module) is enabled HERE ONLY — never on a real
-    // tenant, and never through REAL_TENANT_DEFAULT_MODULES, which must not contain it.
-    modules: [...REAL_TENANT_DEFAULT_MODULES, 'example'],
+    // D-17: all six. 04-10 closed D-19 and deleted the reference module, so the demo tenant is no
+    // longer a special case — it gets exactly what a real tenant gets.
+    modules: [...REAL_TENANT_DEFAULT_MODULES],
     // Far from the neutral TRIA blue (#2e6fd0) and from tria-lab, so the brand smoke tells them apart.
     colors: { primary: '#7c3aed', secondary: '#a78bfa' },
     logoUrl: '/seed-logos/tria-demo.svg',
@@ -945,13 +945,7 @@ for (const t of SEED_TENANTS) {
     const liveRootId = removedIds[2];
     const removedThreadPostId = feedPostIds[1];
     const liveReplierUserId = memberUserIds[0];
-    if (
-      removedRootId &&
-      removedReplyId &&
-      liveRootId &&
-      removedThreadPostId &&
-      liveReplierUserId
-    ) {
+    if (removedRootId && removedReplyId && liveRootId && removedThreadPostId && liveReplierUserId) {
       const removedUserId = await ensureUser(
         `${SEED_REMOVED_MEMBER.local}@${t.slug}.local`,
         SEED_REMOVED_MEMBER.name,

@@ -127,11 +127,6 @@ export async function deleteUserByEmail(email: string): Promise<void> {
   });
 }
 
-/** Removes the throwaway example items a spec created (01-07; the module is deleted in Phase 4). */
-export async function deleteExampleItemsLike(pattern: string): Promise<void> {
-  await sql()`delete from public.example_items where title like ${pattern}`;
-}
-
 /**
  * Removes a tenant the platform-panel spec created through the UI (02-12). `tenant_modules`,
  * `tenant_domains`, `tenant_invites` and `memberships` cascade from `tenants`.

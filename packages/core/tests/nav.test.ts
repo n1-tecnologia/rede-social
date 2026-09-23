@@ -77,7 +77,7 @@ describe('buildNav (MOD-04 / D-40)', () => {
 
 describe('active state (longest match, ties to the first tab)', () => {
   it('isNavItemActive strips the hash/query and matches the path or a sub-path', () => {
-    expect(isNavItemActive('/inicio', '/inicio#exemplo')).toBe(true);
+    expect(isNavItemActive('/inicio', '/inicio#destaques')).toBe(true);
     expect(isNavItemActive('/inicio', '/inicio?tab=x')).toBe(true);
     expect(isNavItemActive('/eventos/123', '/eventos')).toBe(true);
     expect(isNavItemActive('/eventos-antigos', '/eventos')).toBe(false);
@@ -89,8 +89,8 @@ describe('active state (longest match, ties to the first tab)', () => {
       [
         ...modules,
         {
-          key: 'example',
-          nav: { order: 90, href: '/inicio#exemplo', icon: 'sparkles', label: 'Exemplo' },
+          key: 'stories',
+          nav: { order: 90, href: '/inicio#destaques', icon: 'sparkles', label: 'Destaques' },
         },
       ],
       labels,

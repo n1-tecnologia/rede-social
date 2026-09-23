@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Feed module (FEED-01..08): posts, keyset paging, after-commit domain events and the D-55 home-slot widget. Replaces @tria/module-example as the reference module (D-19).",
+  "description": "Feed module (FEED-01..08): posts, keyset paging, after-commit domain events and the D-55 home-slot widget. The reference module since 04-10 closed D-19 and deleted the throwaway one.",
   "exports": {
     "./module": "./module.ts",
     "./contracts": "./contracts/index.ts",

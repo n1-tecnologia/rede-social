@@ -398,8 +398,9 @@ test.describe('02-15 — Módulos tab', () => {
     ]) {
       await expect(page.getByRole('switch', { name })).toBeVisible();
     }
-    // D-19: the reference module is never listed.
-    expect(await page.locator('body').innerText()).not.toContain('example');
+    // The panel lists exactly the key vocabulary — six switches, no seventh. 04-10 deleted the
+    // reference module (D-19), so what makes a stray key impossible is now the vocabulary itself.
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(6);
     expect(await page.getByText('Ativado', { exact: true }).count()).toBe(6);
 
     if (test.info().project.name === 'mobile-chromium') {
@@ -423,7 +424,8 @@ test.describe('02-15 — Módulos tab', () => {
     await expect.poll(() => getTenantModuleFlag(slug, 'feed'), { timeout: 10_000 }).toBe(false);
     // ROLE-04 without a redeploy: immediate on the instance that served the PUT, ≤ 30 s anywhere.
     await expect.poll(modulesOf, { timeout: 35_000 }).not.toContain('feed');
-    expect(await getTenantModuleFlag(slug, 'example')).toBe(false);
+    // Only the key that was toggled moved: the other five flags are untouched by the write.
+    expect(await getTenantModuleFlag(slug, 'events')).toBe(true);
 
     // The server, not client memory, renders the new state after a reload.
     await page.reload();

@@ -214,7 +214,7 @@ export async function createTenant(
         TOGGLEABLE_MODULES.map((key) => ({
           tenantId: tenant.id,
           moduleKey: key,
-          enabled: key !== 'example' && wanted.has(key),
+          enabled: wanted.has(key),
         })),
       );
 

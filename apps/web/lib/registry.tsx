@@ -1,14 +1,11 @@
 import type { Bootstrap, ModuleKey } from '@tria/contracts';
 import type { HomeSlot } from '@tria/core/ui';
-import { exampleItemsSchema } from '@tria/module-example/contracts';
-import { ExampleWidget } from '@tria/module-example/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@tria/module-feed/ui';
 import { EmptyState } from '@tria/ui';
 import { TriangleAlert } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
-import { createExampleItem } from '@/app/(app)/inicio/example-actions';
 import {
   createCommentAction,
   deleteCommentAction,
@@ -23,7 +20,6 @@ import {
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
-import { apiFetch } from '@/lib/api';
 import { loadFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
@@ -104,35 +100,6 @@ interface WebModule {
   /** One renderer per `manifest.home[index]`; an index without a renderer renders nothing. */
   home: HomeSlotRenderer[];
 }
-
-/** The reference module's data, fetched only when the tenant HAS the module (D-19). */
-async function getExampleItems() {
-  const res = await apiFetch('/v1/example/items');
-  if (!res.ok) return [];
-  return exampleItemsSchema.parse(await res.json()).items;
-}
-
-/**
- * `example` → home[0]: the 01-07 widget as a home slot (Phase 4 deletes this entry with the package).
- * `canCreate` comes from the bootstrap permissions (role AND flag); the API re-checks every write.
- */
-const exampleHome: HomeSlotRenderer = async ({ bootstrap }) => {
-  const [items, te] = await Promise.all([getExampleItems(), getTranslations('example')]);
-  return (
-    <ExampleWidget
-      items={items}
-      canCreate={bootstrap.permissions.includes('example.create')}
-      createAction={createExampleItem}
-      labels={{
-        title: te('title'),
-        empty: te('empty'),
-        add: te('add'),
-        placeholder: te('placeholder'),
-        processed: te('processed'),
-      }}
-    />
-  );
-};
 
 /**
  * `feed` → home[0] (D-55): the feed is the main content of `/inicio`, and it adds NO navigation tab.
@@ -292,13 +259,12 @@ export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Boo
 }
 
 export const WEB_MODULE_REGISTRY: Partial<Record<ModuleKey, WebModule>> = {
-  example: { home: [exampleHome] },
   feed: { home: [feedHome] },
 };
 
 /**
  * Module tab labels resolve from the module's own catalog namespace (`<key>.nav`, e.g.
- * `example.nav = "Exemplo"`) before the manifest label (PWA-03). `t` is the ROOT translator.
+ * `events.nav = "Eventos"`) before the manifest label (PWA-03). `t` is the ROOT translator.
  */
 export function moduleLabelResolver(
   t: Translator,

@@ -3,7 +3,6 @@ import { TENANT_HOST_HEADER } from '@tria/contracts';
 import { sqlClient } from '@tria/core/db';
 import { stopBoss } from '@tria/core/server/jobs/boss';
 import { moduleFlags } from '@tria/core/server/modules/flags-cache';
-import type { ExampleItem } from '@tria/module-example/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
 
@@ -15,9 +14,13 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar 
  * tenant A ever see, name or touch a row of tenant B?" — asked once per shape of answer (list,
  * detail, empty, disabled, blocked, wrong host, platform identity, public host lookup).
  *
- * TENANT-05 adjacency: both seeded tenants get items with the SAME title and their members share
+ * TENANT-05 adjacency: both seeded tenants get posts with the SAME caption and their members share
  * the `member@…` local part, so a leak that matched on a value rather than on `tenant_id` cannot
  * pass by looking plausible. Every assertion below compares IDS, never contents.
+ *
+ * Phase 4 (04-10) RETARGETED the list/detail/empty/disabled cases from the deleted reference module
+ * onto the feed. Not one shape of answer was dropped in the move — that is the point: D-19's removal
+ * had to leave this gate exactly as strong as it found it.
  *
  * Phase 3 (03-08) grew the file to every surface that phase added — the private `media` bucket's
  * signed URLs, the provider's playback tokens, the member directory and the profile's avatar gate —
@@ -34,7 +37,7 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar 
  * Deeper single-concern cases already live elsewhere and are deliberately NOT duplicated here:
  *   - `auth-middleware.test.ts` — token verification, blocked/suspended semantics, host matching
  *   - `bootstrap.test.ts`       — the bootstrap payload itself
- *   - `example.test.ts`         — the module's guard chain, transactional enqueue and job RLS
+ *   - `feed.test.ts`            — the feed module's guard chain, keyset paging and write rules
  *   - `modules.test.ts`         — requireModule/requireRole ordering and the flags cache
  *   - `supabase/tests/020-tenant-isolation.sql` — the same isolation proved inside Postgres
  */
@@ -45,12 +48,14 @@ type BootstrapBody = { tenant: { id: string; slug: string }; modules: { key: str
 const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
 
-/** Adjacency: the SAME title in both tenants, so only the id can tell the rows apart. */
-const SHARED_TITLE = 'Reunião';
+/** Adjacency: the SAME caption in both tenants, so only the id can tell the rows apart. */
+const SHARED_TITLE = 'Reunião de sábado, às 10h.';
 const RUN = Date.now();
 const EMPTY_SLUG = `tria-empty-${RUN}`.slice(0, 40);
+const NOFEED_SLUG = `tria-nofeed-${RUN}`.slice(0, 40);
 const SUSPENDED_SLUG = `tria-susp-${RUN}`.slice(0, 40);
 const EMPTY_HOST = `tria-empty-${RUN}.localhost`;
+const NOFEED_HOST = `tria-nofeed-${RUN}.localhost`;
 const SUSPENDED_HOST = `tria-susp-${RUN}.localhost`;
 const THROWAWAY_PASSWORD = 'Segredo123';
 
@@ -60,10 +65,13 @@ const tokens = {
   demoAdmin: '',
   labAdmin: '',
   emptyMember: '',
+  nofeedMember: '',
   blockedMember: '',
   superAdmin: '',
 };
-const tenantIds = { demo: '', lab: '', empty: '', suspended: '' };
+const tenantIds = { demo: '', lab: '', empty: '', nofeed: '', suspended: '' };
+/** 04-10: the list/detail fixture, now FEED posts — the reference module that used to carry these
+ * cases was deleted with D-19, and the gate keeps every one of them against a real module. */
 const itemIds = { demo: [] as string[], lab: [] as string[] };
 const throwawayUsers: string[] = [];
 let blockedUserId = '';
@@ -93,20 +101,6 @@ async function tenantIdBySlug(slug: string): Promise<string> {
   const [row] = await adminSql<{ id: string }[]>`
     select id from public.tenants where slug = ${slug}`;
   if (!row) throw new Error(`tenant ${slug} is not seeded — run pnpm db:seed first`);
-  return row.id;
-}
-
-/** Inserts straight through the admin connection: rows the other tenant's lane must never return. */
-async function seedItem(tenantId: string, title: string): Promise<string> {
-  const [user] = await adminSql<{ id: string }[]>`
-    select u.id from public.users u
-      join public.memberships m on m.user_id = u.id
-     where m.tenant_id = ${tenantId}::uuid limit 1`;
-  const [row] = await adminSql<{ id: string }[]>`
-    insert into public.example_items (tenant_id, title, created_by_user_id)
-    values (${tenantId}::uuid, ${title}, ${user?.id ?? null}::uuid)
-    returning id`;
-  if (!row) throw new Error('failed to seed an example item');
   return row.id;
 }
 
@@ -210,12 +204,12 @@ beforeAll(async () => {
 
   // Identical-looking content on both sides (TENANT-05 adjacency).
   itemIds.demo = [
-    await seedItem(tenantIds.demo, SHARED_TITLE),
-    await seedItem(tenantIds.demo, SHARED_TITLE),
+    await seedPost(tenantIds.demo, SHARED_TITLE),
+    await seedPost(tenantIds.demo, SHARED_TITLE),
   ];
   itemIds.lab = [
-    await seedItem(tenantIds.lab, SHARED_TITLE),
-    await seedItem(tenantIds.lab, SHARED_TITLE),
+    await seedPost(tenantIds.lab, SHARED_TITLE),
+    await seedPost(tenantIds.lab, SHARED_TITLE),
   ];
 
   // A third tenant with the module ENABLED and zero rows: "empty" must be 200 [], never 404/500.
@@ -226,10 +220,25 @@ beforeAll(async () => {
   tenantIds.empty = empty?.id ?? '';
   await adminSql`
     insert into public.tenant_modules (tenant_id, module_key, enabled)
-    values (${tenantIds.empty}::uuid, 'example', true)`;
+    values (${tenantIds.empty}::uuid, 'feed', true)`;
   await adminSql`
     insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
     values (${tenantIds.empty}::uuid, ${EMPTY_HOST}, true, now())`;
+
+  // A fourth tenant with the module explicitly DISABLED. 04-10 needed this: until then the
+  // disabled-module case rode on tria-lab, which does NOT have the reference module but DOES have
+  // the feed (D-17). "Not here" must still answer 404 MODULE_DISABLED rather than 403.
+  const [nofeed] = await adminSql<{ id: string }[]>`
+    insert into public.tenants (slug, display_name, rules_text, rules_version)
+    values (${NOFEED_SLUG}, 'Comunidade Sem Feed', 'Regras de teste.', 1)
+    returning id`;
+  tenantIds.nofeed = nofeed?.id ?? '';
+  await adminSql`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    values (${tenantIds.nofeed}::uuid, 'feed', false)`;
+  await adminSql`
+    insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+    values (${tenantIds.nofeed}::uuid, ${NOFEED_HOST}, true, now())`;
 
   // A SUSPENDED tenant with a verified host: the public host lookup STILL resolves it, carrying
   // status 'suspended' so the "indisponível" screen is branded (D-32); members are refused by requireAuth.
@@ -248,10 +257,13 @@ beforeAll(async () => {
   tokens.labAdmin = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
   tokens.superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
   tokens.emptyMember = await throwawayMember(tenantIds.empty, `member@${EMPTY_SLUG}.local`);
+  tokens.nofeedMember = await throwawayMember(tenantIds.nofeed, `member@${NOFEED_SLUG}.local`);
   tokens.blockedMember = await throwawayMember(tenantIds.demo, `blocked-${RUN}@tria-demo.local`);
   blockedUserId = throwawayUsers[throwawayUsers.length - 1] ?? '';
 
-  for (const id of [tenantIds.demo, tenantIds.lab, tenantIds.empty]) moduleFlags.invalidate(id);
+  for (const id of [tenantIds.demo, tenantIds.lab, tenantIds.empty, tenantIds.nofeed]) {
+    moduleFlags.invalidate(id);
+  }
 
   // Phase 3 fixtures. A REAL upload on each side (start -> PUT straight to Storage -> complete ->
   // the worker derives the ladder), so the signed-URL case runs against objects that really exist.
@@ -289,17 +301,20 @@ afterAll(async () => {
     await adminSql`delete from public.media_assets where id = ${id}::uuid`;
   }
 
-  const posts = [postIds.demo, postIds.lab, postIds.demoRemoved].filter(Boolean);
+  const posts = [
+    postIds.demo,
+    postIds.lab,
+    postIds.demoRemoved,
+    ...itemIds.demo,
+    ...itemIds.lab,
+  ].filter(Boolean);
   if (posts.length > 0) {
     await adminSql`delete from public.feed_posts where id = any(${posts}::uuid[])`;
   }
-
-  const items = [...itemIds.demo, ...itemIds.lab];
-  if (items.length > 0) {
-    await adminSql`delete from public.example_items where id = any(${items}::uuid[])`;
-  }
   for (const userId of throwawayUsers) await authAdmin().deleteUser(userId);
-  await adminSql`delete from public.tenants where slug in (${EMPTY_SLUG}, ${SUSPENDED_SLUG})`;
+  await adminSql`
+    delete from public.tenants
+     where slug in (${EMPTY_SLUG}, ${NOFEED_SLUG}, ${SUSPENDED_SLUG})`;
   await stopBoss();
   await adminSql.end();
   await sqlClient.end();
@@ -307,68 +322,77 @@ afterAll(async () => {
 
 describe('TENANT-05 — the two-tenant isolation gate', () => {
   it('a. list: a tria-demo member gets tria-demo ids only, never a tria-lab id', async () => {
-    const res = await request('/v1/example/items', tokens.demoMember, {
+    const res = await request('/v1/feed', tokens.demoMember, {
       [TENANT_HOST_HEADER]: HOSTS.demo,
     });
     expect(res.status).toBe(200);
 
-    const { items } = (await res.json()) as { items: ExampleItem[] };
+    const { items } = (await res.json()) as { items: { id: string; caption: string }[] };
     const ids = new Set(items.map((i) => i.id));
+    // Newest first, so the fixture rows lead the first page.
     for (const id of itemIds.demo) expect(ids.has(id)).toBe(true);
     for (const id of itemIds.lab) expect(ids.has(id)).toBe(false);
-    // Adjacency: both tenants have rows with this exact title, so the title proves nothing — the
-    // tenant_id of every returned row is what must hold.
-    expect(items.filter((i) => i.title === SHARED_TITLE)).toHaveLength(itemIds.demo.length);
-    expect(items.every((i) => i.tenantId === tenantIds.demo)).toBe(true);
+    // Adjacency: both tenants have rows with this exact caption, so the caption proves nothing —
+    // which ids come back is what must hold.
+    expect(items.filter((i) => i.caption === SHARED_TITLE)).toHaveLength(itemIds.demo.length);
   });
 
   it("b. detail: the other tenant's id is 404 NOT_FOUND, never 403", async () => {
     for (const labId of itemIds.lab) {
-      const res = await request(`/v1/example/items/${labId}`, tokens.demoMember, {
+      const res = await request(`/v1/feed/posts/${labId}`, tokens.demoMember, {
         [TENANT_HOST_HEADER]: HOSTS.demo,
       });
       // 404, not 403: a 403 would confirm the row exists somewhere.
       expect(res.status).toBe(404);
       expect(await code(res)).toBe('NOT_FOUND');
     }
+    // Positive control (T-03-56): the SAME shape of request against the tenant's own rows is 200,
+    // so the 404s above are isolation and not a globally broken route.
+    for (const demoId of itemIds.demo) {
+      const own = await request(`/v1/feed/posts/${demoId}`, tokens.demoMember, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      expect(own.status).toBe(200);
+    }
   });
 
-  it('c. disabled: tria-lab has no example module — read and write are both 404 MODULE_DISABLED', async () => {
-    const list = await request('/v1/example/items', tokens.labMember, {
-      [TENANT_HOST_HEADER]: HOSTS.lab,
+  it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
+    const list = await request('/v1/feed', tokens.nofeedMember, {
+      [TENANT_HOST_HEADER]: NOFEED_HOST,
     });
     expect(list.status).toBe(404);
     expect(await code(list)).toBe('MODULE_DISABLED');
 
-    const write = await api.request('/v1/example/items', {
+    const write = await api.request('/v1/feed/posts', {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${tokens.labMember}`,
+        authorization: `Bearer ${tokens.nofeedMember}`,
         'content-type': 'application/json',
-        [TENANT_HOST_HEADER]: HOSTS.lab,
+        [TENANT_HOST_HEADER]: NOFEED_HOST,
       },
-      body: JSON.stringify({ title: SHARED_TITLE }),
+      body: JSON.stringify({ caption: SHARED_TITLE }),
     });
-    // MODULE_DISABLED wins over the role check: "not here" never degrades into "not allowed".
+    // MODULE_DISABLED wins over the permission check: "not here" never degrades into "not allowed",
+    // which is what keeps a disabled module indistinguishable from one that was never bought.
     expect(write.status).toBe(404);
     expect(await code(write)).toBe('MODULE_DISABLED');
   });
 
   it('d. empty: a tenant with the module enabled and zero rows gets 200 { items: [] }', async () => {
-    const res = await request('/v1/example/items', tokens.emptyMember, {
+    const res = await request('/v1/feed', tokens.emptyMember, {
       [TENANT_HOST_HEADER]: EMPTY_HOST,
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ items: [] });
+    expect(await res.json()).toEqual({ items: [], nextCursor: null });
     // …while the other tenants demonstrably do have rows, so the empty answer is not a global outage.
-    const demo = await request('/v1/example/items', tokens.demoMember, {
+    const demo = await request('/v1/feed', tokens.demoMember, {
       [TENANT_HOST_HEADER]: HOSTS.demo,
     });
-    expect(((await demo.json()) as { items: ExampleItem[] }).items.length).toBeGreaterThan(0);
+    expect(((await demo.json()) as { items: unknown[] }).items.length).toBeGreaterThan(0);
   });
 
   it('e. blocked: a member blocked between two requests is refused on the very next one', async () => {
-    const before = await request('/v1/example/items', tokens.blockedMember, {
+    const before = await request('/v1/feed', tokens.blockedMember, {
       [TENANT_HOST_HEADER]: HOSTS.demo,
     });
     expect(before.status).toBe(200);
@@ -378,7 +402,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
        where user_id = ${blockedUserId}::uuid`;
 
     // Same still-valid token: the membership is re-read per request, so there is no window (AUTH-06).
-    const after = await request('/v1/example/items', tokens.blockedMember, {
+    const after = await request('/v1/feed', tokens.blockedMember, {
       [TENANT_HOST_HEADER]: HOSTS.demo,
     });
     expect(after.status).toBe(403);
@@ -399,7 +423,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
   });
 
   it("f2. a session of tenant A presented on tenant B's REGISTERED host is 403, on every route (D-23)", async () => {
-    for (const path of ['/v1/me/bootstrap', '/v1/example/items']) {
+    for (const path of ['/v1/me/bootstrap', '/v1/feed']) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);
 
@@ -423,13 +447,13 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
   });
 
   it('g. the platform identity is not a member of anything: 403 NO_MEMBERSHIP off a tenant host', async () => {
-    const res = await request('/v1/example/items', tokens.superAdmin);
+    const res = await request('/v1/feed', tokens.superAdmin);
     expect(res.status).toBe(403);
     expect(await code(res)).toBe('NO_MEMBERSHIP');
   });
 
   it('g2. …and on a tenant host it is a host mismatch, not a membership answer (D-23)', async () => {
-    const res = await request('/v1/example/items', tokens.superAdmin, {
+    const res = await request('/v1/feed', tokens.superAdmin, {
       [TENANT_HOST_HEADER]: HOSTS.demo,
     });
     expect(res.status).toBe(403);

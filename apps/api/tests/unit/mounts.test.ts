@@ -14,7 +14,6 @@ describe('module mounts', () => {
   it('1. every manifest with routes is actually mounted under /v1/<key>', () => {
     const withRoutes = keys.filter((key) => MODULE_REGISTRY[key]?.routes);
     // Guard against the test silently passing on an empty registry.
-    expect(withRoutes).toContain('example');
     expect(withRoutes).toContain('feed');
 
     for (const key of withRoutes) {
@@ -23,17 +22,7 @@ describe('module mounts', () => {
     }
   });
 
-  it('2. the example module exposes its three routes with the expected methods', () => {
-    const paths = app.routes
-      .filter((route) => route.path.startsWith('/v1/example') && route.method !== 'ALL')
-      .map((route) => `${route.method} ${route.path}`);
-
-    expect(paths).toContain('GET /v1/example/items');
-    expect(paths).toContain('POST /v1/example/items');
-    expect(paths).toContain('GET /v1/example/items/:id');
-  });
-
-  it('2b. the feed module exposes its three routes under /v1/feed (04-01)', () => {
+  it('2. the feed module exposes its three routes under /v1/feed (04-01)', () => {
     const paths = app.routes
       .filter((route) => route.path.startsWith('/v1/feed') && route.method !== 'ALL')
       .map((route) => `${route.method} ${route.path}`);
@@ -44,14 +33,15 @@ describe('module mounts', () => {
   });
 
   it('3. an enabled module contributes its permissions to the role that owns them', () => {
-    expect(permissionsFor('admin_tenant', new Set<ModuleKey>(['example']))).toContain(
-      'example.create',
+    expect(permissionsFor('admin_tenant', new Set<ModuleKey>(['feed']))).toContain(
+      'feed.post.create',
     );
-    // Members never get it, and neither does an admin when the module is disabled.
-    expect(permissionsFor('member', new Set<ModuleKey>(['example']))).not.toContain(
-      'example.create',
+    // Members never get it by default (FEED-08's `admins_only`), and neither does an admin when the
+    // module is disabled — turning a module off revokes what it granted.
+    expect(permissionsFor('member', new Set<ModuleKey>(['feed']))).not.toContain(
+      'feed.post.create',
     );
-    expect(permissionsFor('admin_tenant', new Set<ModuleKey>())).not.toContain('example.create');
+    expect(permissionsFor('admin_tenant', new Set<ModuleKey>())).not.toContain('feed.post.create');
   });
 
   it('4. the platform lane mounts the six provisioning routes under /v1/platform (02-05)', () => {

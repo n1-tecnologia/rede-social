@@ -15,7 +15,7 @@ import {
 /**
  * MOD-01/MOD-02 + ROLE-06 ordering, with no database: the registry is a pure composition of
  * manifests, so the whole contract (keys are typed and unique, an empty manifest is legal, the sort
- * is deterministic, `example` never reaches a real tenant) is testable before any module exists.
+ * is deterministic, an unknown key is refused by the VOCABULARY) is testable without a module.
  */
 
 const settingsFor = (entries: [ModuleKey, Record<string, unknown>][]) => new Map(entries);
@@ -46,10 +46,10 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       expect(MODULE_REGISTRY[key]?.key).toBe(key);
       expect(TOGGLEABLE_MODULES).toContain(key);
     }
-    // 01-07 registered the throwaway reference module (D-19); 04-10 removes it with the package.
-    // 04-01 added `feed`, the first REAL module — the list is sorted so a new entry is one line.
-    expect(keys.sort()).toEqual(['example', 'feed']);
-    expect(MODULE_REGISTRY.example?.nav?.order).toBe(90);
+    // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
+    // — the first REAL module — as the only registration. The list is sorted so a new entry is one
+    // line, and this assertion is what makes a silently-dropped registration fail rather than pass.
+    expect(keys.sort()).toEqual(['feed']);
     // D-55 (amends D-40): the feed contributes a HOME SLOT and no navigation tab, so Phases 5 and 6
     // keep the tab budget they are planning against. A nav entry here is a regression, not a feature.
     expect(MODULE_REGISTRY.feed?.nav).toBeUndefined();
@@ -96,9 +96,8 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     ).toEqual(['communities', 'feed', 'notifications', 'stories']);
   });
 
-  it('4. prohibition: REAL_TENANT_DEFAULT_MODULES holds the six toggleable keys and never `example`', () => {
+  it('4. the key VOCABULARY is the six real modules, and it is what refuses an unknown key', () => {
     expect(REAL_TENANT_DEFAULT_MODULES).toHaveLength(6);
-    expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('example');
     expect([...REAL_TENANT_DEFAULT_MODULES].sort()).toEqual([
       'chat',
       'communities',
@@ -107,8 +106,13 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       'notifications',
       'stories',
     ]);
-    // `example` is a real key (it can be enabled per tenant) — it is simply never a default (D-19).
-    expect(TOGGLEABLE_MODULES).toContain('example');
+    // 04-10 closed D-19: the reference module's key is gone from the vocabulary itself, so nothing
+    // needs a per-key special case to refuse it — `defineModule` already refuses any key that is not
+    // in `TOGGLEABLE_MODULES`, which is the rule the retired platform branches used to duplicate.
+    expect([...TOGGLEABLE_MODULES].sort()).toEqual([...REAL_TENANT_DEFAULT_MODULES].sort());
+    expect(() => defineModule({ key: 'nao-existe' as unknown as ModuleKey })).toThrow(
+      /unknown module key/,
+    );
   });
 
   it('5. settings ride along per key, defaulting to an empty object', () => {

@@ -14,7 +14,11 @@ import { logFor, type PlatformActor } from './invites';
  * nothing is lost. `moduleFlags.invalidate(tenantId)` makes the change visible to THIS API instance
  * on the very next request; other instances converge within `MODULE_FLAGS_TTL_MS` (30 s).
  *
- * `example` is refused (D-19): a real tenant never gets the sample module, whatever the panel sends.
+ * There is no per-key special case here (04-10 retired the one that refused the reference module):
+ * what a panel may name is the KEY VOCABULARY itself — `z.enum(REAL_TENANT_DEFAULT_MODULES)` at the
+ * route, and `tenant_modules_key_chk` in the database. A key that is not in the vocabulary is
+ * refused before this function is ever called, so an extra branch here would be an unreachable line
+ * that reads to the next person like a live rule.
  */
 export async function setModuleEnabled(
   tenantId: string,
@@ -22,10 +26,6 @@ export async function setModuleEnabled(
   enabled: boolean,
   actor: PlatformActor,
 ): Promise<void> {
-  if (key === 'example') {
-    throw new ApiError(400, 'VALIDATION_FAILED', { module: 'not_toggleable' });
-  }
-
   await withAdminTx(async (tx) => {
     const exists = await tx
       .select({ id: tenants.id })

@@ -15,9 +15,12 @@
  *                                          — a module may only reach data through `withTenantTx`;
  *                                            with the raw client it could `set_config('role', …)`
  *                                            itself and the lane guard's regex would never match
- *   2. `@tria/module-example/server/service` — another module's INTERNALS, not its published entry
- *                                            point (`@tria/module-example/server`); also absent from
- *                                            that package's `exports`, so it does not even resolve
+ *   2. `@tria/module-feed/server/service`   — another module's INTERNALS, not its published entry
+ *                                            point (`@tria/module-feed/server`); also absent from
+ *                                            that package's `exports`, so it does not even resolve.
+ *                                            04-10 repointed this from the throwaway reference
+ *                                            module it deleted (D-19) at the feed: the fixture must
+ *                                            keep violating, so the case MOVES rather than goes
  *   3. `@tria/api/types`                   — an `app`-tagged package; `turbo boundaries` forbids a
  *                                            `module` from depending on an `app`
  *
@@ -30,7 +33,7 @@ import type { AppType } from '@tria/api/types';
 import { db } from '@tria/core/db';
 import { withAdminTx } from '@tria/core/db/admin-tx';
 import { withAdminTx as leakedAdminTx } from '@tria/core/db/tenant-tx';
-import { listItems } from '@tria/module-example/server/service';
+import { listFeed } from '@tria/module-feed/server/service';
 
-export const violations = { withAdminTx, leakedAdminTx, db, listItems };
+export const violations = { withAdminTx, leakedAdminTx, db, listFeed };
 export type FixtureAppType = AppType;

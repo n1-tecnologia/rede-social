@@ -9,6 +9,7 @@ import {
   test,
 } from '@playwright/test';
 import postgres from 'postgres';
+import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import {
   closeAdmin,
   createMember,
@@ -31,13 +32,14 @@ import { ensureWorker } from './worker';
  * branded recovery mail. The seed tenants (tria-demo, tria-lab) are never mutated; `branding.spec.ts`
  * covers them.
  *
- * Decision recorded — honest ROLE-04 witness. No toggleable module ships a nav entry or routes before
- * Phase 4, and D-19 keeps the reference module out of the panel. The smoke therefore proves the panel
- * path with `feed` (switch → flag → member bootstrap within the flags TTL, nav unchanged because feed
- * has no tab yet) and the navigation + API-404 path with `example` flipped by a spec-only SQL helper
- * on the throwaway tenant (tab + home slot appear/disappear, `/v1/example/items` 200/404 within the
- * same API process). Two overlapping witnesses cover the whole chain; Phase 4 extends the smoke with
- * the feed tab. Never a fake pass: the assertion text names both halves.
+ * Decision recorded — honest ROLE-04 witness. When this file was written no toggleable module shipped
+ * routes or a home slot, so the API-404 and home-slot halves rode on the throwaway reference module
+ * flipped by a spec-only SQL helper. 04-10 deleted that module (D-19) and REPLACED the witness with
+ * the feed, which is what 02-16 recorded Phase 4 would do: the whole chain — panel switch → flag →
+ * member bootstrap within the flags TTL → `/v1/feed` 200/404 → the home slot appearing and
+ * disappearing — now runs through the PANEL on a real module, with no SQL shortcut. The nav stays
+ * ['Início', 'Perfil'] throughout because the feed ships a home slot and no tab (D-55), which is an
+ * assertion rather than an absence.
  *
  * Hosts are `<slug>.localhost`: the BROWSER resolves them to loopback (RFC 6761) and GoTrue honours
  * their `redirectTo` locally; NODE does not resolve them, so every Node-side call (API, Mailpit,
@@ -118,10 +120,11 @@ const sql = postgres(
 );
 
 /**
- * Honest ROLE-04 witness, second half (see the file docblock): `tenant_modules.example` is flipped by
- * SQL ONLY because D-19 forbids the panel from listing the reference module; the panel path itself
- * is proven with `feed` in the same test (test 4 a). Scoped to the throwaway tenant by slug — the
- * seed tenants are never touched (prohibition). `(tenant_id, module_key)` is the primary key.
+ * Reads and repairs a module flag on the THROWAWAY tenant only — the seed tenants are never touched
+ * (prohibition). Since 04-10 the smoke drives every flip through the panel (see the file docblock);
+ * this helper survives as the `finally`-safe restore and as the direct read the panel assertions are
+ * checked against, so a green switch that wrote nothing still fails. `(tenant_id, module_key)` is the
+ * primary key.
  */
 async function setTenantModuleFlag(slug: string, key: string, enabled: boolean): Promise<void> {
   const rows = await sql`
@@ -741,7 +744,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     }
   });
 
-  test('4. Módulos tab: Feed off → bootstrap drops feed without redeploy (nav unchanged); reference-module flag → Exemplo tab + slot appear/disappear and /v1/example/items 200/404 (honest ROLE-04 witness)', async ({
+  test('4. Módulos tab: Feed off from the panel → flag, bootstrap, /v1/feed 404 MODULE_DISABLED and the home slot all follow within the flags TTL, with no redeploy and no nav change (D-55); back on restores every one of them (honest ROLE-04 witness)', async ({
     page,
     browser,
   }, testInfo) => {
@@ -757,54 +760,49 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       expect(res.status, 'GET /v1/me/bootstrap').toBe(200);
       return ((await res.json()) as { modules: { key: string }[] }).modules.map((m) => m.key);
     };
-    const exampleItems = async (): Promise<{ status: number; code: string | null }> => {
-      const res = await memberApi('/v1/example/items', {}, host);
+    const feedApi = async (): Promise<{ status: number; code: string | null }> => {
+      const res = await memberApi('/v1/feed', {}, host);
       const body = (await res.json().catch(() => ({}))) as { error?: { code?: string } };
       return { status: res.status, code: body.error?.code ?? null };
     };
+    /** The feed home slot, named by its catalog `aria-label` — a copy drift fails here. */
+    const feedRegion = (p: Page) => p.getByRole('region', { name: feedMessages.feed.region });
 
     const memberContext = await newContextLike(browser, testInfo);
     const memberPage = await memberContext.newPage();
     try {
       await login(memberPage, memberEmail, SEED_PASSWORD, origin);
 
-      // (a) Panel path with a REAL toggleable module: Feed off → flag → bootstrap within the TTL;
-      // the nav stays ['Início', 'Perfil'] because feed ships no tab before Phase 4 (no phantom tab).
+      // (a) BASELINE, so the disappearance below is a change and not a pre-existing absence: the
+      // tenant is created with the feed on, the member's home route renders its slot, and the API
+      // answers 200.
+      await memberPage.goto(`${origin}/inicio`);
+      await expect(feedRegion(memberPage)).toBeVisible();
+      expect(await modulesOf()).toContain('feed');
+      expect((await feedApi()).status).toBe(200);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']);
+
+      // (b) Panel path: Feed off → the stored flag, the member's bootstrap, the API and the home
+      // slot all follow, within the flags TTL and with no redeploy. The nav is unchanged in BOTH
+      // directions because the feed ships a home slot and no tab (D-55) — asserted, not assumed.
       await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
       await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/modulos`);
       await expect(page.locator('main').getByRole('switch')).toHaveCount(6);
-      expect(await modulesOf()).toContain('feed');
       const feed = page.getByRole('switch', { name: /Feed/ });
       await feed.click();
       await expect(feed).toHaveAttribute('aria-checked', 'false');
       await expect(toast(page, 'Alterações salvas.')).toBeVisible();
       await expect.poll(() => getTenantModuleFlag(slug, 'feed'), { timeout: 10_000 }).toBe(false);
       await expect.poll(modulesOf, { timeout: 35_000 }).not.toContain('feed'); // MODULE_FLAGS_TTL_MS
+      // 404 MODULE_DISABLED, never 403: "not here" must not degrade into "not allowed".
+      await expect.poll(async () => (await feedApi()).status, { timeout: 35_000 }).toBe(404);
+      expect((await feedApi()).code).toBe('MODULE_DISABLED');
       await memberPage.goto(`${origin}/inicio`);
       expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']);
       await expect(visibleNav(memberPage).getByRole('link', { name: 'Feed' })).toHaveCount(0);
+      await expect(feedRegion(memberPage)).toHaveCount(0); // the slot is gone, no redeploy
 
-      // (b) Navigation + API-404 witness with the ONLY module that ships a nav entry and routes in
-      // this phase (reference module, D-19 baseline off for panel-created tenants).
-      expect(await exampleItems()).toEqual({ status: 404, code: 'MODULE_DISABLED' });
-      await setTenantModuleFlag(slug, 'example', true);
-      await expect.poll(async () => (await exampleItems()).status, { timeout: 35_000 }).toBe(200); // same API process, no restart — the flags TTL is the bound
-      await memberPage.goto(`${origin}/inicio`);
-      // Kernel Início first / Perfil last, registry order between (cross-reference: 02-07 MOD-04/ordering).
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Exemplo', 'Perfil']);
-      await expect(memberPage.locator('#exemplo')).toBeVisible();
-      await expect(
-        memberPage.locator('#exemplo').getByRole('heading', { name: 'Exemplo' }),
-      ).toBeVisible();
-
-      await setTenantModuleFlag(slug, 'example', false);
-      await expect.poll(async () => (await exampleItems()).status, { timeout: 35_000 }).toBe(404);
-      expect((await exampleItems()).code).toBe('MODULE_DISABLED');
-      await memberPage.goto(`${origin}/inicio`);
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']); // tab + slot gone, no redeploy
-      await expect(memberPage.locator('#exemplo')).toHaveCount(0);
-
-      // (c) The tenant ends as created: Feed back on from the panel, example still off.
+      // (c) The tenant ends as created: Feed back on from the panel, and every witness restored.
       await page.getByRole('switch', { name: /Feed/ }).click();
       await expect(page.getByRole('switch', { name: /Feed/ })).toHaveAttribute(
         'aria-checked',
@@ -812,8 +810,12 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       );
       await expect(toast(page, 'Alterações salvas.')).toBeVisible();
       await expect.poll(modulesOf, { timeout: 35_000 }).toContain('feed');
-      expect(await getTenantModuleFlag(slug, 'example')).toBe(false);
+      await expect.poll(async () => (await feedApi()).status, { timeout: 35_000 }).toBe(200);
+      await memberPage.goto(`${origin}/inicio`);
+      await expect(feedRegion(memberPage)).toBeVisible();
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']);
     } finally {
+      await setTenantModuleFlag(slug, 'feed', true);
       await memberContext.close();
     }
   });

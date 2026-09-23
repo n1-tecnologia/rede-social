@@ -1,7 +1,9 @@
 import {
+  type ModuleKey,
   platformTenantDetailSchema,
   platformTenantsSchema,
   TENANT_HOST_HEADER,
+  TOGGLEABLE_MODULES,
 } from '@tria/contracts';
 import { sqlClient } from '@tria/core/db';
 import { ApiError } from '@tria/core/server/http/api-error';
@@ -156,7 +158,7 @@ afterAll(async () => {
 });
 
 describe('platform services — createTenant, list, detail, modules, update, status, invites', () => {
-  it('1. createTenant writes the tenant, one tenant_modules row per key (example false) and one pending invite in one transaction', async () => {
+  it('1. createTenant writes the tenant, one tenant_modules row per key and one pending invite in one transaction', async () => {
     const { id } = await createTenant(
       {
         displayName: 'Comunidade Serviço',
@@ -183,10 +185,12 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     const modules = await adminSql<{ module_key: string; enabled: boolean }[]>`
       select module_key, enabled from public.tenant_modules where tenant_id = ${id}::uuid
       order by module_key`;
-    expect(modules).toHaveLength(7);
+    // One row per key in the vocabulary, enabled or not, so a later toggle is an UPDATE and never a
+    // "does this tenant have a row yet?" branch.
+    expect(modules).toHaveLength(6);
+    expect(modules.map((m) => m.module_key)).toEqual([...TOGGLEABLE_MODULES].sort());
     const enabled = modules.filter((m) => m.enabled).map((m) => m.module_key);
     expect(enabled.sort()).toEqual(['events', 'feed']);
-    expect(modules.find((m) => m.module_key === 'example')?.enabled).toBe(false);
 
     const invites = await adminSql<
       { email: string; status: string; role: string; created_by: string }[]
@@ -283,7 +287,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(svc.domains).toEqual([]);
   });
 
-  it('5. setModuleEnabled upserts the row and invalidates the flags cache on this instance; example is not toggleable', async () => {
+  it('5. setModuleEnabled upserts the row and invalidates the flags cache on this instance; the key vocabulary is enforced by the database', async () => {
     const ctx = { userId: demoMemberId, tenantId: ids.demo, role: 'member' as const };
     expect(await moduleFlags.enabledKeys(ctx)).toContain('events');
 
@@ -300,12 +304,12 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     await setModuleEnabled(ids.demo, 'events', true, actor);
     expect(await moduleFlags.enabledKeys(ctx)).toContain('events');
 
-    const err = await expectApiError(
-      setModuleEnabled(ids.demo, 'example', true, actor),
-      400,
-      'VALIDATION_FAILED',
-    );
-    expect(err.details).toEqual({ module: 'not_toggleable' });
+    // 04-10 retired the per-key refusal branch this used to assert (D-19). What still refuses a key
+    // outside the vocabulary at THIS layer is `tenant_modules_key_chk`, generated from
+    // `TOGGLEABLE_MODULES` — so a key the route's enum somehow let through still cannot be stored.
+    await expect(
+      setModuleEnabled(ids.demo, 'nao-existe' as ModuleKey, true, actor),
+    ).rejects.toThrow(/tenant_modules_key_chk/);
 
     await expectApiError(
       setModuleEnabled('00000000-0000-4000-8000-000000000000', 'feed', true, actor),
@@ -416,7 +420,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
   let tenantId = '';
   let inviteEmail = '';
 
-  it('10. POST creates the tenant: 201 with the strict detail, 7 module rows (example false), one pending invite', async () => {
+  it('10. POST creates the tenant: 201 with the strict detail, 6 module rows, one pending invite', async () => {
     const res = await platform('/tenants', {
       method: 'POST',
       token: tokens.superAdmin,
@@ -434,7 +438,6 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
       ['onPrimary', 'onPrimaryDark', 'primary', 'primaryDark', 'secondary'].sort(),
     );
     expect(body.modules).toHaveLength(6);
-    expect(body.modules.map((m) => m.key)).not.toContain('example');
     expect(body.modules.every((m) => m.enabled)).toBe(true);
     expect(body.invites).toHaveLength(1);
     expect(body.invites[0]).toMatchObject({ email: inviteEmail, status: 'pending', sentAt: null });
@@ -443,8 +446,8 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
 
     const rows = await adminSql<{ module_key: string; enabled: boolean }[]>`
       select module_key, enabled from public.tenant_modules where tenant_id = ${tenantId}::uuid`;
-    expect(rows).toHaveLength(7);
-    expect(rows.find((r) => r.module_key === 'example')?.enabled).toBe(false);
+    expect(rows).toHaveLength(6);
+    expect(rows.every((r) => r.enabled)).toBe(true);
   });
 
   it('11. idempotency: the same slug again is 400 VALIDATION_FAILED { slug: "taken" }', async () => {
@@ -507,13 +510,15 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     const issues = err.details?.issues as { path: string }[];
     expect(issues.map((i) => i.path)).toContain('displayName');
 
-    // `example` is not a valid checklist value either (D-19).
-    const example = await platform('/tenants', {
+    // A key outside the vocabulary is not a valid checklist value either — 04-10 retired the branch
+    // that named the reference module, and the ENUM is what refuses now.
+    const unknownKey = await platform('/tenants', {
       method: 'POST',
       token: tokens.superAdmin,
-      body: newTenantBody(`pt-test-ex-${RUN}`.slice(0, 40), { modules: ['example'] }),
+      body: newTenantBody(`pt-test-ex-${RUN}`.slice(0, 40), { modules: ['nao-existe'] }),
     });
-    expect(example.status).toBe(400);
+    expect(unknownKey.status).toBe(400);
+    expect((await envelope(unknownKey)).code).toBe('VALIDATION_FAILED');
   });
 
   it('14. GET list: ?q= finds the new tenant, ?status=suspended excludes it, ?limit=1 pages by slug cursor', async () => {
@@ -592,7 +597,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(after.tenant.slug).toBe(SLUG);
   });
 
-  it('17. ROLE-04: PUT …/modules/events on tria-lab is reflected in the lab member’s bootstrap on the very next request; example is not toggleable', async () => {
+  it('17. ROLE-04: PUT …/modules/events on tria-lab is reflected in the lab member’s bootstrap on the very next request; a key outside the vocabulary is refused', async () => {
     const before = (await (await bootstrap(tokens.labMember)).json()) as {
       modules: { key: string }[];
     };
@@ -636,19 +641,21 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     };
     expect(restored.modules.map((m) => m.key)).toEqual(['events', 'feed']);
 
-    // `example` is refused at validation on any tenant (D-19).
-    const example = await platform(`/tenants/${ids.demo}/modules/example`, {
+    // A key outside the vocabulary is refused at validation on any tenant. This is the rule that
+    // SURVIVED 04-10: the route's `z.enum(REAL_TENANT_DEFAULT_MODULES)` refuses it, and no per-key
+    // branch in `setModuleEnabled` is needed (or present) to make that true.
+    const unknownKey = await platform(`/tenants/${ids.demo}/modules/nao-existe`, {
       method: 'PUT',
       token: tokens.superAdmin,
       body: { enabled: false },
     });
-    expect(example.status).toBe(400);
-    expect((await envelope(example)).code).toBe('VALIDATION_FAILED');
-    // …and tria-demo still has it on: the example routes keep answering.
-    const items = await api.request('/v1/example/items', {
+    expect(unknownKey.status).toBe(400);
+    expect((await envelope(unknownKey)).code).toBe('VALIDATION_FAILED');
+    // …and tria-demo's own flags were not touched by the refusal: the feed still answers.
+    const feed = await api.request('/v1/feed', {
       headers: { authorization: `Bearer ${tokens.demoMember}` },
     });
-    expect(items.status).toBe(200);
+    expect(feed.status).toBe(200);
 
     const missing = await platform('/tenants/00000000-0000-4000-8000-000000000000/modules/feed', {
       method: 'PUT',

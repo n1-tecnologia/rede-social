@@ -9,7 +9,6 @@ import { registerJobQueues } from '@tria/core/server/jobs/boss';
 import type { ModuleManifest } from '@tria/core/server/modules/manifest';
 import { setPermissionResolver } from '@tria/core/server/rbac/permissions';
 import { KERNEL_ROLE_PERMISSIONS } from '@tria/core/server/rbac/require-role';
-import { exampleModule } from '@tria/module-example/module';
 import { FEED_PERMISSIONS, feedSettingsSchema } from '@tria/module-feed/contracts';
 import { feedModule } from '@tria/module-feed/module';
 
@@ -18,11 +17,11 @@ import { feedModule } from '@tria/module-feed/module';
  * SHAPE and must never import a module (`turbo boundaries`: `kernel` denies `module`); this file is
  * the single composition point where both sides meet, so adding a module is one entry here.
  *
- * `example` is the throwaway reference module (D-19); 04-10 deletes the entry and the package once
- * `feed` has taken over its role as the worked example of the module contract.
+ * 04-10 removed the throwaway reference module's entry (D-19) — one line here and its package — and
+ * nothing else in this file moved. That is MOD-03 demonstrated rather than asserted: a module comes
+ * out the same way it went in.
  */
 export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
-  example: exampleModule,
   feed: feedModule,
 };
 

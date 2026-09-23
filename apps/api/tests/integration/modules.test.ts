@@ -22,7 +22,7 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setu
 type Envelope = { error: { code: string; message: string; details?: unknown } };
 type BootstrapBody = {
   tenant: { id: string; slug: string };
-  modules: { key: string; nav?: unknown; settings: Record<string, unknown> }[];
+  modules: { key: string; nav?: unknown; home?: unknown; settings: Record<string, unknown> }[];
   permissions: string[];
 };
 
@@ -136,17 +136,16 @@ afterAll(async () => {
   await sqlClient.end();
 });
 
-describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17, D-19)', () => {
-  it('1. tria-demo lists the seven seeded keys; tria-lab only feed + events', async () => {
+describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () => {
+  it('1. tria-demo lists the six seeded keys; tria-lab only feed + events', async () => {
     const demo = await bootstrap(tokens.demoMember);
     expect(demo.status).toBe(200);
     const demoBody = (await demo.json()) as BootstrapBody;
     // ROLE-06 ordering: `nav.order` ascending first, then key ascending among the manifest-less keys
-    // (MODULE_KEY_ORDER_FALLBACK = 1000). `example` is the only module with a manifest so far
-    // (01-07, nav.order 90), so it leads and the remaining six stay alphabetical. When Phase 4
-    // deletes @tria/module-example this list loses `example`, not its ordering rule.
+    // (MODULE_KEY_ORDER_FALLBACK = 1000). 04-10 deleted the reference module — the only key that
+    // carried a `nav` — so every seeded key now shares the fallback bucket and the list is purely
+    // alphabetical. The ordering RULE is unchanged; only its input is.
     expect(demoBody.modules.map((m) => m.key)).toEqual([
-      'example',
       'chat',
       'communities',
       'events',
@@ -156,15 +155,10 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17, D-19)'
     ]);
     for (const m of demoBody.modules) {
       // A key enabled for the tenant but not yet implemented appears WITHOUT nav — that is what
-      // makes /me/bootstrap honest about what the tenant bought.
-      if (m.key === 'example')
-        expect(m.nav).toEqual({
-          label: 'Exemplo',
-          icon: 'sparkles',
-          href: '/inicio#exemplo',
-          order: 90,
-        });
-      else expect(m.nav).toBeUndefined();
+      // makes /me/bootstrap honest about what the tenant bought. `feed` has a manifest but declares
+      // a HOME SLOT and no tab (D-55), so it too arrives without nav.
+      expect(m.nav).toBeUndefined();
+      if (m.key === 'feed') expect(m.home).toEqual([{ order: 10 }]);
       expect(m.settings).toEqual({});
     }
 
@@ -285,7 +279,14 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
 
     expect([...bySlug.keys()]).toContain('tria-demo');
     expect([...bySlug.keys()]).toContain('tria-lab');
-    expect(bySlug.get('tria-demo')?.enabledModules).toContain('example');
+    expect([...(bySlug.get('tria-demo')?.enabledModules ?? [])].sort()).toEqual([
+      'chat',
+      'communities',
+      'events',
+      'feed',
+      'notifications',
+      'stories',
+    ]);
     expect([...(bySlug.get('tria-lab')?.enabledModules ?? [])].sort()).toEqual(['events', 'feed']);
     expect(bySlug.get('tria-demo')?.status).toBe('active');
   });

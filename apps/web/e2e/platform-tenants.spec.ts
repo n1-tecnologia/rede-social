@@ -175,9 +175,9 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await page.getByRole('button', { name: 'Reativar tenant' }).click();
     await expect(page.getByTestId('tenant-status-pill')).toHaveText('Ativo');
 
-    // D-17/D-19 wiring: the six real modules are on, the reference module was never offered.
+    // D-17 wiring: the six real modules are on for a panel-created tenant.
     expect(await getTenantModuleFlag(slug, 'events')).toBe(true);
-    expect(await getTenantModuleFlag(slug, 'example')).toBe(false);
+    expect(await getTenantModuleFlag(slug, 'feed')).toBe(true);
 
     // Back on the list: the new row, without a domain yet.
     await page.goto(`${hosts.platform}/plataforma`);
@@ -258,12 +258,11 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await confirm.check();
     await expect(submit).toBeEnabled();
 
-    // Six switches, all on by default (D-17); the seventh registry key is never listed (D-19).
+    // Six switches, all on by default (D-17) — exactly the key vocabulary and nothing else.
     // Scoped to the form column: the desktop rail carries the "Tema" switch (02-16 theme row).
     const switches = page.locator('main').getByRole('switch');
     await expect(switches).toHaveCount(6);
     for (const sw of await switches.all()) await expect(sw).toBeChecked();
-    await expect(page.getByRole('switch', { name: /example/i })).toHaveCount(0);
     await page.getByRole('switch', { name: 'Stories' }).click();
     await expect(page.getByRole('switch', { name: 'Stories' })).not.toBeChecked();
 
@@ -277,7 +276,6 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
 
     expect(await getTenantModuleFlag(slugs.mod, 'stories')).toBe(false);
     expect(await getTenantModuleFlag(slugs.mod, 'feed')).toBe(true);
-    expect(await getTenantModuleFlag(slugs.mod, 'example')).toBe(false);
 
     // Admins tab: the pending invite with its e-mail, the empty admins row, no horizontal overflow.
     await page.getByRole('tab', { name: 'Admins' }).click();

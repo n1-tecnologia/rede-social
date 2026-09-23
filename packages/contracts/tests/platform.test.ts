@@ -45,10 +45,10 @@ describe('createTenantBodySchema (POST /v1/platform/tenants, ROLE-03)', () => {
     expect(parsed.adminEmail).toBe('admin@cliente.com.br');
   });
 
-  it('defaults modules to the six real modules (never example) when omitted', () => {
+  it('defaults modules to the six real modules when omitted', () => {
     const { modules: _omit, ...body } = valid;
     expect(createTenantBodySchema.parse(body).modules).toEqual([...REAL_TENANT_DEFAULT_MODULES]);
-    expect(createTenantBodySchema.parse(body).modules).not.toContain('example');
+    expect(createTenantBodySchema.parse(body).modules).toHaveLength(6);
   });
 
   it('rejects a slug with spaces or accents (ASCII regex, tenants_slug_chk)', () => {
@@ -66,9 +66,11 @@ describe('createTenantBodySchema (POST /v1/platform/tenants, ROLE-03)', () => {
     ).toBe(true);
   });
 
-  it('rejects modules containing example (D-19) and a malformed adminEmail', () => {
+  it('rejects a modules list carrying a key outside the vocabulary, and a malformed adminEmail', () => {
+    // 04-10 retired the per-key refusal that used to name the reference module (D-19): what refuses
+    // an unknown key is the VOCABULARY itself, so this asserts the rule that actually survives.
     expect(
-      createTenantBodySchema.safeParse({ ...valid, modules: ['feed', 'example'] }).success,
+      createTenantBodySchema.safeParse({ ...valid, modules: ['feed', 'nao-existe'] }).success,
     ).toBe(false);
     expect(createTenantBodySchema.safeParse({ ...valid, adminEmail: 'nope' }).success).toBe(false);
   });
@@ -312,11 +314,11 @@ describe('platformTenantDetailSchema (GET /v1/platform/tenants/{id})', () => {
     expect(platformTenantDetailSchema.safeParse({ ...fixture, members: [] }).success).toBe(false);
   });
 
-  it('modules never carry the example key', () => {
+  it('modules never carry a key outside the vocabulary', () => {
     expect(
       platformTenantDetailSchema.safeParse({
         ...fixture,
-        modules: [{ key: 'example', enabled: true }],
+        modules: [{ key: 'nao-existe', enabled: true }],
       }).success,
     ).toBe(false);
   });

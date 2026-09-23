@@ -14,8 +14,8 @@ afterEach(() => {
 const labels: NavLabels = { home: 'Início', profile: 'Perfil', module: () => null };
 const demoModules: NavModule[] = [
   {
-    key: 'example',
-    nav: { label: 'Exemplo', icon: 'sparkles', href: '/inicio#exemplo', order: 90 },
+    key: 'stories',
+    nav: { label: 'Destaques', icon: 'sparkles', href: '/destaques', order: 90 },
   },
 ];
 const noop = async () => {};
@@ -80,20 +80,20 @@ describe('AppShell (UI-03, D-39, D-26)', () => {
     expect(links[1]?.getAttribute('aria-current')).toBeNull();
   });
 
-  it('MOD-04: a tab exists only for an enabled module — the lab-like nav has no Exemplo link', () => {
+  it('MOD-04: a tab exists only for an enabled module — the lab-like nav has no Destaques link', () => {
     render(shell());
-    expect(screen.queryAllByRole('link', { name: 'Exemplo' })).toHaveLength(0);
+    expect(screen.queryAllByRole('link', { name: 'Destaques' })).toHaveLength(0);
   });
 
-  it('MOD-04: the demo-like nav renders the Exemplo tab in both trees, between Início and Perfil', () => {
+  it('MOD-04: the demo-like nav renders the Destaques tab in both trees, between Início and Perfil', () => {
     const { container } = render(shell({ nav: buildNav(demoModules, labels) }));
     const bottom = container.querySelector('[data-shell-nav="bottom"]');
     expect(
       [...(bottom?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('aria-label')),
-    ).toEqual(['Início', 'Exemplo', 'Perfil']);
+    ).toEqual(['Início', 'Destaques', 'Perfil']);
     const rail = container.querySelector('[data-shell-nav="rail"]');
     expect(rail?.getAttribute('aria-label')).toBe('Navegação principal');
-    expect(rail?.textContent).toContain('Exemplo');
+    expect(rail?.textContent).toContain('Destaques');
   });
 
   it('D-40: a topbar slot renders with its aria-label and count badge; the rail shows it as a row', () => {
