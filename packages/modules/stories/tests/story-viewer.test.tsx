@@ -367,8 +367,9 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     tapAt(RIGHT_TWO_THIRDS());
     expect(currentIndex()).toBe(2);
 
-    // The like control is the host's, in the action row — the viewer owns no like of its own.
-    expect(screen.getByTestId('actions-0')).toBeInTheDocument();
+    // The like control is the host's, in the action row of whichever story is being watched — the
+    // viewer owns no like of its own, and mounts no gesture that could fire one.
+    expect(screen.getByTestId('actions-2')).toBeInTheDocument();
     expect(dialog().querySelector('[data-double-tap-burst]')).toBeNull();
   });
 

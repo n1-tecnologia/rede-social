@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { STORY_DURATION_MS } from '../contracts/index';
-import { useStoryClock, type UseStoryClockOptions } from '../ui/useStoryClock';
+import { type UseStoryClockOptions, useStoryClock } from '../ui/useStoryClock';
 
 /**
  * UI-D-30's timing model, asserted under a clock the TEST owns.
@@ -60,7 +60,10 @@ function manualClock() {
 
 type Clock = ReturnType<typeof manualClock>;
 
-function options(clock: Clock, overrides: Partial<UseStoryClockOptions> = {}): UseStoryClockOptions {
+function options(
+  clock: Clock,
+  overrides: Partial<UseStoryClockOptions> = {},
+): UseStoryClockOptions {
   return {
     durationMs: STORY_DURATION_MS,
     paused: false,

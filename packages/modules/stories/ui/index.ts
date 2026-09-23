@@ -24,6 +24,6 @@ export {
 } from './StoryViewer';
 export {
   type StoryClock,
-  useStoryClock,
   type UseStoryClockOptions,
+  useStoryClock,
 } from './useStoryClock';

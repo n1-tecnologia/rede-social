@@ -8,6 +8,10 @@
 export { cn } from './cn';
 // Hooks
 export { useDebounce } from './hooks/useDebounce';
+// The modal focus contract `BottomSheet` and `ConfirmDialog` already share. Exported for the story
+// viewer (05-06), which is a third modal and must trap focus the SAME way rather than grow a
+// second, subtly different implementation of Tab-cycling and Escape.
+export { useFocusTrap } from './hooks/useFocusTrap';
 export {
   type UseInfiniteScrollOptions,
   type UseInfiniteScrollResult,
