@@ -436,3 +436,90 @@ export async function setFeedPostRemoved(postId: string, removed: boolean): Prom
     returning id`;
   if (updated.length === 0) throw new Error(`no feed post ${postId}`);
 }
+
+/**
+ * A post authored by a REAL user of a seeded tenant (04-09), for the specs that need a card whose
+ * "…" menu offers the author variant.
+ *
+ * Written directly rather than through the composer so the menu, edit and delete cases do not each
+ * pay for two uploads — and so they cannot fail for a reason that belongs to the publish case.
+ * The caption is the caller's, which is what lets the teardown find every row it made.
+ */
+export async function createFeedPostAs(
+  email: string,
+  tenantSlug: string,
+  caption: string,
+): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.feed_posts (tenant_id, author_user_id, caption)
+    select t.id, u.id, ${caption}
+      from public.tenants t, public.users u
+     where t.slug = ${tenantSlug} and u.email = ${email}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not create a post for ${email} in ${tenantSlug}`);
+  return id;
+}
+
+/**
+ * Removes every post whose caption starts with `prefix`, soft-deleted ones included.
+ *
+ * The seeded feed is COUNTED by `feed.spec.ts` (`seededFeedPaging.total`), so a spec that publishes
+ * has to take its rows back out — including the one it soft-deleted, whose stamp keeps it out of
+ * the reads but not out of the table.
+ */
+export async function deleteFeedPostsLike(prefix: string): Promise<number> {
+  const removed = await sql()`
+    delete from public.feed_posts where caption like ${`${prefix}%`} returning id`;
+  return removed.length;
+}
+
+/**
+ * Waits until `count` post images uploaded after `since` have reached `ready`.
+ *
+ * It exists because variant derivation runs in the WORKER (`kernel.media-derive-variants`), and
+ * `createPost` requires an image to be `ready` — a video may publish mid-transcode, an image may
+ * not (04-04). The wait is the SPEC's, not the product's: it removes a race that belongs to the
+ * fixture (a worker that has not polled yet) rather than papering over one in the composer.
+ */
+export async function waitForReadyPostImages(
+  tenantSlug: string,
+  since: Date,
+  count: number,
+  // Generous on purpose: pg-boss is FIFO with a ~2 s poll, so a backlog left behind by an earlier
+  // media spec delays THIS spec's two jobs by however long that backlog takes. With a drained
+  // queue the wait settles in a few seconds.
+  timeoutMs = 120_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let seen = '(none)';
+  while (Date.now() < deadline) {
+    const rows = await sql()<{ status: string; n: string }[]>`
+      select a.status, count(*)::text as n
+        from public.media_assets a
+        join public.tenants t on t.id = a.tenant_id
+       where t.slug = ${tenantSlug}
+         and a.kind = 'image' and a.purpose = 'post'
+         and a.created_at >= ${since.toISOString()}::timestamptz
+       group by a.status`;
+    seen = rows.map((row) => `${row.status}=${row.n}`).join(' ') || '(no rows at all)';
+    const ready = Number(rows.find((row) => row.status === 'ready')?.n ?? '0');
+    if (ready >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  // The observed statuses are the whole diagnosis: "(no rows at all)" means the upload never
+  // reached `complete`, while `processing=2` means the worker is not draining its queue.
+  throw new Error(
+    `only fewer than ${count} post images reached 'ready' within ${timeoutMs}ms — saw ${seen}`,
+  );
+}
+
+/** Drops the post media assets a spec uploaded, so a re-run does not page over its own fixtures. */
+export async function deletePostAssetsSince(tenantSlug: string, since: Date): Promise<void> {
+  await sql()`
+    delete from public.media_assets a
+     using public.tenants t
+     where t.id = a.tenant_id and t.slug = ${tenantSlug}
+       and a.purpose in ('post', 'attachment')
+       and a.created_at >= ${since.toISOString()}::timestamptz`;
+}

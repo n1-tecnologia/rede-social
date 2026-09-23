@@ -435,8 +435,12 @@ test.describe('UI-D-20 — a community with nothing published', () => {
     await expect(region).toContainText(F.empty.title);
     await expect(region).toContainText(F.empty.bodyAuthor);
     await expect(region).not.toContainText(F.empty.body.slice(0, 20));
-    // The CTA is deliberately absent until `/criar` exists (04-09): the widget renders it only when
-    // the host passes a `createHref`, because a button that 404s is worse than no button.
-    await expect(region.getByRole('link', { name: F.empty.cta })).toHaveCount(0);
+    // 04-09 closed the stub this line used to pin (WINDOWS #18): the widget renders the CTA now
+    // that the host passes a `createHref`, and it points at the composer route rather than at the
+    // 404 an earlier CTA would have been. `.first()` because at the desktop breakpoint the same
+    // label also sits in the widget's header row (UI-D-17) — one affordance, two placements.
+    const emptyCta = region.getByRole('link', { name: F.empty.cta, exact: true }).first();
+    await expect(emptyCta).toBeVisible();
+    await expect(emptyCta).toHaveAttribute('href', '/criar');
   });
 });
