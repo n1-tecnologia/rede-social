@@ -33,11 +33,22 @@ export const FEED_MAX_CAPTION = 2200;
 /** Caption characters rendered before the "… mais" toggle (UI-SPEC card anatomy, `[proto]`). */
 export const FEED_CAPTION_TRUNCATE_AT = 100;
 
-/** `GET /v1/feed?limit=&cursor=`. `.strict()`: an unknown query key fails loudly (the 03-03 rule). */
+/**
+ * `GET /v1/feed?limit=&cursor=&communityId=`. `.strict()`: an unknown query key fails loudly (the
+ * 03-03 rule).
+ *
+ * **`communityId` is a FILTER, never an authorisation.** Present, the page is that community's own
+ * posts — the query `feed_posts_tenant_community_created_idx` was built for (COMM-03). Absent, it is
+ * the merged feed (D-73). It is ONE endpoint and one cursor envelope on purpose: a second route
+ * would be a second ordering expression waiting to drift, and the two pages must stay
+ * interchangeable for the reader. The community's visibility is re-resolved server-side inside the
+ * same transaction, so this parameter can only ever narrow what the tenant lane already allows.
+ */
 export const feedQuerySchema = z
   .object({
     cursor: z.string().max(FEED_MAX_CURSOR_LENGTH).optional(),
     limit: z.coerce.number().int().min(1).max(FEED_MAX_PAGE_SIZE).default(FEED_PAGE_SIZE),
+    communityId: z.uuid().optional(),
   })
   .strict();
 export type FeedQuery = z.infer<typeof feedQuerySchema>;
@@ -73,6 +84,51 @@ export const FEED_MEDIA_ISSUES = [
   'asset_not_usable',
 ] as const;
 export type FeedMediaIssue = (typeof FEED_MEDIA_ISSUES)[number];
+
+/* ── Publishing INTO a community (COMM-04, D-72) ───────────────────────────────────────────────── */
+
+/**
+ * The closed refusal vocabulary a post write can answer with, as `details.community` — the
+ * `FEED_MEDIA_ISSUES` rule restated for the destination half. The web switches on it exhaustively
+ * and maps each code to pt-BR copy; the copy never lives here.
+ *
+ * **There is exactly ONE code, and that is the point** (COMM-04, D-23, T-05-13). An unknown
+ * community id, ANOTHER TENANT'S id and a soft-deleted one all answer a BARE 404 with no `details`
+ * at all — a per-cause code over an enumerable uuid space would be an existence oracle. Only an
+ * ARCHIVED community *of this tenant* gets a distinguishable refusal, and it discloses nothing the
+ * member cannot already read on the community page.
+ */
+export const FEED_COMMUNITY_ISSUES = ['archived'] as const;
+export type FeedCommunityIssue = (typeof FEED_COMMUNITY_ISSUES)[number];
+
+/** The route `defaultHook`'s lookup: a Zod issue whose `message` is in here becomes `details.community`. */
+export const FEED_COMMUNITY_ISSUE_SET: ReadonlySet<string> = new Set(FEED_COMMUNITY_ISSUES);
+
+/**
+ * The community a post belongs to, as the FEED projects it (D-71) — a NAME and the two ids the host
+ * needs to build a route, and deliberately nothing else.
+ *
+ * **This is not `@tria/module-communities`' `CommunitySummary`, and it must not become it.** Two
+ * reasons, and both are load-bearing:
+ *
+ *  1. **The boundary.** `turbo.json`'s tag allowlist lets a module depend on the kernel, the shared
+ *     contracts and tooling — never on another module (MOD-02, `packages/boundary-fixture` is the
+ *     negative proof). So the feed cannot import the communities module's contracts at all, and a
+ *     three-field shape it publishes itself is the honest way to say what a post header needs.
+ *  2. **The label is a label.** A cover, a post count, a status and an ordering timestamp on every
+ *     post of the merged feed would be payload nobody renders — and the day one of them IS rendered,
+ *     the "em {Comunidade}" segment has quietly become a second community card inside a post.
+ *
+ * `.strict()` is what keeps rule 2 true: a field cannot be added here by accident.
+ */
+export const postCommunitySchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    slug: z.string(),
+  })
+  .strict();
+export type PostCommunity = z.infer<typeof postCommunitySchema>;
 
 /**
  * One media row as the feed projects it. It carries the ASSET ID and the facts the renderer needs
@@ -129,6 +185,20 @@ export const createPostSchema = z
      * SILENTLY dropped — the post still publishes and the admin is told nothing (UI-D-13).
      */
     linkUrl: z.string().max(2048).optional(),
+    /**
+     * COMM-04 / D-72 — the post's destination, chosen ONCE, at publication.
+     *
+     * Omitted (or absent), the post is tenant-wide. Present, it must name an ACTIVE community of
+     * THIS tenant: the service re-resolves it inside the post's own transaction and answers a bare
+     * 404 for an unknown, foreign or removed id and `400 { community: 'archived' }` for an archived
+     * one. That check is VALIDATION, not authorisation — the permission is still the route's literal
+     * `requirePermission('feed.post.create')`.
+     *
+     * It is deliberately NOT on `updatePostSchema`: a published post cannot move between
+     * communities, because a move would have to decide what happens to the likes, comments and share
+     * links it already accumulated in its old placement. A mis-placed post is deleted and reposted.
+     */
+    communityId: z.uuid().optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -364,6 +434,19 @@ export const feedPostSchema = z
     commentCount: z.number().int(),
     viewerLiked: z.boolean(),
     communityId: z.uuid().nullable(),
+    /**
+     * D-71 — WHERE THIS POST CAME FROM, on every post, always present.
+     *
+     * `null` is the tenant-wide answer and a summary is the community answer; there is no third
+     * state and no optional key, so a renderer never has to guess whether the absence of a label
+     * means "tenant-wide" or "the server forgot". It arrives from the SAME statement as the post (a
+     * `left join public.communities` inside `postProjection`), so the label costs no extra query —
+     * which is what `feed-query-budget.test.ts` holds honest with a ceiling AND a floor.
+     *
+     * `communityId` above stays because `post.published` carries it to Phase 7 and the composer
+     * reads it; this is the same fact HYDRATED for the reader.
+     */
+    community: postCommunitySchema.nullable(),
     canManage: z.boolean(),
     /**
      * D-53's discriminator — what `PostMedia` BRANCHES on. It is the parent's own column, not a

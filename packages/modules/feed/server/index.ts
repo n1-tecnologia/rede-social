@@ -12,6 +12,7 @@ export {
   likeComment,
   likePost,
   listComments,
+  listCommunityFeed,
   listFeed,
   listReplies,
   setPostLinkPreview,

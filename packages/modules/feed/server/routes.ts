@@ -10,6 +10,7 @@ import {
   commentsQuerySchema,
   createCommentSchema,
   createPostSchema,
+  FEED_COMMUNITY_ISSUES,
   FEED_MEDIA_ISSUES,
   feedPageSchema,
   feedPostSchema,
@@ -26,6 +27,7 @@ import {
   likeComment,
   likePost,
   listComments,
+  listCommunityFeed,
   listFeed,
   listReplies,
   softDeletePost,
@@ -54,13 +56,22 @@ import {
  */
 const MEDIA_ISSUE_SET: ReadonlySet<string> = new Set(FEED_MEDIA_ISSUES);
 
+/**
+ * The same lift for COMM-04's destination vocabulary. It is a SECOND set rather than one merged
+ * bag because the two land on different `details` KEYS (`details.media` vs `details.community`), and
+ * the web switches on each exhaustively: merging them would let a media code surface as a community
+ * refusal the day someone reuses a word.
+ */
+const COMMUNITY_ISSUE_SET: ReadonlySet<string> = new Set(FEED_COMMUNITY_ISSUES);
+
 const feed = new OpenAPIHono<AppEnv>({
   defaultHook: (result) => {
     if (!result.success) {
-      const media = result.error.issues
-        .map((issue) => issue.message)
-        .find((message) => MEDIA_ISSUE_SET.has(message));
+      const messages = result.error.issues.map((issue) => issue.message);
+      const media = messages.find((message) => MEDIA_ISSUE_SET.has(message));
       if (media) throw new ApiError(400, 'VALIDATION_FAILED', { media });
+      const community = messages.find((message) => COMMUNITY_ISSUE_SET.has(message));
+      if (community) throw new ApiError(400, 'VALIDATION_FAILED', { community });
       throw new ApiError(400, 'VALIDATION_FAILED', {
         issues: result.error.issues.map((issue) => ({
           path: issue.path.map(String).join('.'),
@@ -80,8 +91,12 @@ const listRoute = createRoute({
   responses: {
     200: {
       description:
-        "One keyset page of the tenant's feed, newest first. `nextCursor` is non-null exactly when another post exists; it is OPAQUE and must be passed back untouched.",
+        "One keyset page of the tenant's feed, newest first. `nextCursor` is non-null exactly when another post exists; it is OPAQUE and must be passed back untouched.\n\nWithout `communityId` this is the MERGED feed (D-73): tenant-wide posts and community posts interleaved by `created_at desc, id desc`, with no per-source cap and no ranking. Every item carries `community` — `null` for a tenant-wide post, `{ id, name, slug }` for a community post (D-71). When the tenant does not have the `communities` module the same endpoint returns only tenant-wide posts and the community rows are untouched (D-74).\n\nWith `communityId` it is that community's own posts, same ordering and same cursor envelope (COMM-03).",
       content: { 'application/json': { schema: feedPageSchema } },
+    },
+    404: {
+      description:
+        "`communityId` names no community visible to this tenant — unknown, another tenant's, removed, or the tenant does not have the `communities` module. One bare code, no details (D-23).",
     },
   },
 });
@@ -118,10 +133,14 @@ const createPostRoute = createRoute({
     },
     400: {
       description:
-        "`VALIDATION_FAILED` with `details.media` carrying exactly one machine code: `gallery_and_video` (D-53 — photos and a video on one post, refused by the schema AND by `feed_post_media_kind_fk`), `too_many_images`, `too_many_attachments`, or `asset_not_usable` (an asset that is not this tenant's, not the right kind/purpose, or not in a usable status — ONE code for all of them, and no id echoed back).",
+        "`VALIDATION_FAILED` with `details.media` carrying exactly one machine code: `gallery_and_video` (D-53 — photos and a video on one post, refused by the schema AND by `feed_post_media_kind_fk`), `too_many_images`, `too_many_attachments`, or `asset_not_usable` (an asset that is not this tenant's, not the right kind/purpose, or not in a usable status — ONE code for all of them, and no id echoed back).\n\nOr `details.community = 'archived'` (COMM-04): the named community exists in this tenant but has been archived, so it accepts no new posts. That is the ONLY distinguishable community refusal — see the 404.",
     },
     403: {
       description: "The tenant's posting policy does not grant this caller `feed.post.create`",
+    },
+    404: {
+      description:
+        "`communityId` names no community visible to this tenant — unknown, another tenant's, or removed. One BARE code with no `details` for all three (D-23, T-05-13), so the composer cannot enumerate another organisation's containers.",
     },
   },
 });
@@ -306,7 +325,16 @@ const listRepliesRoute = createRoute({
 });
 
 export const feedRoutes = feed
-  .openapi(listRoute, async (c) => c.json(await listFeed(c.get('ctx'), c.req.valid('query')), 200))
+  // ONE route, two predicates (D-73/COMM-03): the parameter chooses which page this is, and both
+  // are built by the same projection, the same ordering expression and the same cursor envelope.
+  .openapi(listRoute, async (c) => {
+    const query = c.req.valid('query');
+    const ctx = c.get('ctx');
+    const page = query.communityId
+      ? await listCommunityFeed(ctx, query.communityId, query)
+      : await listFeed(ctx, query);
+    return c.json(page, 200);
+  })
   .openapi(getPostRoute, async (c) => {
     const { postId } = c.req.valid('param');
     return c.json(await getPost(c.get('ctx'), postId), 200);

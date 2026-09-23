@@ -31,6 +31,10 @@ const row = {
   edited_at: null,
   caption: 'olá',
   community_id: null,
+  // 05-03: the projection's `left join public.communities` half. Both null is the TENANT-WIDE
+  // post, which is what every assertion in this file is about.
+  community_name: null,
+  community_slug: null,
   like_count: 0,
   comment_count: 0,
   author_user_id: USER_ID,

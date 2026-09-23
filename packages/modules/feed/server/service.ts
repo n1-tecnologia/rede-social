@@ -4,6 +4,7 @@ import { emit } from '@tria/core/server/events/bus';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { enqueueInTx } from '@tria/core/server/jobs/boss';
 import { moduleLogger } from '@tria/core/server/logging';
+import { moduleFlags } from '@tria/core/server/modules/flags-cache';
 import { decodeCursor, encodeCursor } from '@tria/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
@@ -55,6 +56,9 @@ type FeedRow = {
   edited_at: string | null;
   caption: string;
   community_id: string | null;
+  /** The `left join public.communities` half (05-03). Both null for a tenant-wide post. */
+  community_name: string | null;
+  community_slug: string | null;
   like_count: number;
   comment_count: number;
   viewer_liked: boolean;
@@ -117,6 +121,8 @@ const postProjection = (viewerUserId: string) => sql`
            to_char(p.edited_at at time zone 'utc', ${ISO_MICROSECONDS}) as edited_at,
            p.caption,
            p.community_id,
+           c.name as community_name,
+           c.slug as community_slug,
            p.like_count,
            p.comment_count,
            (pl.id is not null) as viewer_liked,
@@ -142,6 +148,19 @@ const postProjection = (viewerUserId: string) => sql`
       -- statement. The join carries no tenant condition: feed_link_previews_tenant_isolation
       -- scopes it, exactly like every other table in this lane.
       left join feed_link_previews lp on lp.id = p.link_preview_id
+      -- D-71's "em {Comunidade}" label rides the statement that already exists (Pitfall 3/11): the
+      -- container is ONE nullable foreign key, so this is a plain left join and a feed page still
+      -- costs ONE statement. Two things about it are deliberate:
+      --   * the c.tenant_id = p.tenant_id condition is here even though communities_tenant_isolation
+      --     already scopes this lane. It is the ONE join condition in this projection that carries a
+      --     tenant predicate, because this is the one join whose failure mode is a FOREIGN TENANT'S
+      --     NAME rendered inside a post card (T-05-14). Defence in depth, stated not implied;
+      --   * there is NO c.status and no c.deleted_at predicate. Archive is a write gate and a list
+      --     gate, never a feed gate (05-RESEARCH Pattern 7): an archived community's posts stay in
+      --     the feed, still labelled and still reachable, so the feed keeps exactly one ordering
+      --     expression and no outstanding cursor is ever invalidated by an archive.
+      left join public.communities c
+             on c.id = p.community_id and c.tenant_id = p.tenant_id
       left join lateral (
         select coalesce(
                  json_agg(
@@ -220,6 +239,13 @@ const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
   commentCount: row.comment_count,
   viewerLiked: row.viewer_liked,
   communityId: row.community_id,
+  // D-71. Both halves of the pair are checked rather than just the id: a `community_id` whose join
+  // found nothing (a row the lane cannot see) must read as "tenant-wide" rather than as a community
+  // with an empty name — the label is either complete or absent, never a blank link.
+  community:
+    row.community_id !== null && row.community_name !== null && row.community_slug !== null
+      ? { id: row.community_id, name: row.community_name, slug: row.community_slug }
+      : null,
   canManage: row.author_user_id === viewerUserId,
   mediaKind: row.media_kind,
   // `coalesce(..., '[]'::json)` inside the lateral means the array is always present; the `?? []`
@@ -230,19 +256,19 @@ const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
 });
 
 /**
- * `GET /v1/feed?limit=&cursor=` (FEED-02) — one keyset page of the tenant's main feed, newest first.
+ * ONE keyset page, given the ONE predicate that distinguishes the three feeds (05-03).
  *
- * Ordering is `created_at desc, id desc`, which is the ordered pair
- * `feed_posts_tenant_community_created_idx` is built on and is TOTAL: two posts written in the same
- * microsecond occupy two stable adjacent slots that a page boundary can neither duplicate nor skip,
- * even while somebody else is publishing. The cursor's `n` is the row's own `created_at`, read back
- * from the projection rather than re-derived in JavaScript, so it can never disagree with the index.
- *
- * `decodeCursor` is TOTAL (see its docblock): a tampered, truncated or stale envelope degrades to
- * page 1 instead of raising, and nothing from the string reaches SQL before `cursorSchema` accepted
- * it (T-03-52). The tenant predicate is RLS, never the cursor.
+ * Everything below the predicate — the projection, the cursor comparison, the ordering expression,
+ * the over-fetch and the `encodeCursor` — is written once HERE, so the merged feed, the module-off
+ * fallback and a community's own page cannot drift apart on any of them. That is the whole content
+ * of D-73's "one query, one ordering expression": the difference between the three is a `where`
+ * fragment, never a second query path and never a second route.
  */
-export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<FeedPage> {
+async function feedPage(
+  ctx: RequestContext,
+  query: FeedQuery,
+  communityPredicate: ReturnType<typeof sql>,
+): Promise<FeedPage> {
   const limit = query.limit;
   const after = decodeCursor(query.cursor);
   const afterAt = after?.n ?? null;
@@ -251,9 +277,8 @@ export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<F
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<FeedRow>(sql`
       ${postProjection(ctx.userId)}
-       -- Phase 5 widens "community_id is null" to "community_id in (...)"; the index already carries it.
        where p.deleted_at is null
-         and p.community_id is null
+         ${communityPredicate}
          and (
            ${afterAt}::timestamptz is null
            or (p.created_at, p.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
@@ -269,6 +294,52 @@ export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<F
   const nextCursor =
     rows.length > limit && last ? encodeCursor({ n: last.created_at, id: last.id }) : null;
 
+  return { items: page.map((row) => toPost(row, ctx.userId)), nextCursor };
+}
+
+/**
+ * `GET /v1/feed?limit=&cursor=` (FEED-02, D-73, D-74) — one keyset page of the tenant's MAIN feed:
+ * tenant-wide posts and community posts interleaved, strictly chronological, newest first.
+ *
+ * **D-73: the merged predicate is an ABSENCE.** Because COMM-02 makes every member of the tenant a
+ * viewer of every community, "which communities may this member see" has no answer to compute — the
+ * V1 merged feed is simply the feed with no filter on `community_id` at all. There is no per-source
+ * cap, no ranking and no interleaving rule: `created_at desc, id desc` is the whole ordering, so a
+ * community post and a tenant-wide post written a second apart sit a second apart on screen.
+ *
+ * **D-74: the module flag is the SINGLE switch.** With `communities` disabled for this tenant the
+ * predicate reverts to Phase 4's `community_id is null` — the rows are untouched, the community
+ * posts simply stop being listed, and re-enabling restores them with no migration and no backfill.
+ * Nothing else in this file branches on the flag, and there is deliberately no second route: a
+ * tenant that turns the module off must get the OLD feed, not a different one.
+ *
+ * Reading the flag costs nothing measurable: `requireModule('feed')` has already populated
+ * `moduleFlags` for this tenant on this very request, so this is a cache hit, and the cache's own
+ * read is against `tenant_modules` — a table outside the feed query budget's regex either way.
+ *
+ * **Which index serves which predicate is a MEASURED fact, not an assumption** (05-RESEARCH
+ * §Pattern 3, and the schema docblock repeats the table): enabled → `feed_posts_tenant_created_all_idx`,
+ * disabled → the partial `feed_posts_tenant_created_idx`. `090-feed.sql` pins BOTH plans on a volume
+ * fixture, so losing either one is a red pgTAP run rather than a silent sequential scan.
+ *
+ * Ordering is TOTAL: two posts written in the same microsecond occupy two stable adjacent slots that
+ * a page boundary can neither duplicate nor skip, even while somebody else is publishing. The
+ * cursor's `n` is the row's own `created_at`, read back from the projection rather than re-derived
+ * in JavaScript, so it can never disagree with the index.
+ *
+ * `decodeCursor` is TOTAL (see its docblock): a tampered, truncated or stale envelope degrades to
+ * page 1 instead of raising, and nothing from the string reaches SQL before `cursorSchema` accepted
+ * it (T-03-52). The tenant predicate is RLS, never the cursor.
+ */
+export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<FeedPage> {
+  const communitiesEnabled = await moduleFlags.isEnabled(ctx, 'communities');
+  const page = await feedPage(
+    ctx,
+    query,
+    // D-73 enabled: NO filter. D-74 disabled: the Phase 4 predicate, unchanged.
+    communitiesEnabled ? sql`` : sql`and p.community_id is null`,
+  );
+
   // T-04-05: the SHAPE of the read — counts, ids and flags. A caption is member content and never
   // reaches a log line, an error `details` payload or an OpenAPI example.
   log.info(
@@ -277,14 +348,77 @@ export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<F
       tenantId: ctx.tenantId,
       userId: ctx.userId,
       requestId: ctx.requestId,
-      limit,
-      returned: page.length,
-      hasNext: nextCursor !== null,
+      limit: query.limit,
+      returned: page.items.length,
+      hasNext: page.nextCursor !== null,
+      communitiesEnabled,
     },
     'feed listed',
   );
 
-  return { items: page.map((row) => toPost(row, ctx.userId)), nextCursor };
+  return page;
+}
+
+/**
+ * `GET /v1/feed?communityId=…` (COMM-03) — one community's own posts, same projection, same cursor
+ * envelope, same ordering expression as the merged feed.
+ *
+ * It is exposed as a PARAMETER of the existing feed route rather than as a sibling path
+ * (`/v1/feed/communities/{id}`) for one reason that outlives the choice: the cursor. Both pages are
+ * built by `feedPage` from the identical `(created_at, id)` tuple, so a cursor is meaningful in
+ * either — and the day the community page gains a filter the main feed also wants, there is one
+ * `FeedQuery` to add it to instead of two that have to be kept in step. The equality predicate here
+ * is the query `feed_posts_tenant_community_created_idx` was built for in Phase 4.
+ *
+ * **The community is resolved FIRST, inside the tenant lane, and a miss is a BARE 404** — unknown
+ * id, another tenant's id, soft-deleted: one answer for all three, with no `details` (D-23,
+ * T-05-02). There is nothing here that compares tenant ids, so no later edit can turn that 404 into
+ * a 403 that confirms the row exists somewhere.
+ *
+ * An ARCHIVED community still lists its posts (05-RESEARCH §Pattern 7): archiving gates the WRITES
+ * and removes the container from the tab, it does not retract what members already read.
+ *
+ * With the `communities` module disabled the route answers the same bare 404 — not because the id is
+ * wrong, but because a tenant without the module has no communities to name (D-74, ROLE-06's "never
+ * tell 'you may not' from 'there is nothing here'").
+ */
+export async function listCommunityFeed(
+  ctx: RequestContext,
+  communityId: string,
+  query: FeedQuery,
+): Promise<FeedPage> {
+  if (!(await moduleFlags.isEnabled(ctx, 'communities'))) throw new ApiError(404, 'NOT_FOUND');
+
+  const visible = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ id: string }>(sql`
+      select c.id from public.communities c
+       where c.id = ${communityId}::uuid
+         and c.tenant_id = ${ctx.tenantId}::uuid
+         and c.deleted_at is null
+       limit 1`);
+    return rows[0];
+  });
+  if (!visible) throw new ApiError(404, 'NOT_FOUND');
+
+  const page = await feedPage(ctx, query, sql`and p.community_id = ${communityId}::uuid`);
+
+  // The SHAPE of the read. A community NAME is member-facing content and never reaches a log line
+  // (T-05-06) — the id does, exactly as the post id does.
+  log.info(
+    {
+      event: 'feed.community.list',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      communityId,
+      limit: query.limit,
+      returned: page.items.length,
+      hasNext: page.nextCursor !== null,
+    },
+    'community feed listed',
+  );
+
+  return page;
 }
 
 /**
@@ -484,7 +618,43 @@ async function upsertLinkPreview(
 }
 
 /**
- * `POST /v1/feed/posts` (FEED-08).
+ * COMM-04's destination check — VALIDATION, never a permission, and it runs inside the post's OWN
+ * transaction so a community cannot be archived between the check and the insert.
+ *
+ * Three answers, and the asymmetry between them is the security decision (D-23, T-05-12, T-05-13):
+ *  - not visible in this lane (unknown id, ANOTHER TENANT'S id, soft-deleted) → a BARE 404 with no
+ *    `details`. A per-cause code over an enumerable uuid space would let the composer enumerate
+ *    another organisation's containers one 400 at a time;
+ *  - visible but `archived` → `400 VALIDATION_FAILED { community: 'archived' }`. This one IS
+ *    distinguishable, and safely: the member can already read that community's page and see the
+ *    "Arquivada" pill, so the code discloses nothing new;
+ *  - active → the insert proceeds.
+ *
+ * The read runs in the TENANT LANE, so `communities_tenant_isolation` is what scopes it. The
+ * explicit `tenant_id` predicate beside it is layer 2 of the three, exactly as `listCommunityFeed`
+ * carries it: a cross-tenant `communityId` cannot be written even if a policy were ever relaxed,
+ * and the foreign key is the third layer underneath both.
+ */
+async function resolveCommunityTarget(
+  ctx: RequestContext,
+  tx: Tx,
+  communityId: string,
+): Promise<void> {
+  const rows = await tx.execute<{ status: string }>(sql`
+    select c.status from public.communities c
+     where c.id = ${communityId}::uuid
+       and c.tenant_id = ${ctx.tenantId}::uuid
+       and c.deleted_at is null
+     limit 1`);
+  const community = rows[0];
+  if (!community) throw new ApiError(404, 'NOT_FOUND');
+  if (community.status === 'archived') {
+    throw new ApiError(400, 'VALIDATION_FAILED', { community: 'archived' });
+  }
+}
+
+/**
+ * `POST /v1/feed/posts` (FEED-08, COMM-04).
  *
  * - `tenantId` and `authorUserId` come from `ctx`, never from the body (T-04-02, T-07-01). The
  *   policy's `with check (tenant_id = app.tenant_id())` makes a forged stamp a `42501` rather than a
@@ -492,6 +662,12 @@ async function upsertLinkPreview(
  * - `emit` runs only after `withTenantTx` RESOLVES, and even then only QUEUES the event on
  *   `ctx.events`; the response middleware delivers it once the handler returned. A subscriber can
  *   therefore never observe a post that a rollback erased (MOD-03, criterion 4).
+ * - **COMM-04's write is TWO checks, not one.** The PERMISSION is the route's literal
+ *   `requirePermission('feed.post.create')` — it is a post, and publishing into a community is not a
+ *   second kind of act. The destination is then VALIDATED here (`resolveCommunityTarget`) against
+ *   this tenant's own rows. Do not collapse the two: a role check on the community would hard-code
+ *   V1's posting policy, and a permission-shaped refusal would answer 403 where the product means
+ *   "that container is archived".
  */
 export async function createPost(ctx: RequestContext, input: CreatePost): Promise<FeedPost> {
   const images = input.imageAssetIds ?? [];
@@ -515,7 +691,12 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
    */
   const linkCandidate = resolveLinkCandidate(input.linkUrl ?? firstUrlIn(input.caption));
 
+  const communityId = input.communityId ?? null;
+
   const created = await withTenantTx(ctx, async (tx) => {
+    // BEFORE the assets and before the preview: a refused destination must cost neither an asset
+    // validation nor an outbound-fetch cache row, and it must be the first thing the caller is told.
+    if (communityId !== null) await resolveCommunityTarget(ctx, tx, communityId);
     await validateAssets(tx, wanted);
     const previewId = await upsertLinkPreview(tx, ctx, linkCandidate);
 
@@ -524,6 +705,7 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
       .values({
         tenantId: ctx.tenantId,
         authorUserId: ctx.userId,
+        communityId,
         caption: input.caption,
         mediaKind,
         linkPreviewId: previewId,
@@ -574,6 +756,9 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
       // The SHAPE of the media, never an id or a filename (T-04-05): a filename is member content.
       mediaKind,
       mediaCount: created.media.length,
+      // The destination as an ID (COMM-04). A community NAME is member-facing content and never
+      // reaches a log line, exactly as a caption does not (T-05-06).
+      communityId,
     },
     'post created',
   );
@@ -659,6 +844,13 @@ type EditableRow = {
  * not "the bytes differ". A diff-gated marker would need a canonical comparison of caption, media
  * order and preview, and would quietly tell the reader nothing happened when the author reordered
  * two photos back and forth.
+ *
+ * **`community_id` IS NOT IN THIS STATEMENT, and adding it would be a product change** (D-72,
+ * T-05-17). A post's placement is fixed at publication: `updatePostSchema` has no `communityId` key
+ * and is `.strict()`, so an edit body carrying one is REFUSED rather than ignored, and the `set`
+ * list below never names the column even for a caller that assembled its own input. A "Mover para…"
+ * would have to decide what happens to the likes, comments and share links the post already
+ * accumulated in its old placement; a mis-placed post is deleted and reposted instead.
  *
  * **The media triple is a REPLACEMENT** (see `updatePostSchema`): present any of the three keys and
  * the post's whole media set becomes what they describe. The rows are deleted BEFORE the parent's

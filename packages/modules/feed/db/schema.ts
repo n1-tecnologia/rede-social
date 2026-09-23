@@ -31,10 +31,16 @@ import {
  *    (`where p.deleted_at is null`), not in `tenantIsolationPolicy`. Moving it into the policy would
  *    silently blind the moderation surface that has not been written yet.
  *
- * 3. **`community_id` participates in the list index on purpose**, even though V1 only ever asks for
- *    `community_id is null`: FEED-02's predicate becomes `community_id in (…)` in Phase 5, and the
- *    index that serves both is `(tenant_id, community_id, created_at desc, id desc)`. It carries NO
- *    foreign key yet — `communities` does not exist until Phase 5, which adds the reference.
+ * 3. **`community_id` participates in the list index on purpose.** Phase 5 (05-03) made the column
+ *    real: it now carries `feed_posts_community_fk -> public.communities(id)`, and the merged feed
+ *    reads it with NO predicate at all (D-73). See the third index below for why that needed a
+ *    third index rather than the two Phase 4 built. The FOREIGN KEY is declared in
+ *    `supabase/migrations/*_feed_communities.sql` as hand-written SQL rather than as a drizzle
+ *    `.references(() => communities.id)`: `communities` belongs to `@tria/module-communities`, and
+ *    a `module -> module` package dependency is denied by `turbo.json`'s boundary allowlist
+ *    (MOD-02). The constraint is real either way — the database enforces it, `090-feed.sql` and the
+ *    integration suite assert it — and drizzle never diffs it away, because the constraint is not
+ *    in the TS schema and therefore not in the snapshot `drizzle-kit generate` compares against.
  *
  * 4. **`like_count` and `comment_count` are TRIGGER-OWNED** (04-03 adds the triggers). No application
  *    code may update them; a service that does will drift from the rows it is supposed to summarise.
@@ -59,7 +65,14 @@ export const feedPosts = pgTable(
     authorUserId: uuid('author_user_id')
       .notNull()
       .references(() => users.id),
-    /** Reserved for Phase 5's community feed. No FK yet — `communities` does not exist. */
+    /**
+     * The post's container (COMM-04). Null is the tenant-wide feed; a uuid is a community.
+     *
+     * `feed_posts_community_fk -> public.communities(id)` lands in
+     * `supabase/migrations/*_feed_communities.sql` (05-03) with NO `on delete` clause, so the
+     * default `no action` stands: a community can never silently take its posts with it. ARCHIVE is
+     * the supported disappearance (05-RESEARCH §Pattern 7) and COMM-01 offers no deletion at all.
+     */
     communityId: uuid('community_id'),
     /** Plain text with newlines preserved (D-54). URLs are auto-linked at RENDER time, never stored as HTML. */
     caption: text().notNull().default(''),
@@ -106,6 +119,40 @@ export const feedPosts = pgTable(
     index('feed_posts_tenant_created_idx')
       .on(t.tenantId, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst())
       .where(sql`community_id is null`),
+    // ── The MERGED feed (D-73, 05-03). THREE INDEXES, NONE REDUNDANT — read this before "cleaning
+    // up what looks like two indexes on the same columns".
+    //
+    // D-73 claimed the merged feed was "served by the index Phase 4 already built for exactly this
+    // moment". It is NOT, and the claim was falsified by measurement, not by argument
+    // (05-RESEARCH §Pattern 3: a 500-post fixture, `analyze`, four EXPLAIN probes on PG 17.6):
+    //
+    //   query                                                        plan observed
+    //   ------------------------------------------------------------ ---------------------------
+    //   tenant + order by created_at desc, id desc  (the merged feed) Sort + SEQ SCAN
+    //   …and `community_id is null`                 (the D-74 fallback) Index Scan, *_tenant_created_idx
+    //   …and `community_id = $1`                    (a community page)  Index Scan, *_tenant_community_created_idx
+    //   …and `community_id is null or community_id in (…)` (an archive filter) Sort + SEQ SCAN
+    //
+    // The reason is the one the partial index above already gives: a key column that is neither
+    // pinned by an equality nor dropped from the key CANNOT BE SKIPPED, so the composite index can
+    // serve a single community's page but can deliver the ordering for neither of the other two.
+    // The merged feed has no predicate on `community_id` at all, so the column has to leave the key
+    // entirely — which is this index, non-partial because every post of the tenant is in the list.
+    //
+    // Which query each index serves, so the answer is in the file rather than in a commit message:
+    //   *_tenant_created_all_idx       -> the merged feed, communities module ON (D-73)
+    //   *_tenant_created_idx (partial) -> the same feed with the module OFF (D-74)
+    //   *_tenant_community_created_idx -> one community's own page (COMM-03)
+    //
+    // `.desc().nullsFirst()` on both key columns for the reason stated above, and because
+    // `supabase/tests/090-feed.sql`'s fourth EXPLAIN assertion is written against this idiom: it
+    // pins the plan on a volume fixture, so dropping this index turns the pgTAP suite red instead
+    // of turning the pilot's feed into a sequential scan nobody notices at 40 posts.
+    index('feed_posts_tenant_created_all_idx').on(
+      t.tenantId,
+      t.createdAt.desc().nullsFirst(),
+      t.id.desc().nullsFirst(),
+    ),
     // "this member's posts" (a profile tab, Phase 8 moderation) without a sequential scan.
     index('feed_posts_tenant_author_idx').on(t.tenantId, t.authorUserId),
     check('feed_posts_media_kind_chk', sql`${t.mediaKind} in ('none','gallery','video')`),
