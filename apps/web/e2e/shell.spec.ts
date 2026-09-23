@@ -12,15 +12,19 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
  * UI-03 / MOD-04 / D-39 / D-40 / D-42 (plan 02-07): the registry-driven, branded shell on both seed
  * tenants, at 390px (`mobile-chromium`: TopBar + floating BottomNav) and 1280px (`desktop-chromium`:
  * rail + centred column). Everything the shell shows comes from `GET /v1/me/bootstrap`: the tenant's
- * logo and `--brand-primary`, the tabs of its ENABLED modules (demo has `example`, lab does not) and
- * the home slots.
+ * logo and `--brand-primary`, the tabs of its ENABLED modules and the home slots.
  *
  * **The "Em breve" card is no longer observable on either seed tenant (04-06, UI-D-20).** It means
- * "no module contributed anything", and since 04-01 the lab tenant has the `feed` module enabled,
- * so a slot IS registered and the feed's own card takes that position. What the lab case proves now
- * is the thing that actually distinguishes it from demo — no `example` tab, no `#exemplo` widget —
- * plus the positive fact that the registered slot rendered. Asserting the placeholder here would
- * contradict `feed.spec.ts`, which asserts the opposite for the same tenant.
+ * "no module contributed anything", and since 04-01 both seed tenants have the `feed` module
+ * enabled, so a slot IS registered and the feed's own card takes that position.
+ *
+ * **No seed tenant shows a module TAB any more (04-10).** The only module that ever shipped a nav
+ * entry was the throwaway reference one, and D-19 removed it; `feed` deliberately contributes a home
+ * slot and no tab (D-55). So both cases assert `['Início', 'Perfil']` — and that sameness is the
+ * point, because what still separates the two tenants is everything else this file measures: the
+ * brand token, the logo, the display name, and the fact that neither tenant's brand ever appears in
+ * the other's HTML (TENANT-02 adjacency). The tab-bearing case now lives in `phase4-smoke.spec.ts`
+ * as the module-flag witness, on a throwaway tenant rather than on a seed one.
  */
 
 const BRAND = {
@@ -51,7 +55,7 @@ async function navLinkNames(nav: Locator): Promise<string[]> {
 }
 
 test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
-  test('tria-demo: logo, brand, Início · Exemplo · Perfil, the example home slot, one tree visible', async ({
+  test('tria-demo: logo, brand, Início · Perfil, the feed home slot, one tree visible', async ({
     page,
   }, testInfo) => {
     const mobile = testInfo.project.name === 'mobile-chromium';
@@ -79,11 +83,14 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     }
 
     const nav = visibleNav(page, mobile);
-    expect(await navLinkNames(nav)).toEqual(['Início', 'Exemplo', 'Perfil']);
+    expect(await navLinkNames(nav)).toEqual(['Início', 'Perfil']);
     await expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page');
 
-    // D-42: the enabled module's home slot renders; the "Em breve" card does not.
-    await expect(page.locator('#exemplo')).toBeVisible();
+    // D-42: the enabled module's home slot renders; the "Em breve" card does not. Since 04-10 that
+    // slot is the FEED's — the reference module that used to fill it was deleted with D-19.
+    await expect(
+      page.locator('main.app-scroll').getByRole('region', { name: 'Publicações da comunidade' }),
+    ).toBeVisible();
     await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);
 
     // Children render exactly once and scroll inside the shell's single scroll root.
@@ -101,7 +108,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await expect(page.locator('[data-brand-root] img[alt="TRIA"]')).toHaveCount(0);
   });
 
-  test('tria-lab: no Exemplo tab, no #exemplo, the feed slot instead of "Em breve", the lab brand', async ({
+  test('tria-lab: the same tab set and the same slot shape, under a different brand', async ({
     page,
   }, testInfo) => {
     test.skip(isRemote, 'local stack only (needs the tria-lab host)');
@@ -112,12 +119,9 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     expect(await brandPrimary(page)).toBe(BRAND.lab.primary);
 
     const nav = visibleNav(page, mobile);
+    // Scoped to the NAV: the lab feed carries 04-05's seeded link posts, whose auto-linked URLs are
+    // links too — a page-wide count would read those as tabs and fail for the wrong reason.
     expect(await navLinkNames(nav)).toEqual(['Início', 'Perfil']);
-    // Scoped to the NAV and matched exactly: the lab feed carries 04-05's seeded link posts, whose
-    // auto-linked URLs (`…exemplo.invalid/…`) are links whose accessible name CONTAINS "exemplo".
-    // A page-wide substring match would read those as an example TAB and fail for the wrong reason.
-    await expect(nav.getByRole('link', { name: 'Exemplo', exact: true })).toHaveCount(0);
-    await expect(page.locator('#exemplo')).toHaveCount(0);
     // UI-D-20: a module DID contribute a slot here, so the kernel placeholder must be absent and
     // the feed widget must be what fills the home column instead.
     await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);
