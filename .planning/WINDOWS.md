@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 22
+open_count: 23
 waived_count: 0
 fixed_count: 11
-total_count: 33
-last_updated: 2026-09-23T20:12:35.075Z
+total_count: 34
+last_updated: 2026-09-23T21:21:16.622Z
 ---
 
 # Broken Windows Ledger
@@ -48,6 +48,7 @@ last_updated: 2026-09-23T20:12:35.075Z
 | 31 | 05 | unrun-verify | .planning/phases/05-communities-stories/05-01-SUMMARY.md |  | 05-01 D12: the /comunidades empty, first-load-error and load-more-error states are implemented and typechecked but have no automated observation; 05-04 owns the same states | open |  | 2026-09-23T17:36:06.052Z |  |
 | 32 | 05 | deviation | packages/modules/feed/db/schema.ts |  | feed_posts_community_fk is hand-written SQL in the migration, not a drizzle .references(): a module->module package dependency is denied by turbo.json's boundary allowlist (MOD-02). Two 05-03 acceptance greps are therefore unmet by design. | open |  | 2026-09-23T20:12:34.999Z |  |
 | 33 | 05 | deviation | apps/web/e2e/media-video.spec.ts | 491 | Flaky under full-suite Playwright parallelism: the Next.js dev Console Error overlay is a second [role=dialog]. Root cause is an unhandledRejection in the SW registration path when Playwright blocks registration. Passes in isolation. | open |  | 2026-09-23T20:12:35.075Z |  |
+| 34 | 05 | stub | apps/web/app/(app)/comunidades/[communityId]/page.tsx | 128 | The Destaques (pinned-story) slot on the community page is a null placeholder; 05-08 (STORY-04/D-68) fills it. The section and its SectionTitle are both absent while it is null, which is the correct empty rendering, so no member sees a broken surface. | open |  | 2026-09-23T21:21:16.622Z |  |
 
 ````json
 [
@@ -445,6 +446,18 @@ last_updated: 2026-09-23T20:12:35.075Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T20:12:35.075Z",
+    "resolved_at": null
+  },
+  {
+    "id": 34,
+    "kind": "stub",
+    "phase": "05",
+    "file": "apps/web/app/(app)/comunidades/[communityId]/page.tsx",
+    "line": 128,
+    "description": "The Destaques (pinned-story) slot on the community page is a null placeholder; 05-08 (STORY-04/D-68) fills it. The section and its SectionTitle are both absent while it is null, which is the correct empty rendering, so no member sees a broken surface.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T21:21:16.622Z",
     "resolved_at": null
   }
 ]
