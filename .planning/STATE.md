@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
 status: executing
-stopped_at: Completed 05-04-PLAN.md
-last_updated: "2026-09-23T21:24:24.683Z"
+stopped_at: Completed 05-05-PLAN.md
+last_updated: "2026-09-23T23:27:17.166Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 05 execution started
-state_head: 9d4ea3d0927ea2a769db0f2b7eef6f94f3dbde0c
+state_head: e1f5bd8de9a2d29c6bfe24a95e89405545ea3900
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 58
-  completed_plans: 51
+  completed_plans: 52
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 05 (Communities & Stories) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-09-23 — Phase 05 execution started
 
@@ -109,6 +109,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P02 | 65 min | 3 tasks | 27 files |
 | Phase 05 P03 | 79 min | 3 tasks | 37 files |
 | Phase 05 P04 | 51 min | 3 tasks | 28 files |
+| Phase 05 P05 | 91min | 3 tasks | 46 files |
 
 ## Accumulated Context
 
@@ -315,6 +316,10 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-04: archive is a WRITE gate and a LIST gate, never a feed gate — the list gains one predicate it already had, the feed query is untouched, and an archived community still opens read-only by direct link
 - [Phase 05]: 05-04: communities.post_count / last_activity_at are written ONLY by app.community_post_stats() on feed_posts — raised on insert, re-derived on decrement, unclamped so the pgTAP reconciliation can surface drift
 - [Phase 05]: 05-04: communities.region now carries the UI-SPEC's own string (Publicacoes de {community}); the list landmark moved to communities.list.region
+- [Phase 05]: 05-05: expires_at is a VOLATILE COLUMN DEFAULT plus a window CHECK, never a generated column — Postgres refuses the generation expression (timestamptz + interval is STABLE, not IMMUTABLE)
+- [Phase 05]: 05-05: STORY-03 is a READ PREDICATE with no job, sweeper or status transition anywhere; the expired row is retained forever, which is what makes the admin history and 05-08's pins possible with no extra state
+- [Phase 05]: 05-05: feed_comments.story_id / feed_likes.story_id got HAND-WRITTEN foreign keys inside the generated migration — a drizzle .references() needs a module -> module package edge turbo boundaries denies (the 05-03 resolution, reused)
+- [Phase 05]: 05-05: a StoryCircle with no onOpen renders as an inert span rather than a dead button, so nothing taps through to a route 05-06 has not created yet
 
 ### Pending Todos
 
@@ -347,6 +352,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T21:24:13.952Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-09-23T23:27:17.091Z
+Stopped at: Completed 05-05-PLAN.md
 Resume file: None

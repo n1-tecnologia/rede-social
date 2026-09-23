@@ -298,7 +298,7 @@ Plans:
   4. A story leaves the strip 24 h after publishing (hidden by `expires_at`, record retained); a story pinned to one or more communities stays visible on those community pages after expiry until unpinned.
   5. Member can like a story and comment on it; attempts to like or reply to a story comment are rejected by the API and the DB.
 
-**Plans**: 4/8 plans executed
+**Plans**: 5/8 plans executed
 **UI hint**: yes
 **Research needed**: None (conventional CRUD; stories viewer reuses the prototype's reels pager gesture model). Requires the design team's answer on the community "highlights" circles as the pinned-stories UI and a viewer spec (PROTOTYPE.md open question 1).
 **Notes**: Posts scoped via `community_id`; feed query = tenant-wide OR visible community. Stories strip query is `expires_at > now()`, no cron. Admin story history view is included so expired stories remain reachable to the admin. Research falsified D-73's index claim: the merged feed needs a third, non-partial `(tenant_id, created_at desc, id desc)` index (05-03), and `expires_at` cannot be a generated column (05-05).
@@ -320,7 +320,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 05-05-PLAN.md — STORY-01/STORY-03: `@tria/module-stories`, `stories` with its `expires_at` predicate, the order-5 strip home slot and the `/stories/publicar` flow
+- [x] 05-05-PLAN.md — STORY-01/STORY-03: `@tria/module-stories`, `stories` with its `expires_at` predicate, the order-5 strip home slot and the `/stories/publicar` flow
 
 **Wave 5** *(blocked on Wave 4)*
 
@@ -400,7 +400,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 | 2. Tenant Shell, Branding & Platform Panel | 20/20 | In Progress|  |
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
 | 4. Feed | 10/10 | In Progress|  |
-| 5. Communities & Stories | 4/8 | In Progress|  |
+| 5. Communities & Stories | 5/8 | In Progress|  |
 | 6. Events | 0/TBD | Not started | - |
 | 7. Notifications, Web Push & Support Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |

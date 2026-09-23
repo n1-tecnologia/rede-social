@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 23
+open_count: 25
 waived_count: 0
 fixed_count: 11
-total_count: 34
-last_updated: 2026-09-23T21:21:16.622Z
+total_count: 36
+last_updated: 2026-09-23T23:02:18.390Z
 ---
 
 # Broken Windows Ledger
@@ -49,6 +49,8 @@ last_updated: 2026-09-23T21:21:16.622Z
 | 32 | 05 | deviation | packages/modules/feed/db/schema.ts |  | feed_posts_community_fk is hand-written SQL in the migration, not a drizzle .references(): a module->module package dependency is denied by turbo.json's boundary allowlist (MOD-02). Two 05-03 acceptance greps are therefore unmet by design. | open |  | 2026-09-23T20:12:34.999Z |  |
 | 33 | 05 | deviation | apps/web/e2e/media-video.spec.ts | 491 | Flaky under full-suite Playwright parallelism: the Next.js dev Console Error overlay is a second [role=dialog]. Root cause is an unhandledRejection in the SW registration path when Playwright blocks registration. Passes in isolation. | open |  | 2026-09-23T20:12:35.075Z |  |
 | 34 | 05 | stub | apps/web/app/(app)/comunidades/[communityId]/page.tsx | 128 | The Destaques (pinned-story) slot on the community page is a null placeholder; 05-08 (STORY-04/D-68) fills it. The section and its SectionTitle are both absent while it is null, which is the correct empty rendering, so no member sees a broken surface. | open |  | 2026-09-23T21:21:16.622Z |  |
+| 35 | 05 | stub | apps/web/components/stories/StoriesSurface.tsx |  | StoriesSurface binds no onOpen, so strip circles render as inert spans rather than buttons until 05-06 ships /stories/[storyId] | open |  | 2026-09-23T23:02:18.301Z |  |
+| 36 | 05 | stub | apps/web/app/(app)/stories/publicar/page.tsx |  | The publish header's 'Seus stories' action points at /stories/meus, a route 05-08 creates; the link is inert until then | open |  | 2026-09-23T23:02:18.390Z |  |
 
 ````json
 [
@@ -458,6 +460,30 @@ last_updated: 2026-09-23T21:21:16.622Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T21:21:16.622Z",
+    "resolved_at": null
+  },
+  {
+    "id": 35,
+    "kind": "stub",
+    "phase": "05",
+    "file": "apps/web/components/stories/StoriesSurface.tsx",
+    "line": null,
+    "description": "StoriesSurface binds no onOpen, so strip circles render as inert spans rather than buttons until 05-06 ships /stories/[storyId]",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T23:02:18.301Z",
+    "resolved_at": null
+  },
+  {
+    "id": 36,
+    "kind": "stub",
+    "phase": "05",
+    "file": "apps/web/app/(app)/stories/publicar/page.tsx",
+    "line": null,
+    "description": "The publish header's 'Seus stories' action points at /stories/meus, a route 05-08 creates; the link is inert until then",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T23:02:18.390Z",
     "resolved_at": null
   }
 ]
