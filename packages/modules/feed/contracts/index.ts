@@ -402,15 +402,48 @@ export type CreateComment = z.infer<typeof createCommentSchema>;
  * (D-60: a reply shows no "Responder" and no replies toggle) and `replyCount` drives "Ver N
  * respostas"; a reply always reports `replyCount: 0` because it can have none.
  */
+/**
+ * A COMMENT's author (UI-D-24) — the post author's shape with every identifying field nullable.
+ *
+ * It is deliberately NOT `feedPostAuthorSchema`. A post is written by the tenant's admin and the
+ * card's whole identity claim (D-52) rests on that person being present; a comment outlives its
+ * author's membership, because removing the row would orphan every reply under it. The two shapes
+ * therefore have different nullability, and sharing one schema would force the looser rule onto the
+ * post card, where a null name is a bug rather than a state.
+ *
+ * `displayName` is null in EXACTLY ONE case — `authorRemoved === true`, i.e. the author's membership
+ * is missing or soft-deleted. There is no other path that produces a nameless comment: a live member
+ * always has a `member_profiles` row (the `member_profiles_from_membership` trigger guarantees it),
+ * so a null name is never "the profile has not been filled in yet". The client reads `authorRemoved`
+ * and renders the catalog's fixed removed-member label as PLAIN TEXT — `membershipId` is null with
+ * it, so there is nothing to build a profile link out of even if a caller tried (T-04-45).
+ */
+export const commentAuthorSchema = z
+  .object({
+    membershipId: z.uuid().nullable(),
+    displayName: z.string().nullable(),
+    avatarAssetId: z.uuid().nullable(),
+  })
+  .strict();
+export type FeedCommentAuthor = z.infer<typeof commentAuthorSchema>;
+
 export const commentSchema = z
   .object({
     id: z.uuid(),
     createdAt: z.string(),
     body: z.string(),
-    author: feedPostAuthorSchema,
+    author: commentAuthorSchema,
+    /** UI-D-24 — true exactly when `author.displayName` is null; see `commentAuthorSchema`. */
+    authorRemoved: z.boolean(),
     likeCount: z.number().int(),
     viewerLiked: z.boolean(),
-    replyCount: z.number().int(),
+    /**
+     * Live replies under THIS comment, hydrated in the same statement the row came from (D-60).
+     * It is what the "Ver N respostas" toggle renders its ICU plural from, and it is why loading N
+     * roots costs no reply requests at all: zero means the toggle is not drawn, above zero means one
+     * bounded request when — and only when — the member expands that root.
+     */
+    replyCount: z.number().int().min(0),
     isReply: z.boolean(),
     canDelete: z.boolean(),
   })

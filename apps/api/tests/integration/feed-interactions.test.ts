@@ -15,9 +15,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
- * The interaction layer end to end against the live local stack (04-03).
+ * The interaction layer end to end against the live local stack (04-03, extended by 04-07).
  *
- * Seven things are proved here that nothing else in the repo can prove:
+ * Eight things are proved here that nothing else in the repo can prove:
  *  - **FEED-04 idempotency and concurrency.** A double-tap, a retried request and five genuinely
  *    concurrent requests all leave ONE row and ONE count — and no like route ever answers a
  *    CONFLICT status, which would surface as an error toast on every double-tap.
@@ -30,6 +30,9 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
  *    `commentCount` follows, and the comment leaves the list.
  *  - **MOD-03.** Six events, once each, after commit — and none at all when the write was refused.
  *  - **T-04-21.** Every miss is the same bare 404, so nothing here is an existence oracle.
+ *  - **UI-D-24 (04-07).** A comment written by someone since removed from the tenant KEEPS its row,
+ *    its text, its place in the trigger-maintained count and the live member's reply under it —
+ *    nameless and unlinkable, with a live author on the same page as the positive control.
  */
 
 type Envelope = {
@@ -517,5 +520,86 @@ describe('tenant isolation, each with its positive control (T-04-14, T-04-21)', 
       (await request(`/v1/feed/comments/${root.id}/like`, tokens.demoMember, { method: 'POST' }))
         .status,
     ).toBe(200);
+  });
+});
+
+/**
+ * 04-07 / UI-D-24 — the removed-author fixture `scripts/seed.ts` writes for BOTH tenants.
+ *
+ * Mirrored here rather than imported for the reason `apps/web/e2e/fixtures.ts` gives: the seed is a
+ * top-level-await script that demands `SEED_PASSWORD` and opens a connection at import time. The ids
+ * are fixed literals in the seed precisely so a test can name the row without querying for it first.
+ */
+const REMOVED_AUTHOR = {
+  postId: '0d000000-0000-4000-8000-000000000002',
+  rootId: '0d000000-0000-4000-8000-0000000000c3',
+  replyId: '0d000000-0000-4000-8000-0000000000c4',
+  /** The live-author root seeded on the SAME post — the positive control (03-08). */
+  liveRootId: '0d000000-0000-4000-8000-0000000000c5',
+  rootBody: 'Escrevi isto antes de sair da comunidade.',
+  replyBody: 'Obrigado pelo recado, seguimos com o combinado.',
+} as const;
+
+describe('a removed author keeps their thread (UI-D-24)', () => {
+  it('12. the comment survives the membership, nameless and unlinkable — and a live author does not', async () => {
+    // The seed's own membership soft-delete, re-asserted: if this ever stops being true the three
+    // assertions below would pass vacuously against a member who was simply never removed.
+    const removed = await adminSql<{ n: number }[]>`
+      select count(*)::int as n
+        from public.feed_comments c
+        join public.memberships m
+          on m.user_id = c.author_user_id and m.tenant_id = ${tenantIds.demo}::uuid
+       where c.id = ${REMOVED_AUTHOR.rootId}::uuid and m.deleted_at is not null`;
+    expect(removed[0]?.n, 'the seed must soft-delete the removed author’s membership').toBe(1);
+
+    const page = await comments(tokens.demoMember, REMOVED_AUTHOR.postId);
+    const orphanRoot = page.items.find((c) => c.id === REMOVED_AUTHOR.rootId);
+
+    // The row is STILL THERE. An inner join on `memberships` would have dropped it here.
+    expect(orphanRoot, 'the removed author’s comment must still be listed').toBeDefined();
+    const root = orphanRoot as FeedComment;
+    expect(root.authorRemoved).toBe(true);
+    expect(root.author.displayName).toBeNull();
+    expect(root.author.membershipId).toBeNull();
+    expect(root.author.avatarAssetId).toBeNull();
+    // Everything that is NOT the person is untouched: the text, and the thread hanging off it.
+    expect(root.body).toBe(REMOVED_AUTHOR.rootBody);
+    expect(root.replyCount).toBe(1);
+
+    // THE POSITIVE CONTROL, in the same test (03-08): the live-author root the seed writes on this
+    // same post reports the flag false with a real name, so `authorRemoved: true` cannot be a
+    // constant and the three nulls above cannot be what the projection returns for everyone.
+    const liveRoot = page.items.find((c) => c.id === REMOVED_AUTHOR.liveRootId);
+    expect(liveRoot, 'the seed must write a live-author root on the same post').toBeDefined();
+    const live = liveRoot as FeedComment;
+    expect(live.authorRemoved).toBe(false);
+    expect(live.author.displayName).not.toBeNull();
+    expect(live.author.displayName).not.toBe('');
+    expect(live.author.membershipId).not.toBeNull();
+  });
+
+  it('13. the live member’s reply under that root is still returned, with its own author intact', async () => {
+    const page = await replies(tokens.demoMember, REMOVED_AUTHOR.rootId);
+
+    expect(page.items.map((c) => c.id)).toContain(REMOVED_AUTHOR.replyId);
+    const reply = page.items.find((c) => c.id === REMOVED_AUTHOR.replyId) as FeedComment;
+    expect(reply.body).toBe(REMOVED_AUTHOR.replyBody);
+    expect(reply.isReply).toBe(true);
+    // The REPLY's author is alive — removing the root's author must not touch anyone else's row.
+    expect(reply.authorRemoved).toBe(false);
+    expect(reply.author.displayName).not.toBeNull();
+  });
+
+  it('14. the post’s trigger-maintained commentCount still counts the removed author’s comment', async () => {
+    const post = await getPost(tokens.demoMember, REMOVED_AUTHOR.postId);
+
+    // The counter summarises ROWS, not visible authors. Dropping the row from the projection while
+    // the trigger keeps counting it is exactly the drift UI-D-24 exists to prevent, so the count is
+    // reconciled here against the live rows rather than against a hard-coded number.
+    const live = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_comments
+       where post_id = ${REMOVED_AUTHOR.postId}::uuid and deleted_at is null`;
+    expect(post.commentCount).toBe(live[0]?.n);
+    expect(post.commentCount).toBeGreaterThanOrEqual(2);
   });
 });

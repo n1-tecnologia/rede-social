@@ -405,6 +405,53 @@ const SEED_COMMENT_BODIES = [
 ] as const;
 
 /**
+ * 04-07 (UI-D-24) — the thread whose ROOT author has been removed from the tenant.
+ *
+ * `[root, reply, liveRoot]`: the root is written by a member whose membership carries a
+ * `deleted_at`, the reply under it by a LIVE member, and alongside them a second root by a live
+ * member. The first pair is what makes "an inner join would orphan every reply" a thing a test can
+ * catch rather than a claim in a docblock; the third row is the POSITIVE CONTROL that has to sit on
+ * the SAME page (03-08), so `authorRemoved: true` can never pass by being a constant. Both tenants
+ * get all three, identical-looking (SCHEMA-CONVENTIONS §(j)).
+ *
+ * Written on the SECOND seeded post so the 04-03 thread on the first post keeps the exact
+ * `comment_count` and ordering that `feed-interactions.test.ts` and `feed.spec.ts` already assert.
+ */
+const SEED_REMOVED_AUTHOR_COMMENT_IDS: Record<string, readonly string[]> = {
+  'tria-demo': [
+    '0d000000-0000-4000-8000-0000000000c3',
+    '0d000000-0000-4000-8000-0000000000c4',
+    '0d000000-0000-4000-8000-0000000000c5',
+  ],
+  'tria-lab': [
+    '0e000000-0000-4000-8000-0000000000c3',
+    '0e000000-0000-4000-8000-0000000000c4',
+    '0e000000-0000-4000-8000-0000000000c5',
+  ],
+};
+
+/**
+ * Exported so `apps/web/e2e` and the integration suite assert against the FIXTURE rather than
+ * against a literal that could drift from the seed on the next edit (the 04-06 rule).
+ */
+export const SEED_REMOVED_AUTHOR_COMMENT_BODIES = [
+  'Escrevi isto antes de sair da comunidade.',
+  'Obrigado pelo recado, seguimos com o combinado.',
+  'Estou por aqui e continuo na comunidade.',
+] as const;
+
+/**
+ * The person behind that root. They are seeded OUTSIDE `SeedTenant.members` on purpose: the members
+ * list drives the directory fixtures and the `memberUserIds` positional lookups that 04-06 relies
+ * on, and a soft-deleted membership has no business in either. `local` is the same in both tenants
+ * because the email is namespaced by slug.
+ */
+const SEED_REMOVED_MEMBER = {
+  local: 'tereza.bastos.removida',
+  name: 'Tereza Bastos',
+} as const;
+
+/**
  * A REAL `ready` post image asset at a fixed id: the SVG is rendered by sharp into the post width
  * ladder and an original, every derivative is `putObject`-ed under the broker's own key shape, and
  * the row records exactly the widths that were written. Idempotent — `putObject` upserts and the
@@ -881,6 +928,79 @@ for (const t of SEED_TENANTS) {
           on conflict (user_id, comment_id) where comment_id is not null do nothing`);
       });
       console.log(`seed: tenant ${t.slug} — 1 comment + 1 reply, 2 likes`);
+    }
+
+    // 04-07 (UI-D-24): a thread whose ROOT author has been REMOVED from the tenant, with a LIVE
+    // member's reply under it. The comment projection reaches the author through a `left join`
+    // precisely so this row survives; an inner join would drop it, orphan the reply, and leave the
+    // trigger-maintained `comment_count` describing a comment nobody can see. The fixture is what
+    // turns that into something `feed-interactions.test.ts` and `feed-comments.spec.ts` can catch.
+    //
+    // The membership is inserted and then soft-deleted rather than never created: the
+    // `member_profiles_from_membership` trigger must have written a real profile row, so the test
+    // proves the projection NULLS a name that genuinely exists rather than one that was never there.
+    const removedIds = SEED_REMOVED_AUTHOR_COMMENT_IDS[t.slug] ?? [];
+    const removedRootId = removedIds[0];
+    const removedReplyId = removedIds[1];
+    const liveRootId = removedIds[2];
+    const removedThreadPostId = feedPostIds[1];
+    const liveReplierUserId = memberUserIds[0];
+    if (
+      removedRootId &&
+      removedReplyId &&
+      liveRootId &&
+      removedThreadPostId &&
+      liveReplierUserId
+    ) {
+      const removedUserId = await ensureUser(
+        `${SEED_REMOVED_MEMBER.local}@${t.slug}.local`,
+        SEED_REMOVED_MEMBER.name,
+        seedPassword,
+      );
+      await withAdminTx(async (tx) => {
+        await tx
+          .insert(memberships)
+          .values({ tenantId, userId: removedUserId, role: 'member' })
+          .onConflictDoNothing();
+        // The comment is written while the membership is still live, then the membership is removed
+        // — the real-world order, and the only one under which the trigger-maintained counters end
+        // up describing a post that still counts a comment whose author is gone.
+        await tx.execute(sql`
+          insert into public.feed_comments
+            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+          values (
+            ${removedRootId}::uuid, ${tenantId}::uuid, ${removedThreadPostId}::uuid,
+            ${removedUserId}::uuid, ${SEED_REMOVED_AUTHOR_COMMENT_BODIES[0]}, 0, null, null
+          )
+          on conflict (id) do nothing`);
+        await tx.execute(sql`
+          insert into public.feed_comments
+            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+          values (
+            ${removedReplyId}::uuid, ${tenantId}::uuid, ${removedThreadPostId}::uuid,
+            ${liveReplierUserId}::uuid, ${SEED_REMOVED_AUTHOR_COMMENT_BODIES[1]}, 1,
+            ${removedRootId}::uuid, 0
+          )
+          on conflict (id) do nothing`);
+        // The positive control, on the SAME page as the removed root (03-08): a live member's own
+        // root comment. Without it, every assertion about `authorRemoved` on this post would still
+        // pass if the projection simply reported `true` for everyone.
+        await tx.execute(sql`
+          insert into public.feed_comments
+            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+          values (
+            ${liveRootId}::uuid, ${tenantId}::uuid, ${removedThreadPostId}::uuid,
+            ${liveReplierUserId}::uuid, ${SEED_REMOVED_AUTHOR_COMMENT_BODIES[2]}, 0, null, null
+          )
+          on conflict (id) do nothing`);
+        await tx.execute(sql`
+          update public.memberships
+             set deleted_at = coalesce(deleted_at, now())
+           where tenant_id = ${tenantId}::uuid and user_id = ${removedUserId}::uuid`);
+      });
+      console.log(
+        `seed: tenant ${t.slug} — 1 removed-author comment + 1 live reply + 1 live root (UI-D-24)`,
+      );
     }
 
     // 04-04: a post of EVERY media shape (FEED-01, D-53), built through the REAL Phase 3 broker

@@ -599,8 +599,11 @@ type CommentRow = {
   reply_count: number;
   depth: number;
   author_user_id: string;
-  membership_id: string;
-  display_name: string;
+  /** UI-D-24 — true when the author's membership is gone or soft-deleted. See `commentProjection`. */
+  author_removed: boolean;
+  /** All three are NULL exactly when `author_removed` is true, and never otherwise. */
+  membership_id: string | null;
+  display_name: string | null;
   avatar_asset_id: string | null;
 };
 
@@ -611,6 +614,20 @@ type CommentRow = {
  * `feed_likes_comment_uq`) and `reply_count` is a correlated count over the LIVE replies — both
  * hydrated rather than fetched per row, so a comment page is ONE statement however long it is.
  * Ends without a `where`, so each caller appends its own predicate and ordering.
+ *
+ * THE AUTHOR JOIN IS A LEFT JOIN, AND THAT IS LOAD-BEARING (UI-D-24). An INNER join here would
+ * DROP the whole row the moment the author's membership is soft-deleted — which would orphan every
+ * reply written under that root (they hang off `parent_id`, not off the author) and would leave the
+ * trigger-maintained `feed_posts.comment_count` describing a comment nobody can see. The row
+ * therefore survives the person: the body, the timestamp, the like count and the replies are all
+ * still returned, and `author_removed` is the flag the client turns into the "Membro removido"
+ * label from the catalog — the copy stays in ONE place, never in this file.
+ *
+ * The membership lifecycle predicate rides the JOIN condition (`ms.deleted_at is null`, the same
+ * rule `membershipOfRecord` applies and the same one the members directory applies), so a removed
+ * author yields `ms.id is null` and therefore a null `membership_id`, `display_name` AND
+ * `avatar_asset_id` in one step: there is no code path that can hand the client a removed member's
+ * name, and none that can reconstruct a profile link for them (T-04-45).
  */
 const commentProjection = (viewerUserId: string) => sql`
     select c.id,
@@ -624,12 +641,13 @@ const commentProjection = (viewerUserId: string) => sql`
            ) as reply_count,
            c.depth,
            c.author_user_id,
+           (ms.id is null) as author_removed,
            ms.id as membership_id,
            mp.display_name,
            mp.avatar_asset_id
       from feed_comments c
-      join memberships ms on ms.user_id = c.author_user_id
-      join member_profiles mp on mp.membership_id = ms.id
+      left join memberships ms on ms.user_id = c.author_user_id and ms.deleted_at is null
+      left join member_profiles mp on mp.membership_id = ms.id
       left join feed_likes cl on cl.comment_id = c.id and cl.user_id = ${viewerUserId}::uuid`;
 
 /**
@@ -641,6 +659,10 @@ const toComment = (row: CommentRow, viewerUserId: string): FeedComment => ({
   id: row.id,
   createdAt: row.created_at,
   body: row.body,
+  // UI-D-24: `authorRemoved` and the three nulls move together, because the projection's LEFT JOIN
+  // produces them together. The client reads the flag and substitutes the catalog's fixed label —
+  // nothing here invents a display name, so a removed member cannot be named by any response.
+  authorRemoved: row.author_removed,
   author: {
     membershipId: row.membership_id,
     displayName: row.display_name,
@@ -990,6 +1012,10 @@ export async function deleteComment(ctx: RequestContext, commentId: string): Pro
  *
  * The order is `(created_at desc, id desc)` — the exact expression
  * `feed_comments_tenant_post_root_idx` carries, tie-breaker included, so it is TOTAL.
+ *
+ * UI-D-24: because the shared projection reaches the author through a `left join` on `memberships`,
+ * a root whose author has since been removed from the tenant STAYS on this page — with
+ * `authorRemoved: true` and a null name — rather than vanishing and taking its replies with it.
  */
 export async function listComments(
   ctx: RequestContext,
@@ -1006,6 +1032,8 @@ export async function listComments(
       select p.id from feed_posts p where p.id = ${postId}::uuid and p.deleted_at is null`);
     if (!posts[0]) throw new ApiError(404, 'NOT_FOUND');
 
+    // The projection's author relation is a `left join` (UI-D-24): a root whose author has since
+    // been removed from the tenant is still ON this page, nameless — never silently absent from it.
     return tx.execute<CommentRow>(sql`
       ${commentProjection(ctx.userId)}
        where c.post_id = ${postId}::uuid
@@ -1051,6 +1079,10 @@ export async function listComments(
  *
  * ONE statement: an unknown, foreign-tenant or removed comment id yields the same empty page a real
  * root with no replies yields, so there is nothing here to probe with.
+ *
+ * UI-D-24: the same `left join` on `memberships` applies to replies AND to the root they hang off,
+ * which is the half that matters — a removed root author must not take live members' replies down
+ * with them, and a removed replier must not take their own reply out of a thread that counts it.
  */
 export async function listReplies(
   ctx: RequestContext,
@@ -1063,6 +1095,9 @@ export async function listReplies(
   const afterId = after?.id ?? null;
 
   const rows = await withTenantTx(ctx, (tx) =>
+    // Same `left join` (UI-D-24), and it matters on BOTH ends of a thread: a removed root author
+    // must not take live members' replies down with them, and a removed replier must not take their
+    // own reply out of a thread whose `reply_count` still counts the row.
     tx.execute<CommentRow>(sql`
       ${commentProjection(ctx.userId)}
        where c.parent_id = ${commentId}::uuid
