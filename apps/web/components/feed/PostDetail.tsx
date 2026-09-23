@@ -10,6 +10,7 @@ import {
 } from '@tria/module-feed/ui';
 import { useToast } from '@tria/ui';
 import { useCallback } from 'react';
+import { useSharePost } from './useSharePost';
 
 /**
  * The body of `/post/[postId]` (D-56): the FULL `PostCard` — the identical component the feed
@@ -34,6 +35,11 @@ export type PostDetailProps = {
   onUnlike: (postId: string) => Promise<LikeOutcome>;
   /** The one toast a failed like raises; never an inline message (UI-SPEC E09). */
   genericErrorLabel: string;
+  /**
+   * FEED-07. `title` is the tenant's display name: the OS share sheet names the COMMUNITY, never a
+   * caption (T-04-52). The url itself rides `post.shareUrl`, composed on the server.
+   */
+  share: { title: string; copied: string };
   comments: Omit<CommentsListProps, 'postId' | 'variant'>;
 };
 
@@ -45,9 +51,14 @@ export function PostDetail({
   onLike,
   onUnlike,
   genericErrorLabel,
+  share,
   comments,
 }: PostDetailProps) {
   const toast = useToast();
+  const onShare = useSharePost(share.title, {
+    copied: share.copied,
+    error: genericErrorLabel,
+  });
 
   const failToast = useCallback(() => {
     toast.show({ tone: 'error', message: genericErrorLabel });
@@ -63,6 +74,7 @@ export function PostDetail({
         onLike={onLike}
         onUnlike={onUnlike}
         onLikeError={failToast}
+        onShare={onShare}
       />
       {/* No `onOpenComments` and no sheet: the comments ARE the screen below. Wiring the card's
           comment control to a second surface here would open a bottom sheet over a list the member

@@ -3,7 +3,7 @@ import type { HomeSlot } from '@tria/core/ui';
 import { exampleItemsSchema } from '@tria/module-example/contracts';
 import { ExampleWidget } from '@tria/module-example/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
-import { FeedList, type PostCardLabels } from '@tria/module-feed/ui';
+import type { PostCardLabels } from '@tria/module-feed/ui';
 import { EmptyState } from '@tria/ui';
 import { TriangleAlert } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -21,16 +21,27 @@ import {
   unlikeCommentAction,
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
+import { FeedSurface } from '@/components/feed/FeedSurface';
 import { apiFetch } from '@/lib/api';
 import { loadFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
+import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
- * The WEB composition point for module UI (MOD-02, D-42): the only file in `apps/web` that imports a
- * module's `ui` package. The API registry (`apps/api/src/modules/registry.ts`) decides WHICH modules
- * a tenant has and emits their `home` declarations on the bootstrap; this file supplies the renderer
- * for each `<key>` → `home[index]`. Nothing here decides membership: a module without an enabled
- * flag never reaches `bootstrap.modules`, so its renderer is never called.
+ * The WEB composition point for module UI (MOD-02, D-42). The API registry
+ * (`apps/api/src/modules/registry.ts`) decides WHICH modules a tenant has and emits their `home`
+ * declarations on the bootstrap; this file supplies the renderer for each `<key>` → `home[index]`.
+ * Nothing here decides membership: a module without an enabled flag never reaches
+ * `bootstrap.modules`, so its renderer is never called.
+ *
+ * **Composition may now cross into one client shell per surface** (04-08, amending "the only file
+ * in `apps/web` that imports a module's `ui` package"): `components/feed/FeedSurface.tsx` and
+ * `components/feed/PostDetail.tsx` render `FeedList` / `PostCard` because two handlers — the share
+ * branch table and the failed-like toast — need `useToast`, and a server component cannot hold a
+ * hook. The rule those shells keep is the one that mattered: every DECISION (which module, which
+ * data, which label, which server action, which share origin) is still made HERE, on the server,
+ * and passed straight through. A shell that started choosing a label or a route would be the drift
+ * this file exists to prevent.
  */
 
 type Translator = Awaited<ReturnType<typeof getTranslations>>;
@@ -113,11 +124,17 @@ const exampleHome: HomeSlotRenderer = async ({ bootstrap }) => {
  * error deserves the feed's own region label.
  */
 const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
-  const [page, locale, tf, te] = await Promise.all([
+  // `shareOrigin` is resolved on the SERVER (FEED-07): `https://{primaryHost}` from the tenant's
+  // verified `tenant_domains` row, `null` on the platform and generic shells. It is what turns each
+  // post id into a card's `shareUrl`, and it is deliberately not something the browser could have
+  // derived for itself — an alias host would leak into a link a member sends (T-04-51). A null
+  // origin yields a null `shareUrl`, and the card then offers no share affordance at all.
+  const [page, locale, tf, te, shareOrigin] = await Promise.all([
     loadFeed(),
     getLocale(),
     getTranslations('feed'),
     getTranslations('app.error'),
+    primaryHostOrigin(),
   ]);
   const now = Date.now();
   // The SAME block `/post/[postId]` renders its card with; `FeedList` flattens `media` into its own
@@ -125,8 +142,10 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
   const { media, ...card } = postCardLabels(tf);
 
   return (
-    <FeedList
-      initialItems={page === null ? [] : page.items.map((post) => postCardView(post, now, tf))}
+    <FeedSurface
+      initialItems={
+        page === null ? [] : page.items.map((post) => postCardView(post, now, tf, shareOrigin))
+      }
       initialCursor={page?.nextCursor ?? null}
       initialError={page === null}
       canPost={bootstrap.permissions.includes('feed.post.create')}
@@ -137,6 +156,11 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
       onLike={likePostAction}
       onUnlike={unlikePostAction}
       comments={{ title: tf('comments.title'), ...feedCommentsProps(locale, tf, bootstrap) }}
+      share={{
+        title: bootstrap.tenant.displayName,
+        copied: tf('share.copied'),
+        error: tf('errors.generic'),
+      }}
       labels={{
         ...card,
         region: tf('region'),

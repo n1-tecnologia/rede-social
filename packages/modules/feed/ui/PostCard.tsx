@@ -47,6 +47,16 @@ export type PostCardView = {
   createdAtIso: string;
   createdAtRelative: string;
   createdAtAbsolute: string;
+  /**
+   * `https://{primaryHost}/post/{id}` — composed on the SERVER from the tenant's VERIFIED primary
+   * host (FEED-07, T-04-51). `null` wherever there is no such host to name (the platform and
+   * generic shells), and the card then hands the share control no handler: an inert glyph is a far
+   * better answer than a link carrying whichever alias origin the browser happened to be on.
+   *
+   * The card never BUILDS this and the module never reads a location of its own — this is the only
+   * way a post URL reaches the UI at all.
+   */
+  shareUrl: string | null;
   /** UI-D-15: `edited_at` set by ANY persisted change, rendered as a marker with no date of its own. */
   edited: boolean;
   likeCount: number;
@@ -63,6 +73,15 @@ export type PostCardView = {
  * reaches the DOM through this path (T-04-42).
  */
 export type LikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false };
+
+/**
+ * What the share control hands its host: the post it is on, and the already-composed url.
+ *
+ * The URL travels WITH the event rather than being looked up by the handler, so the share control
+ * and 04-09's "copiar link" row cannot disagree about what they resolve to — there is one value and
+ * both read it from the same view.
+ */
+export type PostShareTarget = { postId: string; url: string };
 
 export type PostCardLabels = {
   /** The caption's "more" toggle. */
@@ -90,7 +109,8 @@ export type PostCardProps = {
   /** Raised after a failed toggle has already reverted — the widget shows the generic toast. */
   onLikeError?: () => void;
   onOpenComments?: (postId: string) => void;
-  onShare?: (postId: string) => void;
+  /** Fires only when the post HAS a share url; see `PostCardView.shareUrl`. */
+  onShare?: (target: PostShareTarget) => void;
   onMore?: (postId: string) => void;
 };
 
@@ -136,6 +156,14 @@ export function PostCard({
     onError: onLikeError,
   });
 
+  // A post with no share url hands the control NO handler: it stays present but inert (04-06's
+  // "the action row is always present" contract), which is what "omit the affordance rather than
+  // emit a link to the wrong origin" means for a row whose geometry is fixed at three controls.
+  const shareUrl = post.shareUrl;
+  const share = onShare;
+  const shareTarget =
+    share && shareUrl ? () => share({ postId: post.id, url: shareUrl }) : undefined;
+
   const likeLabel = formatCountLabel(state.likeCount, labels.likes, locale);
   const commentLabel = formatCountLabel(post.commentCount, labels.comments, locale);
   const segments = buildPostMeta({
@@ -177,7 +205,7 @@ export function PostCard({
           pulseKey={pulseKey}
           onToggleLike={toggle}
           onComment={onOpenComments ? () => onOpenComments(post.id) : undefined}
-          onShare={onShare ? () => onShare(post.id) : undefined}
+          onShare={shareTarget}
           labels={{
             like: labels.like,
             unlike: labels.unlike,

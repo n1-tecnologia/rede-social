@@ -169,11 +169,26 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
   };
 }
 
-/** The module's UI resolves no URL, formats no date and knows no route table; this does all three. */
-export function postCardView(post: FeedPost, now: number, tf: Translator): PostCardView {
+/**
+ * The module's UI resolves no URL, formats no date and knows no route table; this does all three.
+ *
+ * `shareOrigin` is `primaryHostOrigin()`'s answer — `https://{primaryHost}` on a tenant host, `null`
+ * everywhere else — and it is what turns a post id into the FEED-07 link (D-56). It is a PARAMETER
+ * rather than a lookup inside this function for the same reason `now` and `tf` are: this module is
+ * reached from a page, from a server action and from the post route, and only the caller is in a
+ * request context that can resolve it. A `null` origin yields a `null` `shareUrl`, and the card
+ * then offers no share affordance at all rather than a link to the wrong origin (T-04-51).
+ */
+export function postCardView(
+  post: FeedPost,
+  now: number,
+  tf: Translator,
+  shareOrigin: string | null,
+): PostCardView {
   return {
     id: post.id,
     caption: post.caption,
+    shareUrl: shareOrigin === null ? null : `${shareOrigin}/post/${post.id}`,
     author: {
       displayName: post.author.displayName,
       // D-52: the post is attributed to the PERSON, and their profile opens by direct link (D-47).

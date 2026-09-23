@@ -9,7 +9,7 @@ import { requireBootstrap } from '@/lib/bootstrap';
 import { loadPost, loadPostComments } from '@/lib/feed';
 import { commentView, postCardView } from '@/lib/feed-view';
 import { feedCommentsProps, postCardLabels } from '@/lib/registry';
-import { getHostTenant } from '@/lib/tenant-host';
+import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
  * `/post/[postId]` (D-56, FEED-07, UI-SPEC §Post page contract) — the share target, the destination
@@ -47,11 +47,14 @@ export default async function PostPage({ params }: { params: Promise<{ postId: s
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const { postId } = await params;
-  const [tf, te, locale, bootstrap, result] = await Promise.all([
+  const [tf, te, locale, bootstrap, shareOrigin, result] = await Promise.all([
     getTranslations('feed'),
     getTranslations('app.error'),
     getLocale(),
     requireBootstrap(),
+    // FEED-07: `https://{primaryHost}` from the tenant's VERIFIED row. The card gets the finished
+    // link as a prop; nothing in the browser ever builds one (T-04-51).
+    primaryHostOrigin(),
     loadPost(postId),
   ]);
 
@@ -100,13 +103,14 @@ export default async function PostPage({ params }: { params: Promise<{ postId: s
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
       {header}
       <PostDetail
-        post={postCardView(result.post, now, tf)}
+        post={postCardView(result.post, now, tf, shareOrigin)}
         captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
         locale={locale}
         labels={postCardLabels(tf)}
         onLike={likePostAction}
         onUnlike={unlikePostAction}
         genericErrorLabel={tf('errors.generic')}
+        share={{ title: bootstrap.tenant.displayName, copied: tf('share.copied') }}
         comments={{
           ...feedCommentsProps(locale, tf, bootstrap),
           initialItems:

@@ -57,6 +57,7 @@ export {
   type PostCardMediaView,
   type PostCardProps,
   type PostCardView,
+  type PostShareTarget,
 } from './PostCard';
 export { PostHeader, type PostHeaderProps } from './PostHeader';
 export {
@@ -65,3 +66,9 @@ export {
   type PostMediaLabels,
   type PostMediaProps,
 } from './PostMedia';
+export {
+  type SharePostPayload,
+  type SharePostResult,
+  type SharePostSurfaces,
+  sharePost,
+} from './sharePost';

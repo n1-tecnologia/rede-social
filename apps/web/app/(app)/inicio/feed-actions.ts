@@ -24,6 +24,7 @@ import {
   unlikePost,
 } from '@/lib/feed';
 import { commentView, postCardView } from '@/lib/feed-view';
+import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
  * The feed's four write/read actions (FEED-02, FEED-04), in the `membros/actions.ts` conventions —
@@ -67,14 +68,19 @@ async function loadPage(cursor?: string): Promise<FeedPageResult> {
   let refusal: string | null = null;
   let result: FeedPageResult = { ok: false, code: 'generic' };
   try {
-    const [page, tf] = await Promise.all([
+    // The share origin is resolved HERE too, not inherited from page 1: a server action runs in its
+    // own request, and a card appended by the sentinel must carry the same `https://{primaryHost}`
+    // link the server-rendered cards do (FEED-07). Reading it in the browser instead is what
+    // T-04-51 bans.
+    const [page, tf, shareOrigin] = await Promise.all([
       getFeed({ cursor: query.data.cursor, limit: query.data.limit }),
       getTranslations('feed'),
+      primaryHostOrigin(),
     ]);
     const now = Date.now();
     result = {
       ok: true,
-      items: page.items.map((post) => postCardView(post, now, tf)),
+      items: page.items.map((post) => postCardView(post, now, tf, shareOrigin)),
       nextCursor: page.nextCursor,
     };
   } catch (error) {

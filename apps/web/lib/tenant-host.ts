@@ -130,6 +130,39 @@ export async function getHostTenant(): Promise<HostShell> {
   return { mode: 'generic', host };
 }
 
+/**
+ * The ONE origin a link that LEAVES this app may carry (FEED-07, D-35, T-04-51).
+ *
+ * `https://{primaryHost}`, composed on the SERVER from the verified `tenant_domains` row the
+ * by-host lookup answered with — never from the browser's own location. The difference matters
+ * because a member can legitimately be ON an alias host at the moment they tap share: 02-08 folds
+ * an alias to the primary with a 308, but a link built from `location.origin` in the browser would
+ * have been minted BEFORE that fold and would travel, in a message to another member, carrying a
+ * host that may be retired tomorrow. The same reasoning is why the share helper takes its surfaces
+ * injected and cannot reach for a location of its own.
+ *
+ * `null` on the platform and generic shells, and on any host whose lookup did not resolve: there is
+ * no verified primary host to name, and the honest answer is to offer no link at all rather than
+ * one pointing at the wrong origin. `isRegistrableHost` re-checks the value the API returned — the
+ * loop guard `primaryHostRedirect` already applies to the same field (T-02-40/45).
+ *
+ * The scheme is `https` unconditionally, per UI-SPEC §Post page contract: a shared link is for
+ * another device, and every host that can be REGISTERED is served over TLS. On the local stack the
+ * copied value is therefore `https://tria-demo.localhost/post/{id}` while the tab is on `:3000`,
+ * which is correct about the tenant and deliberately not a dev convenience.
+ */
+export async function primaryHostOrigin(): Promise<string | null> {
+  const shell = await getHostTenant();
+  if (shell.mode !== 'tenant') return null;
+
+  const resolved = await resolveHostTenant(shell.host);
+  if (resolved.mode !== 'tenant') return null;
+
+  const primaryHost = normalizeHost(resolved.primaryHost);
+  if (!primaryHost || !isRegistrableHost(primaryHost)) return null;
+  return `https://${primaryHost}`;
+}
+
 /** Where "Criar nova conta" points (D-22 on tenant hosts, D-01/D-06 fallback on generic hosts, D-21). */
 export function signupPath(t: Pick<HostShell, 'mode'>, slug: string): string {
   switch (t.mode) {

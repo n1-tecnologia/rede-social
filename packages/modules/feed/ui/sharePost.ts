@@ -1,12 +1,12 @@
 /**
  * FEED-07's share branch table (UI-SPEC §Post page contract "Share", E16).
  *
- * **Both surfaces are injected, and that is the point.** A helper that reached for a global
- * `navigator` would be free to reach for the browser's own origin too — and the link a member then
- * sent another member would carry whichever ALIAS host they happened to be on. 02-08 already folded
- * aliases away at the proxy for exactly that reason (D-35), and T-04-51 bans the browser's location
- * from this file outright: the url arrives already composed, server-side, from the tenant's
- * VERIFIED primary host. Injection is also what lets the whole table be proved without a browser.
+ * **Both surfaces are injected, and that is the point.** A helper allowed to read the browser's own
+ * globals would be free to read the browser's own ORIGIN too — and the link a member then sent
+ * another member would carry whichever ALIAS host they happened to be on. 02-08 already folded
+ * aliases away at the proxy for exactly that reason (D-35), and T-04-51 keeps every browser global
+ * out of this file: the url arrives already composed, server-side, from the tenant's VERIFIED
+ * primary host. Injection is also what lets the whole table be proved without a browser.
  *
  * **Four outcomes, and the caller's table is total.** Nothing here throws, so the composition point
  * needs no catch:

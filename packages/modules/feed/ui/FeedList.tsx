@@ -13,7 +13,13 @@ import { Newspaper, TriangleAlert } from 'lucide-react';
 import { type ReactNode, useCallback, useState, useTransition } from 'react';
 import { CommentSheet, type CommentSheetProps } from './CommentSheet';
 import type { CountTemplates } from './meta';
-import { type LikeOutcome, PostCard, type PostCardMediaView, type PostCardView } from './PostCard';
+import {
+  type LikeOutcome,
+  PostCard,
+  type PostCardMediaView,
+  type PostCardView,
+  type PostShareTarget,
+} from './PostCard';
 
 /**
  * The D-55 home-slot widget: the feed is the main content of `/inicio`, below the branded welcome
@@ -113,7 +119,12 @@ export type FeedListProps = {
    */
   comments?: FeedCommentsProps;
   onOpenComments?: (postId: string) => void;
-  onShare?: (postId: string) => void;
+  /**
+   * FEED-07. Fires with the post AND the url the server already composed for it, so this widget
+   * never has to look one up and can never hand out a different link than 04-09's "copiar link"
+   * row. The four-outcome branch table lives at the host's composition point, not in here.
+   */
+  onShare?: (target: PostShareTarget) => void;
   onMore?: (postId: string) => void;
   /**
    * Per-item media override (04-04's injection point).

@@ -105,6 +105,10 @@
       "title": "Publicação não encontrada",
       "body": "Este link não existe mais ou não é desta comunidade.",
       "cta": "Ir para o início"
+    },
+    "share": {
+      "copied": "Link copiado.",
+      "copyLink": "Copiar link"
     }
   }
 }
