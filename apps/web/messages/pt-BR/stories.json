@@ -8,6 +8,32 @@
     "circle": {
       "action": "Abrir story de {time}"
     },
+    "viewer": {
+      "dialog": "Story",
+      "close": "Fechar",
+      "mute": "Silenciar",
+      "unmute": "Ativar som",
+      "previous": "Story anterior",
+      "next": "Próximo story",
+      "play": "Reproduzir",
+      "position": "Story {current} de {total}",
+      "like": "Curtir",
+      "unlike": "Descurtir",
+      "comment": "Comentar",
+      "likes": {
+        "one": "{count} curtida",
+        "other": "{count} curtidas"
+      },
+      "comments": {
+        "one": "{count} comentário",
+        "other": "{count} comentários"
+      },
+      "errors": {
+        "media": "Não foi possível carregar este story.",
+        "retry": "Tentar novamente",
+        "generic": "Algo deu errado. Tente novamente."
+      }
+    },
     "publish": {
       "title": "Novo story",
       "close": "Fechar",
