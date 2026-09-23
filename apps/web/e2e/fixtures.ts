@@ -62,6 +62,31 @@ export const seededFeedPaging = {
 } as const;
 
 /**
+ * 04-07's comment fixtures, identical in both tenants (SCHEMA-CONVENTIONS §(j)), mirrored from
+ * `scripts/seed.ts` for the same reason `seededFeed` is.
+ *
+ * `removedAuthorPost` is the SECOND seeded caption — the 04-03 thread stays on the first post so
+ * the fixtures `feed.spec.ts` and the integration suite already name keep their exact counts. On
+ * that second post the seed writes three rows and the three are the whole UI-D-24 argument: a root
+ * whose author's membership was soft-deleted, a LIVE member's reply under it (the one an inner join
+ * would have orphaned), and a live-author root beside it as the positive control.
+ */
+export const seededComments = {
+  /** The post carrying the UI-D-24 thread: the second seeded caption. */
+  removedAuthorPost: 'Encontro de sábado confirmado. Levem água e um caderno.',
+  /** Written by the member whose membership carries a `deleted_at`. */
+  removedAuthorBody: 'Escrevi isto antes de sair da comunidade.',
+  /** The live member's reply beneath it — still listed, with its own author intact. */
+  removedAuthorReplyBody: 'Obrigado pelo recado, seguimos com o combinado.',
+  /** A live author's root on the SAME page: the control that keeps "removed" from being a constant. */
+  liveRootBody: 'Estou por aqui e continuo na comunidade.',
+  /** The 04-03 thread, on the FIRST seeded post. */
+  firstPost: 'Bem-vindos! Esta é a primeira publicação da comunidade.',
+  firstPostRootBody: 'Que bom ver a comunidade comecando!',
+  firstPostReplyBody: 'Tambem vou estar la no sabado.',
+} as const;
+
+/**
  * 04-04's media fixtures, identical in both tenants (SCHEMA-CONVENTIONS §(j)). The captions are what
  * `scripts/seed.ts` writes; the filename is the 94-character one UI-SPEC E07's long-text row needs.
  */
