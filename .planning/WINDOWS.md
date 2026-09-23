@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 15
 waived_count: 0
-fixed_count: 8
-total_count: 23
-last_updated: 2026-09-23T01:14:50.647Z
+fixed_count: 9
+total_count: 24
+last_updated: 2026-09-23T01:46:35.102Z
 ---
 
 # Broken Windows Ledger
@@ -36,8 +36,9 @@ last_updated: 2026-09-23T01:14:50.647Z
 | 19 | 04 | unrun-verify | .planning/sketches/002-phase-04-designed-screens/index.html |  | D-33 / UI-04 design review of the six [designed] Phase 4 surfaces is unrun: the sketch README frontmatter is still status: pending / approved: false. 04-04, 04-05 and 04-09 code against it. | open |  | 2026-09-22T16:05:15.396Z |  |
 | 20 | 04 | deviation | apps/api/tests/integration/media.test.ts |  | media.test.ts still sweeps EVERY Storage object under <tenant>/media/, so running the API suite leaves the seeded gallery posts with rows but no bytes — the cards then render MediaImage's neutral box. The DB rows are preserved (04-04 narrowed those deletes); the object sweep is not. | open |  | 2026-09-22T19:22:13.680Z |  |
 | 21 | 04 | deviation | apps/web/e2e/admin.ts |  | deleteTenantVideoAssets is a TOTAL reset, so after media-video.spec.ts runs the tria-demo seeded video post keeps media_kind='video' with zero media rows until the next db:seed. feed-media.spec.ts reads the video case from tria-lab because of it. | open |  | 2026-09-22T19:22:13.761Z |  |
-| 22 | 04 | deviation | apps/web/e2e/shell.spec.ts | 111 | PRE-EXISTING (04-01, not 04-04): shell.spec still expects the 'Em breve' card on tria-lab /inicio, but tria-lab has the feed module enabled since 04-01, so the feed home slot renders and HomeSlots never shows 'Em breve'. Fails deterministically on a fresh seed; feed.spec asserts the contradicting truth. | open |  | 2026-09-22T19:58:25.383Z |  |
+| 22 | 04 | deviation | apps/web/e2e/shell.spec.ts | 111 | PRE-EXISTING (04-01, not 04-04): shell.spec still expects the 'Em breve' card on tria-lab /inicio, but tria-lab has the feed module enabled since 04-01, so the feed home slot renders and HomeSlots never shows 'Em breve'. Fails deterministically on a fresh seed; feed.spec asserts the contradicting truth. | fixed |  | 2026-09-22T19:58:25.383Z | 2026-09-23T01:46:14.345Z |
 | 23 | 04 | stub | packages/modules/feed/db/schema.ts |  | feed_link_previews.image_asset_id is null in V1 by decision — the preview card renders body-only; the image branch is grep-pinned but unexercised by any seeded or runtime row | open |  | 2026-09-23T01:14:50.647Z |  |
+| 24 | 04 | unrun-verify | apps/web/e2e/feed.spec.ts |  | The >999 meta-row backstop (UI-SPEC E02 overflow/long-text) is pinned only as a STRING by packages/modules/feed/tests/meta.test.ts, never as pixels: supabase/tests/090-feed.sql reconciles every post's like_count against its live feed_likes rows, so a four-digit seeded count would need 1000+ auth users and a hand-written counter would turn that assertion red. The abbreviated row has never been rendered at 320px. | open |  | 2026-09-23T01:46:35.102Z |  |
 
 ````json
 [
@@ -300,10 +301,10 @@ last_updated: 2026-09-23T01:14:50.647Z
     "file": "apps/web/e2e/shell.spec.ts",
     "line": 111,
     "description": "PRE-EXISTING (04-01, not 04-04): shell.spec still expects the 'Em breve' card on tria-lab /inicio, but tria-lab has the feed module enabled since 04-01, so the feed home slot renders and HomeSlots never shows 'Em breve'. Fails deterministically on a fresh seed; feed.spec asserts the contradicting truth.",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-22T19:58:25.383Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-23T01:46:14.345Z"
   },
   {
     "id": 23,
@@ -315,6 +316,18 @@ last_updated: 2026-09-23T01:14:50.647Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T01:14:50.647Z",
+    "resolved_at": null
+  },
+  {
+    "id": 24,
+    "kind": "unrun-verify",
+    "phase": "04",
+    "file": "apps/web/e2e/feed.spec.ts",
+    "line": null,
+    "description": "The >999 meta-row backstop (UI-SPEC E02 overflow/long-text) is pinned only as a STRING by packages/modules/feed/tests/meta.test.ts, never as pixels: supabase/tests/090-feed.sql reconciles every post's like_count against its live feed_likes rows, so a four-digit seeded count would need 1000+ auth users and a hand-written counter would turn that assertion red. The abbreviated row has never been rendered at 320px.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T01:46:35.102Z",
     "resolved_at": null
   }
 ]

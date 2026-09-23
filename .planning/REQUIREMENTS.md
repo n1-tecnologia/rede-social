@@ -52,9 +52,9 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### Feed
 
 - [ ] **FEED-01**: `admin_tenant` can create a post with text and any combination of: multiple images (carousel with swipe on mobile), one video, link previews / YouTube-Vimeo embeds (unfurled server-side at create time), and file attachments (PDF and similar)
-- [ ] **FEED-02**: A post may optionally be scoped to a community; the main feed shows posts without community plus posts from communities the member can see, newest first, with cursor pagination
+- [x] **FEED-02**: A post may optionally be scoped to a community; the main feed shows posts without community plus posts from communities the member can see, newest first, with cursor pagination
 - [ ] **FEED-03**: `admin_tenant` can edit (marked "editado") and soft-delete their own posts
-- [ ] **FEED-04**: Member can like/unlike a post (idempotent toggle) and see the like count
+- [x] **FEED-04**: Member can like/unlike a post (idempotent toggle) and see the like count
 - [ ] **FEED-05**: Member can comment on a post and reply to a comment; replies are limited to one level (enforced by a DB constraint)
 - [ ] **FEED-06**: Member can like/unlike comments and replies
 - [ ] **FEED-07**: Member can share a post via the native share sheet (or copy link on desktop) using an internal deep link; opening the link requires login and lands on the post if it belongs to the user's tenant (otherwise 404)
@@ -235,9 +235,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROF-02 | Phase 3 | Complete |
 | PROF-03 | Phase 3 | Complete |
 | FEED-01 | Phase 4 | Pending |
-| FEED-02 | Phase 4 | Pending |
+| FEED-02 | Phase 4 | Complete |
 | FEED-03 | Phase 4 | Pending |
-| FEED-04 | Phase 4 | Pending |
+| FEED-04 | Phase 4 | Complete |
 | FEED-05 | Phase 4 | Pending |
 | FEED-06 | Phase 4 | Pending |
 | FEED-07 | Phase 4 | Pending |

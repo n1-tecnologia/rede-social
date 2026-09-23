@@ -5,7 +5,7 @@ DIRECTLY caused by the current task's changes are auto-fixed).
 
 ## From 04-04
 
-### 1. `apps/web/e2e/shell.spec.ts:111` contradicts `feed.spec.ts` — pre-existing since 04-01
+### 1. ~~`apps/web/e2e/shell.spec.ts:111` contradicts `feed.spec.ts`~~ — FIXED in 04-06 (WINDOWS 22 closed)
 
 `shell.spec.ts` › "tria-lab: no Exemplo tab, no #exemplo, the 'Em breve' card, the lab brand"
 expects `HomeSlots`' "Em breve" placeholder on tria-lab's `/inicio`. Since 04-01 the lab tenant has
@@ -16,9 +16,14 @@ renders real cards and the placeholder is correctly absent — which is exactly 
 Fails deterministically on a fresh `db:reset && db:seed`, at HEAD and before 04-04's commits.
 Nothing in 04-04's diff touches the shell, the registry's module list or the lab tenant's flags.
 
-**Fix belongs to:** whichever plan next owns `shell.spec.ts` (04-06 wires `FeedList` into the page
-and is the natural home). The spec needs a tenant with an enabled module that contributes NO home
-slot, or the assertion re-aimed at the feed widget.
+**FIXED by 04-06** (commit `dd0987f`). The assertion was re-aimed at the feed widget: the lab case
+now asserts that the registered slot rendered (`region[aria-label="Publicações da comunidade"]`
+inside `main.app-scroll`) and that the "Em breve" placeholder is ABSENT, which is UI-D-20's actual
+rule. A second, unreported half of the same test also had to be fixed: the page-wide
+`getByRole('link', { name: 'Exemplo' })` check matched 04-05's auto-linked
+`https://…exemplo.invalid/…` captions (Playwright's `name` is a case-insensitive SUBSTRING match by
+default), so it is now scoped to the nav tree with `exact: true`. `shell.spec.ts` is green on both
+projects.
 
 ### 2. `apps/web/e2e/platform-branding.spec.ts:182` is order-dependent
 

@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Feed
 status: executing
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-09-23T01:15:07.411Z"
+stopped_at: Completed 04-06-PLAN.md
+last_updated: "2026-09-23T01:49:57.182Z"
 last_activity: 2026-09-22
 last_activity_desc: Phase 04 execution started
-state_head: 53fe13d07a0e57b6af976b124c9236e2c26cf8e4
+state_head: dd0987fa6811b8e5409c1e1195fe4a789b429882
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 50
-  completed_plans: 42
+  completed_plans: 43
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 04 (Feed) — EXECUTING
-Plan: 6 of 10
+Plan: 7 of 10
 Status: Ready to execute
 Last activity: 2026-09-22 — Phase 04 execution started
 
@@ -100,6 +100,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P03 | 27 min | 3 tasks | 15 files |
 | Phase 04 P04 | 2h 43m | 3 tasks | 35 files |
 | Phase 04 P05 | 78 min | 3 tasks | 26 files |
+| Phase 04 P06 | 82 min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -274,6 +275,9 @@ Recent decisions affecting current work:
 - [Phase 04]: Node's BlockList widens an IPv4 argument to its IPv4-mapped form before comparing it against IPv6 rules, so an ::ffff:0:0/96 deny entry blocks the entire public IPv4 internet — mapped spellings must be unwrapped and re-checked instead
 - [Phase 04]: Link previews are cached per tenant (unique on tenant_id + url_hash): the key is the privacy boundary and the no-second-fetch mechanism at once
 - [Phase 04]: No third-party frame ships in the feed: YouTube and Vimeo resolve through oEmbed into the same card, opening externally — inline playback waits for a real CSP in Phase 8
+- [Phase 04]: 04-06: no client data-cache library — server-action pagination stays the one paging paradigm for the feed — Phase 3's 03-05 pattern already handles infinite scroll; a second data-fetching paradigm here would fork the first feature that needs paging. Phase 7 (Realtime invalidation) is where a cache is worth revisiting.
+- [Phase 04]: 04-06: count copy crosses the module boundary as a {count} template read with next-intl t.raw() — An optimistic like changes the number with no round trip, so the placeholder must survive the catalog lookup; the module fills it with Intl.NumberFormat/PluralRules for the host-supplied locale and still ships no words (PWA-03).
+- [Phase 04]: 04-06: the >999 meta-row backstop is pinned as a string by a unit test, not by a seeded high-count post — supabase/tests/090-feed.sql reconciles every post's like_count against its live feed_likes rows, so a four-digit fixture would need 1000+ auth users and a hand-written counter would turn that assertion red. Recorded as WINDOWS 24.
 
 ### Pending Todos
 
@@ -306,6 +310,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T01:14:57.829Z
-Stopped at: Completed 04-05-PLAN.md
+Last session: 2026-09-23T01:49:57.114Z
+Stopped at: Completed 04-06-PLAN.md
 Resume file: None

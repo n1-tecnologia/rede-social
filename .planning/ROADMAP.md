@@ -241,7 +241,7 @@ Plans:
   3. Member can share a post through the native share sheet (copy link on desktop); opening the internal deep link while logged out routes through login and lands on the post; a member of another tenant gets 404.
   4. Post, like and comment actions emit typed domain events (`post.published`, `post.liked`, `comment.created`, ...) on the kernel bus after commit, received by a test subscriber; posts/communities/stories carry a generic `author_user_id` and a per-tenant posting policy so member posting in V2 is a permission flip; feed pages execute a bounded number of queries (no N+1, keyset cursors) checked in CI.
 
-**Plans**: 5/10 plans executed
+**Plans**: 6/10 plans executed
 **UI hint**: yes
 **Research needed**: None beyond the conventions doc; acceptance checks (`EXPLAIN`, query count, depth trigger) cover the risks. SSRF-safe unfurl (deny private ranges, follow-redirect limits, timeouts) is implementation detail for the worker job.
 **Notes**: `feed.comments` reserves a `story_id` slot and `feed.likes` uses nullable FKs + partial unique indexes so Phase 5 reuses them. Counters are trigger-maintained. The admin composer is the first prototype-less screen designed under the Phase 2 UI-SPEC pattern (ADMIN-04 is verified across all composers in Phase 8).
@@ -266,7 +266,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 04-06-PLAN.md — Feed interactions: infinite scroll, pull-to-refresh, the meta row, the optimistic like and the double-tap
+- [x] 04-06-PLAN.md — Feed interactions: infinite scroll, pull-to-refresh, the meta row, the optimistic like and the double-tap
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -368,7 +368,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 | 01.1. Cloud Provisioning & First Release (INSERTED) | 0/3 | Deferred (needs accounts) | - |
 | 2. Tenant Shell, Branding & Platform Panel | 20/20 | In Progress|  |
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
-| 4. Feed | 5/10 | In Progress|  |
+| 4. Feed | 6/10 | In Progress|  |
 | 5. Communities & Stories | 0/TBD | Not started | - |
 | 6. Events | 0/TBD | Not started | - |
 | 7. Notifications, Web Push & Support Chat | 0/TBD | Not started | - |
