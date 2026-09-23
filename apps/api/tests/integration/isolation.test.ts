@@ -356,6 +356,44 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("b2. communities: the other tenant's community id is 404 NOT_FOUND with no details (05-01)", async () => {
+    // The lab community ids come from the DATABASE rather than from the lab's own API: `communities`
+    // is disabled for tria-lab in the seed (D-17 gives it feed + events), and the point of this case
+    // is the DEMO session's answer, not the lab's.
+    const labCommunities = await adminSql<{ id: string }[]>`
+      select id from public.communities where tenant_id = ${tenantIds.lab}::uuid`;
+    expect(labCommunities.length).toBeGreaterThan(0);
+
+    for (const row of labCommunities) {
+      const res = await request(`/v1/communities/${row.id}`, tokens.demoMember, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      // 404, not 403: a 403 would confirm the row exists somewhere (D-23, T-05-02).
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      // No `details` key at all — the absence IS the existence-oracle control, so a status-only
+      // assertion would not cover it.
+      expect(Object.hasOwn(body.error, 'details')).toBe(false);
+    }
+
+    // Positive control (T-03-56) IN THE SAME TEST: the demo session really can read its OWN
+    // communities, by list and by id — so the 404s above are isolation, not a broken route.
+    const list = await request('/v1/communities', tokens.demoMember, {
+      [TENANT_HOST_HEADER]: HOSTS.demo,
+    });
+    expect(list.status).toBe(200);
+    const { items } = (await list.json()) as { items: { id: string }[] };
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(labCommunities.map((row) => row.id)).not.toContain(item.id);
+      const own = await request(`/v1/communities/${item.id}`, tokens.demoMember, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      expect(own.status).toBe(200);
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,
@@ -423,7 +461,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
   });
 
   it("f2. a session of tenant A presented on tenant B's REGISTERED host is 403, on every route (D-23)", async () => {
-    for (const path of ['/v1/me/bootstrap', '/v1/feed']) {
+    // `/v1/communities` joins the loop for the reason SCHEMA-CONVENTIONS §(j) rule 2 gives: every
+    // new endpoint adds a cross-tenant case here. The host check fires in `requireAuth`, BEFORE
+    // `requireModule`, so the answer is the same 403 on a module the session's tenant does have.
+    for (const path of ['/v1/me/bootstrap', '/v1/feed', '/v1/communities']) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);
 

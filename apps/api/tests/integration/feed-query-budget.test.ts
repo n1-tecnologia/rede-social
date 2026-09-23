@@ -45,12 +45,28 @@ export const FEED_DETAIL_STATEMENT_BUDGET = 3;
 export const FEED_REPLIES_STATEMENT_BUDGET = 1;
 
 /**
+ * `GET /v1/communities` (05-01): ONE statement against the community tables, cover hydration
+ * included. The cover's variant ladder is a `left join media_assets` inside the SAME statement the
+ * community rows come from, never one lookup per card — which is the whole reason the join is in
+ * `communityProjection` rather than in a loop over the page.
+ */
+// biome-ignore lint/suspicious/noExportsInTest: colocated with the only assertion that proves it
+export const COMMUNITY_LIST_STATEMENT_BUDGET = 1;
+
+/**
  * Every table the feed module reads. `feed_comments` and `feed_likes` are now real (04-03) and the
  * list budget still holds at ONE: `viewerLiked`'s `feed_likes` join landed in the SAME statement,
  * which is exactly what this regex was written in 04-01 to force. `feed_post_media` and
  * `feed_link_previews` do not exist yet (04-04 adds them) and are named for the same reason.
  */
 const FEED_TABLES_PATTERN = 'feed_(posts|post_media|comments|likes|link_previews)';
+
+/**
+ * The community module's own tables. `community_members` is named although V1 never reads it
+ * (COMM-02 is a policy value): the day a join against it appears in the list, this budget is what
+ * turns that into a red build rather than a silently more expensive page.
+ */
+const COMMUNITY_TABLES_PATTERN = 'communit(ies|y_members)';
 
 let token = '';
 let tenantId = '';
@@ -163,6 +179,38 @@ async function feedCalls(): Promise<number> {
      where query ~ ${FEED_TABLES_PATTERN}`;
   return measured?.calls ?? 0;
 }
+
+/** Sum of `calls` over the COMMUNITY tables since the last reset — filtered, never a total. */
+async function communityCalls(): Promise<number> {
+  const [measured] = await adminSql<{ calls: number }[]>`
+    select coalesce(sum(calls), 0)::int as calls
+      from pg_stat_statements
+     where query ~ ${COMMUNITY_TABLES_PATTERN}`;
+  return measured?.calls ?? 0;
+}
+
+describe('GET /v1/communities — the community list query budget (05-01)', () => {
+  it(`costs at most ${COMMUNITY_LIST_STATEMENT_BUDGET} statement against the community tables`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const res = await api.request('/v1/communities?limit=10', {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { coverAssetId: string | null }[] };
+    // Guard against the budget passing vacuously on an empty list, and against it passing on a page
+    // whose covers all happened to be null — the hydration join is the thing under measurement.
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.some((item) => item.coverAssetId !== null)).toBe(true);
+
+    // BIDIRECTIONAL, for the same reason the feed budgets are: a zero here would mean the regex
+    // matched nothing (a table renamed, pg_stat_statements not loaded), not that the page got
+    // cheaper. The floor is what stops an empty measurement passing at zero.
+    const calls = await communityCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(COMMUNITY_LIST_STATEMENT_BUDGET);
+  });
+});
 
 describe('the post page — the detail query budget (04-03, criterion 4)', () => {
   it(`costs at most ${FEED_DETAIL_STATEMENT_BUDGET} statements for the post plus its comments`, async () => {
