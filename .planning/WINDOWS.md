@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 17
+open_count: 19
 waived_count: 0
-fixed_count: 9
-total_count: 26
-last_updated: 2026-09-23T02:59:24.075Z
+fixed_count: 10
+total_count: 29
+last_updated: 2026-09-23T03:43:45.669Z
 ---
 
 # Broken Windows Ledger
@@ -32,7 +32,7 @@ last_updated: 2026-09-23T02:59:24.075Z
 | 15 | 03 | unrun-verify | apps/web/e2e/phase3-smoke.spec.ts |  | Real-device HLS playback was never observed: the phase smoke proves the row reaches 'Pronto' and the player mounts with a credential under Playwright's bundled Chromium, which cannot stand in for iOS Safari's HLS stack. That a ready video actually plays, with a thumbnail, on a real iPhone (Safari) and a real Android device (Chrome) is annotated in the spec and recorded in docs/DEPLOY.md as blocked on Phase 01.1, alongside windows 12 and 14. | open |  | 2026-09-22T04:01:20.180Z |  |
 | 16 | 04 | stub | packages/modules/feed/server/service.ts | 98 | viewerLiked is hard-false for every post; 04-03 adds the feed_likes join to the SAME statement | fixed |  | 2026-09-22T15:43:33.315Z | 2026-09-22T16:39:11.724Z |
 | 17 | 04 | stub | packages/modules/feed/server/service.ts | 221 | post.published carries hasMedia: false; 04-04 sets it from media_kind once feed_post_media exists | fixed |  | 2026-09-22T15:43:33.390Z | 2026-09-22T19:22:02.240Z |
-| 18 | 04 | stub | packages/modules/feed/ui/FeedList.tsx |  | The admin empty-state CTA renders only when the host passes createHref; 04-05 supplies it with /criar | open |  | 2026-09-22T15:43:33.463Z |  |
+| 18 | 04 | stub | packages/modules/feed/ui/FeedList.tsx |  | The admin empty-state CTA renders only when the host passes createHref; 04-05 supplies it with /criar | fixed |  | 2026-09-22T15:43:33.463Z | 2026-09-23T03:43:30.108Z |
 | 19 | 04 | unrun-verify | .planning/sketches/002-phase-04-designed-screens/index.html |  | D-33 / UI-04 design review of the six [designed] Phase 4 surfaces is unrun: the sketch README frontmatter is still status: pending / approved: false. 04-04, 04-05 and 04-09 code against it. | open |  | 2026-09-22T16:05:15.396Z |  |
 | 20 | 04 | deviation | apps/api/tests/integration/media.test.ts |  | media.test.ts still sweeps EVERY Storage object under <tenant>/media/, so running the API suite leaves the seeded gallery posts with rows but no bytes — the cards then render MediaImage's neutral box. The DB rows are preserved (04-04 narrowed those deletes); the object sweep is not. | open |  | 2026-09-22T19:22:13.680Z |  |
 | 21 | 04 | deviation | apps/web/e2e/admin.ts |  | deleteTenantVideoAssets is a TOTAL reset, so after media-video.spec.ts runs the tria-demo seeded video post keeps media_kind='video' with zero media rows until the next db:seed. feed-media.spec.ts reads the video case from tria-lab because of it. | open |  | 2026-09-22T19:22:13.761Z |  |
@@ -41,6 +41,9 @@ last_updated: 2026-09-23T02:59:24.075Z
 | 24 | 04 | unrun-verify | apps/web/e2e/feed.spec.ts |  | The >999 meta-row backstop (UI-SPEC E02 overflow/long-text) is pinned only as a STRING by packages/modules/feed/tests/meta.test.ts, never as pixels: supabase/tests/090-feed.sql reconciles every post's like_count against its live feed_likes rows, so a four-digit seeded count would need 1000+ auth users and a hand-written counter would turn that assertion red. The abbreviated row has never been rendered at 320px. | open |  | 2026-09-23T01:46:35.102Z |  |
 | 25 | 04 | stub | apps/web/lib/registry.tsx | 162 | Viewer's optimistic comment row carries profileHref: null — the bootstrap has no membershipId; bounded to a pending row's lifetime, intentional | open |  | 2026-09-23T02:30:01.337Z |  |
 | 26 | 04 | unrun-verify | apps/web/e2e/feed-share.spec.ts |  | Native OS share sheet on a real iPhone/Android is manual-only (outside the browser-automation boundary); carried as phase UAT coverage entry D6 | open |  | 2026-09-23T02:59:24.075Z |  |
+| 27 | 04 | deviation | apps/web/app/(app)/criar/ComposerForm.tsx |  | Publishing within ~2s of the last photo upload can answer asset_not_usable: variant derivation runs in the worker and createPost requires an image to be 'ready' (04-04). The composer surfaces the refusal with copy but does not wait for readiness; the e2e waits explicitly. Close by either polling readiness in the composer or relaxing the image status rule (a 04-04 contract change). | open |  | 2026-09-23T03:43:45.531Z |  |
+| 28 | 04 | deviation | .planning/sketches/002-phase-04-designed-screens/README.md |  | Sketch 002 (the D-33 gate for the composer, the edit screen, the FAB and the post menu) is still status: pending / approved: false. 04-09 coded against the drawing on the orchestrator's explicit instruction, with approval carried to phase UAT. | open |  | 2026-09-23T03:43:45.600Z |  |
+| 29 | 04 | deviation | apps/web/app/(app)/criar/ComposerForm.tsx |  | Image reorder ships as two 44x44 move controls per tile instead of the mockup's drag grip: a pointer-only drag is unreachable by keyboard and unassertable in a spec. Same effect on the asset-id array. | open |  | 2026-09-23T03:43:45.669Z |  |
 
 ````json
 [
@@ -255,10 +258,10 @@ last_updated: 2026-09-23T02:59:24.075Z
     "file": "packages/modules/feed/ui/FeedList.tsx",
     "line": null,
     "description": "The admin empty-state CTA renders only when the host passes createHref; 04-05 supplies it with /criar",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-22T15:43:33.463Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-23T03:43:30.108Z"
   },
   {
     "id": 19,
@@ -354,6 +357,42 @@ last_updated: 2026-09-23T02:59:24.075Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T02:59:24.075Z",
+    "resolved_at": null
+  },
+  {
+    "id": 27,
+    "kind": "deviation",
+    "phase": "04",
+    "file": "apps/web/app/(app)/criar/ComposerForm.tsx",
+    "line": null,
+    "description": "Publishing within ~2s of the last photo upload can answer asset_not_usable: variant derivation runs in the worker and createPost requires an image to be 'ready' (04-04). The composer surfaces the refusal with copy but does not wait for readiness; the e2e waits explicitly. Close by either polling readiness in the composer or relaxing the image status rule (a 04-04 contract change).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T03:43:45.531Z",
+    "resolved_at": null
+  },
+  {
+    "id": 28,
+    "kind": "deviation",
+    "phase": "04",
+    "file": ".planning/sketches/002-phase-04-designed-screens/README.md",
+    "line": null,
+    "description": "Sketch 002 (the D-33 gate for the composer, the edit screen, the FAB and the post menu) is still status: pending / approved: false. 04-09 coded against the drawing on the orchestrator's explicit instruction, with approval carried to phase UAT.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T03:43:45.600Z",
+    "resolved_at": null
+  },
+  {
+    "id": 29,
+    "kind": "deviation",
+    "phase": "04",
+    "file": "apps/web/app/(app)/criar/ComposerForm.tsx",
+    "line": null,
+    "description": "Image reorder ships as two 44x44 move controls per tile instead of the mockup's drag grip: a pointer-only drag is unreachable by keyboard and unassertable in a spec. Same effect on the asset-id array.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T03:43:45.669Z",
     "resolved_at": null
   }
 ]

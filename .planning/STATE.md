@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Feed
 status: executing
-stopped_at: Completed 04-08-PLAN.md
-last_updated: "2026-09-23T02:58:57.889Z"
+stopped_at: Completed 04-09-PLAN.md
+last_updated: "2026-09-23T03:46:09.867Z"
 last_activity: 2026-09-22
 last_activity_desc: Phase 04 execution started
-state_head: d80744caaba93b80f311fabc9258874bbeb11508
+state_head: 42bbd5845c6af6698fb434cdb6b4e386d642c538
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 50
-  completed_plans: 45
+  completed_plans: 46
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 04 (Feed) — EXECUTING
-Plan: 9 of 10
+Plan: 10 of 10
 Status: Ready to execute
 Last activity: 2026-09-22 — Phase 04 execution started
 
@@ -103,6 +103,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P06 | 82 min | 3 tasks | 18 files |
 | Phase 04 P07 | 35 min | 3 tasks | 19 files |
 | Phase 04 P08 | 26 min | 3 tasks | 23 files |
+| Phase 04 P09 | 46 min | 3 tasks | 34 files |
 
 ## Accumulated Context
 
@@ -286,6 +287,10 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-07: the UI-D-22 error branch and the empty branch are one if/else-if chain, proven exclusive by a branch-scoped grep — A failed load that renders the empty copy asserts a false fact about a post with comments and offers no recovery
 - [Phase 04]: 04-07: FeedList owns ONE CommentSheet for the column plus a per-post comment-count delta, rather than a sheet per card — A sheet per card mounts a dialog, focus trap and confirmation dialog per post on screen; the delta is cleared on refresh because the server's counts become authoritative again
 - [Phase 04]: 04-07: linkify extracted into packages/modules/feed/ui/linkify.tsx so the caption and the comment body share ONE auto-linker — T-04-43: two copies would eventually disagree about which schemes become an href and which rel goes on it, and the weaker one is what a member can post into
+- [Phase 04]: The media triple on PATCH is a replacement, not a merge: the composer sends what the post should BE, which is what makes media_kind recomputable from the body alone
+- [Phase 04]: Authorisation on a post write is BOTH the route permission (feed.post.manage) and the author_user_id predicate in the statement; the live-row predicate makes delete win a concurrent edit
+- [Phase 04]: edited_at advances on a byte-identical re-save: 'edited' means the author saved it again, not that the bytes differ (UI-D-15)
+- [Phase 04]: A 'use server' module cannot re-export another one under Turbopack, so shared non-action helpers live in a plain module (apps/web/lib/feed-write.ts)
 
 ### Pending Todos
 
@@ -318,6 +323,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T02:58:57.821Z
-Stopped at: Completed 04-08-PLAN.md
+Last session: 2026-09-23T03:46:01.678Z
+Stopped at: Completed 04-09-PLAN.md
 Resume file: None

@@ -51,9 +51,9 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Feed
 
-- [ ] **FEED-01**: `admin_tenant` can create a post with text and any combination of: multiple images (carousel with swipe on mobile), one video, link previews / YouTube-Vimeo embeds (unfurled server-side at create time), and file attachments (PDF and similar)
+- [x] **FEED-01**: `admin_tenant` can create a post with text and any combination of: multiple images (carousel with swipe on mobile), one video, link previews / YouTube-Vimeo embeds (unfurled server-side at create time), and file attachments (PDF and similar)
 - [x] **FEED-02**: A post may optionally be scoped to a community; the main feed shows posts without community plus posts from communities the member can see, newest first, with cursor pagination
-- [ ] **FEED-03**: `admin_tenant` can edit (marked "editado") and soft-delete their own posts
+- [x] **FEED-03**: `admin_tenant` can edit (marked "editado") and soft-delete their own posts
 - [x] **FEED-04**: Member can like/unlike a post (idempotent toggle) and see the like count
 - [x] **FEED-05**: Member can comment on a post and reply to a comment; replies are limited to one level (enforced by a DB constraint)
 - [x] **FEED-06**: Member can like/unlike comments and replies
@@ -123,7 +123,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### Design Prototype (UI source of truth)
 
 - [ ] **UI-01**: The app's visual language (tokens, typography, spacing, motion, component styling) follows the design team's prototype in `reference/frontend-design/`; shared primitives (Button, IconButton, Avatar, Badge, BottomSheet, ConfirmDialog, EmptyState, Input, Skeleton, Tabs, Toast, TopBar, BottomNav, PullToRefresh, SafeAreaWrapper) are ported into the kernel shared-UI package
-- [ ] **UI-02**: Feature screens are ported into their module package as each vertical phase is built, replacing mock data with API calls and keeping the prototype's interactions (double-tap like, comment sheet, infinite scroll, pull-to-refresh, swipe)
+- [x] **UI-02**: Feature screens are ported into their module package as each vertical phase is built, replacing mock data with API calls and keeping the prototype's interactions (double-tap like, comment sheet, infinite scroll, pull-to-refresh, swipe)
 - [ ] **UI-03**: The prototype's hardcoded brand (hex literals, "Igor Alves" strings, `lib/nav.ts`) is replaced by tenant-driven theme variables, tenant display name and flag-driven navigation; the iPhone `DeviceShell` mockup is replaced by a real responsive app shell with a desktop layout
 - [ ] **UI-04**: Screens the prototype lacks (stories strip/viewer, admin composers, admin panel, platform panel, moderation, support inbox) are designed in the prototype's language and reviewed with the design team before implementation
 
@@ -234,9 +234,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROF-01 | Phase 3 | Complete |
 | PROF-02 | Phase 3 | Complete |
 | PROF-03 | Phase 3 | Complete |
-| FEED-01 | Phase 4 | Pending |
+| FEED-01 | Phase 4 | Complete |
 | FEED-02 | Phase 4 | Complete |
-| FEED-03 | Phase 4 | Pending |
+| FEED-03 | Phase 4 | Complete |
 | FEED-04 | Phase 4 | Complete |
 | FEED-05 | Phase 4 | Complete |
 | FEED-06 | Phase 4 | Complete |
@@ -279,7 +279,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MEDIA-03 | Phase 3 | Complete |
 | MEDIA-04 | Phase 4 | Complete |
 | UI-01 | Phase 2 | Gaps Found |
-| UI-02 | Phase 4 | Pending |
+| UI-02 | Phase 4 | Complete |
 | UI-03 | Phase 2 | Gaps Found |
 | UI-04 | Phase 2 | Gaps Found |
 | PWA-01 | Phase 2 | Gaps Found |
