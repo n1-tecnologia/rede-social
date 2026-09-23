@@ -1,0 +1,1201 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIA — Fase 5 · telas [designed] (mockup estático para revisão do time de design)</title>
+<style>
+/* =====================================================================================
+   0. NENHUM ASSET EXTERNO. Um arquivo, zero rede: nenhuma fonte remota, nenhum script
+      remoto, nenhuma folha de estilo remota, nenhum quadro incorporado. O arquivo abre
+      offline e pode ser enviado por e-mail ao time de design como está. Manrope renderiza
+      se estiver instalada na máquina (`local()` abaixo); sem ela o fallback do sistema
+      renderiza com as MESMAS medidas de tipo.
+
+   1. TOKENS — packages/ui/src/styles/tokens.css copiado verbatim (mesmos nomes, mesmos
+      valores, mesmas camadas), incluindo --color-like e a derivação de --brand-gradient.
+      A Fase 5 NÃO acrescenta nenhum token, nenhuma medida de espaçamento, nenhum tamanho
+      de tipo e nenhum peso.
+   ===================================================================================== */
+@font-face { font-family: "Manrope"; src: local("Manrope"), local("Manrope Regular"); font-weight: 400; }
+@font-face { font-family: "Manrope"; src: local("Manrope Bold"), local("Manrope-Bold"); font-weight: 700; }
+
+:root, [data-theme="light"] {
+  --theme-bg: #f5f7fb;
+  --theme-bg-secondary: #ffffff;
+  --theme-bg-tertiary: #e9eef7;
+  --theme-bg-input: #eef2f9;
+  --theme-bg-hover: rgba(31, 58, 95, 0.04);
+  --theme-bg-active: rgba(31, 58, 95, 0.08);
+  --theme-text: #16233b;
+  --theme-text-secondary: #51617c;
+  --theme-text-tertiary: #8595ad;
+  --theme-text-inverse: #ffffff;
+  --theme-border: rgba(22, 35, 59, 0.1);
+  --theme-border-secondary: rgba(22, 35, 59, 0.16);
+  --theme-divider: rgba(22, 35, 59, 0.06);
+  --theme-card: #ffffff;
+  --theme-card-hover: #f8fafd;
+  --theme-overlay: rgba(10, 18, 32, 0.4);
+  --theme-handle: #c3cede;
+  --theme-glass-bar: rgba(255, 255, 255, 0.82);
+  --theme-chip: rgba(22, 35, 59, 0.06);
+  /* UI-D-08 (Fase 4) — a cor afetiva da curtida. Não é o accent do tenant, não é o destrutivo. */
+  --color-like: #ef4444;
+}
+:root {
+  --brand-primary: #2e6fd0;
+  --brand-secondary: #5b9cf8;
+  --brand-on-primary: #ffffff;
+  --brand-primary-dark: #5b9cf8;
+  --brand-on-primary-dark: #0f1118;
+  --color-success: #16a34a;
+  --color-danger: #ef4444;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
+  --safe-top: 12px;
+  --safe-bottom: 8px;
+  --nav-height: 64px;
+}
+[data-theme="dark"] {
+  --theme-bg: #0f1118;
+  --theme-bg-secondary: #181c26;
+  --theme-bg-tertiary: #232937;
+  --theme-bg-input: #232937;
+  --theme-bg-hover: rgba(255, 255, 255, 0.06);
+  --theme-bg-active: rgba(255, 255, 255, 0.1);
+  --theme-text: #f2f5fa;
+  --theme-text-secondary: #a6b1c4;
+  --theme-text-tertiary: #64718a;
+  --theme-text-inverse: #0f1118;
+  --theme-border: rgba(255, 255, 255, 0.08);
+  --theme-border-secondary: rgba(255, 255, 255, 0.12);
+  --theme-divider: rgba(255, 255, 255, 0.05);
+  --theme-card: #181c26;
+  --theme-card-hover: #232937;
+  --theme-overlay: rgba(0, 0, 0, 0.7);
+  --theme-handle: #3c4658;
+  --theme-glass-bar: rgba(24, 28, 38, 0.82);
+  --theme-chip: rgba(255, 255, 255, 0.1);
+  --color-like: #ef4444;
+}
+* {
+  --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  /* o token da Fase 2 que UI-D-35 consome: o bloco de capa ausente de uma comunidade */
+  --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+}
+[data-theme="dark"], [data-theme="dark"] * {
+  --brand-accent: var(--brand-primary-dark);
+  --brand-on-accent: var(--brand-on-primary-dark);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
+}
+
+/* =====================================================================================
+   2. BASE + CHROME DO MOCKUP — fora do produto
+   ===================================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { font-family: Manrope, system-ui, -apple-system, sans-serif; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--theme-bg); color: var(--theme-text); font-size: 14px; line-height: 1.5; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.i-16 { width: 16px; height: 16px; } .i-18 { width: 18px; height: 18px; } .i-20 { width: 20px; height: 20px; }
+.i-28 { width: 28px; height: 28px; } .i-40 { width: 40px; height: 40px; }
+
+.toolbar { position: sticky; top: 0; z-index: 200; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 24px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); }
+.toolbar .brandname { font-weight: 700; letter-spacing: -0.02em; font-size: 16px; }
+.toolbar .brandname small { font-weight: 400; color: var(--theme-text-secondary); margin-left: 8px; font-size: 12px; }
+.toolbar label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--theme-text-secondary); }
+.toolbar input[type="color"] { width: 32px; height: 32px; padding: 0; border: 1px solid var(--theme-border); border-radius: 8px; background: none; }
+.toolbar .preset, .toolbar .toggle { height: 32px; padding: 0 12px; border-radius: 999px; background: var(--theme-bg-input); font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.toolbar .toggle { background: var(--theme-bg-tertiary); color: var(--theme-text); }
+.toolbar .preset:hover { background: var(--theme-bg-tertiary); }
+.toolbar nav { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; width: 100%; }
+.toolbar nav a { color: var(--theme-text-tertiary); } .toolbar nav a:hover { color: var(--brand-accent); }
+.readout { font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+
+main.sheet { max-width: 1400px; margin: 0 auto; padding: 24px 24px 120px; }
+section.screen { padding: 40px 0; border-bottom: 1px solid var(--theme-divider); }
+section.screen > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+section.screen > header h2 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+section.screen > header code { font-size: 12px; color: var(--theme-text-tertiary); background: var(--theme-bg-input); padding: 2px 8px; border-radius: 6px; }
+section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(--theme-text-secondary); max-width: 1000px; }
+.frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.caption { font-size: 12px; color: var(--theme-text-tertiary); margin: 8px 0 0; max-width: 390px; }
+.note { font-size: 12px; color: var(--theme-text-secondary); margin: 12px 0 0; max-width: 1000px; }
+.stack { display: flex; flex-direction: column; }
+
+/* =====================================================================================
+   3. MOLDURAS — telefone 390px, telefone estreito 320px, coluna desktop de 680px
+   ===================================================================================== */
+.phone { width: 390px; height: 800px; border: 1px solid var(--theme-border-secondary); border-radius: 40px; overflow: hidden; background: var(--theme-bg); position: relative; flex: none; display: flex; flex-direction: column; }
+.phone.narrow { width: 320px; }
+.phone.short { height: 460px; }
+.phone .body { flex: 1; overflow: auto; }
+.phone .bottomnav { position: absolute; left: 14px; width: calc(100% - 28px); bottom: calc(var(--safe-bottom) + 8px); border-radius: 999px; padding: 4px 6px; display: flex; z-index: 50; background: var(--theme-glass-bar); border: 1px solid var(--theme-border-secondary); box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16); backdrop-filter: blur(2px) saturate(1.5); }
+.bottomnav a { flex: 1; display: grid; place-items: center; padding: 6px 0; }
+.bottomnav .chip { width: 50px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.bottomnav a[aria-current="page"] .chip { background: var(--theme-chip); color: var(--brand-accent); }
+.desk { width: 100%; max-width: 900px; min-height: 480px; border: 1px solid var(--theme-border-secondary); border-radius: 16px; background: var(--theme-bg); padding: 24px; display: flex; justify-content: center; }
+.desk > .column { width: 100%; max-width: 680px; }
+
+/* PageHeader stickyTop="0px" */
+.page-header { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 4px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); }
+.page-header h1 { flex: 1; margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+.page-header .text-action { font-size: 14px; font-weight: 700; color: var(--theme-text-secondary); padding: 0 12px; height: 44px; display: inline-flex; align-items: center; }
+
+/* =====================================================================================
+   4. PRIMITIVAS @tria/ui — mesmas medidas, escritas em CSS puro
+   ===================================================================================== */
+.icon-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--theme-text); flex: none; }
+.icon-btn:hover { background: var(--theme-bg-hover); }
+.icon-btn.tertiary { color: var(--theme-text-tertiary); }
+.btn { height: 44px; padding: 0 20px; border-radius: 12px; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn.sm { height: 36px; padding: 0 14px; border-radius: 10px; }
+.btn.brand { background: var(--brand-accent); color: var(--brand-on-accent); }
+.btn.brand:hover { background: var(--brand-primary-hover); }
+.btn.outline { border: 1px solid var(--theme-border-secondary); color: var(--theme-text); }
+.btn.ghost { color: var(--theme-text-secondary); }
+.btn.ghost.danger { color: var(--color-danger); }
+.btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.btn[aria-busy="true"] { opacity: 0.75; }
+.card { background: var(--theme-card); border-radius: 12px; box-shadow: 0 1px 3px rgba(22, 35, 59, 0.06); overflow: hidden; }
+[data-theme="dark"] .card { border: 1px solid var(--theme-border); }
+.avatar { width: 32px; height: 32px; border-radius: 999px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.t12 { font-size: 12px; } .t12b { font-size: 12px; font-weight: 700; }
+.t14 { font-size: 14px; } .t14b { font-size: 14px; font-weight: 700; }
+.t16 { font-size: 16px; } .t16b { font-size: 16px; font-weight: 700; }
+.t24b { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.sec { color: var(--theme-text-secondary); } .ter { color: var(--theme-text-tertiary); } .dgr { color: var(--color-danger); }
+.num { font-variant-numeric: tabular-nums; }
+.trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.section-title { font-size: 12px; font-weight: 700; color: var(--brand-accent); letter-spacing: 0.04em; text-transform: uppercase; padding: 16px 16px 8px; }
+.pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--theme-chip); color: var(--theme-text-secondary); }
+.pill.warning { background: color-mix(in oklch, var(--color-warning), transparent 88%); color: var(--color-warning); }
+.pill.danger { background: color-mix(in oklch, var(--color-danger), transparent 88%); color: var(--color-danger); }
+.rule { height: 1px; background: var(--theme-border); }
+.skel { background: var(--theme-bg-tertiary); border-radius: 12px; }
+.empty { padding: 64px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.empty .circle { width: 64px; height: 64px; border-radius: 999px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; }
+.empty p { margin: 0; max-width: 260px; font-size: 14px; color: var(--theme-text-secondary); }
+.empty h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.input { width: 100%; background: var(--theme-bg-input); border: 1px solid var(--theme-border); border-radius: 12px; padding: 12px 14px; font-size: 16px; line-height: 1.5; color: var(--theme-text); }
+.input::placeholder { color: var(--theme-text-tertiary); }
+.input.focused { border-color: var(--brand-accent); box-shadow: 0 0 0 2px var(--brand-primary-soft); }
+textarea.input { min-height: 104px; resize: none; }
+.field-label { font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); margin-bottom: 8px; }
+.counter { margin-top: 6px; text-align: right; font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+.helper { font-size: 14px; color: var(--theme-text-secondary); margin-top: 8px; }
+.alert { border: 1px solid color-mix(in oklch, var(--color-danger), transparent 70%); background: color-mix(in oklch, var(--color-danger), transparent 92%); color: var(--color-danger); border-radius: 12px; padding: 12px 14px; font-size: 14px; display: flex; gap: 10px; align-items: flex-start; }
+.progress { height: 4px; border-radius: 999px; background: var(--theme-bg-tertiary); overflow: hidden; margin-top: 12px; }
+.progress > i { display: block; height: 100%; background: var(--brand-accent); }
+.picker-row { width: 100%; min-height: 56px; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--theme-border); border-radius: 12px; background: var(--theme-bg-secondary); text-align: left; }
+.picker-row:hover { background: var(--theme-card-hover); }
+.picker-row .lead { width: 40px; height: 40px; border-radius: 12px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.dropzone { border: 1px dashed var(--theme-border-secondary); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--theme-text-tertiary); background: var(--theme-bg-secondary); }
+.scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 70; }
+.sheet-menu { position: absolute; left: 0; right: 0; bottom: 0; z-index: 80; background: var(--theme-bg-secondary); border-radius: 16px 16px 0 0; padding: 8px 0 calc(var(--safe-bottom) + 8px); max-height: 80%; overflow: auto; }
+.sheet-menu .handle { width: 40px; height: 4px; border-radius: 999px; background: var(--theme-handle); margin: 4px auto 8px; }
+.sheet-menu h3 { margin: 4px 0 0; padding: 0 16px; font-size: 16px; font-weight: 700; }
+.sheet-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px; font-size: 14px; text-align: left; min-height: 44px; }
+.sheet-row:hover { background: var(--theme-bg-hover); }
+.sheet-row.danger { color: var(--color-danger); }
+.dialog { width: 320px; background: var(--theme-bg-secondary); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 24px 48px rgba(15, 23, 42, 0.24); }
+[data-theme="dark"] .dialog { border: 1px solid var(--theme-border); }
+.dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.switch { width: 44px; height: 26px; border-radius: 999px; background: var(--theme-bg-tertiary); position: relative; flex: none; transition: background 0.15s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 999px; background: #ffffff; box-shadow: 0 1px 3px rgba(22, 35, 59, 0.24); transition: transform 0.15s; }
+.switch[aria-checked="true"] { background: var(--brand-accent); }
+.switch[aria-checked="true"]::after { transform: translateX(18px); }
+
+/* =====================================================================================
+   5. SUPERFÍCIE 1 — a régua de stories (StoriesStrip) · [designed] · UI-D-25..UI-D-28
+   ===================================================================================== */
+.strip { display: flex; gap: 16px; padding: 12px 16px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.strip::-webkit-scrollbar { display: none; }
+.strip-item { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+/* anel de 2px (border-2) com inset de 2px (p-0.5) em volta de um círculo de 64×64 */
+.ring { padding: 2px; border-radius: 999px; border: 2px solid var(--brand-accent); }
+.ring.neutral { border-color: var(--theme-border); }
+.ring > .thumb64 { width: 64px; height: 64px; border-radius: 999px; overflow: hidden; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; position: relative; }
+.strip-item .label { font-size: 12px; color: var(--theme-text-tertiary); max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.own-badge { position: absolute; bottom: 0; right: 0; width: 24px; height: 24px; border-radius: 999px; background: var(--brand-accent); color: var(--brand-on-accent); display: grid; place-items: center; border: 2px solid var(--theme-bg); }
+.own-wrap { position: relative; }
+
+/* =====================================================================================
+   6. SUPERFÍCIE 2 — o visualizador de story (StoryViewer) · [designed] · UI-D-30..UI-D-34
+   ===================================================================================== */
+.viewer { position: absolute; inset: 0; overflow: hidden; background: #000000; z-index: 90; }
+.viewer .media { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255, 255, 255, 0.35); }
+/* UI-D-33 — a mídia é sempre object-contain, centrada, no fundo preto. Nunca recortada. */
+.viewer .media .frame { width: 78%; aspect-ratio: 9 / 16; background: #1b1f2b; display: grid; place-items: center; object-fit: contain; }
+.viewer .veil { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,0.5), transparent 22%, transparent 52%, rgba(0,0,0,0.72)); }
+.bars { position: absolute; left: 0; right: 0; z-index: 3; display: flex; gap: 4px; padding: 0 8px; top: calc(var(--safe-top) + 8px); }
+/* h-0.5 = 2px, a mesma geometria de fio de cabelo das bordas */
+.bars > span { height: 2px; flex: 1; border-radius: 999px; background: rgba(255, 255, 255, 0.35); overflow: hidden; }
+.bars > span > i { display: block; height: 100%; background: #ffffff; }
+.vhead { position: absolute; left: 0; right: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 0 16px; top: calc(var(--safe-top) + 24px); color: #ffffff; }
+.vhead .who { min-width: 0; flex: 1; }
+.v-icon { width: 44px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: #ffffff; flex: none; }
+.v-icon.scrim { background: rgba(0, 0, 0, 0.35); }
+.vbottom { position: absolute; left: 0; right: 0; z-index: 3; padding: 0 16px; bottom: calc(var(--safe-bottom) + 12px); color: #ffffff; }
+.vcap { font-size: 16px; line-height: 1.5; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.vacts { display: flex; align-items: center; gap: 4px; margin-left: -10px; margin-top: 8px; }
+.vacts .cnt { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 12px; }
+.liked { color: var(--color-like); }
+.liked svg { fill: var(--color-like); }
+.autoplay-badge { position: absolute; z-index: 4; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 56px; height: 56px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); color: #ffffff; display: grid; place-items: center; }
+.autoplay-badge svg { fill: currentColor; stroke: none; }
+.verr { position: absolute; z-index: 4; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #ffffff; padding: 0 32px; text-align: center; }
+.verr a { font-size: 14px; font-weight: 700; text-decoration: underline; }
+/* camada de anotação da revisão — não é produto */
+.tapzones { position: absolute; inset: 0; z-index: 5; display: flex; }
+.tapzones > span { display: grid; place-items: center; text-align: center; font-size: 12px; font-weight: 700; color: rgba(255, 255, 255, 0.92); border: 1px dashed rgba(255, 255, 255, 0.5); padding: 8px; }
+.tapzones > span.prev { flex: 1; background: rgba(239, 68, 68, 0.16); }
+.tapzones > span.next { flex: 2; background: rgba(46, 111, 208, 0.16); }
+
+/* =====================================================================================
+   7. SUPERFÍCIE 3 — publicar story (StoryComposer) · [designed] · UI-D-39
+   ===================================================================================== */
+.black-screen { position: absolute; inset: 0; background: #000000; overflow: hidden; }
+.cap-overlay { position: absolute; left: 0; right: 0; bottom: calc(var(--safe-bottom) + 72px); padding: 0 16px; }
+.cap-overlay textarea { width: 100%; background: transparent; border: 0; resize: none; color: #ffffff; font-size: 16px; line-height: 1.5; min-height: 48px; outline: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.cap-overlay textarea::placeholder { color: rgba(255, 255, 255, 0.6); }
+.cap-counter { text-align: right; font-size: 12px; color: rgba(255, 255, 255, 0.7); font-variant-numeric: tabular-nums; }
+.publish-cta { position: absolute; right: 16px; bottom: calc(var(--safe-bottom) + 12px); }
+
+/* =====================================================================================
+   8. SUPERFÍCIE 4 — formulário de comunidade (CommunityForm) · [designed] · UI-D-38
+   ===================================================================================== */
+.form-body { display: flex; flex-direction: column; gap: 24px; padding: 16px; }
+.cover-16-7 { aspect-ratio: 16 / 7; border-radius: 12px; overflow: hidden; position: relative; display: grid; place-items: center; }
+/* UI-D-35 — a capa ausente é o bloco --brand-gradient, nunca um cinza quebrado */
+.cover-fallback { background: var(--brand-gradient); color: var(--brand-on-accent); }
+.cover-photo { background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); }
+.cover-veil { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.3) 50%, transparent); }
+.cover-name { position: absolute; left: 16px; right: 16px; bottom: 12px; color: #ffffff; }
+.cover-h36 { height: 144px; position: relative; display: grid; place-items: center; }
+.back-on-media { position: absolute; top: 12px; left: 12px; width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(2px); color: #ffffff; }
+
+/* =====================================================================================
+   9. SUPERFÍCIE 5 — "Seus stories" + PinStorySheet · [designed] · UI-D-40 / UI-D-41
+   ===================================================================================== */
+.hist-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; text-align: left; }
+.hist-row:hover { background: var(--theme-bg-hover); }
+.hist-row .thumb { width: 48px; height: 64px; border-radius: 8px; overflow: hidden; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; object-fit: cover; }
+.hist-row .body { min-width: 0; flex: 1; }
+.hist-row .pinmeta { display: inline-flex; align-items: center; gap: 4px; color: var(--theme-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+.pin-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 9px 16px; text-align: left; }
+.pin-row .cthumb { width: 32px; height: 32px; border-radius: 8px; overflow: hidden; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.pin-row .cthumb.grad { background: var(--brand-gradient); }
+.card-list { display: flex; flex-direction: column; gap: 12px; padding: 0 16px; }
+.counts-row { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 5.7a5 5 0 0 0-7 0l-.9.9-.9-.9a5 5 0 0 0-7 7l8 8 8-8a5 5 0 0 0 0-7Z"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 20.5l1.6-4.8A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5Z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4v16l14-8z"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M19.1 4.9a10 10 0 0 1 0 14.2"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 10.8V4h6v6.8l2 3.2H7Z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8Z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
+</svg>
+
+<!-- ============ barra do mockup (não é superfície do produto) ============ -->
+<div class="toolbar" role="region" aria-label="Controles do mockup">
+  <span class="brandname">TRIA · Fase 5 <small>as cinco telas [designed] · 05-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
+  <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
+  <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
+  <span>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
+    <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
+    <button class="preset" type="button" data-p="#b91c1c" data-s="#f87171">Vermelho</button>
+  </span>
+  <span class="readout" id="brand-readout"></span>
+  <nav aria-label="Telas">
+    <a href="#strip">1 · régua de stories</a>
+    <a href="#viewer">2 · visualizador</a>
+    <a href="#publicar">3 · publicar story</a>
+    <a href="#comunidade-form">4 · formulário de comunidade</a>
+    <a href="#fixar">5 · fixar story</a>
+  </nav>
+</div>
+
+<main class="sheet">
+
+<!-- =====================================================================================
+     SUPERFÍCIE 1 — A RÉGUA DE STORIES
+     ===================================================================================== -->
+<section id="strip" class="screen">
+  <header><h2>Superfície 1 — a régua de stories</h2><code>/inicio · slot order: 5 · [designed] · UI-D-25..UI-D-28, D-78..D-80</code>
+    <p>A régua entra no <code>HomeSlots</code> de <code>/inicio</code> entre o aviso de perfil e o feed. Cada círculo tem 64×64 dentro de um anel de <code>border-2</code> com inset de 2px; no feed o anel é da marca (é um indicador de estado: <em>ao vivo, toque</em>), na comunidade o mesmo círculo usa o anel neutro. O rótulo é o tempo relativo formatado no servidor, 12/400 terciário, truncado em 64px. <strong>Não existe estado de visto/não visto</strong> (D-79) e não existe agrupamento por autor (D-78): um círculo por story ativo, do mais novo para o mais antigo.</p>
+  </header>
+  <div class="frames">
+
+    <!-- membro, com stories -->
+    <div class="phone">
+      <div class="body" style="padding-bottom:120px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
+          <div style="width:64px;height:64px;border-radius:16px;background:var(--brand-accent);color:var(--brand-on-accent);display:grid;place-items:center;font-weight:700;font-size:22px">TD</div>
+          <h1 class="t24b" style="margin:0">Bem-vindo(a) à TRIA Demo</h1>
+        </div>
+        <div class="card" style="margin:0 16px 16px;padding:12px 16px;display:flex;align-items:center;gap:12px">
+          <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+          <span style="min-width:0;flex:1"><span class="t14b" style="display:block">Complete seu perfil</span><span class="t12 ter" style="display:block">Adicione uma foto e uma bio para as pessoas te reconhecerem.</span></span>
+          <svg class="i i-18 ter"><use href="#i-chev-r"/></svg>
+        </div>
+        <div class="strip" role="list" aria-label="Stories">
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir story de há 2 h"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">há 2 h</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir story de há 6 h"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-video"/></svg></span></span></button><span class="label">há 6 h</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir story de há 11 h"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">há 11 h</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir story de há 18 h"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">há 18 h</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir story de há 23 h"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-video"/></svg></span></span></button><span class="label">há 23 h</span></span>
+        </div>
+        <div class="card" style="margin:12px 16px 0">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;min-width:0">
+            <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+            <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h <span aria-hidden="true">·</span> em <span style="font-weight:700;color:var(--theme-text-secondary)">Avisos da diretoria</span></span></span>
+          </div>
+          <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
+        </div>
+      </div>
+      <div class="bottomnav">
+        <a href="#strip" aria-current="page"><span class="chip"><svg class="i"><use href="#i-home"/></svg></span></a>
+        <a href="#strip"><span class="chip"><svg class="i"><use href="#i-users"/></svg></span></a>
+        <a href="#strip"><span class="chip"><svg class="i"><use href="#i-user"/></svg></span></a>
+      </div>
+      <p class="caption" style="position:absolute;bottom:-4px"></p>
+    </div>
+
+    <!-- admin, com o círculo "Seu story" à frente -->
+    <div class="phone">
+      <div class="body" style="padding-bottom:120px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
+          <div style="width:64px;height:64px;border-radius:16px;background:var(--brand-accent);color:var(--brand-on-accent);display:grid;place-items:center;font-weight:700;font-size:22px">TD</div>
+          <h1 class="t24b" style="margin:0">Bem-vindo(a) à TRIA Demo</h1>
+        </div>
+        <div class="strip" role="list" aria-label="Stories">
+          <span class="strip-item" role="listitem"><a href="#publicar" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="thumb64"><svg class="i i-28"><use href="#i-user"/></svg><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></span></a><span class="label">Seu story</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir story de há 2 h"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">há 2 h</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir story de há 6 h"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-video"/></svg></span></span></button><span class="label">há 6 h</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir story de há 18 h"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">há 18 h</span></span>
+        </div>
+        <div class="card" style="margin:12px 16px 0">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;min-width:0">
+            <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+            <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+          </div>
+          <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
+        </div>
+      </div>
+      <button class="icon-btn" type="button" aria-label="Criar publicação" style="position:absolute;right:16px;bottom:calc(var(--safe-bottom) + 84px);width:56px;height:56px;border-radius:999px;background:var(--brand-accent);color:var(--brand-on-accent);box-shadow:0 10px 24px rgba(15,23,42,0.28);z-index:60"><svg class="i"><use href="#i-plus"/></svg></button>
+      <div class="bottomnav">
+        <a href="#strip" aria-current="page"><span class="chip"><svg class="i"><use href="#i-home"/></svg></span></a>
+        <a href="#strip"><span class="chip"><svg class="i"><use href="#i-users"/></svg></span></a>
+        <a href="#strip"><span class="chip"><svg class="i"><use href="#i-user"/></svg></span></a>
+      </div>
+    </div>
+
+    <!-- vazios e carregando -->
+    <div class="phone">
+      <div class="body" style="padding-bottom:120px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
+          <div style="width:64px;height:64px;border-radius:16px;background:var(--brand-accent);color:var(--brand-on-accent);display:grid;place-items:center;font-weight:700;font-size:22px">TD</div>
+          <h1 class="t24b" style="margin:0">Bem-vindo(a) à TRIA Demo</h1>
+        </div>
+        <div class="card" style="margin:0 16px">
+          <div class="empty">
+            <div class="circle"><svg class="i i-28"><use href="#i-sparkles"/></svg></div>
+            <h3>Nada por aqui ainda</h3>
+            <p>Publique a primeira novidade de TRIA Demo.</p>
+          </div>
+        </div>
+        <p class="t12 ter" style="padding:16px;margin:0">UI-D-26 — vazio do <strong>membro</strong>: nenhum nó, nenhuma altura reservada, nenhum texto. A coluna fecha e o feed sobe. A régua nunca é o motivo de <code>/inicio</code> mostrar um erro: uma leitura que falha também renderiza nada.</p>
+        <div class="rule" style="margin:0 16px"></div>
+        <p class="t12 ter" style="padding:16px 16px 8px;margin:0">UI-D-26 — vazio do <strong>admin</strong>: o círculo sozinho, porque ele é a única porta de publicação (D-80).</p>
+        <div class="strip" role="list" aria-label="Stories">
+          <span class="strip-item" role="listitem"><a href="#publicar" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="thumb64"><svg class="i i-28"><use href="#i-user"/></svg><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></span></a><span class="label">Seu story</span></span>
+        </div>
+        <div class="rule" style="margin:8px 16px"></div>
+        <p class="t12 ter" style="padding:8px 16px;margin:0">Carregando — três círculos de 64px e barras de rótulo de 12px na geometria real, para o feed abaixo não pular na troca.</p>
+        <div class="strip" aria-hidden="true">
+          <span class="strip-item"><span class="skel" style="width:68px;height:68px;border-radius:999px"></span><span class="skel" style="width:40px;height:12px;border-radius:999px"></span></span>
+          <span class="strip-item"><span class="skel" style="width:68px;height:68px;border-radius:999px"></span><span class="skel" style="width:40px;height:12px;border-radius:999px"></span></span>
+          <span class="strip-item"><span class="skel" style="width:68px;height:68px;border-radius:999px"></span><span class="skel" style="width:40px;height:12px;border-radius:999px"></span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- desktop -->
+    <div class="desk">
+      <div class="column">
+        <p class="t12 ter" style="margin:0 0 12px">UI-D-47 — desktop: geometria idêntica dentro da coluna de 680px. Sem setas, sem máscara de fade, sem grade. Cabem ~8 círculos; além disso a linha rola na horizontal.</p>
+        <div class="strip" role="list" aria-label="Stories" style="background:var(--theme-bg);border-radius:12px">
+          <span class="strip-item" role="listitem"><a href="#publicar" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="thumb64"><svg class="i i-28"><use href="#i-user"/></svg><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></span></a><span class="label">Seu story</span></span>
+          <span class="strip-item" role="listitem"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span><span class="label">há 2 h</span></span>
+          <span class="strip-item" role="listitem"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-video"/></svg></span></span><span class="label">há 6 h</span></span>
+          <span class="strip-item" role="listitem"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span><span class="label">há 11 h</span></span>
+          <span class="strip-item" role="listitem"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span><span class="label">há 18 h</span></span>
+          <span class="strip-item" role="listitem"><span class="ring"><span class="thumb64"><svg class="i i-28"><use href="#i-video"/></svg></span></span><span class="label">há 23 h</span></span>
+        </div>
+        <p class="t12 ter" style="margin:24px 0 8px">Os mesmos 64×64 na página de uma comunidade, com o anel <strong>neutro</strong> (UI-D-27) — a régua é <em>ao vivo</em>, Destaques é o arquivo editorial da comunidade. <strong>D-68: agora estes círculos abrem o visualizador</strong>; no protótipo eles não abriam nada.</p>
+        <div class="card" style="overflow:hidden">
+          <div class="cover-h36 cover-fallback">
+            <span class="back-on-media" aria-label="Voltar para comunidades"><svg class="i i-20"><use href="#i-chev-l"/></svg></span>
+          </div>
+          <div style="padding:0 16px 16px">
+            <h2 class="t24b" style="margin:16px 0 0">Avisos da diretoria</h2>
+            <p class="t14 sec" style="margin:8px 0 0;line-height:1.6">Comunicados oficiais, atas e convocações. Publicado só pela diretoria.</p>
+          </div>
+          <div class="section-title">Destaques</div>
+          <div class="strip" role="list" aria-label="Destaques">
+            <span class="strip-item" role="listitem"><span class="ring neutral"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span><span class="label">12 mar</span></span>
+            <span class="strip-item" role="listitem"><span class="ring neutral"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span><span class="label">4 mar</span></span>
+            <span class="strip-item" role="listitem"><span class="ring neutral"><span class="thumb64"><svg class="i i-28"><use href="#i-video"/></svg></span></span><span class="label">27 fev</span></span>
+          </div>
+          <div class="rule"></div>
+          <div style="padding:16px;color:var(--theme-text-tertiary)" class="t12">As publicações da comunidade seguem abaixo, em cartões idênticos aos do feed.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">Ordem final de <code>/inicio</code>, de cima para baixo (UI-D-25 / A-7): bloco de boas-vindas → aviso de perfil → <strong>régua de stories</strong> → feed. O aviso fica primeiro porque é a única coisa que expira por ação do próprio membro; a régua fica acima do feed porque é a coisa mais datada da tela — some em 24 h.</p>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 2 — O VISUALIZADOR DE STORY
+     ===================================================================================== -->
+<section id="viewer" class="screen">
+  <header><h2>Superfície 2 — o visualizador de story</h2><code>StoryViewer · /stories/[storyId] · [designed] · UI-D-30..UI-D-34</code>
+    <p>Preto de borda a borda, mídia <code>object-contain</code> (nunca recortada) sobre o véu de dois estágios do protótipo. As trilhas de progresso são segmentos <code>h-0.5</code> (2px) de <code>bg-white/35</code> com o ativo preenchido em branco. Esta é <strong>a única tela do produto sem nenhum elemento da marca</strong>: aqui o conteúdo do tenant é a marca. A curtida é um botão explícito de 44×44 na linha de ações — <strong>o visualizador não tem gesto de curtir por batida dupla</strong> (UI-D-31): um toque avança o story, então a primeira batida já teria pulado o story. Não existe controle de envio/partilha nesta fase (UI-D-32).</p>
+  </header>
+  <div class="frames">
+
+    <!-- populado -->
+    <div class="phone">
+      <div class="viewer">
+        <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+        <span class="veil" aria-hidden="true"></span>
+        <div class="bars" aria-hidden="true">
+          <span><i style="width:100%"></i></span>
+          <span><i style="width:100%"></i></span>
+          <span><i style="width:38%"></i></span>
+          <span><i style="width:0"></i></span>
+          <span><i style="width:0"></i></span>
+        </div>
+        <div class="vhead">
+          <span class="avatar" style="background:rgba(255,255,255,0.2);color:#fff"><svg class="i i-20"><use href="#i-user"/></svg></span>
+          <span class="who"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 6 h</span></span>
+          <button class="v-icon scrim" type="button" aria-label="Ativar som"><svg class="i i-20"><use href="#i-mute"/></svg></button>
+          <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="vbottom">
+          <p class="vcap" style="margin:0">A assembleia de terça mudou para o auditório B. Quem já confirmou não precisa fazer nada — é o mesmo horário, só o andar muda.</p>
+          <div class="vacts">
+            <button class="v-icon" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-20"><use href="#i-heart"/></svg></button>
+            <span class="cnt">12 curtidas</span>
+            <button class="v-icon" type="button" aria-label="Comentar"><svg class="i i-20"><use href="#i-chat"/></svg></button>
+            <span class="cnt">3 comentários</span>
+          </div>
+        </div>
+      </div>
+      <p class="caption" style="position:absolute"></p>
+    </div>
+
+    <!-- curtido + vídeo com som ligado -->
+    <div class="phone">
+      <div class="viewer">
+        <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-video"/></svg></span></div>
+        <span class="veil" aria-hidden="true"></span>
+        <div class="bars" aria-hidden="true">
+          <span><i style="width:100%"></i></span>
+          <span><i style="width:72%"></i></span>
+          <span><i style="width:0"></i></span>
+        </div>
+        <div class="vhead">
+          <span class="avatar" style="background:rgba(255,255,255,0.2);color:#fff"><svg class="i i-20"><use href="#i-user"/></svg></span>
+          <span class="who"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 2 h</span></span>
+          <button class="v-icon scrim" type="button" aria-label="Silenciar"><svg class="i i-20"><use href="#i-sound"/></svg></button>
+          <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="vbottom">
+          <div class="vacts" style="margin-top:0">
+            <button class="v-icon liked" type="button" aria-label="Descurtir" aria-pressed="true"><svg class="i i-20"><use href="#i-heart"/></svg></button>
+            <span class="cnt">13 curtidas</span>
+            <button class="v-icon" type="button" aria-label="Comentar"><svg class="i i-20"><use href="#i-chat"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- zonas de toque (anotação de revisão) -->
+    <div class="phone">
+      <div class="viewer">
+        <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+        <span class="veil" aria-hidden="true"></span>
+        <div class="bars" aria-hidden="true">
+          <span><i style="width:100%"></i></span><span><i style="width:44%"></i></span><span><i style="width:0"></i></span>
+        </div>
+        <div class="tapzones" aria-hidden="true">
+          <span class="prev">Toque no terço da esquerda<br>Story anterior</span>
+          <span class="next">Toque nos dois terços da direita<br>Próximo story</span>
+        </div>
+        <div class="vbottom" style="bottom:calc(var(--safe-bottom) + 8px);z-index:6">
+          <p class="t12" style="margin:0;color:rgba(255,255,255,0.92);line-height:1.6">Segurar em qualquer ponto pausa o relógio e o vídeo. Arrastar na horizontal troca de story; arrastar <strong>para baixo</strong> dispensa. Ambos no mesmo limiar de 60px do protótipo, com a mesma borracha de 0,35. Um toque é um <code>pointerup</code> dentro de 200 ms e 10px; mais que isso é segurar.</p>
+        </div>
+      </div>
+      <p class="caption">Camada só de revisão: no produto não há retângulo nem legenda — só a mídia.</p>
+    </div>
+
+    <!-- autoplay bloqueado + erro de mídia -->
+    <div class="phone">
+      <div class="viewer">
+        <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-video"/></svg></span></div>
+        <span class="veil" aria-hidden="true"></span>
+        <div class="bars" aria-hidden="true"><span><i style="width:0"></i></span><span><i style="width:0"></i></span></div>
+        <div class="vhead">
+          <span class="avatar" style="background:rgba(255,255,255,0.2);color:#fff"><svg class="i i-20"><use href="#i-user"/></svg></span>
+          <span class="who"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 20 h</span></span>
+          <button class="v-icon scrim" type="button" aria-label="Ativar som"><svg class="i i-20"><use href="#i-mute"/></svg></button>
+          <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+        </div>
+        <span class="autoplay-badge" role="img" aria-label="Reproduzir"><svg class="i" viewBox="0 0 24 24"><use href="#i-play"/></svg></span>
+      </div>
+      <p class="caption">UI-D-34 — o vídeo começa mudo e <code>playsInline</code>. Se 400 ms depois de <code>canplay</code> a reprodução não começou (modo de baixo consumo do iOS), o relógio <strong>fica parado</strong> e o selo de 56px aparece. Um toque começa os dois. A barra jamais enche sozinha sobre um vídeo parado.</p>
+    </div>
+
+    <div class="phone">
+      <div class="viewer">
+        <span class="veil" aria-hidden="true"></span>
+        <div class="bars" aria-hidden="true"><span><i style="width:100%"></i></span><span><i style="width:18%"></i></span><span><i style="width:0"></i></span></div>
+        <div class="vhead">
+          <span class="who"></span>
+          <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+        </div>
+        <div class="verr">
+          <p class="t14" style="margin:0">Não foi possível carregar este story.</p>
+          <a href="#viewer">Tentar novamente</a>
+        </div>
+      </div>
+      <p class="caption">Erro de mídia — o relógio fica pausado no segmento atual (a posição nunca desliza sob o dedo), o fechar continua alcançável e a sequência não avança sozinha.</p>
+    </div>
+  </div>
+
+  <div class="frames" style="margin-top:24px">
+    <div class="phone narrow short">
+      <div class="viewer">
+        <div class="media"><span class="frame" style="width:86%"><svg class="i i-28"><use href="#i-image"/></svg></span></div>
+        <span class="veil" aria-hidden="true"></span>
+        <div class="bars" aria-hidden="true">
+          <span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span>
+          <span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span>
+          <span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:56%"></i></span>
+          <span><i style="width:0"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span>
+          <span><i style="width:0"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span>
+          <span><i style="width:0"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span>
+          <span><i style="width:0"></i></span>
+        </div>
+        <div class="vbottom">
+          <p class="t12" style="margin:0;color:rgba(255,255,255,0.92)">25 stories numa tela de 320px: cada segmento continua com mais de 2px e a linha não quebra.</p>
+        </div>
+      </div>
+      <p class="caption">Transbordo (E03/E04) — a contagem de segmentos é <code>stories.length</code> por construção: as barras e o pager saem do mesmo array, então os comprimentos não podem discordar. O array fica <strong>congelado</strong> pela sessão de visualização: um story que expira no meio toca o próprio segmento até o fim e só some da <em>próxima</em> leitura da régua.</p>
+    </div>
+    <div class="note" style="max-width:520px">
+      <p style="margin:0 0 8px"><strong>Relógio.</strong> Um único laço de <code>requestAnimationFrame</code> para a sequência inteira. Imagem: <code>STORY_DURATION_MS = 5000</code> — a constante do próprio time de design, que o protótipo declara e nunca usa. Vídeo: a duração do próprio arquivo, guiada por <code>timeupdate</code>, nunca um temporizador fixo.</p>
+      <p style="margin:0 0 8px"><strong>Pausa.</strong> Um só booleano alimentado por três fontes: segurar, a folha de comentários aberta, e a aba ir para segundo plano. Levar o app para trás nunca queima um story.</p>
+      <p style="margin:0 0 8px"><strong>Limites.</strong> "Próximo" no último story <strong>fecha</strong> o visualizador — nunca repete em laço (D-78: um único publicador em laço prenderia o membro nos mesmos três stories). "Anterior" no primeiro reinicia o relógio do story atual.</p>
+      <p style="margin:0"><strong>Movimento reduzido.</strong> A transição do pager vira troca instantânea e o pulso da curtida some. <strong>O relógio continua</strong>: ele é ritmo de conteúdo, não decoração — tirá-lo deixaria o visualizador inutilizável.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 3 — PUBLICAR STORY
+     ===================================================================================== -->
+<section id="publicar" class="screen">
+  <header><h2>Superfície 3 — publicar um story</h2><code>/stories/publicar · [designed] · UI-D-39, D-81</code>
+    <p>Dois estados numa rota de tela cheia. <strong>Antes da escolha</strong> a tela é neutra: não há nada para enquadrar ainda. <strong>Depois da escolha</strong> a tela fica preta e vira uma prévia viva do story — a mesma moldura que o membro vai ver — com a legenda como campo transparente sobreposto. É isso que impede um story cortado ou ilegível. Um story <strong>não é editável depois de publicado</strong> (D-81): a legenda é parte do passo de publicar.</p>
+  </header>
+  <div class="frames">
+
+    <!-- pré-escolha -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Novo story</h1>
+          <a class="text-action" href="#fixar">Seus stories</a>
+        </div>
+        <div class="form-body">
+          <div class="stack" style="gap:8px">
+            <button class="picker-row" type="button"><span class="lead"><svg class="i i-20"><use href="#i-image"/></svg></span><span class="t14b">Escolher foto</span></button>
+            <button class="picker-row" type="button"><span class="lead"><svg class="i i-20"><use href="#i-video"/></svg></span><span class="t14b">Escolher vídeo</span></button>
+            <p class="helper" style="margin:0">Vídeo de até 60 s.</p>
+          </div>
+        </div>
+      </div>
+      <p class="caption" style="position:absolute"></p>
+    </div>
+
+    <!-- pré-escolha com erro -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Novo story</h1>
+          <a class="text-action" href="#fixar">Seus stories</a>
+        </div>
+        <div class="form-body">
+          <div class="alert" role="alert"><svg class="i i-20"><use href="#i-alert"/></svg><span>Escolha uma foto ou um vídeo para publicar.</span></div>
+          <div class="stack" style="gap:8px">
+            <button class="picker-row" type="button"><span class="lead"><svg class="i i-20"><use href="#i-image"/></svg></span><span class="t14b">Escolher foto</span></button>
+            <button class="picker-row" type="button"><span class="lead"><svg class="i i-20"><use href="#i-video"/></svg></span><span class="t14b">Escolher vídeo</span></button>
+            <p class="helper" style="margin:0">Vídeo de até 60 s.</p>
+          </div>
+          <div>
+            <p class="t12 ter" style="margin:0 0 8px">Envio em curso — a máquina de upload da Fase 3, verbatim: barra de 4px da marca, percentual 12/400 terciário com <code>tabular-nums</code> e o cancelar fantasma.</p>
+            <div class="progress"><i style="width:62%"></i></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+              <span class="t12 ter num" aria-live="polite">62% enviado</span>
+              <button class="btn ghost sm" type="button">Cancelar envio</button>
+            </div>
+          </div>
+          <div>
+            <p class="t12 ter" style="margin:0 0 8px">Vídeo em processamento — publicar já é permitido; a janela de 24 h começa no momento de publicar, não quando termina o processamento, e a nota diz isso em vez de perder vida do story em silêncio.</p>
+            <div class="picker-row" style="align-items:flex-start">
+              <span class="lead"><svg class="i i-20"><use href="#i-loader"/></svg></span>
+              <span style="min-width:0"><span class="t14b" style="display:block">Processando o vídeo…</span><span class="t12 ter" style="display:block">Seu story aparece no início assim que o vídeo terminar de processar.</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- pós-escolha, preto -->
+    <div class="phone">
+      <div class="black-screen">
+        <div style="position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,0.35)"><span style="width:78%;aspect-ratio:9/16;background:#1b1f2b;display:grid;place-items:center;object-fit:contain"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+        <span style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg, rgba(0,0,0,0.5), transparent 22%, transparent 52%, rgba(0,0,0,0.72))"></span>
+        <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
+        <div class="cap-overlay">
+          <textarea aria-label="Legenda" placeholder="Escreva uma legenda (opcional)…"></textarea>
+          <div class="cap-counter">0/300</div>
+        </div>
+        <span class="btn brand publish-cta">Publicar</span>
+      </div>
+      <p class="caption">Pós-escolha — a tela fica preta e vira a moldura do visualizador. O "Publicar" é o único preenchimento da marca na tela.</p>
+    </div>
+
+    <div class="phone">
+      <div class="black-screen">
+        <div style="position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,0.35)"><span style="width:78%;aspect-ratio:9/16;background:#1b1f2b;display:grid;place-items:center;object-fit:contain"><svg class="i i-40"><use href="#i-video"/></svg></span></div>
+        <span style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg, rgba(0,0,0,0.5), transparent 22%, transparent 52%, rgba(0,0,0,0.72))"></span>
+        <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
+        <div class="cap-overlay">
+          <textarea aria-label="Legenda">Trecho do coral no encerramento. O vídeo completo entra no feed amanhã.</textarea>
+          <div class="cap-counter">71/300</div>
+        </div>
+        <span class="btn brand publish-cta" aria-busy="true">Publicando…</span>
+      </div>
+      <p class="caption">Legenda escrita, publicação em curso. O contador é 12 branco/70; o campo não tem moldura própria — a mídia é o fundo.</p>
+    </div>
+
+    <!-- desktop + descarte -->
+    <div class="desk">
+      <div class="column">
+        <div class="page-header" style="border-radius:12px 12px 0 0">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Novo story</h1>
+          <a class="text-action" href="#fixar">Seus stories</a>
+        </div>
+        <div class="form-body" style="padding:24px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div class="dropzone"><svg class="i i-40"><use href="#i-image"/></svg><span class="t14b" style="color:var(--theme-text)">Escolher foto</span></div>
+            <div class="dropzone"><svg class="i i-40"><use href="#i-video"/></svg><span class="t14b" style="color:var(--theme-text)">Escolher vídeo</span></div>
+          </div>
+          <p class="helper" style="margin:0">Vídeo de até 60 s.</p>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:24px">
+          <div class="dialog" role="dialog" aria-label="Descartar story?">
+            <h3 class="t16b" style="margin:0">Descartar story?</h3>
+            <p class="t14 sec" style="margin:0">A mídia escolhida será perdida.</p>
+            <div class="row"><button class="btn outline sm" type="button">Continuar editando</button><button class="btn ghost danger sm" type="button">Descartar</button></div>
+          </div>
+          <p class="t12 ter" style="margin:0;max-width:280px">No desktop os dois seletores viram <code>FileDropZone</code>; nada muda de tipografia nem de espaçamento. O descarte usa o <code>ConfirmDialog</code> já existente.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 4 — FORMULÁRIO DE COMUNIDADE
+     ===================================================================================== -->
+<section id="comunidade-form" class="screen">
+  <header><h2>Superfície 4 — criar, editar e arquivar uma comunidade</h2><code>/comunidades/nova · /comunidades/[communityId]/editar · [designed] · UI-D-38, D-69</code>
+    <p>O chrome do composer, reutilizado: <code>PageHeader</code> fixo com o fechar 44×44, o título e o enviar da marca no fim. Corpo com <code>gap-6</code>. O seletor de capa fica no topo e <strong>pré-visualiza o bloco <code>--brand-gradient</code> enquanto está vazio</strong> — o admin vê exatamente o que o membro verá, o que transforma "sem capa" de consolação em escolha (D-69 / UI-D-35). Arquivar é uma linha fantasma em <code>text-danger</code> no fim <strong>só do formulário de edição</strong>.</p>
+  </header>
+  <div class="frames">
+
+    <!-- nova, vazia -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova comunidade</h1>
+          <span class="btn brand sm" aria-disabled="true">Criar comunidade</span>
+        </div>
+        <div class="form-body">
+          <div>
+            <div class="field-label">Capa</div>
+            <div class="cover-16-7 cover-fallback">
+              <span class="t12b" style="opacity:0.9">Prévia da capa padrão</span>
+            </div>
+            <button class="picker-row" type="button" style="margin-top:8px"><span class="lead"><svg class="i i-20"><use href="#i-image"/></svg></span><span class="t14b">Adicionar capa</span></button>
+            <p class="helper" style="margin-top:8px">A capa é opcional. Sem ela, usamos as cores de TRIA Demo.</p>
+          </div>
+          <div>
+            <div class="field-label">Nome</div>
+            <input class="input focused" placeholder="Ex.: Avisos da diretoria" aria-label="Nome">
+            <div class="counter">0/60</div>
+          </div>
+          <div>
+            <div class="field-label">Descrição</div>
+            <textarea class="input" placeholder="Explique em uma frase do que trata esta comunidade." aria-label="Descrição"></textarea>
+            <div class="counter">0/160</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- nova, preenchida + no limite + erro de nome -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova comunidade</h1>
+          <span class="btn brand sm" aria-busy="true">Criando…</span>
+        </div>
+        <div class="form-body">
+          <div>
+            <div class="field-label">Capa</div>
+            <div class="cover-16-7 cover-photo"><svg class="i i-40"><use href="#i-image"/></svg></div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn outline sm" type="button">Trocar capa</button>
+              <button class="btn ghost sm" type="button">Remover capa</button>
+            </div>
+            <div class="progress"><i style="width:84%"></i></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+              <span class="t12 ter num" aria-live="polite">84% enviado</span>
+              <button class="btn ghost sm" type="button">Cancelar envio</button>
+            </div>
+          </div>
+          <div>
+            <div class="field-label">Nome</div>
+            <input class="input" value="Avisos da diretoria e comunicados oficiais do conselho" aria-label="Nome">
+            <div class="counter dgr">60/60</div>
+          </div>
+          <div>
+            <div class="field-label">Descrição</div>
+            <textarea class="input" aria-label="Descrição">Comunicados oficiais, atas e convocações. Publicado só pela diretoria.</textarea>
+            <div class="counter">69/160</div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Contador no limite em <code>text-danger</code> 12/400; a capa enviada usa a mesma máquina de upload da Fase 3, dentro do seletor.</p>
+    </div>
+
+    <!-- editar + arquivar -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Editar comunidade</h1>
+          <span class="btn brand sm">Salvar alterações</span>
+        </div>
+        <div class="form-body">
+          <div class="alert" role="alert"><svg class="i i-20"><use href="#i-alert"/></svg><span>Dê um nome para a comunidade.</span></div>
+          <div>
+            <div class="field-label">Capa</div>
+            <div class="cover-16-7 cover-fallback"><span class="t12b" style="opacity:0.9">Prévia da capa padrão</span></div>
+            <button class="picker-row" type="button" style="margin-top:8px"><span class="lead"><svg class="i i-20"><use href="#i-image"/></svg></span><span class="t14b">Adicionar capa</span></button>
+            <p class="helper" style="margin-top:8px">A capa é opcional. Sem ela, usamos as cores de TRIA Demo.</p>
+          </div>
+          <div>
+            <div class="field-label">Nome</div>
+            <input class="input" value="" aria-label="Nome" style="border-color:var(--color-danger)">
+            <div class="counter dgr">0/60</div>
+          </div>
+          <div>
+            <div class="field-label">Descrição</div>
+            <textarea class="input" aria-label="Descrição">Fotos, bastidores e o calendário do coral.</textarea>
+            <div class="counter">42/160</div>
+          </div>
+          <div class="rule"></div>
+          <button class="btn ghost danger" type="button" style="justify-content:flex-start;padding:0;height:44px"><svg class="i i-20"><use href="#i-archive"/></svg>Arquivar comunidade</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- diálogo de arquivar + comunidade arquivada -->
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="dialog" role="dialog" aria-label="Arquivar comunidade?">
+        <h3 class="t16b" style="margin:0">Arquivar comunidade?</h3>
+        <p class="t14 sec" style="margin:0">Ela sai da lista e ninguém mais publica nela. As publicações continuam no feed.</p>
+        <div class="row"><button class="btn outline sm" type="button">Cancelar</button><button class="btn ghost danger sm" type="button">Arquivar</button></div>
+      </div>
+      <div class="dialog" role="dialog" aria-label="Descartar comunidade?">
+        <h3 class="t16b" style="margin:0">Descartar comunidade?</h3>
+        <p class="t14 sec" style="margin:0">As informações preenchidas serão perdidas.</p>
+        <div class="row"><button class="btn outline sm" type="button">Continuar editando</button><button class="btn ghost danger sm" type="button">Descartar</button></div>
+      </div>
+      <p class="t12 ter" style="margin:0;max-width:320px">Nenhum diálogo usa preenchimento da marca: a ação destrutiva é fantasma em <code>--color-danger</code> e o cancelar é <code>outline</code>.</p>
+    </div>
+
+    <div class="phone">
+      <div class="body" style="padding-bottom:120px">
+        <div class="cover-h36 cover-photo" style="color:var(--theme-text-tertiary)">
+          <svg class="i i-40"><use href="#i-image"/></svg>
+          <span class="back-on-media" aria-label="Voltar para comunidades"><svg class="i i-20"><use href="#i-chev-l"/></svg></span>
+        </div>
+        <div style="padding:0 16px 16px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:16px">
+            <h2 class="t24b" style="margin:0">Coral TRIA</h2>
+            <span class="pill">Arquivada</span>
+          </div>
+          <p class="t14 sec" style="margin:8px 0 0;line-height:1.6">Fotos, bastidores e o calendário do coral.</p>
+          <p class="t14 sec" style="margin:8px 0 0">Esta comunidade foi arquivada. Você ainda pode ler as publicações.</p>
+        </div>
+        <div class="section-title">Destaques</div>
+        <div class="strip" role="list" aria-label="Destaques">
+          <span class="strip-item" role="listitem"><span class="ring neutral"><span class="thumb64"><svg class="i i-28"><use href="#i-image"/></svg></span></span><span class="label">18 fev</span></span>
+          <span class="strip-item" role="listitem"><span class="ring neutral"><span class="thumb64"><svg class="i i-28"><use href="#i-video"/></svg></span></span><span class="label">3 fev</span></span>
+        </div>
+        <div class="rule"></div>
+        <div class="card" style="margin:16px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;min-width:0">
+            <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+            <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 3 d</span></span>
+          </div>
+          <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
+        </div>
+      </div>
+      <div class="bottomnav">
+        <a href="#comunidade-form"><span class="chip"><svg class="i"><use href="#i-home"/></svg></span></a>
+        <a href="#comunidade-form" aria-current="page"><span class="chip"><svg class="i"><use href="#i-users"/></svg></span></a>
+        <a href="#comunidade-form"><span class="chip"><svg class="i"><use href="#i-user"/></svg></span></a>
+      </div>
+      <p class="caption">Arquivada e somente leitura (UI-D-37): a pílula neutra ao lado do nome, a nota em linha, <strong>sem FAB</strong> e sem CTA de publicar no desktop. Destaques e publicações renderizam normalmente — um link partilhado e uma publicação no feed não podem quebrar porque a comunidade foi arquivada.</p>
+    </div>
+
+    <!-- desktop do formulário -->
+    <div class="desk">
+      <div class="column">
+        <div class="page-header" style="border-radius:12px 12px 0 0">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Nova comunidade</h1>
+          <span class="btn brand sm">Criar comunidade</span>
+        </div>
+        <div class="form-body" style="padding:24px;gap:32px">
+          <div>
+            <div class="field-label">Capa</div>
+            <div class="dropzone" style="padding:0;overflow:hidden">
+              <div class="cover-16-7 cover-fallback" style="width:100%;border-radius:0">
+                <span style="display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--brand-on-accent)"><svg class="i i-40"><use href="#i-image"/></svg><span class="t14b">Adicionar capa</span></span>
+              </div>
+            </div>
+            <p class="helper" style="margin-top:8px">A capa é opcional. Sem ela, usamos as cores de TRIA Demo.</p>
+          </div>
+          <div>
+            <div class="field-label">Nome</div>
+            <input class="input" value="Avisos da diretoria" aria-label="Nome">
+            <div class="counter">19/60</div>
+          </div>
+          <div>
+            <div class="field-label">Descrição</div>
+            <textarea class="input" aria-label="Descrição">Comunicados oficiais, atas e convocações. Publicado só pela diretoria.</textarea>
+            <div class="counter">69/160</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">A capa ausente é o <strong>único bloco preenchido com a marca de toda a fase</strong>, permitido porque substitui uma fotografia e nunca um cartão. Ele carrega só a tinta <code>--brand-on-primary</code> que a Fase 2 já persiste acima de 4,5:1 — nunca <code>text-white</code> cru.</p>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 5 — "SEUS STORIES" E O FLUXO DE FIXAR
+     ===================================================================================== -->
+<section id="fixar" class="screen">
+  <header><h2>Superfície 5 — "Seus stories" e fixar em comunidades</h2><code>/stories/meus · PinStorySheet · [designed] · UI-D-40, UI-D-41, D-84</code>
+    <p>Uma <strong>lista de linhas, não uma grade</strong>: uma grade de recortes 9:16 esconderia exatamente as duas coisas para as quais esta tela existe — as contagens e o estado de fixado — e não teria onde pôr a pílula de <code>Processando</code>/<code>Recusado</code>. Cada linha tem no mínimo 56px, miniatura de 48×64, legenda truncada (ou "Sem legenda"), meta terciária com <code>tabular-nums</code> e o indicador de fixado no fim. A folha de fixar tem um <code>Switch</code> por comunidade e <strong>nenhum botão "Salvar"</strong>: cada fixação é um fato independente, não um formulário.</p>
+  </header>
+  <div class="frames">
+
+    <!-- lista -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Seus stories</h1>
+        </div>
+        <button class="hist-row" type="button">
+          <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+          <span class="body">
+            <span class="t14 trunc" style="display:block">A assembleia de terça mudou para o auditório B.</span>
+            <span class="t12 ter num" style="display:block">12 mar <span aria-hidden="true">·</span> 12 curtidas <span aria-hidden="true">·</span> 3 comentários</span>
+          </span>
+          <span class="pinmeta"><svg class="i i-16"><use href="#i-pin"/></svg>2</span>
+        </button>
+        <button class="hist-row" type="button">
+          <span class="thumb"><svg class="i i-20"><use href="#i-video"/></svg></span>
+          <span class="body">
+            <span class="t14 trunc" style="display:block">Trecho do coral no encerramento.</span>
+            <span class="t12 ter num" style="display:block">11 mar <span aria-hidden="true">·</span> 31 curtidas <span aria-hidden="true">·</span> 8 comentários</span>
+            <span class="t12 ter" style="display:block">Seu story aparece no início assim que o vídeo terminar de processar.</span>
+          </span>
+          <span class="pill warning">Processando</span>
+        </button>
+        <button class="hist-row" type="button">
+          <span class="thumb"><svg class="i i-20"><use href="#i-video"/></svg></span>
+          <span class="body">
+            <span class="t14 trunc ter" style="display:block">Sem legenda</span>
+            <span class="t12 ter num" style="display:block">9 mar <span aria-hidden="true">·</span> 0 curtidas <span aria-hidden="true">·</span> 0 comentários</span>
+          </span>
+          <span class="pill danger">Recusado</span>
+        </button>
+        <button class="hist-row" type="button">
+          <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+          <span class="body">
+            <span class="t14 trunc" style="display:block">Sem legenda</span>
+            <span class="t12 ter num" style="display:block">8 mar <span aria-hidden="true">·</span> 5 curtidas <span aria-hidden="true">·</span> 1 comentário</span>
+          </span>
+          <span class="pinmeta"><svg class="i i-16"><use href="#i-pin"/></svg>1</span>
+        </button>
+        <button class="hist-row" type="button">
+          <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+          <span class="body">
+            <span class="t14 trunc" style="display:block">Prestação de contas do trimestre já está publicada no feed, com a ata em PDF anexada.</span>
+            <span class="t12 ter num" style="display:block">6 mar <span aria-hidden="true">·</span> 22 curtidas <span aria-hidden="true">·</span> 4 comentários</span>
+          </span>
+        </button>
+      </div>
+      <p class="caption" style="position:absolute"></p>
+    </div>
+
+    <!-- menu da linha -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Seus stories</h1>
+        </div>
+        <button class="hist-row" type="button">
+          <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+          <span class="body">
+            <span class="t14 trunc" style="display:block">A assembleia de terça mudou para o auditório B.</span>
+            <span class="t12 ter num" style="display:block">12 mar <span aria-hidden="true">·</span> 12 curtidas <span aria-hidden="true">·</span> 3 comentários</span>
+          </span>
+          <span class="pinmeta"><svg class="i i-16"><use href="#i-pin"/></svg>2</span>
+        </button>
+        <button class="hist-row" type="button">
+          <span class="thumb"><svg class="i i-20"><use href="#i-video"/></svg></span>
+          <span class="body">
+            <span class="t14 trunc ter" style="display:block">Sem legenda</span>
+            <span class="t12 ter num" style="display:block">9 mar <span aria-hidden="true">·</span> 7 curtidas <span aria-hidden="true">·</span> 2 comentários</span>
+          </span>
+        </button>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet-menu" role="dialog" aria-label="Opções do story">
+        <div class="handle"></div>
+        <button class="sheet-row" type="button"><svg class="i i-20 ter"><use href="#i-pin"/></svg>Fixar em comunidades</button>
+        <button class="sheet-row" type="button"><svg class="i i-20 ter"><use href="#i-eye"/></svg>Ver story</button>
+        <button class="sheet-row danger" type="button"><svg class="i i-20"><use href="#i-trash"/></svg>Excluir story</button>
+      </div>
+      <p class="caption" style="position:absolute"></p>
+    </div>
+
+    <!-- folha de fixar -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Seus stories</h1>
+        </div>
+        <button class="hist-row" type="button">
+          <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+          <span class="body">
+            <span class="t14 trunc" style="display:block">A assembleia de terça mudou para o auditório B.</span>
+            <span class="t12 ter num" style="display:block">12 mar <span aria-hidden="true">·</span> 12 curtidas <span aria-hidden="true">·</span> 3 comentários</span>
+          </span>
+        </button>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet-menu" role="dialog" aria-label="Fixar em comunidades">
+        <div class="handle"></div>
+        <h3>Fixar em comunidades</h3>
+        <p class="t14 sec" style="margin:4px 0 8px;padding:0 16px">Um story fixado continua visível na comunidade depois das 24 h.</p>
+        <div class="pin-row"><span class="cthumb"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="t14 trunc" style="flex:1">Avisos da diretoria</span><span class="switch" role="switch" aria-checked="true" aria-label="Fixar em Avisos da diretoria"></span></div>
+        <div class="pin-row"><span class="cthumb grad"></span><span class="t14 trunc" style="flex:1">Coral TRIA</span><span class="switch" role="switch" aria-checked="true" aria-label="Fixar em Coral TRIA"></span></div>
+        <div class="pin-row"><span class="cthumb"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="t14 trunc" style="flex:1">Voluntariado</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Voluntariado"></span></div>
+        <div class="pin-row"><span class="cthumb grad"></span><span class="t14 trunc" style="flex:1">Biblioteca</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Biblioteca"></span></div>
+      </div>
+      <p class="caption" style="position:absolute"></p>
+    </div>
+
+    <!-- vazios + confirmação -->
+    <div class="phone">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Seus stories</h1>
+        </div>
+        <div class="empty">
+          <div class="circle"><svg class="i i-28"><use href="#i-sparkles"/></svg></div>
+          <h3>Nenhum story ainda</h3>
+          <p>Publique seu primeiro story para ele aparecer no topo do início.</p>
+          <a class="btn brand" href="#publicar">Publicar story</a>
+        </div>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet-menu" role="dialog" aria-label="Fixar em comunidades">
+        <div class="handle"></div>
+        <h3>Fixar em comunidades</h3>
+        <p class="t14 sec" style="margin:4px 0 8px;padding:0 16px">Um story fixado continua visível na comunidade depois das 24 h.</p>
+        <div class="empty" style="padding:32px 24px">
+          <div class="circle"><svg class="i i-28"><use href="#i-users"/></svg></div>
+          <p>Nenhuma comunidade ainda.</p>
+          <a class="t14b" href="#comunidade-form" style="color:var(--brand-accent)">Criar comunidade</a>
+        </div>
+      </div>
+      <p class="caption" style="position:absolute"></p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="dialog" role="dialog" aria-label="Excluir story?">
+        <h3 class="t16b" style="margin:0">Excluir story?</h3>
+        <p class="t14 sec" style="margin:0">Ele sai do início e das comunidades onde está fixado.</p>
+        <div class="row"><button class="btn outline sm" type="button">Cancelar</button><button class="btn ghost danger sm" type="button">Excluir</button></div>
+      </div>
+      <p class="t12 ter" style="margin:0;max-width:320px">Uma fixação que falha no servidor <strong>reverte o <code>Switch</code></strong> e dispara o toast genérico de erro; a linha continua no lugar, sem mensagem em linha e sem fechar a folha, para o admin tentar de novo ali mesmo.</p>
+    </div>
+  </div>
+
+  <div class="frames" style="margin-top:24px">
+    <div class="phone narrow">
+      <div class="body">
+        <div class="page-header">
+          <button class="icon-btn" type="button" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></button>
+          <h1>Seus stories</h1>
+        </div>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet-menu" role="dialog" aria-label="Fixar em comunidades">
+        <div class="handle"></div>
+        <h3>Fixar em comunidades</h3>
+        <p class="t14 sec" style="margin:4px 0 8px;padding:0 16px">Um story fixado continua visível na comunidade depois das 24 h.</p>
+        <div class="pin-row"><span class="cthumb grad"></span><span class="t14 trunc" style="flex:1">Avisos da diretoria e do conselho fiscal</span><span class="switch" role="switch" aria-checked="true" aria-label="Fixar em Avisos da diretoria e do conselho fiscal"></span></div>
+        <div class="pin-row"><span class="cthumb"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="t14 trunc" style="flex:1">Coral TRIA e grupo instrumental jovem</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Coral TRIA e grupo instrumental jovem"></span></div>
+        <div class="pin-row"><span class="cthumb grad"></span><span class="t14 trunc" style="flex:1">Voluntariado e ação social de bairro</span><span class="switch" role="switch" aria-checked="true" aria-label="Fixar em Voluntariado e ação social de bairro"></span></div>
+        <div class="pin-row"><span class="cthumb"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="t14 trunc" style="flex:1">Biblioteca comunitária e clube de leitura</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Biblioteca comunitária e clube de leitura"></span></div>
+        <div class="pin-row"><span class="cthumb grad"></span><span class="t14 trunc" style="flex:1">Esportes, corrida e caminhada matinal</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Esportes, corrida e caminhada matinal"></span></div>
+        <div class="pin-row"><span class="cthumb"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="t14 trunc" style="flex:1">Comissão de festas e confraternizações</span><span class="switch" role="switch" aria-checked="true" aria-label="Fixar em Comissão de festas e confraternizações"></span></div>
+        <div class="pin-row"><span class="cthumb grad"></span><span class="t14 trunc" style="flex:1">Obras, manutenção e zeladoria predial</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Obras, manutenção e zeladoria predial"></span></div>
+        <div class="pin-row"><span class="cthumb"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="t14 trunc" style="flex:1">Grupo de jovens e formação continuada</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Grupo de jovens e formação continuada"></span></div>
+        <div class="pin-row"><span class="cthumb grad"></span><span class="t14 trunc" style="flex:1">Conselho fiscal e prestação de contas</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Conselho fiscal e prestação de contas"></span></div>
+        <div class="pin-row"><span class="cthumb"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="t14 trunc" style="flex:1">Comunicação, redes e assessoria</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Comunicação, redes e assessoria"></span></div>
+        <div class="pin-row"><span class="cthumb grad"></span><span class="t14 trunc" style="flex:1">Acolhimento de novos membros</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Acolhimento de novos membros"></span></div>
+        <div class="pin-row"><span class="cthumb"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="t14 trunc" style="flex:1">Arquivo histórico e memória da casa</span><span class="switch" role="switch" aria-checked="false" aria-label="Fixar em Arquivo histórico e memória da casa"></span></div>
+      </div>
+      <p class="caption" style="position:absolute"></p>
+    </div>
+    <div class="note" style="max-width:520px">
+      <p style="margin:0 0 8px"><strong>Texto longo e transbordo.</strong> Doze comunidades com nomes de 40 caracteres numa tela de 320px: cada linha trunca no corpo <code>min-w-0</code>, o <code>Switch</code> fica sempre alcançável e a folha rola por dentro do seu teto de 80% da altura da tela. Nenhum nome empurra o controle para fora da linha.</p>
+      <p style="margin:0 0 8px"><strong>Miniatura que falha.</strong> A capa cai para a caixa neutra <code>bg-bg-tertiary</code> (ou, sem capa, para o bloco <code>--brand-gradient</code>) e o nome e o <code>Switch</code> continuam operáveis — fixar nunca depende da arte.</p>
+      <p style="margin:0"><strong>Alcance do fluxo.</strong> "Seus stories" chega de duas portas para o mesmo destino, sem custar um toque ao círculo "+": a ação de texto no cabeçalho de <code>/stories/publicar</code>, e uma linha em <code>/configuracoes</code> no grupo Administração que já existe.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+(function () {
+  const html = document.documentElement;
+  const NEUTRAL = { primary: '#2e6fd0', secondary: '#5b9cf8' };
+  const state = { ...NEUTRAL };
+
+  /* a mesma derivação que brandStyleVars() faz no servidor (D-25/D-41) */
+  const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  const toHex = (rgb) => '#' + rgb.map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('');
+  const mixWhite = (c, amount) => toHex(hex(c).map((v) => v + (255 - v) * amount));
+  const lum = (c) => { const [r, g, b] = hex(c).map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+  const onColour = (c) => (ratio('#ffffff', c) >= ratio('#16233b', c) ? '#ffffff' : '#16233b');
+
+  function apply() {
+    const primary = state.primary, secondary = state.secondary;
+    const primaryDark = mixWhite(primary, 0.3);
+    const onPrimary = onColour(primary), onPrimaryDark = onColour(primaryDark);
+    const vars = {
+      '--brand-primary': primary,
+      '--brand-secondary': secondary,
+      '--brand-on-primary': onPrimary,
+      '--brand-primary-dark': primaryDark,
+      '--brand-on-primary-dark': onPrimaryDark,
+    };
+    for (const [k, v] of Object.entries(vars)) html.style.setProperty(k, v);
+    document.getElementById('pick-primary').value = primary;
+    document.getElementById('pick-secondary').value = secondary;
+    document.getElementById('brand-readout').textContent =
+      'primary ' + primary + ' · on ' + onPrimary + ' · dark ' + primaryDark + ' · on-dark ' + onPrimaryDark;
+  }
+
+  const setBrand = (p, s) => { state.primary = p.toLowerCase(); state.secondary = s.toLowerCase(); apply(); };
+  document.getElementById('pick-primary').addEventListener('input', (e) => setBrand(e.target.value, state.secondary));
+  document.getElementById('pick-secondary').addEventListener('input', (e) => setBrand(state.primary, e.target.value));
+  document.querySelectorAll('.preset').forEach((b) => b.addEventListener('click', () => setBrand(b.dataset.p, b.dataset.s)));
+
+  function setTheme(dark) {
+    html.setAttribute('data-theme', dark ? 'dark' : 'light');
+    const t = document.getElementById('theme-toggle');
+    t.setAttribute('aria-pressed', String(dark));
+    document.getElementById('theme-label').textContent = dark ? 'Tema claro' : 'Tema escuro';
+    t.querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+  }
+  const isDark = () => html.getAttribute('data-theme') === 'dark';
+  document.getElementById('theme-toggle').addEventListener('click', () => setTheme(!isDark()));
+  if (window.matchMedia('(prefers-color-scheme: dark)').matches) setTheme(true);
+  apply();
+})();
+</script>
+</body>
+</html>
