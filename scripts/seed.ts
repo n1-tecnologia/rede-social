@@ -1157,11 +1157,17 @@ for (const t of SEED_TENANTS) {
       // mis-attribute the edge onto the kernel-tagged packages.
       const communityIds = SEED_COMMUNITY_IDS[t.slug];
       if (communityIds) {
+        // ONE clock read for the whole batch. Calling `Date.now()` per row would put the two
+        // communities that share a `minutesAgo` milliseconds apart, and the "deliberate tie" the
+        // keyset tie-break exists to prove would silently stop existing —
+        // `apps/api/tests/integration/communities.test.ts` case 3 is what caught exactly that.
+        const communityClock = Date.now();
         await withAdminTx(async (tx) => {
           for (const [index, community] of SEED_COMMUNITIES.entries()) {
             const id = communityIds[index];
             const coverAssetId =
               community.coverIndex === null ? null : mediaIds.images[community.coverIndex];
+            const stamp = new Date(communityClock - community.minutesAgo * 60_000).toISOString();
             await tx.execute(sql`
               insert into public.communities
                 (id, tenant_id, created_by_user_id, name, slug, description, cover_asset_id,
@@ -1170,8 +1176,8 @@ for (const t of SEED_TENANTS) {
                 ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid,
                 ${community.name}, ${community.slug}, ${community.description},
                 ${coverAssetId}::uuid,
-                ${new Date(Date.now() - community.minutesAgo * 60_000).toISOString()}::timestamptz,
-                ${new Date(Date.now() - community.minutesAgo * 60_000).toISOString()}::timestamptz
+                ${stamp}::timestamptz,
+                ${stamp}::timestamptz
               )
               on conflict (id) do nothing`);
           }

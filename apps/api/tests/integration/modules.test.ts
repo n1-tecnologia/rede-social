@@ -142,18 +142,26 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     expect(demo.status).toBe(200);
     const demoBody = (await demo.json()) as BootstrapBody;
     // ROLE-06 ordering: `nav.order` ascending first, then key ascending among the manifest-less keys
-    // (MODULE_KEY_ORDER_FALLBACK = 1000). 04-10 deleted the reference module — the only key that
-    // carried a `nav` — so every seeded key now shares the fallback bucket and the list is purely
-    // alphabetical. The ordering RULE is unchanged; only its input is.
+    // (MODULE_KEY_ORDER_FALLBACK = 1000). 04-10 deleted the reference module and left every seeded
+    // key in the fallback bucket, so this list was purely alphabetical until 05-01 — which is when
+    // `communities` declared `nav.order: 20` (D-40: the tab the feed deliberately left unspent) and
+    // moved to the HEAD of the list. That move is the ordering rule working, not a regression: a key
+    // with a nav entry sorts ahead of every key without one, whatever its letter.
     expect(demoBody.modules.map((m) => m.key)).toEqual([
-      'chat',
       'communities',
+      'chat',
       'events',
       'feed',
       'notifications',
       'stories',
     ]);
     for (const m of demoBody.modules) {
+      if (m.key === 'communities') {
+        // The ONE navigable module in V1 (05-01). Its entry is the manifest's, verbatim — the shell
+        // renders a `Comunidades` tab because of THIS payload, never because the shell changed.
+        expect(m.nav).toMatchObject({ placement: 'tab', href: '/comunidades', order: 20 });
+        continue;
+      }
       // A key enabled for the tenant but not yet implemented appears WITHOUT nav — that is what
       // makes /me/bootstrap honest about what the tenant bought. `feed` has a manifest but declares
       // a HOME SLOT and no tab (D-55), so it too arrives without nav.

@@ -124,10 +124,19 @@ test.describe('the Comunidades tab and the /comunidades list (COMM-02, COMM-03)'
     // …and there is no `<img>` inside it to break.
     await expect(fallback.locator('img')).toHaveCount(0);
 
-    // The positive control in the same test: a community WITH a cover really does render an image,
-    // so the gradient above is the fallback branch and not a globally broken media path.
+    // The positive control in the same test: a community WITH a cover takes the IMAGE branch, so
+    // the gradient above is the null-cover fallback and not a global default every card gets.
+    //
+    // The control is the rendered BRANCH, deliberately not a loaded bitmap. `MediaImage`'s whole
+    // error contract is that a missing object degrades to the neutral `bg-bg-tertiary` box rather
+    // than a broken-image glyph — so an `<img>` assertion here would be asserting that the shared
+    // local stack still holds the seeded bytes, which is a property of the suite that ran before
+    // this one (`media-sweeper.test.ts` empties the bucket), not a property of the card.
     const withCover = cardWith(page, SEEDED.first);
-    await expect(withCover.locator('img').first()).toBeVisible();
+    await expect(withCover.locator('[data-testid="community-cover-image"]')).toBeVisible();
+    await expect(withCover.locator('[data-testid="community-cover-fallback"]')).toHaveCount(0);
+    // …and symmetrically, the cover-less card never takes the image branch.
+    await expect(coverless.locator('[data-testid="community-cover-image"]')).toHaveCount(0);
   });
 
   test('the D-75 drops are absent: no activity badge, no member count, no timestamp', async ({
