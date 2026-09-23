@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
-import { closeAdmin, deleteStoriesByCaptionPrefix, envValue } from './admin';
+import { activeReadyStoryCount, closeAdmin, deleteStoriesByCaptionPrefix, envValue } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 import { ensureWorker } from './worker';
 
@@ -23,16 +23,34 @@ const S = storyMessages.stories;
 test.use({ serviceWorkers: 'block' });
 
 /**
- * What `scripts/seed.ts` writes for the demo tenant, mirrored here for the same reason
- * `comunidades.spec.ts` mirrors its community names: the seed is a top-level-await script that
- * requires `SEED_PASSWORD` and opens a database connection at import time.
+ * What `scripts/seed.ts` writes for the demo tenant. The expired story's CAPTION is mirrored here
+ * the way `comunidades.spec.ts` mirrors its community names — the seed is a top-level-await script
+ * that requires `SEED_PASSWORD` and opens a database connection at import time.
+ *
+ * The strip's COUNT is deliberately NOT mirrored. `media-video.spec.ts` performs a hard, total
+ * reset of the demo tenant's video library and takes the seeded story VIDEO with it (see
+ * `deleteTenantVideoAssets`), so a constant here would make every assertion below depend on the
+ * order the suite happened to run in. `activeReadyStoryCount` reads the real predicate instead, and
+ * `expect(count).toBeGreaterThan(0)` is what stops it passing vacuously at zero.
  */
 const SEEDED = {
-  /** ACTIVE, ready stories only — the expired one and the `processing` one are both absent. */
-  active: 3,
   /** The caption of the EXPIRED story: it must not appear on the strip in any form. */
   expiredCaption: 'Publicado ontem, ja fora da regua.',
 } as const;
+
+/** The tenant's live strip size, read once per file from the database (see the note above). */
+let activeStories = 0;
+
+test.beforeAll(async () => {
+  activeStories = await activeReadyStoryCount('tria-demo');
+  expect(activeStories, 'the demo tenant has at least one active story to render').toBeGreaterThan(
+    0,
+  );
+});
+
+test.afterAll(async () => {
+  await closeAdmin();
+});
 
 const strip = (page: Page) => page.getByRole('list', { name: S.region });
 
@@ -80,7 +98,7 @@ test.describe('the /inicio strip — one circle per active story, newest first (
     const row = strip(page);
     await expect(row).toBeVisible();
     // D-78: one circle per active STORY. Per-publisher grouping would collapse this to one.
-    await expect(row.getByRole('listitem')).toHaveCount(SEEDED.active);
+    await expect(row.getByRole('listitem')).toHaveCount(activeStories);
 
     // D-80 / UI-D-28: the own-circle is the ONLY publish entry point, and a member has none.
     await expect(row.getByRole('link', { name: S.own.action })).toHaveCount(0);
@@ -103,7 +121,7 @@ test.describe('the /inicio strip — one circle per active story, newest first (
 
     const row = strip(page);
     const items = row.getByRole('listitem');
-    await expect(items).toHaveCount(SEEDED.active + 1);
+    await expect(items).toHaveCount(activeStories + 1);
 
     // UI-D-28: rendered FIRST, and an anchor rather than a button — `/stories/publicar` is a
     // full-screen route that must not live in a dismissible layer.
@@ -121,7 +139,7 @@ test.describe('the /inicio strip — one circle per active story, newest first (
 
     const row = strip(page);
     await expect(row).toBeVisible();
-    await expect(row.getByRole('listitem')).toHaveCount(SEEDED.active + 1);
+    await expect(row.getByRole('listitem')).toHaveCount(activeStories + 1);
     // The row is the only horizontal scroller, and its overscroll is contained so a trackpad swipe
     // never triggers the browser back-gesture.
     const overflow = await row.evaluate((node) => getComputedStyle(node).overflowX);
@@ -149,7 +167,6 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     // The product's own DELETE is SOFT by design, so the row and its asset would survive every run
     // and accumulate. This is the hard sweep that keeps the file re-runnable in any order.
     await deleteStoriesByCaptionPrefix(TEST_CAPTION_PREFIX);
-    await closeAdmin();
   });
 
   test('a member cannot reach the publish route at all — it redirects to /inicio', async ({
@@ -191,13 +208,13 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     const items = strip(page).getByRole('listitem');
     await expect(async () => {
       await page.reload();
-      await expect(items).toHaveCount(SEEDED.active + 2);
+      await expect(items).toHaveCount(activeStories + 2);
     }).toPass({ timeout: 60_000 });
 
     // Clean up through the product's own surface, so the shared seed is exactly as it was found.
     await removeNewestStory();
     await page.goto('/inicio');
-    await expect(strip(page).getByRole('listitem')).toHaveCount(SEEDED.active + 1);
+    await expect(strip(page).getByRole('listitem')).toHaveCount(activeStories + 1);
   });
 
   test('submitting with no media is refused client-side, and no story is created', async ({
@@ -218,7 +235,7 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     );
 
     await page.goto('/inicio');
-    await expect(strip(page).getByRole('listitem')).toHaveCount(SEEDED.active + 1);
+    await expect(strip(page).getByRole('listitem')).toHaveCount(activeStories + 1);
   });
 });
 

@@ -272,10 +272,48 @@ export async function deleteTenantVideoAssets(tenantSlug: string): Promise<void>
      using public.media_assets a, public.tenants t
      where m.media_asset_id = a.id and a.tenant_id = t.id
        and t.slug = ${tenantSlug} and a.kind = 'video'`;
+  // 05-05: `stories.media_asset_id` is a second reference to this table, and unlike
+  // `feed_post_media` it is NOT NULL — there is no "detach" available, so a story that names one of
+  // these assets has to GO with it. That is the honest reading of "HARD, TOTAL reset": the admin
+  // media library lists every `kind = 'video'` asset regardless of purpose, so leaving a story's
+  // video behind would make the empty-library assertion below fail instead.
+  //
+  // The consequence is the same one the video POST already pays: the demo tenant's seeded story
+  // VIDEO does not survive this reset. `stories.spec.ts` therefore reads its expected count from
+  // the DATABASE (see `activeReadyStoryCount`) rather than mirroring a seed constant, so its
+  // assertions measure the strip rather than the order the suite happened to run in.
+  await sql()`
+    delete from public.stories s
+     using public.media_assets a, public.tenants t
+     where s.media_asset_id = a.id and a.tenant_id = t.id
+       and t.slug = ${tenantSlug} and a.kind = 'video'`;
   await sql()`
     delete from public.media_assets a
      using public.tenants t
      where t.id = a.tenant_id and t.slug = ${tenantSlug} and a.kind = 'video'`;
+}
+
+/**
+ * How many stories the tenant's STRIP will show right now — the `listActiveStories` predicate,
+ * verbatim (05-05).
+ *
+ * `stories.spec.ts` reads this instead of mirroring a seed constant, because another spec can
+ * legitimately remove one of the fixtures: `deleteTenantVideoAssets` performs a hard, total reset
+ * of a tenant's video library and takes the seeded story VIDEO with it. A mirrored number would
+ * then make the strip assertions depend on the order the suite happened to run in — which is the
+ * one thing an e2e must never measure.
+ */
+export async function activeReadyStoryCount(tenantSlug: string): Promise<number> {
+  const rows = await sql()<{ count: number }[]>`
+    select count(*)::int as count
+      from public.stories s
+      join public.media_assets a on a.id = s.media_asset_id
+      join public.tenants t on t.id = s.tenant_id
+     where t.slug = ${tenantSlug}
+       and s.deleted_at is null
+       and s.expires_at > now()
+       and a.status = 'ready'`;
+  return rows[0]?.count ?? 0;
 }
 
 /**
