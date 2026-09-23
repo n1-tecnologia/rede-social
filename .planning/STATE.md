@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-09-23T18:38:52.930Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-09-23T20:12:54.203Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 05 execution started
-state_head: e6f56624b6b0c92cbd2ab00c924e672937d98bd8
+state_head: a34344938ccae1756f587d330a834dbf385e0c6d
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 58
-  completed_plans: 48
+  completed_plans: 50
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 05 (Communities & Stories) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-09-23 — Phase 05 execution started
 
@@ -107,6 +107,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P10 | 87 min | 3 tasks | 52 files |
 | Phase 05 P01 | 28 min | 3 tasks | 34 files |
 | Phase 05 P02 | 65 min | 3 tasks | 27 files |
+| Phase 05 P03 | 79 min | 3 tasks | 37 files |
 
 ## Accumulated Context
 
@@ -305,6 +306,11 @@ Recent decisions affecting current work:
 - [Phase 05]: communities.last_activity_at is NOT NULL, seeded at creation and trigger-owned from 05-03. It is the keyset key: an aggregate over feed_posts is not pageable, and a nullable column would float post-less communities to the top
 - [Phase 05]: UI-D-46 ships a 6/4 split, not the spec's 4/6: media.errors.quota drops the word instead of gaining {tenant} — The string resolves in useSignedUpload, whose platform-panel callers (LogoUpload, IconOverrideUpload) run as super_admin on app.seusistema.com where no tenant display name exists. Interpolating there would render a stray brace on the platform host.
 - [Phase 05]: The two 404 components now read the host tenant; their existence-oracle guarantee is unchanged — post/[postId]/not-found.tsx and membros/[membershipId]/not-found.tsx still take no props and read no param, so the requested id can never be echoed. The tenant name is host-derived and therefore byte-identical across every 404 cause, so it leaks nothing about the resource.
+- [Phase 05]: 05-03: feed_posts_community_fk is HAND-WRITTEN SQL in the generated migration, not a drizzle .references() — a module->module package dependency is denied by turbo.json's boundary allowlist (verified: turbo boundaries reports the missing tag). The constraint is identical and drizzle never diffs it away.
+- [Phase 05]: 05-03: listFeed's predicate is chosen from the tenant's enabled-module set — no filter when communities is on (D-73), the Phase 4 partial predicate when it is off (D-74). One feedPage helper, one ordering expression, two where fragments; never a second route.
+- [Phase 05]: 05-03: feed_posts_tenant_created_all_idx added as the THIRD, non-partial index. D-73's claim that the Phase 4 composite served the merged feed was falsified by measurement; 090-feed.sql now pins the plan BY NAME on a 500-row interleaved fixture.
+- [Phase 05]: 05-03: the community feed is GET /v1/feed?communityId= rather than a sibling route — one FeedQuery, one cursor envelope, and both pages built by the same helper.
+- [Phase 05]: 05-03: postCommunitySchema ({id,name,slug}) is declared in the FEED's own contracts rather than imported from @tria/module-communities — the same boundary, and the honest shape for a label.
 
 ### Pending Todos
 
@@ -337,6 +343,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T18:38:45.368Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-09-23T20:12:54.130Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None

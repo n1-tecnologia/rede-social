@@ -63,9 +63,9 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### Communities
 
 - [ ] **COMM-01**: `admin_tenant` can create, edit and archive communities (name, description, cover image)
-- [ ] **COMM-02**: Every tenant member can see every community in V1; a community-membership table exists so private/opt-in communities in V2 require no migration
+- [x] **COMM-02**: Every tenant member can see every community in V1; a community-membership table exists so private/opt-in communities in V2 require no migration
 - [ ] **COMM-03**: Member can browse the community list (cover, name, description, post count) and open a community to see its posts and its pinned stories
-- [ ] **COMM-04**: `admin_tenant` can post directly into a community from the community page
+- [x] **COMM-04**: `admin_tenant` can post directly into a community from the community page
 
 ### Stories
 
@@ -243,9 +243,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FEED-07 | Phase 4 | Complete |
 | FEED-08 | Phase 4 | Complete |
 | COMM-01 | Phase 5 | Pending |
-| COMM-02 | Phase 5 | Pending |
+| COMM-02 | Phase 5 | Complete |
 | COMM-03 | Phase 5 | Pending |
-| COMM-04 | Phase 5 | Pending |
+| COMM-04 | Phase 5 | Complete |
 | STORY-01 | Phase 5 | Pending |
 | STORY-02 | Phase 5 | Pending |
 | STORY-03 | Phase 5 | Pending |

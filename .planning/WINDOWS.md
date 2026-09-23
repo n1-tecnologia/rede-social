@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 20
+open_count: 22
 waived_count: 0
 fixed_count: 11
-total_count: 31
-last_updated: 2026-09-23T17:36:06.052Z
+total_count: 33
+last_updated: 2026-09-23T20:12:35.075Z
 ---
 
 # Broken Windows Ledger
@@ -46,6 +46,8 @@ last_updated: 2026-09-23T17:36:06.052Z
 | 29 | 04 | deviation | apps/web/app/(app)/criar/ComposerForm.tsx |  | Image reorder ships as two 44x44 move controls per tile instead of the mockup's drag grip: a pointer-only drag is unreachable by keyboard and unassertable in a spec. Same effect on the asset-id array. | open |  | 2026-09-23T03:43:45.669Z |  |
 | 30 | 04 | deviation | apps/web/e2e/feed-composer.spec.ts | 125 | Times out inside a full pnpm verify (worker not draining kernel.media-derive-variants, processing=2); green alone in 6.4s and green on the second full gate run. Cross-spec ensureWorker interaction, same class as the platform-branding and feed.spec order-dependence already logged. | open |  | 2026-09-23T05:15:02.900Z |  |
 | 31 | 05 | unrun-verify | .planning/phases/05-communities-stories/05-01-SUMMARY.md |  | 05-01 D12: the /comunidades empty, first-load-error and load-more-error states are implemented and typechecked but have no automated observation; 05-04 owns the same states | open |  | 2026-09-23T17:36:06.052Z |  |
+| 32 | 05 | deviation | packages/modules/feed/db/schema.ts |  | feed_posts_community_fk is hand-written SQL in the migration, not a drizzle .references(): a module->module package dependency is denied by turbo.json's boundary allowlist (MOD-02). Two 05-03 acceptance greps are therefore unmet by design. | open |  | 2026-09-23T20:12:34.999Z |  |
+| 33 | 05 | deviation | apps/web/e2e/media-video.spec.ts | 491 | Flaky under full-suite Playwright parallelism: the Next.js dev Console Error overlay is a second [role=dialog]. Root cause is an unhandledRejection in the SW registration path when Playwright blocks registration. Passes in isolation. | open |  | 2026-09-23T20:12:35.075Z |  |
 
 ````json
 [
@@ -419,6 +421,30 @@ last_updated: 2026-09-23T17:36:06.052Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T17:36:06.052Z",
+    "resolved_at": null
+  },
+  {
+    "id": 32,
+    "kind": "deviation",
+    "phase": "05",
+    "file": "packages/modules/feed/db/schema.ts",
+    "line": null,
+    "description": "feed_posts_community_fk is hand-written SQL in the migration, not a drizzle .references(): a module->module package dependency is denied by turbo.json's boundary allowlist (MOD-02). Two 05-03 acceptance greps are therefore unmet by design.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T20:12:34.999Z",
+    "resolved_at": null
+  },
+  {
+    "id": 33,
+    "kind": "deviation",
+    "phase": "05",
+    "file": "apps/web/e2e/media-video.spec.ts",
+    "line": 491,
+    "description": "Flaky under full-suite Playwright parallelism: the Next.js dev Console Error overlay is a second [role=dialog]. Root cause is an unhandledRejection in the SW registration path when Playwright blocks registration. Passes in isolation.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T20:12:35.075Z",
     "resolved_at": null
   }
 ]
