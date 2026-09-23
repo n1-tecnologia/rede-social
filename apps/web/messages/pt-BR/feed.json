@@ -4,7 +4,9 @@
     "post": {
       "label": "Publicação de {name}",
       "pageTitle": "Publicação",
-      "back": "Voltar"
+      "back": "Voltar",
+      "communityLabel": "em {community}",
+      "communityAriaLabel": "Ver a comunidade {community}"
     },
     "caption": {
       "more": "… mais"

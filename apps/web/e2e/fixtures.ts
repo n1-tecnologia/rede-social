@@ -42,13 +42,19 @@ export const seededFeed = {
  * for the same reason `seededFeed` is: the seed is a top-level-await script that requires
  * `SEED_PASSWORD` and opens a database connection at import time.
  *
- * `total` is what one tenant's feed holds after `pnpm db:seed` — 8 fixtures plus 18 fillers — and
- * `pageSize` is `FEED_PAGE_SIZE`, so the sentinel has THREE pages to walk (10 + 10 + 6).
+ * `total` is what one tenant's MERGED feed holds after `pnpm db:seed` — and since 05-03 the merged
+ * feed is the whole tenant, community posts included (D-73), so the six posts the seed publishes
+ * inside communities are part of this number. `pageSize` is `FEED_PAGE_SIZE`, so the sentinel has
+ * FOUR pages to walk (10 + 10 + 10 + 3).
  */
 export const seededFeedPaging = {
   pageSize: 10,
-  /** The DEMO tenant's post count: 9 fixtures plus 18 fillers (the lab tenant has 26). */
-  total: 27,
+  /**
+   * The DEMO tenant's post count: 9 tenant-wide fixtures, 18 fillers and 6 inside communities
+   * (the lab tenant has 32 — one fewer, because only the demo tenant has the 40-character member
+   * whose post the header-truncation case needs).
+   */
+  total: 33,
   /** The post whose `edited_at` is set: its meta row carries the marker (UI-D-15). */
   editedCaption: 'Programacao do mes, ja com a correcao dos horarios.',
   /** Exactly 40 characters (UI-SPEC E03 long-text backstop) — a demo-tenant member. */
@@ -59,6 +65,28 @@ export const seededFeedPaging = {
   firstFiller: 'Aviso 1 da comunidade: mais uma novidade para o mural.',
   /** The second filler: page 2, and the post the failed-like case toggles. */
   secondFiller: 'Aviso 2 da comunidade: mais uma novidade para o mural.',
+} as const;
+
+/**
+ * 05-03's merged-feed fixtures (COMM-04, D-71/D-72), mirrored from `scripts/seed.ts` for the same
+ * reason `seededFeed` is.
+ *
+ * `inCommunity` is the newest of the six posts the seed publishes INSIDE a community (four minutes
+ * back, so it lands on page 1 of the merged feed), and `communityName` is the container it names —
+ * which is also the string the D-71 "em {Comunidade}" label interpolates.
+ */
+export const seededCommunityFeed = {
+  inCommunity: 'Pauta da reuniao de diretoria desta semana.',
+  communityName: 'Avisos da diretoria',
+  /** The second community of the seed's activity order — the picker's second row. */
+  otherCommunityName: 'Eventos e encontros',
+  /**
+   * The FIXED id of `inCommunity` in the demo tenant (`SEED_COMMUNITY_POST_IDS`), so the edit
+   * screen is reachable by direct URL. The card deliberately carries no `/post/{id}` link — the
+   * post page is reached through the overflow menu — and a spec that scraped one would be asserting
+   * a navigation affordance rather than the row it is actually about.
+   */
+  inCommunityPostId: '0d000000-0000-4000-8000-0000000000d1',
 } as const;
 
 /**

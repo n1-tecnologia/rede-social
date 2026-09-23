@@ -4,7 +4,12 @@ import { createPostSchema } from '@tria/module-feed/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createPost } from '@/lib/feed';
-import { asMediaIssue, attemptPostWrite, type PostWriteResult } from '@/lib/feed-write';
+import {
+  asCommunityIssue,
+  asMediaIssue,
+  attemptPostWrite,
+  type PostWriteResult,
+} from '@/lib/feed-write';
 
 /**
  * The composer's own server action (FEED-01), in the three conventions every server action in this
@@ -36,6 +41,14 @@ export async function createPostAction(input: unknown): Promise<PostWriteResult>
   if (!body.success) {
     const media = body.error.issues.map((issue) => asMediaIssue(issue.message)).find(Boolean);
     if (media) return { ok: false, code: media };
+    // COMM-04: the destination's own closed vocabulary, lifted from the SAME issue list. It cannot
+    // be raised by this parse today (`communityId` is a plain optional uuid), and it is read here
+    // anyway so that the day the create schema learns a destination refinement, the composer has
+    // its copy without a second edit in a second file.
+    const community = body.error.issues
+      .map((issue) => asCommunityIssue(issue.message))
+      .find(Boolean);
+    if (community) return { ok: false, code: community };
     const empty = body.error.issues.some((issue) => issue.message === 'empty_post');
     return { ok: false, code: empty ? 'empty_post' : 'generic' };
   }

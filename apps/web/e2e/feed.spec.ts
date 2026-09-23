@@ -221,16 +221,23 @@ test.describe('FEED-02 / D-58 — paging the feed forward and backward', () => {
     await expect(postCards(page)).toHaveCount(seededFeedPaging.pageSize * 2);
     expect(actionPosts() - base).toBe(1);
 
+    // 05-03: the merged feed is FOUR pages, not three (10 + 10 + 10 + 3). The walk is written as
+    // "one intersection, one page" rather than as a fixed number of scrolls, so the shape of the
+    // assertion survives the next fixture that lands in the seed.
     await scrollFeedToBottom(page);
-    await expect(postCards(page)).toHaveCount(seededFeedPaging.total);
+    await expect(postCards(page)).toHaveCount(seededFeedPaging.pageSize * 3);
     expect(actionPosts() - base).toBe(2);
 
-    // Past the last page the sentinel renders NOTHING — no terminal spacer, and above all no third
+    await scrollFeedToBottom(page);
+    await expect(postCards(page)).toHaveCount(seededFeedPaging.total);
+    expect(actionPosts() - base).toBe(3);
+
+    // Past the last page the sentinel renders NOTHING — no terminal spacer, and above all no extra
     // request. `hasMore` is false because the API returned a null cursor, not because of a guess.
     await scrollFeedToBottom(page);
     await page.waitForTimeout(500);
     await expect(postCards(page)).toHaveCount(seededFeedPaging.total);
-    expect(actionPosts() - base).toBe(2);
+    expect(actionPosts() - base).toBe(3);
 
     // Every caption is distinct: an off-by-one keyset would duplicate a row across the boundary.
     const captions = await postCards(page).allInnerTexts();
@@ -282,6 +289,11 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
+    // 05-03: the merged feed pushed the fillers off page 1, so the sentinel has to run once before
+    // this fixture exists in the DOM. Deliberately still the FILLER rather than a post that
+    // happens to be on page 1 today — it is the post with no likes and no media, which is what
+    // makes "a post nobody has touched shows its time alone" assertable at all.
+    await scrollFeedToBottom(page);
     const card = cardWith(page, seededFeedPaging.firstFiller);
     await expect(card).toBeVisible();
     const meta = card.locator('[data-post-meta]');
@@ -295,6 +307,7 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
     await expect(card.getByRole('button', { name: F.actions.unlike })).toBeVisible();
     await expect(meta).toContainText(likeSegment(1));
     await page.reload();
+    await scrollFeedToBottom(page);
     const reloaded = cardWith(page, seededFeedPaging.firstFiller);
     await expect(reloaded.getByRole('button', { name: F.actions.unlike })).toBeVisible();
     await expect(reloaded.locator('[data-post-meta]')).toContainText(likeSegment(1));
@@ -332,6 +345,9 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
   test('a failed like reverts, toasts, and never removes the card', async ({ page }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
+    // 05-03: page 2, for the reason the case above states. The scroll happens BEFORE the server
+    // actions are broken, so what this test breaks is the LIKE and never the paging.
+    await scrollFeedToBottom(page);
     const card = cardWith(page, seededFeedPaging.firstFiller);
     await expect(card).toBeVisible();
 
@@ -345,10 +361,11 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
     await expect(page.getByRole('status')).toContainText(F.errors.generic);
     // …and the card is still exactly where it was (the no-optimistic-removal rule).
     await expect(card).toBeVisible();
-    await expect(postCards(page)).toHaveCount(seededFeedPaging.pageSize);
+    await expect(postCards(page)).toHaveCount(seededFeedPaging.pageSize * 2);
 
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     await page.reload();
+    await scrollFeedToBottom(page);
     await expect(
       cardWith(page, seededFeedPaging.firstFiller).getByRole('button', { name: F.actions.like }),
     ).toBeVisible();
@@ -381,6 +398,8 @@ test.describe('UI-02 — the meta row and the header under pressure', () => {
     await page.setViewportSize({ width: 320, height: 720 });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
+    // 05-03: the merged feed pushed this fixture onto page 2 (see the sentinel case above).
+    await scrollFeedToBottom(page);
     const card = cardWith(page, seededFeedPaging.longNameCaption);
     const author = card.getByRole('link', { name: seededFeedPaging.longDisplayName });
     await expect(author).toBeVisible();

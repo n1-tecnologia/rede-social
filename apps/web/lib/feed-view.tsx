@@ -198,6 +198,23 @@ export function postCardView(
     createdAtIso: post.createdAt,
     createdAtRelative: relativeFrom(post.createdAt, now),
     createdAtAbsolute: absoluteTime.format(new Date(post.createdAt)),
+    /**
+     * D-71 / UI-D-36 — "em {Comunidade}", composed HERE for the same two reasons `profileHref` and
+     * `shareUrl` are: `@tria/module-feed` knows no route table (MOD-02) and ships no language
+     * (PWA-03). The module receives a finished string and a finished href and renders them; it
+     * never learns the word "em" or the shape of `/comunidades/{id}`.
+     *
+     * `null` passes straight through as `null`, which is what makes a tenant-wide post render its
+     * `<time>` alone rather than a middot with nothing after it.
+     */
+    community:
+      post.community === null
+        ? null
+        : {
+            label: tf('post.communityLabel', { community: post.community.name }),
+            href: `/comunidades/${post.community.id}`,
+            ariaLabel: tf('post.communityAriaLabel', { community: post.community.name }),
+          },
     // UI-D-15: the marker is a BOOLEAN here, not a second date — the meta row appends "editado" and
     // never a timestamp of its own.
     edited: post.editedAt !== null,
@@ -243,12 +260,23 @@ export type ComposerDraft = {
   video: ComposerVideoDraft | null;
   attachments: ComposerAttachmentDraft[];
   hasLinkPreview: boolean;
+  /**
+   * D-72 / UI-D-45 — where the post was PUBLISHED, carried into the edit screen so the picker row
+   * can render READ-ONLY with the destination it actually has.
+   *
+   * It is the post's own `community`, not a lookup against the tenant's active list: a post whose
+   * community has since been ARCHIVED still has to show where it lives, and an archived community
+   * is deliberately absent from that list.
+   */
+  community: { id: string; name: string } | null;
 };
 
 export function composerDraft(post: FeedPost, tf: Translator): ComposerDraft {
   const video = post.media.find((item) => item.kind === 'video');
   return {
     caption: post.caption,
+    community:
+      post.community === null ? null : { id: post.community.id, name: post.community.name },
     images: post.media
       .filter((item) => item.kind === 'image')
       .map((item) => ({ assetId: item.assetId, variantWidths: item.variantWidths })),

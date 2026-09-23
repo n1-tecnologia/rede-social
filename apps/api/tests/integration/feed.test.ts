@@ -173,9 +173,15 @@ describe('GET /v1/feed — keyset paging (FEED-02)', () => {
     for (const id of fixtureIds) expect(ids).toContain(id);
 
     // …and the walk really did see the whole tenant's feed, not a prefix of it.
+    //
+    // 05-03 dropped `and community_id is null` from this count. That clause was not describing the
+    // FEED — it was describing the Phase 4 predicate, which D-73 replaced with an absence: with the
+    // `communities` module on, "the whole tenant's feed" is every live post of the tenant, whatever
+    // container it sits in. The count is deliberately left as a count of ROWS rather than a
+    // hard-coded number, so it keeps measuring the walk and not the fixture.
     const [total] = await adminSql<{ count: number }[]>`
       select count(*)::int as count from public.feed_posts
-       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and community_id is null`;
+       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null`;
     expect(ids.length).toBe(total?.count);
   });
 
@@ -453,5 +459,200 @@ describe('post.published — after commit, exactly once (MOD-03)', () => {
     expect(refused.status).toBe(400);
     // Nothing committed, so nothing was announced: the count moved by exactly one.
     expect(events.length).toBe(before + 1);
+  });
+});
+
+/**
+ * 05-03 — the MERGED feed (D-71, D-73, D-74) and COMM-04's write, against the live stack.
+ *
+ * These are the assertions no unit test can make: whether ONE query really returns two sources in
+ * one chronological order, whether the community summary really rides the same statement, and
+ * whether the destination check really runs inside the write's own transaction.
+ *
+ * The seeded communities are the fixture (`scripts/seed.ts` writes four per tenant and six posts
+ * inside them); this block creates only the posts it needs and sweeps them by id.
+ */
+describe('the merged feed and COMM-04’s write (D-71, D-73, COMM-04)', () => {
+  /** Every seeded community of the demo tenant, newest activity first. */
+  async function demoCommunities(): Promise<{ id: string; name: string; status: string }[]> {
+    return adminSql<{ id: string; name: string; status: string }[]>`
+      select id, name, status from public.communities
+       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null
+       order by last_activity_at desc, id desc`;
+  }
+
+  /** Walk the merged feed to the end (bounded), in the server's own order. */
+  async function walkFeed(token: string): Promise<FeedPost[]> {
+    const seen: FeedPost[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 10; guard++) {
+      const query: string = cursor ? `?limit=25&cursor=${encodeURIComponent(cursor)}` : '?limit=25';
+      const body: FeedPage = await page(token, query);
+      seen.push(...body.items);
+      cursor = body.nextCursor;
+      if (cursor === null) break;
+    }
+    return seen;
+  }
+
+  it('13. D-73: community posts and tenant-wide posts are ONE chronological list, interleaved', async () => {
+    const items = await walkFeed(tokens.demoMember);
+
+    // Both sources are present — without this the ordering assertion below would pass vacuously on
+    // a feed that had quietly gone back to `community_id is null`.
+    const withCommunity = items.filter((item) => item.community !== null);
+    const tenantWide = items.filter((item) => item.community === null);
+    expect(withCommunity.length, 'the seed publishes inside communities').toBeGreaterThan(0);
+    expect(tenantWide.length).toBeGreaterThan(0);
+
+    // ONE ordering expression: the concatenation of every page is strictly descending on
+    // `(createdAt, id)` regardless of which source each row came from.
+    expect(isStrictlyDescending(items)).toBe(true);
+
+    // INTERLEAVED, not appended: some tenant-wide post sits BELOW some community post in the list.
+    // Two concatenated blocks would satisfy "strictly descending" inside each block and fail here.
+    const firstCommunityIndex = items.findIndex((item) => item.community !== null);
+    const lastTenantWideIndex = items.map((item) => item.community).lastIndexOf(null);
+    expect(lastTenantWideIndex).toBeGreaterThan(firstCommunityIndex);
+  });
+
+  it('14. D-71: every community item carries its summary, every tenant-wide item carries null', async () => {
+    const items = await walkFeed(tokens.demoMember);
+    const names = new Map((await demoCommunities()).map((row) => [row.id, row.name]));
+
+    for (const item of items) {
+      // The two fields are one fact: a `communityId` with a null `community` would be a label the
+      // reader never sees, and the reverse would be a label with nothing behind it.
+      expect(item.community === null, item.id).toBe(item.communityId === null);
+      if (item.community === null) continue;
+      expect(item.community.id).toBe(item.communityId);
+      // The name really came from THIS tenant's row (T-05-14), not from anywhere else.
+      expect(item.community.name).toBe(names.get(item.community.id));
+      expect(item.community.slug.length).toBeGreaterThan(0);
+      // `.strict()` on the wire shape: the label is a name and a route, never a second card.
+      expect(Object.keys(item.community).sort()).toEqual(['id', 'name', 'slug']);
+    }
+  });
+
+  it('15. COMM-04: posting into an ACTIVE community lands in both the merged feed and that community', async () => {
+    const [target] = await demoCommunities();
+    expect(target?.status).toBe('active');
+    const communityId = target?.id ?? '';
+
+    const res = await request('/v1/feed/posts', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ caption: `Publicacao na comunidade ${Date.now()}`, communityId }),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(201);
+    const post = (await res.json()) as FeedPost;
+    created.push(post.id);
+    expect(post.communityId).toBe(communityId);
+    expect(post.community?.id).toBe(communityId);
+    expect(post.community?.name).toBe(target?.name);
+
+    // The merged feed's FIRST page carries it — it is the newest post in the tenant.
+    const merged = await page(tokens.demoMember, '?limit=10');
+    expect(merged.items.map((item) => item.id)).toContain(post.id);
+
+    // …and so does the community's own page, which is the same endpoint with a predicate.
+    const scoped = await page(tokens.demoMember, `?limit=10&communityId=${communityId}`);
+    expect(scoped.items.map((item) => item.id)).toContain(post.id);
+    expect(scoped.items.every((item) => item.communityId === communityId)).toBe(true);
+  });
+
+  it('16. COMM-04: an ARCHIVED community answers 400 with details.community === "archived"', async () => {
+    const communities = await demoCommunities();
+    const target = communities[communities.length - 1];
+    const communityId = target?.id ?? '';
+
+    await adminSql`
+      update public.communities set status = 'archived' where id = ${communityId}::uuid`;
+    try {
+      const res = await request('/v1/feed/posts', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ caption: 'Publicacao recusada', communityId }),
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('VALIDATION_FAILED');
+      expect((body.error.details as { community?: string }).community).toBe('archived');
+
+      // 05-RESEARCH §Pattern 7: archive is a WRITE gate, never a feed gate. The posts already
+      // inside it stay exactly where members last saw them.
+      const items = await walkFeed(tokens.demoMember);
+      expect(items.some((item) => item.communityId === communityId)).toBe(true);
+    } finally {
+      await adminSql`
+        update public.communities set status = 'active' where id = ${communityId}::uuid`;
+    }
+  });
+
+  it('17. COMM-04: an unknown or other-tenant community is a BARE 404 with no details key', async () => {
+    const [labCommunity] = await adminSql<{ id: string }[]>`
+      select id from public.communities where tenant_id = ${tenantIds.lab}::uuid limit 1`;
+    expect(labCommunity?.id, 'the lab tenant is seeded with communities too').toBeDefined();
+
+    const bodies: Envelope[] = [];
+    for (const communityId of [labCommunity?.id ?? '', '00000000-0000-4000-8000-000000000000']) {
+      const res = await request('/v1/feed/posts', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ caption: 'Publicacao sem destino', communityId }),
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      expect(res.status, communityId).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      // D-23 / T-05-13: no `details` at all. A per-cause code over an enumerable uuid space would
+      // let the composer enumerate another organisation's containers one refusal at a time.
+      expect(Object.hasOwn(body.error, 'details')).toBe(false);
+      bodies.push(body);
+    }
+    // The two refusals are byte-identical apart from the request id that correlates the logs.
+    const strip = (body: Envelope) => JSON.stringify({ ...body.error, requestId: undefined });
+    expect(strip(bodies[0] as Envelope)).toBe(strip(bodies[1] as Envelope));
+
+    // The READ path answers the same way, for the same reason.
+    const read = await request(`/v1/feed?communityId=${labCommunity?.id ?? ''}`, tokens.demoAdmin, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(read.status).toBe(404);
+  });
+
+  it('18. D-72: a published post cannot be moved between communities', async () => {
+    const communities = await demoCommunities();
+    const from = communities[0]?.id ?? '';
+    const to = communities[1]?.id ?? '';
+    expect(from).not.toBe(to);
+
+    const create = await request('/v1/feed/posts', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ caption: `Publicacao fixa ${Date.now()}`, communityId: from }),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(create.status).toBe(201);
+    const post = (await create.json()) as FeedPost;
+    created.push(post.id);
+
+    // `updatePostSchema` is `.strict()` and has no `communityId` key, so the attempt is REFUSED
+    // rather than silently ignored — the rule is visible to the caller, not just to the row.
+    const moved = await request(`/v1/feed/posts/${post.id}`, tokens.demoAdmin, {
+      method: 'PATCH',
+      body: JSON.stringify({ caption: 'Publicacao fixa editada', communityId: to }),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(moved.status).toBe(400);
+
+    // …and a legitimate edit leaves the placement exactly where publication put it.
+    const edited = await request(`/v1/feed/posts/${post.id}`, tokens.demoAdmin, {
+      method: 'PATCH',
+      body: JSON.stringify({ caption: 'Publicacao fixa editada' }),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(edited.status).toBe(200);
+    const after = (await edited.json()) as FeedPost;
+    expect(after.communityId).toBe(from);
+    expect(after.community?.id).toBe(from);
   });
 });

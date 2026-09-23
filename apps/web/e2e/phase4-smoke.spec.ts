@@ -132,9 +132,11 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
     await expect(region.getByText(seededFeed.newest, { exact: false })).toBeVisible();
     await expect(region.getByRole('article').first()).toBeVisible();
 
-    // D-55, asserted rather than assumed: the feed contributes a HOME SLOT and no navigation entry,
-    // which is the budget Phases 5 and 6 are planning their own tabs against.
-    expect(await navLabels(page)).toEqual(['Início', 'Perfil']);
+    // D-55, asserted rather than assumed: the FEED contributes a HOME SLOT and no navigation entry.
+    // The `Comunidades` entry beside the two kernel tabs is 05-01's `communities` manifest, not the
+    // feed's — which is exactly the distinction this assertion exists to keep visible, and the
+    // explicit `name: 'Feed'` count below is what pins it.
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Perfil']);
     await expect(visibleNav(page).getByRole('link', { name: 'Feed', exact: true })).toHaveCount(0);
 
     // FEED-07: the deep link a member would receive resolves to the post's own page.
@@ -223,7 +225,10 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
 
     // …and the shell offers neither a tab nor a widget for it, on a tenant that used to have both.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    expect(await navLabels(page)).toEqual(['Início', 'Perfil']);
+    // `Comunidades` is 05-01's `communities` manifest and is exactly what the absent reference
+    // module's own entry would have looked like — its presence is what makes this an assertion
+    // about the DELETED module rather than about a nav that happens to be kernel-only.
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Perfil']);
     await expect(page.locator('#exemplo')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Exemplo', exact: true })).toHaveCount(0);
   });

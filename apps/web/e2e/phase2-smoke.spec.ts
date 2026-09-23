@@ -38,8 +38,9 @@ import { ensureWorker } from './worker';
  * the feed, which is what 02-16 recorded Phase 4 would do: the whole chain — panel switch → flag →
  * member bootstrap within the flags TTL → `/v1/feed` 200/404 → the home slot appearing and
  * disappearing — now runs through the PANEL on a real module, with no SQL shortcut. The nav stays
- * ['Início', 'Perfil'] throughout because the feed ships a home slot and no tab (D-55), which is an
- * assertion rather than an absence.
+ * ['Início', 'Comunidades', 'Perfil'] throughout because the FEED ships a home slot and no tab
+ * (D-55) while `communities` ships a tab (D-40, 05-01) and a provisioned tenant gets every default
+ * module — which is an assertion rather than an absence.
  *
  * Hosts are `<slug>.localhost`: the BROWSER resolves them to loopback (RFC 6761) and GoTrue honours
  * their `redirectTo` locally; NODE does not resolve them, so every Node-side call (API, Mailpit,
@@ -607,8 +608,9 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     await expect(
       page.locator(mobile ? '[data-shell-nav="bottom"]' : '[data-shell-nav="rail"]'),
     ).toBeVisible();
-    // D-19 (reference module off) + D-40 (no module ships a tab yet): kernel tabs only.
-    expect(await navLabels(page)).toEqual(['Início', 'Perfil']);
+    // D-19 (reference module off) + D-40: the two kernel tabs plus the `communities` manifest's own
+    // entry, which every newly provisioned tenant gets with the default module set (05-01).
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Perfil']);
     // RENDERED brand colour on the active item (02-14 alias scoping inside [data-brand-root]).
     await expect.poll(() => activeNavColor(page)).toBe(hexToRgb(PRIMARY_2));
 
@@ -763,11 +765,13 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect(feedRegion(memberPage)).toBeVisible();
       expect(await modulesOf()).toContain('feed');
       expect((await feedApi()).status).toBe(200);
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Perfil']);
 
       // (b) Panel path: Feed off → the stored flag, the member's bootstrap, the API and the home
       // slot all follow, within the flags TTL and with no redeploy. The nav is unchanged in BOTH
-      // directions because the feed ships a home slot and no tab (D-55) — asserted, not assumed.
+      // directions because the FEED ships a home slot and no tab (D-55) — asserted, not assumed.
+      // The `Comunidades` entry belongs to another module whose flag this test never touches, so
+      // it is present in all three readings and is precisely what "unchanged" has to mean.
       await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
       await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/modulos`);
       await expect(page.locator('main').getByRole('switch')).toHaveCount(6);
@@ -781,7 +785,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect.poll(async () => (await feedApi()).status, { timeout: 35_000 }).toBe(404);
       expect((await feedApi()).code).toBe('MODULE_DISABLED');
       await memberPage.goto(`${origin}/inicio`);
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Perfil']);
       await expect(visibleNav(memberPage).getByRole('link', { name: 'Feed' })).toHaveCount(0);
       await expect(feedRegion(memberPage)).toHaveCount(0); // the slot is gone, no redeploy
 
@@ -796,7 +800,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect.poll(async () => (await feedApi()).status, { timeout: 35_000 }).toBe(200);
       await memberPage.goto(`${origin}/inicio`);
       await expect(feedRegion(memberPage)).toBeVisible();
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Perfil']);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Perfil']);
     } finally {
       await setTenantModuleFlag(slug, 'feed', true);
       await memberContext.close();

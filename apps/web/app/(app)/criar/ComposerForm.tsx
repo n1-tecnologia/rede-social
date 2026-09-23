@@ -6,6 +6,7 @@ import {
   mediaAcceptFor,
   PURPOSE_WIDTHS,
 } from '@tria/contracts/media';
+import { type CommunityPickerRow, CommunityPickerSheet } from '@tria/module-communities/ui';
 import {
   createPostSchema,
   FEED_MAX_ATTACHMENTS,
@@ -24,6 +25,7 @@ import {
   useToast,
 } from '@tria/ui';
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -80,6 +82,17 @@ import type { ComposerDraft } from '@/lib/feed-view';
  */
 export type ComposerMode = 'create' | 'edit';
 
+/**
+ * One destination the picker can offer (UI-D-45). Resolved on the SERVER by `/criar`, so opening
+ * the sheet costs no network round trip and the pre-filled `?comunidade=` value is already a name.
+ */
+export type ComposerDestination = {
+  id: string;
+  name: string;
+  coverAssetId: string | null;
+  coverVariantWidths: number[];
+};
+
 export type ComposerFormProps = {
   mode: ComposerMode;
   /** Edit mode only: which post is being saved. */
@@ -92,6 +105,18 @@ export type ComposerFormProps = {
    * second read: a client component may not reach for the tenant of record on its own.
    */
   tenantName: string;
+  /**
+   * D-72 / UI-D-45 — every ACTIVE community of the tenant, in the server's own order. Empty is a
+   * legal value and is the zero-community tenant: the sheet then renders exactly one row ("Feed
+   * principal") and is never empty. Edit mode ignores this entirely.
+   */
+  destinations?: ComposerDestination[];
+  /**
+   * The destination the form OPENS on. `/criar?comunidade={id}` resolves it on the server (D-70),
+   * so the picker row is already filled in on first paint — no client fetch, no flash of the
+   * default. `null` is the tenant-wide feed.
+   */
+  initialCommunityId?: string | null;
 };
 
 type PickedImage = {
@@ -116,6 +141,7 @@ const EMPTY_DRAFT: ComposerDraft = {
   video: null,
   attachments: [],
   hasLinkPreview: false,
+  community: null,
 };
 
 /** Binary sizes in pt-BR, the `feed-view` rule restated for a file the browser has not sent yet. */
@@ -140,9 +166,12 @@ export function ComposerForm({
   postId,
   initial = EMPTY_DRAFT,
   tenantName,
+  destinations = [],
+  initialCommunityId = null,
 }: ComposerFormProps) {
   const t = useTranslations('feed');
   const tm = useTranslations('media');
+  const tc = useTranslations('communities');
   const toast = useToast();
   const router = useRouter();
 
@@ -154,6 +183,17 @@ export function ComposerForm({
   const [attachments, setAttachments] = useState<PickedAttachment[]>(initial.attachments);
   /** UI-D-11: the row is dismissible, and dismissing it is the WHOLE remove-preview affordance. */
   const [linkRemoved, setLinkRemoved] = useState(false);
+  /**
+   * D-72 — the destination, chosen ONCE. `null` is "Feed principal".
+   *
+   * In EDIT mode it is never touched: the post's placement is fixed at publication, the row below
+   * renders read-only, and the body the form sends carries no `communityId` at all (the edit schema
+   * has no such key and is `.strict()`, so the API would refuse one anyway).
+   */
+  const [communityId, setCommunityId] = useState<string | null>(
+    mode === 'edit' ? (initial.community?.id ?? null) : initialCommunityId,
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const [formError, setFormError] = useState<string | null>(null);
   const [captionError, setCaptionError] = useState<string | undefined>(undefined);
@@ -260,6 +300,27 @@ export function ComposerForm({
   const publishable =
     trimmedCaption.length > 0 || galleryChosen || videoChosen || attachments.length > 0;
 
+  /**
+   * The destination's NAME, resolved in three steps that are not interchangeable:
+   *   1. edit mode reads the POST's own community, because it may since have been archived and an
+   *      archived container is deliberately absent from `destinations`;
+   *   2. create mode matches the selected id against the server-resolved list;
+   *   3. anything unmatched falls back to "Feed principal" — including a `?comunidade=` naming a
+   *      community this member cannot see, which must read as the default rather than as a blank.
+   */
+  const destinationName =
+    mode === 'edit'
+      ? (initial.community?.name ?? tc('picker.default'))
+      : (destinations.find((item) => item.id === communityId)?.name ?? tc('picker.default'));
+
+  const pickerRows: CommunityPickerRow[] = destinations.map((item) => ({
+    id: item.id,
+    name: item.name,
+    coverAssetId: item.coverAssetId,
+    coverVariantWidths: item.coverVariantWidths,
+    coverAlt: tc('picker.cover', { community: item.name }),
+  }));
+
   /** UI-D-11: the row appears once the CAPTION carries a URL, and it stays for a post that has one. */
   const showLinkRow =
     !linkRemoved && (firstUrlIn(caption) !== null || (mode === 'edit' && initial.hasLinkPreview));
@@ -344,6 +405,12 @@ export function ComposerForm({
         return t('composer.errors.assetNotUsable');
       case 'not_found':
         return t('composer.errors.notFound');
+      // COMM-04 / UI-SPEC E14/error: the destination was archived between this form rendering and
+      // this submit. The copy lives in the COMMUNITIES namespace because it is a fact about a
+      // community, and the typed caption is deliberately left untouched — the admin re-picks a
+      // destination and publishes the same post (UI-D-45).
+      case 'archived':
+        return tc('errors.archived');
       default:
         return t('composer.errors.publish');
     }
@@ -375,6 +442,10 @@ export function ComposerForm({
               // An empty string is "no preview, thank you": `new URL('')` throws inside the SSRF
               // guard, so the create path needs no second field for the remove affordance.
               ...(linkRemoved ? { linkUrl: '' } : {}),
+              // D-72: present ONLY on the create path, and only when a destination was chosen.
+              // The key is omitted rather than sent as null, because `createPostSchema` types it
+              // as an optional uuid — "no destination" is the absence, not a value.
+              ...(communityId ? { communityId } : {}),
             });
 
       if (!body.success) {
@@ -511,6 +582,56 @@ export function ComposerForm({
             setCaptionError(undefined);
           }}
         />
+
+        {/* ── D-72 / UI-D-45: the destination, BELOW the caption and ABOVE the media pickers ────
+            The order is the decision: the destination is settled before the expensive half of the
+            composer starts, so an admin never uploads a 400 MB video and only then discovers they
+            are publishing it to the wrong place.
+
+            The row is exactly THREE flex children and that is what guarantees its geometry at any
+            name length: the fixed label is `shrink-0`, the destination value is the only
+            `min-w-0 truncate` child, and the trailing glyph is `shrink-0`. Truncation can therefore
+            only ever fall on the name, the chevron is never pushed out of the row, and the row
+            never wraps to a second line — no max-width, no measurement. ── */}
+        <div className="flex flex-col gap-1">
+          {mode === 'edit' ? (
+            // UI-D-45: read-only rather than HIDDEN. A row that vanished between publishing and
+            // editing would read as a bug to the admin who used it five seconds earlier; rendering
+            // it inert with its helper TEACHES the rule instead of concealing it (D-72).
+            <div
+              data-composer-destination
+              data-readonly="true"
+              className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-border px-3 py-3"
+            >
+              <span className="shrink-0 text-sm font-normal text-text">{tc('picker.label')}</span>
+              <span className="min-w-0 flex-1 truncate text-right text-xs font-normal text-text-tertiary">
+                {destinationName}
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-composer-destination
+              aria-label={tc('picker.open')}
+              onClick={() => setPickerOpen(true)}
+              className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-border px-3 py-3 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            >
+              <span className="shrink-0 text-sm font-normal text-text">{tc('picker.label')}</span>
+              <span
+                data-composer-destination-value
+                className="min-w-0 flex-1 truncate text-right text-xs font-normal text-text-tertiary"
+              >
+                {destinationName}
+              </span>
+              <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
+            </button>
+          )}
+          {mode === 'edit' ? (
+            <p data-composer-destination-helper className="text-xs font-normal text-text-secondary">
+              {tc('picker.editHelper')}
+            </p>
+          ) : null}
+        </div>
 
         {/* ── Media: two mutually exclusive pickers (D-53) ─────────────────────────────────────── */}
         <div className="flex flex-col gap-2">
@@ -811,6 +932,56 @@ export function ComposerForm({
           </p>
         </div>
       </div>
+
+      {/* UI-D-45's sheet. "Feed principal" is the `leadingRow`, so the list is NEVER empty: a
+          tenant with zero communities gets exactly that one row. The trailing control is the
+          injected `Check` — the same body 05-08's pin sheet renders with a `Switch`. */}
+      {mode === 'create' ? (
+        <CommunityPickerSheet
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          title={tc('picker.title')}
+          rows={pickerRows}
+          rowLabel={(row) => tc('picker.row', { community: row.name })}
+          trailing={(row) =>
+            row.id === communityId ? (
+              <Check aria-label={tc('picker.selected')} size={20} className="text-brand" />
+            ) : null
+          }
+          onSelect={(row) => {
+            setCommunityId(row.id);
+            setPickerOpen(false);
+            clearErrors();
+          }}
+          leadingRow={
+            <button
+              type="button"
+              data-picker-default
+              aria-label={tc('picker.default')}
+              onClick={() => {
+                setCommunityId(null);
+                setPickerOpen(false);
+                clearErrors();
+              }}
+              className="flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            >
+              <span
+                aria-hidden
+                className="h-8 w-8 shrink-0 rounded-lg"
+                style={{ backgroundImage: 'var(--brand-gradient)' }}
+              />
+              <span className="min-w-0 flex-1 truncate text-sm font-normal text-text">
+                {tc('picker.default')}
+              </span>
+              <span className="shrink-0">
+                {communityId === null ? (
+                  <Check aria-label={tc('picker.selected')} size={20} className="text-brand" />
+                ) : null}
+              </span>
+            </button>
+          }
+        />
+      ) : null}
 
       {/* E18: all four strings are FIXED — no caption, filename or comment body is ever quoted into
           a destructive confirmation (T-04-58). */}

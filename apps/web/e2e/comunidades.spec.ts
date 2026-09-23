@@ -1,9 +1,11 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
-import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
+import { hosts, login, SEED_PASSWORD, seededCommunityFeed, seededFeed, users } from './fixtures';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
 const C = communityMessages.communities;
+const F = feedMessages.feed;
 
 /**
  * COMM-02 / COMM-03 / D-40 (plan 05-01): the `Comunidades` tab and the `/comunidades` list, on the
@@ -163,5 +165,135 @@ test.describe('the Comunidades tab and the /comunidades list (COMM-02, COMM-03)'
     // T-05-03 rendered: the member holds no `communities.community.manage`, so the list offers no
     // creation affordance at all. (The CTA itself lives in the empty state, which 05-04 exercises.)
     await expect(page.locator('main').getByRole('link', { name: C.actions.create })).toHaveCount(0);
+  });
+});
+
+/**
+ * 05-03 — the two halves of the phase's first criterion, in a real browser: the READ (a community
+ * post inside the main feed, labelled and linked) and the WRITE (the composer opened from a
+ * community, with its destination already chosen).
+ *
+ * Both run against the SEEDED fixtures and write nothing, so the shared seed stays as it was and
+ * the file remains re-runnable in any order.
+ */
+test.describe('the merged feed and the “Publicar em” picker (D-71, D-72, COMM-04)', () => {
+  test('a community post in the MAIN feed says where it came from, and links there', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/inicio`);
+
+    // D-73 rendered: the post is on `/inicio`, not on a separate community screen.
+    const card = page
+      .locator('[role="article"]')
+      .filter({ hasText: seededCommunityFeed.inCommunity })
+      .first();
+    await expect(card).toBeVisible();
+
+    // D-71 / UI-D-36: the label is the catalog's own template, interpolated with the container's
+    // name, and it is a LINK to that community — which is also the only discovery path from the
+    // feed into a community.
+    const expectedLabel = F.post.communityLabel.replace(
+      '{community}',
+      seededCommunityFeed.communityName,
+    );
+    const expectedAria = F.post.communityAriaLabel.replace(
+      '{community}',
+      seededCommunityFeed.communityName,
+    );
+    const label = card.getByRole('link', { name: expectedAria });
+    await expect(label).toBeVisible();
+    await expect(label).toHaveText(expectedLabel);
+    // The href is the community's own route. The destination SCREEN is 05-04's
+    // (`/comunidades/[communityId]`), so this asserts the link the member would follow rather than
+    // the page it lands on — the walk-through itself belongs to the plan that builds that page.
+    await expect(label).toHaveAttribute('href', /^\/comunidades\/[0-9a-f-]{36}$/);
+
+    // …and a TENANT-WIDE post carries no such segment at all — no middot, no empty node. Without
+    // this control the assertion above would pass on a feed that labelled every post.
+    const tenantWide = page
+      .locator('[role="article"]')
+      .filter({ hasText: seededFeed.newest })
+      .first();
+    await expect(tenantWide).toBeVisible();
+    await expect(tenantWide.locator('[data-post-community]')).toHaveCount(0);
+  });
+
+  test('the admin’s composer opens on “Feed principal”, and pre-filled from ?comunidade=', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+
+    // UI-D-45's default: the destination row exists, sits in the composer body, and reads
+    // "Feed principal" until the admin chooses otherwise.
+    await page.goto(`${hosts.demo}/criar`);
+    const row = page.locator('[data-composer-destination]');
+    await expect(row).toBeVisible();
+    await expect(row).toContainText(C.picker.label);
+    await expect(page.locator('[data-composer-destination-value]')).toHaveText(C.picker.default);
+
+    // The sheet lists "Feed principal" FIRST and then every active community, so it is never empty.
+    await row.click();
+    const sheet = page.getByRole('dialog', { name: C.picker.title });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator('[data-picker-default]')).toBeVisible();
+    await expect(
+      sheet.getByRole('button', {
+        name: C.picker.row.replace('{community}', seededCommunityFeed.communityName),
+      }),
+    ).toBeVisible();
+
+    // Choosing one closes the sheet and updates the row's value.
+    await sheet
+      .getByRole('button', {
+        name: C.picker.row.replace('{community}', seededCommunityFeed.otherCommunityName),
+      })
+      .click();
+    await expect(sheet).toBeHidden();
+    await expect(page.locator('[data-composer-destination-value]')).toHaveText(
+      seededCommunityFeed.otherCommunityName,
+    );
+
+    // D-70: arriving from a community's FAB pre-fills the row on the server, with no round trip —
+    // the value is correct on the very first paint.
+    const communityHref = await page
+      .goto(`${hosts.demo}/comunidades`)
+      .then(() =>
+        page
+          .locator('main a[href^="/comunidades/"]')
+          .filter({ hasText: seededCommunityFeed.communityName })
+          .first()
+          .getAttribute('href'),
+      );
+    const communityId = (communityHref ?? '').split('/').pop() ?? '';
+    expect(communityId).toMatch(/^[0-9a-f-]{36}$/);
+
+    await page.goto(`${hosts.demo}/criar?comunidade=${communityId}`);
+    await expect(page.locator('[data-composer-destination-value]')).toHaveText(
+      seededCommunityFeed.communityName,
+    );
+  });
+
+  test('the EDIT screen renders the destination read-only with its helper (UI-D-45)', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    // Direct URL, by the seed's FIXED id: the admin authored this post, so the edit route is
+    // reachable for it. The card carries no `/post/{id}` link to scrape (the post page is reached
+    // through the overflow menu), and scraping one would assert a navigation affordance rather than
+    // the row this case is about.
+    await page.goto(`${hosts.demo}/post/${seededCommunityFeed.inCommunityPostId}/editar`);
+
+    // UI-D-45: the row is PRESENT and inert, with its helper — rendering it read-only TEACHES
+    // D-72's rule, where hiding it would read as a bug to the admin who used it moments ago.
+    const row = page.locator('[data-composer-destination][data-readonly="true"]');
+    await expect(row).toBeVisible();
+    await expect(row).toContainText(C.picker.label);
+    await expect(row).toContainText(seededCommunityFeed.communityName);
+    await expect(page.locator('[data-composer-destination-helper]')).toHaveText(
+      C.picker.editHelper,
+    );
+    // …and there is no chevron and nothing to tap: the sheet cannot be opened from here at all.
+    await expect(page.getByRole('dialog', { name: C.picker.title })).toHaveCount(0);
   });
 });

@@ -169,6 +169,40 @@ describe('GET /v1/feed — the CI query budget (criterion 4)', () => {
     expect(measured?.calls ?? 0).toBeGreaterThan(0);
     expect(measured?.calls ?? 0).toBeLessThanOrEqual(FEED_LIST_STATEMENT_BUDGET);
   });
+
+  /**
+   * 05-03 / D-71 — the community label is FREE, and this is where that claim is checked.
+   *
+   * `postProjection` gained a `left join public.communities`, which is the only way the "em
+   * {Comunidade}" segment can cost nothing: a lookup per labelled post would be a ten-post page
+   * paying ten extra round trips, and it would be invisible in every functional assertion because
+   * the payload would be identical. The budget above already holds the FEED tables at one; this
+   * holds the COMMUNITY tables at one for the same page, so the join really is inside the same
+   * statement rather than beside it.
+   *
+   * Bidirectional again, and the floor here has real work to do: the regex must match the merged
+   * feed's statement, and it can only match it if the join is actually in it. A zero would mean the
+   * label had quietly stopped being hydrated, not that the page got cheaper.
+   */
+  it(`hydrates the D-71 community label inside the SAME statement (at most ${COMMUNITY_LIST_STATEMENT_BUDGET})`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    // A FULL page (the contract's maximum), so the page is wide enough to contain both sources —
+    // this file's own 12 tenant-wide fixtures sit on top of the seed's community posts.
+    const res = await api.request('/v1/feed?limit=25', {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { community: { name: string } | null }[] };
+    expect(body.items.length).toBe(25);
+    // Guard against the budget passing vacuously on a page whose posts are all tenant-wide — the
+    // label's hydration is the thing under measurement, so a labelled post has to be on the page.
+    expect(body.items.some((item) => item.community !== null)).toBe(true);
+
+    const calls = await communityCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(COMMUNITY_LIST_STATEMENT_BUDGET);
+  });
 });
 
 /** Sum of `calls` over the feed tables since the last reset — the filtered measure, never a total. */

@@ -1,4 +1,10 @@
-import { FEED_MEDIA_ISSUES, type FeedMediaIssue, type FeedPost } from '@tria/module-feed/contracts';
+import {
+  FEED_COMMUNITY_ISSUE_SET,
+  FEED_MEDIA_ISSUES,
+  type FeedCommunityIssue,
+  type FeedMediaIssue,
+  type FeedPost,
+} from '@tria/module-feed/contracts';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 
 /**
@@ -30,7 +36,10 @@ import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
  */
 export type PostWriteResult =
   | { ok: true; postId: string }
-  | { ok: false; code: FeedMediaIssue | 'empty_post' | 'not_found' | 'generic' };
+  | {
+      ok: false;
+      code: FeedMediaIssue | FeedCommunityIssue | 'empty_post' | 'not_found' | 'generic';
+    };
 
 export type PostDeleteResult = { ok: true } | { ok: false; code: 'not_found' | 'generic' };
 
@@ -42,20 +51,38 @@ export function asMediaIssue(value: unknown): FeedMediaIssue | null {
 }
 
 /**
+ * The same, for COMM-04's destination vocabulary. A SECOND function rather than one merged lookup
+ * because the two codes arrive on different envelope KEYS (`details.media` vs `details.community`),
+ * and collapsing them would let a media code surface as a community refusal the day the two
+ * vocabularies happen to share a word.
+ */
+export function asCommunityIssue(value: unknown): FeedCommunityIssue | null {
+  return typeof value === 'string' && FEED_COMMUNITY_ISSUE_SET.has(value)
+    ? (value as FeedCommunityIssue)
+    : null;
+}
+
+/**
  * Reads the refusal the API put in `details`, and nothing else from the envelope.
  *
  * Two shapes, both already in use on the create path: `details.media` carries one machine code from
  * the closed media vocabulary, and `details.issues` carries Zod's own list — of which the composer
  * branches on exactly one, `empty_post`, because it is the only one the submit control also guards.
  */
-export function postWriteIssue(error: unknown): FeedMediaIssue | 'empty_post' | 'not_found' | null {
+export function postWriteIssue(
+  error: unknown,
+): FeedMediaIssue | FeedCommunityIssue | 'empty_post' | 'not_found' | null {
   if (!(error instanceof ApiClientError)) return null;
+  // COMM-04: an unknown, foreign or removed community is the SAME bare 404 an unknown post id is
+  // (D-23) — the composer says one thing for all of them, exactly as `/post/[id]` does.
   if (error.status === 404) return 'not_found';
   const details = error.details as
-    | { media?: unknown; issues?: { message?: unknown }[] }
+    | { media?: unknown; community?: unknown; issues?: { message?: unknown }[] }
     | undefined;
   const media = asMediaIssue(details?.media);
   if (media) return media;
+  const community = asCommunityIssue(details?.community);
+  if (community) return community;
   if (details?.issues?.some((issue) => issue.message === 'empty_post')) return 'empty_post';
   return null;
 }

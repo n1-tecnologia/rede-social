@@ -10,6 +10,16 @@
       "posts": "{count, plural, one {# publicação} other {# publicações}}",
       "cover": "Capa da comunidade {community}"
     },
+    "picker": {
+      "label": "Publicar em",
+      "default": "Feed principal",
+      "title": "Publicar em",
+      "open": "Escolher onde publicar",
+      "row": "Publicar em {community}",
+      "selected": "Selecionado",
+      "cover": "Capa da comunidade {community}",
+      "editHelper": "A publicação não pode mudar de comunidade."
+    },
     "actions": {
       "create": "Criar comunidade",
       "creating": "Criando…",

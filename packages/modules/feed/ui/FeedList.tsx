@@ -161,6 +161,15 @@ export type FeedListProps = {
    * node unchanged.
    */
   renderMedia?: (item: PostCardView) => PostCardMediaView;
+  /**
+   * UI-D-36 / D-71: suppress the "em {Comunidade}" segment on EVERY card in this list.
+   *
+   * The community's own page passes it, because there the label would restate the page the reader
+   * is standing on. It is a LIST-level flag rather than a per-item one on purpose: on that page the
+   * whole list shares one community, so a per-item decision would be the same decision repeated
+   * and could drift for a single card.
+   */
+  suppressCommunity?: boolean;
 };
 
 /** The geometry of a real card: circle + two meta lines, a ratio box, two caption lines. */
@@ -240,6 +249,7 @@ export function FeedList({
   menu,
   onMore,
   renderMedia,
+  suppressCommunity,
 }: FeedListProps) {
   const toast = useToast();
 
@@ -464,6 +474,7 @@ export function FeedList({
                 edited: labels.edited,
                 media: { carousel: labels.carousel, attachmentError: labels.attachmentError },
               }}
+              suppressCommunity={suppressCommunity}
               onLike={onLike}
               onUnlike={onUnlike}
               onLikeError={failToast}

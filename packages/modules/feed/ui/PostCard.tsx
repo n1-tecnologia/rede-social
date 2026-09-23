@@ -48,6 +48,13 @@ export type PostCardView = {
   createdAtRelative: string;
   createdAtAbsolute: string;
   /**
+   * D-71 — the "em {Comunidade}" segment of the header's meta row, already interpolated and already
+   * routed by the host (`apps/web/lib/feed-view.tsx`). `null` is the tenant-wide post and renders
+   * nothing; the community's own page suppresses it with `suppressCommunity` on the LIST, because
+   * the whole list there shares one community and the label would restate the page (UI-D-36).
+   */
+  community?: { label: string; href: string; ariaLabel: string } | null;
+  /**
    * `https://{primaryHost}/post/{id}` — composed on the SERVER from the tenant's VERIFIED primary
    * host (FEED-07, T-04-51). `null` wherever there is no such host to name (the platform and
    * generic shells), and the card then hands the share control no handler: an inert glyph is a far
@@ -121,6 +128,8 @@ export type PostCardProps = {
   /** Fires only when the post HAS a share url; see `PostCardView.shareUrl`. */
   onShare?: (target: PostShareTarget) => void;
   onMore?: (postId: string) => void;
+  /** UI-D-36: the community page passes this for EVERY card it renders (D-71's suppression). */
+  suppressCommunity?: boolean;
 };
 
 /**
@@ -146,6 +155,7 @@ export function PostCard({
   onOpenComments,
   onShare,
   onMore,
+  suppressCommunity,
 }: PostCardProps) {
   // The refusal envelope becomes a rejection, which is the one signal the optimistic engine reverts
   // on — so a refused like and a failed request behave identically, as they must.
@@ -193,6 +203,8 @@ export function PostCard({
         createdAtIso={post.createdAtIso}
         createdAtRelative={post.createdAtRelative}
         createdAtAbsolute={post.createdAtAbsolute}
+        community={post.community ?? null}
+        suppressCommunity={suppressCommunity}
         onMore={onMore ? () => onMore(post.id) : undefined}
         moreLabel={onMore ? labels.moreOptions : undefined}
       />

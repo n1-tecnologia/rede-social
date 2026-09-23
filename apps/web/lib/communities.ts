@@ -1,4 +1,5 @@
 import {
+  COMMUNITY_MAX_PAGE_SIZE,
   COMMUNITY_PAGE_SIZE,
   type CommunityPage,
   type CommunitySummary,
@@ -80,6 +81,39 @@ export async function loadCommunities(
 
   if (path) redirect(path);
   return page;
+}
+
+/**
+ * Every ACTIVE community of the tenant, for a surface that has to offer ALL of them at once —
+ * UI-D-45's "Publicar em" picker today, UI-D-41's pin sheet in 05-08.
+ *
+ * It walks the SAME keyset `getCommunities` pages (never a second endpoint and never a second
+ * cursor), with a hard page ceiling so a tenant with thousands of containers cannot turn opening a
+ * composer into an unbounded server-side loop. A tenant past the ceiling gets the first N and the
+ * picker stays usable; a scrolling picker with its own pagination is a real screen 05-08 can design
+ * when a tenant needs one, not something to half-build here.
+ *
+ * It NEVER throws and never redirects: an unreadable list returns `[]`, the picker then offers only
+ * "Feed principal", and the composer still publishes. Losing the destination chooser must not cost
+ * the admin the post.
+ */
+const PICKER_MAX_PAGES = 10;
+
+export async function listAllCommunities(): Promise<CommunitySummary[]> {
+  const items: CommunitySummary[] = [];
+  let cursor: string | undefined;
+  try {
+    for (let page = 0; page < PICKER_MAX_PAGES; page += 1) {
+      const result = await getCommunities({ cursor, limit: COMMUNITY_MAX_PAGE_SIZE });
+      items.push(...result.items);
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+  } catch (error) {
+    // Shape only: a community NAME is member-facing content and never reaches a log line (T-05-06).
+    console.error('communities.picker_failed', { error: String(error), loaded: items.length });
+  }
+  return items;
 }
 
 /** The outcome of reading ONE community: the community, a bare miss, or an answer we could not read. */

@@ -538,3 +538,85 @@ describe('community.created — after commit, exactly once (MOD-03)', () => {
     expect(events.length).toBe(before + 1);
   });
 });
+
+/**
+ * 05-03 / D-74 — the module flag is the SINGLE switch, and it flips the MERGED FEED in both
+ * directions with the rows untouched.
+ *
+ * Case 10/11 above prove the flag governs this module's own routes and the nav tab. This block
+ * proves the half that lives in ANOTHER module: with `communities` off, `GET /v1/feed` reverts to
+ * Phase 4's `community_id is null` predicate; with it on, the same endpoint returns the merged
+ * list. The rows are counted in the database between the two reads, so "the posts are still there"
+ * is a measurement rather than an inference — an implementation that soft-deleted or re-homed the
+ * community posts on a flag flip would pass a contents-only assertion and fail this one.
+ *
+ * It runs against the LAB tenant for the same reason cases 10/11 do: the flag's state itself is
+ * what must be observable, and the lab tenant's `communities` row is this file's to move.
+ */
+describe('D-74 — the communities flag flips the MERGED FEED, in both directions', () => {
+  it('17. OFF: the feed carries no community post, and every one of those rows still exists', async () => {
+    const [before] = await adminSql<{ count: number }[]>`
+      select count(*)::int as count from public.feed_posts
+       where tenant_id = ${tenantIds.lab}::uuid and community_id is not null
+         and deleted_at is null`;
+    expect(
+      before?.count,
+      'the seed publishes inside the lab tenant’s communities too',
+    ).toBeGreaterThan(0);
+
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'communities'`;
+    moduleFlags.invalidate(tenantIds.lab);
+
+    const res = await request('/v1/feed?limit=25', tokens.labAdmin, {
+      headers: { 'x-tenant-host': HOSTS.lab },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { communityId: string | null }[] };
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.every((item) => item.communityId === null)).toBe(true);
+
+    // The rows are UNTOUCHED — the flag hides them from a list, it does not delete or re-home them.
+    const [after] = await adminSql<{ count: number }[]>`
+      select count(*)::int as count from public.feed_posts
+       where tenant_id = ${tenantIds.lab}::uuid and community_id is not null
+         and deleted_at is null`;
+    expect(after?.count).toBe(before?.count);
+
+    // And the community feed is unreachable while the module is off — the same bare 404 an unknown
+    // id gets, never a 403 that would tell a member the container exists somewhere (ROLE-06).
+    const [community] = await adminSql<{ id: string }[]>`
+      select id from public.communities where tenant_id = ${tenantIds.lab}::uuid limit 1`;
+    const scoped = await request(`/v1/feed?communityId=${community?.id ?? ''}`, tokens.labAdmin, {
+      headers: { 'x-tenant-host': HOSTS.lab },
+    });
+    expect(scoped.status).toBe(404);
+  });
+
+  it('18. …and turning it back ON restores them, with no migration and no backfill', async () => {
+    await adminSql`
+      update public.tenant_modules set enabled = true
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'communities'`;
+    moduleFlags.invalidate(tenantIds.lab);
+
+    const res = await request('/v1/feed?limit=25', tokens.labAdmin, {
+      headers: { 'x-tenant-host': HOSTS.lab },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { communityId: string | null; community: { name: string } | null }[];
+    };
+    const restored = body.items.filter((item) => item.communityId !== null);
+    expect(restored.length).toBeGreaterThan(0);
+    // D-71 rides back with them: each restored post carries the label it will render.
+    expect(restored.every((item) => (item.community?.name.length ?? 0) > 0)).toBe(true);
+
+    const [community] = await adminSql<{ id: string }[]>`
+      select id from public.communities where tenant_id = ${tenantIds.lab}::uuid limit 1`;
+    const scoped = await request(`/v1/feed?communityId=${community?.id ?? ''}`, tokens.labAdmin, {
+      headers: { 'x-tenant-host': HOSTS.lab },
+    });
+    expect(scoped.status).toBe(200);
+  });
+});
