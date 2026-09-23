@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 04
 current_phase_name: Feed
 status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-09-23T01:49:57.182Z"
+stopped_at: Completed 04-07-PLAN.md
+last_updated: "2026-09-23T02:30:24.168Z"
 last_activity: 2026-09-22
 last_activity_desc: Phase 04 execution started
-state_head: dd0987fa6811b8e5409c1e1195fe4a789b429882
+state_head: 8d5c43ae4f91608ab1c2ae13444f60fd0cd8e50b
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 50
-  completed_plans: 43
+  completed_plans: 44
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 04 (Feed) — EXECUTING
-Plan: 7 of 10
+Plan: 8 of 10
 Status: Ready to execute
 Last activity: 2026-09-22 — Phase 04 execution started
 
@@ -101,6 +101,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 04 P04 | 2h 43m | 3 tasks | 35 files |
 | Phase 04 P05 | 78 min | 3 tasks | 26 files |
 | Phase 04 P06 | 82 min | 3 tasks | 18 files |
+| Phase 04 P07 | 35 min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -278,6 +279,12 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-06: no client data-cache library — server-action pagination stays the one paging paradigm for the feed — Phase 3's 03-05 pattern already handles infinite scroll; a second data-fetching paradigm here would fork the first feature that needs paging. Phase 7 (Realtime invalidation) is where a cache is worth revisiting.
 - [Phase 04]: 04-06: count copy crosses the module boundary as a {count} template read with next-intl t.raw() — An optimistic like changes the number with no round trip, so the placeholder must survive the catalog lookup; the module fills it with Intl.NumberFormat/PluralRules for the host-supplied locale and still ships no words (PWA-03).
 - [Phase 04]: 04-06: the >999 meta-row backstop is pinned as a string by a unit test, not by a seeded high-count post — supabase/tests/090-feed.sql reconciles every post's like_count against its live feed_likes rows, so a four-digit fixture would need 1000+ auth users and a hand-written counter would turn that assertion red. Recorded as WINDOWS 24.
+- [Phase 04]: 04-07: a comment's author schema is nullable and SEPARATE from a post's (commentAuthorSchema) — a comment outlives its author's membership, a post does not — Sharing one schema would force a null-tolerant name onto the post card, where a null name is a bug rather than a state (UI-D-24)
+- [Phase 04]: 04-07: the membership lifecycle predicate rides the comment projection's LEFT JOIN condition, never a WHERE clause — ms.deleted_at is null in the JOIN nulls membership_id, display_name and avatar_asset_id together; moving it to WHERE silently restores the inner-join behaviour that orphans every reply under a removed author
+- [Phase 04]: 04-07: two comment surfaces, ONE CommentsList — the container difference is a variant prop, not a second component (D-59) — A copy for the sheet and a copy for the post page would drift on ordering, paging and the delete affordance
+- [Phase 04]: 04-07: the UI-D-22 error branch and the empty branch are one if/else-if chain, proven exclusive by a branch-scoped grep — A failed load that renders the empty copy asserts a false fact about a post with comments and offers no recovery
+- [Phase 04]: 04-07: FeedList owns ONE CommentSheet for the column plus a per-post comment-count delta, rather than a sheet per card — A sheet per card mounts a dialog, focus trap and confirmation dialog per post on screen; the delta is cleared on refresh because the server's counts become authoritative again
+- [Phase 04]: 04-07: linkify extracted into packages/modules/feed/ui/linkify.tsx so the caption and the comment body share ONE auto-linker — T-04-43: two copies would eventually disagree about which schemes become an href and which rel goes on it, and the weaker one is what a member can post into
 
 ### Pending Todos
 
@@ -310,6 +317,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T01:49:57.114Z
-Stopped at: Completed 04-06-PLAN.md
+Last session: 2026-09-23T02:30:09.518Z
+Stopped at: Completed 04-07-PLAN.md
 Resume file: None

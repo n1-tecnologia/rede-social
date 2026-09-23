@@ -39,3 +39,17 @@ objects behind 04-04's seeded gallery posts. 04-04 narrowed the `media_assets` r
 foreign key holds and the rows survive, but the BYTES do not: after the API suite runs, the seeded
 gallery renders `MediaImage`'s neutral box until the next `pnpm db:seed`. No assertion depends on
 the pixels, so this is cosmetic drift in the local fixture rather than a product defect.
+
+### 4. `apps/web/e2e/feed.spec.ts` flakes under repeated runs against the shared local stack
+
+Observed while verifying 04-07: `playwright test feed.spec.ts --repeat-each=3` (that file ALONE,
+with no 04-07 spec in the run) fails 10 of 69 — different tests on different passes, all of them
+timing assertions on a server-action round trip (`a failed like reverts…`, `the sentinel appends one
+page…`). A single pass of the same file is green, and so is a single pass of every feed spec
+together. The cause is the local `next dev` server under sustained load, not the feature: none of
+the failures is reproducible in isolation and none of them names a wrong VALUE, only a value that
+had not arrived yet.
+
+Out of scope for 04-07 (the scope-boundary rule: this file was not touched by this plan). If CI ever
+runs the e2e suite with repeats or higher parallelism, the fix is to give these round-trip
+assertions an explicit longer timeout rather than to relax what they assert.

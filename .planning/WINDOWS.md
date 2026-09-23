@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 15
+open_count: 16
 waived_count: 0
 fixed_count: 9
-total_count: 24
-last_updated: 2026-09-23T01:46:35.102Z
+total_count: 25
+last_updated: 2026-09-23T02:30:01.337Z
 ---
 
 # Broken Windows Ledger
@@ -39,6 +39,7 @@ last_updated: 2026-09-23T01:46:35.102Z
 | 22 | 04 | deviation | apps/web/e2e/shell.spec.ts | 111 | PRE-EXISTING (04-01, not 04-04): shell.spec still expects the 'Em breve' card on tria-lab /inicio, but tria-lab has the feed module enabled since 04-01, so the feed home slot renders and HomeSlots never shows 'Em breve'. Fails deterministically on a fresh seed; feed.spec asserts the contradicting truth. | fixed |  | 2026-09-22T19:58:25.383Z | 2026-09-23T01:46:14.345Z |
 | 23 | 04 | stub | packages/modules/feed/db/schema.ts |  | feed_link_previews.image_asset_id is null in V1 by decision — the preview card renders body-only; the image branch is grep-pinned but unexercised by any seeded or runtime row | open |  | 2026-09-23T01:14:50.647Z |  |
 | 24 | 04 | unrun-verify | apps/web/e2e/feed.spec.ts |  | The >999 meta-row backstop (UI-SPEC E02 overflow/long-text) is pinned only as a STRING by packages/modules/feed/tests/meta.test.ts, never as pixels: supabase/tests/090-feed.sql reconciles every post's like_count against its live feed_likes rows, so a four-digit seeded count would need 1000+ auth users and a hand-written counter would turn that assertion red. The abbreviated row has never been rendered at 320px. | open |  | 2026-09-23T01:46:35.102Z |  |
+| 25 | 04 | stub | apps/web/lib/registry.tsx | 162 | Viewer's optimistic comment row carries profileHref: null — the bootstrap has no membershipId; bounded to a pending row's lifetime, intentional | open |  | 2026-09-23T02:30:01.337Z |  |
 
 ````json
 [
@@ -328,6 +329,18 @@ last_updated: 2026-09-23T01:46:35.102Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T01:46:35.102Z",
+    "resolved_at": null
+  },
+  {
+    "id": 25,
+    "kind": "stub",
+    "phase": "04",
+    "file": "apps/web/lib/registry.tsx",
+    "line": 162,
+    "description": "Viewer's optimistic comment row carries profileHref: null — the bootstrap has no membershipId; bounded to a pending row's lifetime, intentional",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T02:30:01.337Z",
     "resolved_at": null
   }
 ]
