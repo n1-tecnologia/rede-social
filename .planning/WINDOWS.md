@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 19
+open_count: 20
 waived_count: 0
 fixed_count: 11
-total_count: 30
-last_updated: 2026-09-23T06:10:00.000Z
+total_count: 31
+last_updated: 2026-09-23T17:36:06.052Z
 ---
 
 # Broken Windows Ledger
@@ -45,6 +45,7 @@ last_updated: 2026-09-23T06:10:00.000Z
 | 28 | 04 | deviation | .planning/sketches/002-phase-04-designed-screens/README.md |  | Sketch 002 (the D-33 gate for the composer, the edit screen, the FAB and the post menu) is still status: pending / approved: false. 04-09 coded against the drawing on the orchestrator's explicit instruction, with approval carried to phase UAT. | open |  | 2026-09-23T03:43:45.600Z |  |
 | 29 | 04 | deviation | apps/web/app/(app)/criar/ComposerForm.tsx |  | Image reorder ships as two 44x44 move controls per tile instead of the mockup's drag grip: a pointer-only drag is unreachable by keyboard and unassertable in a spec. Same effect on the asset-id array. | open |  | 2026-09-23T03:43:45.669Z |  |
 | 30 | 04 | deviation | apps/web/e2e/feed-composer.spec.ts | 125 | Times out inside a full pnpm verify (worker not draining kernel.media-derive-variants, processing=2); green alone in 6.4s and green on the second full gate run. Cross-spec ensureWorker interaction, same class as the platform-branding and feed.spec order-dependence already logged. | open |  | 2026-09-23T05:15:02.900Z |  |
+| 31 | 05 | unrun-verify | .planning/phases/05-communities-stories/05-01-SUMMARY.md |  | 05-01 D12: the /comunidades empty, first-load-error and load-more-error states are implemented and typechecked but have no automated observation; 05-04 owns the same states | open |  | 2026-09-23T17:36:06.052Z |  |
 
 ````json
 [
@@ -406,6 +407,18 @@ last_updated: 2026-09-23T06:10:00.000Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T05:15:02.900Z",
+    "resolved_at": null
+  },
+  {
+    "id": 31,
+    "kind": "unrun-verify",
+    "phase": "05",
+    "file": ".planning/phases/05-communities-stories/05-01-SUMMARY.md",
+    "line": null,
+    "description": "05-01 D12: the /comunidades empty, first-load-error and load-more-error states are implemented and typechecked but have no automated observation; 05-04 owns the same states",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-23T17:36:06.052Z",
     "resolved_at": null
   }
 ]

@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
 current_phase: 05
-current_phase_name: communities-stories
+current_phase_name: Communities & Stories
 status: executing
-stopped_at: Phase 05 UI-SPEC approved
-last_updated: "2026-09-23T16:36:56.014Z"
-last_activity: 2026-09-22
-last_activity_desc: Phase 04 execution started
-state_head: d731bf60d1d3a85eac612d2576e38c3ef502c44d
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-09-23T17:36:00.722Z"
+last_activity: 2026-09-23
+last_activity_desc: Phase 05 execution started
+state_head: 33bc9e756ba2ce6f3a8cb4bc1dd858adbef7fe5a
 progress:
   total_phases: 9
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 58
-  completed_plans: 47
-  percent: 11
+  completed_plans: 48
+  percent: 0
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-11)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 04 — Feed
+**Current focus:** Phase 05 — Communities & Stories
 
 ## Current Position
 
-Phase: 05 (communities-stories) — READY TO EXECUTE
-Plan: 10 of 10
+Phase: 05 (Communities & Stories) — EXECUTING
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-09-22 — Phase 04 execution started
+Last activity: 2026-09-23 — Phase 05 execution started
 
-Progress: [█░░░░░░░░░] 11%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -105,6 +105,7 @@ Progress: [█░░░░░░░░░] 11%
 | Phase 04 P08 | 26 min | 3 tasks | 23 files |
 | Phase 04 P09 | 46 min | 3 tasks | 34 files |
 | Phase 04 P10 | 87 min | 3 tasks | 52 files |
+| Phase 05 P01 | 28 min | 3 tasks | 34 files |
 
 ## Accumulated Context
 
@@ -298,6 +299,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-10: the removal migration hand-extends the GENERATED file rather than splitting into --custom: rows, then table, then the narrowed CHECK, because the narrowed constraint refuses to be created while a retired-key row exists; the snapshot is untouched so db:generate stays idempotent
 - [Phase 04]: 04-10: no seed tenant carries a module TAB any more (feed is a home slot, D-55), so shell.spec asserts the same nav on both tenants; the tab-bearing module-flag witness moved to phase4-smoke.spec.ts on a throwaway tenant
 - [Phase 04]: 04-10: Phase 4 exit gate pnpm verify GREEN at 21m51s (unit 512, pgTAP 191, integration 373, e2e 328 passed/58 skipped, PWA 45/3) against the Phase 3 baseline of 20m26s — after the gate caught shell.spec.ts still asserting the deleted module's tab, a file the RESEARCH removal inventory had missed
+- [Phase 05]: The kernel does NOT re-export module schemas: packages/core/db/schema/index.ts stays untouched for communities, because turbo boundaries denies kernel -> module and drizzle.config.ts already globs packages/modules/*/db/schema.ts
+- [Phase 05]: GET /v1/communities CLAMPS limit instead of refusing it (the feed 400s): a tab-reachable list must land a hand-edited ?limit= on a page, not an error screen. T-05-04 holds either way, because no client value widens the read
+- [Phase 05]: communities.last_activity_at is NOT NULL, seeded at creation and trigger-owned from 05-03. It is the keyset key: an aggregate over feed_posts is not pageable, and a nullable column would float post-less communities to the top
 
 ### Pending Todos
 
@@ -330,6 +334,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T15:00:44.704Z
-Stopped at: Phase 05 UI-SPEC approved
-Resume file: .planning/phases/05-communities-stories/05-UI-SPEC.md
+Last session: 2026-09-23T17:35:07.495Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None
