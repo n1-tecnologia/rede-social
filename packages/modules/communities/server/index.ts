@@ -4,4 +4,10 @@
  * imports).
  */
 export { communitiesRoutes } from './routes';
-export { createCommunity, getCommunity, listCommunities, slugify } from './service';
+export {
+  createCommunity,
+  getCommunity,
+  listCommunities,
+  slugify,
+  updateCommunity,
+} from './service';

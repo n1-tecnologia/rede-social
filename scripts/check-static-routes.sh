@@ -65,6 +65,8 @@ const REQUIRED_KEYS = [
   // request, so neither may ever be prerendered.
   '/(app)/comunidades/page',
   '/(app)/comunidades/[communityId]/page',
+  '/(app)/comunidades/nova/page',
+  '/(app)/comunidades/[communityId]/editar/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

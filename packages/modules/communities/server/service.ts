@@ -11,6 +11,7 @@ import type {
   CommunityStatus,
   CommunitySummary,
   CreateCommunity,
+  UpdateCommunity,
 } from '../contracts/index';
 
 const log = moduleLogger('module-communities');
@@ -338,4 +339,134 @@ async function insertCommunity(
   const row = rows[0];
   if (!row) throw new ApiError(500, 'INTERNAL');
   return row;
+}
+
+/**
+ * `PATCH /v1/communities/{communityId}` (COMM-01, UI-D-37) — edit, archive and reactivate.
+ *
+ * **ONE function, because archive is a STATUS WRITE and not a separate verb.** Splitting it into
+ * `archiveCommunity` / `reactivateCommunity` would be three code paths writing one column, and the
+ * three would eventually disagree about what an unchanged request answers.
+ *
+ * **What archive MEANS** (05-RESEARCH §Pattern 7, settled here): a WRITE gate and a LIST gate, never
+ * a feed gate. An archived community keeps its existing posts in the merged feed exactly where
+ * members already saw them (`listFeed` carries no archive predicate at all — the measured
+ * alternative is a sequential scan plus a sort, and the denormalised one is a table-wide UPDATE plus
+ * a fourth index plus a new class of drift); disappears from `GET /v1/communities` (one predicate,
+ * already there); still OPENS by id, read-only; refuses new posts with the closed `archived` code
+ * that 05-03 already raises; and is reversible with one PATCH back to `active`.
+ *
+ * **Every miss is the SAME bare 404** the read path answers — unknown id, another tenant's,
+ * soft-deleted — because the update statement carries the identical predicate and RLS supplies the
+ * tenant beneath it. There is nothing here that compares tenant ids, so no later edit can turn that
+ * 404 into a 403 that confirms the row exists somewhere (D-23, T-05-20).
+ *
+ * **`post_count` and `last_activity_at` are not in the `set` list and must never be.** They are
+ * trigger-owned; an edit is not activity, and a list ordered by "who edited most recently" would
+ * answer a different question than D-76 asks. `updated_at` moves only when something actually
+ * changed, which is what makes a no-op PATCH observably a no-op.
+ *
+ * **Two events, both id-shaped, both after commit.** `community.updated` on a CONTENT change and
+ * `community.archived` on the TRANSITION into `archived`. A repeat archive changes no row, so it
+ * announces nothing — the event counts transitions, not states.
+ */
+export async function updateCommunity(
+  ctx: RequestContext,
+  communityId: string,
+  input: UpdateCommunity,
+): Promise<CommunitySummary> {
+  // The service re-states the route's rule: this function is also reachable from the seed and from
+  // any handler that assembles its own input, none of which pass through the route validator.
+  if (input.name !== undefined && input.name.trim().length === 0) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { community: 'name_required' });
+  }
+
+  const { row, contentChanged, archivedNow } = await withTenantTx(ctx, async (tx) => {
+    // The row is read FIRST, inside the same transaction, because three of this function's answers
+    // depend on what it was: the 404, whether anything actually changed, and whether this write is
+    // the transition into `archived` rather than a repeat of it.
+    const current = await tx.execute<CommunityRow>(sql`
+      ${communityProjection}
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.id = ${communityId}::uuid
+         and c.deleted_at is null
+       limit 1`);
+    const before = current[0];
+    if (!before) throw new ApiError(404, 'NOT_FOUND');
+
+    const name = input.name ?? before.name;
+    const description = input.description ?? before.description;
+    const coverAssetId =
+      input.coverAssetId === undefined ? before.cover_asset_id : input.coverAssetId;
+    const status = input.status ?? before.status;
+
+    const changedContent =
+      name !== before.name ||
+      description !== before.description ||
+      coverAssetId !== before.cover_asset_id;
+    const changedStatus = status !== before.status;
+
+    // Nothing moved: no statement, no `updated_at`, no event. A PATCH identical to the stored row
+    // must be observably inert, not merely idempotent in its response body.
+    if (!changedContent && !changedStatus) {
+      return { row: before, contentChanged: false, archivedNow: false };
+    }
+
+    await tx.execute(sql`
+      update communities
+         set name = ${name},
+             description = ${description},
+             cover_asset_id = ${coverAssetId}::uuid,
+             status = ${status},
+             updated_at = now()
+       where tenant_id = ${ctx.tenantId}::uuid
+         and id = ${communityId}::uuid
+         and deleted_at is null`);
+
+    const rows = await tx.execute<CommunityRow>(sql`
+      ${communityProjection}
+       where c.id = ${communityId}::uuid
+       limit 1`);
+    const after = rows[0];
+    if (!after) throw new ApiError(500, 'INTERNAL');
+
+    return {
+      row: after,
+      contentChanged: changedContent,
+      archivedNow: changedStatus && status === 'archived',
+    };
+  });
+
+  if (contentChanged) {
+    emit(ctx, 'community.updated', {
+      tenantId: ctx.tenantId,
+      communityId: row.id,
+      actorUserId: ctx.userId,
+    });
+  }
+  if (archivedNow) {
+    emit(ctx, 'community.archived', {
+      tenantId: ctx.tenantId,
+      communityId: row.id,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  log.info(
+    {
+      event: 'communities.updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      communityId: row.id,
+      // Flags and lengths, never the words themselves (T-05-06).
+      contentChanged,
+      archivedNow,
+      status: row.status,
+      hasCover: row.cover_asset_id !== null,
+    },
+    'community updated',
+  );
+
+  return toCommunity(row);
 }

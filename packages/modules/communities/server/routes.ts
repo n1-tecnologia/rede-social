@@ -10,8 +10,9 @@ import {
   communityQuerySchema,
   communitySummarySchema,
   createCommunitySchema,
+  updateCommunitySchema,
 } from '../contracts/index';
-import { createCommunity, getCommunity, listCommunities } from './service';
+import { createCommunity, getCommunity, listCommunities, updateCommunity } from './service';
 
 /**
  * The module owns its guard chain: the mount in `apps/api/src/app.ts` is a plain
@@ -109,6 +110,46 @@ const createCommunityRoute = createRoute({
   },
 });
 
+/**
+ * COMM-01's write half (05-04): edit, archive and reactivate, on ONE route.
+ *
+ * Archive is a `status` write rather than a `POST /{id}/archive` verb, so there is exactly one
+ * guarded path into every mutation of a community — one place a reviewer has to look, and one place
+ * a later change can go wrong. The 404 wording is the read route's, verbatim, because the two
+ * answers must be indistinguishable: a PATCH that said something a GET did not would be the
+ * existence oracle D-23 removes.
+ */
+const updateCommunityRoute = createRoute({
+  method: 'patch',
+  path: '/{communityId}',
+  // The literal, not `COMMUNITY_PERMISSIONS.manage`: this string is the one thing a reviewer greps
+  // for when asking "what guards editing and archiving a community?", and an indirection here is
+  // the kind that hides a change (T-05-18).
+  middleware: [requirePermission('communities.community.manage')] as const,
+  request: {
+    params: communityIdParam,
+    body: { content: { 'application/json': { schema: updateCommunitySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The community as it now stands. A body identical to the stored row is a 200 that writes nothing and moves neither `updated_at` nor the trigger-owned `last_activity_at`; archiving an already-archived community is likewise a 200 that emits no second `community.archived`.',
+      content: { 'application/json': { schema: communitySummarySchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.community` carrying exactly one machine code: `name_required`.',
+    },
+    403: {
+      description: 'The caller does not hold `communities.community.manage` in this tenant',
+    },
+    404: {
+      description:
+        'No community with that id is visible to this tenant — unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
 export const communitiesRoutes = communities
   .openapi(listRoute, async (c) =>
     c.json(await listCommunities(c.get('ctx'), c.req.valid('query')), 200),
@@ -119,4 +160,8 @@ export const communitiesRoutes = communities
   })
   .openapi(createCommunityRoute, async (c) =>
     c.json(await createCommunity(c.get('ctx'), c.req.valid('json')), 201),
-  );
+  )
+  .openapi(updateCommunityRoute, async (c) => {
+    const { communityId } = c.req.valid('param');
+    return c.json(await updateCommunity(c.get('ctx'), communityId, c.req.valid('json')), 200);
+  });

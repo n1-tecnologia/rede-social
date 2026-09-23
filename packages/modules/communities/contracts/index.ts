@@ -159,6 +159,41 @@ export const createCommunitySchema = z
   });
 export type CreateCommunity = z.infer<typeof createCommunitySchema>;
 
+/**
+ * `PATCH /v1/communities/{communityId}` (COMM-01, 05-04) — edit, archive and reactivate, in ONE
+ * schema and ONE endpoint.
+ *
+ * **Archive is a STATUS WRITE, not a separate verb.** `POST /{id}/archive` +
+ * `POST /{id}/reactivate` would be two routes, two guards and two service functions for one
+ * column, and the pair would eventually disagree about what an already-archived community answers.
+ * Here the answer falls out of the shape: `status` is just another optional field.
+ *
+ * **Every field is optional and `.strict()`.** A PATCH carries only what changes, an absent field
+ * means "leave it", and an unknown key fails loudly. `coverAssetId` is `.nullable()` so `null` is
+ * the REMOVE affordance ("no cover" is a value the admin can choose, D-69/UI-D-38) — which is also
+ * why it cannot be merged with "absent".
+ *
+ * `slug` is deliberately NOT here. It is derived from the name at creation and then frozen: a
+ * rename must not break a link somebody already sent (D-56's precedent), and the URL is the id.
+ */
+export const updateCommunitySchema = z
+  .object({
+    name: z.string().trim().max(COMMUNITY_MAX_NAME).optional(),
+    description: z.string().trim().max(COMMUNITY_MAX_DESCRIPTION).optional(),
+    coverAssetId: z.uuid().nullable().optional(),
+    status: z.enum(COMMUNITY_STATUSES).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    // The SAME rule the create path states, for the same reason: a community with no name has
+    // nothing for a card to render. The MACHINE code rides as the issue `message` and the route's
+    // `defaultHook` lifts it into `details.community`.
+    if (value.name !== undefined && value.name.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['name'], message: 'name_required' });
+    }
+  });
+export type UpdateCommunity = z.infer<typeof updateCommunitySchema>;
+
 /** The permission STRINGS, exported so the manifest and the web tier never retype them. */
 export const COMMUNITY_PERMISSIONS = {
   manage: 'communities.community.manage',
@@ -176,11 +211,40 @@ export interface CommunityCreated {
 }
 
 /**
- * MOD-02 in one block: the module teaches the KERNEL's `EventMap` about its own event instead of the
- * kernel knowing modules exist. Anything that imports this file gets `emit`/`subscribe` typed for it.
+ * A content change (name, description or cover) landed. Ids only, for the same reason
+ * `CommunityCreated` is: the payload is what a subscriber logs, and member-facing text has no
+ * business in a log line (T-05-06). There is deliberately no "what changed" field — a diff in an
+ * event payload is the shortest path to a NAME in a log.
+ */
+export interface CommunityUpdated {
+  tenantId: string;
+  communityId: string;
+  actorUserId: string;
+}
+
+/**
+ * The TRANSITION into `archived`, announced exactly once. Archiving an already-archived community
+ * answers 200 and emits nothing: a subscriber counting these is counting transitions, and a second
+ * announcement of a state that never changed would be a lie it cannot detect.
+ *
+ * The reverse transition has no event in V1 — nothing subscribes to it, and an event nobody reads is
+ * a payload shape frozen for free. Adding `community.reactivated` later is one line here.
+ */
+export interface CommunityArchived {
+  tenantId: string;
+  communityId: string;
+  actorUserId: string;
+}
+
+/**
+ * MOD-02 in one block: the module teaches the KERNEL's `EventMap` about its own events instead of
+ * the kernel knowing modules exist. Anything that imports this file gets `emit`/`subscribe` typed
+ * for them.
  */
 declare module '@tria/contracts' {
   interface EventMap {
     'community.created': CommunityCreated;
+    'community.updated': CommunityUpdated;
+    'community.archived': CommunityArchived;
   }
 }

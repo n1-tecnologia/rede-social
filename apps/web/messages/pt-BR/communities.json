@@ -40,6 +40,50 @@
       "creating": "Criando…",
       "viewAll": "Ver comunidades"
     },
+    "form": {
+      "createTitle": "Nova comunidade",
+      "editTitle": "Editar comunidade",
+      "close": "Fechar",
+      "save": "Salvar alterações",
+      "saving": "Salvando…",
+      "archive": "Arquivar comunidade",
+      "cover": {
+        "label": "Capa",
+        "add": "Adicionar capa",
+        "change": "Trocar capa",
+        "remove": "Remover capa",
+        "preview": "Prévia da capa padrão",
+        "helper": "A capa é opcional. Sem ela, usamos as cores de {tenant}."
+      },
+      "name": {
+        "label": "Nome",
+        "placeholder": "Ex.: Avisos da diretoria"
+      },
+      "description": {
+        "label": "Descrição",
+        "placeholder": "Explique em uma frase do que trata esta comunidade."
+      }
+    },
+    "toasts": {
+      "created": "Comunidade criada.",
+      "saved": "Alterações salvas.",
+      "archived": "Comunidade arquivada.",
+      "reactivated": "Comunidade reativada."
+    },
+    "confirm": {
+      "archive": {
+        "title": "Arquivar comunidade?",
+        "body": "Ela sai da lista e ninguém mais publica nela. As publicações continuam no feed.",
+        "confirm": "Arquivar",
+        "cancel": "Cancelar"
+      }
+    },
+    "discard": {
+      "title": "Descartar comunidade?",
+      "body": "As informações preenchidas serão perdidas.",
+      "confirm": "Descartar",
+      "cancel": "Continuar editando"
+    },
     "empty": {
       "title": "Nenhuma comunidade ainda",
       "body": "As comunidades de {tenant} vão aparecer aqui.",
@@ -55,7 +99,8 @@
       "retry": "Tentar novamente",
       "loadMore": "Não foi possível carregar mais comunidades.",
       "nameRequired": "Dê um nome para a comunidade.",
-      "archived": "Esta comunidade foi arquivada. Não é possível publicar nela."
+      "archived": "Esta comunidade foi arquivada. Não é possível publicar nela.",
+      "save": "Não foi possível salvar. Revise os campos e tente novamente."
     }
   }
 }

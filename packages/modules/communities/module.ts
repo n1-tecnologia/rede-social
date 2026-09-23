@@ -39,6 +39,20 @@ export const communitiesModule = defineModule({
         log.info({ event: 'community.created', ...payload }, 'community created');
       },
     },
+    {
+      event: 'community.updated',
+      handler: async (payload) => {
+        // Shape only — and there is deliberately no diff in the payload to spread here.
+        log.info({ event: 'community.updated', ...payload }, 'community updated');
+      },
+    },
+    {
+      event: 'community.archived',
+      handler: async (payload) => {
+        // The TRANSITION into `archived`, announced once. A repeat archive emits nothing at all.
+        log.info({ event: 'community.archived', ...payload }, 'community archived');
+      },
+    },
   ],
   defaultRolePermissions: {
     admin_tenant: [COMMUNITY_PERMISSIONS.manage],

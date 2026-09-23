@@ -6,6 +6,7 @@ import {
   type CreateCommunity,
   communityPageSchema,
   communitySummarySchema,
+  type UpdateCommunity,
 } from '@tria/module-communities/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -163,6 +164,27 @@ export async function loadCommunity(communityId: string): Promise<CommunityResul
 export async function createCommunity(input: CreateCommunity): Promise<CommunitySummary> {
   const res = await apiFetch('/v1/communities', {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return communitySummarySchema.parse(await res.json());
+}
+
+/**
+ * `PATCH /v1/communities/{communityId}` (COMM-01) — the edit, the archive and the reactivate, all
+ * three through the SAME `apiFetch` every read above uses, so no write path can drift on the tenant
+ * header or on how a refusal is read.
+ *
+ * There is deliberately no `archiveCommunity`/`reactivateCommunity` here: archive is a `status`
+ * write on this endpoint (05-04), and a second function would be a second place to keep in step.
+ */
+export async function updateCommunity(
+  communityId: string,
+  input: UpdateCommunity,
+): Promise<CommunitySummary> {
+  const res = await apiFetch(`/v1/communities/${encodeURIComponent(communityId)}`, {
+    method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   });
