@@ -279,6 +279,34 @@ export async function deleteTenantVideoAssets(tenantSlug: string): Promise<void>
 }
 
 /**
+ * Hard-deletes the stories a spec wrote, by caption prefix, together with the assets they name
+ * (05-05).
+ *
+ * A soft delete would NOT do, and the reason is specific rather than tidiness: `DELETE /v1/stories`
+ * is soft by design (the likes and comments members left on a story survive it), so a spec that
+ * cleaned up through the product would leave one `stories` row and one `media_assets` row per run.
+ * Those assets are then permanently skipped by the media suites' own sweeps — which now exclude
+ * anything a story names — so the accumulation would be silent and unbounded until `pnpm db:reset`.
+ *
+ * Scoped by CAPTION PREFIX rather than by tenant: every seeded story has to survive untouched, and
+ * the prefix is the only thing that distinguishes a spec's rows from the fixture's.
+ */
+export async function deleteStoriesByCaptionPrefix(prefix: string): Promise<void> {
+  const rows = await sql()<{ media_asset_id: string }[]>`
+    delete from public.stories
+     where caption like ${`${prefix}%`}
+    returning media_asset_id`;
+  const assetIds = [...new Set(rows.map((row) => row.media_asset_id))];
+  if (assetIds.length === 0) return;
+  // Only assets no OTHER story still names — a spec that reused a seeded asset must not remove it.
+  await sql()`
+    delete from public.media_assets
+     where id = any(${assetIds}::uuid[])
+       and id not in (select media_asset_id from public.stories)
+       and id not in (select media_asset_id from public.feed_post_media)`;
+}
+
+/**
  * Records a video asset in a KNOWN state without a provider round trip (03-07): the failed and
  * rejected rows the library must render, and a `ready` row with a playback id the fake provider can
  * sign. Returns the asset id.

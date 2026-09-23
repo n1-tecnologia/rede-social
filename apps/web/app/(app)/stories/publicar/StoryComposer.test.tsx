@@ -56,9 +56,8 @@ const lookup = (tree: Record<string, unknown>, key: string, values?: Record<stri
 };
 
 vi.mock('next-intl', () => ({
-  useTranslations:
-    (namespace?: string) => (key: string, values?: Record<string, unknown>) =>
-      lookup(namespace === 'media' ? mediaCatalog : catalog, key, values),
+  useTranslations: (namespace?: string) => (key: string, values?: Record<string, unknown>) =>
+    lookup(namespace === 'media' ? mediaCatalog : catalog, key, values),
 }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh: vi.fn() }) }));
@@ -75,8 +74,10 @@ vi.mock('@/app/(app)/stories/story-actions', () => ({ publishStoryAction: publis
  * composer registers and drives them directly, which is how "a video handed to the provider" and
  * "an image completed in Storage" become two one-line scenarios instead of two fake transports.
  */
-vi.mock('@/components/media/useSignedUpload', async (orig) => ({
-  ...(await orig<typeof import('@/components/media/useSignedUpload')>()),
+// A PLAIN factory, not a spread of the original: the real module imports the profile server
+// actions, which import `lib/api` -> `lib/env`, which fails fast on the browser env vars a unit
+// test has no business supplying. The composer uses nothing else from this module.
+vi.mock('@/components/media/useSignedUpload', () => ({
   useSignedUpload: (options: { kind: string; [key: string]: unknown }) => {
     upload.handlers[options.kind] = options as never;
     const shell = options.kind === 'video' ? upload.video : upload.image;
@@ -84,6 +85,7 @@ vi.mock('@/components/media/useSignedUpload', async (orig) => ({
   },
 }));
 
+const { MEDIA_LIMITS } = await import('@tria/contracts/media');
 const { STORY_MAX_CAPTION } = await import('@tria/module-stories/contracts');
 const { StoryComposer } = await import('./StoryComposer');
 
@@ -114,10 +116,21 @@ const composer = () => render(<StoryComposer historyHref="/stories/meus" />);
 describe('StoryComposer — the two-state publish screen (UI-D-39, D-81)', () => {
   it('1. before a pick: both pickers, the duration helper, and NO Publicar control at all', () => {
     composer();
-    expect(screen.getByText(lookup(catalog, 'publish.pickPhoto'))).toBeTruthy();
-    expect(screen.getByText(lookup(catalog, 'publish.pickVideo'))).toBeTruthy();
-    // UI-D-05: the cap is interpolated from MEDIA_LIMITS, never typed into the copy.
-    expect(screen.getByTestId('story-duration-helper').textContent).toMatch(/60/);
+    // TWO nodes per picker, and that is the approved drawing: the mobile ROW (`md:hidden`) and the
+    // desktop DROP ZONE render the same words and drive the SAME hidden input, so a breakpoint
+    // cannot offer a picker the other one lacks.
+    expect(screen.getAllByText(lookup(catalog, 'publish.pickPhoto'))).toHaveLength(2);
+    expect(screen.getAllByText(lookup(catalog, 'publish.pickVideo'))).toHaveLength(2);
+    // UI-D-05: the cap is INTERPOLATED from MEDIA_LIMITS, never typed into the copy — and it is
+    // formatted by the SAME `>= 60 -> minutes` rule `useSignedUpload` applies to the duration
+    // REFUSAL, so the number a member is promised and the number they are refused with can never be
+    // rounded two different ways. Derived here rather than written out, which is what makes the
+    // assertion fail if the cap moves and the copy does not.
+    const cap = MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0;
+    const capLabel = cap >= 60 ? `${Math.round(cap / 60)} min` : `${cap} s`;
+    expect(screen.getByTestId('story-duration-helper').textContent).toBe(
+      lookup(catalog, 'publish.helper', { limit: capLabel }),
+    );
     expect(screen.queryByRole('button', { name: lookup(catalog, 'publish.submit') })).toBeNull();
   });
 
@@ -140,7 +153,7 @@ describe('StoryComposer — the two-state publish screen (UI-D-39, D-81)', () =>
     expect(screen.getByLabelText(lookup(catalog, 'publish.captionLabel'))).toBeTruthy();
     expect(screen.getByRole('button', { name: lookup(catalog, 'publish.submit') })).toBeTruthy();
     // The pickers are gone: there is one thing to do on this screen now.
-    expect(screen.queryByText(lookup(catalog, 'publish.pickPhoto'))).toBeNull();
+    expect(screen.queryAllByText(lookup(catalog, 'publish.pickPhoto'))).toHaveLength(0);
   });
 
   it('4. publishing an image sends the asset id and the caption, then leaves for /inicio', async () => {

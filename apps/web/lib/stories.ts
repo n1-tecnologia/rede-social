@@ -1,6 +1,14 @@
-import { STORY_PAGE_SIZE, type StoryPage, storyPageSchema } from '@tria/module-stories/contracts';
+import {
+  type PublishStory,
+  STORY_ISSUE_SET,
+  STORY_PAGE_SIZE,
+  type StoryIssue,
+  type StoryPage,
+  storyPageSchema,
+  storySummarySchema,
+} from '@tria/module-stories/contracts';
 import { apiFetch } from '@/lib/api';
-import { ApiClientError } from '@/lib/bootstrap';
+import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 
 /**
  * The ONE stories fetch implementation (the `getFeed` / `getCommunities` rule, D-58, Pitfall 9). The
@@ -66,5 +74,67 @@ export async function loadStories(query: StoryQueryInput = {}): Promise<StoryPag
     // Shape only: a story CAPTION is member-facing content and never reaches a log line (T-05-29).
     console.error('stories.list_failed', { error: String(error) });
     return null;
+  }
+}
+
+/**
+ * The closed result vocabulary of a story publish. `code` is a catalog KEY, never pt-BR copy: the
+ * client translates, so nothing server-controlled reaches the DOM through this path.
+ *
+ * `not_found` is the API's single bare 404 for every miss — an unknown asset id, another tenant's,
+ * and one soft-deleted between the upload and the publish — so the screen says ONE thing for all of
+ * them (D-23, T-05-26).
+ *
+ * **Why this lives HERE and not beside the action.** A `'use server'` module may export nothing but
+ * async functions, so a refusal mapper, a `ReadonlySet` and a result type cannot sit next to
+ * `publishStoryAction`. The same reason `lib/feed-write.ts` exists.
+ */
+export type StoryWriteResult =
+  | { ok: true; storyId: string }
+  | { ok: false; code: StoryIssue | 'not_found' | 'generic' };
+
+const STORY_ISSUE_LOOKUP: ReadonlySet<string> = STORY_ISSUE_SET;
+
+/** True for a machine code that belongs to the story module's closed vocabulary, and nothing else. */
+export function asStoryIssue(value: unknown): StoryIssue | null {
+  return typeof value === 'string' && STORY_ISSUE_LOOKUP.has(value) ? (value as StoryIssue) : null;
+}
+
+/** Reads the refusal the API put in `details.story`, and nothing else from the envelope. */
+export function storyWriteIssue(error: unknown): StoryIssue | 'not_found' | null {
+  if (!(error instanceof ApiClientError)) return null;
+  // An unknown, foreign or removed ASSET is the same bare 404 an unknown story id is (D-23).
+  if (error.status === 404) return 'not_found';
+  return asStoryIssue((error.details as { story?: unknown } | undefined)?.story);
+}
+
+/**
+ * `POST /v1/stories` (STORY-01) — through the SAME `apiFetch` every read above uses, so the publish
+ * path cannot drift on the tenant header or on how a refusal is read.
+ *
+ * It deliberately does NOT revalidate and does NOT redirect: which paths a write invalidates and
+ * whether a refusal becomes a navigation are decisions that belong to the action owning the request
+ * (`redirect()` throws in Next 16 and this function's own catch would swallow it).
+ */
+export async function attemptStoryPublish(
+  input: PublishStory,
+): Promise<{ result: StoryWriteResult; refusal: string | null }> {
+  try {
+    const res = await apiFetch('/v1/stories', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw await apiError(res);
+    const story = storySummarySchema.parse(await res.json());
+    return { result: { ok: true, storyId: story.id }, refusal: null };
+  } catch (error) {
+    const issue = storyWriteIssue(error);
+    if (issue) return { result: { ok: false, code: issue }, refusal: null };
+
+    const refusal = error instanceof ApiClientError ? bootstrapRedirectPath(error) : null;
+    // Shape only: a story CAPTION is member-facing content and never reaches a log line (T-05-29).
+    if (!refusal) console.error('stories.publish_failed', { error: String(error) });
+    return { result: { ok: false, code: 'generic' }, refusal };
   }
 }

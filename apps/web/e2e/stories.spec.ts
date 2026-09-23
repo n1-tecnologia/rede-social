@@ -1,7 +1,9 @@
+import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
-import { envValue } from './admin';
+import { closeAdmin, deleteStoriesByCaptionPrefix, envValue } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
 const S = storyMessages.stories;
@@ -33,6 +35,17 @@ const SEEDED = {
 } as const;
 
 const strip = (page: Page) => page.getByRole('list', { name: S.region });
+
+/**
+ * A REAL photo, the same fixture `feed-composer.spec.ts` uploads. Not a synthesised 1x1 PNG: the
+ * variant worker decodes the bytes with sharp, and a minimal buffer fails with
+ * `vipspng: libpng read error`, leaves the asset `processing` forever and makes the strip's R-P8
+ * filter look like a broken publish flow.
+ */
+const PHOTO = `${fileURLToPath(new URL('./fixtures/', import.meta.url))}post-a.jpg`;
+
+/** The prefix every story THIS FILE publishes carries, so the sweep can be exact. */
+const TEST_CAPTION_PREFIX = 'Story publicado pelo e2e';
 
 const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
 const DEMO_HOST = new URL(hosts.demo).hostname;
@@ -119,6 +132,26 @@ test.describe('the /inicio strip — one circle per active story, newest first (
 });
 
 test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)', () => {
+  /**
+   * Variant derivation (`kernel.media-derive-variants`) runs in the WORKER role, not in the API, and
+   * an image asset stays `processing` until it finishes. R-P8 then correctly keeps the story out of
+   * the strip — so without a worker this spec would assert the readiness filter rather than the
+   * publish flow, and would fail for exactly the right reason at exactly the wrong place.
+   */
+  let stopWorker: (() => Promise<void>) | null = null;
+
+  test.beforeAll(async () => {
+    stopWorker = await ensureWorker();
+  });
+
+  test.afterAll(async () => {
+    await stopWorker?.();
+    // The product's own DELETE is SOFT by design, so the row and its asset would survive every run
+    // and accumulate. This is the hard sweep that keeps the file re-runnable in any order.
+    await deleteStoriesByCaptionPrefix(TEST_CAPTION_PREFIX);
+    await closeAdmin();
+  });
+
   test('a member cannot reach the publish route at all — it redirects to /inicio', async ({
     page,
   }) => {
@@ -140,27 +173,26 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     // UI empty/E07: before a pick there is nothing to publish, so the control does not exist.
     await expect(page.getByRole('button', { name: S.publish.submit })).toHaveCount(0);
 
-    // A 1x1 PNG is enough: the upload path itself is Phase 3's and already has its own suites.
-    await page.locator('#story-photo-input').setInputFiles({
-      name: 'story.png',
-      mimeType: 'image/png',
-      buffer: Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-        'base64',
-      ),
-    });
+    // The upload path itself is Phase 3's and already has its own suites; what matters here is
+    // that the bytes are REAL, so the worker can derive the ladder the circle renders.
+    await page.locator('#story-photo-input').setInputFiles(PHOTO);
 
     // Post-pick the screen becomes the story FRAME — the media, the overlaid caption and Publicar.
     const caption = page.getByLabel(S.publish.captionLabel);
     await expect(caption).toBeVisible({ timeout: 30_000 });
-    await caption.fill('Story publicado pelo e2e.');
+    await caption.fill(`${TEST_CAPTION_PREFIX}.`);
 
     await page.getByRole('button', { name: S.publish.submit }).click();
     await expect(page).toHaveURL(/\/inicio$/);
 
-    // The new circle heads the strip, one slot after the admin's own circle.
+    // The new circle heads the strip, one slot after the admin's own circle. The wait is the
+    // WORKER's: the asset is `processing` until variant derivation lands, and R-P8 keeps a
+    // non-ready story out of the strip — so the poll is measuring the real pipeline, not a race.
     const items = strip(page).getByRole('listitem');
-    await expect(items).toHaveCount(SEEDED.active + 2);
+    await expect(async () => {
+      await page.reload();
+      await expect(items).toHaveCount(SEEDED.active + 2);
+    }).toPass({ timeout: 60_000 });
 
     // Clean up through the product's own surface, so the shared seed is exactly as it was found.
     await removeNewestStory();
@@ -179,7 +211,11 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     await page.locator('[data-testid="story-composer"]').evaluate((form) => {
       (form as HTMLFormElement).requestSubmit();
     });
-    await expect(page.getByRole('alert')).toHaveText(S.publish.errors.noMedia);
+    // Scoped to the form: Next ships its own always-present `role="alert"` route announcer, so an
+    // unscoped query is a strict-mode violation rather than an assertion about this screen.
+    await expect(page.locator('[data-testid="story-composer"]').getByRole('alert')).toHaveText(
+      S.publish.errors.noMedia,
+    );
 
     await page.goto('/inicio');
     await expect(strip(page).getByRole('listitem')).toHaveCount(SEEDED.active + 1);

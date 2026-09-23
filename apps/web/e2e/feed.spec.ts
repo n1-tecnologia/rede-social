@@ -326,7 +326,17 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
 
     // The GALLERY, explicitly: the card also carries the author's avatar, and a double tap there
     // lands outside the gesture wrapper and would make this test pass or fail for the wrong reason.
-    await card.getByTestId('post-gallery-strip').dblclick();
+    //
+    // SCROLLED FIRST, and that is load-bearing (05-05): `DoubleTapHeart` counts two `pointerup`s on
+    // the SAME wrapper inside 300 ms, so the element must not move between them. `dblclick` scrolls
+    // the target into view as part of the action, and with the `/inicio` column now carrying the
+    // stories strip above the feed the card starts below the fold — the scroll then lands inside
+    // the gesture window and the second tap misses. Settling the position BEFORE the gesture is the
+    // 05-03 remedy for the same class of move, one plan later.
+    const gallery = card.getByTestId('post-gallery-strip');
+    await gallery.scrollIntoViewIfNeeded();
+    await expect(gallery).toBeInViewport();
+    await gallery.dblclick();
 
     await expect(card.getByRole('button', { name: F.actions.unlike })).toBeVisible();
     await expect(card.locator('[data-post-meta]')).toContainText(likeSegment(1));
