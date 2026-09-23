@@ -3,9 +3,7 @@
 import {
   commentsQuerySchema,
   createCommentSchema,
-  FEED_MEDIA_ISSUES,
   type FeedComment,
-  type FeedMediaIssue,
   feedQuerySchema,
   repliesQuerySchema,
   updatePostSchema,
@@ -30,6 +28,12 @@ import {
   updatePost,
 } from '@/lib/feed';
 import { commentView, postCardView } from '@/lib/feed-view';
+import {
+  asMediaIssue,
+  attemptPostWrite,
+  type PostDeleteResult,
+  type PostWriteResult,
+} from '@/lib/feed-write';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -52,6 +56,8 @@ import { primaryHostOrigin } from '@/lib/tenant-host';
 export type FeedPageResult =
   | { ok: true; items: PostCardView[]; nextCursor: string | null }
   | { ok: false; code: 'generic' };
+
+export type { PostDeleteResult, PostWriteResult };
 
 export type LikeActionResult =
   | { ok: true; liked: boolean; likeCount: number }
@@ -151,94 +157,37 @@ export async function unlikePostAction(postId: string): Promise<LikeActionResult
 /* ── The admin write paths (FEED-03) ───────────────────────────────────────────────────────────── */
 
 /**
- * What a post WRITE can answer with. `code` is a catalog KEY, never pt-BR copy (T-04-42): the
- * client translates, so nothing server-controlled reaches the DOM through this path.
- *
- * The media vocabulary is the contracts' own closed set, forwarded verbatim — the composer switches
- * on it exhaustively and a new refusal code cannot compile until it has copy. `not_found` is the
- * API's single bare 404 for every miss (someone else's post, an unknown id, another tenant's, and
- * one soft-deleted between the form loading and the save), so the composer says one thing for all
- * of them exactly as `/post/[id]` does (UI-D-16).
- */
-export type PostWriteResult =
-  | { ok: true; postId: string }
-  | { ok: false; code: FeedMediaIssue | 'empty_post' | 'not_found' | 'generic' };
-
-export type PostDeleteResult = { ok: true } | { ok: false; code: 'not_found' | 'generic' };
-
-const MEDIA_ISSUE_SET: ReadonlySet<string> = new Set(FEED_MEDIA_ISSUES);
-
-/**
- * Reads the refusal the API put in `details`, and nothing else from the envelope.
- *
- * Two shapes, both already in use on the create path: `details.media` carries one machine code from
- * the closed media vocabulary, and `details.issues` carries Zod's own list — of which the composer
- * branches on exactly one, `empty_post`, because it is the only one the submit control also guards.
- */
-function postIssue(error: unknown): FeedMediaIssue | 'empty_post' | 'not_found' | null {
-  if (!(error instanceof ApiClientError)) return null;
-  if (error.status === 404) return 'not_found';
-  const details = error.details as
-    | { media?: unknown; issues?: { message?: unknown }[] }
-    | undefined;
-  if (typeof details?.media === 'string' && MEDIA_ISSUE_SET.has(details.media)) {
-    return details.media as FeedMediaIssue;
-  }
-  if (details?.issues?.some((issue) => issue.message === 'empty_post')) return 'empty_post';
-  return null;
-}
-
-/**
- * Shared by the create and the edit action: one try, one refusal mapping, one revalidation.
- *
- * `revalidatePath('/inicio')` is what takes the changed post to the feed the admin lands back on —
- * the home slot is server-rendered, so without it the member would read a cached page-1 that still
- * carries the old caption. The post's own page is revalidated too, because the share link a member
- * may already be holding points at it.
- */
-async function writePost(run: () => Promise<{ id: string }>): Promise<PostWriteResult> {
-  let refusal: string | null = null;
-  let result: PostWriteResult = { ok: false, code: 'generic' };
-  try {
-    const post = await run();
-    revalidatePath('/inicio');
-    revalidatePath(`/post/${post.id}`);
-    result = { ok: true, postId: post.id };
-  } catch (error) {
-    const issue = postIssue(error);
-    if (issue) {
-      result = { ok: false, code: issue };
-    } else {
-      if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
-      // Shape only: a caption is member content and never reaches a log line (T-04-05/T-04-40).
-      if (!refusal) console.error('feed.post.write_failed', { error: String(error) });
-    }
-  }
-
-  if (refusal) redirect(refusal);
-  return result;
-}
-
-/**
  * Save an edit (FEED-03). The SAME Zod the API validates with runs BEFORE the request, so a body
  * the composer could not have produced is refused here and never reaches SQL; the API re-authorises
  * independently anyway, and its `author_user_id` predicate — not this action — is what decides
  * whether the post is this admin's to touch.
+ *
+ * The result vocabulary, the refusal mapping and the revalidation live in `lib/feed-write.ts`,
+ * shared verbatim with the create action: a `'use server'` module may export only async functions,
+ * so keeping them here would mean two copies of "which envelope field carries the refusal".
  */
 export async function updatePostAction(postId: string, input: unknown): Promise<PostWriteResult> {
   const id = postIdSchema.safeParse(postId);
-  const body = updatePostSchema.safeParse(input);
   if (!id.success) return { ok: false, code: 'not_found' };
+
+  const body = updatePostSchema.safeParse(input);
   if (!body.success) {
+    const media = body.error.issues.map((issue) => asMediaIssue(issue.message)).find(Boolean);
+    if (media) return { ok: false, code: media };
     const empty = body.error.issues.some((issue) => issue.message === 'empty_post');
-    const media = body.error.issues
-      .map((issue) => issue.message)
-      .find((message) => MEDIA_ISSUE_SET.has(message));
-    if (media) return { ok: false, code: media as FeedMediaIssue };
     return { ok: false, code: empty ? 'empty_post' : 'generic' };
   }
 
-  return writePost(() => updatePost(id.data, body.data));
+  const { result, refusal } = await attemptPostWrite(() => updatePost(id.data, body.data));
+  // The edited caption has to reach every server-rendered read of it, including the post's own
+  // page, which a member may already be holding a share link to.
+  if (result.ok) {
+    revalidatePath('/inicio');
+    revalidatePath(`/post/${result.postId}`);
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
 }
 
 /**

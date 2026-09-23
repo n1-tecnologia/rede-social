@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '../cn';
 import { IconButton } from './IconButton';
@@ -20,6 +20,12 @@ export type PageHeaderProps = BackProps & {
   title?: string;
   /** Trailing slot (actions). */
   trailing?: ReactNode;
+  /**
+   * Glyph of the leading control. Defaults to the back chevron every navigational header uses; the
+   * composer passes `X` because it CLOSES a full-screen form rather than stepping back through a
+   * hierarchy, and the two read as different promises (UI-SPEC §Composer contract, "Chrome").
+   */
+  backIcon?: LucideIcon;
   /** CSS `top` of the sticky header — defaults to just below the TopBar. */
   stickyTop?: string;
   className?: string;
@@ -32,6 +38,7 @@ const backClasses =
 export function PageHeader({
   title,
   trailing,
+  backIcon: BackIcon = ChevronLeft,
   stickyTop = 'calc(var(--safe-top) + 3rem)',
   className,
   ...back
@@ -48,10 +55,10 @@ export function PageHeader({
     >
       {back.backHref !== undefined ? (
         <a href={back.backHref} aria-label={back.backLabel} className={backClasses}>
-          <ChevronLeft aria-hidden size={22} />
+          <BackIcon aria-hidden size={22} />
         </a>
       ) : back.onBack !== undefined ? (
-        <IconButton icon={ChevronLeft} label={back.backLabel} onClick={back.onBack} />
+        <IconButton icon={BackIcon} label={back.backLabel} onClick={back.onBack} />
       ) : null}
       {title === undefined ? (
         <div className="flex-1" />

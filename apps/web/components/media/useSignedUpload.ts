@@ -33,12 +33,24 @@ export interface UseSignedUploadOptions {
   onHandedToProvider?: (assetId: string) => void | Promise<void>;
   /** The file that will actually be uploaded (already normalised), for a local preview. */
   onPicked?: (file: File) => void;
-  /** Catalog key of the success toast, under the `media` namespace. */
-  successKey?: string;
+  /**
+   * Catalog key of the success toast, under the `media` namespace — or `null` for NO toast.
+   *
+   * `null` since 04-09: the composer picks several photos in a row and the thumbnail appearing in
+   * the grid IS the confirmation, so a toast per file would stack three notifications over a form
+   * the admin is still filling in. Every screen that uploads ONE thing still toasts.
+   */
+  successKey?: string | null;
 }
 
-/** "8 MB" from 8388608 — the copy interpolates `{limit}` and never hard-codes a number (UI-D-05). */
-function formatLimit(bytes: number): string {
+/**
+ * "8 MB" from 8388608 — the copy interpolates `{limit}` and never hard-codes a number (UI-D-05).
+ *
+ * Exported since 04-09: the composer's "PDF de até {limit}." helper reads the SAME function as the
+ * upload refusals below, so the number a member is promised and the number they are refused with
+ * can never be rounded two different ways.
+ */
+export function formatMediaLimit(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
 }
@@ -101,7 +113,7 @@ export function useSignedUpload({
 
   /** Exhaustive over `MEDIA_ISSUES`: a new refusal code cannot compile until it has copy. */
   const messageFor = (issue: MediaIssue | 'generic', answeredMaxBytes?: number): string => {
-    const limitText = formatLimit(answeredMaxBytes ?? maxBytes);
+    const limitText = formatMediaLimit(answeredMaxBytes ?? maxBytes);
     const seconds = limit?.maxDurationSeconds ?? 0;
     const durationText = seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${seconds} s`;
     const map: Record<MediaIssue | 'generic', string> = {
@@ -125,7 +137,7 @@ export function useSignedUpload({
   const reject = (reason: 'type' | 'size') => {
     if (busy.current) return;
     setError(
-      reason === 'type' ? typeMessage() : t('errors.size', { limit: formatLimit(maxBytes) }),
+      reason === 'type' ? typeMessage() : t('errors.size', { limit: formatMediaLimit(maxBytes) }),
     );
     setState('error');
   };
@@ -195,7 +207,7 @@ export function useSignedUpload({
         setProgress(100);
         setState('done');
         await onHandedToProvider?.(started.upload.assetId);
-        toast.show({ tone: 'success', message: t(successKey) });
+        if (successKey !== null) toast.show({ tone: 'success', message: t(successKey) });
         return;
       }
 
@@ -207,7 +219,7 @@ export function useSignedUpload({
       setProgress(100);
       setState('done');
       await onCompleted(completed.asset);
-      toast.show({ tone: 'success', message: t(successKey) });
+      if (successKey !== null) toast.show({ tone: 'success', message: t(successKey) });
     } catch (unexpected) {
       // WR-07: a rejected action or a thrown transfer returns the zone to idle with the generic
       // message; the raw value is logged, never rendered. try + catch only — no `finally`.

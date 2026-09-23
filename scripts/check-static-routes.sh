@@ -55,6 +55,11 @@ const REQUIRED_KEYS = [
   '/(app)/inicio/page',
   '/(app)/configuracoes/page',
   '/(app)/perfil/page',
+  // Phase 4: the feed's own routes. `/post/[postId]` is the FEED-07 share target and is therefore
+  // effectively permanent; the composer and its edit twin read the session and the host per request.
+  '/(app)/post/[postId]/page',
+  '/(app)/criar/page',
+  '/(app)/post/[postId]/editar/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

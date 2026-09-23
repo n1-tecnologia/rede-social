@@ -1,5 +1,5 @@
 import { avatarUrlFor } from '@tria/contracts/profiles';
-import type { FeedComment, FeedPost } from '@tria/module-feed/contracts';
+import type { FeedComment, FeedPost, PostMediaItem } from '@tria/module-feed/contracts';
 import type {
   AttachmentDescriptor,
   CommentView,
@@ -214,6 +214,55 @@ export function postCardView(
     viewerLiked: post.viewerLiked,
     ariaLabel: tf('post.label', { name: post.author.displayName }),
     media: postMediaView(post, tf),
+  };
+}
+
+/**
+ * `FeedPost` → the shape the composer pre-fills the EDIT route with (04-09, FEED-03).
+ *
+ * It lives beside `postCardView` for the same reason that one does: byte sizes and type labels are
+ * locale- and catalog-shaped, and a second `formatBytes` inside the form would print "1.2 MB" on
+ * the edit screen and "1,2 MB" on the card for the same file.
+ *
+ * `hasLinkPreview` is a BOOLEAN, not the preview itself: the composer's row is inert copy plus a
+ * remove control (UI-D-11) and has nothing to render from a resolved card. It is true only for a
+ * preview the API actually projected — a pending or refused one is already null on the wire, which
+ * is the silence UI-D-13 asks for carried into the edit screen unchanged.
+ */
+export type ComposerImageDraft = { assetId: string; variantWidths: number[] };
+export type ComposerVideoDraft = { assetId: string; status: PostMediaItem['status'] };
+export type ComposerAttachmentDraft = {
+  assetId: string;
+  filename: string;
+  typeLabel: string;
+  sizeLabel: string | null;
+};
+export type ComposerDraft = {
+  caption: string;
+  images: ComposerImageDraft[];
+  video: ComposerVideoDraft | null;
+  attachments: ComposerAttachmentDraft[];
+  hasLinkPreview: boolean;
+};
+
+export function composerDraft(post: FeedPost, tf: Translator): ComposerDraft {
+  const video = post.media.find((item) => item.kind === 'video');
+  return {
+    caption: post.caption,
+    images: post.media
+      .filter((item) => item.kind === 'image')
+      .map((item) => ({ assetId: item.assetId, variantWidths: item.variantWidths })),
+    video: video ? { assetId: video.assetId, status: video.status } : null,
+    attachments: post.media
+      .filter((item) => item.kind === 'file')
+      .map((item) => ({
+        assetId: item.assetId,
+        filename: item.filename ?? '',
+        typeLabel:
+          item.mime === 'application/pdf' ? tf('attachment.type.pdf') : tf('attachment.type.other'),
+        sizeLabel: formatBytes(item.bytes),
+      })),
+    hasLinkPreview: post.linkPreview !== null,
   };
 }
 
