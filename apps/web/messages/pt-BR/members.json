@@ -15,7 +15,7 @@
     },
     "empty": {
       "title": "Nenhum membro ainda",
-      "body": "Quando outras pessoas entrarem na comunidade, elas aparecem aqui."
+      "body": "Quando outras pessoas entrarem em {tenant}, elas aparecem aqui."
     },
     "searchEmpty": {
       "title": "Nenhum membro encontrado",
@@ -23,7 +23,7 @@
     },
     "notFound": {
       "title": "Membro não encontrado",
-      "body": "Esta pessoa não faz parte da sua comunidade.",
+      "body": "Esta pessoa não faz parte de {tenant}.",
       "cta": "Voltar para membros"
     },
     "errors": {

@@ -46,6 +46,11 @@ export default async function EditPostPage({ params }: { params: Promise<{ postI
   }
 
   return (
-    <ComposerForm mode="edit" postId={result.post.id} initial={composerDraft(result.post, tf)} />
+    <ComposerForm
+      mode="edit"
+      postId={result.post.id}
+      initial={composerDraft(result.post, tf)}
+      tenantName={bootstrap.tenant.displayName}
+    />
   );
 }

@@ -28,5 +28,5 @@ export default async function CreatePostPage() {
   const bootstrap = await requireBootstrap();
   if (!bootstrap.permissions.includes(FEED_PERMISSIONS.create)) redirect('/inicio');
 
-  return <ComposerForm mode="create" />;
+  return <ComposerForm mode="create" tenantName={bootstrap.tenant.displayName} />;
 }

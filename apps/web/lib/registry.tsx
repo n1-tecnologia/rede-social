@@ -167,7 +167,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
         attachmentError: media.attachmentError,
         emptyTitle: tf('empty.title'),
         emptyBody: tf('empty.body', { tenant: bootstrap.tenant.displayName }),
-        emptyBodyAuthor: tf('empty.bodyAuthor'),
+        emptyBodyAuthor: tf('empty.bodyAuthor', { tenant: bootstrap.tenant.displayName }),
         emptyCta: tf('empty.cta'),
         errorTitle: te('title'),
         errorBody: te('body'),

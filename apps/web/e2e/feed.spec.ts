@@ -433,7 +433,9 @@ test.describe('UI-D-20 — a community with nothing published', () => {
 
     const region = feedRegion(page);
     await expect(region).toContainText(F.empty.title);
-    await expect(region).toContainText(F.empty.bodyAuthor);
+    await expect(region).toContainText(
+      F.empty.bodyAuthor.replace('{tenant}', `Comunidade ${tenant.slug}`),
+    );
     await expect(region).not.toContainText(F.empty.body.slice(0, 20));
     // 04-09 closed the stub this line used to pin (WINDOWS #18): the widget renders the CTA now
     // that the host passes a `createHref`, and it points at the composer route rather than at the

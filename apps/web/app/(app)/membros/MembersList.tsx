@@ -25,6 +25,12 @@ export interface MembersListProps {
   q: string;
   /** `true` when the server could not read the first page at all (UI-SPEC E4/error). */
   initialError?: boolean;
+  /**
+   * The tenant's display name, interpolated into the empty state (UI-D-46). The page already holds
+   * it from `getHostTenant()`, so this is a value passed DOWN — the same prop shape 05-01 gave
+   * `CommunitiesList`.
+   */
+  tenantName: string;
 }
 
 /** Eight rows: the loading shape of the directory on the first load and on every query change (E4/loading). */
@@ -73,7 +79,13 @@ function listUrl(q: string): string {
  * re-sorts or highlights: `goncal` finding `João Gonçalves` is a property of
  * `app.imm_unaccent(lower(display_name))`, and the UI makes no promise of highlighting.
  */
-export function MembersList({ initialItems, initialCursor, q, initialError }: MembersListProps) {
+export function MembersList({
+  initialItems,
+  initialCursor,
+  q,
+  initialError,
+  tenantName,
+}: MembersListProps) {
   const t = useTranslations('members');
   const router = useRouter();
 
@@ -183,7 +195,12 @@ export function MembersList({ initialItems, initialCursor, q, initialError }: Me
         body={t('searchEmpty.body')}
       />
     ) : (
-      <EmptyState variant="card" icon={Users} title={t('empty.title')} body={t('empty.body')} />
+      <EmptyState
+        variant="card"
+        icon={Users}
+        title={t('empty.title')}
+        body={t('empty.body', { tenant: tenantName })}
+      />
     );
   } else {
     body = (

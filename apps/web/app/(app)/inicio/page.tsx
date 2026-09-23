@@ -93,7 +93,7 @@ export default async function InicioPage() {
             variant="card"
             icon={Sparkles}
             title={t('home.soonTitle')}
-            body={t('home.soonBody')}
+            body={t('home.soonBody', { tenant: tenant.displayName })}
           />
         }
       />

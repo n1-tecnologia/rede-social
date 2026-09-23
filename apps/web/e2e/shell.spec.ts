@@ -89,7 +89,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     // D-42: the enabled module's home slot renders; the "Em breve" card does not. Since 04-10 that
     // slot is the FEED's — the reference module that used to fill it was deleted with D-19.
     await expect(
-      page.locator('main.app-scroll').getByRole('region', { name: 'Publicações da comunidade' }),
+      page.locator('main.app-scroll').getByRole('region', { name: 'Feed principal' }),
     ).toBeVisible();
     await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);
 
@@ -126,7 +126,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     // the feed widget must be what fills the home column instead.
     await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);
     await expect(
-      page.locator('main.app-scroll').getByRole('region', { name: 'Publicações da comunidade' }),
+      page.locator('main.app-scroll').getByRole('region', { name: 'Feed principal' }),
     ).toBeVisible();
 
     const html = await page.content();

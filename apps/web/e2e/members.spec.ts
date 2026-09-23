@@ -307,7 +307,10 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
     await page.goto(`${empty.origin}/membros`);
     await expect(page.getByText('Nenhum membro ainda')).toBeVisible();
     await expect(
-      page.getByText('Quando outras pessoas entrarem na comunidade, elas aparecem aqui.'),
+      // UI-D-46: the empty state names the tenant instead of saying "a comunidade".
+      page.getByText(
+        `Quando outras pessoas entrarem em Comunidade ${empty.slug}, elas aparecem aqui.`,
+      ),
     ).toBeVisible();
     await expect(page.getByText('Nenhum membro encontrado')).toHaveCount(0);
   });
@@ -414,7 +417,11 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
       await page.goto(`${big.origin}/membros/${id}`);
 
       await expect(page.getByText('Membro não encontrado'), reason).toBeVisible();
-      await expect(page.getByText('Esta pessoa não faz parte da sua comunidade.')).toBeVisible();
+      // UI-D-46: the one 404 body names the tenant. It is host-derived and therefore identical
+      // across all five causes in `misses`, so it stays a single indistinguishable answer (D-23).
+      await expect(
+        page.getByText(`Esta pessoa não faz parte de Comunidade ${big.slug}.`),
+      ).toBeVisible();
       await expect(page.getByRole('link', { name: 'Voltar para membros' })).toHaveAttribute(
         'href',
         '/membros',
@@ -476,7 +483,9 @@ test.describe('PROF-01 — the D-02 nudge on /inicio', () => {
     await expect(nudge(page)).toBeVisible();
     await expect(page.getByText('Complete seu perfil')).toBeVisible();
     await expect(
-      page.getByText('Adicione uma foto e uma bio para a comunidade te reconhecer.'),
+      // UI-D-46: the word is dropped rather than replaced — the nudge renders directly above the
+      // Phase 5 stories strip, where "a comunidade" would read as the container.
+      page.getByText('Adicione uma foto e uma bio para as pessoas te reconhecerem.'),
     ).toBeVisible();
 
     // One visible dismissal only — no second affordance for the same action (no X glyph).

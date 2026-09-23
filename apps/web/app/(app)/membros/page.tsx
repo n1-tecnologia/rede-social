@@ -3,7 +3,7 @@ import { PageHeader } from '@tria/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { loadMembers } from '@/lib/profile';
-import { getHostTenant } from '@/lib/tenant-host';
+import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';
 import { MembersList } from './MembersList';
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -68,6 +68,7 @@ export default async function MembersPage({
         initialItems={page?.items ?? []}
         initialCursor={page?.nextCursor ?? null}
         initialError={page === null}
+        tenantName={tenantDisplayName(hostTenant)}
       />
     </div>
   );

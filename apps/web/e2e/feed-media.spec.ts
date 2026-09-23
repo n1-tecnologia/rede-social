@@ -16,7 +16,7 @@ import { hosts, login, SEED_PASSWORD, seededFeedMedia, users } from './fixtures'
 test.use({ serviceWorkers: 'block' });
 
 function feedRegion(page: Page): Locator {
-  return page.getByRole('region', { name: 'Publicações da comunidade' });
+  return page.getByRole('region', { name: 'Feed principal' });
 }
 
 /** The card whose caption is `caption` — named by content, never by index in a shared stack. */

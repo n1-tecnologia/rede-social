@@ -86,6 +86,12 @@ export type ComposerFormProps = {
   postId?: string;
   /** Edit mode only: the post as it stands, mapped by `lib/feed-view.tsx`. */
   initial?: ComposerDraft;
+  /**
+   * The tenant's display name, interpolated into the caption placeholder (UI-D-46). Both routes
+   * that render this form already hold the bootstrap, so this is a value passed DOWN rather than a
+   * second read: a client component may not reach for the tenant of record on its own.
+   */
+  tenantName: string;
 };
 
 type PickedImage = {
@@ -129,7 +135,12 @@ const IMAGE_ACCEPT = mediaAcceptFor('image', 'post');
 const VIDEO_ACCEPT = mediaAcceptFor('video', 'post');
 const FILE_ACCEPT = mediaAcceptFor('file', 'attachment');
 
-export function ComposerForm({ mode, postId, initial = EMPTY_DRAFT }: ComposerFormProps) {
+export function ComposerForm({
+  mode,
+  postId,
+  initial = EMPTY_DRAFT,
+  tenantName,
+}: ComposerFormProps) {
   const t = useTranslations('feed');
   const tm = useTranslations('media');
   const toast = useToast();
@@ -482,7 +493,7 @@ export function ComposerForm({ mode, postId, initial = EMPTY_DRAFT }: ComposerFo
           id="composer-caption"
           name="caption"
           aria-label={t('composer.captionLabel')}
-          placeholder={t('composer.captionPlaceholder')}
+          placeholder={t('composer.captionPlaceholder', { tenant: tenantName })}
           value={caption}
           rows={4}
           maxLength={FEED_MAX_CAPTION}

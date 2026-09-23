@@ -227,8 +227,12 @@ describe('the photo upload state machine (UI-SPEC §Upload contract)', () => {
       await result.current.pick(photo());
     });
 
+    // UI-D-46: the refusal no longer names "a comunidade". The string is shared with the platform
+    // panel's own uploads (LogoUpload / IconOverrideUpload run as super_admin on a host with no
+    // tenant), so it names no one and still points at the administrator, which is the actionable
+    // half of the sentence.
     expect(result.current.error).toBe(
-      'A comunidade atingiu o limite de armazenamento. Fale com o administrador.',
+      'O limite de armazenamento foi atingido. Fale com o administrador.',
     );
   });
 

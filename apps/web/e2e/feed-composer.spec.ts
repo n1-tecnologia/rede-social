@@ -143,9 +143,11 @@ test.describe('FEED-01 / E14 — publishing from a phone', () => {
       const publish = page.getByRole('button', { name: feed.composer.publish, exact: true });
       // E14/empty: an unfilled form shows placeholders only and the submit is disabled.
       await expect(publish).toBeDisabled();
+      // UI-D-46: the placeholder now names the tenant, so the catalog value is interpolated here
+      // the same way the server interpolates it.
       await expect(composer.caption(page)).toHaveAttribute(
         'placeholder',
-        feed.composer.captionPlaceholder,
+        feed.composer.captionPlaceholder.replace('{tenant}', 'TRIA Demo'),
       );
 
       await composer.caption(page).fill(caption);

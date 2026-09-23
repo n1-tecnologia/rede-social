@@ -37,7 +37,7 @@
     "confirm": {
       "removeVideo": {
         "title": "Remover este vídeo?",
-        "body": "O vídeo deixa de ficar disponível para a comunidade.",
+        "body": "O vídeo deixa de ficar disponível para os membros.",
         "confirm": "Remover",
         "cancel": "Cancelar"
       }
@@ -62,7 +62,7 @@
       "prepare": "Não foi possível preparar esta imagem. Tente outra foto.",
       "notCompleted": "O envio não foi concluído. Tente novamente.",
       "notAnImage": "Este arquivo não é uma imagem válida. Tente outra foto.",
-      "quota": "A comunidade atingiu o limite de armazenamento. Fale com o administrador.",
+      "quota": "O limite de armazenamento foi atingido. Fale com o administrador.",
       "duration": "Vídeo muito longo. O limite é {duration}.",
       "transcode": "Não foi possível processar este vídeo.",
       "generic": "Algo deu errado. Tente novamente."

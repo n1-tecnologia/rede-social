@@ -108,6 +108,85 @@ describe('loadMessages (PWA-03: one pt-BR catalog assembled from per-namespace f
   });
 });
 
+/**
+ * UI-D-46 — the retired sense of "comunidade" is closed inside the authenticated member/admin app.
+ *
+ * Ten shipped rows carried the word meaning *the tenant*. Six now name the tenant through a
+ * `{tenant}` interpolation and four drop the word outright. Both halves are pinned here, and the
+ * pin is the point: a later edit that deletes a `{tenant}` would not fail typecheck (the call site
+ * would simply pass an argument nobody reads) and would ship a sentence with a hole in it. A
+ * missing placeholder is a test failure instead.
+ */
+describe('UI-D-46 vocabulary amendment (the retired sense of "comunidade")', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function at(dotted: string): string {
+    const value = dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+    expect(typeof value, dotted).toBe('string');
+    return value as string;
+  }
+
+  /**
+   * The SIX rows that gain `{tenant}`. `media.errors.quota` is deliberately NOT here: the string
+   * resolves in `useSignedUpload`, which two platform-panel components also call as `super_admin`
+   * on `app.seusistema.com`, where no tenant display name exists — so that row drops the word
+   * instead of naming a tenant it could not name.
+   */
+  it.each([
+    'feed.empty.bodyAuthor',
+    'feed.notFound.body',
+    'feed.composer.captionPlaceholder',
+    'app.home.soonBody',
+    'members.empty.body',
+    'members.notFound.body',
+  ])('%s carries the {tenant} placeholder', (key) => {
+    expect(at(key)).toContain('{tenant}');
+  });
+
+  /** The FOUR rows that drop the word. */
+  it.each([
+    ['feed.region', 'Feed principal'],
+    ['profile.nudge.body', 'Adicione uma foto e uma bio para as pessoas te reconhecerem.'],
+    ['media.confirm.removeVideo.body', 'O vídeo deixa de ficar disponível para os membros.'],
+    ['media.errors.quota', 'O limite de armazenamento foi atingido. Fale com o administrador.'],
+  ])('%s drops the retired sense outright', (key, expected) => {
+    expect(at(key)).toBe(expected);
+  });
+
+  /** None of the ten may still carry a retired-sense phrase, interpolated or not. */
+  it('no amended row still says "comunidade" in the retired sense', () => {
+    const retired =
+      /da comunidade|sua comunidade|desta comunidade|na comunidade|para a comunidade|A comunidade atingiu/;
+    for (const key of [
+      'feed.region',
+      'feed.empty.bodyAuthor',
+      'feed.notFound.body',
+      'feed.composer.captionPlaceholder',
+      'app.home.soonBody',
+      'members.empty.body',
+      'members.notFound.body',
+      'profile.nudge.body',
+      'media.confirm.removeVideo.body',
+      'media.errors.quota',
+    ]) {
+      expect(at(key), key).not.toMatch(retired);
+    }
+  });
+
+  /**
+   * The 16 out-of-scope rows stay as they are (UI-SPEC groups A and B): in neither group can the
+   * two meanings reach one screen, and `platform.moduleNames.communities` already carries the NEW
+   * sense. One row from each group stands for its group here.
+   */
+  it('leaves the out-of-scope rows and the already-correct row untouched', () => {
+    expect(at('noCommunity.title')).toContain('comunidade');
+    expect(at('platformDomains.empty.body')).toContain('comunidade');
+    expect(at('platform.moduleNames.communities')).toBe('Comunidades');
+  });
+});
+
 describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   function run(files: Record<string, string>): { status: number | null; out: string } {
     const dir = mkdtempSync(path.join(tmpdir(), 'tria-literals-'));

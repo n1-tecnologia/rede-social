@@ -449,7 +449,7 @@ test.describe('MEDIA-03 — the upload and the player', () => {
     await page.getByRole('button', { name: 'Remover' }).first().click();
     await expect(page.getByText('Remover este vídeo?')).toBeVisible();
     await expect(
-      page.getByText('O vídeo deixa de ficar disponível para a comunidade.'),
+      page.getByText('O vídeo deixa de ficar disponível para os membros.'),
     ).toBeVisible();
 
     await page.getByRole('button', { name: 'Remover', exact: true }).last().click();

@@ -131,6 +131,21 @@ export async function getHostTenant(): Promise<HostShell> {
 }
 
 /**
+ * The name to interpolate into a `{tenant}` string when the only thing in scope is the host shell
+ * (UI-D-46). On a tenant host that is the display name proxy.ts resolved from `tenant_domains`; on
+ * the platform or a generic host there is no tenant to name, so the honest answer is the host
+ * itself — a value the browser already has, never an empty string and never a stray brace.
+ *
+ * Surfaces that hold the BOOTSTRAP use `bootstrap.tenant.displayName` instead: that is the tenant
+ * of record (the membership's), and the host only selects the shell. The two agree by construction
+ * — a session whose membership does not match the host is refused with `TENANT_HOST_MISMATCH`
+ * before any page renders — so this helper is for the surfaces that have no bootstrap in hand.
+ */
+export function tenantDisplayName(shell: HostShell): string {
+  return shell.mode === 'tenant' ? shell.displayName : shell.host;
+}
+
+/**
  * The ONE origin a link that LEAVES this app may carry (FEED-07, D-35, T-04-51).
  *
  * `https://{primaryHost}`, composed on the SERVER from the verified `tenant_domains` row the

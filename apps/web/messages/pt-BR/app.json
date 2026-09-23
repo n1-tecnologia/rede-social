@@ -14,7 +14,7 @@
     "home": {
       "welcome": "Bem-vindo(a) à {tenant}",
       "soonTitle": "Em breve",
-      "soonBody": "As novidades da sua comunidade vão aparecer aqui."
+      "soonBody": "As novidades de {tenant} vão aparecer aqui."
     },
     "error": {
       "title": "Algo deu errado.",

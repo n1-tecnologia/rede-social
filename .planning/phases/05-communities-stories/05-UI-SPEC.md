@@ -268,9 +268,24 @@ The shipped catalogs carry **27** rows using the word. Every one of them is acco
 | `members.notFound.body` | "Esta pessoa não faz parte da sua comunidade." | "Esta pessoa não faz parte de {tenant}." | **yes** |
 | `profile.nudge.body` | "Adicione uma foto e uma bio para a comunidade te reconhecer." | "Adicione uma foto e uma bio para as pessoas te reconhecerem." | no — the word is dropped rather than replaced; this string renders on `/inicio` directly above the stories strip |
 | `media.confirm.removeVideo.body` | "O vídeo deixa de ficar disponível para a comunidade." | "O vídeo deixa de ficar disponível para os membros." | no |
-| `media.errors.quota` | "A comunidade atingiu o limite de armazenamento. Fale com o administrador." | "{tenant} atingiu o limite de armazenamento. Fale com o administrador." | **yes** |
+| `media.errors.quota` | "A comunidade atingiu o limite de armazenamento. Fale com o administrador." | "O limite de armazenamento foi atingido. Fale com o administrador." | no — **corrected at execution (05-02 Task 3).** The row was specified as gaining `{tenant}`, but the string resolves in `apps/web/components/media/useSignedUpload.ts`, and two of that hook's callers — `components/platform/LogoUpload.tsx` and `components/platform/IconOverrideUpload.tsx` — run as `super_admin` on `app.seusistema.com`, where **no tenant display name exists**. `{tenant}` there would render empty or as a stray brace on the platform host. The word is therefore dropped rather than replaced; the sentence keeps the actionable half ("Fale com o administrador") and names no one |
 
-Six rows drop the word outright; four gain `{tenant}`, and **every one of those four call sites already holds the tenant** — no new data has to be threaded to any component. `scripts/check-ui-literals.sh` is unaffected (it gates TSX literals, not catalog values); a catalog test pins each new interpolation so a missing `{tenant}` fails the build rather than rendering a stray brace.
+**Four rows drop the word outright; six gain `{tenant}`.** (This spec originally read "six drop, four gain". The split was corrected at execution when `media.errors.quota` turned out to be shared with the platform panel — see that row's note. The 10/16/1 reconciliation is unchanged; only which side of the 10 a single row falls on moved.)
+
+**Threading, corrected.** The original claim — that every newly-interpolated row renders where the tenant is already in scope, so no new data is threaded to any component — holds for four of the six. Two client components gain **one `tenantName` prop each**, passed down from a server page that already holds the tenant (the prop shape 05-01 gave `CommunitiesList`):
+
+| Row | Where it resolves | What was needed |
+|-----|-------------------|-----------------|
+| `feed.empty.bodyAuthor` | `apps/web/lib/registry.tsx` | nothing — `bootstrap.tenant.displayName` was already in scope, one line below at `empty.body` |
+| `app.home.soonBody` | `apps/web/app/(app)/inicio/page.tsx` (**not** `registry.tsx`) | nothing — the page already destructures `tenant` from the bootstrap |
+| `feed.notFound.body` | `apps/web/app/(app)/post/[postId]/not-found.tsx` | the component now reads `getHostTenant()`. Its "takes no props, reads no param" rule and its existence-oracle guarantee are **unchanged** — the id still never reaches the file. Only the "reads no tenant" clause changed, and safely: the name is host-derived, so it is byte-identical across all three 404 causes |
+| `members.notFound.body` | `apps/web/app/(app)/membros/[membershipId]/not-found.tsx` | same, across all five D-23/TENANT-04 causes |
+| `feed.composer.captionPlaceholder` | `apps/web/app/(app)/criar/ComposerForm.tsx` (client) | **one `tenantName` prop**, passed from both routes that render the form (`/criar` and `/post/[postId]/editar`), each of which already awaits `requireBootstrap()` |
+| `members.empty.body` | `apps/web/app/(app)/membros/MembersList.tsx` (client) | **one `tenantName` prop**, passed from `membros/page.tsx`, which already calls `getHostTenant()` |
+
+A shared `tenantDisplayName(shell)` helper in `apps/web/lib/tenant-host.ts` is the one rule for the host-derived surfaces: the display name on a tenant host, the host itself on the platform or a generic host — never an empty string and never a stray brace.
+
+`scripts/check-ui-literals.sh` is unaffected (it gates TSX literals, not catalog values); a catalog test pins each new interpolation so a missing `{tenant}` fails the build rather than rendering a stray brace.
 
 **Out of scope — recorded, not amended (16 rows, 2 groups).** Both groups keep the retired sense deliberately, because in neither can the two meanings reach one screen.
 

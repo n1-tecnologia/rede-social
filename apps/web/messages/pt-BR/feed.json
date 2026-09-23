@@ -1,6 +1,6 @@
 {
   "feed": {
-    "region": "Publicações da comunidade",
+    "region": "Feed principal",
     "post": {
       "label": "Publicação de {name}",
       "pageTitle": "Publicação",
@@ -43,7 +43,7 @@
     "empty": {
       "title": "Nada por aqui ainda",
       "body": "As publicações da {tenant} vão aparecer aqui.",
-      "bodyAuthor": "Publique a primeira novidade da comunidade.",
+      "bodyAuthor": "Publique a primeira novidade de {tenant}.",
       "cta": "Criar publicação"
     },
     "actions": {
@@ -103,7 +103,7 @@
     },
     "notFound": {
       "title": "Publicação não encontrada",
-      "body": "Este link não existe mais ou não é desta comunidade.",
+      "body": "Este link não existe mais ou não é de {tenant}.",
       "cta": "Ir para o início"
     },
     "share": {
@@ -134,7 +134,7 @@
       "saving": "Salvando…",
       "close": "Fechar",
       "captionLabel": "Texto da publicação",
-      "captionPlaceholder": "Escreva o que quer contar para a comunidade…",
+      "captionPlaceholder": "Escreva o que quer contar para {tenant}…",
       "addPhotos": "Adicionar fotos",
       "addVideo": "Adicionar vídeo",
       "addFile": "Anexar arquivo",
