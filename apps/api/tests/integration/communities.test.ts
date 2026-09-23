@@ -3,9 +3,11 @@ import { subscribe } from '@tria/core/server/events/bus';
 import { moduleFlags } from '@tria/core/server/modules/flags-cache';
 import {
   COMMUNITY_MAX_PAGE_SIZE,
+  type CommunityArchived,
   type CommunityCreated,
   type CommunityPage,
   type CommunitySummary,
+  type CommunityUpdated,
 } from '@tria/module-communities/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -45,6 +47,10 @@ const tenantIds = { demo: '', lab: '' };
 /** Every community THIS FILE created; swept by name prefix as well, in case a create raced a crash. */
 const created: string[] = [];
 const events: CommunityCreated[] = [];
+/** 05-04's two new events, collected the same way, so "exactly once, after commit" is measurable. */
+const updatedEvents: CommunityUpdated[] = [];
+const archivedEvents: CommunityArchived[] = [];
+const unsubscribes: (() => void)[] = [];
 let unsubscribe: () => void = () => {};
 
 /** The prefix every community this file writes carries, so the sweep can be exact. */
@@ -139,10 +145,19 @@ beforeAll(async () => {
   unsubscribe = subscribe('community.created', async (payload) => {
     events.push(payload);
   });
+  unsubscribes.push(
+    subscribe('community.updated', async (payload) => {
+      updatedEvents.push(payload);
+    }),
+    subscribe('community.archived', async (payload) => {
+      archivedEvents.push(payload);
+    }),
+  );
 });
 
 afterAll(async () => {
   unsubscribe();
+  for (const stop of unsubscribes) stop();
   await sweep();
   await adminSql`
     delete from public.tenant_modules
@@ -618,5 +633,204 @@ describe('D-74 — the communities flag flips the MERGED FEED, in both direction
       headers: { 'x-tenant-host': HOSTS.lab },
     });
     expect(scoped.status).toBe(200);
+  });
+});
+
+/**
+ * 05-04 — COMM-01's WRITE half: `PATCH /v1/communities/{id}` and what archiving MEANS.
+ *
+ * Archive is one status write, not a separate verb, and the three facts that make it safe are
+ * asserted here rather than assumed (05-RESEARCH §Pattern 7): an archived community DISAPPEARS from
+ * the list, still OPENS by id, and REFUSES new posts — while every post already inside it stays in
+ * the merged feed exactly where members last saw it. The fourth fact, that it is reversible with one
+ * PATCH back to `active`, is what makes the whole thing an organisational tidy-up rather than a
+ * deletion.
+ *
+ * Every community these cases touch is one THIS FILE created (the name prefix the sweep matches), so
+ * a crash cannot leave a seeded container archived for the next run.
+ */
+describe('PATCH /v1/communities/{id} — edit, archive and reactivate (COMM-01, UI-D-37)', () => {
+  const patch = (id: string, body: unknown, token: string, host = HOSTS.demo) =>
+    request(`/v1/communities/${id}`, token, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      headers: { 'x-tenant-host': host },
+    });
+
+  /** A fresh community owned by this file, so no case depends on another's leftovers. */
+  async function makeCommunity(suffix: string): Promise<CommunitySummary> {
+    const res = await request('/v1/communities', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ name: `${TEST_NAME_PREFIX} ${suffix}`, description: 'antes' }),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status, `POST /v1/communities (${suffix})`).toBe(201);
+    const community = (await res.json()) as CommunitySummary;
+    created.push(community.id);
+    return community;
+  }
+
+  it('19. an admin edits name and description; a member is refused 403 (T-05-18)', async () => {
+    const community = await makeCommunity('editavel');
+
+    const refused = await patch(community.id, { name: 'de um membro' }, tokens.demoMember);
+    expect(refused.status).toBe(403);
+    expect(await code(refused)).toBe('FORBIDDEN');
+
+    const res = await patch(
+      community.id,
+      { name: `${TEST_NAME_PREFIX} editada`, description: 'depois' },
+      tokens.demoAdmin,
+    );
+    expect(res.status).toBe(200);
+    const updated = (await res.json()) as CommunitySummary;
+    expect(updated.name).toBe(`${TEST_NAME_PREFIX} editada`);
+    expect(updated.description).toBe('depois');
+    // The id and the slug are STABLE across a rename: a shared link must not break (D-56).
+    expect(updated.id).toBe(community.id);
+    expect(updated.slug).toBe(community.slug);
+  });
+
+  it('20. an unknown or other-tenant id is a BARE 404 with no details key (T-05-20)', async () => {
+    const [labCommunity] = await adminSql<{ id: string }[]>`
+      select id from public.communities where tenant_id = ${tenantIds.lab}::uuid limit 1`;
+    expect(labCommunity?.id, 'the lab tenant is seeded with communities too').toBeDefined();
+
+    for (const id of [labCommunity?.id ?? '', '00000000-0000-4000-8000-000000000000']) {
+      const res = await patch(id, { description: 'nao deveria escrever' }, tokens.demoAdmin);
+      expect(res.status, id).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.details, id).toBeUndefined();
+    }
+  });
+
+  it('21. archiving removes it from the LIST, keeps it readable by id, and refuses new posts', async () => {
+    const community = await makeCommunity('arquivavel');
+
+    const before = await page(tokens.demoMember, `?limit=${COMMUNITY_MAX_PAGE_SIZE}`);
+    expect(before.items.map((item) => item.id)).toContain(community.id);
+
+    const archived = await patch(community.id, { status: 'archived' }, tokens.demoAdmin);
+    expect(archived.status).toBe(200);
+    expect(((await archived.json()) as CommunitySummary).status).toBe('archived');
+
+    // 1. absent from the list…
+    const after = await walk(tokens.demoMember, COMMUNITY_MAX_PAGE_SIZE);
+    expect(after.map((item) => item.id)).not.toContain(community.id);
+
+    // 2. …still readable by id, so a shared link and a feed post that names it keep working…
+    const byId = await request(`/v1/communities/${community.id}`, tokens.demoMember, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(byId.status).toBe(200);
+    expect(((await byId.json()) as CommunitySummary).status).toBe('archived');
+
+    // 3. …and it refuses new posts with the closed code the composer maps (05-03's branch).
+    const post = await request('/v1/feed/posts', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ caption: 'Publicacao recusada', communityId: community.id }),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(post.status).toBe(400);
+    const body = (await post.json()) as Envelope;
+    expect((body.error.details as { community?: string }).community).toBe('archived');
+  });
+
+  it('22. archiving twice is IDEMPOTENT: 200, and no second community.archived', async () => {
+    const community = await makeCommunity('idempotente');
+
+    const first = await patch(community.id, { status: 'archived' }, tokens.demoAdmin);
+    expect(first.status).toBe(200);
+    const afterFirst = archivedEvents.filter((event) => event.communityId === community.id).length;
+    expect(afterFirst).toBe(1);
+
+    const second = await patch(community.id, { status: 'archived' }, tokens.demoAdmin);
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as CommunitySummary).status).toBe('archived');
+    // The event marks the TRANSITION, not the state: a repeat announces nothing.
+    expect(archivedEvents.filter((event) => event.communityId === community.id)).toHaveLength(1);
+  });
+
+  it('23. reactivating is one PATCH back to active, and the row returns to the list', async () => {
+    const community = await makeCommunity('reativavel');
+
+    expect((await patch(community.id, { status: 'archived' }, tokens.demoAdmin)).status).toBe(200);
+    const hidden = await walk(tokens.demoMember, COMMUNITY_MAX_PAGE_SIZE);
+    expect(hidden.map((item) => item.id)).not.toContain(community.id);
+
+    const back = await patch(community.id, { status: 'active' }, tokens.demoAdmin);
+    expect(back.status).toBe(200);
+    expect(((await back.json()) as CommunitySummary).status).toBe('active');
+
+    const visible = await walk(tokens.demoMember, COMMUNITY_MAX_PAGE_SIZE);
+    expect(visible.map((item) => item.id)).toContain(community.id);
+  });
+
+  it('24. a PATCH identical to the stored row is a 200 that changes nothing — including the ordering key', async () => {
+    const community = await makeCommunity('sem mudanca');
+
+    const [before] = await adminSql<{ last_activity_at: string; updated_at: string }[]>`
+      select last_activity_at::text, updated_at::text
+        from public.communities where id = ${community.id}::uuid`;
+
+    const res = await patch(
+      community.id,
+      { name: community.name, description: community.description },
+      tokens.demoAdmin,
+    );
+    expect(res.status).toBe(200);
+
+    const [after] = await adminSql<{ last_activity_at: string; updated_at: string }[]>`
+      select last_activity_at::text, updated_at::text
+        from public.communities where id = ${community.id}::uuid`;
+    // `last_activity_at` is TRIGGER-owned: no write path on this endpoint may move it, or the list's
+    // ordering would answer "who edited most recently" instead of "where did something happen".
+    expect(after?.last_activity_at).toBe(before?.last_activity_at);
+    expect(after?.updated_at).toBe(before?.updated_at);
+  });
+
+  it('25. an empty name is refused with the closed machine code; the cap is the same UTF-16 unit', async () => {
+    const community = await makeCommunity('validada');
+
+    const empty = await patch(community.id, { name: '   ' }, tokens.demoAdmin);
+    expect(empty.status).toBe(400);
+    const body = (await empty.json()) as Envelope;
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.details).toEqual({ community: 'name_required' });
+
+    const tooLong = await patch(community.id, { name: 'a'.repeat(81) }, tokens.demoAdmin);
+    expect(tooLong.status).toBe(400);
+    expect(await code(tooLong)).toBe('VALIDATION_FAILED');
+
+    // The name it had is untouched: a refused write writes nothing.
+    const byId = await request(`/v1/communities/${community.id}`, tokens.demoAdmin, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(((await byId.json()) as CommunitySummary).name).toBe(community.name);
+  });
+
+  it('26. both new events fire once, after commit, carrying IDS only (T-05-06)', async () => {
+    const community = await makeCommunity('com eventos');
+    const updatedBefore = updatedEvents.length;
+
+    expect(
+      (await patch(community.id, { description: 'nova descricao' }, tokens.demoAdmin)).status,
+    ).toBe(200);
+    const updated = updatedEvents.filter((event) => event.communityId === community.id);
+    expect(updated).toHaveLength(1);
+    expect(updated[0]?.tenantId).toBe(tenantIds.demo);
+    expect(updated[0]?.actorUserId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.stringify(updated[0])).not.toContain('nova descricao');
+    expect(JSON.stringify(updated[0])).not.toContain(TEST_NAME_PREFIX);
+
+    expect((await patch(community.id, { status: 'archived' }, tokens.demoAdmin)).status).toBe(200);
+    const archived = archivedEvents.filter((event) => event.communityId === community.id);
+    expect(archived).toHaveLength(1);
+    expect(JSON.stringify(archived[0])).not.toContain(TEST_NAME_PREFIX);
+
+    // A REFUSED patch announces nothing at all.
+    expect((await patch(community.id, { name: '' }, tokens.demoAdmin)).status).toBe(400);
+    expect(updatedEvents.length).toBe(updatedBefore + 1);
   });
 });
