@@ -64,7 +64,13 @@ describe('CommunityCover — one component, two geometries, two branches (UI-D-3
     expect(box).toBeInTheDocument();
     expect(box.getAttribute('data-geometry')).toBe('card');
     expect(box.className).toContain('aspect-[16/7]');
-    expect(within(box).getByAltText('cover-alt')).toBeInTheDocument();
+    // The BRANCH, deliberately not a loaded bitmap (the 05-01 lesson, restated at unit scale):
+    // `MediaImage`'s documented contract is that an object it cannot fetch degrades to the neutral
+    // `bg-bg-tertiary` box, and under happy-dom NOTHING fetches — so an `alt` assertion here would
+    // be measuring the test environment rather than the component. The veil is the photograph
+    // branch's own mark, and it is what the gradient branch must never carry.
+    expect(within(box).getByTestId('community-cover-media')).toBeInTheDocument();
+    expect(box.innerHTML).toContain('from-black/85');
     expect(screen.getByText('overlay-node')).toBeInTheDocument();
     expect(screen.queryByTestId('community-cover-fallback')).toBeNull();
   });

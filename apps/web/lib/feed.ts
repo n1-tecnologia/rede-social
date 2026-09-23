@@ -45,11 +45,18 @@ async function apiError(res: Response): Promise<ApiClientError> {
   return new ApiClientError(res.status, code, details);
 }
 
-/** The query `/inicio` and the load-more action send; `cursor` is OPAQUE and forwarded verbatim. */
-export type FeedQueryInput = { cursor?: string; limit?: number };
+/**
+ * The query `/inicio` and the load-more action send; `cursor` is OPAQUE and forwarded verbatim.
+ *
+ * `communityId` (05-03, COMM-03) narrows the SAME endpoint to one community's posts — the same
+ * projection, the same cursor envelope, the same page size. It is a parameter rather than a second
+ * fetch function precisely so the merged feed and a community's own list cannot drift on any of the
+ * three.
+ */
+export type FeedQueryInput = { cursor?: string; limit?: number; communityId?: string };
 
 /**
- * `GET /v1/feed` (FEED-02).
+ * `GET /v1/feed` (FEED-02) and, with `communityId`, `GET /v1/feed?communityId=` (COMM-03).
  *
  * `limit` defaults to `FEED_PAGE_SIZE`; the API clamps it anyway. The cursor is passed through
  * untouched: its encoding is an implementation detail of the API, and nothing on the web side
@@ -59,6 +66,7 @@ export async function getFeed(query: FeedQueryInput = {}): Promise<FeedPage> {
   const search = new URLSearchParams();
   if (query.cursor) search.set('cursor', query.cursor);
   search.set('limit', String(query.limit ?? FEED_PAGE_SIZE));
+  if (query.communityId) search.set('communityId', query.communityId);
 
   const res = await apiFetch(`/v1/feed?${search.toString()}`);
   if (!res.ok) throw await apiError(res);

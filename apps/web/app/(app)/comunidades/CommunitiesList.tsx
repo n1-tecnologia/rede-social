@@ -240,7 +240,10 @@ export function CommunitiesList({
 
   return (
     <PullToRefresh onRefresh={refresh}>
-      <section aria-label={t('region', { tenant: tenantName })} className="flex flex-col pb-6">
+      {/* `list.region` names the LIST; `communities.region` names one community's post list on its
+          own page (UI-SPEC §Copywriting Contract). 05-04 moved this key so the spec's own name is
+          free for the surface the spec gives it to. */}
+      <section aria-label={t('list.region', { tenant: tenantName })} className="flex flex-col pb-6">
         {body}
       </section>
     </PullToRefresh>

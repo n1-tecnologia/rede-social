@@ -1,8 +1,8 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
 import { Card } from '@tria/ui';
 import { ChevronRight, MessageCircle } from 'lucide-react';
+import { CommunityCover } from './CommunityCover';
 
 /**
  * The `card-magazine` list card (UI-D-42), ported from the prototype onto the shipped `Card`.
@@ -41,9 +41,6 @@ export interface CommunityCardProps {
   coverAlt: string;
 }
 
-/** `sizes` for a full-bleed card in the 680px column: the viewport up to the column's own cap. */
-const COVER_SIZES = '(min-width: 680px) 680px, 100vw';
-
 export function CommunityCard({
   href,
   name,
@@ -54,8 +51,8 @@ export function CommunityCard({
   coverAlt,
 }: CommunityCardProps) {
   /**
-   * The name and description overlay, shared by both cover branches so the two can never drift apart
-   * in size, weight or position. 16/700 for the name, `line-clamp-1` for the description.
+   * The name and description over a PHOTOGRAPH: white ink over the veil, the established over-media
+   * pattern (Phase 4's carousel dots and play badge), which clears 4.5:1 by construction.
    */
   const overlay = (
     <div className="absolute right-4 bottom-3 left-4">
@@ -67,53 +64,19 @@ export function CommunityCard({
   );
 
   /**
-   * D-69 / UI-D-35: a cover-less community renders the `--brand-gradient` block carrying its own
-   * name — never `bg-tertiary`, never a broken-image glyph, and deliberately **no black veil**: the
-   * gradient already carries its contrast against the persisted `--brand-on-primary` ink, so a scrim
-   * on top would only darken a surface that is already accessible on a tenant hex nobody has seen.
-   *
-   * The gradient and its ink are INLINE STYLES because both are runtime tenant variables with no
-   * Tailwind class; that is the same reason `PostMedia` sets its aspect ratio inline.
+   * The SAME two lines over the `--brand-gradient` fallback, in the persisted `--brand-on-primary`
+   * ink that `CommunityCover` applies — never `text-white` on a tenant hex nobody has seen (D-69,
+   * UI-D-35). Sharing the geometry with `overlay` above is what stops the two branches drifting in
+   * size, weight or position.
    */
-  const gradientCover = (
-    <div
-      data-testid="community-cover-fallback"
-      className="relative flex aspect-[16/7] w-full items-end"
-      style={{ backgroundImage: 'var(--brand-gradient)' }}
-    >
-      <div
-        className="absolute right-4 bottom-3 left-4"
-        style={{ color: 'var(--brand-on-primary)' }}
-      >
-        <p className="truncate text-base font-bold">{name}</p>
-        {description ? (
-          <p className="line-clamp-1 text-xs font-normal opacity-80">{description}</p>
-        ) : null}
-      </div>
-    </div>
+  const fallbackOverlay = (
+    <>
+      <p className="truncate text-base font-bold">{name}</p>
+      {description ? (
+        <p className="line-clamp-1 text-xs font-normal opacity-80">{description}</p>
+      ) : null}
+    </>
   );
-
-  /**
-   * The image branch keeps the prototype's veil, which is what makes white type legible over an
-   * arbitrary photograph. `MediaImage`'s own error path degrades to the neutral `bg-bg-tertiary`
-   * ground rather than a broken-image glyph, so a deleted or cross-tenant cover still reads as a
-   * card with a name on it.
-   */
-  const imageCover =
-    coverAssetId !== null ? (
-      <div data-testid="community-cover-image" className="relative aspect-[16/7] w-full">
-        <MediaImage
-          assetId={coverAssetId}
-          widths={coverVariantWidths}
-          alt={coverAlt}
-          sizes={COVER_SIZES}
-          ratio=""
-          className="h-full w-full"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
-        {overlay}
-      </div>
-    ) : null;
 
   return (
     <Card>
@@ -122,7 +85,16 @@ export function CommunityCard({
         data-testid="community-card"
         className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
       >
-        {imageCover ?? gradientCover}
+        {/* The cover is `CommunityCover` at the `card` geometry (05-04): ONE component, so the veil,
+            the ratio box and the error degradation cannot drift from the community page's header. */}
+        <CommunityCover
+          geometry="card"
+          coverAssetId={coverAssetId}
+          coverVariantWidths={coverVariantWidths}
+          coverAlt={coverAlt}
+          overlay={overlay}
+          fallbackOverlay={fallbackOverlay}
+        />
 
         {/* The counts row: the post count and nothing else. No member count, no activity badge, no
             timestamp (D-75). `tabular-nums` keeps the digits from shifting as the count grows. */}

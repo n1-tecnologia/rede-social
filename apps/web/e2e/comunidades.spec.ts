@@ -44,7 +44,9 @@ const SEEDED = {
 const DROPPED_COPY = [/Novas interações/i, /Nova interação/i, /membros?\b/i, /Atualizado/i];
 
 function list(page: Page): Locator {
-  return page.getByRole('region', { name: new RegExp(C.region.replace('{tenant}', '.*')) });
+  // `list.region` names the LIST. 05-04 moved it off `communities.region`, which the UI-SPEC
+  // reserves for ONE community's post list on its own page ("Publicações de {community}").
+  return page.getByRole('region', { name: new RegExp(C.list.region.replace('{tenant}', '.*')) });
 }
 
 /** Every community card is ONE link to `/comunidades/{id}` (the whole card is the target). */

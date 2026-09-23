@@ -1,14 +1,29 @@
 {
   "communities": {
     "nav": "Comunidades",
-    "region": "Comunidades de {tenant}",
+    "region": "Publicações de {community}",
     "list": {
       "title": "Comunidades",
-      "subtitle": "Escolha onde você quer entrar hoje."
+      "subtitle": "Escolha onde você quer entrar hoje.",
+      "region": "Comunidades de {tenant}"
     },
     "card": {
       "posts": "{count, plural, one {# publicação} other {# publicações}}",
       "cover": "Capa da comunidade {community}"
+    },
+    "page": {
+      "back": "Voltar para comunidades",
+      "highlights": "Destaques",
+      "compose": "Publicar nesta comunidade"
+    },
+    "archived": {
+      "pill": "Arquivada",
+      "note": "Esta comunidade foi arquivada. Você ainda pode ler as publicações.",
+      "reactivate": "Reativar comunidade"
+    },
+    "emptyPosts": {
+      "title": "Nada publicado ainda",
+      "body": "As publicações desta comunidade vão aparecer aqui."
     },
     "picker": {
       "label": "Publicar em",

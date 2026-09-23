@@ -60,6 +60,11 @@ const REQUIRED_KEYS = [
   '/(app)/post/[postId]/page',
   '/(app)/criar/page',
   '/(app)/post/[postId]/editar/page',
+  // Phase 5: the communities tab and one community's page — the destination every D-71 label in
+  // the feed points at, and therefore effectively permanent. Both read the session and the host per
+  // request, so neither may ever be prerendered.
+  '/(app)/comunidades/page',
+  '/(app)/comunidades/[communityId]/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',
