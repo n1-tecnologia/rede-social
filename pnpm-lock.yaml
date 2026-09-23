@@ -229,6 +229,9 @@ importers:
       '@tria/module-feed':
         specifier: workspace:*
         version: link:../../packages/modules/feed
+      '@tria/module-stories':
+        specifier: workspace:*
+        version: link:../../packages/modules/stories
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(pg@8.23.0)(postgres@3.4.9)
@@ -308,6 +311,9 @@ importers:
       '@tria/module-feed':
         specifier: workspace:*
         version: link:../../packages/modules/feed
+      '@tria/module-stories':
+        specifier: workspace:*
+        version: link:../../packages/modules/stories
       '@tria/ui':
         specifier: workspace:*
         version: link:../../packages/ui

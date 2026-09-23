@@ -1,0 +1,12 @@
+{
+  "stories": {
+    "region": "Stories",
+    "own": {
+      "label": "Seu story",
+      "action": "Publicar um story"
+    },
+    "circle": {
+      "action": "Abrir story de {time}"
+    }
+  }
+}

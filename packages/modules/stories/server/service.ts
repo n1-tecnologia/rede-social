@@ -1,0 +1,427 @@
+import { withTenantTx } from '@tria/core/db/tenant-tx';
+import type { RequestContext } from '@tria/core/server/auth/context';
+import { emit } from '@tria/core/server/events/bus';
+import { ApiError } from '@tria/core/server/http/api-error';
+import { moduleLogger } from '@tria/core/server/logging';
+import { decodeCursor, encodeCursor } from '@tria/core/server/paging';
+import { sql } from 'drizzle-orm';
+import type {
+  PublishStory,
+  StoryMediaKind,
+  StoryPage,
+  StoryQuery,
+  StorySummary,
+} from '../contracts/index';
+
+const log = moduleLogger('module-stories');
+
+/**
+ * The stories service (STORY-01, STORY-03) — a PURE TENANT-LANE area.
+ *
+ * Every function is `withTenantTx(ctx, …)`: the tenant is never a parameter a caller supplies and
+ * never a value this file compares. Layer 3 (`stories_tenant_isolation`) supplies it under the
+ * explicit `tenant_id` predicate the statements also carry, which is what makes the cross-tenant 404
+ * fall out of the SAME code path as an unknown id — there is nothing here that compares tenant ids,
+ * so no later edit can turn that 404 into a 403 that confirms the row exists somewhere (D-23).
+ *
+ * **Every read carries `deleted_at is null` ITSELF.** Phase 4 deliberately kept that predicate out
+ * of `tenantIsolationPolicy` so Phase 8's moderation can still see removed rows through the tenant
+ * lane (Pitfall 9); a read that forgets it shows deleted content and does not fail a test that only
+ * checks tenant isolation.
+ *
+ * **There is no expiry job in this file, and there must never be one.** `expires_at > now()` is a
+ * PREDICATE on one read. Nothing here updates, blanks or deletes a row because a clock passed
+ * (STORY-03).
+ */
+
+/**
+ * One hydrated row of the projection. Snake_case: it comes straight off `tx.execute`, which returns
+ * the driver's own row objects — NOT Drizzle's column-mapped ones — so the timestamps arrive as text
+ * and are formatted by the statement itself (see `ISO_MICROSECONDS`).
+ */
+type StoryRow = {
+  id: string;
+  author_user_id: string;
+  media_asset_id: string;
+  media_kind: StoryMediaKind;
+  media_variant_widths: number[] | null;
+  media_status: StorySummary['mediaStatus'];
+  media_failure_reason: string | null;
+  duration_seconds: number | null;
+  caption: string;
+  published_at: string;
+  expires_at: string;
+  is_active: boolean;
+  like_count: number;
+  comment_count: number;
+  viewer_liked: boolean;
+};
+
+/**
+ * ISO-8601 in UTC with MICROSECOND precision, produced by Postgres rather than by JavaScript — the
+ * `listFeed` / `listCommunities` rule restated for this module's ordering column.
+ *
+ * This matters for correctness, not tidiness. The cursor's `n` is this exact string, and the page
+ * predicate compares it back as `::timestamptz`. Round-tripping through a JS `Date` would truncate
+ * `timestamptz`'s microseconds to milliseconds, moving the page boundary EARLIER than the row it
+ * came from — which silently SKIPS any story whose window ends in the same millisecond but a later
+ * microsecond. Keeping the full precision in text makes `(expires_at, id)` a genuinely total order
+ * end to end.
+ */
+const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
+
+/**
+ * THE projection, written once and shared by the strip, the admin history and the read-back after a
+ * publish, so the three can never disagree about what a story looks like.
+ *
+ * The media asset's ladder, status, failure reason and duration come back in the SAME statement as
+ * the story (Pitfall 11): a page costs ONE statement, never one plus N, and
+ * `feed-query-budget.test.ts` asserts that with a ceiling AND a floor. The `join media_assets`
+ * carries NO tenant condition — `media_assets_tenant_select` is what decides visibility in this
+ * lane, so writing one would be dead weight a reader could mistake for the actual isolation. It is
+ * an INNER join because `media_asset_id` is NOT NULL: a story whose asset the lane cannot see has
+ * nothing to render and must not occupy a circle.
+ *
+ * `viewer_liked` reads `feed_likes` through RAW SQL rather than through `@tria/module-feed`'s
+ * schema export: a `module -> module` package dependency is denied by `turbo boundaries`, and the
+ * table is Phase 4's published shape (`feed_likes_story_uq` already scopes it per user and story).
+ * The same posture 05-03 took for the feed's `left join public.communities`.
+ *
+ * `is_active` is computed HERE, under the statement's own `now()`, so the flag and the rows it
+ * describes come from one clock (UI-D-14).
+ */
+function storyProjection(viewerUserId: string) {
+  return sql`
+    select s.id,
+           s.author_user_id,
+           s.media_asset_id,
+           s.media_kind,
+           a.variant_widths as media_variant_widths,
+           a.status as media_status,
+           a.failure_reason as media_failure_reason,
+           a.duration_seconds,
+           s.caption,
+           to_char(s.published_at at time zone 'utc', ${ISO_MICROSECONDS}) as published_at,
+           to_char(s.expires_at at time zone 'utc', ${ISO_MICROSECONDS}) as expires_at,
+           (s.expires_at > now()) as is_active,
+           s.like_count,
+           s.comment_count,
+           exists (
+             select 1 from feed_likes l
+              where l.story_id = s.id
+                and l.user_id = ${viewerUserId}::uuid
+           ) as viewer_liked
+      from stories s
+      join media_assets a on a.id = s.media_asset_id`;
+}
+
+/** Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`. */
+const toStory = (row: StoryRow): StorySummary => ({
+  id: row.id,
+  authorUserId: row.author_user_id,
+  mediaAssetId: row.media_asset_id,
+  mediaKind: row.media_kind,
+  // `[]` for an asset whose worker has not derived a ladder yet — `MediaImage` then renders its
+  // neutral box, which is the same branch a failed fetch takes.
+  mediaVariantWidths: row.media_variant_widths ?? [],
+  mediaStatus: row.media_status,
+  mediaFailureReason: row.media_failure_reason,
+  caption: row.caption,
+  publishedAt: row.published_at,
+  expiresAt: row.expires_at,
+  isActive: row.is_active,
+  durationSeconds: row.duration_seconds,
+  likeCount: row.like_count,
+  commentCount: row.comment_count,
+  viewerLiked: row.viewer_liked,
+});
+
+/** The over-fetch page split, shared by both list reads so the two cannot disagree about `nextCursor`. */
+function toPage(rows: StoryRow[], limit: number): StoryPage {
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.expires_at, id: last.id }) : null;
+  return { items: page.map(toStory), nextCursor };
+}
+
+/**
+ * `GET /v1/stories?limit=&cursor=` (STORY-01, STORY-03, D-78) — one keyset page of the tenant's
+ * ACTIVE stories, newest first.
+ *
+ * **Three predicates, and each one is load-bearing:**
+ *  - `expires_at > now()` is STORY-03 in full. There is no job, no sweeper and no status column
+ *    behind it — a story leaves this list because the clock moved, and its ROW IS UNTOUCHED.
+ *  - `deleted_at is null` is carried here rather than by the policy (Pitfall 9).
+ *  - `a.status = 'ready'` is R-P8: a video that is still transcoding, or one the worker REFUSED for
+ *    duration, must never occupy a circle. The admin still sees both in `listOwnStories`, which is
+ *    the whole point — a story that vanished with no explanation must not be the only feedback.
+ *
+ * Ordering is `expires_at desc, id desc`: the ordered pair `stories_tenant_expires_idx` is built on,
+ * and the column the range predicate is ON. Ordering by `published_at` would mean exactly the same
+ * thing under a fixed 24 h window and would cost a sort over a bitmap heap scan (both plans
+ * measured). The cursor's `n` is the row's own `expires_at`, read back from the projection rather
+ * than re-derived in JavaScript, so it can never disagree with the index.
+ *
+ * `decodeCursor` is TOTAL: a tampered, truncated or stale envelope degrades to page 1 instead of
+ * raising, and nothing from the string reaches SQL before `cursorSchema` accepted it.
+ */
+export async function listActiveStories(
+  ctx: RequestContext,
+  query: StoryQuery,
+): Promise<StoryPage> {
+  const limit = query.limit;
+  const after = decodeCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<StoryRow>(sql`
+      ${storyProjection(ctx.userId)}
+       where s.tenant_id = ${ctx.tenantId}::uuid
+         and s.deleted_at is null
+         and s.expires_at > now()
+         and a.status = 'ready'
+         and (
+           ${afterAt}::timestamptz is null
+           or (s.expires_at, s.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by s.expires_at desc, s.id desc
+       limit ${limit + 1}`),
+  );
+
+  const page = toPage(rows, limit);
+
+  // The SHAPE of the read — counts, ids and flags. A story CAPTION is member-facing content and
+  // never reaches a log line, an error `details` payload or an OpenAPI example (T-05-29).
+  log.info(
+    {
+      event: 'stories.list',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      limit,
+      returned: page.items.length,
+      hasNext: page.nextCursor !== null,
+    },
+    'stories listed',
+  );
+
+  return page;
+}
+
+/**
+ * `GET /v1/stories/mine` (D-84) — the SAME query as the strip with the range predicate and the
+ * readiness filter DROPPED, which is the whole reason `stories_tenant_expires_idx` serves both.
+ *
+ * "Own" is the MANAGING view of the tenant's stories, not an author filter: the guard is
+ * `stories.story.manage`, and V1's single publisher makes the two sets identical anyway. An author
+ * predicate would be a second shape the one index would then have to serve badly, and it would hide
+ * a co-admin's story from the person responsible for moderating it.
+ *
+ * This is where a `processing` story and a `rejected` one are visible — with `mediaStatus` and
+ * `mediaFailureReason` on the payload so the history screen can render the Phase 3 `Processando` /
+ * `Recusado` pill and the media catalog's own reason string (Pitfall 5).
+ */
+export async function listOwnStories(ctx: RequestContext, query: StoryQuery): Promise<StoryPage> {
+  const limit = query.limit;
+  const after = decodeCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<StoryRow>(sql`
+      ${storyProjection(ctx.userId)}
+       where s.tenant_id = ${ctx.tenantId}::uuid
+         and s.deleted_at is null
+         and (
+           ${afterAt}::timestamptz is null
+           or (s.expires_at, s.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by s.expires_at desc, s.id desc
+       limit ${limit + 1}`),
+  );
+
+  const page = toPage(rows, limit);
+
+  log.info(
+    {
+      event: 'stories.list_own',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      limit,
+      returned: page.items.length,
+      hasNext: page.nextCursor !== null,
+    },
+    'own stories listed',
+  );
+
+  return page;
+}
+
+/**
+ * `GET /v1/stories/{storyId}` — one story, ACTIVE OR NOT.
+ *
+ * ONE bare 404 with NO `details` payload for every miss — unknown id, another tenant's id,
+ * soft-deleted (D-23, T-05-30). An EXPIRED story is deliberately still readable by id: 05-06's
+ * viewer opens a single-item sequence from the history, and 05-08's pins make an expired story a
+ * legitimate thing to fetch. The STRIP is what filters; the row read never does.
+ */
+export async function getStory(ctx: RequestContext, storyId: string): Promise<StorySummary> {
+  const row = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<StoryRow>(sql`
+      ${storyProjection(ctx.userId)}
+       where s.tenant_id = ${ctx.tenantId}::uuid
+         and s.id = ${storyId}::uuid
+         and s.deleted_at is null
+       limit 1`);
+    return rows[0];
+  });
+
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return toStory(row);
+}
+
+/** What the asset lookup inside `publishStory`'s transaction needs to decide. */
+type AssetRow = { kind: string; purpose: string };
+
+/**
+ * `POST /v1/stories` (STORY-01).
+ *
+ * - `tenantId` and `authorUserId` come from `ctx`, never from the body (T-05-25). The policy's
+ *   `with check (tenant_id = app.tenant_id())` makes a forged stamp a `42501` rather than a
+ *   cross-tenant write, so the rule is enforced twice on purpose.
+ * - **The asset is resolved INSIDE the same transaction** (T-05-26). It must belong to this tenant
+ *   (RLS decides that, not a comparison here) and carry `purpose = 'story'` with a matching kind. A
+ *   foreign or unknown id is a BARE 404; a real asset of this tenant with the wrong purpose is a
+ *   `400 { story: 'media_invalid' }`, because the caller can see that one and fixing it is their job.
+ * - **A `processing` asset is ACCEPTED.** Publishing while a video transcodes is allowed (D-53's
+ *   precedent): the row is created immediately, the strip filters it out until the asset is ready,
+ *   and the 24 h window starts at PUBLISH rather than at ready. The copy says so; silently losing
+ *   story life would be the alternative.
+ * - `expires_at` is NOT in the insert. The column default is the window (STORY-03), so no client
+ *   value and no service edit can lengthen it.
+ * - `like_count` / `comment_count` are NOT in the insert either: both are trigger-owned.
+ * - `emit` runs only after `withTenantTx` RESOLVES, and even then only QUEUES the event on
+ *   `ctx.events`; the response middleware delivers it once the handler returned. A subscriber can
+ *   therefore never observe a story that a rollback erased (MOD-03).
+ */
+export async function publishStory(
+  ctx: RequestContext,
+  input: PublishStory,
+): Promise<StorySummary> {
+  // The service re-states the route's rule: `publishStory` is also reachable from the seed and from
+  // any handler that assembles its own input, none of which pass through the route validator.
+  const mediaAssetId = input.mediaAssetId;
+  if (mediaAssetId === null) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { story: 'media_required' });
+  }
+
+  const created = await withTenantTx(ctx, async (tx) => {
+    const assets = await tx.execute<AssetRow>(sql`
+      select kind, purpose
+        from media_assets
+       where id = ${mediaAssetId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+         and deleted_at is null
+       limit 1`);
+    const asset = assets[0];
+    // Unknown, another tenant's, or soft-deleted — one indistinguishable answer, no details.
+    if (!asset) throw new ApiError(404, 'NOT_FOUND');
+    if (asset.purpose !== 'story' || asset.kind !== input.mediaKind) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { story: 'media_invalid' });
+    }
+
+    const inserted = await tx.execute<{ id: string }>(sql`
+      insert into stories (tenant_id, author_user_id, media_asset_id, media_kind, caption)
+      values (${ctx.tenantId}::uuid,
+              ${ctx.userId}::uuid,
+              ${mediaAssetId}::uuid,
+              ${input.mediaKind},
+              ${input.caption})
+      returning id`);
+    const id = inserted[0]?.id;
+    if (!id) throw new ApiError(500, 'INTERNAL');
+
+    const rows = await tx.execute<StoryRow>(sql`
+      ${storyProjection(ctx.userId)}
+       where s.id = ${id}::uuid
+       limit 1`);
+    const row = rows[0];
+    if (!row) throw new ApiError(500, 'INTERNAL');
+    return row;
+  });
+
+  emit(ctx, 'story.published', {
+    tenantId: ctx.tenantId,
+    storyId: created.id,
+    authorUserId: created.author_user_id,
+    mediaKind: created.media_kind,
+    expiresAt: created.expires_at,
+  });
+
+  log.info(
+    {
+      event: 'stories.published',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      storyId: created.id,
+      mediaKind: created.media_kind,
+      mediaStatus: created.media_status,
+      // Lengths and flags, never the words themselves (T-05-29).
+      captionLength: input.caption.length,
+    },
+    'story published',
+  );
+
+  return toStory(created);
+}
+
+/**
+ * `DELETE /v1/stories/{storyId}` (D-84) — a SOFT delete behind `stories.story.manage`.
+ *
+ * Soft, not hard, for the same reason expiry is a predicate: the likes and comments members left on
+ * a story are theirs, and a cascade would erase them. Phase 8's moderation reads the row through the
+ * same tenant lane afterwards (Pitfall 9).
+ *
+ * A second delete of the same story is a no-op that still answers 204 and emits nothing: the
+ * statement's `deleted_at is null` predicate matches zero rows, and an event counting transitions
+ * must not announce one that did not happen.
+ */
+export async function deleteStory(ctx: RequestContext, storyId: string): Promise<void> {
+  const removed = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ id: string; author_user_id: string }>(sql`
+      update stories
+         set deleted_at = now()
+       where tenant_id = ${ctx.tenantId}::uuid
+         and id = ${storyId}::uuid
+         and deleted_at is null
+      returning id, author_user_id`);
+    return rows[0];
+  });
+
+  // Unknown, another tenant's, or ALREADY deleted — one bare 404, no details (D-23). "Already
+  // deleted" answering 404 is deliberate: the alternative tells a caller that an id they cannot see
+  // exists, which is the existence oracle the whole posture removes.
+  if (!removed) throw new ApiError(404, 'NOT_FOUND');
+
+  emit(ctx, 'story.deleted', {
+    tenantId: ctx.tenantId,
+    storyId: removed.id,
+    authorUserId: removed.author_user_id,
+    actorUserId: ctx.userId,
+  });
+
+  log.info(
+    {
+      event: 'stories.deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      storyId: removed.id,
+    },
+    'story soft-deleted',
+  );
+}

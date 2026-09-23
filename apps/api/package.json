@@ -24,6 +24,7 @@
     "@tria/core": "workspace:*",
     "@tria/module-communities": "workspace:*",
     "@tria/module-feed": "workspace:*",
+    "@tria/module-stories": "workspace:*",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.7",
     "pg-boss": "12.31.0",

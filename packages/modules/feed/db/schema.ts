@@ -276,9 +276,14 @@ export const feedPostMedia = pgTable(
  *    column-level `.references(() => feedComments.id)`. The column-level form on a self-referencing
  *    column is what trips TypeScript's circularity check and forces a widened column-type
  *    annotation to break it.
- * 2. **`story_id` is reserved for Phase 5** and carries no foreign key yet (`stories` does not
- *    exist). `feed_comments_target_chk` already pins "exactly one target", so Phase 5 adds the
- *    reference and nothing else.
+ * 2. **`story_id` carries its real foreign key since 05-05**, and the constraint is declared in
+ *    `*_stories.sql` as HAND-WRITTEN SQL rather than as a `.references(() => stories.id)` here.
+ *    That is not a shortcut: a column-level reference would force
+ *    `"@tria/module-stories": "workspace:*"` into this package, and `turbo boundaries` denies a
+ *    `module -> module` package edge (`turbo.json`'s `module.dependencies.allow` is
+ *    `["kernel", "contracts", "tooling"]`). The same resolution 05-03 reached for
+ *    `feed_posts_community_fk`. `feed_comments_target_chk` still pins "exactly one target", so
+ *    Phase 5 added the reference and nothing else.
  * 3. **`deleted_at` stays OUT of the RLS policy** (the `feed_posts` rule, restated): Phase 8's
  *    MODER-01 must see removed rows through the tenant lane, so `deleted_at is null` lives in every
  *    read query instead.
@@ -294,7 +299,7 @@ export const feedComments = pgTable(
       .references(() => tenants.id, { onDelete: 'cascade' }),
     /** Exactly one of `post_id` / `story_id` is set — see `feed_comments_target_chk`. */
     postId: uuid('post_id').references(() => feedPosts.id, { onDelete: 'cascade' }),
-    /** Reserved for Phase 5's story comments. No FK yet — `stories` does not exist. */
+    /** Phase 5's story comments. `feed_comments_story_fk` is hand-written SQL — see fact 2 above. */
     storyId: uuid('story_id'),
     /** Generic authorship, the `feed_posts` rule restated (FEED-08 / SCHEMA-CONVENTIONS §(c).1). */
     authorUserId: uuid('author_user_id')
@@ -368,7 +373,10 @@ export const feedComments = pgTable(
  * double-tap gesture.
  *
  * `kind` exists so V2's emoji reactions (V2-CONT-06) are new VALUES in this column rather than a
- * new table. `story_id` is the Phase 5 slot, FK included then.
+ * new table. `story_id` is Phase 5's target; its foreign key (`feed_likes_story_fk`) is declared in
+ * `*_stories.sql` as hand-written SQL for the MOD-02 boundary reason spelled out on `feedComments`
+ * above — a `.references(() => stories.id)` here would need a forbidden `module -> module` package
+ * dependency.
  */
 export const feedLikes = pgTable(
   'feed_likes',
@@ -382,7 +390,7 @@ export const feedLikes = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     postId: uuid('post_id').references(() => feedPosts.id, { onDelete: 'cascade' }),
     commentId: uuid('comment_id').references(() => feedComments.id, { onDelete: 'cascade' }),
-    /** Reserved for Phase 5. No FK yet — `stories` does not exist. */
+    /** Phase 5's story likes. `feed_likes_story_fk` is hand-written SQL — see the note above. */
     storyId: uuid('story_id'),
     /** V2-CONT-06: emoji reactions are new values here, never a new table. */
     kind: text().notNull().default('like'),

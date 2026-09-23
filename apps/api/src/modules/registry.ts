@@ -12,6 +12,7 @@ import { KERNEL_ROLE_PERMISSIONS } from '@tria/core/server/rbac/require-role';
 import { communitiesModule } from '@tria/module-communities/module';
 import { FEED_PERMISSIONS, feedSettingsSchema } from '@tria/module-feed/contracts';
 import { feedModule } from '@tria/module-feed/module';
+import { storiesModule } from '@tria/module-stories/module';
 
 /**
  * MOD-02: the registry lives in the APP tier, not in `@tria/core`. The kernel defines the manifest
@@ -25,6 +26,7 @@ import { feedModule } from '@tria/module-feed/module';
 export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
   communities: communitiesModule,
   feed: feedModule,
+  stories: storiesModule,
 };
 
 /**

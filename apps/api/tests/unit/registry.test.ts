@@ -47,14 +47,19 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       expect(TOGGLEABLE_MODULES).toContain(key);
     }
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
-    // — the first REAL module — as the only registration; 05-01 added `communities`. The list is
-    // sorted so a new entry is one line, and this assertion is what makes a silently-dropped
-    // registration fail rather than pass.
-    expect(keys.sort()).toEqual(['communities', 'feed']);
+    // — the first REAL module — as the only registration; 05-01 added `communities` and 05-05 added
+    // `stories`. The list is sorted so a new entry is one line, and this assertion is what makes a
+    // silently-dropped registration fail rather than pass.
+    expect(keys.sort()).toEqual(['communities', 'feed', 'stories']);
     // D-55 (amends D-40): the feed contributes a HOME SLOT and no navigation tab, so Phases 5 and 6
     // keep the tab budget they are planning against. A nav entry here is a regression, not a feature.
     expect(MODULE_REGISTRY.feed?.nav).toBeUndefined();
     expect(MODULE_REGISTRY.feed?.home).toEqual([{ order: 10 }]);
+    // UI-D-25: `stories` spends a HOME SLOT and no tab either — at order 5, ABOVE the feed's 10, so
+    // `/inicio` reads welcome -> nudge -> strip -> feed. D-80 makes the strip's own circle the
+    // publish door, so a nav entry here would be a regression as well.
+    expect(MODULE_REGISTRY.stories?.nav).toBeUndefined();
+    expect(MODULE_REGISTRY.stories?.home).toEqual([{ order: 5 }]);
   });
 
   it('2. defineModule accepts a manifest with only a key, and it lists without nav (MOD-01 empty)', () => {

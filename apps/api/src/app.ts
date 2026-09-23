@@ -4,6 +4,7 @@ import { flushEventsAfterHandler } from '@tria/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@tria/core/server/http/api-error';
 import { communitiesRoutes } from '@tria/module-communities/server';
 import { feedRoutes } from '@tria/module-feed/server';
+import { storiesRoutes } from '@tria/module-stories/server';
 import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
 import { healthRoutes } from './routes/health';
@@ -71,7 +72,15 @@ const routes = app
   // `requirePermission('communities.community.manage')` on the write
   // (packages/modules/communities/server/routes.ts). Turning the module off 404s every route below
   // and removes the Comunidades tab from the bootstrap — no migration, no edit here (MOD-04, D-40).
-  .route('/v1/communities', communitiesRoutes);
+  .route('/v1/communities', communitiesRoutes)
+  // Same shape again (05-05): the stories module carries its own
+  // `requireAuth` + `requireModule('stories')` chain plus per-route
+  // `requirePermission('stories.story.publish')` / `…manage` on the writes
+  // (packages/modules/stories/server/routes.ts). Turning the module off 404s every route below and
+  // removes the order-5 home slot from the bootstrap, so `/inicio` closes up — no migration, no
+  // edit here (MOD-04, UI-D-25). It declares NO nav entry: the publish door is the strip's own
+  // circle (D-80), not a fourth tab.
+  .route('/v1/stories', storiesRoutes);
 
 export type AppType = typeof routes;
 export { app };

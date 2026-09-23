@@ -20,8 +20,10 @@ import {
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
+import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { loadFeed } from '@/lib/feed';
-import { postCardView } from '@/lib/feed-view';
+import { postCardView, relativeFrom } from '@/lib/feed-view';
+import { loadStories } from '@/lib/stories';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -258,8 +260,60 @@ export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Boo
   };
 }
 
+/**
+ * `stories` → home[0] at order 5 (UI-D-25): the strip sits ABOVE the feed, because a story is the
+ * most time-bounded thing on `/inicio` — it is gone in 24 h — while the feed is durable. The module
+ * declares no navigation tab at all (D-40/D-80): its publish door is the own-circle below.
+ *
+ * **The own-circle's visibility is a PERMISSION, never a role** (UI-D-28, T-05-25). It renders
+ * exactly when the bootstrap carries `stories.story.publish` — the same composed value the API's
+ * `requirePermission` guard evaluates — so turning members into publishers in V2 is a settings flip
+ * with no web change. A role comparison here would hard-code V1 into the home screen.
+ *
+ * **A failed read renders NOTHING** (UI-SPEC E01/error): `loadStories` swallows the failure into
+ * `null`, this returns an empty strip, and `StoriesStrip` then collapses to no node for a member.
+ * The strip must never be the reason `/inicio` shows an error card — which is also why it is NOT
+ * allowed to reject into `homeSlotsFor`'s generic error slot the way the feed deliberately is.
+ *
+ * Every relative-time label is formatted HERE from the page's single `now` (UI-D-14): the circle
+ * never calls a clock in render, so there is no hydration mismatch and no per-second re-render.
+ */
+const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
+  const [page, tf] = await Promise.all([loadStories(), getTranslations('stories')]);
+  const now = Date.now();
+  const canPublish = bootstrap.permissions.includes('stories.story.publish');
+
+  return (
+    <StoriesSurface
+      items={(page?.items ?? []).map((story) => {
+        const time = relativeFrom(story.publishedAt, now);
+        return {
+          id: story.id,
+          label: time,
+          actionLabel: tf('circle.action', { time }),
+          assetId: story.mediaAssetId,
+          variantWidths: story.mediaVariantWidths,
+        };
+      })}
+      ringVariant="brand"
+      regionLabel={tf('region')}
+      own={
+        canPublish
+          ? {
+              href: '/stories/publicar',
+              label: tf('own.label'),
+              actionLabel: tf('own.action'),
+              avatarUrl: bootstrap.membership.profile.avatarUrl,
+            }
+          : undefined
+      }
+    />
+  );
+};
+
 export const WEB_MODULE_REGISTRY: Partial<Record<ModuleKey, WebModule>> = {
   feed: { home: [feedHome] },
+  stories: { home: [storiesHome] },
 };
 
 /**
