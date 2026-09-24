@@ -241,6 +241,58 @@ function isSlugCollision(error: unknown): boolean {
 /** How many suffixes to try before giving up. Ten same-named communities is already absurd. */
 const SLUG_ATTEMPTS = 10;
 
+/** What the cover lookup inside a community WRITE's transaction needs to decide. */
+type CoverAssetRow = { kind: string; purpose: string; status: string };
+
+/**
+ * The cover reference, resolved INSIDE the writing transaction — shared verbatim by create and
+ * update (05-09, T-05-40/T-05-41), exactly as `publishStory` resolves a story's asset.
+ *
+ * **Why this exists at all.** `cover_asset_id` used to go from the request body straight into SQL.
+ * The single-column foreign key cannot stand in for this check: Postgres referential integrity runs
+ * as the TABLE OWNER and therefore bypasses RLS, so another tenant's asset id PERSISTED — and the
+ * 23503-vs-201 split (random uuid → 500; real foreign id → 201) was a working cross-tenant existence
+ * oracle over an enumerable uuid space.
+ *
+ * **Two answers, and the difference between them is the whole point.**
+ *  - NO ROW, for any reason — another tenant's, unknown, soft-deleted — is ONE bare 404 with no
+ *    `details`, byte-identical to the answer an unknown COMMUNITY id gets. The read runs in the
+ *    tenant lane, so `media_assets_tenant_select` is what makes a foreign id simply not come back;
+ *    there is nothing here that compares tenant ids, so no later edit can turn this into a 403 that
+ *    confirms the asset exists somewhere (D-23).
+ *  - A row that IS present but unusable is `400 { community: 'cover_invalid' }`. The caller can see
+ *    that one and fixing it is their job, so it is information they already had, not an oracle.
+ *
+ * **The accepted tuple is exactly `purpose = 'cover'`, `kind = 'image'`, `status = 'ready'`.** The
+ * feed's D-53 concession — publish while a video transcodes and show the `processando` placeholder —
+ * is a VIDEO concession and is deliberately NOT inherited: a cover is never a video, and a cover
+ * whose bytes do not exist yet renders as exactly the `--brand-gradient` block the admin was trying
+ * to replace.
+ *
+ * A null id returns immediately and performs NO lookup: "no cover" is a first-class value (D-69).
+ */
+async function resolveCoverAsset(
+  tx: Tx,
+  ctx: RequestContext,
+  coverAssetId: string | null,
+): Promise<void> {
+  if (coverAssetId === null) return;
+
+  const rows = await tx.execute<CoverAssetRow>(sql`
+    select kind, purpose, status
+      from media_assets
+     where id = ${coverAssetId}::uuid
+       and tenant_id = ${ctx.tenantId}::uuid
+       and deleted_at is null
+     limit 1`);
+  const asset = rows[0];
+  // Unknown, another tenant's, or soft-deleted — one indistinguishable answer, no details.
+  if (!asset) throw new ApiError(404, 'NOT_FOUND');
+  if (asset.purpose !== 'cover' || asset.kind !== 'image' || asset.status !== 'ready') {
+    throw new ApiError(400, 'VALIDATION_FAILED', { community: 'cover_invalid' });
+  }
+}
+
 /**
  * `POST /v1/communities` (COMM-01).
  *
@@ -313,6 +365,10 @@ export async function createCommunity(
  * shape the list returns, so the form can prepend it without a second request. Separated out so the
  * slug-collision retry above re-enters a FRESH transaction — retrying inside an aborted one would
  * fail on every statement.
+ *
+ * The cover is resolved HERE rather than before the retry loop, for the same reason: the lookup
+ * belongs to whichever transaction performs the write, so the two cannot interleave with another
+ * statement of this request (05-09).
  */
 async function insertCommunity(
   tx: Tx,
@@ -320,6 +376,11 @@ async function insertCommunity(
   input: CreateCommunity,
   slug: string,
 ): Promise<CommunityRow> {
+  // FIRST statement of the transaction: a refused cover writes nothing at all. `isSlugCollision`
+  // matches a 23505 on the slug index alone, so this `ApiError` is re-thrown by the retry loop
+  // untouched rather than swallowed as a collision.
+  await resolveCoverAsset(tx, ctx, input.coverAssetId ?? null);
+
   const inserted = await tx.execute<{ id: string }>(sql`
     insert into communities (tenant_id, created_by_user_id, name, slug, description, cover_asset_id)
     values (${ctx.tenantId}::uuid,
@@ -399,6 +460,13 @@ export async function updateCommunity(
     const coverAssetId =
       input.coverAssetId === undefined ? before.cover_asset_id : input.coverAssetId;
     const status = input.status ?? before.status;
+
+    // Validation runs whenever the RESOLVED cover is non-null — including a PATCH that re-sends the
+    // id already stored. One indexed lookup, and the reason is that a bad id a pre-fix release
+    // wrote must not be able to survive by being re-sent unchanged. The inertness contract is
+    // untouched: the no-op early return below still happens AFTER this, so an unchanged PATCH
+    // still writes no row, moves no `updated_at` and emits no event (05-04's contract, 05-09).
+    await resolveCoverAsset(tx, ctx, coverAssetId);
 
     const changedContent =
       name !== before.name ||

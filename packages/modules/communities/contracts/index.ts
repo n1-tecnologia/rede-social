@@ -41,13 +41,17 @@ export const COMMUNITY_MAX_DESCRIPTION = 280;
  *
  * `name_required` is the empty-name refusal (a name is the one field a card cannot render without).
  * `archived` is declared now and raised by 05-04's write paths (COMM-04: publishing into an archived
- * community). Both are MACHINE codes — the pt-BR copy lives in the catalog, never here.
+ * community). `cover_invalid` (05-09) is a REAL asset of THIS tenant that cannot serve as a cover —
+ * the wrong `purpose`, the wrong `kind`, or a `status` that is not yet `ready`. All three are
+ * MACHINE codes — the pt-BR copy lives in the catalog, never here.
  *
  * A miss (unknown id, another tenant's, soft-deleted) is deliberately NOT in this vocabulary: it is
  * a BARE 404 with no `details` at all, because a per-cause code over an enumerable uuid space would
- * be an existence oracle (D-23, T-05-02).
+ * be an existence oracle (D-23, T-05-02). That paragraph is now load-bearing TWICE — for a missing
+ * COMMUNITY and for a missing COVER ASSET — which is why `cover_invalid` covers only the case the
+ * caller can see and fix, and never the case that would tell them whose asset it is.
  */
-export const COMMUNITY_ISSUES = ['name_required', 'archived'] as const;
+export const COMMUNITY_ISSUES = ['name_required', 'archived', 'cover_invalid'] as const;
 export type CommunityIssue = (typeof COMMUNITY_ISSUES)[number];
 
 /** The route `defaultHook`'s lookup: a Zod issue whose `message` is in here becomes `details.community`. */
