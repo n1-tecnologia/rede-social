@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
+import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import { hosts, login, SEED_PASSWORD, seededCommunityFeed, seededFeed, users } from './fixtures';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -43,6 +44,16 @@ const SEEDED = {
    * card anywhere to scrape a href from — which is the very property this fixture exists to prove.
    */
   archivedId: '0d000000-0000-4000-8000-0000000000c5',
+  /**
+   * 05-08 / STORY-04: `SEED_COMMUNITY_IDS['tria-demo'][0]` — the community the seed pins BOTH the
+   * EXPIRED story and an active one to, and `SEED_COMMUNITY_IDS[1]`, which has no pin at all. The
+   * pair is what makes the Destaques assertions below say something: one renders the row and its
+   * `SectionTitle`, the other renders NEITHER (UI-SPEC E12/empty).
+   */
+  pinnedId: '0d000000-0000-4000-8000-0000000000c1',
+  unpinnedId: '0d000000-0000-4000-8000-0000000000c2',
+  /** The caption of the EXPIRED story the seed pins — absent from `/inicio`, present here. */
+  pinnedExpiredCaption: 'Publicado ontem, ja fora da regua.',
 } as const;
 
 /**
@@ -547,5 +558,71 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
     // Leave the shared seed exactly as it was found.
     await archive();
     await expect(cards(page)).toHaveCount(SEEDED.total);
+  });
+});
+
+/**
+ * D-68 / STORY-04 (05-08) — the answer to PROTOTYPE.md's open question 1, walked in a browser.
+ *
+ * The claim is not "a circle row renders". It is that a story whose 24 h window CLOSED is still on
+ * its community's page while being absent from the tenant-wide strip at the same instant — the two
+ * surfaces disagreeing on purpose. Only an end-to-end walk can put both on one screen sequence;
+ * pgTAP proves the same pair of predicates inside one transaction.
+ */
+test.describe('Destaques — the pinned circles, and the expiry they outlive (D-68, STORY-04)', () => {
+  const ST = storyMessages.stories;
+
+  /** The Destaques row, named by the catalog label the page passes as its `aria-label`. */
+  function destaques(page: Page): Locator {
+    return page.getByRole('list', { name: C.page.highlights });
+  }
+
+  test('a community with pins renders the row AND its section title; one without renders neither', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.pinnedId}`);
+    await expect(destaques(page)).toBeVisible();
+    await expect(page.getByText(C.page.highlights, { exact: true }).first()).toBeVisible();
+    // The seed pins two stories to this container: the expired one and an active one. Both circles
+    // are there, and nothing in the DOM distinguishes them (D-79, A-4).
+    await expect(destaques(page).getByRole('button')).toHaveCount(2);
+
+    // UI-SPEC E12/empty: with nothing pinned the ROW and its `SectionTitle` are both ABSENT — not
+    // an empty state, not a reserved height. This is the half a "renders the row" test would miss.
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.unpinnedId}`);
+    await expect(destaques(page)).toHaveCount(0);
+    await expect(page.getByText(C.page.highlights, { exact: true })).toHaveCount(0);
+  });
+
+  test('a member opens the pinned EXPIRED story from Destaques, and the same story is absent from /inicio', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.pinnedId}`);
+
+    // Newest pin first: the seed writes the EXPIRED story's pin last, so it leads the row.
+    await destaques(page).getByRole('button').first().click();
+    const viewer = page.getByRole('dialog', { name: ST.viewer.dialog });
+    await expect(viewer).toBeVisible();
+    // The caption is the identity: this is the story `stories.spec.ts` asserts is NOT on the strip.
+    await expect(viewer.getByText(SEEDED.pinnedExpiredCaption)).toBeVisible();
+    await expect(page).toHaveURL(/\/stories\/[0-9a-f-]{36}$/);
+    const storyId = page.url().split('/').pop() ?? '';
+    expect(storyId).toMatch(/^[0-9a-f-]{36}$/);
+
+    // THE SAME STORY, the same session, the tenant-wide strip: absent. Its window closed, and the
+    // pin is what kept it on the community page — the two surfaces disagree deliberately.
+    await page.goto(`${hosts.demo}/inicio`);
+    const strip = page.getByRole('list', { name: ST.region });
+    await expect(strip).toBeVisible();
+    await expect(strip.locator(`a[href="/stories/${storyId}"]`)).toHaveCount(0);
+    await expect(page.getByText(SEEDED.pinnedExpiredCaption)).toHaveCount(0);
+
+    // …and it is still READABLE by id: expiry gates the strip's read and nothing else (A-4).
+    await page.goto(`${hosts.demo}/stories/${storyId}`);
+    await expect(page.getByRole('dialog', { name: ST.viewer.dialog })).toBeVisible();
+    await expect(page.getByText(SEEDED.pinnedExpiredCaption)).toBeVisible();
   });
 });

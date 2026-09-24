@@ -164,3 +164,95 @@ export function storyCommentView(
     canDelete: comment.canDelete,
   };
 }
+
+/* ── "Seus stories" (D-84, UI-D-40) ───────────────────────────────────────────────────────────── */
+
+/**
+ * One row of the admin history, composed on the SERVER — the `feed-view.ts` rule restated.
+ *
+ * **Nothing here is a function and nothing is a template.** Every value that crosses into
+ * `StoryHistoryList` is a plain string, number or boolean, because the boundary only carries
+ * serialisable props. The two strings that need NUMBERS in them — the meta line and the
+ * plural-aware pin indicator — are interpolated HERE with the page's own translator, which is also
+ * what keeps the pt-BR plural rules on the server where `next-intl` can apply them.
+ */
+export type StoryHistoryItemView = {
+  id: string;
+  thumbnailAssetId: string;
+  thumbnailVariantWidths: readonly number[];
+  thumbnailAlt: string;
+  caption: string;
+  captionMuted: boolean;
+  meta: string;
+  note?: string;
+  status?: { tone: 'warning' | 'danger'; label: string };
+  pinned?: { count: number; label: string };
+  actionLabel: string;
+  /** `/stories/{id}` — "Ver story" opens the viewer as a SINGLE-item sequence (05-06's route). */
+  viewHref: string;
+};
+
+/** The history's date segment: "12 mar", the sketch's own format. */
+const HISTORY_DATE = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' });
+
+/**
+ * The reader this view-model needs: a namespaced translator that can interpolate. Unlike
+ * `storyViewerLabels` NOTHING here crosses as a template, so `.raw` is not needed — every
+ * placeholder is filled before the value leaves the server.
+ */
+type HistoryLabelReader = (key: string, values?: Record<string, string | number>) => string;
+
+export function storyHistoryView(
+  story: StorySummary,
+  ts: HistoryLabelReader,
+  tm: HistoryLabelReader,
+): StoryHistoryItemView {
+  const date = HISTORY_DATE.format(new Date(story.publishedAt));
+  const caption = story.caption.trim();
+
+  // Phase 3's media vocabulary, VERBATIM (UI-SPEC §Components): the history does not invent a
+  // second word for a state the media screens already name.
+  const status =
+    story.mediaStatus === 'processing'
+      ? ({ tone: 'warning', label: tm('status.processing') } as const)
+      : story.mediaStatus === 'rejected' || story.mediaStatus === 'failed'
+        ? ({ tone: 'danger', label: tm('status.rejected') } as const)
+        : undefined;
+
+  // Pitfall 5: the ~60 s refusal arrives AFTER ingest, so the history is where an admin finds out
+  // why a story they published never appeared. `processing` gets the reassurance instead.
+  const note =
+    story.mediaStatus === 'processing'
+      ? ts('history.processingNote')
+      : story.mediaFailureReason === 'duration_too_long'
+        ? tm('errors.transcode')
+        : undefined;
+
+  return {
+    id: story.id,
+    thumbnailAssetId: story.mediaAssetId,
+    thumbnailVariantWidths: story.mediaVariantWidths,
+    thumbnailAlt: ts('history.row', { date }),
+    caption: caption.length > 0 ? caption : ts('history.noCaption'),
+    captionMuted: caption.length === 0,
+    meta: ts('history.meta', {
+      date,
+      likes: story.likeCount,
+      comments: story.commentCount,
+    }),
+    ...(note ? { note } : {}),
+    ...(status ? { status } : {}),
+    // UI zero-one-many/E08: pinned NOWHERE renders no indicator at all, so the key is absent
+    // rather than carrying a zero. `StoryHistoryRow` checks the count too — belt and braces.
+    ...(story.pinnedCommunityCount > 0
+      ? {
+          pinned: {
+            count: story.pinnedCommunityCount,
+            label: ts('history.pinned', { count: story.pinnedCommunityCount }),
+          },
+        }
+      : {}),
+    actionLabel: ts('history.row', { date }),
+    viewHref: `/stories/${story.id}`,
+  };
+}

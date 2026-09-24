@@ -40,7 +40,8 @@
         "darkTheme": "Tema escuro",
         "notifications": "Notificações",
         "version": "Versão {version}",
-        "media": "Mídia"
+        "media": "Mídia",
+        "stories": "Seus stories"
       },
       "soon": "Em breve",
       "logoutFailed": "Algo deu errado. Tente novamente."

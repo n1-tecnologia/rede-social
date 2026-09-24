@@ -52,6 +52,13 @@ test.use({ serviceWorkers: 'block' });
 const SEEDED = {
   /** The caption of the EXPIRED story: it must not appear on the strip in any form. */
   expiredCaption: 'Publicado ontem, ja fora da regua.',
+  /**
+   * 05-08: `SEED_COMMUNITY_IDS['tria-demo'][0]`'s NAME — the community the seed pins to, and the
+   * row the pin sheet opens with its switch already ON. `SEED_COMMUNITIES[1]` carries no pin, so
+   * it is the row a toggle can be walked on without disturbing the shared fixture.
+   */
+  pinnedCommunityName: 'Avisos da diretoria',
+  unpinnedCommunityName: 'Eventos e encontros',
 } as const;
 
 /** The tenant's live strip size, read once per file from the database (see the note above). */
@@ -659,5 +666,153 @@ test.describe('the story comment sheet — D-82, D-83 (mobile)', () => {
     await page.waitForTimeout(600);
     const resumed = (await page.getByTestId('story-fill-0').boundingBox())?.width ?? -1;
     expect(resumed).toBeGreaterThan(held);
+  });
+});
+
+/**
+ * D-84 / UI-D-40 / UI-D-41 (05-08) — "Seus stories", the one Phase 5 flow with no prototype at all,
+ * and the pin sheet that lives inside it.
+ *
+ * Everything that WRITES here undoes itself: the one toggle the walk performs is turned back off in
+ * the same test, so the shared seed is left exactly as it was found and the file stays re-runnable
+ * in any order. The DELETE case publishes its own story first rather than removing a seeded one.
+ */
+test.describe('"Seus stories" — the admin history and the pin sheet (D-84, UI-D-40, UI-D-41)', () => {
+  const H = S.history;
+  const P = S.pin;
+
+  test('the two doors UI-D-29 specifies both reach the history, and the "+" circle still publishes', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+
+    // Door 1: the publish screen's trailing text action.
+    await page.goto(`${hosts.demo}/stories/publicar`);
+    await page.getByRole('link', { name: S.publish.history }).click();
+    await expect(page).toHaveURL(/\/stories\/meus$/);
+    await expect(page.getByRole('heading', { name: H.title })).toBeVisible();
+
+    // Door 2: the settings administration row.
+    await page.goto(`${hosts.demo}/configuracoes`);
+    await page.getByRole('link', { name: H.title }).click();
+    await expect(page).toHaveURL(/\/stories\/meus$/);
+
+    // …and the strip's own circle keeps its SINGLE tap to publishing (D-80): two destinations on
+    // one circle would have cost the most frequent action a tap.
+    await page.goto(`${hosts.demo}/inicio`);
+    await strip(page).getByRole('link', { name: S.own.action }).click();
+    await expect(page).toHaveURL(/\/stories\/publicar$/);
+  });
+
+  test('a MEMBER cannot reach the history and is not offered the settings row (T-05-48)', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    await page.goto(`${hosts.demo}/configuracoes`);
+    await expect(page.getByRole('link', { name: H.title })).toHaveCount(0);
+
+    // The route itself bounces rather than rendering a list the API would then refuse.
+    await page.goto(`${hosts.demo}/stories/meus`);
+    await expect(page).toHaveURL(/\/inicio$/);
+  });
+
+  test('the history lists EXPIRED stories too, with their counts and their pinned indicator', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/stories/meus`);
+
+    const rows = page.locator('[data-story-history-row]');
+    await expect(rows.first()).toBeVisible();
+    // D-84: the history is the SAME query as the strip with the range predicate dropped, so the
+    // expired story is here — and it is the whole reason this screen exists.
+    await expect(page.getByText(SEEDED.expiredCaption)).toBeVisible();
+    // UI-D-40: a story with no caption reads as the fallback rather than as an empty line.
+    await expect(page.getByText(H.noCaption, { exact: true }).first()).toBeVisible();
+    // …and the pinned indicator is present exactly where the seed pinned (zero-one-many E08).
+    await expect(page.locator('[data-testid="story-history-pin"]')).not.toHaveCount(0);
+  });
+
+  test('the pin sheet toggles ONE community immediately, with no save button anywhere', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/stories/meus`);
+
+    // Open the row menu on the EXPIRED story — the one the pin flow exists for.
+    await page
+      .locator('[data-story-history-row]')
+      .filter({ hasText: SEEDED.expiredCaption })
+      .first()
+      .click();
+    const menu = page.getByRole('dialog', { name: H.menu.title });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByText(H.menu.pin, { exact: true })).toBeVisible();
+    await expect(menu.getByText(H.menu.view, { exact: true })).toBeVisible();
+    await expect(menu.getByText(H.menu.delete, { exact: true })).toBeVisible();
+
+    await menu.getByText(H.menu.pin, { exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: P.title });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText(P.helper)).toBeVisible();
+
+    // UI-D-41's whole product rule, as an absence: there is no save button in this sheet.
+    await expect(sheet.getByRole('button', { name: /salvar/i })).toHaveCount(0);
+
+    // The seeded community reads as ALREADY pinned, without the sheet asking the admin anything.
+    const pinnedRow = sheet.getByRole('switch', {
+      name: P.row.replace('{community}', SEEDED.pinnedCommunityName),
+    });
+    await expect(pinnedRow).toHaveAttribute('aria-checked', 'true');
+
+    // One toggle on an unpinned community: immediate, optimistic, and confirmed by the toast.
+    const target = sheet.getByRole('switch', {
+      name: P.row.replace('{community}', SEEDED.unpinnedCommunityName),
+    });
+    await expect(target).toHaveAttribute('aria-checked', 'false');
+    await target.dispatchEvent('click');
+    await expect(target).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText(P.pinned, { exact: true })).toBeVisible();
+
+    // Turn it back off, so the shared seed is left exactly as it was found.
+    await target.dispatchEvent('click');
+    await expect(target).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByText(P.unpinned, { exact: true })).toBeVisible();
+  });
+
+  test('a story the walk published is deleted from the history, dialog and toast included', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+
+    // Its OWN story: deleting a seeded one would change what every other spec in the suite reads.
+    const caption = `${TEST_CAPTION_PREFIX} — historico ${Date.now()}`;
+    await page.goto(`${hosts.demo}/stories/publicar`);
+    await page.locator('#story-photo-input').setInputFiles(PHOTO);
+    // The wait is the WORKER's: the caption field appears once the upload has an asset id.
+    const field = page.getByLabel(S.publish.captionLabel);
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    await field.fill(caption);
+    // A real `click`, not `dispatchEvent`: the submit control is animated, and the shipped publish
+    // walk above uses the same gesture — two spellings of the same tap would eventually diverge.
+    await page.getByRole('button', { name: S.publish.submit }).click();
+    await expect(page).toHaveURL(/\/inicio$/);
+
+    await page.goto(`${hosts.demo}/stories/meus`);
+    const row = page.locator('[data-story-history-row]').filter({ hasText: caption }).first();
+    await expect(row).toBeVisible();
+    await row.click();
+
+    await page.getByRole('dialog', { name: H.menu.title }).getByText(H.menu.delete).click();
+    const dialog = page.getByRole('dialog', { name: H.confirmDelete.title });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(H.confirmDelete.body)).toBeVisible();
+    await dialog.getByRole('button', { name: H.confirmDelete.confirm }).dispatchEvent('click');
+
+    await expect(page.getByText(H.toasts.deleted, { exact: true })).toBeVisible();
+    await expect(page.locator('[data-story-history-row]').filter({ hasText: caption })).toHaveCount(
+      0,
+    );
   });
 });

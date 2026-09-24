@@ -1,5 +1,6 @@
 import { THEME_COOKIE } from '@tria/contracts/branding';
 import { iconFor, ThemeToggle } from '@tria/core/ui';
+import { STORY_PERMISSIONS } from '@tria/module-stories/contracts';
 import { Button, Card, PageHeader, SectionTitle, StatusPill } from '@tria/ui';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
@@ -91,8 +92,17 @@ export default async function SettingsPage({
   ]);
   const platform = hostTenant.mode === 'platform';
   let role: string | null = null;
+  // UI-D-29's second door is gated on the composed PERMISSION rather than on the role beside it
+  // (T-05-48): `stories.story.manage` is the identical value `requirePermission` evaluates on the
+  // API, so V2 handing story management to another role is a settings flip with no web change.
+  // A tenant without the `stories` module carries neither the permission nor the row.
+  let canManageStories = false;
   if (platform) await requirePlatformTenants();
-  else role = (await requireBootstrap()).membership.role;
+  else {
+    const bootstrap = await requireBootstrap();
+    role = bootstrap.membership.role;
+    canManageStories = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+  }
 
   // E7/partial + E7/zero-one-many: the whole group — its `SectionTitle` included — is ABSENT from
   // the DOM for every role but `admin_tenant`, never rendered-and-disabled. A member must not learn
@@ -138,14 +148,27 @@ export default async function SettingsPage({
             <Row icon="bell" label={t('settings.rows.notifications')} trailing={soon} />
           )}
         </Group>
-        {isTenantAdmin ? (
+        {isTenantAdmin || canManageStories ? (
           <Group title={t('settings.groups.admin')}>
-            <Row
-              icon="film"
-              label={t('settings.rows.media')}
-              href="/configuracoes/midia"
-              trailing={null}
-            />
+            {isTenantAdmin ? (
+              <Row
+                icon="film"
+                label={t('settings.rows.media')}
+                href="/configuracoes/midia"
+                trailing={null}
+              />
+            ) : null}
+            {/* UI-D-29: the stable, discoverable door to D-84's history, beside the media row in
+                the group Phase 3 already created. The other door is the publish screen's trailing
+                text action; the strip's own "+" circle keeps its single tap to publishing. */}
+            {canManageStories ? (
+              <Row
+                icon="sparkles"
+                label={t('settings.rows.stories')}
+                href="/stories/meus"
+                trailing={null}
+              />
+            ) : null}
           </Group>
         ) : null}
         {platform ? null : (

@@ -24,6 +24,14 @@ import type { ReactNode } from 'react';
  * message: the "Publicar em" sheet is never empty (its host prepends a "Feed principal" row of its
  * own), while the pin sheet's empty state carries a CTA that only the host can route. A message
  * baked in here would be wrong for one of them.
+ *
+ * **WITHOUT `onSelect` THE ROW IS NOT A BUTTON, and that is a correctness rule rather than a
+ * refinement** (05-08). The "Publicar em" sheet passes `onSelect` and the whole row is its control;
+ * the pin sheet does not, because its trailing control is a `Switch` — itself a `<button>`. Wrapping
+ * one interactive element in another is invalid HTML, gives the row two tab stops, and lets a tap on
+ * the switch bubble into a row handler that should not exist. So the row renders as a plain flex
+ * container when nothing selects it, and `trailing` is then the only thing a finger or a keyboard
+ * can reach — which is exactly what UI-D-41's drawing shows.
  */
 export interface CommunityPickerRow {
   id: string;
@@ -61,6 +69,44 @@ export interface CommunityPickerSheetProps {
 /** The thumb is a fixed 32×32 square in every row, so `sizes` never needs the viewport. */
 const THUMB_SIZES = '32px';
 
+/**
+ * The row's container: a `<button>` when the host selects on it, a plain `<div>` otherwise.
+ *
+ * Both branches carry the identical class list, so the two sheets are pixel-identical; the only
+ * difference is whether the row itself is focusable. See the docblock above for why the inert
+ * branch exists at all.
+ */
+const ROW =
+  'flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors';
+const ROW_INTERACTIVE =
+  'hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+function RowShell({
+  label,
+  onSelect,
+  children,
+}: {
+  label: string;
+  onSelect?: () => void;
+  children: ReactNode;
+}) {
+  if (!onSelect) {
+    // No accessible name on the container: with nothing to activate, a labelled generic would
+    // announce a control that is not there. The trailing `Switch` carries the row's name instead.
+    return <div className={ROW}>{children}</div>;
+  }
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onSelect}
+      className={`${ROW} ${ROW_INTERACTIVE}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function CommunityPickerSheet({
   open,
   onClose,
@@ -79,14 +125,10 @@ export function CommunityPickerSheet({
         {leadingRow ? <li>{leadingRow}</li> : null}
         {rows.map((row) => (
           <li key={row.id}>
-            <button
-              type="button"
-              aria-label={rowLabel(row)}
-              onClick={onSelect ? () => onSelect(row) : undefined}
-              // `min-h-11` is the 44px row UI-D-41/UI-D-45 both specify, and it is also the tap
-              // target: the whole row is the control, never the glyph at its end.
-              className="flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-            >
+            {/* `min-h-11` is the 44px row UI-D-41/UI-D-45 both specify. With `onSelect` it is also
+                the tap target — the whole row is the control, never the glyph at its end; without
+                it the row is inert and `trailing` owns the interaction (see the docblock). */}
+            <RowShell label={rowLabel(row)} onSelect={onSelect ? () => onSelect(row) : undefined}>
               {row.coverAssetId !== null ? (
                 <span
                   data-picker-cover
@@ -117,7 +159,7 @@ export function CommunityPickerSheet({
                 {row.name}
               </span>
               <span className="shrink-0">{trailing(row)}</span>
-            </button>
+            </RowShell>
           </li>
         ))}
       </ul>

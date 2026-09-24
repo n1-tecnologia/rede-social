@@ -186,6 +186,20 @@ describe('PinStorySheet — UI-D-41, one switch per community and no Salvar anyw
     expect(screen.queryAllByRole('switch')).toHaveLength(0);
   });
 
+  it('11. re-opening on ANOTHER story RE-SEEDS the switches from the new prop', async () => {
+    // The sheet stays mounted while it is closed, so a `useState` initialiser alone would freeze
+    // the FIRST story's pins into every story after it — the defect `stories.spec.ts` caught,
+    // where a story the seed had pinned opened with its switch off.
+    const { rerender } = render(<PinStorySheet {...props()} />);
+    expect(switchFor('c1')).toHaveAttribute('aria-checked', 'true');
+    expect(switchFor('c2')).toHaveAttribute('aria-checked', 'false');
+
+    rerender(<PinStorySheet {...props({ pinnedCommunityIds: ['c2'] })} />);
+
+    await waitFor(() => expect(switchFor('c2')).toHaveAttribute('aria-checked', 'true'));
+    expect(switchFor('c1')).toHaveAttribute('aria-checked', 'false');
+  });
+
   it('10. the title and the helper are the HOST’s words — the sheet ships none (PWA-03)', () => {
     render(<PinStorySheet {...props()} />);
 
