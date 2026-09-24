@@ -834,3 +834,275 @@ describe('PATCH /v1/communities/{id} — edit, archive and reactivate (COMM-01, 
     expect(updatedEvents.length).toBe(updatedBefore + 1);
   });
 });
+
+/**
+ * 05-09 — GAP 1 of `05-VERIFICATION.md`, from the SAME-TENANT side.
+ *
+ * `isolation.test.ts` case b5 proves the cross-tenant half: a foreign cover id is one bare 404 that
+ * is byte-identical to an unknown uuid's, so no oracle survives. This block proves the other half —
+ * every way an asset of THIS tenant can be wrong answers the closed `cover_invalid` code the admin
+ * can see and act on, and the two answers never blur into each other.
+ *
+ * The accepted tuple is exactly `(purpose 'cover', kind 'image', status 'ready')`. The feed's D-53
+ * concession — publish while a video transcodes — is a VIDEO concession and case 29 is the case that
+ * pins it as deliberately not inherited: a cover with no bytes renders as exactly the gradient the
+ * admin was trying to replace.
+ */
+describe('POST/PATCH /v1/communities — the cover asset contract (COMM-01, 05-09)', () => {
+  /** Every media row this block seeds, so the cleanup can be exact (the file keeps no media list). */
+  const coverAssets: string[] = [];
+  const fixtures = { ready: '', avatar: '', video: '', processing: '', labCover: '' };
+
+  const patch = (id: string, body: unknown, token = tokens.demoAdmin) =>
+    request(`/v1/communities/${id}`, token, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+
+  const post = (body: unknown, token = tokens.demoAdmin) =>
+    request('/v1/communities', token, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+
+  /** `requestId` is the ONE field that legitimately differs between two requests (the case q rule). */
+  const withoutRequestId = (raw: string) => {
+    const parsed = JSON.parse(raw) as Envelope;
+    const { requestId: _requestId, ...error } = parsed.error;
+    return JSON.stringify({ error });
+  };
+
+  /** How many communities the demo tenant has right now — a refusal must not move this. */
+  async function demoCommunityCount(): Promise<number> {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.communities
+       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null`;
+    return row?.n ?? 0;
+  }
+
+  /** A fresh community owned by this file, optionally carrying a cover. */
+  async function makeCommunity(suffix: string, coverAssetId: string | null = null) {
+    const res = await post({ name: `${TEST_NAME_PREFIX} ${suffix}`, coverAssetId });
+    expect(res.status, `POST /v1/communities (${suffix})`).toBe(201);
+    const community = (await res.json()) as CommunitySummary;
+    created.push(community.id);
+    return community;
+  }
+
+  /**
+   * One media row in a KNOWN tuple, written straight through the admin connection. Every value comes
+   * from the schema's own CHECK vocabularies (`media_assets_kind_chk`, `_purpose_chk`, `_status_chk`),
+   * so a fixture can never be refused by the database before the service gets to refuse it.
+   */
+  async function seedAsset(
+    tenantId: string,
+    email: string,
+    kind: string,
+    purpose: string,
+    status: string,
+  ): Promise<string> {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+         variant_widths, filename, ready_at)
+      select ${tenantId}::uuid, u.id, ${kind}, ${purpose}, ${status}, 'supabase',
+             ${kind === 'video' ? 'video/mp4' : 'image/webp'}, 262144, 1600, 700,
+             ${status === 'ready' ? '{320,640,960,1280}' : '{}'}::int[],
+             ${`05-09-${kind}-${purpose}-${status}`},
+             ${status === 'ready' ? new Date().toISOString() : null}::timestamptz
+        from public.users u where u.email = ${email}
+      returning id`;
+    if (!row) throw new Error(`could not seed a ${kind}/${purpose}/${status} asset for ${email}`);
+    coverAssets.push(row.id);
+    return row.id;
+  }
+
+  beforeAll(async () => {
+    fixtures.ready = await seedAsset(
+      tenantIds.demo,
+      'admin@tria-demo.local',
+      'image',
+      'cover',
+      'ready',
+    );
+    fixtures.avatar = await seedAsset(
+      tenantIds.demo,
+      'admin@tria-demo.local',
+      'image',
+      'avatar',
+      'ready',
+    );
+    fixtures.video = await seedAsset(
+      tenantIds.demo,
+      'admin@tria-demo.local',
+      'video',
+      'post',
+      'ready',
+    );
+    fixtures.processing = await seedAsset(
+      tenantIds.demo,
+      'admin@tria-demo.local',
+      'image',
+      'cover',
+      'processing',
+    );
+    // The OTHER tenant's perfectly usable cover — case 31's "a pre-fix release wrote this" fixture.
+    fixtures.labCover = await seedAsset(
+      tenantIds.lab,
+      'admin@tria-lab.local',
+      'image',
+      'cover',
+      'ready',
+    );
+  });
+
+  afterAll(async () => {
+    if (coverAssets.length === 0) return;
+    // Communities pointing AT a fixture asset go first — including the row case 31 corrupted by
+    // hand — or the delete below fails on the foreign key. The file-level sweep runs later and
+    // would otherwise find the assets already gone.
+    await adminSql`
+      delete from public.communities where cover_asset_id = any(${coverAssets}::uuid[])`;
+    await adminSql`delete from public.media_assets where id = any(${coverAssets}::uuid[])`;
+  });
+
+  it('27. wrong PURPOSE: an avatar image is cover_invalid, and both write verbs answer identically', async () => {
+    const before = await demoCommunityCount();
+    const community = await makeCommunity('capa com proposito errado');
+
+    const onCreate = await post({
+      name: `${TEST_NAME_PREFIX} capa avatar`,
+      coverAssetId: fixtures.avatar,
+    });
+    expect(onCreate.status).toBe(400);
+    const createText = await onCreate.text();
+    const createBody = JSON.parse(createText) as Envelope;
+    expect(createBody.error.code).toBe('VALIDATION_FAILED');
+    expect(createBody.error.details).toEqual({ community: 'cover_invalid' });
+
+    const onPatch = await patch(community.id, { coverAssetId: fixtures.avatar });
+    expect(onPatch.status).toBe(400);
+    const patchText = await onPatch.text();
+
+    // The contract test named in 05-09's assumption-delta block: the answer depends only on the
+    // asset's (tenant_id, purpose, kind, status) tuple and never on WHICH verb asked — one intent,
+    // two call sites, one rule. An equality rather than two checks against a literal, so a future
+    // extra key on either branch fails here.
+    expect(withoutRequestId(patchText)).toEqual(withoutRequestId(createText));
+
+    // A refusal wrote nothing: only the community this case deliberately created exists.
+    expect(await demoCommunityCount()).toBe(before + 1);
+  });
+
+  it('28. wrong KIND: a ready VIDEO is cover_invalid — a cover is never a video', async () => {
+    const before = await demoCommunityCount();
+
+    const res = await post({
+      name: `${TEST_NAME_PREFIX} capa video`,
+      coverAssetId: fixtures.video,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.details).toEqual({ community: 'cover_invalid' });
+
+    expect(await demoCommunityCount()).toBe(before);
+  });
+
+  it('29. not READY: a processing cover is cover_invalid — the feed video concession is not inherited', async () => {
+    const before = await demoCommunityCount();
+
+    // D-53 lets a POST publish while its VIDEO transcodes, because the card shows a `processando`
+    // placeholder. A community cover has no such placeholder: an unready cover renders as the
+    // `--brand-gradient` block, which is exactly what the admin was replacing. Deliberately refused.
+    const res = await post({
+      name: `${TEST_NAME_PREFIX} capa em processamento`,
+      coverAssetId: fixtures.processing,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.details).toEqual({ community: 'cover_invalid' });
+
+    expect(await demoCommunityCount()).toBe(before);
+  });
+
+  it('30. null and ABSENT are both "no cover": 201, stored null, and no asset lookup (COMM-01 edge/empty)', async () => {
+    const explicit = await post({ name: `${TEST_NAME_PREFIX} sem capa nula`, coverAssetId: null });
+    expect(explicit.status).toBe(201);
+    const withNull = (await explicit.json()) as CommunitySummary;
+    created.push(withNull.id);
+    expect(withNull.coverAssetId).toBeNull();
+
+    const omitted = await post({ name: `${TEST_NAME_PREFIX} sem capa ausente` });
+    expect(omitted.status).toBe(201);
+    const withoutKey = (await omitted.json()) as CommunitySummary;
+    created.push(withoutKey.id);
+    expect(withoutKey.coverAssetId).toBeNull();
+
+    // Read back from the database, not from the payload: "no cover" is one value everywhere.
+    const rows = await adminSql<{ id: string; cover_asset_id: string | null }[]>`
+      select id, cover_asset_id from public.communities
+       where id = any(${[withNull.id, withoutKey.id]}::uuid[])`;
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.cover_asset_id).toBeNull();
+  });
+
+  it('31. a PATCH re-sending the stored cover is still INERT — and still validated (COMM-01 edge/idempotency)', async () => {
+    const community = await makeCommunity('capa idempotente', fixtures.ready);
+    expect(community.coverAssetId).toBe(fixtures.ready);
+
+    const [before] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text from public.communities where id = ${community.id}::uuid`;
+    const updatedBefore = updatedEvents.length;
+
+    const repeat = await patch(community.id, { coverAssetId: fixtures.ready });
+    expect(repeat.status).toBe(200);
+
+    const [after] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text from public.communities where id = ${community.id}::uuid`;
+    // Observably inert: no row written, no `updated_at`, no event. The lookup happens BEFORE the
+    // no-op early return, so validating cost one indexed read and changed nothing.
+    expect(after?.updated_at).toBe(before?.updated_at);
+    expect(updatedEvents.length).toBe(updatedBefore);
+
+    // Now the row a PRE-FIX release could have written: a cover id belonging to the OTHER tenant,
+    // put there by hand because the API can no longer produce it. Re-sending it UNCHANGED must
+    // still be refused — this is what proves validation is not skipped when nothing appears to move.
+    await adminSql`
+      update public.communities set cover_asset_id = ${fixtures.labCover}::uuid
+       where id = ${community.id}::uuid`;
+
+    const countBefore = await demoCommunityCount();
+    const resent = await patch(community.id, { coverAssetId: fixtures.labCover });
+    expect(resent.status).toBe(404);
+    const body = (await resent.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(Object.hasOwn(body.error, 'details')).toBe(false);
+    expect(await demoCommunityCount()).toBe(countBefore);
+  });
+
+  it('32. uuid EQUALITY is Postgres, not JavaScript; a malformed id is a 400 and never a 500 (COMM-01 edge/encoding)', async () => {
+    const community = await makeCommunity('capa com maiusculas');
+
+    // Two textual spellings of the SAME uuid resolve to the same asset: the `::uuid` cast is what
+    // compares them, never JS string equality.
+    const upper = await patch(community.id, { coverAssetId: fixtures.ready.toUpperCase() });
+    expect(upper.status).toBe(200);
+    const [stored] = await adminSql<{ cover_asset_id: string | null }[]>`
+      select cover_asset_id::text from public.communities where id = ${community.id}::uuid`;
+    expect(stored?.cover_asset_id).toBe(fixtures.ready);
+
+    // A 35-character string is not a uuid. The CONTRACT validator refuses it before the service is
+    // reached, so it is a 400 with no `community` code — never the driver's 500 on a bad cast.
+    const countBefore = await demoCommunityCount();
+    const malformed = await patch(community.id, { coverAssetId: fixtures.ready.slice(0, 35) });
+    expect(malformed.status).toBe(400);
+    expect(malformed.status).not.toBe(500);
+    const body = (await malformed.json()) as Envelope;
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect((body.error.details as { community?: string } | undefined)?.community).toBeUndefined();
+    expect(await demoCommunityCount()).toBe(countBefore);
+  });
+});
