@@ -34,9 +34,17 @@ const MuxPlayer = dynamic(() => import('@mux/mux-player-react'), { ssr: false })
  */
 export interface StoryVideoProps {
   assetId: string;
+  /**
+   * THIS story's id — what makes the host's play registration per-STORY rather than per-mount.
+   *
+   * `StoryViewer` mounts a 3-wide neighbour window, so several of these bridges are alive at once
+   * and every one of them registers. Without the id the host cannot tell them apart: the last
+   * attacher wins the single slot and the badge reaches an offscreen neighbour (CR-02).
+   */
+  storyId: string;
   controls: StoryMediaControls;
   /** Set by the host so the viewer's play badge can start playback inside the user's own gesture. */
-  onPlayRef?: (play: (() => void) | null) => void;
+  onPlayRef?: (storyId: string, play: (() => void) | null) => void;
 }
 
 /** What the custom element exposes that this bridge uses — standard media-element surface. */
@@ -48,7 +56,7 @@ type PlayableElement = HTMLElement & {
   muted?: boolean;
 };
 
-export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
+export function StoryVideo({ assetId, storyId, controls, onPlayRef }: StoryVideoProps) {
   const [tokens, setTokens] = useState<{
     playbackId: string;
     playback: string;
@@ -139,7 +147,7 @@ export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
       element.addEventListener('playing', onPlaying);
       element.addEventListener('timeupdate', onTimeUpdate);
       element.addEventListener('error', onError);
-      onPlayRef?.(() => {
+      onPlayRef?.(storyId, () => {
         void element.play?.();
       });
       setAttachments((count) => count + 1);
@@ -153,7 +161,7 @@ export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
       element.removeEventListener('timeupdate', onTimeUpdate);
       element.removeEventListener('error', onError);
       playerRef.current = null;
-      onPlayRef?.(null);
+      onPlayRef?.(storyId, null);
     };
 
     const reconcile = () => {
@@ -171,7 +179,7 @@ export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
       observer.disconnect();
       detach();
     };
-  }, [onPlayRef]);
+  }, [onPlayRef, storyId]);
 
   /**
    * The viewer's ONE pause boolean reaches the element here, and nowhere else.

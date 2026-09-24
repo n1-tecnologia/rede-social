@@ -551,10 +551,12 @@ export function StoryViewer({
           call anywhere in this file for a later edit to delete by accident. They keep their `z-[4]`, which sits above
           the stage in the same stacking context the header row (`z-[3]`) already uses.
 
-          REGRESSION GATE: `apps/web/e2e/stories.spec.ts` drives this exact stage with real pointer
-          gestures (tap-to-navigate, hold-to-pause, swipe-to-dismiss, deep link). It runs against
-          this restructure in **05-11 Task 3**, wave 9 — not in wave 8, where 05-09 already holds
-          the seeded database and the dev-server ports for its own Playwright run. */}
+          COVERAGE, stated accurately: `story-viewer.test.tsx` cases 12a-12c pin the structural half
+          — the badge and the retry are siblings of the stage, and a tap on either does not advance.
+          The HIT-TESTING half (a tap on the error COPY falling through to the stage via
+          `pointer-events-none`) is asserted by NO automated test: happy-dom does not hit-test, and
+          no browser-level spec in this repo drives these controls. It is carried as an open human
+          check in the phase's verification pack (WR-09). */}
 
       {isVideo && autoplayBlocked ? (
         // The badge occupies only its own box, so the area around it stays tappable by the stage.

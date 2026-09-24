@@ -75,6 +75,11 @@ vi.mock('@mux/mux-player-react', async () => {
 const { StoryVideo } = await import('./StoryVideo');
 
 const ASSET = '0d000000-0000-4000-8000-0000000000b1';
+/**
+ * `storyId` is REQUIRED on `StoryVideoProps`: it is what keys the host's play registration per
+ * story rather than per mount (CR-02). Every render site in this file carries it.
+ */
+const STORY_ID = '0d000000-0000-4000-8000-0000000000d1';
 
 const TOKEN = {
   ok: true as const,
@@ -141,7 +146,7 @@ afterEach(cleanup);
 describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34)', () => {
   it('1. attaches to an element that mounts LATE and forwards all four of its events', async () => {
     const controls: Controls = makeControls();
-    render(<StoryVideo assetId={ASSET} controls={controls} />);
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />);
 
     const player = await mountedPlayer();
 
@@ -164,7 +169,7 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
 
   it('2. IGNORES a time update whose duration is zero or non-finite', async () => {
     const controls: Controls = makeControls();
-    render(<StoryVideo assetId={ASSET} controls={controls} />);
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />);
     const player = await mountedPlayer();
 
     player.currentTime = 4;
@@ -179,7 +184,7 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
 
   it('3. applies the paused and muted flags it is ALREADY HOLDING the moment the element appears', async () => {
     const controls: Controls = makeControls(true, true);
-    render(<StoryVideo assetId={ASSET} controls={controls} />);
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />);
 
     const player = await mountedPlayer();
     // No prop change between the render and this assertion — that is the whole claim. The shipped
@@ -194,11 +199,11 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
 
   it('4. flipping paused to false calls the element’s play', async () => {
     const controls: Controls = makeControls(true, true);
-    const { rerender } = render(<StoryVideo assetId={ASSET} controls={controls} />);
+    const { rerender } = render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />);
     await mountedPlayer();
     await flush();
 
-    rerender(<StoryVideo assetId={ASSET} controls={{ ...controls, paused: false }} />);
+    rerender(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={{ ...controls, paused: false }} />);
     await flush();
 
     expect(play).toHaveBeenCalledTimes(1);
@@ -208,15 +213,19 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
     const controls: Controls = makeControls();
     const bindPlay = vi.fn();
     const { unmount } = render(
-      <StoryVideo assetId={ASSET} controls={controls} onPlayRef={bindPlay} />,
+      <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} onPlayRef={bindPlay} />,
     );
 
     const player = await mountedPlayer();
     await flush();
-    expect(typeof bindPlay.mock.calls.at(-1)?.[0]).toBe('function');
+    // Two arguments now: the STORY ID the component was given, then the callable. The id is what
+    // lets the host keep one registration per story instead of one shared slot (CR-02).
+    expect(bindPlay.mock.calls.at(-1)?.[0]).toBe(STORY_ID);
+    expect(typeof bindPlay.mock.calls.at(-1)?.[1]).toBe('function');
 
     unmount();
-    expect(bindPlay.mock.calls.at(-1)?.[0]).toBeNull();
+    expect(bindPlay.mock.calls.at(-1)?.[0]).toBe(STORY_ID);
+    expect(bindPlay.mock.calls.at(-1)?.[1]).toBeNull();
 
     // A duration that WOULD have been forwarded, on the element the bridge has let go of.
     player.currentTime = 2.5;
@@ -230,7 +239,7 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
   it('6. a REFUSED token is a media failure, and no vendor element is mounted', async () => {
     playbackToken.mockResolvedValue({ ok: false, code: 'notReady' });
     const controls: Controls = makeControls();
-    render(<StoryVideo assetId={ASSET} controls={controls} />);
+    render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />);
     await flush();
 
     // A refusal answers a KEY; the viewer renders its own error copy. No provider string, no

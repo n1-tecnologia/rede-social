@@ -411,10 +411,11 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
    *
    * What these three cases can and cannot see: happy-dom does not hit-test, so the other half of
    * the fix — the error container being `pointer-events-none` so a tap on the COPY still falls
-   * through to the stage — is not observable here. It is a real-browser property, covered by
-   * `apps/web/e2e/stories.spec.ts` (run as a gate in 05-11 Task 3). Case 12c is the unit-level
-   * guard that matters most here: without it, 12a and 12b would also pass over a viewer whose
-   * gesture pipeline had been broken entirely rather than isolated.
+   * through to the stage — is NOT observable here and is asserted by NO automated test in this
+   * repo. It is a real-browser property and it is carried as an open HUMAN check in the phase's
+   * verification pack (WR-09). Case 12c is the unit-level guard that matters most here: without
+   * it, 12a and 12b would also pass over a viewer whose gesture pipeline had been broken entirely
+   * rather than isolated.
    */
 
   it('12a. CR-04: tapping the play badge starts playback and does NOT advance the story', () => {

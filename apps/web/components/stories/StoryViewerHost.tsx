@@ -119,7 +119,7 @@ export function StoryViewerHost({
    * The alternative — holding the deltas in THIS component's state — would change the identity of
    * the memoised `viewerItems` array on every comment, which re-creates every media render function
    * and re-mounts the image the member is looking at while the sheet is open. Registering a setter
-   * is the same shape `bindPlay` already uses for the video's `play()`.
+   * is the same shape `bindPlay` uses for the video's `play()` — neither is the other's exception.
    */
   const countBumpRef = useRef<Record<string, (delta: number) => void>>({});
   const bindCountBump = useCallback((storyId: string, bump: ((delta: number) => void) | null) => {
@@ -127,10 +127,29 @@ export function StoryViewerHost({
     else delete countBumpRef.current[storyId];
   }, []);
 
-  /** Set by `StoryVideo` while a video is mounted; the play badge calls it inside the gesture. */
-  const playRef = useRef<(() => void) | null>(null);
-  const bindPlay = useCallback((play: (() => void) | null) => {
-    playRef.current = play;
+  /**
+   * Per-story play callbacks, registered by the `StoryVideo` bridges that own them — the play badge
+   * calls the CURRENT story's one, synchronously inside the member's gesture.
+   *
+   * **Keyed by story id, because the viewer mounts THREE of these at once.** `StoryViewer` renders a
+   * 3-wide neighbour window (`Math.abs(k - index) <= 1`) as its pre-buffer, so with the middle story
+   * active both neighbours are mounted and all three bridges register. A single unkeyed slot was
+   * simply overwritten by whichever element attached LAST — and attach order follows token
+   * resolution rather than screen position, so that was usually an offscreen neighbour: the badge
+   * started a video the member could not see while the one in front of them stayed frozen. The same
+   * slot was nulled by ANY bridge unmounting, so a neighbour leaving the window also cleared the
+   * ACTIVE story's registration (CR-02).
+   *
+   * Deliberately byte-for-byte the shape `bindCountBump` uses above: the asymmetry between the two
+   * WAS the bug, so the fix is the existing idiom rather than a second one. It stays a
+   * `useCallback([], …)` because `StoryVideo`'s listener effect takes it as a dependency (WR-01) —
+   * a fresh inline callback per render would be an unbounded attach/detach loop.
+   */
+  const playRefs = useRef<Record<string, () => void>>({});
+  const bindPlay = useCallback((storyId: string, play: (() => void) | null) => {
+    if (play) playRefs.current[storyId] = play;
+    // Only the OWNER clears its own slot: a neighbour unmounting must not silence the active story.
+    else delete playRefs.current[storyId];
   }, []);
 
   const close = useCallback(() => {
@@ -153,10 +172,15 @@ export function StoryViewerHost({
         authorName: author.name,
         timeLabel: item.timeLabel,
         avatar: <Avatar src={author.avatarUrl} alt="" size="sm" />,
-        onRequestPlay: () => playRef.current?.(),
+        onRequestPlay: () => playRefs.current[item.id]?.(),
         media: (controls: StoryMediaControls) =>
           item.mediaKind === 'video' ? (
-            <StoryVideo assetId={item.mediaAssetId} controls={controls} onPlayRef={bindPlay} />
+            <StoryVideo
+              assetId={item.mediaAssetId}
+              storyId={item.id}
+              controls={controls}
+              onPlayRef={bindPlay}
+            />
           ) : (
             <MediaImage
               assetId={item.mediaAssetId}
