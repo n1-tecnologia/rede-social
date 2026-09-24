@@ -287,7 +287,6 @@ Plans:
 ### Phase 5: Communities & Stories
 
 **Goal**: `admin_tenant` organizes content into communities and broadcasts 24 h stories; members browse communities with their posts and pinned stories, and watch stories in a full-screen viewer with the complete gesture set.
-**Mode:** mvp
 **Depends on**: Phase 4
 **Requirements**: COMM-01, COMM-02, COMM-03, COMM-04, STORY-01, STORY-02, STORY-03, STORY-04, STORY-05
 **Success Criteria** (what must be TRUE):
