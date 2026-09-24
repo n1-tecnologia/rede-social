@@ -67,6 +67,12 @@ const REQUIRED_KEYS = [
   '/(app)/comunidades/[communityId]/page',
   '/(app)/comunidades/nova/page',
   '/(app)/comunidades/[communityId]/editar/page',
+  // Phase 5: the story routes. The publish screen and the history list read the session per
+  // request, and the viewer route is the deep-link target a share or a notification lands on, so
+  // all three are authenticated surfaces that may never be prerendered.
+  '/(app)/stories/publicar/page',
+  '/(app)/stories/meus/page',
+  '/(app)/stories/[storyId]/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',
