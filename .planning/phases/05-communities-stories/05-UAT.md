@@ -3,7 +3,7 @@ status: partial
 phase: 05-communities-stories
 source: [05-VERIFICATION.md]
 started: 2026-09-24T15:40:00Z
-updated: 2026-09-24T18:05:00Z
+updated: 2026-09-24T18:18:00Z
 ---
 
 ## Current Test
@@ -157,6 +157,8 @@ blocked: 1
 - test: 5
   idea: "deu certo. Mas seria interessante conseguir ver as que foram arquivadas com uma tag pra pessoa conseguir entrar sem ter que decorar um id ne"
   deferred_at: 2026-09-24
+  decision: "Tester chose to KEEP this as a follow-up rather than promote it to a Phase 5 gap, with the reachability evidence below in front of them. It therefore generates no fix plan this round."
+  decided_at: 2026-09-24
   orchestrator_note: "Demonstrated in session, not hypothetical: archive has NO reverse path reachable from the UI. `listCommunities` filters `status = 'active'` (packages/modules/communities/server/service.ts:137) so an archived community leaves /comunidades entirely, and the only reactivate control lives at the bottom of that same community's edit form (apps/web/app/(app)/comunidades/CommunityForm.tsx:458-470) — a route the admin can only reach by already knowing the UUID. The tester could not complete test 5 unaided; the id came from a direct Postgres query. Suggested shape (the tester's): keep archived communities in the list behind an `Arquivada` tag/filter. Recorded as a follow-up per the tester's own framing; promote to a gap on request."
 
 ## Gaps
@@ -170,3 +172,19 @@ blocked: 1
   incidental: true
   artifacts: []
   missing: []
+  deferred: true
+  deferred_at: 2026-09-24
+  deferred_by: tester
+  deferred_rationale: |
+    Deliberately NOT routed to diagnosis or gap planning this round. Two reasons, both stated to the
+    tester before the choice: (1) the defect is only reachable when the player itself errors, and the
+    only error available in this environment is the fake provider's own invalid token — the real
+    shape of the bug under a live Mux asset is unknown; (2) phase 05 cannot transition regardless,
+    because test 1 is blocked on that same absent provider. Bundling the two means one look instead
+    of two.
+    REVISIT CONDITION: when VIDEO_PROVIDER flips to `mux` (docs/DEPLOY.md:177-192) and test 1 becomes
+    runnable, re-check whether a genuinely failing Mux asset still stacks mux-player's own dialog on
+    top of the app's pt-BR overlay. If it does, this is a real product defect and not a fake-provider
+    artifact.
+    NOTE ON STATUS: left as `failed` rather than rewritten, so the finding is not laundered into
+    something already handled. `deferred: true` is what keeps it out of this round's gap closure.
