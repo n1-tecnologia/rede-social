@@ -702,6 +702,43 @@ const SEED_REMOVED_MEMBER = {
 } as const;
 
 /**
+ * 05-07 (STORY-05, D-82, D-83) — the story's FLAT conversation.
+ *
+ * `[oldest, middle, removedAuthor]`, written on the NEWEST active story in both tenants with
+ * explicit `created_at` values a minute apart, because the list runs OLDEST FIRST and a fixture
+ * whose rows share a timestamp would make "oldest first" untestable. The third row's author is the
+ * same soft-deleted membership the post thread uses, so the removed-member row has a fixture on a
+ * story too — and it is the LAST one, so it is visible on the first page without paging.
+ *
+ * There are no replies and no comment likes here, and there cannot be: `feed_comments_parent_fk`
+ * and `feed_likes_comment_fk` make both unrepresentable. The seed asserting that by omission is the
+ * weakest of the three proofs; `supabase/tests/110-communities-stories.sql` is the strongest.
+ */
+const SEED_STORY_COMMENT_IDS: Record<string, readonly [string, string, string]> = {
+  'tria-demo': [
+    '0d000000-0000-4000-8000-0000000000e1',
+    '0d000000-0000-4000-8000-0000000000e2',
+    '0d000000-0000-4000-8000-0000000000e3',
+  ],
+  'tria-lab': [
+    '0e000000-0000-4000-8000-0000000000e1',
+    '0e000000-0000-4000-8000-0000000000e2',
+    '0e000000-0000-4000-8000-0000000000e3',
+  ],
+};
+
+/**
+ * Exported so `apps/web/e2e` and the integration suite assert against the FIXTURE rather than
+ * against a literal that could drift from the seed on the next edit (the 04-06 rule). Identical in
+ * both tenants on purpose: a leak cannot hide behind "the rows look different".
+ */
+export const SEED_STORY_COMMENT_BODIES = [
+  'Que story bonito, parabens pela equipe!',
+  'Vou passar la amanha de manha.',
+  'Comentei aqui antes de sair da comunidade.',
+] as const;
+
+/**
  * A REAL `ready` post image asset at a fixed id: the SVG is rendered by sharp into the post width
  * ladder and an original, every derivative is `putObject`-ed under the broker's own key shape, and
  * the row records exactly the widths that were written. Idempotent — `putObject` upserts and the
@@ -1251,13 +1288,14 @@ for (const t of SEED_TENANTS) {
             ${commenterUserId}::uuid, ${SEED_COMMENT_BODIES[0]}, 0, null, null
           )
           on conflict (id) do nothing`);
-        // depth 1 with parent_depth 0: the only shape `feed_comments_parent_fk` accepts.
+        // depth 1, parent_depth 0, parent_target_kind 'post': the only TRIPLE
+        // `feed_comments_parent_fk` accepts since 05-07 widened it to three columns.
         await tx.execute(sql`
           insert into public.feed_comments
-            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
           values (
             ${replyCommentId}::uuid, ${tenantId}::uuid, ${firstPostId}::uuid,
-            ${replierUserId}::uuid, ${SEED_COMMENT_BODIES[1]}, 1, ${rootCommentId}::uuid, 0
+            ${replierUserId}::uuid, ${SEED_COMMENT_BODIES[1]}, 1, ${rootCommentId}::uuid, 0, 'post'
           )
           on conflict (id) do nothing`);
         await tx.execute(sql`
@@ -1265,8 +1303,8 @@ for (const t of SEED_TENANTS) {
           values (${tenantId}::uuid, ${commenterUserId}::uuid, ${firstPostId}::uuid)
           on conflict (user_id, post_id) where post_id is not null do nothing`);
         await tx.execute(sql`
-          insert into public.feed_likes (tenant_id, user_id, comment_id)
-          values (${tenantId}::uuid, ${replierUserId}::uuid, ${rootCommentId}::uuid)
+          insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+          values (${tenantId}::uuid, ${replierUserId}::uuid, ${rootCommentId}::uuid, 'post')
           on conflict (user_id, comment_id) where comment_id is not null do nothing`);
       });
       console.log(`seed: tenant ${t.slug} — 1 comment + 1 reply, 2 likes`);
@@ -1281,6 +1319,9 @@ for (const t of SEED_TENANTS) {
     // The membership is inserted and then soft-deleted rather than never created: the
     // `member_profiles_from_membership` trigger must have written a real profile row, so the test
     // proves the projection NULLS a name that genuinely exists rather than one that was never there.
+    // Hoisted: 05-07's story-comment fixture needs the SAME person further down, so the removed
+    // member is resolved once rather than re-created under a second id.
+    let removedAuthorUserId: string | null = null;
     const removedIds = SEED_REMOVED_AUTHOR_COMMENT_IDS[t.slug] ?? [];
     const removedRootId = removedIds[0];
     const removedReplyId = removedIds[1];
@@ -1293,6 +1334,7 @@ for (const t of SEED_TENANTS) {
         SEED_REMOVED_MEMBER.name,
         seedPassword,
       );
+      removedAuthorUserId = removedUserId;
       await withAdminTx(async (tx) => {
         await tx
           .insert(memberships)
@@ -1311,11 +1353,11 @@ for (const t of SEED_TENANTS) {
           on conflict (id) do nothing`);
         await tx.execute(sql`
           insert into public.feed_comments
-            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+            (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
           values (
             ${removedReplyId}::uuid, ${tenantId}::uuid, ${removedThreadPostId}::uuid,
             ${liveReplierUserId}::uuid, ${SEED_REMOVED_AUTHOR_COMMENT_BODIES[1]}, 1,
-            ${removedRootId}::uuid, 0
+            ${removedRootId}::uuid, 0, 'post'
           )
           on conflict (id) do nothing`);
         // The positive control, on the SAME page as the removed root (03-08): a live member's own
@@ -1571,8 +1613,41 @@ for (const t of SEED_TENANTS) {
           });
         }
 
+        // 05-07 (STORY-05, D-82, D-83): the story's FLAT conversation, in BOTH tenants, so
+        // `stories.comment_count` is never zero everywhere and the pgTAP reconciliation has a
+        // seeded row to reconcile rather than only rows a test wrote.
+        //
+        // The counter is NOT written here: `app.feed_comment_count()` is the only writer of
+        // `stories.comment_count`, and a seed that set it by hand is exactly the drift the
+        // reconciliation assertion exists to catch.
+        //
+        // Every row is a ROOT — `parent_id`, `parent_depth` and `parent_target_kind` are all null,
+        // the only shape a story comment can legally have. The explicit `created_at` values are a
+        // minute apart so D-83's oldest-first ordering is a thing the e2e can actually measure.
+        const storyCommentIds = SEED_STORY_COMMENT_IDS[t.slug];
+        const storyCommenters = [memberUserIds[0], memberUserIds[1], removedAuthorUserId];
+        if (storyCommentIds && newestStoryId && storyCommenters[0] && storyCommenters[1]) {
+          await withAdminTx(async (tx) => {
+            for (const [index, id] of storyCommentIds.entries()) {
+              const authorId = storyCommenters[index] ?? storyCommenters[0];
+              if (!authorId) continue;
+              const createdAt = new Date(storyClock - (3 - index) * 60_000);
+              await tx.execute(sql`
+                insert into public.feed_comments
+                  (id, tenant_id, story_id, author_user_id, body, depth,
+                   parent_id, parent_depth, parent_target_kind, created_at)
+                values (
+                  ${id}::uuid, ${tenantId}::uuid, ${newestStoryId}::uuid, ${authorId}::uuid,
+                  ${SEED_STORY_COMMENT_BODIES[index]}, 0, null, null, null,
+                  ${createdAt.toISOString()}::timestamptz
+                )
+                on conflict (id) do nothing`);
+            }
+          });
+        }
+
         console.log(
-          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired`,
+          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest`,
         );
       }
     }

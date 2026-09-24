@@ -48,11 +48,35 @@ begin;
 --    volume fixture — and the SAME index serves D-84's history with the range predicate dropped,
 --    which is the whole reason the read orders by `expires_at` rather than by `published_at`.
 --
+-- 8. STORY-05 IS A FACT INSIDE POSTGRES, not an API convention (05-07). The roadmap states twice
+--    that a story comment cannot be replied to or liked; this file is where that stops being prose.
+--    Every refusal is asserted TWICE — once with the row naming its target HONESTLY (refused by the
+--    null-guarded shape CHECK, 23514) and once with it LYING (refused by the composite foreign key,
+--    23503) — because there is no legal triple that finds a story comment either way. Each negative
+--    ships its POSITIVE CONTROL in the same block: a reply to a POST comment still succeeds, a like
+--    on a POST comment still succeeds, and a like on the STORY itself still succeeds, so a
+--    constraint that refused everything could not pass this file.
+--
+-- 9. THE PITFALL-1 PROBE. A CHECK that evaluates to NULL is SATISFIED, and Phase 4's second branch
+--    evaluated to NULL when `parent_depth` was null — so a depth-1 comment with a parent id and a
+--    NULL parent depth INSERTED, with the composite foreign key skipped entirely (MATCH SIMPLE).
+--    The identical statement is asserted to be REFUSED here and in `090-feed.sql`, which is where
+--    the Phase 4 acceptance checks live.
+--
+-- 10. `stories.comment_count` reconciles against the rows it summarises, across a MIXED
+--    insert / soft-delete / restore / hard-delete sequence — the soft delete is an UPDATE, so a
+--    counter that only followed inserts and deletes would sit wrong forever (Pitfall 5/10).
+--
+-- 11. D-83's forward-running list is served by `feed_comments_tenant_story_root_asc_idx`, pinned BY
+--    NAME and with NO SORT NODE, on its own volume fixture. The no-sort half is the claim: an
+--    `Index Scan` that feeds a `Sort` would mean the ascending order is being produced in memory,
+--    which is exactly the Pitfall-8 regression reusing the DESC index would cause.
+--
 -- The EXPLAIN block builds and ANALYZEs its own 400-row fixture inside this file's transaction,
 -- because with five rows the planner always chooses a sequential scan and the assertion would prove
 -- nothing. Like its siblings, this file ROLLS BACK, so it re-runs identically against a seeded or an
 -- empty database, twice in a row, in any order.
-select plan(31);
+select plan(47);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-comm', 'Comunidade Phase 5', '0f000000-0000-4000-8000-000000000001');
@@ -448,7 +472,198 @@ select is_empty(
   'stories.like_count equals count(*) of that story''s like rows, for every story in the database'
 );
 
--- ── 30-31. the strip keyset is an index scan on stories_tenant_expires_idx ─────────────────────
+-- ── 30-43. STORY-05: the refusals are the DATABASE's, and each carries its positive control ────
+-- The fixture: a post of this file's own (so nothing earlier in the file can have removed it), one
+-- ROOT comment on it, and one ROOT comment on the ACTIVE story. From here every assertion is about
+-- which of the four constraints refused, and why.
+insert into public.feed_posts (id, tenant_id, author_user_id, caption)
+values ('0f000000-0000-4000-8000-0000000000bc', '0f000000-0000-4000-8000-000000000001',
+        '0f000000-0000-4000-8000-000000000002', 'alvo dos comentarios');
+
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth,
+                                  parent_id, parent_depth, parent_target_kind)
+values ('0f000000-0000-4000-8000-0000000000c1', '0f000000-0000-4000-8000-000000000001',
+        '0f000000-0000-4000-8000-0000000000bc', '0f000000-0000-4000-8000-000000000002',
+        'raiz de post', 0, null, null, null);
+
+-- 30. The positive control the whole block rests on: a ROOT comment on a STORY is accepted, with
+-- `target_kind` generated as 'story' and every parent column null. If this failed, every refusal
+-- below would be passing for the wrong reason.
+select lives_ok(
+  $$ insert into public.feed_comments (id, tenant_id, story_id, author_user_id, body, depth,
+                                       parent_id, parent_depth, parent_target_kind)
+     values ('0f000000-0000-4000-8000-0000000000c2', '0f000000-0000-4000-8000-000000000001',
+             '0f000000-0000-4000-8000-0000000000a9', '0f000000-0000-4000-8000-000000000002',
+             'comentario de story', 0, null, null, null) $$,
+  'STORY-05: a ROOT comment on a story is accepted — the flat conversation exists'
+);
+
+-- 31. Honest: the row says its parent is a story comment. The rewritten shape CHECK pins
+-- `parent_target_kind = 'post'`, so the reply branch is FALSE and the row never reaches the index.
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, story_id, author_user_id, body, depth,
+                                       parent_id, parent_depth, parent_target_kind)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-0000000000a9',
+             '0f000000-0000-4000-8000-000000000002', 'resposta honesta', 1,
+             '0f000000-0000-4000-8000-0000000000c2', 0, 'story') $$,
+  '23514',
+  null,
+  'STORY-05: a reply naming the story kind HONESTLY is refused by feed_comments_parent_shape_chk'
+);
+
+-- 32. Lying: the row claims its parent is a post comment, which satisfies the CHECK — and then the
+-- composite foreign key looks for the triple `(c2, 0, 'post')`. c2's generated `target_kind` is
+-- 'story', so no such triple exists. There is NO legal value that finds a story comment.
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, story_id, author_user_id, body, depth,
+                                       parent_id, parent_depth, parent_target_kind)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-0000000000a9',
+             '0f000000-0000-4000-8000-000000000002', 'resposta mentirosa', 1,
+             '0f000000-0000-4000-8000-0000000000c2', 0, 'post') $$,
+  '23503',
+  null,
+  'STORY-05: a reply LYING about the parent kind is refused by the composite feed_comments_parent_fk'
+);
+
+-- 33. POSITIVE CONTROL, in the same block: the Phase 4 behaviour is untouched — a reply to a POST
+-- comment still works. A constraint that refused every reply would pass 31 and 32 and fail here.
+select lives_ok(
+  $$ insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth,
+                                       parent_id, parent_depth, parent_target_kind)
+     values ('0f000000-0000-4000-8000-0000000000c3', '0f000000-0000-4000-8000-000000000001',
+             '0f000000-0000-4000-8000-0000000000bc', '0f000000-0000-4000-8000-000000000002',
+             'resposta legitima', 1, '0f000000-0000-4000-8000-0000000000c1', 0, 'post') $$,
+  'positive control: a reply to a POST comment is still accepted after the rewrite'
+);
+
+-- 34. …and the Phase 4 RULE is untouched too: a reply to a REPLY is still refused, now by the
+-- three-column key rather than the two-column one. The rewrite must not quietly widen the cap.
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth,
+                                       parent_id, parent_depth, parent_target_kind)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-0000000000bc',
+             '0f000000-0000-4000-8000-000000000002', 'resposta de resposta', 1,
+             '0f000000-0000-4000-8000-0000000000c3', 0, 'post') $$,
+  '23503',
+  null,
+  'FEED-05 survives the rewrite: a reply to a reply is still refused by feed_comments_parent_fk'
+);
+
+-- 35. A story comment claiming depth 1 with no parent at all: neither branch of the shape CHECK
+-- matches, so the constraint is FALSE rather than NULL.
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, story_id, author_user_id, body, depth,
+                                       parent_id, parent_depth, parent_target_kind)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-0000000000a9',
+             '0f000000-0000-4000-8000-000000000002', 'orfa de nivel 1', 1, null, null, null) $$,
+  '23514',
+  null,
+  'a depth-1 comment with NO parent is refused — the root branch requires depth 0'
+);
+
+-- 36. THE PITFALL-1 PROBE, verbatim: a parent id with a NULL parent depth. Before this migration
+-- the second branch read `true AND NULL AND true` = NULL, a NULL CHECK is SATISFIED, and the
+-- composite foreign key was skipped entirely because MATCH SIMPLE ignores a key with a null column
+-- — so this row INSERTED, as a depth-1 reply whose parent was never checked to exist, to be in this
+-- tenant, or to be a root. Every equality is now guarded by an explicit `is not null`.
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth,
+                                       parent_id, parent_depth)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-0000000000bc',
+             '0f000000-0000-4000-8000-000000000002', 'sonda pitfall 1', 1,
+             '0f000000-0000-4000-8000-0000000000c1', null) $$,
+  '23514',
+  null,
+  'PITFALL 1 CLOSED: a parent id with a NULL parent_depth no longer satisfies a NULL check'
+);
+
+-- 37. The like half, honest: the row says the comment it names is a story comment.
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-000000000002',
+             '0f000000-0000-4000-8000-0000000000c2', 'story') $$,
+  '23514',
+  null,
+  'STORY-05: a like naming the story kind HONESTLY is refused by feed_likes_comment_kind_chk'
+);
+
+-- 38. …and lying: the CHECK passes and `feed_likes_comment_fk` then looks for the pair
+-- `(c2, 'post')`, which does not exist.
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-000000000002',
+             '0f000000-0000-4000-8000-0000000000c2', 'post') $$,
+  '23503',
+  null,
+  'STORY-05: a like LYING about the comment kind is refused by the composite feed_likes_comment_fk'
+);
+
+-- 39. PITFALL 2, which is the one that would actually have shipped: written the naive way, the
+-- CHECK accepted a row with a comment id and a NULL discriminator, and MATCH SIMPLE then skipped
+-- the foreign key entirely — so the story comment was liked. The guard is what refuses it.
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-000000000002',
+             '0f000000-0000-4000-8000-0000000000c2') $$,
+  '23514',
+  null,
+  'PITFALL 2 CLOSED: a NULL discriminator no longer disables feed_likes_comment_fk'
+);
+
+-- 40-41. The two POSITIVE CONTROLS for the like half, in the same block: a POST comment is still
+-- likeable, and the STORY itself is still likeable (STORY-05's first half, 05-06).
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-000000000002',
+             '0f000000-0000-4000-8000-0000000000c1', 'post') $$,
+  'positive control: a like on a POST comment is still accepted after the rewrite'
+);
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, story_id)
+     values ('0f000000-0000-4000-8000-000000000001', '0f000000-0000-4000-8000-000000000002',
+             '0f000000-0000-4000-8000-0000000000e1') $$,
+  'positive control: a like on the STORY itself is still accepted (STORY-05 first half)'
+);
+
+-- ── 42-43. stories.comment_count across a MIXED sequence ───────────────────────────────────────
+-- The soft delete is an UPDATE, not a DELETE (Pitfall 5/10), so the trigger branches on the
+-- TRANSITION of `deleted_at`. A counter that only followed inserts and deletes would sit one too
+-- high forever the first time a member removed a comment. One insert takes a9 to 2, the soft delete
+-- back to 1, the restore back to 2, and the hard delete back to 1 — four transitions, one column.
+insert into public.feed_comments (id, tenant_id, story_id, author_user_id, body, depth,
+                                  parent_id, parent_depth, parent_target_kind)
+values ('0f000000-0000-4000-8000-0000000000c4', '0f000000-0000-4000-8000-000000000001',
+        '0f000000-0000-4000-8000-0000000000a9', '0f000000-0000-4000-8000-000000000003',
+        'segundo comentario', 0, null, null, null);
+update public.feed_comments set deleted_at = now()
+ where id = '0f000000-0000-4000-8000-0000000000c4';
+update public.feed_comments set deleted_at = null
+ where id = '0f000000-0000-4000-8000-0000000000c4';
+delete from public.feed_comments where id = '0f000000-0000-4000-8000-0000000000c4';
+
+select results_eq(
+  $$ select comment_count from public.stories
+      where id = '0f000000-0000-4000-8000-0000000000a9' $$,
+  ARRAY[1],
+  'stories.comment_count follows insert, SOFT delete, restore and hard delete — exactly once each'
+);
+
+-- The reconciliation itself, over EVERY story in the database rather than this file's fixture: the
+-- seeded rows went through the same trigger, so a seed that wrote a counter by hand, a backfill
+-- that missed a row or a branch that never fired all surface here (T-05-47). There is no
+-- `greatest(0, …)` clamp in the function precisely so this can go red.
+select is_empty(
+  $$ select s.id::text, s.comment_count, coalesce(c.n, 0) as rows
+       from public.stories s
+       left join (select story_id, count(*)::int as n
+                    from public.feed_comments
+                   where story_id is not null and deleted_at is null
+                   group by story_id) c on c.story_id = s.id
+      where s.comment_count <> coalesce(c.n, 0) $$,
+  'stories.comment_count equals count(*) of that story''s live comment rows, for every story'
+);
+
+-- ── 44-45. the strip keyset is an index scan on stories_tenant_expires_idx ─────────────────
 -- 400 stories in THIS file's own tenant, then `analyze`: with five rows the planner always chooses
 -- a sequential scan and the assertion below would prove nothing. The windows are spread so the
 -- range predicate is selective, exactly as it is in production.
@@ -501,6 +716,53 @@ select ok(
   and (select plan from story_plans where name = 'history') not like '%Seq Scan on stories%'
   and (select plan from story_plans where name = 'strip') not like '%Seq Scan on stories%',
   'D-84: the admin history drops the range and rides the SAME index — neither plan is a Seq Scan'
+);
+
+
+-- ── 46-47. D-83's forward list is an index scan on feed_comments_tenant_story_root_asc_idx ─────
+-- 400 root comments on ONE story, then `analyze`: with two rows the planner always chooses a
+-- sequential scan and the assertion below would prove nothing. The windows are spread so the
+-- ordering is what the index has to deliver rather than an accident of insertion order.
+insert into public.feed_comments (id, tenant_id, story_id, author_user_id, body, depth,
+                                  parent_id, parent_depth, parent_target_kind, created_at)
+select ('0f00c9' || lpad(to_hex(g), 26, '0'))::uuid,
+       '0f000000-0000-4000-8000-000000000001',
+       '0f000000-0000-4000-8000-0000000000a9',
+       '0f000000-0000-4000-8000-000000000002',
+       'volume story comment ' || g,
+       0, null, null, null,
+       now() - (g || ' minutes')::interval
+  from generate_series(1, 400) g;
+
+analyze public.feed_comments;
+
+do $$
+declare
+  v_plan text;
+begin
+  execute
+    'explain (format json) select c.id, c.created_at from public.feed_comments c
+      where c.tenant_id = ''0f000000-0000-4000-8000-000000000001''
+        and c.story_id = ''0f000000-0000-4000-8000-0000000000a9''
+        and c.parent_id is null and c.deleted_at is null
+      order by c.created_at asc, c.id asc limit 10' into v_plan;
+  insert into story_plans values ('story_comments_asc', v_plan);
+end
+$$;
+
+select matches(
+  (select plan from story_plans where name = 'story_comments_asc'),
+  'feed_comments_tenant_story_root_asc_idx',
+  'D-83: the story comment list is served by feed_comments_tenant_story_root_asc_idx BY NAME'
+);
+-- The half that actually pins the DIRECTION. Naming the index alone would still pass on a plan that
+-- scanned it and then SORTED — which is precisely what reusing the DESC index for an ascending
+-- order produces, and what makes the existing cursor comparison unable to page it (Pitfall 8). No
+-- Sort node and no sequential scan: the order comes off the index.
+select ok(
+  (select plan from story_plans where name = 'story_comments_asc') not like '%"Node Type": "Sort"%'
+  and (select plan from story_plans where name = 'story_comments_asc') not like '%Seq Scan on feed_comments%',
+  'D-83 / Pitfall 8: the ascending order comes OFF the index — no Sort node, never a Seq Scan'
 );
 
 select * from finish();

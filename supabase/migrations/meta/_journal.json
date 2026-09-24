@@ -197,6 +197,13 @@
       "when": 1790199659030,
       "tag": "20260923214059_stories",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1790211267290,
+      "tag": "20260924005427_story_comment_rules",
+      "breakpoints": true
     }
   ]
 }

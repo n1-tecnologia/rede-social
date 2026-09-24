@@ -32,7 +32,7 @@ begin;
 -- tenant would push the demo posts off the first feed page and quietly break `feed.test.ts`'s
 -- cursor walk and `feed.spec.ts`'s ordering assertions. Like its siblings, this file rolls back, so
 -- it re-runs identically against a seeded or an empty database, twice in a row, in any order.
-select plan(39);
+select plan(40);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-feed', 'Comunidade Feed', '0c000000-0000-4000-8000-000000000001');
@@ -54,42 +54,65 @@ select lives_ok(
   'positive control: a ROOT comment (depth 0, no parent) is accepted'
 );
 select lives_ok(
-  $$ insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+  $$ insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
      values ('0c000000-0000-4000-8000-0000000000b2', '0c000000-0000-4000-8000-000000000001',
              '0c000000-0000-4000-8000-0000000000a1', '0c000000-0000-4000-8000-000000000003',
-             'reply', 1, '0c000000-0000-4000-8000-0000000000b1', 0) $$,
-  'positive control: ONE reply level (depth 1, parent_depth 0) is accepted'
+             'reply', 1, '0c000000-0000-4000-8000-0000000000b1', 0, 'post') $$,
+  'positive control: ONE reply level (depth 1, parent_depth 0, parent_target_kind post) is accepted'
 );
 -- The cap itself: the only (id, depth) pair a reply may name has depth 0, and a reply has depth 1.
 select throws_ok(
-  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
      values ('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-0000000000a1',
              '0c000000-0000-4000-8000-000000000002', 'reply to a reply', 1,
-             '0c000000-0000-4000-8000-0000000000b2', 0) $$,
+             '0c000000-0000-4000-8000-0000000000b2', 0, 'post') $$,
   '23503',
   null,
   'FEED-05: a reply to a reply is refused by feed_comments_parent_fk (23503)'
 );
 select throws_ok(
-  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
      values ('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-0000000000a1',
              '0c000000-0000-4000-8000-000000000002', 'lying about parent_depth', 1,
-             '0c000000-0000-4000-8000-0000000000b2', 1) $$,
+             '0c000000-0000-4000-8000-0000000000b2', 1, 'post') $$,
   '23514',
   null,
   'FEED-05: claiming parent_depth = 1 is refused by feed_comments_parent_shape_chk (23514)'
 );
 select throws_ok(
-  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
      values ('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-0000000000a1',
              '0c000000-0000-4000-8000-000000000002', 'depth two', 2,
-             '0c000000-0000-4000-8000-0000000000b1', 0) $$,
+             '0c000000-0000-4000-8000-0000000000b1', 0, 'post') $$,
   '23514',
   null,
   'FEED-05: depth = 2 is refused by feed_comments_parent_shape_chk (23514)'
 );
 
--- ── 6-8. exactly one target, on both tables ────────────────────────────────────────────────────
+-- 6. PITFALL 1, CLOSED (05-07) — and it lives in THIS file because the hole was a Phase 4
+-- constraint, and this is where the Phase 4 acceptance checks are read.
+--
+-- SQL is three-valued: a CHECK passes unless it evaluates to FALSE. Phase 4's second branch was
+-- `(parent_id is not null and parent_depth = 0 and depth = 1)`, and with a NULL `parent_depth` that
+-- reads `true AND NULL AND true` = NULL — so the whole constraint was `false OR NULL` = NULL, which
+-- is SATISFIED. The composite foreign key did not catch it either: MATCH SIMPLE does not enforce a
+-- composite key when ANY of its columns is null, so `feed_comments_parent_fk` was skipped entirely.
+-- The statement below INSERTED against the real table (verified, rolled back), producing a depth-1
+-- reply whose parent was never checked to exist, to be in this tenant, or to be a root.
+--
+-- 05-07 rewrote the constraint with an explicit `is not null` guard on every equality. The probe is
+-- kept verbatim so a future "simplification" of those guards turns this red.
+select throws_ok(
+  $$ insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+     values ('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-0000000000a1',
+             '0c000000-0000-4000-8000-000000000002', 'pitfall 1 probe', 1,
+             '0c000000-0000-4000-8000-0000000000b1', null) $$,
+  '23514',
+  null,
+  'PITFALL 1: a parent_id with a NULL parent_depth is REFUSED — a NULL check is no longer satisfied'
+);
+
+-- ── 7-9. exactly one target, on both tables ────────────────────────────────────────────────────
 select throws_ok(
   $$ insert into public.feed_likes (tenant_id, user_id, post_id, comment_id)
      values ('0c000000-0000-4000-8000-000000000001', '0c000000-0000-4000-8000-000000000002',
@@ -394,13 +417,13 @@ select ('0c00f2' || lpad(to_hex(g), 26, '0'))::uuid,
   from generate_series(1, 250) g;
 
 insert into public.feed_comments
-  (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+  (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind, created_at)
 select ('0c00f3' || lpad(to_hex(g), 26, '0'))::uuid,
        '0c000000-0000-4000-8000-000000000001',
        '0c000000-0000-4000-8000-0000000000a1',
        '0c000000-0000-4000-8000-000000000002',
        'volume reply ' || g,
-       1, '0c000000-0000-4000-8000-0000000000b1', 0,
+       1, '0c000000-0000-4000-8000-0000000000b1', 0, 'post',
        now() - (g || ' seconds')::interval
   from generate_series(1, 250) g;
 

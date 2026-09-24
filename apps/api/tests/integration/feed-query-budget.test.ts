@@ -146,9 +146,9 @@ beforeAll(async () => {
   detailRootId = root?.id ?? '';
   for (let i = 0; i < 5; i++) {
     await adminSql`
-      insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
       values (${tenantId}::uuid, ${detailPostId}::uuid, ${author?.id ?? null}::uuid,
-              ${`Orcamento resposta ${i}`}, 1, ${detailRootId}::uuid, 0)`;
+              ${`Orcamento resposta ${i}`}, 1, ${detailRootId}::uuid, 0, 'post')`;
   }
 });
 
