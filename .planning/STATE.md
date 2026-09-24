@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 Phase: 05 (Communities & Stories) — EXECUTING
 Plan: 12 of 12
 Status: Phase complete — ready for verification
-Last activity: 2026-09-24 — Phase 05 execution started
+Last activity: 2026-09-24 — Completed quick task 260924-fwv: fixed CR-01 (updateCommunity revalidating the stored cover) and CR-02 (bindPlay not keyed by story id), both verified 8/8
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -364,9 +364,10 @@ None yet.
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260914-mfk | Route bootstrap 401/403 to redirects through one requireBootstrap()/requirePlatformTenants() helper so concurrently rendered segments no longer log a false ApiClientError | 2026-09-14 | 43db3cd | [260914-mfk-move-the-bootstrap-error-to-redirect-map](./quick/260914-mfk-move-the-bootstrap-error-to-redirect-map/) |
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260914-mfk | Route bootstrap 401/403 to redirects through one requireBootstrap()/requirePlatformTenants() helper so concurrently rendered segments no longer log a false ApiClientError | 2026-09-14 | 43db3cd | — | [260914-mfk-move-the-bootstrap-error-to-redirect-map](./quick/260914-mfk-move-the-bootstrap-error-to-redirect-map/) |
+| 260924-fwv | Corrigir os dois defeitos introduzidos pela gap closure da Fase 5: CR-01 (updateCommunity revalida a capa armazenada em todo PATCH) e CR-02 (bindPlay nao chaveado por story id) | 2026-09-24 | e1631da | Verified | [260924-fwv-corrigir-os-dois-defeitos-introduzidos-p](./quick/260924-fwv-corrigir-os-dois-defeitos-introduzidos-p/) |
 
 ### Roadmap Evolution
 
