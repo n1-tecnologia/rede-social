@@ -298,7 +298,7 @@ Plans:
   4. A story leaves the strip 24 h after publishing (hidden by `expires_at`, record retained); a story pinned to one or more communities stays visible on those community pages after expiry until unpinned.
   5. Member can like a story and comment on it; attempts to like or reply to a story comment are rejected by the API and the DB.
 
-**Plans**: 8/8 plans executed
+**Plans**: 8/8 executed + 4 gap-closure plans (05-09..05-12) planned from `05-VERIFICATION.md`
 **UI hint**: yes
 **Research needed**: None (conventional CRUD; stories viewer reuses the prototype's reels pager gesture model). Requires the design team's answer on the community "highlights" circles as the pinned-stories UI and a viewer spec (PROTOTYPE.md open question 1).
 **Notes**: Posts scoped via `community_id`; feed query = tenant-wide OR visible community. Stories strip query is `expires_at > now()`, no cron. Admin story history view is included so expired stories remain reachable to the admin. Research falsified D-73's index claim: the merged feed needs a third, non-partial `(tenant_id, created_at desc, id desc)` index (05-03), and `expires_at` cannot be a generated column (05-05).
@@ -333,6 +333,19 @@ Plans:
 **Wave 7** *(blocked on Wave 6)*
 
 - [x] 05-08-PLAN.md — STORY-04: `story_community_pins`, the community Destaques row, the "Seus stories" history with pin/unpin and delete, and the phase exit gate
+
+**Wave 8** *(gap closure — the two FAILED truths of `05-VERIFICATION.md`)*
+
+- [ ] 05-09-PLAN.md — GAP 1 / COMM-01: resolve the community cover asset inside `withTenantTx`, one bare 404 with no existence oracle, the closed `cover_invalid` code, and the cross-tenant integration case with its positive control
+- [ ] 05-10-PLAN.md — GAP 2 image half / STORY-02: stop the `MediaImage` ↔ `StoryViewer` render loop at both ends, report the empty variant ladder (CR-03), take the badge and retry out of the gesture stage (CR-04), and render the real media under the viewer in a test
+
+**Wave 9** *(blocked on Wave 8)*
+
+- [ ] 05-11-PLAN.md — GAP 2 video half / STORY-02: attach `StoryVideo`'s listeners to the late-mounting `mux-player`, prove a video segment advances inside the real viewer, and put the three `/stories` routes inside the static-route gate
+
+**Wave 10** *(blocked on Wave 9)*
+
+- [ ] 05-12-PLAN.md — The verification debt: the 14 flagged prohibitions, the 5 backstop claims and the 4 device checks assembled with evidence, plus the `mode: mvp` / User-Story goal decision
 
 ### Phase 6: Events
 
