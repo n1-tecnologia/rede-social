@@ -3,10 +3,14 @@ import type { RequestContext } from '@tria/core/server/auth/context';
 import { emit } from '@tria/core/server/events/bus';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { moduleLogger } from '@tria/core/server/logging';
-import { decodeCursor, encodeCursor } from '@tria/core/server/paging';
+import { decodeCursor, encodeCursor, keysetComparison } from '@tria/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
+  CreateStoryComment,
   PublishStory,
+  StoryComment,
+  StoryCommentPage,
+  StoryCommentsQuery,
   StoryLikeResult,
   StoryMediaKind,
   StoryPage,
@@ -518,4 +522,352 @@ export async function unlikeStory(ctx: RequestContext, storyId: string): Promise
   }
 
   return { liked: false, likeCount };
+}
+
+/* ── Comments (STORY-05, D-82, D-83) ──────────────────────────────────────────────────────────── */
+
+/**
+ * One hydrated story-comment row. Snake_case for the same reason `StoryRow` is: it comes straight
+ * off `tx.execute`, which returns the driver's own row objects.
+ */
+type StoryCommentRow = {
+  id: string;
+  created_at: string;
+  body: string;
+  author_user_id: string;
+  /** UI-D-24 — true when the author's membership is gone or soft-deleted. */
+  author_removed: boolean;
+  /** All three are NULL exactly when `author_removed` is true, and never otherwise. */
+  membership_id: string | null;
+  display_name: string | null;
+  avatar_asset_id: string | null;
+};
+
+/**
+ * THE story-comment projection, shared by the list and by the create read-back so the two cannot
+ * disagree about what a comment looks like.
+ *
+ * It reads `feed_comments` through RAW SQL rather than through `@tria/module-feed`'s schema export,
+ * exactly as `storyProjection`'s `viewer_liked` reads `feed_likes`: a `module -> module` package
+ * dependency is denied by `turbo boundaries` (MOD-02), and the table is Phase 4's published shape.
+ *
+ * THE AUTHOR JOIN IS A LEFT JOIN, AND THAT IS LOAD-BEARING (UI-D-24). An inner join would DROP the
+ * row the moment the author's membership is soft-deleted — the comment, its text and its timestamp
+ * would vanish from a conversation other members are reading, and `stories.comment_count` would
+ * then describe a comment nobody can see. The membership lifecycle predicate rides the JOIN
+ * condition, so a removed author yields a null `membership_id`, `display_name` AND
+ * `avatar_asset_id` in one step: no code path can hand the client a removed member's name, and none
+ * can reconstruct a profile link for them (T-04-45).
+ *
+ * There is no `like_count`, no `viewer_liked` and no `reply_count` here, and their absence is the
+ * product rule rather than an omission — see `storyCommentSchema`.
+ *
+ * Ends without a `where`, so each caller appends its own predicate and ordering.
+ */
+function storyCommentProjection() {
+  return sql`
+    select c.id,
+           to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at,
+           c.body,
+           c.author_user_id,
+           (ms.id is null) as author_removed,
+           ms.id as membership_id,
+           mp.display_name,
+           mp.avatar_asset_id
+      from feed_comments c
+      left join memberships ms on ms.user_id = c.author_user_id and ms.deleted_at is null
+      left join member_profiles mp on mp.membership_id = ms.id`;
+}
+
+/** Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`. */
+const toStoryComment = (row: StoryCommentRow, viewerUserId: string): StoryComment => ({
+  id: row.id,
+  createdAt: row.created_at,
+  body: row.body,
+  // UI-D-24: the flag and the three nulls move together, because the LEFT JOIN produces them
+  // together. Nothing here invents a display name, so a removed member cannot be named by any
+  // response — the client substitutes the catalog's fixed label.
+  authorRemoved: row.author_removed,
+  author: {
+    membershipId: row.membership_id,
+    displayName: row.display_name,
+    avatarAssetId: row.avatar_asset_id,
+  },
+  canDelete: row.author_user_id === viewerUserId,
+});
+
+/**
+ * The comparison and the order for D-83's forward-running list, resolved ONCE from the repo's one
+ * cursor envelope (`@tria/core/server/paging`).
+ *
+ * Both halves are spliced with `sql.raw` because neither can be a bound parameter — an operator is
+ * not a value — and both come from a CLOSED union `keysetComparison` is total over, so nothing
+ * caller-controlled reaches this splice. Keeping them in one value is what stops a `>` drifting
+ * away from its `order by … asc` half a statement later (Pitfall 8).
+ */
+const STORY_COMMENT_KEYSET = keysetComparison('asc');
+
+/**
+ * The two constraint names that mean "you tried to reply to a story comment" (STORY-05, T-05-40).
+ *
+ * `feed_comments_parent_shape_chk` raises `23514` when the row names the parent's target honestly
+ * (`'story'`); `feed_comments_parent_fk` raises `23503` when it lies (`'post'`), because the triple
+ * `(story comment, 0, 'post')` does not exist. The API always writes the literal `'post'`, so it
+ * always takes the second path — the first is reachable only by hand and is asserted in pgTAP.
+ *
+ * Naming the constraints individually is the point: an unrelated integrity error must still surface
+ * as a 500 rather than being mistranslated into a 400 the client would act on.
+ *
+ * STORY-05's OTHER refusal, `story_comment_not_likeable`, is deliberately NOT translated in this
+ * file: there is no story-comment-like route here and there must not be one. Liking a comment is
+ * `POST /v1/feed/comments/{commentId}/like`, so its `23503` / `23514` on
+ * `feed_likes_comment_fk` / `feed_likes_comment_kind_chk` is translated by
+ * `packages/modules/feed/server/service.ts`. Both codes are enumerated together in this module's
+ * `STORY_COMMENT_ISSUES`, so the web tier still has ONE exhaustive switch for the pair.
+ */
+const STORY_COMMENT_REPLY_CONSTRAINTS = new Set([
+  'feed_comments_parent_fk',
+  'feed_comments_parent_shape_chk',
+]);
+
+/**
+ * Postgres `23503`/`23514` on one of those two constraints, possibly wrapped by drizzle's
+ * `DrizzleQueryError` — the cause chain is walked with a `seen` set so a self-referential `cause`
+ * cannot loop (the `isReplyDepthViolation` shape, restated across the module boundary).
+ */
+function isStoryReplyViolation(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const e = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (e.code === '23503' || e.code === '23514') {
+      const name = typeof e.constraint_name === 'string' ? e.constraint_name : '';
+      return STORY_COMMENT_REPLY_CONSTRAINTS.has(name);
+    }
+    current = e.cause;
+  }
+  return false;
+}
+
+/**
+ * `GET /v1/stories/{storyId}/comments` (STORY-05, D-83) — the story's flat conversation, OLDEST
+ * first.
+ *
+ * **The direction is the whole design.** A story's comments are one conversation, so they run
+ * forward in time and a new comment lands at the BOTTOM while the sheet is open; a post's root
+ * comments run backward because that list is a ranking of threads and a story has no threads
+ * (D-62 vs D-83). Forward means its own ascending index — `feed_comments_tenant_story_root_asc_idx`
+ * — and its own comparison operator on the one cursor envelope, because serving `asc` from the
+ * existing `DESC` index is a backward scan the `<` comparison cannot page (Pitfall 8).
+ *
+ * `parent_id is null` is in the predicate for symmetry with the index, not because replies might be
+ * hiding: a story comment CANNOT have children — `feed_comments_parent_fk` makes the row
+ * unrepresentable — so this list is the whole conversation by construction.
+ *
+ * Two statements, both bounded: one that decides whether this lane may see the story at all (so a
+ * foreign-tenant story answers the same bare 404 the detail read gives, rather than an empty list
+ * that would confirm nothing), and ONE hydrated keyset page. Expiry is deliberately NOT a predicate
+ * here — a pinned expired story is a readable surface (A-4).
+ */
+export async function listStoryComments(
+  ctx: RequestContext,
+  storyId: string,
+  query: StoryCommentsQuery,
+): Promise<StoryCommentPage> {
+  const limit = query.limit;
+  const after = decodeCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const rows = await withTenantTx(ctx, async (tx) => {
+    const stories = await tx.execute<{ id: string }>(sql`
+      select s.id from stories s
+       where s.id = ${storyId}::uuid and s.tenant_id = ${ctx.tenantId}::uuid
+         and s.deleted_at is null`);
+    if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
+
+    return tx.execute<StoryCommentRow>(sql`
+      ${storyCommentProjection()}
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.story_id = ${storyId}::uuid
+         and c.parent_id is null
+         and c.deleted_at is null
+         and (
+           ${afterAt}::timestamptz is null
+           or (c.created_at, c.id) ${sql.raw(STORY_COMMENT_KEYSET.operator)} (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by c.created_at ${sql.raw(STORY_COMMENT_KEYSET.order)}, c.id ${sql.raw(STORY_COMMENT_KEYSET.order)}
+       limit ${limit + 1}`);
+  });
+
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.created_at, id: last.id }) : null;
+
+  // The SHAPE only — a comment body is member content and never reaches a log line (T-05-43).
+  log.info(
+    {
+      event: 'stories.comments.list',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      storyId,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'story comments listed',
+  );
+
+  return { items: page.map((row) => toStoryComment(row, ctx.userId)), nextCursor };
+}
+
+/**
+ * `POST /v1/stories/{storyId}/comments` (STORY-05) — and the place STORY-05's first half is
+ * REFUSED rather than checked.
+ *
+ * **There is no `if (input.parentId) throw` in this function, and adding one would be the bug.**
+ * A request carrying a `parentId` is inserted as `depth 1, parent_depth 0, parent_target_kind
+ * 'post'` — the LITERALS, never the parent's own columns — and the three-column composite foreign
+ * key decides. A story comment's triple is `(id, 0, 'story')`, so the insert finds nothing and
+ * Postgres raises `23503`, which becomes `400 VALIDATION_FAILED { comment: 'story_comment_no_reply' }`.
+ * An application check would be a read-then-write two concurrent requests could both pass, and it
+ * would keep this suite green with the constraint missing — the exact failure this plan exists to
+ * remove.
+ *
+ * The insert SELECTS the story rather than trusting the path parameter (T-05-45), so a story id
+ * this lane cannot see produces zero rows and the same bare 404 an unknown id gives.
+ */
+export async function createStoryComment(
+  ctx: RequestContext,
+  storyId: string,
+  input: CreateStoryComment,
+): Promise<StoryComment> {
+  const parentId = input.parentId ?? null;
+
+  const created = await withTenantTx(ctx, async (tx) => {
+    let inserted: { id: string }[];
+    try {
+      inserted =
+        parentId === null
+          ? await tx.execute<{ id: string }>(sql`
+              insert into feed_comments (tenant_id, story_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+              select ${ctx.tenantId}::uuid, s.id, ${ctx.userId}::uuid, ${input.body}, 0, null, null, null
+                from stories s
+               where s.id = ${storyId}::uuid and s.tenant_id = ${ctx.tenantId}::uuid
+                 and s.deleted_at is null
+              returning id`)
+          : // The literals, not `c.depth` / `c.target_kind`. The parent is necessarily a STORY
+            // comment (the join says so), so this statement is written to be REFUSED — by the
+            // foreign key, in the database, with no help from this file.
+            await tx.execute<{ id: string }>(sql`
+              insert into feed_comments (tenant_id, story_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+              select ${ctx.tenantId}::uuid, s.id, ${ctx.userId}::uuid, ${input.body}, 1, c.id, 0, 'post'
+                from stories s
+                join feed_comments c on c.story_id = s.id and c.deleted_at is null
+               where s.id = ${storyId}::uuid and s.tenant_id = ${ctx.tenantId}::uuid
+                 and s.deleted_at is null
+                 and c.id = ${parentId}::uuid
+              returning id`);
+    } catch (error) {
+      if (isStoryReplyViolation(error)) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { comment: 'story_comment_no_reply' });
+      }
+      throw error;
+    }
+
+    const id = inserted[0]?.id;
+    // Zero rows: the story is unknown / another tenant's / removed, or the named parent is not a
+    // live comment on THIS story. One bare 404, no `details` to read (D-23, T-05-45).
+    if (!id) throw new ApiError(404, 'NOT_FOUND');
+
+    // The created comment in exactly the shape the list returns, plus the recipient id the event
+    // needs — read here so Phase 7 never re-reads the story it is being told about.
+    const rows = await tx.execute<StoryCommentRow & { story_author_user_id: string }>(sql`
+      select hydrated.*, s.author_user_id as story_author_user_id
+        from (${storyCommentProjection()} where c.id = ${id}::uuid) hydrated
+        join stories s on s.id = ${storyId}::uuid`);
+    const row = rows[0];
+    if (!row) throw new ApiError(500, 'INTERNAL');
+    return row;
+  });
+
+  emit(ctx, 'story.commented', {
+    tenantId: ctx.tenantId,
+    storyId,
+    commentId: created.id,
+    storyAuthorUserId: created.story_author_user_id,
+    actorUserId: ctx.userId,
+  });
+
+  log.info(
+    {
+      event: 'stories.comment.created',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      storyId,
+      commentId: created.id,
+      bodyLength: input.body.length,
+    },
+    'story comment created',
+  );
+
+  return toStoryComment(created, ctx.userId);
+}
+
+/**
+ * `DELETE /v1/stories/{storyId}/comments/{commentId}` (D-61's rule, restated for stories) — a
+ * member removes their OWN comment.
+ *
+ * The authority is IN THE PREDICATE (`author_user_id = ctx.userId`), so someone else's comment, an
+ * unknown id and an already-deleted one are ONE branch answering a bare 404: a member cannot even
+ * probe whether a comment exists (T-04-16, T-04-21). The row STAYS — only `deleted_at` is set — so
+ * Phase 8's MODER-01 widens this exact route with one more permission and reads the same row.
+ *
+ * `story_id` is in the predicate as well as the path, so a comment id belonging to another story
+ * (or to a POST) answers the same 404 rather than being removed from a conversation the caller was
+ * not looking at.
+ *
+ * The count moves EXACTLY ONCE, and not from here: `app.feed_comment_count()` fires on the
+ * `deleted_at` TRANSITION, so a second delete matches nothing, adjusts nothing and emits nothing.
+ */
+export async function deleteStoryComment(
+  ctx: RequestContext,
+  storyId: string,
+  commentId: string,
+): Promise<void> {
+  await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ id: string }>(sql`
+      update feed_comments
+         set deleted_at = now()
+       where id = ${commentId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+         and story_id = ${storyId}::uuid
+         and author_user_id = ${ctx.userId}::uuid
+         and deleted_at is null
+      returning id`);
+    if (!rows[0]) throw new ApiError(404, 'NOT_FOUND');
+  });
+
+  emit(ctx, 'story.comment_deleted', {
+    tenantId: ctx.tenantId,
+    storyId,
+    commentId,
+    actorUserId: ctx.userId,
+  });
+
+  log.info(
+    {
+      event: 'stories.comment.deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      storyId,
+      commentId,
+    },
+    'story comment soft-deleted',
+  );
 }

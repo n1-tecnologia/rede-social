@@ -277,29 +277,165 @@ declare module '@tria/contracts' {
     'story.deleted': StoryDeleted;
     'story.liked': StoryLiked;
     'story.unliked': StoryUnliked;
+    'story.commented': StoryCommented;
+    'story.comment_deleted': StoryCommentDeleted;
   }
 }
 
-/* ── Story comments (STORY-05, D-82, D-83) — RED SKELETON ─────────────────────────────────────── */
+/* ── Story comments (STORY-05, D-82, D-83) ─────────────────────────────────────────────────────── */
 
-/** RED skeleton (05-07 Task 1). Replaced by the real contract in the GREEN commit. */
+/**
+ * The comment cap, restated here rather than imported from `@tria/module-feed/contracts` for the
+ * reason `storyLikeResultSchema` is restated: `turbo boundaries` denies a `module -> module` package
+ * edge (MOD-02). The VALUE is deliberately the same as `FEED_MAX_COMMENT` — a member typing into the
+ * same sheet must hit the same ceiling — and it is measured in UTF-16 code units at both ends, so an
+ * emoji is never cut into a lone surrogate.
+ */
 export const STORY_MAX_COMMENT = 1000;
+
+/** The feed's root-comment page size and cap, restated. Refused above the cap, never clamped. */
 export const STORY_COMMENTS_PAGE_SIZE = 20;
 export const STORY_COMMENTS_MAX_PAGE_SIZE = 50;
-export const STORY_COMMENT_ISSUES = ['story_comment_no_reply'] as const;
+
+/**
+ * STORY-05's closed refusal vocabulary, as MACHINE codes. The pt-BR copy lives in the catalog.
+ *
+ * TWO codes for TWO refusals, and that is the point. "You cannot reply to a story comment" and "you
+ * cannot like a story comment" are different sentences to a member, and a single shared code would
+ * make one of the two wrong. Phase 4's `reply_depth_exceeded` keeps its own case — a reply to a
+ * reply on a POST — and is deliberately absent from this set.
+ *
+ * Both are TRANSLATIONS of a SQLSTATE the database raised (`23514` when the row names its target
+ * honestly, `23503` when it lies), never a pre-check. `story_comment_not_likeable` is answered by
+ * the FEED's comment-like route rather than by anything in this module; it is enumerated here so
+ * the web tier has one exhaustive switch for the pair (T-05-40, T-05-41).
+ */
+export const STORY_COMMENT_ISSUES = [
+  'story_comment_no_reply',
+  'story_comment_not_likeable',
+] as const;
 export type StoryCommentIssue = (typeof STORY_COMMENT_ISSUES)[number];
+
+/** The route `defaultHook`'s and the web tier's lookup over that closed vocabulary. */
 export const STORY_COMMENT_ISSUE_SET: ReadonlySet<string> = new Set(STORY_COMMENT_ISSUES);
 
+/**
+ * `POST /v1/stories/{storyId}/comments`.
+ *
+ * **`parentId` is accepted on purpose, and this is the most important line in the file.** STORY-05
+ * says a story comment cannot be replied to, and the DATABASE is what says so: the insert names
+ * `(parent, 0, 'post')` and a story comment's triple is `(id, 0, 'story')`, so `feed_comments_parent_fk`
+ * refuses it. A `.strict()` object without a `parentId` would move that refusal into the schema —
+ * an application check that passes its own tests while the constraint is missing, and one that
+ * gives a member calling the API directly a different answer from a member tapping a button. The
+ * UI simply never draws the affordance (D-82); the absence of the button is not the control.
+ */
 export const createStoryCommentSchema = z
-  .object({ body: z.string().trim().min(1).max(STORY_MAX_COMMENT) })
+  .object({
+    body: z.string().trim().min(1).max(STORY_MAX_COMMENT),
+    parentId: z.uuid().optional(),
+  })
   .strict();
 export type CreateStoryComment = z.infer<typeof createStoryCommentSchema>;
 
-export const storyCommentsQuerySchema = z.object({}).strict();
+/**
+ * `GET /v1/stories/{storyId}/comments?limit=&cursor=`. `.strict()`: an unknown query key fails
+ * loudly (the 03-03 rule), and there is deliberately no `order` key — the direction is D-83's, not
+ * the caller's, and it is the direction `feed_comments_tenant_story_root_asc_idx` is built on.
+ */
+export const storyCommentsQuerySchema = z
+  .object({
+    cursor: z.string().max(STORY_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(STORY_COMMENTS_MAX_PAGE_SIZE)
+      .default(STORY_COMMENTS_PAGE_SIZE),
+  })
+  .strict();
 export type StoryCommentsQuery = z.infer<typeof storyCommentsQuerySchema>;
 
-export const storyCommentAuthorSchema = z.object({}).strict();
-export const storyCommentSchema = z.object({}).strict();
+/**
+ * A story comment's author (UI-D-24), with every identifying field nullable — the feed's
+ * `commentAuthorSchema` restated across the boundary.
+ *
+ * `displayName` is null in exactly one case: `authorRemoved === true`, i.e. the membership is gone
+ * or soft-deleted. The row STAYS — its body, its timestamp and its place in the conversation are
+ * untouched — and the client renders the catalog's fixed removed-member label as plain text, with
+ * `membershipId` null beside it so there is nothing to build a profile link out of (T-04-45).
+ *
+ * A story comment is the one place this projection is strictly SAFER than the feed's: with no
+ * replies there is nothing hanging off the row to orphan.
+ */
+export const storyCommentAuthorSchema = z
+  .object({
+    membershipId: z.uuid().nullable(),
+    displayName: z.string().nullable(),
+    avatarAssetId: z.uuid().nullable(),
+  })
+  .strict();
+export type StoryCommentAuthor = z.infer<typeof storyCommentAuthorSchema>;
+
+/**
+ * One story comment on the wire — and note what is NOT here.
+ *
+ * No `likeCount`, no `viewerLiked`, no `replyCount` and no `isReply`. A flat conversation has no
+ * threads to count and no likeable rows, so carrying those fields would be four numbers the client
+ * could only render as zero — and the first thing a future reader would do is wire a control to
+ * them. The payload's SHAPE is the product rule, restated where it cannot be missed.
+ *
+ * `canDelete` is SERVER-derived (T-04-44): the client never compares ids to decide who may remove a
+ * comment, and the delete re-checks it anyway.
+ */
+export const storyCommentSchema = z
+  .object({
+    id: z.uuid(),
+    createdAt: z.string(),
+    body: z.string(),
+    author: storyCommentAuthorSchema,
+    /** UI-D-24 — true exactly when `author.displayName` is null. */
+    authorRemoved: z.boolean(),
+    canDelete: z.boolean(),
+  })
+  .strict();
 export type StoryComment = z.infer<typeof storyCommentSchema>;
-export const storyCommentPageSchema = z.object({}).strict();
+
+/** One keyset page, OLDEST first (D-83). `nextCursor` is non-null exactly when another row exists. */
+export const storyCommentPageSchema = z
+  .object({
+    items: z.array(storyCommentSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
 export type StoryCommentPage = z.infer<typeof storyCommentPageSchema>;
+
+/**
+ * A member commented on a story (STORY-05).
+ *
+ * `storyAuthorUserId` OVER-CARRIES the recipient exactly as `StoryLiked` does, so Phase 7 builds its
+ * notification row straight from the payload without re-reading the story. Read INSIDE the writing
+ * transaction, so it cannot describe a story a rollback erased.
+ *
+ * **There is no comment BODY on this payload and there must never be one** (T-05-43): the manifest's
+ * own subscriber logs the payload verbatim, and member-facing text has no business in a log line.
+ */
+export interface StoryCommented {
+  tenantId: string;
+  storyId: string;
+  commentId: string;
+  /** The notification recipient. */
+  storyAuthorUserId: string;
+  actorUserId: string;
+}
+
+/**
+ * A member soft-deleted their OWN story comment. Emitted only when a row really moved — a second
+ * delete matches nothing and announces nothing, the `story.unliked` rule restated.
+ */
+export interface StoryCommentDeleted {
+  tenantId: string;
+  storyId: string;
+  commentId: string;
+  actorUserId: string;
+}

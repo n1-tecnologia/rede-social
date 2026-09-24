@@ -1154,12 +1154,27 @@ const REPLY_DEPTH_CONSTRAINTS = new Set([
 ]);
 
 /**
- * Postgres `23503`/`23514` on one of those two constraints, possibly wrapped by drizzle's
+ * The two constraint names that mean "you tried to like a STORY comment" (STORY-05, 05-07), and
+ * nothing else. Same discipline as above: naming them individually is what keeps an unrelated
+ * integrity error a 500 instead of a 400 the client would act on.
+ *
+ * `feed_likes_comment_kind_chk` raises `23514` when the row names the target honestly; the composite
+ * `feed_likes_comment_fk` raises `23503` when it lies, because `(comment, 'post')` does not exist
+ * for a comment whose generated `target_kind` is `'story'`. Both are the DATABASE refusing — this
+ * file never reads the parent comment's target to decide.
+ */
+const STORY_COMMENT_LIKE_CONSTRAINTS = new Set([
+  'feed_likes_comment_kind_chk',
+  'feed_likes_comment_fk',
+]);
+
+/**
+ * Postgres `23503`/`23514` on one of a named set of constraints, possibly wrapped by drizzle's
  * `DrizzleQueryError` — the cause chain is walked exactly as `isUniqueViolation` does for 02-05's
  * duplicate-slug mapping (`packages/core/server/platform/tenants.ts`), with a `seen` set so a
  * self-referential `cause` cannot loop.
  */
-function isReplyDepthViolation(error: unknown): boolean {
+function isConstraintViolation(error: unknown, constraints: ReadonlySet<string>): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (current && typeof current === 'object' && !seen.has(current)) {
@@ -1167,11 +1182,21 @@ function isReplyDepthViolation(error: unknown): boolean {
     const e = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
     if (e.code === '23503' || e.code === '23514') {
       const name = typeof e.constraint_name === 'string' ? e.constraint_name : '';
-      return REPLY_DEPTH_CONSTRAINTS.has(name);
+      return constraints.has(name);
     }
     current = e.cause;
   }
   return false;
+}
+
+/** A reply that tried to become a second level — the Phase 4 rule, unchanged by 05-07. */
+function isReplyDepthViolation(error: unknown): boolean {
+  return isConstraintViolation(error, REPLY_DEPTH_CONSTRAINTS);
+}
+
+/** A like that named a STORY comment — refused by the CHECK if honest, by the FK if lying. */
+function isStoryCommentLikeViolation(error: unknown): boolean {
+  return isConstraintViolation(error, STORY_COMMENT_LIKE_CONSTRAINTS);
 }
 
 /** The post's counter and its author, read back inside the writing transaction. */
@@ -1266,15 +1291,30 @@ export async function unlikePost(ctx: RequestContext, postId: string) {
  * `POST /v1/feed/comments/{commentId}/like` (FEED-06) — the SAME table and the SAME toggle as a
  * post, arbitrated by `feed_likes_comment_uq`. A reply is a comment, so liking one takes this exact
  * path with no special case.
+ *
+ * **STORY-05's second half is refused HERE, by the database, on this exact statement (05-07).**
+ * `comment_target_kind` is the LITERAL `'post'`, never `c.target_kind`: a like that names a STORY
+ * comment therefore asks `feed_likes_comment_fk` for a `(comment, 'post')` pair that does not exist
+ * and gets `23503`, which this function turns into `400 VALIDATION_FAILED
+ * { like: 'story_comment_not_likeable' }`. There is no `if (comment.storyId) throw` anywhere in
+ * this file, and adding one would be the bug — it would keep the suite green with the constraint
+ * missing, and it would be a read-then-write two concurrent requests could both pass.
  */
 export async function likeComment(ctx: RequestContext, commentId: string) {
   const { likeCount, authorUserId } = await withTenantTx(ctx, async (tx) => {
-    await tx.execute(sql`
-      insert into feed_likes (tenant_id, user_id, comment_id)
-      select ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, c.id
-        from feed_comments c
-       where c.id = ${commentId}::uuid and c.deleted_at is null
-      on conflict (user_id, comment_id) where comment_id is not null do nothing`);
+    try {
+      await tx.execute(sql`
+        insert into feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+        select ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, c.id, 'post'
+          from feed_comments c
+         where c.id = ${commentId}::uuid and c.deleted_at is null
+        on conflict (user_id, comment_id) where comment_id is not null do nothing`);
+    } catch (error) {
+      if (isStoryCommentLikeViolation(error)) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { like: 'story_comment_not_likeable' });
+      }
+      throw error;
+    }
 
     const rows = await tx.execute<CommentCounterRow>(sql`
       select c.like_count, c.author_user_id
@@ -1356,16 +1396,17 @@ export async function createComment(
       inserted =
         parentId === null
           ? await tx.execute<{ id: string }>(sql`
-              insert into feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
-              select ${ctx.tenantId}::uuid, p.id, ${ctx.userId}::uuid, ${input.body}, 0, null, null
+              insert into feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+              select ${ctx.tenantId}::uuid, p.id, ${ctx.userId}::uuid, ${input.body}, 0, null, null, null
                 from feed_posts p
                where p.id = ${postId}::uuid and p.deleted_at is null
               returning id`)
-          : // `parent_depth` is the LITERAL 0, not `c.depth`: naming a reply as the parent must be
-            // refused by the foreign key rather than quietly recorded as a second level.
+          : // `parent_depth` is the LITERAL 0, not `c.depth`, and `parent_target_kind` is the
+            // LITERAL 'post', not `c.target_kind`: naming a reply — or a STORY comment (05-07) — as
+            // the parent must be refused by the foreign key rather than quietly recorded.
             await tx.execute<{ id: string }>(sql`
-              insert into feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
-              select ${ctx.tenantId}::uuid, p.id, ${ctx.userId}::uuid, ${input.body}, 1, c.id, 0
+              insert into feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+              select ${ctx.tenantId}::uuid, p.id, ${ctx.userId}::uuid, ${input.body}, 1, c.id, 0, 'post'
                 from feed_posts p
                 join feed_comments c on c.post_id = p.id and c.deleted_at is null
                where p.id = ${postId}::uuid and p.deleted_at is null

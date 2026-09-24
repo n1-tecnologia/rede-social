@@ -72,8 +72,8 @@ export type KeysetComparison = {
  * (they cannot be bound parameters — an operator is not a value), so "no answer" would put the word
  * `undefined` into a query. Anything unrecognised is the repo's default.
  */
-export function keysetComparison(_direction: KeysetDirection): KeysetComparison {
-  return { operator: '>', order: 'desc' };
+export function keysetComparison(direction: KeysetDirection): KeysetComparison {
+  return direction === 'asc' ? { operator: '>', order: 'asc' } : { operator: '<', order: 'desc' };
 }
 
 /**

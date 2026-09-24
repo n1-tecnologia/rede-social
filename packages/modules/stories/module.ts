@@ -57,6 +57,21 @@ export const storiesModule = defineModule({
         log.info({ event: 'story.unliked', ...payload }, 'story unliked');
       },
     },
+    {
+      // STORY-05's other half. The payload is ids only — a comment BODY must never reach a log
+      // line (T-05-43), and this handler logging the payload verbatim is exactly why the shape is
+      // asserted in `story-comments-contract.test.ts` rather than trusted.
+      event: 'story.commented',
+      handler: async (payload) => {
+        log.info({ event: 'story.commented', ...payload }, 'story commented');
+      },
+    },
+    {
+      event: 'story.comment_deleted',
+      handler: async (payload) => {
+        log.info({ event: 'story.comment_deleted', ...payload }, 'story comment soft-deleted');
+      },
+    },
   ],
   defaultRolePermissions: {
     admin_tenant: [STORY_PERMISSIONS.publish, STORY_PERMISSIONS.manage],

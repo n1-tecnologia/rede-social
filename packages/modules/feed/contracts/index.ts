@@ -634,9 +634,22 @@ export type LikeResult = z.infer<typeof likeResultSchema>;
  * the API's translation of the database's 23503/23514 refusal — the only comment issue a client
  * branches on. The other two are documentation: the module answers a BARE 404 for a missing post or
  * comment (D-23), with no `details` payload to read.
+ *
+ * **The two STORY-05 codes are SEPARATE codes, not a reuse of `reply_depth_exceeded` (05-07).**
+ * Three different refusals travel these paths now — "you replied to a reply", "you replied to a
+ * story comment" and "you liked a story comment" — and each earns its own pt-BR sentence. One code
+ * covering two of them would make one of the two sentences wrong for the member who reads it, which
+ * is the entire reason this vocabulary is closed and enumerated rather than a free-text message.
+ *
+ * `story_comment_not_likeable` rides `details.like` (it is answered by the comment LIKE route, not
+ * by a comment write); `story_comment_no_reply` rides `details.comment` like its siblings. Both are
+ * translations of a SQLSTATE the database raised — `feed_likes_comment_kind_chk` / `feed_likes_comment_fk`
+ * and `feed_comments_parent_shape_chk` / `feed_comments_parent_fk` — never a pre-check.
  */
 export const FEED_COMMENT_ISSUES = [
   'reply_depth_exceeded',
+  'story_comment_no_reply',
+  'story_comment_not_likeable',
   'comment_not_found',
   'post_not_found',
 ] as const;

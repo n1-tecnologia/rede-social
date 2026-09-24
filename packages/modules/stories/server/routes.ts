@@ -5,19 +5,26 @@ import { ApiError } from '@tria/core/server/http/api-error';
 import { requireModule } from '@tria/core/server/modules/require-module';
 import { requirePermission } from '@tria/core/server/rbac/permissions';
 import {
+  createStoryCommentSchema,
   publishStorySchema,
   STORY_ISSUE_SET,
+  storyCommentPageSchema,
+  storyCommentSchema,
+  storyCommentsQuerySchema,
   storyLikeResultSchema,
   storyPageSchema,
   storyQuerySchema,
   storySummarySchema,
 } from '../contracts/index';
 import {
+  createStoryComment,
   deleteStory,
+  deleteStoryComment,
   getStory,
   likeStory,
   listActiveStories,
   listOwnStories,
+  listStoryComments,
   publishStory,
   unlikeStory,
 } from './service';
@@ -205,6 +212,81 @@ const unlikeStoryRoute = createRoute({
   responses: storyLikeResponses,
 });
 
+/* ── Comments (STORY-05, D-82, D-83) ───────────────────────────────────────────── */
+
+/**
+ * **All three comment routes are MEMBER-REACHABLE: `requireAuth` + `requireModule('stories')` and
+ * nothing else.** Adding a `requirePermission` here would be the bug, for the same reason it would
+ * be on the like routes: the publishing policy gates AUTHORING a story, not talking about one, and
+ * every member of the tenant may comment — exactly as they may comment on a post (FEED-05's rule).
+ *
+ * **The 400 below is a TRANSLATION, not a validation.** `createStoryCommentSchema` deliberately
+ * ACCEPTS a `parentId`: the request is well-formed, the INSERT is issued, and
+ * `feed_comments_parent_fk` refuses it because a story comment's `(id, depth, target_kind)` triple
+ * is unreachable from any legal parent. A member calling this endpoint directly therefore gets the
+ * same answer as a member tapping a button — and the UI's missing affordance is the least
+ * important of the three layers (STORY-05, T-05-40).
+ *
+ * An EXPIRED story is commentable, and that is not an oversight (A-4): expiry gates the STRIP's
+ * read and nothing else, and 05-08 pins expired stories to communities.
+ */
+const listCommentsRoute = createRoute({
+  method: 'get',
+  path: '/{storyId}/comments',
+  request: { params: storyIdParam, query: storyCommentsQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One keyset page of the story's comments, OLDEST first (D-83): a flat conversation runs forward in time, so a new comment lands at the bottom. There are no replies to fan out — the database makes a reply to a story comment unrepresentable — so this page is the whole conversation.",
+      content: { 'application/json': { schema: storyCommentPageSchema } },
+    },
+    404: {
+      description:
+        'No story with that id is visible to this tenant — unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const createCommentRoute = createRoute({
+  method: 'post',
+  path: '/{storyId}/comments',
+  request: {
+    params: storyIdParam,
+    body: { content: { 'application/json': { schema: createStoryCommentSchema } }, required: true },
+  },
+  responses: {
+    201: {
+      description:
+        "The created comment, in the same shape the list returns, with the story's `comment_count` already moved by the trigger.",
+      content: { 'application/json': { schema: storyCommentSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED` with `details.comment = 'story_comment_no_reply'` — the DATABASE refused a reply to a story comment (SQLSTATE 23503 on `feed_comments_parent_fk`, or 23514 on `feed_comments_parent_shape_chk` for a row naming the target honestly). STORY-05.",
+    },
+    404: {
+      description:
+        'No story with that id is visible to this tenant, or the named parent is not a live comment on it. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const deleteCommentRoute = createRoute({
+  method: 'delete',
+  path: '/{storyId}/comments/{commentId}',
+  request: { params: storyIdParam.extend({ commentId: z.uuid() }) },
+  responses: {
+    204: {
+      description:
+        "The comment is SOFT-deleted: the row stays for Phase 8 moderation and the story's count moves exactly once, on the `deleted_at` transition.",
+    },
+    404: {
+      description:
+        'Not this member’s comment, not on this story, unknown, or already removed — ONE branch, so a member cannot probe whether a comment exists (T-04-16).',
+    },
+  },
+});
+
 export const storiesRoutes = stories
   .openapi(listOwnRoute, async (c) =>
     c.json(await listOwnStories(c.get('ctx'), c.req.valid('query')), 200),
@@ -231,4 +313,17 @@ export const storiesRoutes = stories
   .openapi(unlikeStoryRoute, async (c) => {
     const { storyId } = c.req.valid('param');
     return c.json(await unlikeStory(c.get('ctx'), storyId), 200);
+  })
+  .openapi(listCommentsRoute, async (c) => {
+    const { storyId } = c.req.valid('param');
+    return c.json(await listStoryComments(c.get('ctx'), storyId, c.req.valid('query')), 200);
+  })
+  .openapi(createCommentRoute, async (c) => {
+    const { storyId } = c.req.valid('param');
+    return c.json(await createStoryComment(c.get('ctx'), storyId, c.req.valid('json')), 201);
+  })
+  .openapi(deleteCommentRoute, async (c) => {
+    const { storyId, commentId } = c.req.valid('param');
+    await deleteStoryComment(c.get('ctx'), storyId, commentId);
+    return c.body(null, 204);
   });

@@ -263,12 +263,23 @@ export const feedPostMedia = pgTable(
  * key is enforced by an index and cannot race, needs no `security definer` function and no
  * `search_path` hardening.
  *
- * The refusals a caller will actually see (verified against this project's Postgres):
+ * **STORY-05 rides the SAME mechanism, widened by one column (05-07).** The roadmap says twice that
+ * a story comment cannot be replied to or liked. A stored generated `target_kind` makes the row's
+ * target visible to a referential check; `unique (id, depth, target_kind)` makes the triple
+ * nameable; and the self foreign key below is THREE columns, so the only parent a reply may name is
+ * `(parent, 0, 'post')`. A story comment's triple is `(id, 0, 'story')` — unreachable. The
+ * `feed_likes` half is the same technique with two columns instead of three.
+ *
+ * The refusals a caller will actually see (verified against this project's Postgres 17.6):
  *   - reply to a reply                  -> SQLSTATE 23503 on `feed_comments_parent_fk`
  *   - lying about `parent_depth`/`depth`-> SQLSTATE 23514 on `feed_comments_parent_shape_chk`
- * `packages/modules/feed/server/service.ts` maps BOTH to `400 VALIDATION_FAILED
- * { comment: 'reply_depth_exceeded' }`. There is deliberately NO application-level depth check: one
- * would pass a test suite while the constraint was missing.
+ *   - reply to a story comment, honest  -> SQLSTATE 23514 on `feed_comments_parent_shape_chk`
+ *   - reply to a story comment, lying   -> SQLSTATE 23503 on `feed_comments_parent_fk`
+ * `packages/modules/feed/server/service.ts` maps the first two to `400 VALIDATION_FAILED
+ * { comment: 'reply_depth_exceeded' }` and `packages/modules/stories/server/service.ts` maps the
+ * story pair to `{ comment: 'story_comment_no_reply' }` — two refusals, two codes, because one code
+ * would make one of the two pt-BR sentences wrong. There is deliberately NO application-level depth
+ * or target check anywhere: one would pass a test suite while the constraint was missing.
  *
  * THREE MORE THINGS A REVIEWER MUST NOT "FIX":
  *
@@ -301,6 +312,21 @@ export const feedComments = pgTable(
     postId: uuid('post_id').references(() => feedPosts.id, { onDelete: 'cascade' }),
     /** Phase 5's story comments. `feed_comments_story_fk` is hand-written SQL — see fact 2 above. */
     storyId: uuid('story_id'),
+    /**
+     * STORED GENERATED (05-07). The row's target as a single value a REFERENTIAL CHECK can see —
+     * `'post'` when the post target is present, `'story'` otherwise, which `feed_comments_target_chk`
+     * makes total. No application statement can lie about it and no trigger has to keep it true.
+     */
+    targetKind: text('target_kind').generatedAlwaysAs(
+      sql`case when post_id is not null then 'post' else 'story' end`,
+    ),
+    /**
+     * Redundant on purpose, exactly as `parent_depth` is: the THIRD column of the composite self
+     * foreign key. `feed_comments_parent_shape_chk` pins it to `'post'`, so the only triple a reply
+     * may name is `(parent, 0, 'post')` — and a story comment's triple is `(id, 0, 'story')`, which
+     * no legal value reaches. STORY-05's first half is that sentence.
+     */
+    parentTargetKind: text('parent_target_kind'),
     /** Generic authorship, the `feed_posts` rule restated (FEED-08 / SCHEMA-CONVENTIONS §(c).1). */
     authorUserId: uuid('author_user_id')
       .notNull()
@@ -322,19 +348,36 @@ export const feedComments = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [
-    // The target of the composite self-FK below. `id` is already the primary key; this pair is what
-    // lets a child row name "(this id) AND (that id's depth)" in a single referential check.
-    unique('feed_comments_id_depth_uq').on(t.id, t.depth),
+    // The targets of the two composite foreign keys below. `id` is already the primary key, so
+    // both are logically redundant — they exist ONLY so a child row can name "(this id) AND (that
+    // id's depth) AND (that id's target)" in a single referential check. The two-column
+    // `(id, target_kind)` pair is what `feed_likes_comment_fk` points at.
+    unique('feed_comments_id_depth_kind_uq').on(t.id, t.depth, t.targetKind),
+    unique('feed_comments_id_kind_uq').on(t.id, t.targetKind),
     foreignKey({
-      columns: [t.parentId, t.parentDepth],
-      foreignColumns: [t.id, t.depth],
+      columns: [t.parentId, t.parentDepth, t.parentTargetKind],
+      foreignColumns: [t.id, t.depth, t.targetKind],
       name: 'feed_comments_parent_fk',
     }).onDelete('cascade'),
     // The two — and only two — legal shapes. Anything else is a 23514 before it reaches a row.
+    //
+    // EVERY EQUALITY IS GUARDED BY AN EXPLICIT `is not null`, AND THAT IS NOT DEFENSIVE STYLING.
+    // SQL is three-valued: a CHECK passes unless it evaluates to FALSE, so an unguarded equality
+    // against a nullable column evaluates to NULL and the branch — and therefore the whole
+    // constraint — is SATISFIED. Phase 4's version of this check had exactly that hole: a row with
+    // a `parent_id` and a NULL `parent_depth` made the second branch `true AND NULL AND true` =
+    // NULL and INSERTED. The composite foreign key did not catch it either, because MATCH SIMPLE
+    // does not enforce a composite key when ANY of its columns is null — so the two must be written
+    // together and probed together. Verified against this project's Postgres 17.6 and asserted in
+    // `supabase/tests/090-feed.sql` (the Phase 4 file, where the hole was) and in
+    // `supabase/tests/110-communities-stories.sql`.
     check(
       'feed_comments_parent_shape_chk',
-      sql`(parent_id is null and parent_depth is null and depth = 0)
-       or (parent_id is not null and parent_depth = 0 and depth = 1)`,
+      sql`(parent_id is null and parent_depth is null and parent_target_kind is null and depth = 0)
+       or (parent_id is not null
+           and parent_depth is not null and parent_depth = 0
+           and parent_target_kind is not null and parent_target_kind = 'post'
+           and depth = 1)`,
     ),
     // SCHEMA-CONVENTIONS §(e).3: exactly one target, so Phase 5 reuses the table with no rewrite.
     check('feed_comments_target_chk', sql`num_nonnulls(post_id, story_id) = 1`),
@@ -349,6 +392,20 @@ export const feedComments = pgTable(
     // D-62's reply list verbatim — `order by created_at, id` under one root. The OPPOSITE direction
     // from the roots, which is why it is a second index and not a reuse of the first.
     index('feed_comments_tenant_parent_idx').on(t.tenantId, t.parentId, t.createdAt, t.id),
+    // D-83's story list — ASCENDING, and it is a THIRD index rather than a reuse of the DESC one
+    // above for a reason that is not stylistic. A story's comments are a FLAT conversation, so they
+    // run forward in time; a post's ROOT comments run backward because that list is a ranking of
+    // threads and a story has no threads. Serving an `asc` order from a `DESC NULLS FIRST` index is
+    // a backward scan, and the keyset comparison the cursor envelope carries (`<` for `desc`, `>`
+    // for `asc` — `keysetComparison` in `@tria/core/server/paging`) cannot page one: page 2 would
+    // silently repeat or skip rows. One index, one direction, one comparison (Pitfall 8).
+    //
+    // `deleted_at is null` is IN the predicate here, unlike the post index: the story list has no
+    // second read that wants removed rows, and including it keeps a soft-deleted comment out of the
+    // index entirely rather than out of the result by a filter.
+    index('feed_comments_tenant_story_root_asc_idx')
+      .on(t.tenantId, t.storyId, t.createdAt, t.id)
+      .where(sql`parent_id is null and deleted_at is null`),
     tenantIsolationPolicy('feed_comments_tenant_isolation'),
   ],
 ).enableRLS();
@@ -390,6 +447,13 @@ export const feedLikes = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     postId: uuid('post_id').references(() => feedPosts.id, { onDelete: 'cascade' }),
     commentId: uuid('comment_id').references(() => feedComments.id, { onDelete: 'cascade' }),
+    /**
+     * Redundant on purpose (05-07): the second column of `feed_likes_comment_fk`, which points at
+     * `feed_comments (id, target_kind)`. `feed_likes_comment_kind_chk` pins it to `'post'`, so the
+     * only pair a like may name is `(comment, 'post')` — and a story comment's pair is
+     * `(id, 'story')`. STORY-05's second half: a story comment is not likeable, at the index.
+     */
+    commentTargetKind: text('comment_target_kind'),
     /** Phase 5's story likes. `feed_likes_story_fk` is hand-written SQL — see the note above. */
     storyId: uuid('story_id'),
     /** V2-CONT-06: emoji reactions are new values here, never a new table. */
@@ -398,6 +462,27 @@ export const feedLikes = pgTable(
   },
   (t) => [
     check('feed_likes_target_chk', sql`num_nonnulls(post_id, comment_id, story_id) = 1`),
+    // STORY-05's second half, and — like the comment shape check above — every equality is guarded
+    // by an explicit `is not null`. The naive form
+    // `(comment_id is null and comment_target_kind is null) or (comment_id is not null and comment_target_kind = 'post')`
+    // was PROBED against this project's Postgres and ACCEPTED a row with `comment_id` set and a
+    // NULL discriminator; MATCH SIMPLE then skipped `feed_likes_comment_fk` entirely and the story
+    // comment was liked. The CHECK and the foreign key are one mechanism: neither closes it alone.
+    check(
+      'feed_likes_comment_kind_chk',
+      sql`(comment_id is null and comment_target_kind is null)
+       or (comment_id is not null
+           and comment_target_kind is not null and comment_target_kind = 'post')`,
+    ),
+    // The referential half. The column-level `.references()` on `comment_id` above stays: it is the
+    // ordinary "the comment must exist" rule, and this one is the narrower "…and it must be a POST
+    // comment". Together they mean a like on a story comment fails 23514 when it names the target
+    // honestly and 23503 when it lies, because no legal pair finds a story comment.
+    foreignKey({
+      columns: [t.commentId, t.commentTargetKind],
+      foreignColumns: [feedComments.id, feedComments.targetKind],
+      name: 'feed_likes_comment_fk',
+    }).onDelete('cascade'),
     // One per target, PARTIAL: a NULL target column would otherwise make every row distinct under a
     // plain unique index (NULLs never conflict), so the constraint would enforce nothing.
     uniqueIndex('feed_likes_post_uq').on(t.userId, t.postId).where(sql`post_id is not null`),
