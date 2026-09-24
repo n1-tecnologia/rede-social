@@ -136,7 +136,14 @@ describe('updateCommunityAction — a 404 on an edit is settled by a RE-READ (05
     expect(result).toEqual({ ok: false, code: 'not_found' });
   });
 
-  it('pays for NO re-read when the submission carried no cover — archive included', async () => {
+  it('pays for NO re-read when the submission carried no cover — and the 404 can only mean the community is gone', async () => {
+    // A cover-silent submission makes no claim about a cover, so there is nothing for a re-read to
+    // disambiguate and the refusal stays `not_found`. What that 404 MEANS narrowed with CR-01: the
+    // API no longer re-validates the STORED cover on a cover-silent PATCH, so it can no longer
+    // produce a 404 about a retired cover at all — a community whose own cover was retired archives
+    // with a 200 and self-heals (integration case 33). The only surviving meaning here is the
+    // literal one: the community itself is gone. The BFF's conservatism is unchanged and still
+    // correct; only the case it was covering for no longer exists.
     vi.mocked(updateCommunity).mockRejectedValue(bare404());
 
     const edit = await updateCommunityAction(COMMUNITY, { name: 'Avisos' });
@@ -145,6 +152,28 @@ describe('updateCommunityAction — a 404 on an edit is settled by a RE-READ (05
     const archived = await archiveCommunityAction(COMMUNITY);
     expect(archived).toEqual({ ok: false, code: 'not_found' });
 
+    expect(loadCommunity).not.toHaveBeenCalled();
+  });
+
+  it('archives successfully without adding a refusal of its own — no re-read on the happy path', async () => {
+    // The other side of the case above: with CR-01 fixed, the archive of a community carrying a
+    // retired cover is a 200 at the API, and the BFF must pass it straight through. It adds no
+    // cover-awareness of its own on a path that submitted no cover.
+    vi.mocked(updateCommunity).mockResolvedValue({
+      id: COMMUNITY,
+      name: 'Avisos',
+      slug: 'avisos',
+      description: '',
+      coverAssetId: null,
+      coverVariantWidths: [],
+      postCount: 0,
+      status: 'archived',
+      lastActivityAt: '2026-01-01T00:00:00.000000Z',
+    });
+
+    const archived = await archiveCommunityAction(COMMUNITY);
+
+    expect(archived).toEqual({ ok: true, communityId: COMMUNITY });
     expect(loadCommunity).not.toHaveBeenCalled();
   });
 });

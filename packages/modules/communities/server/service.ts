@@ -270,6 +270,10 @@ type CoverAssetRow = { kind: string; purpose: string; status: string };
  * to replace.
  *
  * A null id returns immediately and performs NO lookup: "no cover" is a first-class value (D-69).
+ *
+ * Its boolean sibling is `coverIsUsable`, which answers the SAME tuple rule off the SAME lookup
+ * without throwing — for the one caller that must not refuse a request over a cover the request
+ * never asserted (see `updateCommunity`).
  */
 async function resolveCoverAsset(
   tx: Tx,
@@ -278,6 +282,27 @@ async function resolveCoverAsset(
 ): Promise<void> {
   if (coverAssetId === null) return;
 
+  const asset = await loadCoverAsset(tx, ctx, coverAssetId);
+  // Unknown, another tenant's, or soft-deleted — one indistinguishable answer, no details.
+  if (!asset) throw new ApiError(404, 'NOT_FOUND');
+  if (!isUsableCover(asset)) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { community: 'cover_invalid' });
+  }
+}
+
+/**
+ * THE cover lookup — one select statement, and every consumer is built on it.
+ *
+ * `resolveCoverAsset` and `coverIsUsable` answer different questions about the same row (throw vs.
+ * boolean), but they must never answer them off different QUERIES: two copies of the
+ * `(tenant_id, deleted_at is null)` predicate would eventually drift, and the weaker copy is the one
+ * a write path would end up trusting. Same statement, same tuple rule, one place to change either.
+ */
+async function loadCoverAsset(
+  tx: Tx,
+  ctx: RequestContext,
+  coverAssetId: string,
+): Promise<CoverAssetRow | undefined> {
   const rows = await tx.execute<CoverAssetRow>(sql`
     select kind, purpose, status
       from media_assets
@@ -285,12 +310,30 @@ async function resolveCoverAsset(
        and tenant_id = ${ctx.tenantId}::uuid
        and deleted_at is null
      limit 1`);
-  const asset = rows[0];
-  // Unknown, another tenant's, or soft-deleted — one indistinguishable answer, no details.
-  if (!asset) throw new ApiError(404, 'NOT_FOUND');
-  if (asset.purpose !== 'cover' || asset.kind !== 'image' || asset.status !== 'ready') {
-    throw new ApiError(400, 'VALIDATION_FAILED', { community: 'cover_invalid' });
-  }
+  return rows[0];
+}
+
+/** The accepted tuple, stated ONCE so the throwing and boolean answers cannot disagree. */
+function isUsableCover(asset: CoverAssetRow): boolean {
+  return asset.purpose === 'cover' && asset.kind === 'image' && asset.status === 'ready';
+}
+
+/**
+ * Is the STORED cover reference still usable? The non-throwing half of `resolveCoverAsset`.
+ *
+ * The distinction this exists to serve: a request that ASSERTS a cover id is answerable — refuse it
+ * and the admin can see what they sent and fix it. A request that asserts NOTHING about the cover is
+ * not: refusing it reports "Comunidade nao encontrada" about a community that is open on the admin's
+ * screen, and no later write to that row can ever succeed again. So a dangling stored reference is
+ * self-healed (dropped to null) rather than enforced — see `updateCommunity`.
+ */
+async function coverIsUsable(
+  tx: Tx,
+  ctx: RequestContext,
+  coverAssetId: string,
+): Promise<boolean> {
+  const asset = await loadCoverAsset(tx, ctx, coverAssetId);
+  return asset !== undefined && isUsableCover(asset);
 }
 
 /**
@@ -457,16 +500,32 @@ export async function updateCommunity(
 
     const name = input.name ?? before.name;
     const description = input.description ?? before.description;
-    const coverAssetId =
-      input.coverAssetId === undefined ? before.cover_asset_id : input.coverAssetId;
+    let coverAssetId = input.coverAssetId === undefined ? before.cover_asset_id : input.coverAssetId;
     const status = input.status ?? before.status;
 
-    // Validation runs whenever the RESOLVED cover is non-null — including a PATCH that re-sends the
-    // id already stored. One indexed lookup, and the reason is that a bad id a pre-fix release
-    // wrote must not be able to survive by being re-sent unchanged. The inertness contract is
-    // untouched: the no-op early return below still happens AFTER this, so an unchanged PATCH
-    // still writes no row, moves no `updated_at` and emits no event (05-04's contract, 05-09).
-    await resolveCoverAsset(tx, ctx, coverAssetId);
+    // **Validate the cover the REQUEST asserts; never the one the row merely stores.** The
+    // difference is the whole of CR-01, and it is a difference in who can act on the refusal:
+    //
+    //  - The request SENT a `coverAssetId` (an explicit id, or an explicit `null`): it made a claim,
+    //    so it owns the answer. `resolveCoverAsset` refuses exactly as before — a re-sent unusable
+    //    id is still the bare 404, which is what stops a bad id a pre-fix release wrote from
+    //    surviving by being re-sent unchanged. `null` returns before any lookup, so an explicit
+    //    clear still costs nothing.
+    //  - The request said NOTHING about the cover (rename, description edit, archive, reactivate)
+    //    but the STORED reference no longer resolves — the community's own admin retired it through
+    //    `DELETE /v1/media/{assetId}`, which is a state the product itself produces. Enforcing it
+    //    here bricked the row: every later write 404'd forever and the BFF reported "Comunidade nao
+    //    encontrada" about a community open on the admin's screen. A retired cover is "no cover", a
+    //    first-class value (D-69), so the dangling reference is DROPPED rather than enforced.
+    //
+    // The self-heal is BOUNDED by `changedContent` below: nulling the reference makes this PATCH a
+    // real write (one `updated_at` move, one `community.updated`), and the next identical PATCH
+    // finds nothing dangling and is observably inert again — a one-time repair, not a write forever.
+    if (input.coverAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, coverAssetId);
+    } else if (coverAssetId !== null && !(await coverIsUsable(tx, ctx, coverAssetId))) {
+      coverAssetId = null;
+    }
 
     const changedContent =
       name !== before.name ||
