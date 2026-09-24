@@ -1,6 +1,12 @@
 /** `@tria/module-stories/ui` — the only surface `apps/web` may import from this module. */
 
 export {
+  type CommunityPickerSheetBody,
+  type PinStoryCommunityRow,
+  PinStorySheet,
+  type PinStorySheetProps,
+} from './PinStorySheet';
+export {
   StoriesStrip,
   type StoriesStripProps,
   type StoryCircleItem,
@@ -11,6 +17,10 @@ export {
   type StoryCircleProps,
   type StoryCircleVariant,
 } from './StoryCircle';
+export {
+  StoryHistoryRow,
+  type StoryHistoryRowProps,
+} from './StoryHistoryRow';
 export {
   StoryProgressBars,
   type StoryProgressBarsProps,
