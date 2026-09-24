@@ -19,11 +19,13 @@ import {
   unlikeCommentAction,
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
+import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { loadFeed } from '@/lib/feed';
 import { postCardView, relativeFrom } from '@/lib/feed-view';
 import { loadStories } from '@/lib/stories';
+import { storyViewerItem, storyViewerLabels } from '@/lib/story-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -282,10 +284,11 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
   const [page, tf] = await Promise.all([loadStories(), getTranslations('stories')]);
   const now = Date.now();
   const canPublish = bootstrap.permissions.includes('stories.story.publish');
+  const stories = page?.items ?? [];
 
   return (
     <StoriesSurface
-      items={(page?.items ?? []).map((story) => {
+      items={stories.map((story) => {
         const time = relativeFrom(story.publishedAt, now);
         return {
           id: story.id,
@@ -295,6 +298,25 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
           variantWidths: story.mediaVariantWidths,
         };
       })}
+      // STORY-02: the viewer opens on the STRIP'S OWN ordered sequence, built from the same page in
+      // the same request — so the Nth circle and the Nth segment can never disagree, and opening
+      // the viewer costs no second round trip. No stories means no `viewer` prop at all, which is
+      // what keeps the circles inert rather than linking to a sequence with nothing in it.
+      viewer={
+        stories.length === 0
+          ? undefined
+          : {
+              items: stories.map((story) => storyViewerItem(story, now)),
+              author: {
+                // V1's single publisher IS the tenant; see the note in `StoryViewerHost`.
+                name: bootstrap.tenant.displayName,
+                avatarUrl: bootstrap.tenant.branding.logoUrl,
+              },
+              labels: storyViewerLabels(tf),
+              onLike: likeStoryAction,
+              onUnlike: unlikeStoryAction,
+            }
+      }
       ringVariant="brand"
       regionLabel={tf('region')}
       own={

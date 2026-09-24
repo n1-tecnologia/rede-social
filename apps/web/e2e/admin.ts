@@ -345,6 +345,46 @@ export async function deleteStoriesByCaptionPrefix(prefix: string): Promise<void
 }
 
 /**
+ * Clones an EXISTING ready story onto `count` extra rows (05-06's overflow backstop).
+ *
+ * They all reuse the same `media_asset_id` — a story references an asset, it does not own one — so
+ * the fixture costs one statement and no upload, and `deleteStoriesByCaptionPrefix` removes the
+ * rows while correctly leaving the shared asset alone. The windows are staggered by a minute so the
+ * keyset order is total, exactly as it is in production.
+ *
+ * Returns the number of rows written, so the caller can assert against what it actually created
+ * rather than against what it asked for.
+ */
+export async function cloneActiveStories(
+  tenantSlug: string,
+  captionPrefix: string,
+  count: number,
+): Promise<number> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.stories
+      (tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+    select s.tenant_id, s.author_user_id, s.media_asset_id, s.media_kind,
+           ${captionPrefix} || ' ' || g,
+           now() - (g || ' minutes')::interval,
+           now() + interval '24 hours' - (g || ' minutes')::interval
+      from generate_series(1, ${count}) g,
+           lateral (
+             select s.tenant_id, s.author_user_id, s.media_asset_id, s.media_kind
+               from public.stories s
+               join public.media_assets a on a.id = s.media_asset_id
+               join public.tenants t on t.id = s.tenant_id
+              where t.slug = ${tenantSlug}
+                and s.deleted_at is null
+                and s.expires_at > now()
+                and a.status = 'ready'
+                and s.media_kind = 'image'
+              limit 1
+           ) s
+    returning id`;
+  return rows.length;
+}
+
+/**
  * Records a video asset in a KNOWN state without a provider round trip (03-07): the failed and
  * rejected rows the library must render, and a `ready` row with a playback id the fake provider can
  * sign. Returns the asset id.

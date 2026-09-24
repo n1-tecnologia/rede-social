@@ -3,7 +3,10 @@ import {
   STORY_ISSUE_SET,
   STORY_PAGE_SIZE,
   type StoryIssue,
+  type StoryLikeResult,
   type StoryPage,
+  type StorySummary,
+  storyLikeResultSchema,
   storyPageSchema,
   storySummarySchema,
 } from '@tria/module-stories/contracts';
@@ -138,3 +141,52 @@ export async function attemptStoryPublish(
     return { result: { ok: false, code: 'generic' }, refusal };
   }
 }
+
+/* ── One story, and the like toggle (05-06) ───────────────────────────────────────────────────── */
+
+/**
+ * `GET /v1/stories/{storyId}` — the DEEP LINK's read.
+ *
+ * Three outcomes, never two: the story, "not this tenant's" and "we could not reach the server".
+ * The middle one covers an unknown id, another tenant's and a soft-deleted one indistinguishably,
+ * because the API answers one bare 404 for all three (D-23, T-05-35) — so `/stories/[storyId]`
+ * renders the SAME not-found screen for every miss and tells a prober nothing.
+ */
+export type StoryResult =
+  | { status: 'ok'; story: StorySummary }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
+export async function loadStory(storyId: string): Promise<StoryResult> {
+  try {
+    const res = await apiFetch(`/v1/stories/${encodeURIComponent(storyId)}`);
+    // 400 is an id that is not a uuid; it is the same miss as far as a member is concerned.
+    if (res.status === 404 || res.status === 400) return { status: 'not-found' };
+    if (!res.ok) throw await apiError(res);
+    return { status: 'ok', story: storySummarySchema.parse(await res.json()) };
+  } catch (error) {
+    // Shape only: a story CAPTION is member-facing content and never reaches a log line (T-05-29).
+    console.error('stories.get_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * `POST` / `DELETE /v1/stories/{storyId}/likes` (STORY-05) — through the SAME `apiFetch` every read
+ * above uses, so the like path cannot drift on the tenant header or on how a refusal is read.
+ *
+ * The response is the AUTHORITATIVE `{ liked, likeCount }` read back inside the API's transaction.
+ * Nothing here increments anything: the optimistic value lives in the button and is replaced by
+ * this pair, or reverted when the request rejects.
+ */
+async function toggleStoryLike(
+  storyId: string,
+  method: 'POST' | 'DELETE',
+): Promise<StoryLikeResult> {
+  const res = await apiFetch(`/v1/stories/${encodeURIComponent(storyId)}/likes`, { method });
+  if (!res.ok) throw await apiError(res);
+  return storyLikeResultSchema.parse(await res.json());
+}
+
+export const likeStory = (storyId: string) => toggleStoryLike(storyId, 'POST');
+export const unlikeStory = (storyId: string) => toggleStoryLike(storyId, 'DELETE');

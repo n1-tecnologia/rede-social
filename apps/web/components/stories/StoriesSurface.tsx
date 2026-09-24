@@ -1,25 +1,110 @@
 'use client';
 
 import { StoriesStrip, type StoriesStripProps } from '@tria/module-stories/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
+import type {
+  StoryViewerAuthorView,
+  StoryViewerItemView,
+  StoryViewerLabelsView,
+} from '@/lib/story-view';
+import { StoryViewerHost } from './StoryViewerHost';
 
 /**
- * `/inicio`'s stories strip — the client seam, copied from `components/feed/FeedSurface.tsx`.
+ * `/inicio`'s stories strip and the viewer it opens (05-05, 05-06).
  *
  * **Why this shell exists.** `lib/registry.tsx` composes the strip on the SERVER: which data, which
  * labels, whether the own-circle renders, and where it points are all decided there and passed
- * straight through. The circle's OPEN handler cannot be: it drives the viewer, which is client
+ * straight through. The circle's OPEN handler cannot be — it drives the viewer, which is client
  * state, and a server component cannot hold a hook. So the composition splits exactly the way the
- * feed's does, and this file is where 05-06 binds `onOpen` without moving a single decision off the
- * server.
+ * feed's does, and every decision still lives on the server.
  *
- * **Until 05-06 ships `/stories/[storyId]`, no handler is bound and none is invented here.** A
- * circle without `onOpen` renders as an inert `<span>` rather than as a button that does nothing —
- * the 04-09 posture for `createHref`, which stayed absent precisely so nothing linked to a 404.
+ * **The viewer reads the STRIP'S OWN ORDERED SEQUENCE, never a second fetch.** `viewer.items` is
+ * built from the same page the circles were, in the same order, in the same request — so the two
+ * can never disagree about which story the third circle opens, and opening the viewer costs no
+ * round trip at all. The array is then FROZEN for the viewing session (UI partial/E04): a story
+ * that expires or is deleted mid-view plays out its own segment and is absent only from the next
+ * strip read.
  *
- * It renders `StoriesStrip` unchanged and adds no state, no branch and no label of its own.
+ * **The modal is a shallow history entry, not an intercepting route.** Next 16 supports
+ * `window.history.pushState` natively — it updates the URL and syncs the router WITHOUT rendering
+ * another route — so the back gesture pops straight back to `/inicio` with the feed still mounted
+ * underneath, and `app/(app)/stories/[storyId]/page.tsx` is what a deep link or a refresh resolves
+ * to. The alternative, `@modal` parallel slots plus `(.)` interception, would put a `default.tsx`
+ * and a second render path into the app-group layout to buy the same two behaviours.
  */
-export type StoriesSurfaceProps = StoriesStripProps;
+export type StoriesSurfaceProps = StoriesStripProps & {
+  /**
+   * Absent (a member whose tenant has no active story, or a render before 05-06's route existed)
+   * leaves every circle INERT — `StoryCircle` renders a plain span rather than a button that does
+   * nothing, the 04-09 `createHref` posture.
+   */
+  viewer?: {
+    items: readonly StoryViewerItemView[];
+    author: StoryViewerAuthorView;
+    labels: StoryViewerLabelsView;
+    onLike: typeof likeStoryAction;
+    onUnlike: typeof unlikeStoryAction;
+  };
+};
 
-export function StoriesSurface(props: StoriesSurfaceProps) {
-  return <StoriesStrip {...props} />;
+export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+
+  /** The circle that opened the viewer: focus returns to it on close (UI-SPEC §Accessibility). */
+  const originRef = useRef<HTMLElement | null>(null);
+  /** True while THIS component owns the pushed entry, so a close can pop exactly the one it added. */
+  const pushedRef = useRef(false);
+
+  const close = useCallback(() => {
+    if (pushedRef.current) {
+      pushedRef.current = false;
+      // Popping is what restores `/inicio` in the URL; the `popstate` listener below then clears
+      // the state, so closing by gesture and closing by back button take the IDENTICAL path.
+      window.history.back();
+      return;
+    }
+    setOpenIndex(null);
+  }, []);
+
+  const open = useCallback(
+    (index: number) => {
+      const story = viewer?.items[index];
+      if (!story) return;
+      originRef.current = document.activeElement as HTMLElement | null;
+      window.history.pushState(null, '', `/stories/${story.id}`);
+      pushedRef.current = true;
+      setOpenIndex(index);
+    },
+    [viewer],
+  );
+
+  useEffect(() => {
+    const onPopState = () => {
+      pushedRef.current = false;
+      setOpenIndex(null);
+      // The focus return has to wait for the viewer's own focus trap to restore first, or the trap
+      // would move focus back out from under it as it unmounts.
+      queueMicrotask(() => originRef.current?.focus?.({ preventScroll: true }));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  return (
+    <>
+      <StoriesStrip {...strip} onOpen={viewer ? open : undefined} />
+      {viewer && openIndex !== null ? (
+        <StoryViewerHost
+          items={viewer.items}
+          initialIndex={openIndex}
+          author={viewer.author}
+          labels={viewer.labels}
+          onLike={viewer.onLike}
+          onUnlike={viewer.onUnlike}
+          onClose={close}
+        />
+      ) : null}
+    </>
+  );
 }

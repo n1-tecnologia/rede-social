@@ -1,7 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
+import { STORY_PAGE_SIZE } from '@tria/module-stories/contracts';
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
-import { activeReadyStoryCount, closeAdmin, deleteStoriesByCaptionPrefix, envValue } from './admin';
+import {
+  activeReadyStoryCount,
+  cloneActiveStories,
+  closeAdmin,
+  deleteStoriesByCaptionPrefix,
+  envValue,
+} from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 import { ensureWorker } from './worker';
 
@@ -68,17 +75,19 @@ const TEST_CAPTION_PREFIX = 'Story publicado pelo e2e';
 const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
 const DEMO_HOST = new URL(hosts.demo).hostname;
 
-/** A real GoTrue session for the seeded demo admin (Node side, no browser). */
-async function adminToken(): Promise<string> {
+/** A real GoTrue session for a seeded user (Node side, no browser). */
+async function sessionToken(email: string): Promise<string> {
   const res = await fetch(`${envValue('SUPABASE_URL')}/auth/v1/token?grant_type=password`, {
     method: 'POST',
     headers: { apikey: envValue('SUPABASE_PUBLISHABLE_KEY'), 'content-type': 'application/json' },
-    body: JSON.stringify({ email: users.demoAdmin, password: SEED_PASSWORD }),
+    body: JSON.stringify({ email, password: SEED_PASSWORD }),
   });
-  if (!res.ok) throw new Error(`demo admin sign-in failed: ${res.status}`);
+  if (!res.ok) throw new Error(`${email} sign-in failed: ${res.status}`);
   const { access_token } = (await res.json()) as { access_token: string };
   return access_token;
 }
+
+const adminToken = () => sessionToken(users.demoAdmin);
 
 function storiesApi(token: string, path: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${API_URL}${path}`, {
@@ -258,3 +267,299 @@ async function removeNewestStory(): Promise<void> {
   const removed = await storiesApi(token, `/v1/stories/${id}`, { method: 'DELETE' });
   expect(removed.status, 'the e2e cleaned up the story it published').toBe(204);
 }
+
+/**
+ * STORY-02 in a real browser on a phone viewport (05-06) — the one interaction in this phase that
+ * nothing in the tree had before: a timed, auto-advancing, full-screen pager.
+ *
+ * **Every assertion here measures the COMPUTED WIDTH of a progress segment**, never a screenshot.
+ * A screenshot of a bar mid-fill is the flakiest possible assertion about a clock; the width is the
+ * number the clock actually writes, and it is what makes "holding freezes it and releasing resumes
+ * from the same point" falsifiable rather than a claim in a docblock.
+ *
+ * The gestures are driven with POINTER events (`mouse.down` / `mouse.move` / `mouse.up`) rather than
+ * with `click`, because a hold and a drag are the two things a click cannot express — and both are
+ * exactly what the viewer distinguishes a tap from.
+ */
+test.describe('the story viewer — tap, hold, swipe (STORY-02, UI-D-30, mobile)', () => {
+  const V = S.viewer;
+
+  /** The fill of segment `n`, in CSS pixels as the browser computed it from the inline width. */
+  async function fillWidth(page: Page, n: number): Promise<number> {
+    const box = await page.getByTestId(`story-fill-${n}`).boundingBox();
+    return box?.width ?? -1;
+  }
+
+  /** Opens the viewer on the FIRST circle of the member's strip, and waits for the clock to start. */
+  async function openViewer(page: Page) {
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await strip(page).getByRole('button').first().click();
+    await expect(page.getByRole('dialog', { name: V.dialog })).toBeVisible();
+    // The clock does not start until the media reports it is loaded (UI loading/E03), so the first
+    // non-zero width is ALSO the proof that the image decoded.
+    await expect.poll(() => fillWidth(page, 0), { timeout: 15_000 }).toBeGreaterThan(0);
+  }
+
+  test('a circle opens the viewer, the URL becomes /stories/{id}, and the first bar fills', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    await openViewer(page);
+
+    // The strip's circles were inert until this plan (05-05 left `onOpen` unbound on purpose).
+    await expect(page).toHaveURL(/\/stories\/[0-9a-f-]{36}$/);
+    // One segment per ACTIVE story, from the SAME array the pager renders — never a second count.
+    await expect(page.getByTestId('story-progress-bars')).toHaveAttribute(
+      'data-story-count',
+      String(activeStories),
+    );
+
+    const first = await fillWidth(page, 0);
+    await page.waitForTimeout(900);
+    expect(await fillWidth(page, 0)).toBeGreaterThan(first);
+  });
+
+  test('a tap on the right advances and a tap on the left goes back', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    test.skip(activeStories < 2, 'advancing needs a sequence of at least two');
+    await openViewer(page);
+
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    const dialog = page.getByRole('dialog', { name: V.dialog });
+
+    // The right TWO-THIRDS: the larger target matches the dominant direction (UI-D-30).
+    await page.mouse.click(Math.round(size.width * 0.8), Math.round(size.height * 0.5));
+    await expect(dialog).toHaveAttribute('data-story-index', '1');
+    // The story just left is FULL and the new one has started from zero.
+    expect(await fillWidth(page, 0)).toBeGreaterThan(await fillWidth(page, 1));
+
+    // The left THIRD.
+    await page.mouse.click(Math.round(size.width * 0.15), Math.round(size.height * 0.5));
+    await expect(dialog).toHaveAttribute('data-story-index', '0');
+  });
+
+  test('a press-and-HOLD freezes the bar, and releasing resumes it from the same point', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    await openViewer(page);
+
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    const x = Math.round(size.width * 0.5);
+    const y = Math.round(size.height * 0.5);
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    // Longer than the 200 ms tap window — this is a hold, and the pause is reported on the dialog.
+    await page.waitForTimeout(400);
+    await expect(page.getByRole('dialog', { name: V.dialog })).toHaveAttribute(
+      'data-paused',
+      'true',
+    );
+
+    const held = await fillWidth(page, 0);
+    await page.waitForTimeout(900);
+    // The whole claim: nine hundred milliseconds of wall clock moved the bar by nothing at all.
+    expect(Math.abs((await fillWidth(page, 0)) - held)).toBeLessThan(2);
+
+    await page.mouse.up();
+    await expect(page.getByRole('dialog', { name: V.dialog })).toHaveAttribute(
+      'data-paused',
+      'false',
+    );
+    // …and it resumed from WHERE IT STOPPED rather than restarting: still at least the held value.
+    await page.waitForTimeout(600);
+    const resumed = await fillWidth(page, 0);
+    expect(resumed).toBeGreaterThan(held);
+    // A hold is not a tap: the story under the finger is still the one being watched.
+    await expect(page.getByRole('dialog', { name: V.dialog })).toHaveAttribute(
+      'data-story-index',
+      '0',
+    );
+  });
+
+  test('a downward swipe dismisses the viewer and returns to /inicio', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    await openViewer(page);
+
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    const x = Math.round(size.width * 0.5);
+
+    await page.mouse.move(x, Math.round(size.height * 0.35));
+    await page.mouse.down();
+    // Past the prototype's 60px threshold, and vertical-dominant so the axis lock picks dismiss.
+    for (const step of [60, 120, 180, 240]) {
+      await page.mouse.move(x, Math.round(size.height * 0.35) + step);
+    }
+    await page.mouse.up();
+
+    await expect(page.getByRole('dialog', { name: V.dialog })).toHaveCount(0);
+    // The back gesture's own path: the pushed history entry is popped, so `/inicio` is restored
+    // with the feed still mounted underneath it.
+    await expect(page).toHaveURL(/\/inicio$/);
+    await expect(strip(page)).toBeVisible();
+  });
+
+  test('the browser BACK gesture dismisses the viewer just as the swipe does', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    await openViewer(page);
+
+    await page.goBack();
+    await expect(page.getByRole('dialog', { name: V.dialog })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inicio$/);
+  });
+
+  test('a DEEP LINK to /stories/{id} renders the viewer as a full page for that one story', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, '/v1/stories?limit=1');
+    const body = (await list.json()) as { items: { id: string }[] };
+    const storyId = body.items[0]?.id;
+    expect(storyId, 'the demo tenant has a story to deep-link to').toBeTruthy();
+
+    await page.goto(`/stories/${storyId}`);
+    await expect(page.getByRole('dialog', { name: V.dialog })).toBeVisible();
+    // A deep link is a SINGLE-story sequence: one segment, not the whole strip.
+    await expect(page.getByTestId('story-progress-bars')).toHaveAttribute('data-story-count', '1');
+  });
+
+  test('an unknown, other-tenant or removed story id renders the one not-found screen', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'one project is enough for a routing claim');
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    await page.goto('/stories/00000000-0000-4000-8000-000000000000');
+    await expect(page.getByRole('dialog', { name: V.dialog })).toHaveCount(0);
+    await expect(page.getByTestId('story-progress-bars')).toHaveCount(0);
+  });
+
+  test('tapping the heart moves the count, and the server’s value is what is shown', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the overlay is the phone’s');
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    // A DEEP LINK rather than the strip: a single-story sequence keeps the heart pointing at the
+    // same story while the assertions run, and the restore below names one id rather than whichever
+    // story the clock had advanced to.
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, '/v1/stories?limit=1');
+    const { items } = (await list.json()) as {
+      items: { id: string; likeCount: number; viewerLiked: boolean }[];
+    };
+    const story = items[0];
+    expect(story, 'the demo tenant has a story to like').toBeTruthy();
+    const target = story as { id: string; likeCount: number; viewerLiked: boolean };
+
+    await page.goto(`/stories/${target.id}`);
+    // SCOPED to the dialog: `/inicio`'s feed cards carry the identical `Curtir` / `Descurtir`
+    // control, and an unscoped query would be a strict-mode violation the moment a single-story
+    // sequence reaches its end and closes back onto the home screen.
+    const dialog = page.getByRole('dialog', { name: V.dialog });
+    const heart = dialog.getByRole('button', { name: target.viewerLiked ? V.unlike : V.like });
+    await expect(heart).toBeVisible();
+
+    // Dispatched straight AT the element rather than clicked at its coordinates. The reason is the
+    // dev-overlay artifact `deferred-items.md` already records: the blocked service-worker
+    // registration rejects, Next's dev overlay mounts a full-viewport `<nextjs-portal>`, and every
+    // coordinate-based click in the run then lands on it — `force` skips the actionability CHECK
+    // but still dispatches at coordinates, so it does not help. The control itself is visible,
+    // enabled and stable; what this asserts is the handler, which is the subject of the test.
+    await heart.dispatchEvent('click');
+
+    // The authoritative count, read back from the row by the API — not a local increment.
+    const expected = target.likeCount + (target.viewerLiked ? -1 : 1);
+    const countNode = dialog.getByTestId('story-like-count');
+    if (expected === 0) await expect(countNode).toHaveCount(0);
+    else await expect(countNode).toContainText(String(expected));
+    await expect(
+      dialog.getByRole('button', { name: target.viewerLiked ? V.like : V.unlike }),
+    ).toBeVisible();
+
+    // Restore the seed through the API rather than with a second tap: the clock may have closed
+    // the single-story viewer by then, and the shared fixture has to be found as it was left.
+    await storiesApi(token, `/v1/stories/${target.id}/likes`, {
+      method: target.viewerLiked ? 'POST' : 'DELETE',
+    });
+  });
+});
+
+/**
+ * The overflow BACKSTOP (UI overflow/E03, E04): a FULL strip at 320px keeps every progress segment
+ * at least 2px wide and does not wrap the bar row.
+ *
+ * **The UI-SPEC states this backstop at 25 stories, and 25 is not reachable through the product.**
+ * The viewer's sequence IS the strip's page, and `STORY_PAGE_SIZE = 10` caps that page — so the
+ * most segments a member can ever see is ten, and a 25-row fixture would only prove that the strip
+ * paginates. This test therefore measures the REAL ceiling, and the 25-segment DOM shape is pinned
+ * where it is actually reachable: `story-viewer.test.tsx` renders `StoryProgressBars` with 25 items
+ * and asserts one non-wrapping row. The arithmetic between them closes the gap — at 320px the row
+ * has 304px of content width and 24 four-pixel gaps, leaving 208px over 25 segments, or 8.3px each.
+ *
+ * It runs LAST and cleans up after itself, because it adds rows to the shared strip — and the whole
+ * file measures the strip. `fullyParallel: false` and `workers: 1` make the declaration order the
+ * execution order, which is what makes that safe rather than lucky.
+ */
+test.describe('the viewer at a FULL strip on a 320px screen (overflow backstop)', () => {
+  const BACKSTOP_PREFIX = 'Story do backstop e2e';
+  /** The strip renders ONE page, and the page size is the contract's. */
+  const TARGET = STORY_PAGE_SIZE;
+  let created = 0;
+
+  test.beforeAll(async () => {
+    created = await cloneActiveStories('tria-demo', BACKSTOP_PREFIX, TARGET - activeStories);
+  });
+
+  test.afterAll(async () => {
+    await deleteStoriesByCaptionPrefix(BACKSTOP_PREFIX);
+  });
+
+  test('every segment stays at least 2px wide and the row does not wrap', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the narrowest supported screen is a phone');
+    expect(created, 'the backstop fixture was written').toBeGreaterThan(0);
+
+    // 320px is the narrowest screen the product supports — narrower than every device preset.
+    await page.setViewportSize({ width: 320, height: 640 });
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await strip(page).getByRole('button').first().click();
+    await expect(page.getByRole('dialog', { name: S.viewer.dialog })).toBeVisible();
+
+    const bars = page.getByTestId('story-progress-bars');
+    await expect(bars).toHaveAttribute('data-story-count', String(TARGET));
+
+    const geometry = await bars.evaluate((row) =>
+      Array.from(row.children).map((node) => {
+        const box = node.getBoundingClientRect();
+        return { width: box.width, top: box.top };
+      }),
+    );
+    expect(geometry).toHaveLength(TARGET);
+    // Every segment is still a visible hairline…
+    for (const segment of geometry) expect(segment.width).toBeGreaterThanOrEqual(2);
+    // …and they are all on ONE row: a wrap would put some of them on a different line.
+    const tops = new Set(geometry.map((segment) => Math.round(segment.top)));
+    expect(tops.size).toBe(1);
+  });
+});

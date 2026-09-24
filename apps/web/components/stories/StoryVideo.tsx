@@ -77,9 +77,9 @@ export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
       }
       setTokens({
         playbackId: result.playback.playbackId,
-        playback: result.playback.playback,
-        thumbnail: result.playback.thumbnail,
-        storyboard: result.playback.storyboard,
+        playback: result.playback.tokens.playback,
+        thumbnail: result.playback.tokens.thumbnail,
+        storyboard: result.playback.tokens.storyboard,
       });
     })();
     return () => {
@@ -87,7 +87,13 @@ export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
     };
   }, [assetId]);
 
-  /** The element's own events ARE the clock for a video segment — never a timer beside it. */
+  /**
+   * The element's own events ARE the clock for a video segment — never a timer beside it.
+   *
+   * `tokens` is a dependency the body never reads, and that is the point: it is what MOUNTS
+   * `<mux-player>`, so re-running on its change is the only moment the element exists to attach to.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see the note above — `tokens` mounts the element
   useEffect(() => {
     const element = frameRef.current?.querySelector<PlayableElement>('mux-player');
     if (!element) return;
@@ -142,7 +148,7 @@ export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
           muted={controls.muted}
           autoPlay={controls.active && !controls.paused}
           // UI-D-33: a story is never cropped. The black ground is the surface.
-          style={{ height: '100%', width: '100%', '--controls': 'none' } as React.CSSProperties}
+          style={{ height: '100%', width: '100%' }}
           className="h-full w-full object-contain"
         />
       ) : null}

@@ -52,7 +52,9 @@ const absoluteTime = new Intl.DateTimeFormat('pt-BR', {
  * module needing only the formatter does not also pull `VideoPlayer` and the env-validating server
  * action behind it. Every existing caller of `relativeFrom` from this module is unchanged.
  */
-export { relativeFrom } from '@/lib/relative-time';
+import { relativeFrom } from '@/lib/relative-time';
+
+export { relativeFrom };
 
 /**
  * Byte sizes in pt-BR ("1,2 MB"). The FORMATTING lives here rather than inside the module for the

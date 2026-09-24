@@ -72,8 +72,18 @@ export function storyViewerItem(story: StorySummary, now: number): StoryViewerIt
   };
 }
 
-/** The whole label block, read once from the `stories.viewer` catalog namespace. */
-export function storyViewerLabels(tf: (key: string) => string): StoryViewerLabelsView {
+/**
+ * The whole label block, read once from the `stories.viewer` catalog namespace.
+ *
+ * **The five templated strings are read with `.raw`, and that is not optional.** `next-intl`
+ * FORMATS on read: asking for `viewer.position` through `t()` without a `{current}` raises
+ * `FORMATTING_ERROR` and takes the whole home slot down with it. `.raw` returns the pattern
+ * untouched, which is exactly what has to cross to the client — the same reason the feed's plural
+ * pairs are read that way.
+ */
+type StoryLabelReader = ((key: string) => string) & { raw: (key: string) => unknown };
+
+export function storyViewerLabels(tf: StoryLabelReader): StoryViewerLabelsView {
   return {
     dialog: tf('viewer.dialog'),
     close: tf('viewer.close'),
@@ -87,11 +97,11 @@ export function storyViewerLabels(tf: (key: string) => string): StoryViewerLabel
     like: tf('viewer.like'),
     unlike: tf('viewer.unlike'),
     comment: tf('viewer.comment'),
-    position: tf('viewer.position'),
-    likesOne: tf('viewer.likes.one'),
-    likesOther: tf('viewer.likes.other'),
-    commentsOne: tf('viewer.comments.one'),
-    commentsOther: tf('viewer.comments.other'),
+    position: String(tf.raw('viewer.position')),
+    likesOne: String(tf.raw('viewer.likes.one')),
+    likesOther: String(tf.raw('viewer.likes.other')),
+    commentsOne: String(tf.raw('viewer.comments.one')),
+    commentsOther: String(tf.raw('viewer.comments.other')),
     genericError: tf('viewer.errors.generic'),
   };
 }

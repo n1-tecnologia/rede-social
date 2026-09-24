@@ -58,7 +58,11 @@ vi.mock('./StoryVideo', () => ({
 const { storyViewerLabels } = await import('@/lib/story-view');
 const { StoryViewerHost } = await import('./StoryViewerHost');
 
-const LABELS = storyViewerLabels(lookup as (key: string) => string);
+// `next-intl`'s reader FORMATS on read, so the templated strings are taken with `.raw` — this
+// stand-in exposes the same two calls the real translator does.
+const reader = Object.assign((key: string) => lookup(key), { raw: (key: string) => lookup(key) });
+
+const LABELS = storyViewerLabels(reader);
 
 const ASSET = '0d000000-0000-4000-8000-0000000000b1';
 
@@ -105,9 +109,7 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
     expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true');
     expect(screen.getByText('Direcao TRIA Demo')).toBeTruthy();
     expect(screen.getByText('há 1 h')).toBeTruthy();
-    expect(screen.getByTestId('story-caption').textContent).toBe(
-      'Bastidores do encontro de hoje.',
-    );
+    expect(screen.getByTestId('story-caption').textContent).toBe('Bastidores do encontro de hoje.');
     // The copy is the catalog's, interpolated — never a literal in this file.
     expect(screen.getByTestId('story-like-count').textContent).toBe('12 curtidas');
     expect(screen.getByRole('button', { name: 'Curtir' })).toBeTruthy();
@@ -153,7 +155,7 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
     expect(toast.show).toHaveBeenCalledTimes(1);
     expect(toast.show).toHaveBeenCalledWith({
       message: 'Algo deu errado. Tente novamente.',
-      tone: 'danger',
+      tone: 'error',
     });
     // Nothing was written into the overlay itself.
     expect(screen.queryByRole('alert')).toBeNull();

@@ -22,6 +22,19 @@ export interface MediaImageProps {
   /** Classes of the BOX (size, radius); the `<img>` always fills it. */
   className?: string;
   /**
+   * How the `<img>` fills its box. `cover` everywhere a thumbnail is cropped to a shape (every
+   * caller before 05-06); `contain` for the story viewer, where UI-D-33 forbids cropping — a story
+   * is a whole composition the admin framed on their phone, and the black ground is the surface.
+   */
+  fit?: 'cover' | 'contain';
+  /**
+   * Fired once the bytes have decoded. The story viewer's clock does not start until this arrives,
+   * so a slow image never burns its five seconds invisibly (UI loading/E03).
+   */
+  onReady?: () => void;
+  /** Fired when the asset cannot be rendered — the same moment the fallback below takes over. */
+  onFailed?: () => void;
+  /**
    * What replaces the box when the asset cannot be rendered (expired, deleted, another tenant's).
    * Typically the neutral `Avatar`; when omitted the plain `bg-bg-tertiary` box stays.
    */
@@ -47,6 +60,9 @@ export function MediaImage({
   eager = false,
   ratio = 'aspect-square',
   className,
+  fit = 'cover',
+  onReady,
+  onFailed,
   fallback,
 }: MediaImageProps) {
   // Keyed by asset id rather than a bare boolean, so pointing the component at another asset retries
@@ -60,8 +76,15 @@ export function MediaImage({
   // is a fetch that ended without an image, so the fallback is applied on mount as well.
   useEffect(() => {
     const img = imgRef.current;
-    if (img?.complete && img.naturalWidth === 0) setFailedId(assetId);
-  }, [assetId]);
+    if (img?.complete && img.naturalWidth === 0) {
+      setFailedId(assetId);
+      onFailed?.();
+      return;
+    }
+    // A server-rendered image that is ALREADY decoded never fires `load` either, so the ready
+    // signal has to be reported here too — otherwise a cached story would leave the clock paused.
+    if (img?.complete && img.naturalWidth > 0) onReady?.();
+  }, [assetId, onReady, onFailed]);
 
   const ladder = widths.length > 0 ? widths : [];
   const base = baseWidth ?? ladder[0];
@@ -87,8 +110,12 @@ export function MediaImage({
         loading={eager ? 'eager' : 'lazy'}
         decoding="async"
         draggable={false}
-        onError={() => setFailedId(assetId)}
-        className="h-full w-full object-cover"
+        onLoad={onReady}
+        onError={() => {
+          setFailedId(assetId);
+          onFailed?.();
+        }}
+        className={cn('h-full w-full', fit === 'contain' ? 'object-contain' : 'object-cover')}
       />
     </span>
   );
