@@ -728,6 +728,34 @@ const SEED_STORY_COMMENT_IDS: Record<string, readonly [string, string, string]> 
 };
 
 /**
+ * 05-08 (STORY-04) — TWO pins per tenant, and the pair is chosen so the phase's central claim has a
+ * fixture that does NOT depend on a test writing one first.
+ *
+ * `[0]` pins the EXPIRED story (`SEED_STORIES[3]`) to the first community. That single row is the
+ * whole of STORY-04 as a fixture: the story is ABSENT from `/inicio`'s strip because its window
+ * closed, and PRESENT on that community's Destaques row because the pin overrides the clock. The
+ * e2e walks exactly that contrast, and the UAT reads it on a real screen.
+ *
+ * `[1]` pins an ACTIVE story (`SEED_STORIES[1]`) to the same community, so the row carries two
+ * circles that are visually identical while one of them is expired (D-79, A-4) — a one-circle
+ * fixture could not show that.
+ *
+ * `SEED_STORIES[0]` stays UNPINNED and active: the positive control that a Destaques read returning
+ * everything could not satisfy.
+ *
+ * The community is index 0 in BOTH tenants, and index 0 is `active` — pinning into an archived
+ * container is refused by the API, so a fixture that used index 4 would be seeding a state the
+ * product cannot reach.
+ */
+const SEED_STORY_PIN_IDS: Record<string, readonly [string, string]> = {
+  'tria-demo': ['0d000000-0000-4000-8000-0000000000f1', '0d000000-0000-4000-8000-0000000000f2'],
+  'tria-lab': ['0e000000-0000-4000-8000-0000000000f1', '0e000000-0000-4000-8000-0000000000f2'],
+};
+
+/** Which `SEED_STORIES` index each pin names. Index 3 is the EXPIRED story; index 1 is active. */
+const SEED_STORY_PIN_STORY_INDEXES = [3, 1] as const;
+
+/**
  * Exported so `apps/web/e2e` and the integration suite assert against the FIXTURE rather than
  * against a literal that could drift from the seed on the next edit (the 04-06 rule). Identical in
  * both tenants on purpose: a leak cannot hide behind "the rows look different".
@@ -1646,8 +1674,33 @@ for (const t of SEED_TENANTS) {
           });
         }
 
+        // 05-08 (STORY-04): the pins. `community_id` points at `SEED_COMMUNITY_IDS[t.slug][0]`,
+        // which the community block above wrote in this same run; if that block did not run there
+        // is nothing to pin to and this one is skipped rather than guessed at.
+        const pinIds = SEED_STORY_PIN_IDS[t.slug];
+        const pinCommunityId = communityIds?.[0];
+        let seededPins = 0;
+        if (pinIds && pinCommunityId) {
+          await withAdminTx(async (tx) => {
+            for (const [index, pinId] of pinIds.entries()) {
+              const storyId = storyIds[SEED_STORY_PIN_STORY_INDEXES[index] ?? 0];
+              if (!storyId) continue;
+              await tx.execute(sql`
+                insert into public.story_community_pins
+                  (id, tenant_id, story_id, community_id, pinned_by_user_id, pinned_at)
+                values (
+                  ${pinId}::uuid, ${tenantId}::uuid, ${storyId}::uuid,
+                  ${pinCommunityId}::uuid, ${authorUserId}::uuid,
+                  ${new Date(storyClock - (index + 1) * 60_000).toISOString()}::timestamptz
+                )
+                on conflict (id) do nothing`);
+              seededPins += 1;
+            }
+          });
+        }
+
         console.log(
-          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest`,
+          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest, ${seededPins} community pins (1 on the EXPIRED story)`,
         );
       }
     }

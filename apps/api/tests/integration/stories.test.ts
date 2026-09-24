@@ -15,6 +15,7 @@ import {
   type StoryLiked,
   type StoryLikeResult,
   type StoryPage,
+  type StoryPinned,
   type StoryPublished,
   type StorySummary,
 } from '@tria/module-stories/contracts';
@@ -60,6 +61,8 @@ const createdAssets: string[] = [];
 const events: StoryPublished[] = [];
 /** STORY-05: every like/unlike event this file's requests produced, with the name that raised it. */
 const likeEvents: { name: 'story.liked' | 'story.unliked'; payload: StoryLiked }[] = [];
+/** STORY-04: every pin/unpin event this file's requests produced, with the name that raised it. */
+const pinEvents: { name: 'story.pinned' | 'story.unpinned'; payload: StoryPinned }[] = [];
 const unsubscribes: (() => void)[] = [];
 let unsubscribe: () => void = () => {};
 
@@ -222,6 +225,12 @@ beforeAll(async () => {
     }),
     subscribe('story.unliked', async (payload) => {
       likeEvents.push({ name: 'story.unliked', payload });
+    }),
+    subscribe('story.pinned', async (payload) => {
+      pinEvents.push({ name: 'story.pinned', payload });
+    }),
+    subscribe('story.unpinned', async (payload) => {
+      pinEvents.push({ name: 'story.unpinned', payload });
     }),
   );
 });
@@ -1157,6 +1166,327 @@ describe('STORY-05 (second half) — the comment surface, and the two refusals t
 
     expect(await storedCommentCount(storyId)).toBe(await liveCommentRows(storyId));
     expect(await storedCommentCount(expiredStoryId)).toBe(await liveCommentRows(expiredStoryId));
+  });
+});
+
+describe('STORY-04 / D-68 — pinning a story to a community, and the Destaques read', () => {
+  /**
+   * THE PLAN'S CENTRAL CLAIM AT THE HTTP TIER: a pinned story is visible on its community page for
+   * every value of `now()`, while the strip refuses the same story in the same breath.
+   *
+   * This file's OWN fixture, for the reason the like block gives: the seeded pins exist and the
+   * e2e depends on them, so writing here would move a count another suite reads. Both stories and
+   * both communities below are created in `beforeAll` and swept in `afterAll`;
+   * `story_community_pins_community_fk` and `..._story_id_stories_id_fk` are both `on delete
+   * cascade`, so removing either parent removes the pins with it.
+   */
+  let activeStoryId = '';
+  let expiredStoryId = '';
+  let communityA = '';
+  let communityB = '';
+  let communityC = '';
+  let archivedCommunity = '';
+  let labCommunity = '';
+  const createdCommunities: string[] = [];
+
+  const pin = (token: string, storyId: string, communityId: string, host = HOSTS.demo) =>
+    request(`/v1/stories/${storyId}/pins/${communityId}`, token, {
+      method: 'PUT',
+      headers: { 'x-tenant-host': host },
+    });
+
+  const unpin = (token: string, storyId: string, communityId: string, host = HOSTS.demo) =>
+    request(`/v1/stories/${storyId}/pins/${communityId}`, token, {
+      method: 'DELETE',
+      headers: { 'x-tenant-host': host },
+    });
+
+  const highlights = (token: string, communityId: string, host = HOSTS.demo) =>
+    page(token, '/v1/stories/pinned', `?communityId=${communityId}`, host);
+
+  /** The real row count for a pair — what a "no second row" claim has to be measured against. */
+  async function pinRows(storyId: string, communityId: string): Promise<number> {
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_community_pins
+       where story_id = ${storyId}::uuid and community_id = ${communityId}::uuid`;
+    return rows[0]?.n ?? 0;
+  }
+
+  async function makeCommunity(
+    tenantId: string,
+    email: string,
+    name: string,
+    status = 'active',
+  ): Promise<string> {
+    const id = randomUUID();
+    createdCommunities.push(id);
+    await adminSql`
+      insert into public.communities (id, tenant_id, created_by_user_id, name, slug, status)
+      select ${id}::uuid, ${tenantId}::uuid, m.user_id, ${name}, ${`${id}`}, ${status}
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantId}::uuid and u.email = ${email}
+       limit 1`;
+    return id;
+  }
+
+  beforeAll(async () => {
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const res = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — fixavel ativa`,
+    });
+    expect(res.status).toBe(201);
+    activeStoryId = ((await res.json()) as StorySummary).id;
+    created.push(activeStoryId);
+
+    // An EXPIRED story of this file's own: a story cannot be published expired (the window is a
+    // column default), and the seeded expired row must stay untouched.
+    const expiredAsset = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+    });
+    expiredStoryId = randomUUID();
+    created.push(expiredStoryId);
+    await adminSql`
+      insert into public.stories
+        (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+      select ${expiredStoryId}::uuid, ${tenantIds.demo}::uuid, m.user_id, ${expiredAsset}::uuid,
+             'image', ${`${TEST_CAPTION_PREFIX} — fixavel expirada`},
+             now() - interval '30 hours', now() - interval '6 hours'
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       limit 1`;
+
+    communityA = await makeCommunity(tenantIds.demo, 'admin@tria-demo.local', 'Pin A');
+    communityB = await makeCommunity(tenantIds.demo, 'admin@tria-demo.local', 'Pin B');
+    communityC = await makeCommunity(tenantIds.demo, 'admin@tria-demo.local', 'Pin C');
+    archivedCommunity = await makeCommunity(
+      tenantIds.demo,
+      'admin@tria-demo.local',
+      'Pin arquivada',
+      'archived',
+    );
+    labCommunity = await makeCommunity(tenantIds.lab, 'admin@tria-lab.local', 'Pin do lab');
+  });
+
+  afterAll(async () => {
+    if (createdCommunities.length > 0) {
+      await adminSql`delete from public.communities where id = any(${createdCommunities}::uuid[])`;
+    }
+  });
+
+  it('22. an admin pins a story and receives the story pinned-community count', async () => {
+    const res = await pin(tokens.demoAdmin, expiredStoryId, communityA);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ pinned: true, pinnedCommunityCount: 1 });
+    expect(await pinRows(expiredStoryId, communityA)).toBe(1);
+  });
+
+  it('23. a REPEAT pin returns the same count, creates no second row, and is never a 409', async () => {
+    const res = await pin(tokens.demoAdmin, expiredStoryId, communityA);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ pinned: true, pinnedCommunityCount: 1 });
+    expect(await pinRows(expiredStoryId, communityA)).toBe(1);
+  });
+
+  it('24. THE INVARIANT: the pinned EXPIRED story is on the community page while the strip refuses it', async () => {
+    const row = await highlights(tokens.demoMember, communityA);
+    expect(row.items.map((item) => item.id)).toEqual([expiredStoryId]);
+    // The flag is projected, and it says the story is expired — so this is not a story that
+    // happened to still be live.
+    expect(row.items[0]?.isActive).toBe(false);
+
+    // The same story, the same instant, the STRIP's read: absent. The two surfaces disagree
+    // deliberately, and a highlights read that had grown an expiry predicate would fail here.
+    const strip = await page(tokens.demoMember);
+    expect(strip.items.some((item) => item.id === expiredStoryId)).toBe(false);
+  });
+
+  it('25. A MEMBER sees the highlights — the read carries no permission, only the module', async () => {
+    const row = await highlights(tokens.demoMember, communityA);
+    expect(row.items).toHaveLength(1);
+    expect(row.nextCursor).toBeNull();
+  });
+
+  it('26. a community with no pins answers an EMPTY list, never a 404', async () => {
+    const row = await highlights(tokens.demoMember, communityB);
+    expect(row.items).toEqual([]);
+    expect(row.nextCursor).toBeNull();
+  });
+
+  it('27. one story pins to THREE communities and appears in all three highlight reads', async () => {
+    for (const community of [communityB, communityC]) {
+      const res = await pin(tokens.demoAdmin, expiredStoryId, community);
+      expect(res.status).toBe(200);
+    }
+    const last = (await (await pin(tokens.demoAdmin, expiredStoryId, communityA)).json()) as {
+      pinnedCommunityCount: number;
+    };
+    expect(last.pinnedCommunityCount).toBe(3);
+
+    for (const community of [communityA, communityB, communityC]) {
+      const row = await highlights(tokens.demoMember, community);
+      expect(
+        row.items.map((item) => item.id),
+        community,
+      ).toContain(expiredStoryId);
+    }
+  });
+
+  it('28. GET /{storyId}/pins returns exactly those three community ids', async () => {
+    const res = await request(`/v1/stories/${expiredStoryId}/pins`, tokens.demoAdmin, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { communityIds: string[] };
+    expect([...body.communityIds].sort()).toEqual([communityA, communityB, communityC].sort());
+  });
+
+  it('29. an ACTIVE and an EXPIRED pinned story come back from ONE read, newest pin first', async () => {
+    expect((await pin(tokens.demoAdmin, activeStoryId, communityA)).status).toBe(200);
+
+    const row = await highlights(tokens.demoMember, communityA);
+    // Newest pin first: the active story was pinned last, so it leads. Nothing but `isActive`
+    // distinguishes the two — there is no state column on the payload to draw a second ring from.
+    expect(row.items.map((item) => item.id)).toEqual([activeStoryId, expiredStoryId]);
+    expect(row.items.map((item) => item.isActive)).toEqual([true, false]);
+  });
+
+  it('30. the per-story pinned count rides the admin history payload (UI-D-40)', async () => {
+    const mine = await page(tokens.demoAdmin, '/v1/stories/mine', '?limit=25');
+    const expired = mine.items.find((item) => item.id === expiredStoryId);
+    expect(expired?.pinnedCommunityCount).toBe(3);
+    const untouched = mine.items.find((item) => item.caption === SEEDED_PROCESSING_CAPTION);
+    expect(untouched?.pinnedCommunityCount).toBe(0);
+  });
+
+  it('31. an unpin decrements, and a SECOND unpin removes nothing and still answers 200', async () => {
+    const first = await unpin(tokens.demoAdmin, expiredStoryId, communityC);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ pinned: false, pinnedCommunityCount: 2 });
+
+    const second = await unpin(tokens.demoAdmin, expiredStoryId, communityC);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ pinned: false, pinnedCommunityCount: 2 });
+    expect(await pinRows(expiredStoryId, communityC)).toBe(0);
+
+    // …and the STORY ROW survived the unpin: it is still readable by id.
+    const story = await request(`/v1/stories/${expiredStoryId}`, tokens.demoAdmin, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(story.status).toBe(200);
+  });
+
+  it('32. T-05-48: a MEMBER is refused 403 on pin, on unpin and on the pins read', async () => {
+    for (const res of [
+      await pin(tokens.demoMember, activeStoryId, communityB),
+      await unpin(tokens.demoMember, activeStoryId, communityB),
+      await request(`/v1/stories/${activeStoryId}/pins`, tokens.demoMember, {
+        headers: { 'x-tenant-host': HOSTS.demo },
+      }),
+    ]) {
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it('33. an ARCHIVED community refuses a new pin — and still accepts an UNPIN', async () => {
+    const refused = await pin(tokens.demoAdmin, activeStoryId, archivedCommunity);
+    expect(refused.status).toBe(400);
+    const body = await envelope(refused);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.details).toEqual({ pin: 'archived' });
+
+    // Archive gates NEW content. Pin while active, archive, then unpin: if archiving gated the
+    // removal too, a story pinned before the archive would stay highlighted there forever.
+    const reopened = await makeCommunity(tenantIds.demo, 'admin@tria-demo.local', 'Pin reaberta');
+    expect((await pin(tokens.demoAdmin, activeStoryId, reopened)).status).toBe(200);
+    await adminSql`update public.communities set status = 'archived' where id = ${reopened}::uuid`;
+    const removed = await unpin(tokens.demoAdmin, activeStoryId, reopened);
+    expect(removed.status).toBe(200);
+    expect(await pinRows(activeStoryId, reopened)).toBe(0);
+  });
+
+  it('34. T-05-49 / D-23: an unknown story, an unknown community and ANOTHER TENANT are ONE bare 404', async () => {
+    const unknown = randomUUID();
+    const responses = [
+      await pin(tokens.demoAdmin, unknown, communityA),
+      await pin(tokens.demoAdmin, activeStoryId, unknown),
+      // The cross-tenant probe: a REAL community of the lab tenant, named from the demo lane.
+      await pin(tokens.demoAdmin, activeStoryId, labCommunity),
+    ];
+    for (const res of responses) {
+      expect(res.status).toBe(404);
+      const body = await envelope(res);
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.details).toBeUndefined();
+    }
+
+    // The positive control in the same test: the identical call with both ids this lane CAN see
+    // succeeds, so the 404s above are about visibility and not about the route being broken.
+    expect((await pin(tokens.demoAdmin, activeStoryId, communityB)).status).toBe(200);
+  });
+
+  it('35. T-05-52: soft-deleting a story removes it from EVERY community highlights at once', async () => {
+    const res = await request(`/v1/stories/${activeStoryId}`, tokens.demoAdmin, {
+      method: 'DELETE',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(204);
+
+    for (const community of [communityA, communityB]) {
+      const row = await highlights(tokens.demoMember, community);
+      expect(
+        row.items.map((item) => item.id),
+        community,
+      ).not.toContain(activeStoryId);
+    }
+    // …and the PIN ROWS remain, as the record of where it had been.
+    expect(await pinRows(activeStoryId, communityA)).toBe(1);
+  });
+
+  it('36. T-05-53: `limit` is clamped server-side and a hostile cursor degrades to page 1', async () => {
+    const wide = await highlights(tokens.demoMember, communityA);
+    expect(wide.items.length).toBeLessThanOrEqual(STORY_MAX_PAGE_SIZE);
+
+    const clamped = await page(
+      tokens.demoMember,
+      '/v1/stories/pinned',
+      `?communityId=${communityA}&limit=100000`,
+    );
+    expect(clamped.items.length).toBeLessThanOrEqual(STORY_MAX_PAGE_SIZE);
+
+    const tampered = await page(
+      tokens.demoMember,
+      '/v1/stories/pinned',
+      `?communityId=${communityA}&cursor=${encodeURIComponent("' or 1=1--")}`,
+    );
+    expect(tampered.items.map((item) => item.id)).toEqual(wide.items.map((item) => item.id));
+  });
+
+  it('37. the pin events carry IDS ONLY, and only for a real transition', async () => {
+    const before = pinEvents.length;
+    const fresh = await makeCommunity(tenantIds.demo, 'admin@tria-demo.local', 'Pin eventos');
+
+    expect((await pin(tokens.demoAdmin, expiredStoryId, fresh)).status).toBe(200);
+    expect((await pin(tokens.demoAdmin, expiredStoryId, fresh)).status).toBe(200);
+    expect((await unpin(tokens.demoAdmin, expiredStoryId, fresh)).status).toBe(200);
+    expect((await unpin(tokens.demoAdmin, expiredStoryId, fresh)).status).toBe(200);
+
+    // Four requests, TWO events: the repeat pin and the second unpin changed nothing.
+    const raised = pinEvents.slice(before);
+    expect(raised.map((entry) => entry.name)).toEqual(['story.pinned', 'story.unpinned']);
+    for (const entry of raised) {
+      expect(Object.keys(entry.payload).sort()).toEqual([
+        'actorUserId',
+        'communityId',
+        'storyId',
+        'tenantId',
+      ]);
+      expect(entry.payload.communityId).toBe(fresh);
+    }
   });
 });
 

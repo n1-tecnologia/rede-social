@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(91);
+select plan(100);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -156,6 +156,20 @@ insert into public.stories
   ('0b000000-0000-4000-8000-0000000000d1', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-000000000005', 'image',
    'ao vivo', now() - interval '1 hour', now() + interval '23 hours');
+
+-- 05-08: ONE community pin per tenant (STORY-04), pointing at each tenant's OWN story and OWN
+-- community — the only rows that could even be inserted, since both foreign keys are real. The
+-- PAIR of ids is the adjacency here: both tenants pinned "their first story to their first
+-- community", so the two rows are structurally identical and a read that filtered on anything but
+-- `tenant_id` would match both.
+insert into public.story_community_pins
+  (id, tenant_id, story_id, community_id, pinned_by_user_id) values
+  ('0a000000-0000-4000-8000-0000000000e5', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-0000000000d1', '0a000000-0000-4000-8000-0000000000c1',
+   '0a000000-0000-4000-8000-000000000002'),
+  ('0b000000-0000-4000-8000-0000000000e5', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-0000000000d1', '0b000000-0000-4000-8000-0000000000c1',
+   '0b000000-0000-4000-8000-000000000002');
 
 -- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
 -- global) and RLS with ZERO policies, like platform_admins and tenant_invites: one community's
@@ -457,6 +471,64 @@ select results_eq(
   'USING: a delete aimed at B''s stories touches nothing'
 );
 
+-- ── story_community_pins: the same five cases, plus its own positive control (05-08) ──────────
+-- A pin is the row that makes a story OUTLIVE its own expiry on a community page, so a leak here
+-- would put another tenant's broadcast in a community's permanent highlights — the longest-lived
+-- cross-tenant exposure this phase could create. It is proved on the same six axes as every other
+-- table, and never on the assumption that its two foreign keys already constrain it.
+select results_eq(
+  $$ select count(*)::int from public.story_community_pins
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own story_community_pins row'
+);
+select results_eq(
+  $$ select count(*)::int from public.story_community_pins $$,
+  ARRAY[1],
+  'adjacency: both tenants pinned their first story to their first community, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.story_community_pins $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the pin it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.story_community_pins
+      where id = '0b000000-0000-4000-8000-0000000000e5' $$,
+  'detail by id: B''s pin is not found through A''s lane'
+);
+-- The HIGHLIGHTS JOIN itself, not just the table: the read a community page performs, aimed at B's
+-- community id from A's lane, returns nothing. A join constrained only on the community id — the
+-- exact mistake a reviewer could make, since the pair looks like it already scopes the read —
+-- would return B's story here.
+select is_empty(
+  $$ select s.id
+       from public.story_community_pins p
+       join public.stories s on s.id = p.story_id and s.tenant_id = p.tenant_id
+      where p.community_id = '0b000000-0000-4000-8000-0000000000c1'
+        and s.deleted_at is null $$,
+  'T-05-51: the community highlights JOIN aimed at B''s community returns nothing through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.story_community_pins
+       (tenant_id, story_id, community_id, pinned_by_user_id)
+     values ('0b000000-0000-4000-8000-000000000001',
+             '0b000000-0000-4000-8000-0000000000d1',
+             '0b000000-0000-4000-8000-0000000000c1',
+             '0b000000-0000-4000-8000-000000000002') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a pin stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with d as (
+       delete from public.story_community_pins
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from d $$,
+  ARRAY[0],
+  'USING: an unpin aimed at B''s pins removes nothing — and unpin is a HARD delete, so there is no soft-delete predicate hiding the miss'
+);
+
 -- ── community_members: the same five cases (05-01). The table is UNUSED in V1 and still proved:
 --    V2-CONT-02 is only a policy change if the policy is already correct today. ─────────────────
 select results_eq(
@@ -717,6 +789,16 @@ select results_eq(
 select is_empty(
   $$ select id from public.feed_likes where id = '0a000000-0000-4000-8000-0000000000f3' $$,
   'symmetry: A''s like is not found through B''s lane'
+);
+select results_eq(
+  $$ select tenant_id::text from public.story_community_pins $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s pin for the same structurally identical pair'
+);
+select is_empty(
+  $$ select id from public.story_community_pins
+      where id = '0a000000-0000-4000-8000-0000000000e5' $$,
+  'symmetry: A''s pin is not found through B''s lane'
 );
 select results_eq(
   $$ select host::text from public.tenant_domains $$,

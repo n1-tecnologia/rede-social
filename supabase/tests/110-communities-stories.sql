@@ -76,7 +76,7 @@ begin;
 -- because with five rows the planner always chooses a sequential scan and the assertion would prove
 -- nothing. Like its siblings, this file ROLLS BACK, so it re-runs identically against a seeded or an
 -- empty database, twice in a row, in any order.
-select plan(47);
+select plan(58);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-comm', 'Comunidade Phase 5', '0f000000-0000-4000-8000-000000000001');
@@ -764,6 +764,170 @@ select ok(
   and (select plan from story_plans where name = 'story_comments_asc') not like '%Seq Scan on feed_comments%',
   'D-83 / Pitfall 8: the ascending order comes OFF the index — no Sort node, never a Seq Scan'
 );
+
+-- ══ 48-58. STORY-04: THE PIN OUTLIVES THE EXPIRY (05-08) ═══════════════════════════════════════
+-- THE ASSERTION THIS WHOLE PHASE TURNS ON, and the companion 05-05's assumption-delta decision
+-- promised: **a pinned story is visible on its community page for EVERY value of `now()`.**
+--
+-- The fixture is the one the controlled-clock block above already built — `…e1` published 25 hours
+-- ago and expired an hour ago, `…a9` published an hour ago and live for another 23. Nothing new is
+-- backdated and no clock is faked: `now()` is the transaction timestamp, so the same two rows every
+-- STORY-03 assertion read are the two rows these read.
+--
+-- The three claims, and each ships its POSITIVE CONTROL in the same block so a globally broken
+-- fixture or a permissive query could not satisfy them:
+--
+--   * the highlights JOIN — the `listCommunityHighlights` statement's predicate verbatim, which
+--     carries NO expiry range at all — returns the EXPIRED pinned story;
+--   * the STRIP predicate, in the SAME transaction and therefore under the SAME `now()`, does NOT.
+--     The two surfaces are proved to disagree DELIBERATELY rather than by accident;
+--   * an UNPINNED active story is returned by the strip and NOT by the highlights join, so a
+--     highlights query that had simply dropped its `community_id` predicate could not pass.
+--
+-- If a future phase reintroduces a global liveness predicate on the community path, assertion 49
+-- goes red the instant it lands. That is the entire point of writing it here rather than in prose.
+insert into public.story_community_pins
+  (id, tenant_id, story_id, community_id, pinned_by_user_id)
+values ('0f000000-0000-4000-8000-0000000000f1', '0f000000-0000-4000-8000-000000000001',
+        '0f000000-0000-4000-8000-0000000000e1', '0f000000-0000-4000-8000-0000000000a1',
+        '0f000000-0000-4000-8000-000000000002');
+
+-- 48. The story really is expired under this transaction's clock — stated first, so assertion 49
+-- cannot be read as "the pin worked because the story was live all along".
+select results_eq(
+  $$ select (expires_at < now()) from public.stories
+      where id = '0f000000-0000-4000-8000-0000000000e1' $$,
+  ARRAY[true],
+  'STORY-04 precondition: the pinned story''s window closed an hour ago under this transaction''s now()'
+);
+
+-- 49. THE INVARIANT. The highlights read's predicate, verbatim — read it for what is NOT in it.
+select results_eq(
+  $$ select s.id::text
+       from public.story_community_pins p
+       join public.stories s on s.id = p.story_id and s.tenant_id = p.tenant_id
+      where p.tenant_id = '0f000000-0000-4000-8000-000000000001'
+        and p.community_id = '0f000000-0000-4000-8000-0000000000a1'
+        and s.deleted_at is null
+      order by p.pinned_at desc, p.id desc $$,
+  ARRAY['0f000000-0000-4000-8000-0000000000e1'],
+  'STORY-04: a pinned story is visible on its community page for EVERY value of now() — the join carries no expiry predicate at all'
+);
+
+-- 50. …and the STRIP still refuses it, in the same transaction and under the same clock. Without
+-- this half, assertion 49 would also pass on an implementation that had quietly stopped expiring
+-- anything at all.
+select is_empty(
+  $$ select s.id from public.stories s
+      where s.tenant_id = '0f000000-0000-4000-8000-000000000001'
+        and s.deleted_at is null
+        and s.expires_at > now()
+        and s.id = '0f000000-0000-4000-8000-0000000000e1' $$,
+  '…while the STRIP predicate refuses the same row under the same now() — the two surfaces disagree DELIBERATELY'
+);
+
+-- 51-52. The positive control the plan asks for by name: an UNPINNED ACTIVE story is returned by
+-- the strip and is NOT returned by the highlights join. A highlights query that had dropped its
+-- `community_id` predicate, or that returned every story of the tenant, would fail 52.
+select results_eq(
+  $$ select s.id::text from public.stories s
+      where s.tenant_id = '0f000000-0000-4000-8000-000000000001'
+        and s.deleted_at is null
+        and s.expires_at > now()
+        and s.id = '0f000000-0000-4000-8000-0000000000a9' $$,
+  ARRAY['0f000000-0000-4000-8000-0000000000a9'],
+  'positive control: the UNPINNED active story is returned by the strip predicate'
+);
+select is_empty(
+  $$ select s.id
+       from public.story_community_pins p
+       join public.stories s on s.id = p.story_id and s.tenant_id = p.tenant_id
+      where p.community_id = '0f000000-0000-4000-8000-0000000000a1'
+        and s.id = '0f000000-0000-4000-8000-0000000000a9' $$,
+  '…and NOT by the highlights join — a permissive highlights query could not satisfy this'
+);
+
+-- 53. An ACTIVE story pinned to the same community comes back from the SAME query with no
+-- distinction other than the projected active flag (D-79, A-4): the row carries no state column
+-- and the read makes no branch, so there is nothing a renderer could draw a second ring from.
+insert into public.story_community_pins
+  (id, tenant_id, story_id, community_id, pinned_by_user_id)
+values ('0f000000-0000-4000-8000-0000000000f2', '0f000000-0000-4000-8000-000000000001',
+        '0f000000-0000-4000-8000-0000000000a9', '0f000000-0000-4000-8000-0000000000a1',
+        '0f000000-0000-4000-8000-000000000002');
+select results_eq(
+  $$ select s.id::text, (s.expires_at > now()) as is_active
+       from public.story_community_pins p
+       join public.stories s on s.id = p.story_id and s.tenant_id = p.tenant_id
+      where p.tenant_id = '0f000000-0000-4000-8000-000000000001'
+        and p.community_id = '0f000000-0000-4000-8000-0000000000a1'
+        and s.deleted_at is null
+      order by p.pinned_at desc, p.id desc $$,
+  $$ values ('0f000000-0000-4000-8000-0000000000a9', true),
+            ('0f000000-0000-4000-8000-0000000000e1', false) $$,
+  'a pinned ACTIVE and a pinned EXPIRED story come back from ONE query, distinguished only by the projected flag'
+);
+
+-- 54. `story_community_pins_uq` is the idempotency arbiter, not application code. The SERVICE
+-- issues `on conflict (story_id, community_id) do nothing`, so this asserts the arbiter that makes
+-- that legal: the same pair cannot produce a second row even from a hand-written statement.
+select throws_ok(
+  $$ insert into public.story_community_pins
+       (tenant_id, story_id, community_id, pinned_by_user_id)
+     values ('0f000000-0000-4000-8000-000000000001',
+             '0f000000-0000-4000-8000-0000000000e1',
+             '0f000000-0000-4000-8000-0000000000a1',
+             '0f000000-0000-4000-8000-000000000002') $$,
+  '23505',
+  null,
+  'story_community_pins_uq refuses a second row for the same (story, community) pair'
+);
+select results_eq(
+  $$ select count(*)::int from public.story_community_pins
+      where story_id = '0f000000-0000-4000-8000-0000000000e1'
+        and community_id = '0f000000-0000-4000-8000-0000000000a1' $$,
+  ARRAY[1],
+  '…so re-pinning the same pair leaves exactly one row'
+);
+
+-- 56-57. UNPIN is a HARD delete, and the STORY ROW SURVIVES it. Both halves matter: a cascade that
+-- took the story with the pin would make "unpin" destroy a broadcast, and a highlights join that
+-- still returned the story would make the control useless.
+delete from public.story_community_pins
+ where story_id = '0f000000-0000-4000-8000-0000000000e1'
+   and community_id = '0f000000-0000-4000-8000-0000000000a1';
+select is_empty(
+  $$ select s.id
+       from public.story_community_pins p
+       join public.stories s on s.id = p.story_id and s.tenant_id = p.tenant_id
+      where p.community_id = '0f000000-0000-4000-8000-0000000000a1'
+        and s.id = '0f000000-0000-4000-8000-0000000000e1' $$,
+  'unpinning removes the story from the community''s highlights immediately'
+);
+select isnt_empty(
+  $$ select 1 from public.stories
+      where id = '0f000000-0000-4000-8000-0000000000e1' and deleted_at is null $$,
+  '…while the STORY ROW is untouched — unpin removes the editorial act, never the broadcast'
+);
+
+-- 58. A SOFT-DELETED story leaves every community's highlights at once (T-05-52), and its pin rows
+-- REMAIN as the record of where it had been. The predicate doing that work is `deleted_at is null`
+-- in the READ, never a cascade — which is what lets Phase 8 still see the row through the lane.
+update public.stories set deleted_at = now()
+ where id = '0f000000-0000-4000-8000-0000000000a9';
+select results_eq(
+  $$ select (select count(*)::int
+               from public.story_community_pins p
+               join public.stories s on s.id = p.story_id and s.tenant_id = p.tenant_id
+              where p.community_id = '0f000000-0000-4000-8000-0000000000a1'
+                and s.deleted_at is null),
+            (select count(*)::int from public.story_community_pins
+              where story_id = '0f000000-0000-4000-8000-0000000000a9') $$,
+  $$ values (0, 1) $$,
+  'a soft-deleted story leaves the highlights of every community at once, and its pin row stays as the record'
+);
+update public.stories set deleted_at = null
+ where id = '0f000000-0000-4000-8000-0000000000a9';
 
 select * from finish();
 rollback;

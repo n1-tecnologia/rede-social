@@ -204,6 +204,13 @@
       "when": 1790211267290,
       "tag": "20260924005427_story_comment_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1790216767203,
+      "tag": "20260924022607_story_community_pins",
+      "breakpoints": true
     }
   ]
 }
