@@ -32,7 +32,12 @@ export interface MediaImageProps {
    * so a slow image never burns its five seconds invisibly (UI loading/E03).
    */
   onReady?: () => void;
-  /** Fired when the asset cannot be rendered — the same moment the fallback below takes over. */
+  /**
+   * Fired when the asset cannot be rendered — the same moment the fallback below takes over. It
+   * covers BOTH failure shapes, including the one that is easy to mistake for silence: an EMPTY
+   * variant ladder, where there is no `<img>` at all. Exactly one of `onReady`/`onFailed` always
+   * arrives, because the caller is waiting on one of them (see the docblock on the mount effect).
+   */
   onFailed?: () => void;
   /**
    * What replaces the box when the asset cannot be rendered (expired, deleted, another tenant's).
@@ -103,7 +108,19 @@ export function MediaImage({
    * is a fetch that ended without an image, so the fallback is applied on mount as well.
    */
   useEffect(() => {
-    if (src === null) return;
+    // An EMPTY variant ladder is not a quieter kind of success (CR-03). There is nothing to render
+    // and no `<img>` to fire an event, so this branch is the ONLY place the outcome can be
+    // reported — and it is reachable in production: `listCommunityHighlights` deliberately omits
+    // the `status = 'ready'` filter, so a pinned, still-transcoding asset arrives with no variants.
+    // Returning the fallback while reporting nothing is what froze the story viewer in `loading`
+    // with no progress, no auto-advance, no error copy and no retry. `src` is already a dependency,
+    // so this runs once per asset; both the state write and the report happen in an effect rather
+    // than during render, so neither breaks the render-purity rule the rest of this file follows.
+    if (src === null) {
+      setFailedId(assetId);
+      onFailedRef.current?.();
+      return;
+    }
     const img = imgRef.current;
     if (img?.complete && img.naturalWidth === 0) {
       setFailedId(assetId);

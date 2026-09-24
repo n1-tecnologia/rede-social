@@ -32,7 +32,9 @@ const CEILING_MESSAGE = `MediaImage render count exceeded ${RENDER_CEILING}`;
 const WIDTHS = [320, 640, 1080] as const;
 
 let renderCount = 0;
-const reports = { ready: 0, failed: 0 };
+/** Spies rather than counters, so every assertion below reads as an explicit CALL COUNT. */
+const onReadyReport = vi.fn();
+const onFailedReport = vi.fn();
 
 function bumpRender() {
   renderCount += 1;
@@ -64,11 +66,11 @@ function ReportingParent({
       ratio=""
       fit="contain"
       onReady={() => {
-        reports.ready += 1;
+        onReadyReport();
         setState((state) => ({ ...state, [assetId]: 'ready' }));
       }}
       onFailed={() => {
-        reports.failed += 1;
+        onFailedReport();
         setState((state) => ({ ...state, [assetId]: 'error' }));
       }}
       fallback={<span data-testid="media-fallback" />}
@@ -107,8 +109,8 @@ function restoreImageState() {
 
 beforeEach(() => {
   renderCount = 0;
-  reports.ready = 0;
-  reports.failed = 0;
+  onReadyReport.mockClear();
+  onFailedReport.mockClear();
 });
 
 afterEach(() => {
@@ -125,8 +127,8 @@ describe('MediaImage — the reporting contract (R-05, CR-03)', () => {
 
     // The verifier's probe, made permanent. Before the fix this line is never reached.
     expect(renderCount).toBeLessThan(10);
-    expect(reports.ready).toBe(1);
-    expect(reports.failed).toBe(0);
+    expect(onReadyReport).toHaveBeenCalledTimes(1);
+    expect(onFailedReport).toHaveBeenCalledTimes(0);
   });
 
   it('2. an EMPTY variant ladder reports FAILURE exactly once and renders the fallback (CR-03)', () => {
@@ -136,8 +138,8 @@ describe('MediaImage — the reporting contract (R-05, CR-03)', () => {
     // still-transcoding asset reaches the viewer with no variants published yet.
     render(<ReportingParent assetId="asset-empty" widths={[]} />);
 
-    expect(reports.failed).toBe(1);
-    expect(reports.ready).toBe(0);
+    expect(onFailedReport).toHaveBeenCalledTimes(1);
+    expect(onReadyReport).toHaveBeenCalledTimes(0);
     expect(screen.getByTestId('media-fallback')).toBeInTheDocument();
     // There is nothing to render, so there must be no `<img>` at all — not a broken-image glyph.
     expect(document.querySelector('img')).toBeNull();
@@ -149,8 +151,8 @@ describe('MediaImage — the reporting contract (R-05, CR-03)', () => {
 
     render(<ReportingParent assetId="asset-broken" widths={WIDTHS} baseWidth={1080} />);
 
-    expect(reports.failed).toBe(1);
-    expect(reports.ready).toBe(0);
+    expect(onFailedReport).toHaveBeenCalledTimes(1);
+    expect(onReadyReport).toHaveBeenCalledTimes(0);
     expect(screen.getByTestId('media-fallback')).toBeInTheDocument();
   });
 
@@ -161,14 +163,14 @@ describe('MediaImage — the reporting contract (R-05, CR-03)', () => {
       <ReportingParent assetId="asset-ok" widths={WIDTHS} baseWidth={1080} />,
     );
 
-    expect(reports.ready).toBe(1);
-    expect(reports.failed).toBe(0);
+    expect(onReadyReport).toHaveBeenCalledTimes(1);
+    expect(onFailedReport).toHaveBeenCalledTimes(0);
 
     act(() => {
       rerender(<ReportingParent assetId="asset-ok" widths={WIDTHS} baseWidth={1080} />);
     });
 
-    expect(reports.ready).toBe(1);
-    expect(reports.failed).toBe(0);
+    expect(onReadyReport).toHaveBeenCalledTimes(1);
+    expect(onFailedReport).toHaveBeenCalledTimes(0);
   });
 });
