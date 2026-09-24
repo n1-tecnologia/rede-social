@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 26
+open_count: 28
 waived_count: 0
 fixed_count: 12
-total_count: 38
-last_updated: 2026-09-24T01:55:05.376Z
+total_count: 40
+last_updated: 2026-09-24T04:01:21.500Z
 ---
 
 # Broken Windows Ledger
@@ -53,6 +53,8 @@ last_updated: 2026-09-24T01:55:05.376Z
 | 36 | 05 | stub | apps/web/app/(app)/stories/publicar/page.tsx |  | The publish header's 'Seus stories' action points at /stories/meus, a route 05-08 creates; the link is inert until then | open |  | 2026-09-23T23:02:18.390Z |  |
 | 37 | 05 | stub | apps/web/components/stories/StoryViewerHost.tsx |  | The viewer's Comentar control is rendered disabled: 05-07 binds CommentSheet to it and feeds the open sheet into StoryViewer's externallyPaused, which is wired and currently fed by nothing | fixed |  | 2026-09-24T00:38:56.005Z | 2026-09-24T01:55:05.376Z |
 | 38 | 05 | deviation | apps/web/e2e/stories.spec.ts |  | The UI-SPEC overflow backstop states 25 progress segments at 320px; the strip is ONE page and STORY_PAGE_SIZE=10 caps it, so the e2e measures the real ceiling and the 25-segment DOM shape is pinned in story-viewer.test.tsx instead | open |  | 2026-09-24T00:38:56.078Z |  |
+| 39 | 05 | deviation | package.json |  | pnpm verify had to re-seed between test:integration and e2e — the integration suite wipes storage.objects for the demo tenant's fixed-id assets | open |  | 2026-09-24T04:01:21.422Z |  |
+| 40 | 05 | unrun-verify | apps/web/e2e/feed.spec.ts | 321 | the double-tap like is flaky under full-suite parallelism; passes in isolation (deferred-items.md #4) | open |  | 2026-09-24T04:01:21.500Z |  |
 
 ````json
 [
@@ -510,6 +512,30 @@ last_updated: 2026-09-24T01:55:05.376Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-24T00:38:56.078Z",
+    "resolved_at": null
+  },
+  {
+    "id": 39,
+    "kind": "deviation",
+    "phase": "05",
+    "file": "package.json",
+    "line": null,
+    "description": "pnpm verify had to re-seed between test:integration and e2e — the integration suite wipes storage.objects for the demo tenant's fixed-id assets",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-24T04:01:21.422Z",
+    "resolved_at": null
+  },
+  {
+    "id": 40,
+    "kind": "unrun-verify",
+    "phase": "05",
+    "file": "apps/web/e2e/feed.spec.ts",
+    "line": 321,
+    "description": "the double-tap like is flaky under full-suite parallelism; passes in isolation (deferred-items.md #4)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-24T04:01:21.500Z",
     "resolved_at": null
   }
 ]

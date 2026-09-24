@@ -40,3 +40,40 @@ observed, why it is out of scope, and what would close it.
 - **Out of scope:** a suite-structure change, not a feature change.
 - **To close:** worth a look during Phase 8's hardening; not urgent while the phase-scoped runs
   (`playwright test <spec>`) stay fast.
+
+## From 05-08
+
+### 4. `feed.spec.ts:321` (the double-tap like) is FLAKY under full-suite parallelism
+
+- **Observed:** in the phase-exit `pnpm verify` run, `FEED-04 — a double tap on the gallery likes
+  exactly ONCE, not twice` failed: after `dblclick()` the card's "Descurtir" control was never
+  found, so the optimistic like never registered.
+- **Verified out of scope:** it passes in isolation immediately afterwards
+  (`playwright test feed.spec.ts -g "a double tap on the gallery likes exactly ONCE"` — 2 passed),
+  and 05-08 touches neither the feed's like path, the gallery, nor `DoubleTapHeart`.
+- **Cause (suspected, not confirmed):** a `dblclick` is two synthetic pointer events with no
+  guaranteed spacing; under a loaded machine the second can fall outside the component's own
+  double-tap window, degrading the gesture to two single taps on a gallery slide — which does
+  nothing. It joins entries 1 and 2 as the third member of the same family: a gesture or a timing
+  assertion that is exact enough to be right and tight enough to be fragile under parallelism.
+- **To close:** give the gesture an explicit wait on the optimistic state rather than trusting the
+  synthetic event pair, in whichever plan next touches the feed's like path.
+
+### 5. `pnpm verify` had to be taught to re-seed between the integration and e2e stages
+
+Recorded here as the CONTEXT for a change 05-08 did make, so the next reader knows why the script
+grew two commands rather than assuming it was decoration.
+
+- **Observed:** the first full `pnpm verify` of the phase failed with SIX viewer-clock e2e cases
+  timing out (`the first bar fills`, the tap/hold/swipe cases, the comment sheet). 05-07 had
+  already recorded the cause as a standing environment fact — a `pnpm test:integration` pass leaves
+  the demo tenant's fixed-id media assets with no `storage.objects` rows, so `MediaImage` never
+  reports `load` and the clock never starts — but nobody had run the FULL chain, in which
+  `test:integration` runs immediately before `e2e`.
+- **Fixed in 05-08 (Rule 3):** `pnpm db:reset && pnpm db:seed` now sits between `spike:supavisor`
+  and `e2e` in the `verify` script. The e2e suite legitimately requires a seeded database and the
+  integration suite legitimately destroys part of it; making that explicit is what the standing
+  environment fact prescribes, and CI runs the same chain.
+- **Still open:** the underlying asymmetry. The integration suite's own sweeps remove storage
+  objects for assets it did not create. Worth narrowing in Phase 8's hardening; the re-seed makes
+  the gate honest in the meantime.

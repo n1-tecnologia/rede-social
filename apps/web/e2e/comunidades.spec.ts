@@ -585,9 +585,17 @@ test.describe('Destaques — the pinned circles, and the expiry they outlive (D-
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.pinnedId}`);
     await expect(destaques(page)).toBeVisible();
     await expect(page.getByText(C.page.highlights, { exact: true }).first()).toBeVisible();
-    // The seed pins two stories to this container: the expired one and an active one. Both circles
-    // are there, and nothing in the DOM distinguishes them (D-79, A-4).
-    await expect(destaques(page).getByRole('button')).toHaveCount(2);
+    // At least one circle, never an exact count — the SAME reason `stories.spec.ts` refuses to
+    // mirror the strip's size. The seed pins two stories here (the expired one and an active
+    // VIDEO), but `media-video.spec.ts` performs a hard, total reset of the demo tenant's video
+    // library and takes that video's ASSET with it; the highlights read inner-joins `media_assets`,
+    // so under a full-suite run the video's circle is legitimately gone. A constant here would make
+    // this assertion depend on the order the suite happened to run in.
+    //
+    // The claim an exact count would have carried — that an active and an expired pinned story come
+    // back from ONE query distinguished only by the projected flag — is asserted exactly where it
+    // can be: `110-communities-stories.sql` case 53 and `stories.test.ts` case 29.
+    await expect(destaques(page).getByRole('button')).not.toHaveCount(0);
 
     // UI-SPEC E12/empty: with nothing pinned the ROW and its `SectionTitle` are both ABSENT — not
     // an empty state, not a reserved height. This is the half a "renders the row" test would miss.
