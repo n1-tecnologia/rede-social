@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
-status: executing
-stopped_at: Completed 05-11-PLAN.md
-last_updated: "2026-09-24T12:29:32.117Z"
+status: verifying
+stopped_at: Completed 05-12-PLAN.md
+last_updated: "2026-09-24T12:53:59.807Z"
 last_activity: 2026-09-24
 last_activity_desc: Phase 05 execution started
-state_head: aeaaf19193f08f8b9e70eda58fa461c1cb2dbf0f
+state_head: 6198fd32526efa36c76d50e45644597f425151e0
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 62
-  completed_plans: 58
+  completed_plans: 59
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 Phase: 05 (Communities & Stories) — EXECUTING
 Plan: 12 of 12
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-24 — Phase 05 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -116,6 +116,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P09 | 25min | 3 tasks | 8 files |
 | Phase 05 P10 | 42min | 3 tasks | 5 files |
 | Phase 05 P11 | 13min | 3 tasks | 4 files |
+| Phase 05 P12 | 15 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -346,6 +347,8 @@ Recent decisions affecting current work:
 - [Phase 05]: StoryVideo observes for the vendor element with a MutationObserver over its own frame instead of a one-shot querySelector keyed on the token commit — next/dynamic(ssr:false) has not mounted the custom element on that commit, and it does not forward refs, so a ref callback is not the alternative
 - [Phase 05]: The story viewer's unit suite stops stubbing the component under test: StoryViewerHost.test.tsx mocks the playback-token SERVER ACTION and the VENDOR PACKAGE, leaves next/dynamic unmocked, and asserts a real video segment filling to 50% from the element's own time
 - [Phase 05]: STORY-02 marked complete: both media paths in the viewer now have executable evidence and the browser-level gesture gate is green; the missing VIDEO-playback e2e is carried as a named limitation into 05-12's human pack
+- [Phase 05]: Phase 5 drops `mode: mvp` rather than acquire a User Story goal after the fact — the phase is already executed, verified once and gap-closed, so a story written now would be written backwards from the code (05-12 Task 2, developer's answer)
+- [Phase 05]: REQUIREMENTS.md confirmed against disk and deliberately NOT edited; COMM-01 and STORY-02 stay open until Phase 5 re-verification (05-12 Task 1)
 
 ### Pending Todos
 
@@ -357,6 +360,7 @@ None yet.
 - [Phase 3]: Video vendor (Mux vs Cloudflare Stream) pricing is LOW confidence; verify at phase start, decide whether the pilot can defer video.
 - [Phase 7]: Realtime connection quota on the Free plan (200) and "new post to every member" fan-out strategy need pilot member count.
 - [Phase 8]: LGPD legal review is out of research scope; flag to user before pilot go-live.
+- Phase 5 carries 22 unresolved fail-closed verification items (.planning/phases/05-communities-stories/05-VERIFICATION-DEBT.md, WINDOWS.md entry 43) plus H-05-02 (entry 42, a VIDEO story end to end, not closable locally). Phase 5 is NOT verified complete.
 
 ### Quick Tasks Completed
 
@@ -378,6 +382,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T12:29:23.636Z
-Stopped at: Completed 05-11-PLAN.md
+Last session: 2026-09-24T12:53:51.690Z
+Stopped at: Completed 05-12-PLAN.md
 Resume file: None

@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 29
+open_count: 30
 waived_count: 0
 fixed_count: 13
-total_count: 42
-last_updated: 2026-09-24T12:27:19.076Z
+total_count: 43
+last_updated: 2026-09-24T12:52:00.328Z
 ---
 
 # Broken Windows Ledger
@@ -57,6 +57,7 @@ last_updated: 2026-09-24T12:27:19.076Z
 | 40 | 05 | unrun-verify | apps/web/e2e/feed.spec.ts | 321 | the double-tap like is flaky under full-suite parallelism; passes in isolation (deferred-items.md #4) | open |  | 2026-09-24T04:01:21.500Z |  |
 | 41 | 05 | unrun-verify | apps/web/e2e/stories.spec.ts |  | Browser-level gesture gate over the restructured story stage (CR-04 DOM move) is deferred to 05-11 Task 3; happy-dom cannot hit-test pointer-events-none | fixed |  | 2026-09-24T12:11:05.270Z | 2026-09-24T12:27:12.354Z |
 | 42 | 05 | unrun-verify | apps/web/e2e/stories.spec.ts |  | No end-to-end case for VIDEO playback: the local provider is 'fake' with no HLS stream and the seed fixture is image-only, so an e2e would assert over a player that cannot play. 05-VERIFICATION human check 2 stays OPEN and is carried into 05-12's human-verification pack. | open |  | 2026-09-24T12:27:19.076Z |  |
+| 43 | 05 | unrun-verify | .planning/phases/05-communities-stories/05-VERIFICATION-DEBT.md |  | 22 of Phase 5's 23 fail-closed verification items are still unresolved and now assembled in one dossier: 13 carried prohibitions (P-05-01..P-05-14 minus the converted P-05-10), 5 backstop visual claims needing a 320px viewport (B-05-01..B-05-05), the device half of H-05-01, and the error-copy tap hole under P-05-10/H-05-04. H-05-02 is tracked separately as entry 42. None may be folded into a passing verdict. | open |  | 2026-09-24T12:52:00.328Z |  |
 
 ````json
 [
@@ -562,6 +563,18 @@ last_updated: 2026-09-24T12:27:19.076Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-24T12:27:19.076Z",
+    "resolved_at": null
+  },
+  {
+    "id": 43,
+    "kind": "unrun-verify",
+    "phase": "05",
+    "file": ".planning/phases/05-communities-stories/05-VERIFICATION-DEBT.md",
+    "line": null,
+    "description": "22 of Phase 5's 23 fail-closed verification items are still unresolved and now assembled in one dossier: 13 carried prohibitions (P-05-01..P-05-14 minus the converted P-05-10), 5 backstop visual claims needing a 320px viewport (B-05-01..B-05-05), the device half of H-05-01, and the error-copy tap hole under P-05-10/H-05-04. H-05-02 is tracked separately as entry 42. None may be folded into a passing verdict.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-24T12:52:00.328Z",
     "resolved_at": null
   }
 ]
