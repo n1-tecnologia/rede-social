@@ -4,17 +4,23 @@ import {
   STORY_COMMENTS_PAGE_SIZE,
   STORY_ISSUE_SET,
   STORY_PAGE_SIZE,
+  STORY_PIN_ISSUE_SET,
   type StoryComment,
   type StoryCommentIssue,
   type StoryCommentPage,
   type StoryIssue,
   type StoryLikeResult,
   type StoryPage,
+  type StoryPinIssue,
+  type StoryPinResult,
+  type StoryPins,
   type StorySummary,
   storyCommentPageSchema,
   storyCommentSchema,
   storyLikeResultSchema,
   storyPageSchema,
+  storyPinResultSchema,
+  storyPinsSchema,
   storySummarySchema,
 } from '@tria/module-stories/contracts';
 import { apiFetch } from '@/lib/api';
@@ -270,5 +276,110 @@ export function storyCommentIssue(error: unknown): StoryCommentIssue | null {
   const issue = (error.details as { comment?: unknown } | undefined)?.comment;
   return typeof issue === 'string' && STORY_COMMENT_ISSUE_SET.has(issue)
     ? (issue as StoryCommentIssue)
+    : null;
+}
+
+/* ── Community pins (STORY-04, D-68) ──────────────────────────────────────────────────────────── */
+
+/**
+ * `GET /v1/stories/pinned?communityId=` (STORY-04, D-68) — one community's Destaques row.
+ *
+ * **It NEVER redirects and never rethrows**, exactly as `loadStories` does not and for the same
+ * reason (UI-SPEC E12/error): the row is a widget ABOVE the post list on a screen reachable from a
+ * shared link. A failed highlights read must render NOTHING and leave the community page
+ * untouched — turning a transient failure into an error card, or into a navigation, would cost a
+ * member the whole page over a strip they may not even have.
+ *
+ * It answers `null` for a tenant whose `stories` module is OFF, too: the API 404s
+ * `MODULE_DISABLED`, this swallows it, and the community page simply has no Destaques section —
+ * which is the behaviour `phase5-smoke.spec.ts` witnesses in both directions.
+ */
+export async function loadCommunityHighlights(communityId: string): Promise<StoryPage | null> {
+  try {
+    const search = new URLSearchParams({ communityId, limit: String(STORY_PAGE_SIZE) });
+    const res = await apiFetch(`/v1/stories/pinned?${search.toString()}`);
+    if (!res.ok) throw await apiError(res);
+    return storyPageSchema.parse(await res.json());
+  } catch (error) {
+    // Shape only: a story CAPTION is member-facing content and never reaches a log line (T-05-29).
+    console.error('stories.highlights_failed', { error: String(error) });
+    return null;
+  }
+}
+
+/**
+ * `GET /v1/stories/mine` (D-84) — the admin's own history, expired stories included.
+ *
+ * Unlike the strip's read this one DOES surface its failure, because the history IS the screen: an
+ * empty list and an unreadable one are different answers there, and UI E08/error asks for the
+ * generic empty state plus a retry. `null` is "we could not read it".
+ */
+export async function loadOwnStories(query: StoryQueryInput = {}): Promise<StoryPage | null> {
+  try {
+    const search = new URLSearchParams();
+    if (query.cursor) search.set('cursor', query.cursor);
+    search.set('limit', String(query.limit ?? STORY_PAGE_SIZE));
+
+    const res = await apiFetch(`/v1/stories/mine?${search.toString()}`);
+    if (!res.ok) throw await apiError(res);
+    return storyPageSchema.parse(await res.json());
+  } catch (error) {
+    console.error('stories.list_own_failed', { error: String(error) });
+    return null;
+  }
+}
+
+/** `GET /v1/stories/{storyId}/pins` — the community ids a story is pinned to (the sheet's state). */
+export async function getStoryPins(storyId: string): Promise<StoryPins> {
+  const res = await apiFetch(`/v1/stories/${encodeURIComponent(storyId)}/pins`);
+  if (!res.ok) throw await apiError(res);
+  return storyPinsSchema.parse(await res.json());
+}
+
+/**
+ * `PUT` / `DELETE /v1/stories/{storyId}/pins/{communityId}` — one toggle, one request, no batch.
+ *
+ * The response is the AUTHORITATIVE `{ pinned, pinnedCommunityCount }` read back inside the API's
+ * transaction. Nothing here increments anything: the optimistic value lives in the switch and is
+ * replaced by this pair, or reverted when the request rejects (UI-D-41).
+ */
+async function toggleStoryPin(
+  storyId: string,
+  communityId: string,
+  method: 'PUT' | 'DELETE',
+): Promise<StoryPinResult> {
+  const res = await apiFetch(
+    `/v1/stories/${encodeURIComponent(storyId)}/pins/${encodeURIComponent(communityId)}`,
+    { method },
+  );
+  if (!res.ok) throw await apiError(res);
+  return storyPinResultSchema.parse(await res.json());
+}
+
+export const pinStory = (storyId: string, communityId: string) =>
+  toggleStoryPin(storyId, communityId, 'PUT');
+export const unpinStory = (storyId: string, communityId: string) =>
+  toggleStoryPin(storyId, communityId, 'DELETE');
+
+/** `DELETE /v1/stories/{storyId}` (D-84) — the admin soft-deletes one of their tenant's stories. */
+export async function deleteStory(storyId: string): Promise<void> {
+  const res = await apiFetch(`/v1/stories/${encodeURIComponent(storyId)}`, { method: 'DELETE' });
+  if (!res.ok) throw await apiError(res);
+}
+
+/**
+ * Reads the STORY-04 refusal the API put in `details.pin`, and nothing else from the envelope.
+ *
+ * One code (`archived`) and one miss (a bare 404, which is the SAME answer for an unknown story, an
+ * unknown community and another tenant's of either). Both become the generic error toast in the
+ * sheet — UI-D-41 asks for no inline message — but they are read here rather than guessed, so a
+ * future screen that wants to say "essa comunidade foi arquivada" has the code to switch on.
+ */
+export function storyPinIssue(error: unknown): StoryPinIssue | 'not_found' | null {
+  if (!(error instanceof ApiClientError)) return null;
+  if (error.status === 404) return 'not_found';
+  const issue = (error.details as { pin?: unknown } | undefined)?.pin;
+  return typeof issue === 'string' && STORY_PIN_ISSUE_SET.has(issue)
+    ? (issue as StoryPinIssue)
     : null;
 }

@@ -11,8 +11,11 @@ import {
   storyCommentPageSchema,
   storyCommentSchema,
   storyCommentsQuerySchema,
+  storyHighlightsQuerySchema,
   storyLikeResultSchema,
   storyPageSchema,
+  storyPinResultSchema,
+  storyPinsSchema,
   storyQuerySchema,
   storySummarySchema,
 } from '../contracts/index';
@@ -23,10 +26,14 @@ import {
   getStory,
   likeStory,
   listActiveStories,
+  listCommunityHighlights,
   listOwnStories,
   listStoryComments,
+  listStoryPins,
+  pinStory,
   publishStory,
   unlikeStory,
+  unpinStory,
 } from './service';
 
 /**
@@ -102,6 +109,26 @@ const listOwnRoute = createRoute({
       content: { 'application/json': { schema: storyPageSchema } },
     },
     403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+  },
+});
+
+/**
+ * D-68's community Destaques (STORY-04). Declared BEFORE `/{storyId}` so the literal segment wins
+ * the match: `pinned` is not a uuid, so the param route would 400 on it rather than falling through.
+ *
+ * **No `requirePermission`, and that is deliberate**: every member of the tenant sees a community's
+ * highlights, exactly as every member sees its posts. The write half is the guarded one.
+ */
+const highlightsRoute = createRoute({
+  method: 'get',
+  path: '/pinned',
+  request: { query: storyHighlightsQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One keyset page of the community's PINNED stories, newest pin first — EXPIRED ones included. The query carries no expiry predicate at all: the pin row IS the override (STORY-04). A community with no pins answers an empty `items` and a null `nextCursor`, never a 404.",
+      content: { 'application/json': { schema: storyPageSchema } },
+    },
   },
 });
 
@@ -287,10 +314,91 @@ const deleteCommentRoute = createRoute({
   },
 });
 
+/* ── Community pins (STORY-04, D-68) ──────────────────────────────────────────────────────────── */
+
+/**
+ * **The two WRITE routes carry `requirePermission('stories.story.manage')` and the READ carries
+ * none, and the asymmetry is the product rule** (T-05-48): pinning is an EDITORIAL act reserved to
+ * whoever moderates the tenant's stories, while a community's Destaques is something every member
+ * of the tenant sees — exactly as every member sees the community's posts.
+ *
+ * The literal is spelled out at each call site rather than read from `STORY_PERMISSIONS`, for the
+ * reason the chain note at the top of this file gives: it is the one string a reviewer greps for
+ * when asking "what guards pinning a story?".
+ *
+ * **There is no conflict status in this block.** A repeat pin answers 200 with the identical body
+ * and an unpin of something never pinned does too; the unique pair is the arbiter, not a check in
+ * the service and not an error code here.
+ */
+const pinParams = storyIdParam.extend({ communityId: z.uuid() });
+
+const storyPinResponses = {
+  200: {
+    description:
+      'The CURRENT state after the toggle, read back from the rows in the same transaction. `pinnedCommunityCount` is how many communities the STORY is pinned to. Idempotent: a repeat creates no second row, removes nothing a second time, and never answers 409.',
+    content: { 'application/json': { schema: storyPinResultSchema } },
+  },
+  403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+  404: {
+    description:
+      'The story or the community is unknown, another tenant’s, or removed — ONE bare code for all of them, no details (D-23, T-05-49).',
+  },
+} as const;
+
+const pinStoryRoute = createRoute({
+  method: 'put',
+  path: '/{storyId}/pins/{communityId}',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: { params: pinParams },
+  responses: {
+    ...storyPinResponses,
+    400: {
+      description:
+        "`VALIDATION_FAILED` with `details.pin = 'archived'` — an archived community takes no new content, and a pin is new content. 05-03's own code, not a second spelling of it.",
+    },
+  },
+});
+
+const unpinStoryRoute = createRoute({
+  method: 'delete',
+  path: '/{storyId}/pins/{communityId}',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: { params: pinParams },
+  responses: {
+    ...storyPinResponses,
+    // Deliberately NO 400 here: an ARCHIVED community can still be unpinned. Archiving gates new
+    // content; if it gated removal too, a story pinned before the archive would stay highlighted
+    // on that page forever with no affordance to take it down.
+  },
+});
+
+const listStoryPinsRoute = createRoute({
+  method: 'get',
+  path: '/{storyId}/pins',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: { params: storyIdParam },
+  responses: {
+    200: {
+      description:
+        "The community ids this story is pinned to — the pin sheet's initial state. Ids only: the sheet already holds the names from the page's own read.",
+      content: { 'application/json': { schema: storyPinsSchema } },
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    404: { description: 'No story with that id is visible to this tenant (D-23).' },
+  },
+});
+
 export const storiesRoutes = stories
   .openapi(listOwnRoute, async (c) =>
     c.json(await listOwnStories(c.get('ctx'), c.req.valid('query')), 200),
   )
+  .openapi(highlightsRoute, async (c) => {
+    const { communityId, ...query } = c.req.valid('query');
+    return c.json(await listCommunityHighlights(c.get('ctx'), communityId, query), 200);
+  })
   .openapi(listRoute, async (c) =>
     c.json(await listActiveStories(c.get('ctx'), c.req.valid('query')), 200),
   )
@@ -326,4 +434,16 @@ export const storiesRoutes = stories
     const { storyId, commentId } = c.req.valid('param');
     await deleteStoryComment(c.get('ctx'), storyId, commentId);
     return c.body(null, 204);
+  })
+  .openapi(listStoryPinsRoute, async (c) => {
+    const { storyId } = c.req.valid('param');
+    return c.json(await listStoryPins(c.get('ctx'), storyId), 200);
+  })
+  .openapi(pinStoryRoute, async (c) => {
+    const { storyId, communityId } = c.req.valid('param');
+    return c.json(await pinStory(c.get('ctx'), storyId, communityId), 200);
+  })
+  .openapi(unpinStoryRoute, async (c) => {
+    const { storyId, communityId } = c.req.valid('param');
+    return c.json(await unpinStory(c.get('ctx'), storyId, communityId), 200);
   });

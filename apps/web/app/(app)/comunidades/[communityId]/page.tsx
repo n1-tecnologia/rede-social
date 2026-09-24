@@ -15,11 +15,21 @@ import {
   likePostAction,
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
+import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
+import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
-import { feedCommentsProps, postCardLabels, postMenuLabels } from '@/lib/registry';
+import {
+  feedCommentsProps,
+  postCardLabels,
+  postMenuLabels,
+  storyCommentsProps,
+} from '@/lib/registry';
+import { relativeFrom } from '@/lib/relative-time';
+import { loadCommunityHighlights } from '@/lib/stories';
+import { storyViewerItem, storyViewerLabels } from '@/lib/story-view';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 import { CommunityPosts } from './CommunityPosts';
 
@@ -70,9 +80,13 @@ export default async function CommunityPage({
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const { communityId } = await params;
-  const [tc, tf, te, locale, bootstrap, shareOrigin, result] = await Promise.all([
+  const [tc, tf, ts, te, locale, bootstrap, shareOrigin, result] = await Promise.all([
     getTranslations('communities'),
     getTranslations('feed'),
+    // D-68's circles are the stories module's component with the stories module's copy — the
+    // Destaques SECTION TITLE is the communities namespace's, because it names the section rather
+    // than the things in it.
+    getTranslations('stories'),
     getTranslations('app.error'),
     getLocale(),
     requireBootstrap(),
@@ -112,16 +126,66 @@ export default async function CommunityPage({
   // The community is readable, so its posts are asked for SECOND rather than in the `Promise.all`
   // above: a miss must not pay for a page of posts nobody will see, and a cross-tenant probe must
   // not cost the API a second query either (the `/post/[postId]` rule).
-  const page = await loadFeed({ communityId: community.id });
+  const [page, pinned] = await Promise.all([
+    loadFeed({ communityId: community.id }),
+    // D-68 / STORY-04: the community's Destaques. `null` is "the tenant has no stories module" or
+    // "we could not read it" — both render NOTHING, which is the same answer an empty list gives.
+    loadCommunityHighlights(community.id),
+  ]);
   const now = Date.now();
   const { media, ...card } = postCardLabels(tf);
 
   /**
-   * D-68's pinned-story circle row. 05-08 (STORY-04) fills this slot; until then it is `null`, and
+   * D-68's pinned-story circle row, answered YES: the Destaques circles ARE the pinned stories, and
+   * a tap OPENS THE VIEWER on this community's own pinned sequence.
+   *
+   * **It is the SAME `StoriesStrip` the `/inicio` home slot renders** — one component, two data
+   * sources, two ring variants (UI-D-27). `StoriesSurface` is the client shell that gives the
+   * circles their `onOpen`, exactly as it does on the home screen, so a Destaques tap and a strip
+   * tap reach the identical screen. There is no tabbed layout on this page and must not be (D-68).
+   *
+   * **Every circle is visually identical whether its story is active or expired** (D-79, A-4): the
+   * ring variant is a property of the ROW, never of the story. `isActive` still rides the payload
+   * because the viewer needs it for the expired-mid-view case.
+   *
    * `null` means the row AND its `SectionTitle` are both absent with nothing in their place
    * (UI-SPEC E12/empty) — never a reserved height and never an empty-state card of its own.
    */
-  const highlights: ReactNode = null;
+  const highlightItems = pinned?.items ?? [];
+  const highlights: ReactNode =
+    highlightItems.length === 0 ? null : (
+      <StoriesSurface
+        items={highlightItems.map((story) => {
+          const time = relativeFrom(story.publishedAt, now);
+          return {
+            id: story.id,
+            label: time,
+            actionLabel: ts('circle.action', { time }),
+            assetId: story.mediaAssetId,
+            variantWidths: story.mediaVariantWidths,
+          };
+        })}
+        // STORY-02's rule, restated for this row: the viewer opens on the ROW'S OWN ordered
+        // sequence, built from the same read in the same request — so the Nth circle and the Nth
+        // segment can never disagree, and opening the viewer costs no second round trip.
+        viewer={{
+          items: highlightItems.map((story) => storyViewerItem(story, now)),
+          author: {
+            // V1's single publisher IS the tenant; see the note in `StoryViewerHost`.
+            name: bootstrap.tenant.displayName,
+            avatarUrl: bootstrap.tenant.branding.logoUrl,
+          },
+          labels: storyViewerLabels(ts),
+          onLike: likeStoryAction,
+          onUnlike: unlikeStoryAction,
+          comments: storyCommentsProps(locale, tf, ts, bootstrap),
+        }}
+        // UI-D-27: the neutral ring. The brand ring means "live now, tap me" and belongs to the
+        // strip alone; Destaques is the community's editorial archive.
+        ringVariant="neutral"
+        regionLabel={tc('page.highlights')}
+      />
+    );
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col">

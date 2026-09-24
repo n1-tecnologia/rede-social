@@ -1,12 +1,22 @@
 import { tenantIsolationPolicy } from '@tria/core/db/rls';
 import { mediaAssets, tenants, users } from '@tria/core/db/schema';
 import { sql } from 'drizzle-orm';
-import { check, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  check,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 /**
- * The stories module's one table (STORY-01, STORY-03) — the tenant's 24 h broadcast.
+ * The stories module's two tables (STORY-01, STORY-03, STORY-04) — the tenant's 24 h broadcast and
+ * the join that lets an editorial act outlive it.
  *
- * FOUR THINGS A REVIEWER MUST NOT "FIX":
+ * SIX THINGS A REVIEWER MUST NOT "FIX":
  *
  * 1. **`expires_at` is a plain column with a VOLATILE DEFAULT, not a generated column.** The obvious
  *    "improvement" — `generated always as (published_at + interval '24 hours') stored` — is refused
@@ -38,6 +48,20 @@ import { check, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-o
  *    strip because `now()` moved, and the ROW IS RETAINED FOREVER — which is what makes the admin's
  *    history screen (D-84) and 05-08's pins possible with no extra state, and what stops a member's
  *    comment vanishing because a clock passed.
+ *
+ * 5. **UNPIN IS A HARD DELETE, and this is deliberate.** It is the one place Phase 5 departs from
+ *    the soft-delete convention, so say it here rather than let a reviewer "fix" it: a pin carries
+ *    NO AUTHORED CONTENT and NO MODERATION EVIDENCE — it is a pair of ids and a timestamp recording
+ *    an editorial act that has since been undone. The unique pair on `story_community_pins` is the
+ *    idempotency arbiter, and a soft-deleted pin would need an extra `deleted_at is null` predicate
+ *    threaded through every join that reads it, plus a decision about what re-pinning a
+ *    soft-deleted pair means. `story.unpinned` is the record that it happened.
+ *
+ * 6. **THE PIN ROW IS THE EXPIRY OVERRIDE.** `listCommunityHighlights` carries NO expiry predicate
+ *    at all — that ABSENCE is the mechanism, not an oversight, and it is asserted under a clock the
+ *    test controls in `110-communities-stories.sql`. There is deliberately no column on `stories`
+ *    recording that it is pinned: STORY-04 says "one or more communities", which a boolean cannot
+ *    represent, and a denormalised count would be a second writer of a fact the join already holds.
  *
  * Authorship is the generic `author_user_id -> users.id` (SCHEMA-CONVENTIONS §(c).1), so V2 member
  * stories are rows rather than a migration.
@@ -106,5 +130,61 @@ export const stories = pgTable(
     // migration, a psql session) cannot invert the window or publish a story already expired.
     check('stories_expiry_window_chk', sql`${t.expiresAt} > ${t.publishedAt}`),
     tenantIsolationPolicy('stories_tenant_isolation'),
+  ],
+).enableRLS();
+
+/**
+ * STORY-04's join: which stories a community keeps as its Destaques, one row per (story, community)
+ * pair. **The pin ROW IS the expiry override** — see item 6 of the docblock above.
+ *
+ * The pair is a set of INDEPENDENT FACTS, which is why this is a join table and not a column: the
+ * requirement says "one or more communities", and no boolean or timestamp on `stories` could
+ * represent that without duplicating the join anyway.
+ *
+ * **`community_id` carries no drizzle `.references()`, and that is not an omission.** The
+ * communities table lives in `@tria/module-communities/db`, and reaching it from here would be the
+ * `module -> module` package edge `turbo boundaries` denies (MOD-02). The foreign key is REAL and is
+ * declared as hand-written SQL inside this table's migration, exactly as `feed_comments_story_fk`
+ * and `feed_likes_story_fk` were in `*_stories.sql`. The constraint is what `020-tenant-isolation.sql`
+ * and `110-communities-stories.sql` assert; the missing TypeScript reference costs nothing but the
+ * convenience of a typed join, which this module never performs.
+ */
+export const storyCommunityPins = pgTable(
+  'story_community_pins',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    storyId: uuid('story_id')
+      .notNull()
+      .references(() => stories.id, { onDelete: 'cascade' }),
+    /** -> `public.communities.id` on delete cascade, declared in SQL. See the docblock above. */
+    communityId: uuid('community_id').notNull(),
+    /** Who performed the editorial act. Phase 8 reads it; no member-facing surface does. */
+    pinnedByUserId: uuid('pinned_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    pinnedAt: timestamp('pinned_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // THE IDEMPOTENCY ARBITER. `on conflict … do nothing` against this pair is what makes a repeat
+    // pin a no-op rather than a 409, and it is also why unpin can be a plain delete: there is at
+    // most one row to remove, so "remove the pin" needs no disambiguation.
+    uniqueIndex('story_community_pins_uq').on(t.storyId, t.communityId),
+    // The Destaques read's ordering, verbatim, tie-breaker included — `(pinned_at, id)` is a TOTAL
+    // order the index carries, so a page boundary can neither duplicate nor skip a row.
+    //
+    // `.nullsFirst()` is NOT decoration (04-03's lesson): drizzle's `.desc()` alone emits
+    // `DESC NULLS LAST`, while SQL's `order by x desc` means `desc NULLS FIRST`, and the mismatch
+    // stops the planner using the index to DELIVER the ordering. Both key columns are NOT NULL, so
+    // this changes no result — only whether the index is usable at all.
+    index('story_community_pins_tenant_community_idx').on(
+      t.tenantId,
+      t.communityId,
+      t.pinnedAt.desc().nullsFirst(),
+      t.id.desc().nullsFirst(),
+    ),
+    tenantIsolationPolicy('story_community_pins_tenant_isolation'),
   ],
 ).enableRLS();

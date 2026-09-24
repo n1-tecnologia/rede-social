@@ -1,17 +1,16 @@
-import { withTenantTx } from '@tria/core/db/tenant-tx';
+import { type Tx, withTenantTx } from '@tria/core/db/tenant-tx';
 import type { RequestContext } from '@tria/core/server/auth/context';
 import { emit } from '@tria/core/server/events/bus';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { moduleLogger } from '@tria/core/server/logging';
 import { decodeCursor, encodeCursor, keysetComparison } from '@tria/core/server/paging';
-import { sql } from 'drizzle-orm';
+import { type SQL, sql } from 'drizzle-orm';
 import type {
   CreateStoryComment,
   PublishStory,
   StoryComment,
   StoryCommentPage,
   StoryCommentsQuery,
-  StoryHighlightsQuery,
   StoryLikeResult,
   StoryMediaKind,
   StoryPage,
@@ -99,8 +98,16 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  *
  * `is_active` is computed HERE, under the statement's own `now()`, so the flag and the rows it
  * describes come from one clock (UI-D-14).
+ *
+ * `pinned_community_count` (STORY-04) is counted in the SAME statement for the same reason
+ * everything else is: UI-D-40's history row renders it, and fetching it per row would be the N+1
+ * `feed-query-budget.test.ts` has a ceiling for. It rides the strip's read too, unread, because one
+ * projection serving three surfaces is what stops the three disagreeing about what a story is.
+ *
+ * `extra` is how the Destaques read adds the two PIN columns its cursor is built from without
+ * either duplicating this column list or pushing pin-specific columns onto the other two reads.
  */
-function storyProjection(viewerUserId: string) {
+function storyProjection(viewerUserId: string, extra: SQL | null = null) {
   return sql`
     select s.id,
            s.author_user_id,
@@ -120,7 +127,12 @@ function storyProjection(viewerUserId: string) {
              select 1 from feed_likes l
               where l.story_id = s.id
                 and l.user_id = ${viewerUserId}::uuid
-           ) as viewer_liked
+           ) as viewer_liked,
+           (
+             select count(*)::int from story_community_pins sp
+              where sp.story_id = s.id
+           ) as pinned_community_count
+           ${extra ?? sql``}
       from stories s
       join media_assets a on a.id = s.media_asset_id`;
 }
@@ -878,36 +890,298 @@ export async function deleteStoryComment(
   );
 }
 
-/* ── Community pins (STORY-04, D-68) — RED SKELETONS ──────────────────────────────────────────── */
+/* ── Community pins (STORY-04, D-68) ──────────────────────────────────────────────────────────── */
 
 /**
- * Signature-only-and-wrong, on purpose: the RED phase needs the symbols to EXIST (an absent export
- * crashes the loader, which is `INVALID_RED`) while none of the behaviour does. Every value below is
- * frozen and deliberately mismatched against `tests/story-pins.test.ts`.
+ * What the pair lookup inside a pin write resolves. BOTH ids are read back from the database rather
+ * than taken from the path: a story or a community this lane cannot see yields no row at all, so a
+ * cross-tenant id cannot reach the insert even though the row it names exists somewhere (T-05-49).
+ */
+type PinTargetRow = { story_id: string; community_id: string; community_status: string };
+
+/**
+ * The pair lookup both halves of the toggle share, so the two can never disagree about what
+ * "this story, this community, this tenant" means.
+ *
+ * The join names `public.communities` through RAW SQL rather than through
+ * `@tria/module-communities`'s schema export, exactly as `viewer_liked` names `feed_likes`: a
+ * `module -> module` package dependency is denied by `turbo boundaries` (MOD-02), and the table is
+ * 05-01's published shape. RLS decides visibility for both sides in this lane; the explicit
+ * `tenant_id` predicates are the second of the three layers, carried on purpose.
+ */
+async function resolvePinTarget(
+  tx: Tx,
+  ctx: RequestContext,
+  storyId: string,
+  communityId: string,
+): Promise<PinTargetRow> {
+  const rows = await tx.execute<PinTargetRow>(sql`
+    select s.id as story_id, c.id as community_id, c.status as community_status
+      from stories s
+      join communities c
+        on c.id = ${communityId}::uuid
+       and c.tenant_id = ${ctx.tenantId}::uuid
+       and c.deleted_at is null
+     where s.id = ${storyId}::uuid
+       and s.tenant_id = ${ctx.tenantId}::uuid
+       and s.deleted_at is null
+     limit 1`);
+  const target = rows[0];
+  // Unknown story, unknown community, another tenant's of either, removed — ONE indistinguishable
+  // answer with no `details` at all (D-23, T-05-49). There is nothing here that compares tenant
+  // ids, so no later edit can turn this into a 403 that confirms the row exists somewhere.
+  if (!target) throw new ApiError(404, 'NOT_FOUND');
+  return target;
+}
+
+/** How many communities a story is pinned to, read back from the ROWS inside the same transaction. */
+async function readPinnedCount(tx: Tx, storyId: string): Promise<number> {
+  const rows = await tx.execute<{ pinned_community_count: number }>(sql`
+    select count(*)::int as pinned_community_count
+      from story_community_pins
+     where story_id = ${storyId}::uuid`);
+  return rows[0]?.pinned_community_count ?? 0;
+}
+
+/**
+ * `PUT /v1/stories/{storyId}/pins/{communityId}` (STORY-04) — the editorial act, behind
+ * `stories.story.manage`.
+ *
+ * It is `likePost`'s shape, because it is the same kind of write over a different pair:
+ *
+ *  - **both ids are RESOLVED inside the transaction** before anything is written (T-05-49);
+ *  - **`story_community_pins_uq` is the idempotency arbiter, not application code.** `on conflict …
+ *    do nothing` means a repeat pin inserts nothing and answers 200 with the current state, NEVER a
+ *    409 — a conflict status would surface as an error toast on a gesture the admin has every right
+ *    to repeat, and would make the sheet's optimistic switch revert on a state that is already true;
+ *  - **the count is READ BACK from the rows**, never incremented here;
+ *  - **the event counts a TRANSITION.** `returning id` is what distinguishes "a row was created"
+ *    from "the unique pair absorbed the write", and only the first announces anything. Phase 7
+ *    builds a notification row straight from this payload, and a duplicate announcement of a state
+ *    that never changed is a lie it cannot detect (the `story.unliked` rule, applied to both halves).
+ *
+ * An ARCHIVED target is refused with 05-03's own `archived` code: an archived container takes no new
+ * content, and pinning into one is new content. Unpinning FROM one is not — see `unpinStory`.
+ *
+ * **Expiry is not a predicate here.** Pinning an expired story is the entire point of STORY-04.
  */
 export async function pinStory(
-  _ctx: RequestContext,
-  _storyId: string,
-  _communityId: string,
+  ctx: RequestContext,
+  storyId: string,
+  communityId: string,
 ): Promise<StoryPinResult> {
-  return { pinned: false, pinnedCommunityCount: 0 };
+  const { pinnedCommunityCount, created } = await withTenantTx(ctx, async (tx) => {
+    const target = await resolvePinTarget(tx, ctx, storyId, communityId);
+    if (target.community_status !== 'active') {
+      throw new ApiError(400, 'VALIDATION_FAILED', { pin: 'archived' });
+    }
+
+    const inserted = await tx.execute<{ id: string }>(sql`
+      insert into story_community_pins (tenant_id, story_id, community_id, pinned_by_user_id)
+      values (${ctx.tenantId}::uuid,
+              ${target.story_id}::uuid,
+              ${target.community_id}::uuid,
+              ${ctx.userId}::uuid)
+      on conflict (story_id, community_id) do nothing
+      returning id`);
+
+    return {
+      pinnedCommunityCount: await readPinnedCount(tx, storyId),
+      created: inserted.length > 0,
+    };
+  });
+
+  if (created) {
+    emit(ctx, 'story.pinned', {
+      tenantId: ctx.tenantId,
+      storyId,
+      communityId,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  log.info(
+    {
+      event: 'stories.pinned',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      storyId,
+      communityId,
+      created,
+      pinnedCommunityCount,
+    },
+    'story pinned to a community',
+  );
+
+  return { pinned: true, pinnedCommunityCount };
 }
 
+/**
+ * `DELETE /v1/stories/{storyId}/pins/{communityId}` — the other half, equally idempotent.
+ *
+ * **The delete is HARD, deliberately** — see item 5 of the schema's reviewer docblock. A pin carries
+ * no authored content and no moderation evidence, the unique pair is the arbiter, and a
+ * soft-deleted pin would need an extra predicate threaded through every join that reads it.
+ *
+ * **An ARCHIVED community can still be unpinned**, and that asymmetry is the point: archiving gates
+ * NEW content. If it gated removal too, a story pinned before the archive would stay highlighted on
+ * that page forever with no affordance to take it down.
+ *
+ * Unpinning something that was never pinned removes nothing, answers 200 with the current count and
+ * emits NOTHING — an event counting transitions must not announce one that did not happen.
+ */
 export async function unpinStory(
-  _ctx: RequestContext,
-  _storyId: string,
-  _communityId: string,
+  ctx: RequestContext,
+  storyId: string,
+  communityId: string,
 ): Promise<StoryPinResult> {
-  return { pinned: true, pinnedCommunityCount: 0 };
+  const { pinnedCommunityCount, removed } = await withTenantTx(ctx, async (tx) => {
+    const target = await resolvePinTarget(tx, ctx, storyId, communityId);
+
+    const deleted = await tx.execute<{ id: string }>(sql`
+      delete from story_community_pins
+       where story_id = ${target.story_id}::uuid
+         and community_id = ${target.community_id}::uuid
+      returning id`);
+
+    return {
+      pinnedCommunityCount: await readPinnedCount(tx, storyId),
+      removed: deleted.length > 0,
+    };
+  });
+
+  if (removed) {
+    emit(ctx, 'story.unpinned', {
+      tenantId: ctx.tenantId,
+      storyId,
+      communityId,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  log.info(
+    {
+      event: 'stories.unpinned',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      storyId,
+      communityId,
+      removed,
+      pinnedCommunityCount,
+    },
+    'story unpinned from a community',
+  );
+
+  return { pinned: false, pinnedCommunityCount };
 }
 
+/** The Destaques row's own two cursor columns, carried beside the shared story projection. */
+type HighlightRow = StoryRow & { pin_id: string; pinned_at: string };
+
+/**
+ * `GET /v1/stories/pinned?communityId=` (STORY-04, D-68) — one community's Destaques.
+ *
+ * **READ THE `where` CLAUSE FOR WHAT IS NOT IN IT.** There is no `expires_at > now()` here, and that
+ * ABSENCE is the entire mechanism of STORY-04: the pin row IS the expiry override, so a pinned story
+ * is visible on its community page for EVERY value of `now()` until somebody unpins it.
+ * `110-communities-stories.sql` asserts exactly that, under a clock the test controls, beside the
+ * strip predicate refusing the same row in the same transaction — so the two surfaces are proved to
+ * disagree deliberately rather than by accident.
+ *
+ * The one predicate that IS here on the story is `deleted_at is null` (Pitfall 9): deleting a story
+ * must remove it from every surface at once, including other communities' highlights (T-05-52). The
+ * pin rows stay as the record of where it had been.
+ *
+ * **Every member sees a community's highlights**, so the route carries no permission — only
+ * `requireModule('stories')`. Ordering is `pinned_at desc, p.id desc`, the ordered pair
+ * `story_community_pins_tenant_community_idx` is built on, and the cursor's `n` is the row's own
+ * `pinned_at` read back from the statement rather than re-derived in JavaScript.
+ *
+ * The readiness filter is deliberately ABSENT too: a pinned story whose video is still transcoding
+ * would otherwise vanish from a community page for a while and come back, which reads as a bug. The
+ * circle renders its neutral box in the meantime, which is the same branch a failed fetch takes.
+ */
 export async function listCommunityHighlights(
-  _ctx: RequestContext,
-  _query: StoryHighlightsQuery,
+  ctx: RequestContext,
+  communityId: string,
+  query: StoryQuery,
 ): Promise<StoryPage> {
-  return { items: [], nextCursor: null };
+  const limit = query.limit;
+  const after = decodeCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<HighlightRow>(sql`
+      ${storyProjection(
+        ctx.userId,
+        sql`, p.id as pin_id,
+           to_char(p.pinned_at at time zone 'utc', ${ISO_MICROSECONDS}) as pinned_at`,
+      )}
+      join story_community_pins p
+        on p.story_id = s.id
+       and p.tenant_id = s.tenant_id
+       where p.tenant_id = ${ctx.tenantId}::uuid
+         and p.community_id = ${communityId}::uuid
+         and s.deleted_at is null
+         and (
+           ${afterAt}::timestamptz is null
+           or (p.pinned_at, p.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by p.pinned_at desc, p.id desc
+       limit ${limit + 1}`),
+  );
+
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.pinned_at, id: last.pin_id }) : null;
+
+  log.info(
+    {
+      event: 'stories.highlights',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      communityId,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'community highlights listed',
+  );
+
+  return { items: page.map(toStory), nextCursor };
 }
 
-export async function listStoryPins(_ctx: RequestContext, _storyId: string): Promise<StoryPins> {
-  return { communityIds: [] };
+/**
+ * `GET /v1/stories/{storyId}/pins` — the community ids a story is pinned to, which is the pin
+ * sheet's initial state.
+ *
+ * Ids only: the sheet already holds the NAMES from the page's own read, and sending them again
+ * would be a second source of the same words. The story is resolved first so a miss answers the
+ * same bare 404 every other story-scoped route does, rather than an empty list that would tell a
+ * caller "this story exists and has no pins".
+ */
+export async function listStoryPins(ctx: RequestContext, storyId: string): Promise<StoryPins> {
+  const communityIds = await withTenantTx(ctx, async (tx) => {
+    const stories = await tx.execute<{ id: string }>(sql`
+      select id from stories
+       where id = ${storyId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+         and deleted_at is null
+       limit 1`);
+    if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
+
+    const rows = await tx.execute<{ community_id: string }>(sql`
+      select community_id from story_community_pins
+       where story_id = ${storyId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+       order by pinned_at desc, id desc`);
+    return rows.map((row) => row.community_id);
+  });
+
+  return { communityIds };
 }
