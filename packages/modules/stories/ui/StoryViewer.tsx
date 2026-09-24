@@ -538,47 +538,68 @@ export function StoryViewer({
             className="h-full basis-2/3 focus-visible:outline-none"
           />
         </div>
+      </div>
 
-        {isVideo && autoplayBlocked ? (
+      {/* ── OUTSIDE the stage, deliberately (CR-04) ─────────────────────────────────────────────
+          Both controls below used to live INSIDE the div above, the one that owns
+          `onPointerDown`/`onPointerMove`/`onPointerUp`. A tap on either therefore also ran the
+          stage's tap-zone maths and advanced the story: the member pressed "play" and lost the
+          story instead. The viewer must not mount two different meanings on the same tap.
+
+          The isolation is STRUCTURAL rather than propagational — a control that is not in the
+          subtree carrying the handlers cannot bubble into them, and there is no propagation-halting
+          call anywhere in this file for a later edit to delete by accident. They keep their `z-[4]`, which sits above
+          the stage in the same stacking context the header row (`z-[3]`) already uses.
+
+          REGRESSION GATE: `apps/web/e2e/stories.spec.ts` drives this exact stage with real pointer
+          gestures (tap-to-navigate, hold-to-pause, swipe-to-dismiss, deep link). It runs against
+          this restructure in **05-11 Task 3**, wave 9 — not in wave 8, where 05-09 already holds
+          the seeded database and the dev-server ports for its own Playwright run. */}
+
+      {isVideo && autoplayBlocked ? (
+        // The badge occupies only its own box, so the area around it stays tappable by the stage.
+        <button
+          type="button"
+          data-testid="story-autoplay-badge"
+          aria-label={labels.play}
+          onClick={() => {
+            setBlocked((state) => ({ ...state, [currentId]: false }));
+            setPlayAttempt((value) => value + 1);
+            // Synchronously inside the gesture: iOS grants playback to the handler, not to a
+            // later effect.
+            current?.onRequestPlay?.();
+          }}
+          className="absolute top-1/2 left-1/2 z-[4] grid h-14 w-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/60 text-white"
+          data-play-attempt={playAttempt}
+        >
+          <Play size={24} aria-hidden className="fill-current" />
+        </button>
+      ) : null}
+
+      {currentState === 'error' ? (
+        // `absolute inset-0` as a SIBLING of the stage would swallow every tap on the whole screen,
+        // and the member could no longer advance past a failed story. So: the container is
+        // transparent to hit-testing and only the control that needs a tap of its own takes one —
+        // the same two-part idiom the veil and the tap-zone row use above, for the same reason.
+        <div
+          data-testid="story-media-error"
+          className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center gap-3 px-8 text-center"
+        >
+          <p className="text-sm">{labels.mediaError}</p>
           <button
             type="button"
-            data-testid="story-autoplay-badge"
-            aria-label={labels.play}
-            onClick={() => {
-              setBlocked((state) => ({ ...state, [currentId]: false }));
-              setPlayAttempt((value) => value + 1);
-              // Synchronously inside the gesture: iOS grants playback to the handler, not to a
-              // later effect.
-              current?.onRequestPlay?.();
-            }}
-            className="absolute top-1/2 left-1/2 z-[4] grid h-14 w-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/60 text-white"
-            data-play-attempt={playAttempt}
+            onClick={() =>
+              setAttempt((state) => {
+                setMediaState((media) => ({ ...media, [currentId]: 'loading' }));
+                return { ...state, [currentId]: (state[currentId] ?? 0) + 1 };
+              })
+            }
+            className="pointer-events-auto text-sm font-bold underline"
           >
-            <Play size={24} aria-hidden className="fill-current" />
+            {labels.retry}
           </button>
-        ) : null}
-
-        {currentState === 'error' ? (
-          <div
-            data-testid="story-media-error"
-            className="absolute inset-0 z-[4] flex flex-col items-center justify-center gap-3 px-8 text-center"
-          >
-            <p className="text-sm">{labels.mediaError}</p>
-            <button
-              type="button"
-              onClick={() =>
-                setAttempt((state) => {
-                  setMediaState((media) => ({ ...media, [currentId]: 'loading' }));
-                  return { ...state, [currentId]: (state[currentId] ?? 0) + 1 };
-                })
-              }
-              className="text-sm font-bold underline"
-            >
-              {labels.retry}
-            </button>
-          </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <StoryProgressBars items={items} index={index} progress={progress} />
 
