@@ -341,7 +341,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8)*
 
-- [ ] 05-11-PLAN.md — GAP 2 video half / STORY-02: attach `StoryVideo`'s listeners to the late-mounting `mux-player`, prove a video segment advances inside the real viewer, and put the three `/stories` routes inside the static-route gate
+- [x] 05-11-PLAN.md — GAP 2 video half / STORY-02: attach `StoryVideo`'s listeners to the late-mounting `mux-player`, prove a video segment advances inside the real viewer, and put the three `/stories` routes inside the static-route gate
 
 **Wave 10** *(blocked on Wave 9)*
 
@@ -413,7 +413,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 | 2. Tenant Shell, Branding & Platform Panel | 20/20 | In Progress|  |
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
 | 4. Feed | 10/10 | In Progress|  |
-| 5. Communities & Stories | 10/12 | In Progress|  |
+| 5. Communities & Stories | 11/12 | In Progress|  |
 | 6. Events | 0/TBD | Not started | - |
 | 7. Notifications, Web Push & Support Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |

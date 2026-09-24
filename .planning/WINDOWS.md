@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 29
 waived_count: 0
-fixed_count: 12
-total_count: 41
-last_updated: 2026-09-24T12:11:05.270Z
+fixed_count: 13
+total_count: 42
+last_updated: 2026-09-24T12:27:19.076Z
 ---
 
 # Broken Windows Ledger
@@ -55,7 +55,8 @@ last_updated: 2026-09-24T12:11:05.270Z
 | 38 | 05 | deviation | apps/web/e2e/stories.spec.ts |  | The UI-SPEC overflow backstop states 25 progress segments at 320px; the strip is ONE page and STORY_PAGE_SIZE=10 caps it, so the e2e measures the real ceiling and the 25-segment DOM shape is pinned in story-viewer.test.tsx instead | open |  | 2026-09-24T00:38:56.078Z |  |
 | 39 | 05 | deviation | package.json |  | pnpm verify had to re-seed between test:integration and e2e — the integration suite wipes storage.objects for the demo tenant's fixed-id assets | open |  | 2026-09-24T04:01:21.422Z |  |
 | 40 | 05 | unrun-verify | apps/web/e2e/feed.spec.ts | 321 | the double-tap like is flaky under full-suite parallelism; passes in isolation (deferred-items.md #4) | open |  | 2026-09-24T04:01:21.500Z |  |
-| 41 | 05 | unrun-verify | apps/web/e2e/stories.spec.ts |  | Browser-level gesture gate over the restructured story stage (CR-04 DOM move) is deferred to 05-11 Task 3; happy-dom cannot hit-test pointer-events-none | open |  | 2026-09-24T12:11:05.270Z |  |
+| 41 | 05 | unrun-verify | apps/web/e2e/stories.spec.ts |  | Browser-level gesture gate over the restructured story stage (CR-04 DOM move) is deferred to 05-11 Task 3; happy-dom cannot hit-test pointer-events-none | fixed |  | 2026-09-24T12:11:05.270Z | 2026-09-24T12:27:12.354Z |
+| 42 | 05 | unrun-verify | apps/web/e2e/stories.spec.ts |  | No end-to-end case for VIDEO playback: the local provider is 'fake' with no HLS stream and the seed fixture is image-only, so an e2e would assert over a player that cannot play. 05-VERIFICATION human check 2 stays OPEN and is carried into 05-12's human-verification pack. | open |  | 2026-09-24T12:27:19.076Z |  |
 
 ````json
 [
@@ -546,9 +547,21 @@ last_updated: 2026-09-24T12:11:05.270Z
     "file": "apps/web/e2e/stories.spec.ts",
     "line": null,
     "description": "Browser-level gesture gate over the restructured story stage (CR-04 DOM move) is deferred to 05-11 Task 3; happy-dom cannot hit-test pointer-events-none",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-24T12:11:05.270Z",
+    "resolved_at": "2026-09-24T12:27:12.354Z"
+  },
+  {
+    "id": 42,
+    "kind": "unrun-verify",
+    "phase": "05",
+    "file": "apps/web/e2e/stories.spec.ts",
+    "line": null,
+    "description": "No end-to-end case for VIDEO playback: the local provider is 'fake' with no HLS stream and the seed fixture is image-only, so an e2e would assert over a player that cannot play. 05-VERIFICATION human check 2 stays OPEN and is carried into 05-12's human-verification pack.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-24T12:27:19.076Z",
     "resolved_at": null
   }
 ]

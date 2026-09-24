@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
 status: executing
-stopped_at: Completed 05-10-PLAN.md
-last_updated: "2026-09-24T12:10:20.523Z"
+stopped_at: Completed 05-11-PLAN.md
+last_updated: "2026-09-24T12:29:32.117Z"
 last_activity: 2026-09-24
 last_activity_desc: Phase 05 execution started
-state_head: 1f4b2eb40191c46e158589d9ffb0b6d2968a8724
+state_head: aeaaf19193f08f8b9e70eda58fa461c1cb2dbf0f
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 62
-  completed_plans: 57
+  completed_plans: 58
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 05 (Communities & Stories) — EXECUTING
-Plan: 11 of 12
+Plan: 12 of 12
 Status: Ready to execute
 Last activity: 2026-09-24 — Phase 05 execution started
 
@@ -115,6 +115,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P08 | 2h 12m | 3 tasks | 35 files |
 | Phase 05 P09 | 25min | 3 tasks | 8 files |
 | Phase 05 P10 | 42min | 3 tasks | 5 files |
+| Phase 05 P11 | 13min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -342,6 +343,9 @@ Recent decisions affecting current work:
 - [Phase 05]: StoryViewer's media controls are two memo layers over a live ref, replacing the render-time controlsFor factory; StoryMediaControls' type is unchanged but its identity lifecycle is not (05-11 must key video effects on values, never handler identities)
 - [Phase 05]: An empty variant ladder routes into MediaImage's EXISTING failure outcome rather than a new three-valued status union (the plan's assumption-delta no-change decision, honoured)
 - [Phase 05]: Gesture isolation is structural, not propagational: the play badge and media-error container are siblings of the stage, with pointer-events-none/auto on the error container and its retry
+- [Phase 05]: StoryVideo observes for the vendor element with a MutationObserver over its own frame instead of a one-shot querySelector keyed on the token commit — next/dynamic(ssr:false) has not mounted the custom element on that commit, and it does not forward refs, so a ref callback is not the alternative
+- [Phase 05]: The story viewer's unit suite stops stubbing the component under test: StoryViewerHost.test.tsx mocks the playback-token SERVER ACTION and the VENDOR PACKAGE, leaves next/dynamic unmocked, and asserts a real video segment filling to 50% from the element's own time
+- [Phase 05]: STORY-02 marked complete: both media paths in the viewer now have executable evidence and the browser-level gesture gate is green; the missing VIDEO-playback e2e is carried as a named limitation into 05-12's human pack
 
 ### Pending Todos
 
@@ -374,6 +378,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T12:10:09.140Z
-Stopped at: Completed 05-10-PLAN.md
+Last session: 2026-09-24T12:29:23.636Z
+Stopped at: Completed 05-11-PLAN.md
 Resume file: None
