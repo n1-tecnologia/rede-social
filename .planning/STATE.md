@@ -4,10 +4,10 @@ current_phase: 05
 current_phase_name: Communities & Stories
 status: Phase 05 UAT partial — 11/12 passed, test 1 blocked on the absent video provider (Mux). Next actionable work is Phase 05.1.
 stopped_at: Completed 05-12-PLAN.md
-last_updated: "2026-09-24T16:55:46.349Z"
+last_updated: "2026-09-24T17:44:39.699Z"
 last_activity: 2026-09-24
 last_activity_desc: "Phase 05 UAT session: 11 passed, 1 blocked, 1 incidental gap deferred with the Mux work; Phase 05.1 inserted for three user-reported authoring gaps"
-state_head: 6b8725dc5a7ef0d168b34675df2e7adfb96761ed
+state_head: c0c1acde60fa09c6ac29055bfd23ee2b6c7a7eaf
 progress:
   total_phases: 10
   completed_phases: 0
@@ -373,6 +373,7 @@ None yet.
 
 - Phase 01.1 inserted after Phase 1: Cloud Provisioning & First Release: plans 01-10/01-11/01-12 moved out of Phase 1 as 01.1-01..03 because the cloud accounts do not exist yet; Phase 1 closes on the local stack and Phases 2-8 proceed locally. PWA-04 moved to 01.1.
 - Phase 05.1 inserted after Phase 5: Community Authoring Entry Points — create-community CTA unreachable once a community exists, archived communities unreachable without a UUID, and stories cannot be created from inside a community. All three user-reported in Phase 5 UAT; must ship before Phase 6. (URGENT)
+- Phase 05.1 edited: added success criterion 5 — the story composer itself asks whether the story goes to a community, with 'no community' a first-class answer; criteria 3 and 5 flagged as one mechanism
 
 ## Deferred Items
 
