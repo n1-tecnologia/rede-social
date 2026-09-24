@@ -57,6 +57,15 @@ export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
   } | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
 
+  /** The vendor element the listeners below are currently attached to, or null. */
+  const playerRef = useRef<PlayableElement | null>(null);
+  /**
+   * How many times an element has been attached. Its ONLY job is to re-run the pause/mute effect
+   * at the moment the element appears, so the flags the bridge is already holding are applied then
+   * rather than at the next toggle.
+   */
+  const [attachments, setAttachments] = useState(0);
+
   /**
    * The controls object is rebuilt on every viewer render; reading it through a ref keeps the DOM
    * listeners below attached ONCE instead of being torn down sixty times a second.
@@ -90,48 +99,96 @@ export function StoryVideo({ assetId, controls, onPlayRef }: StoryVideoProps) {
   /**
    * The element's own events ARE the clock for a video segment — never a timer beside it.
    *
-   * `tokens` is a dependency the body never reads, and that is the point: it is what MOUNTS
-   * `<mux-player>`, so re-running on its change is the only moment the element exists to attach to.
+   * **The element is mounted by a CHILD THAT RESOLVES ASYNCHRONOUSLY, so this bridge OBSERVES for
+   * it instead of guessing when it will arrive.** This effect used to key on `tokens` — a
+   * dependency its body never read — on the reasoning that setting the token is what mounts
+   * `<mux-player>`. It is not: `MuxPlayer` comes through `next/dynamic(…, { ssr: false })`, whose
+   * chunk has not resolved on the commit where `tokens` first becomes non-null. The one-shot
+   * `querySelector` returned null, the effect returned early, and neither dependency ever changed
+   * again — so no `timeupdate` was ever forwarded, `videoProgress` stayed 0 and a video story
+   * never progressed and never auto-advanced (05-VERIFICATION GAP 2, video half).
+   *
+   * **A ref callback on the player was considered and REJECTED**: `next/dynamic` does not forward
+   * refs to the wrapped component, so a `ref={…}` on `<MuxPlayer>` is a second silent no-op with
+   * exactly the same shape as the first. The observer is the mechanism.
+   *
+   * It keeps observing for the whole mount rather than disconnecting on first success — the
+   * element is REPLACED when the asset changes, and a one-shot observer would reproduce the same
+   * class of defect one level up.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see the note above — `tokens` mounts the element
   useEffect(() => {
-    const element = frameRef.current?.querySelector<PlayableElement>('mux-player');
-    if (!element) return;
+    const frame = frameRef.current;
+    if (!frame) return;
 
     const onCanPlay = () => controlsRef.current.onCanPlay();
     const onPlaying = () => controlsRef.current.onPlaying();
     const onError = () => controlsRef.current.onError();
     const onTimeUpdate = () => {
+      const element = playerRef.current;
+      if (!element) return;
       const duration = element.duration ?? 0;
+      // UI-D-34: a duration the element cannot mean is IGNORED. A segment filling off a
+      // meaningless number would tell the member they are watching something they are not.
       if (!Number.isFinite(duration) || duration <= 0) return;
       controlsRef.current.onTimeUpdate(element.currentTime ?? 0, duration);
     };
 
-    element.addEventListener('canplay', onCanPlay);
-    element.addEventListener('playing', onPlaying);
-    element.addEventListener('timeupdate', onTimeUpdate);
-    element.addEventListener('error', onError);
-    onPlayRef?.(() => {
-      void element.play?.();
-    });
-    return () => {
+    const attach = (element: PlayableElement) => {
+      playerRef.current = element;
+      element.addEventListener('canplay', onCanPlay);
+      element.addEventListener('playing', onPlaying);
+      element.addEventListener('timeupdate', onTimeUpdate);
+      element.addEventListener('error', onError);
+      onPlayRef?.(() => {
+        void element.play?.();
+      });
+      setAttachments((count) => count + 1);
+    };
+
+    const detach = () => {
+      const element = playerRef.current;
+      if (!element) return;
       element.removeEventListener('canplay', onCanPlay);
       element.removeEventListener('playing', onPlaying);
       element.removeEventListener('timeupdate', onTimeUpdate);
       element.removeEventListener('error', onError);
+      playerRef.current = null;
       onPlayRef?.(null);
     };
-  }, [tokens, onPlayRef]);
 
-  /** The viewer's ONE pause boolean reaches the element here, and nowhere else. */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `tokens` is what mounts the element
+    const reconcile = () => {
+      const found = frame.querySelector<PlayableElement>('mux-player');
+      if (found === playerRef.current) return;
+      detach();
+      if (found) attach(found);
+    };
+
+    // Once immediately — a SYNCHRONOUS mount must not wait for a mutation that already happened.
+    reconcile();
+    const observer = new MutationObserver(reconcile);
+    observer.observe(frame, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      detach();
+    };
+  }, [onPlayRef]);
+
+  /**
+   * The viewer's ONE pause boolean reaches the element here, and nowhere else.
+   *
+   * `attachments` is a real dependency and a real read: before the first attachment there is no
+   * element to apply anything to, and the moment there IS one, the flags this bridge is already
+   * holding must be applied to it — without waiting for a later toggle. That second half of the
+   * same defect is why `muted` and `paused` were silently ignored on arrival.
+   */
   useEffect(() => {
-    const element = frameRef.current?.querySelector<PlayableElement>('mux-player');
+    if (attachments === 0) return;
+    const element = playerRef.current;
     if (!element) return;
     element.muted = controls.muted;
     if (controls.paused) element.pause?.();
     else void element.play?.();
-  }, [controls.paused, controls.muted, tokens]);
+  }, [controls.paused, controls.muted, attachments]);
 
   return (
     <div ref={frameRef} className="absolute inset-0" data-testid="story-video">
