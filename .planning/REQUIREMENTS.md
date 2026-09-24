@@ -62,18 +62,18 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Communities
 
-- [x] **COMM-01**: `admin_tenant` can create, edit and archive communities (name, description, cover image)
-- [x] **COMM-02**: Every tenant member can see every community in V1; a community-membership table exists so private/opt-in communities in V2 require no migration
-- [x] **COMM-03**: Member can browse the community list (cover, name, description, post count) and open a community to see its posts and its pinned stories
-- [x] **COMM-04**: `admin_tenant` can post directly into a community from the community page
+- [ ] **COMM-01**: `admin_tenant` can create, edit and archive communities (name, description, cover image)
+- [ ] **COMM-02**: Every tenant member can see every community in V1; a community-membership table exists so private/opt-in communities in V2 require no migration
+- [ ] **COMM-03**: Member can browse the community list (cover, name, description, post count) and open a community to see its posts and its pinned stories
+- [ ] **COMM-04**: `admin_tenant` can post directly into a community from the community page
 
 ### Stories
 
-- [x] **STORY-01**: `admin_tenant` can publish a story with an image or a short video (up to ~60 s, via the streaming vendor) and optional caption
-- [x] **STORY-02**: Members see active stories in a horizontally scrollable strip; tapping opens a full-screen viewer with progress bars, auto-advance, tap-to-navigate and hold-to-pause
-- [x] **STORY-03**: A story is visible for 24 h after publishing; after that it is hidden by an `expires_at` filter but the record is retained
-- [x] **STORY-04**: `admin_tenant` can pin a story to one or more communities; a pinned story stays visible in that community after the 24 h expiry until unpinned
-- [x] **STORY-05**: Member can like a story and comment on it; story comments cannot be liked or replied to
+- [ ] **STORY-01**: `admin_tenant` can publish a story with an image or a short video (up to ~60 s, via the streaming vendor) and optional caption
+- [ ] **STORY-02**: Members see active stories in a horizontally scrollable strip; tapping opens a full-screen viewer with progress bars, auto-advance, tap-to-navigate and hold-to-pause
+- [ ] **STORY-03**: A story is visible for 24 h after publishing; after that it is hidden by an `expires_at` filter but the record is retained
+- [ ] **STORY-04**: `admin_tenant` can pin a story to one or more communities; a pinned story stays visible in that community after the 24 h expiry until unpinned
+- [ ] **STORY-05**: Member can like a story and comment on it; story comments cannot be liked or replied to
 
 ### Events
 
@@ -242,15 +242,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FEED-06 | Phase 4 | Complete |
 | FEED-07 | Phase 4 | Complete |
 | FEED-08 | Phase 4 | Complete |
-| COMM-01 | Phase 5 | Complete |
-| COMM-02 | Phase 5 | Complete |
-| COMM-03 | Phase 5 | Complete |
-| COMM-04 | Phase 5 | Complete |
-| STORY-01 | Phase 5 | Complete |
-| STORY-02 | Phase 5 | Complete |
-| STORY-03 | Phase 5 | Complete |
-| STORY-04 | Phase 5 | Complete |
-| STORY-05 | Phase 5 | Complete |
+| COMM-01 | Phase 5 | Gaps Found |
+| COMM-02 | Phase 5 | Gaps Found |
+| COMM-03 | Phase 5 | Gaps Found |
+| COMM-04 | Phase 5 | Gaps Found |
+| STORY-01 | Phase 5 | Gaps Found |
+| STORY-02 | Phase 5 | Gaps Found |
+| STORY-03 | Phase 5 | Gaps Found |
+| STORY-04 | Phase 5 | Gaps Found |
+| STORY-05 | Phase 5 | Gaps Found |
 | EVENT-01 | Phase 6 | Pending |
 | EVENT-02 | Phase 6 | Pending |
 | EVENT-03 | Phase 6 | Pending |
