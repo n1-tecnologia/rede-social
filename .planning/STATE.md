@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
 status: executing
-stopped_at: Completed 05-06-PLAN.md
-last_updated: "2026-09-24T00:42:33.316Z"
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-09-24T02:11:09.629Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 05 execution started
-state_head: 380245de22bab0217d73b48c0caaa34d694192b8
+state_head: 494b608ce9af63a45f88071177b3613f4601b151
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 58
-  completed_plans: 53
+  completed_plans: 54
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 05 (Communities & Stories) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 Status: Ready to execute
 Last activity: 2026-09-23 — Phase 05 execution started
 
@@ -111,6 +111,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P04 | 51 min | 3 tasks | 28 files |
 | Phase 05 P05 | 91min | 3 tasks | 46 files |
 | Phase 05 P06 | 68 | 3 tasks | 30 files |
+| Phase 05 P07 | 79 min | 3 tasks | 38 files |
 
 ## Accumulated Context
 
@@ -325,6 +326,12 @@ Recent decisions affecting current work:
 - [Phase 05]: StoryViewer takes its media as a RENDER FUNCTION and its action row as a node, so the app tier injects the vendor player and the feed's LikeButton across a boundary turbo forbids the module to cross
 - [Phase 05]: The story like counter REPLACES app.feed_like_count() to fill Phase 4's reserved story branch — one trigger, one writer of every like counter in the product
 - [Phase 05]: next-intl FORMATS on read: a message whose PATTERN must cross to the client is taken with .raw, or it raises FORMATTING_ERROR and takes the home slot down
+- [Phase 05]: STORY-05 is enforced by the DATABASE: a stored generated target_kind plus a three-column composite self-FK make a reply to a story comment unrepresentable, and a two-column composite FK makes it unlikeable — the API only translates the SQLSTATE
+- [Phase 05]: Both rewritten CHECKs guard every equality with an explicit is not null: a NULL CHECK is SATISFIED and MATCH SIMPLE skips a composite key with any null column, so the CHECK and the FK are ONE mechanism (Pitfall 1 + Pitfall 2, closed together)
+- [Phase 05]: Two refusals get two machine codes (story_comment_no_reply, story_comment_not_likeable) because one shared code would make one of the two pt-BR sentences wrong
+- [Phase 05]: D-83's story comment list runs oldest-first on its OWN ascending index with no Sort node, and the direction rides the ONE cursor envelope as keysetComparison(direction)
+- [Phase 05]: The flat comment surface is a VALUE on the variant prop CommentsList already had; CommentItem renders no heart when onToggleLike is withheld, so there is no branch about what a comment looks like
+- [Phase 05]: A plain async function cannot cross the RSC boundary — even a no-op handler passed to a client component must be a server action, or the whole home slot fails
 
 ### Pending Todos
 
@@ -357,6 +364,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T00:42:24.891Z
-Stopped at: Completed 05-06-PLAN.md
+Last session: 2026-09-24T02:11:08.620Z
+Stopped at: Completed 05-07-PLAN.md
 Resume file: None

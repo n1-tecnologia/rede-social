@@ -73,7 +73,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [x] **STORY-02**: Members see active stories in a horizontally scrollable strip; tapping opens a full-screen viewer with progress bars, auto-advance, tap-to-navigate and hold-to-pause
 - [x] **STORY-03**: A story is visible for 24 h after publishing; after that it is hidden by an `expires_at` filter but the record is retained
 - [ ] **STORY-04**: `admin_tenant` can pin a story to one or more communities; a pinned story stays visible in that community after the 24 h expiry until unpinned
-- [ ] **STORY-05**: Member can like a story and comment on it; story comments cannot be liked or replied to
+- [x] **STORY-05**: Member can like a story and comment on it; story comments cannot be liked or replied to
 
 ### Events
 
@@ -250,7 +250,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORY-02 | Phase 5 | Complete |
 | STORY-03 | Phase 5 | Complete |
 | STORY-04 | Phase 5 | Pending |
-| STORY-05 | Phase 5 | Pending |
+| STORY-05 | Phase 5 | Complete |
 | EVENT-01 | Phase 6 | Pending |
 | EVENT-02 | Phase 6 | Pending |
 | EVENT-03 | Phase 6 | Pending |
