@@ -11,9 +11,12 @@ import type {
   StoryComment,
   StoryCommentPage,
   StoryCommentsQuery,
+  StoryHighlightsQuery,
   StoryLikeResult,
   StoryMediaKind,
   StoryPage,
+  StoryPinResult,
+  StoryPins,
   StoryQuery,
   StorySummary,
 } from '../contracts/index';
@@ -60,6 +63,8 @@ type StoryRow = {
   like_count: number;
   comment_count: number;
   viewer_liked: boolean;
+  /** STORY-04's per-story pin count, counted in the SAME statement (null before 05-08's GREEN). */
+  pinned_community_count: number | null;
 };
 
 /**
@@ -139,6 +144,7 @@ const toStory = (row: StoryRow): StorySummary => ({
   likeCount: row.like_count,
   commentCount: row.comment_count,
   viewerLiked: row.viewer_liked,
+  pinnedCommunityCount: row.pinned_community_count ?? 0,
 });
 
 /** The over-fetch page split, shared by both list reads so the two cannot disagree about `nextCursor`. */
@@ -870,4 +876,38 @@ export async function deleteStoryComment(
     },
     'story comment soft-deleted',
   );
+}
+
+/* ── Community pins (STORY-04, D-68) — RED SKELETONS ──────────────────────────────────────────── */
+
+/**
+ * Signature-only-and-wrong, on purpose: the RED phase needs the symbols to EXIST (an absent export
+ * crashes the loader, which is `INVALID_RED`) while none of the behaviour does. Every value below is
+ * frozen and deliberately mismatched against `tests/story-pins.test.ts`.
+ */
+export async function pinStory(
+  _ctx: RequestContext,
+  _storyId: string,
+  _communityId: string,
+): Promise<StoryPinResult> {
+  return { pinned: false, pinnedCommunityCount: 0 };
+}
+
+export async function unpinStory(
+  _ctx: RequestContext,
+  _storyId: string,
+  _communityId: string,
+): Promise<StoryPinResult> {
+  return { pinned: true, pinnedCommunityCount: 0 };
+}
+
+export async function listCommunityHighlights(
+  _ctx: RequestContext,
+  _query: StoryHighlightsQuery,
+): Promise<StoryPage> {
+  return { items: [], nextCursor: null };
+}
+
+export async function listStoryPins(_ctx: RequestContext, _storyId: string): Promise<StoryPins> {
+  return { communityIds: [] };
 }

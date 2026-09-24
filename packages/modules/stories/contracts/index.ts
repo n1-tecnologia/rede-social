@@ -138,6 +138,14 @@ export const storySummarySchema = z
     likeCount: z.number().int(),
     commentCount: z.number().int(),
     viewerLiked: z.boolean(),
+    /**
+     * STORY-04: how many communities this story is pinned to, counted in the SAME statement the
+     * story row came from. It is what UI-D-40's trailing pin indicator renders, and `0` is what
+     * makes "a story pinned nowhere renders no indicator at all" a comparison rather than a null
+     * check. The strip carries it too, unread, because one projection serving three reads is what
+     * stops the three disagreeing about what a story looks like.
+     */
+    pinnedCommunityCount: z.number().int(),
   })
   .strict();
 export type StorySummary = z.infer<typeof storySummarySchema>;
@@ -438,4 +446,126 @@ export interface StoryCommentDeleted {
   storyId: string;
   commentId: string;
   actorUserId: string;
+}
+
+/* ── Community pins (STORY-04, D-68, D-84) ─────────────────────────────────────────────────────── */
+
+/**
+ * `PUT` / `DELETE /v1/stories/{storyId}/pins/{communityId}` — the toggle's answer.
+ *
+ * The SAME `{ state, count }` pair shape the like toggle answers with, for the same reason: the
+ * count is the AUTHORITATIVE number read back from the rows inside the writing transaction, never a
+ * number the client incremented. `pinnedCommunityCount` is how many communities the STORY is pinned
+ * to — not how many pins the community has — because that is what the history row's indicator
+ * renders and what the sheet's state is reconciled against.
+ *
+ * There is no conflict status anywhere in this vocabulary. Re-pinning the same pair returns the
+ * identical body, and unpinning something that was never pinned does too.
+ */
+export const storyPinResultSchema = z
+  .object({
+    pinned: z.boolean(),
+    pinnedCommunityCount: z.number().int().min(0),
+  })
+  .strict();
+export type StoryPinResult = z.infer<typeof storyPinResultSchema>;
+
+/**
+ * The closed refusal vocabulary a pin WRITE can answer with, as `details.pin`.
+ *
+ * ONE code, and it is 05-03's own word: pinning into an ARCHIVED community is refused with the
+ * same `archived` the composer already answers, because it is the same rule — an archived container
+ * takes no new content. Inventing a second spelling for it here would give the web two switches to
+ * keep in step for one product fact.
+ *
+ * A MISS — an unknown story, an unknown community, another tenant's of either — is deliberately NOT
+ * in this vocabulary: it is a BARE 404 with no `details` at all, because a per-cause code over an
+ * enumerable uuid space would be an existence oracle (D-23, T-05-49).
+ */
+export const STORY_PIN_ISSUES = ['archived'] as const;
+export type StoryPinIssue = (typeof STORY_PIN_ISSUES)[number];
+
+/** The web tier's lookup over that closed vocabulary. */
+export const STORY_PIN_ISSUE_SET: ReadonlySet<string> = new Set(STORY_PIN_ISSUES);
+
+/**
+ * `GET /v1/stories/{storyId}/pins` — the community ids a story is currently pinned to, which is the
+ * pin sheet's initial state.
+ *
+ * Ids only. The sheet already holds the community NAMES from the page's own read, so sending them
+ * again would be a second source of the same words that could disagree with the first.
+ */
+export const storyPinsSchema = z.object({ communityIds: z.array(z.uuid()) }).strict();
+export type StoryPins = z.infer<typeof storyPinsSchema>;
+
+/**
+ * `GET /v1/stories/pinned?communityId=&limit=&cursor=` (STORY-04, D-68) — one community's Destaques.
+ *
+ * `communityId` is REQUIRED: there is no "all pinned stories of the tenant" read, because no screen
+ * asks that question and an endpoint nobody calls is a payload shape frozen for free.
+ *
+ * `limit` CLAMPS rather than refuses, for the reason `storyQuerySchema`'s does: the row renders on
+ * the community page, a screen reachable from a shared link, and a hand-edited `?limit=` must never
+ * be the reason it shows an error. The clamp is what T-05-53 asks for either way.
+ */
+export const storyHighlightsQuerySchema = z
+  .object({
+    communityId: z.uuid(),
+    cursor: z.string().max(STORY_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(STORY_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), STORY_MAX_PAGE_SIZE))
+      .default(STORY_PAGE_SIZE),
+  })
+  .strict();
+export type StoryHighlightsQuery = z.infer<typeof storyHighlightsQuerySchema>;
+
+/**
+ * The community row the pin sheet draws, declared HERE rather than imported from
+ * `@tria/module-communities/contracts`.
+ *
+ * **This is not a preference.** `turbo boundaries` denies a `module -> module` package edge
+ * (MOD-02), and `PinStorySheet` lives in this module — so the shape the sheet consumes is declared
+ * in the module that consumes it, exactly as `storyLikeResultSchema` and `STORY_MAX_COMMENT`
+ * restate the feed's. The host (`apps/web`, which may reach both) maps `CommunitySummary` onto this
+ * in one place, so the four fields below are the whole contract between the two modules and they
+ * are structurally checked at that call site.
+ */
+export interface StoryPinCommunity {
+  id: string;
+  name: string;
+  /** Null takes the `--brand-gradient` branch (D-69/UI-D-35), exactly as the list card's cover does. */
+  coverAssetId: string | null;
+  coverVariantWidths: readonly number[];
+}
+
+/**
+ * A story was pinned to a community (STORY-04) — an EDITORIAL act, announced exactly once.
+ *
+ * **Ids only**, for the reason every other payload in this file is: the manifest's own subscriber
+ * logs the payload verbatim, and neither a story caption nor a community name has any business in a
+ * log line (T-05-29, T-05-06).
+ *
+ * It is emitted only when a row was really created. Re-pinning the same pair inserts nothing and
+ * announces nothing: a subscriber counting these is counting transitions, and a second
+ * announcement of a state that never changed would be a lie it cannot detect — the `story.unliked`
+ * rule, applied to both halves of this toggle rather than only to the removal.
+ */
+export interface StoryPinned {
+  tenantId: string;
+  storyId: string;
+  communityId: string;
+  actorUserId: string;
+}
+
+/** The same shape for the other half, emitted only when a row was really removed. */
+export type StoryUnpinned = StoryPinned;
+
+declare module '@tria/contracts' {
+  interface EventMap {
+    'story.pinned': StoryPinned;
+    'story.unpinned': StoryUnpinned;
+  }
 }
