@@ -2,14 +2,14 @@
 gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
-status: verifying
+status: Phase 05 UAT partial — 11/12 passed, test 1 blocked on the absent video provider (Mux). Next actionable work is Phase 05.1.
 stopped_at: Completed 05-12-PLAN.md
-last_updated: "2026-09-24T12:53:59.807Z"
+last_updated: "2026-09-24T16:55:46.349Z"
 last_activity: 2026-09-24
-last_activity_desc: Phase 05 execution started
-state_head: 6198fd32526efa36c76d50e45644597f425151e0
+last_activity_desc: "Phase 05 UAT session: 11 passed, 1 blocked, 1 incidental gap deferred with the Mux work; Phase 05.1 inserted for three user-reported authoring gaps"
+state_head: 6b8725dc5a7ef0d168b34675df2e7adfb96761ed
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 0
   total_plans: 62
   completed_plans: 59
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 Phase: 05 (Communities & Stories) — EXECUTING
 Plan: 12 of 12
-Status: Phase complete — ready for verification
-Last activity: 2026-09-24 — Completed quick task 260924-fwv: fixed CR-01 (updateCommunity revalidating the stored cover) and CR-02 (bindPlay not keyed by story id), both verified 8/8
+Status: Phase 05 UAT partial — 11/12 passed, test 1 blocked on the absent video provider (Mux). Next actionable work is Phase 05.1.
+Last activity: 2026-09-24 — Phase 05 UAT session: 11 passed, 1 blocked, 1 incidental gap deferred with the Mux work; Phase 05.1 inserted for three user-reported authoring gaps
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -372,6 +372,7 @@ None yet.
 ### Roadmap Evolution
 
 - Phase 01.1 inserted after Phase 1: Cloud Provisioning & First Release: plans 01-10/01-11/01-12 moved out of Phase 1 as 01.1-01..03 because the cloud accounts do not exist yet; Phase 1 closes on the local stack and Phases 2-8 proceed locally. PWA-04 moved to 01.1.
+- Phase 05.1 inserted after Phase 5: Community Authoring Entry Points — create-community CTA unreachable once a community exists, archived communities unreachable without a UUID, and stories cannot be created from inside a community. All three user-reported in Phase 5 UAT; must ship before Phase 6. (URGENT)
 
 ## Deferred Items
 

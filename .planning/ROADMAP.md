@@ -346,6 +346,23 @@ Plans:
 
 - [x] 05-12-PLAN.md — The verification debt: the 14 flagged prohibitions, the 5 backstop claims and the 4 device checks assembled with evidence, plus the `mode: mvp` / User-Story goal decision
 
+### Phase 05.1: Community Authoring Entry Points (INSERTED)
+
+**Goal**: Close the authoring routes Phase 5 built but left unreachable. Every community and story action an `admin_tenant` is permitted to take must have a control on a screen they can get to — no URL typing, no memorised UUIDs — and a story must be creatable from inside a community so it is born attached to it.
+**Depends on**: Phase 5 (communities, stories, `story_community_pins`, the `/criar?comunidade=` precedent)
+**Requirements**: COMM-01 (reachability half), STORY-04 (authoring half) — both re-opened by Phase 5 UAT
+**Success Criteria** (what must be TRUE):
+
+  1. An `admin_tenant` with at least one existing community can reach the create-community form from `/comunidades` on a phone. Today the CTA is built at `CommunitiesList.tsx:153` but rendered only at line 190, inside the zero-communities `EmptyState`; the non-empty branch (line 193+) never renders it, so `/comunidades/nova` is reachable only by typing the URL.
+  2. An `admin_tenant` can find an archived community and reactivate it without knowing its id. `listCommunities` filters `status = 'active'` (`packages/modules/communities/server/service.ts:137`), so an archived community leaves the list entirely, and the only reactivate control sits at the bottom of that community's own edit form (`CommunityForm.tsx:458-470`). Tester's suggested shape: keep archived communities in the list behind an "Arquivada" tag or filter.
+  3. An `admin_tenant` viewing a community can publish a story from that screen, and the published story is attached to that community without a second editorial step. Follow the shipped post precedent — the community page already passes `createHref={`/criar?comunidade=${community.id}`}` (`comunidades/[communityId]/page.tsx:243`) so a POST is already born attached.
+  4. The attachment is written in the same transaction as the story, not as a follow-up pin the admin could forget or half-apply.
+
+**Plans**: TBD
+**UI hint**: yes — three surfaces change (`/comunidades` list, the community page, the story composer); the design system and the existing components cover all three.
+**Research needed**: None. Every mechanism already exists; this phase is wiring, not invention.
+**Notes**: NO SCHEMA CHANGE. `story_community_pins` (`packages/modules/stories/db/schema.ts:152`) is already many-to-many, so creating the story and its pin together satisfies criterion 3 additively — the post-hoc pin flow from `/stories/meus` (`PinStorySheet`) stays exactly as shipped and remains the way to attach a story to ADDITIONAL communities. Criteria 1 and 2 are the same defect shape twice: a working route with nothing linking to it. Source: Phase 5 UAT, 2026-09-24, all three user-reported — criterion 2 is carried from `05-UAT.md` "## Deferred Follow-Ups"; criteria 1 and 3 were reported directly. The user asked that this ship before Phase 6.
+
 ### Phase 6: Events
 
 **Goal**: `admin_tenant` publishes in-person and online events; members see what is coming, confirm attendance, check in on the day and add events to their calendar; the admin sees who confirmed and who showed up.
