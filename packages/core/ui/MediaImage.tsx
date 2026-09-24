@@ -71,27 +71,49 @@ export function MediaImage({
   const failed = failedId === assetId;
   const imgRef = useRef<HTMLImageElement>(null);
 
-  // A server-rendered image can fail BEFORE React hydrates, and that `error` event is never
-  // delivered to the handler below. The element remembers it: `complete` with a zero natural width
-  // is a fetch that ended without an image, so the fallback is applied on mount as well.
-  useEffect(() => {
-    const img = imgRef.current;
-    if (img?.complete && img.naturalWidth === 0) {
-      setFailedId(assetId);
-      onFailed?.();
-      return;
-    }
-    // A server-rendered image that is ALREADY decoded never fires `load` either, so the ready
-    // signal has to be reported here too — otherwise a cached story would leave the clock paused.
-    if (img?.complete && img.naturalWidth > 0) onReady?.();
-  }, [assetId, onReady, onFailed]);
+  /**
+   * The two reports are read through refs that are reassigned during render — the same idiom
+   * `apps/web/components/stories/StoryVideo.tsx` uses for its `controls` object, and for the same
+   * reason: the caller rebuilds them on every pass and the effect below must not notice.
+   */
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  const onFailedRef = useRef(onFailed);
+  onFailedRef.current = onFailed;
 
+  // Derived ABOVE the effect so `src` is in scope for its dependency array — and because `src`
+  // being null is itself an outcome the effect has to report (see its first branch).
   const ladder = widths.length > 0 ? widths : [];
   const base = baseWidth ?? ladder[0];
   const src = base === undefined ? null : mediaVariantUrl(assetId, `w${base}`);
   const srcSet = ladder
     .map((width) => `${mediaVariantUrl(assetId, `w${width}`)} ${width}w`)
     .join(', ');
+
+  /**
+   * The single mount effect, and the ONE rule that governs its dependency array: **this component
+   * reports to a caller it does not control, so the array may name VALUES (`assetId`, `src`) and
+   * never the caller's callback IDENTITIES.** A report that re-arms on the caller's identity is a
+   * loop waiting for a caller that rebuilds its callbacks — which every caller that builds its
+   * props inline does. Putting `onReady`/`onFailed` back here reopens the render loop that ran a
+   * verifier probe to `FATAL ERROR: JavaScript heap out of memory` (05-VERIFICATION.md gap 2).
+   *
+   * A server-rendered image can fail BEFORE React hydrates, and that `error` event is never
+   * delivered to the handler below. The element remembers it: `complete` with a zero natural width
+   * is a fetch that ended without an image, so the fallback is applied on mount as well.
+   */
+  useEffect(() => {
+    if (src === null) return;
+    const img = imgRef.current;
+    if (img?.complete && img.naturalWidth === 0) {
+      setFailedId(assetId);
+      onFailedRef.current?.();
+      return;
+    }
+    // A server-rendered image that is ALREADY decoded never fires `load` either, so the ready
+    // signal has to be reported here too — otherwise a cached story would leave the clock paused.
+    if (img?.complete && img.naturalWidth > 0) onReadyRef.current?.();
+  }, [assetId, src]);
 
   if (failed || src === null)
     return <>{fallback ?? <span className={cn('block bg-bg-tertiary', ratio, className)} />}</>;
@@ -110,10 +132,11 @@ export function MediaImage({
         loading={eager ? 'eager' : 'lazy'}
         decoding="async"
         draggable={false}
-        onLoad={onReady}
+        // DOM props, not dependencies: their identity is free to change every render.
+        onLoad={() => onReadyRef.current?.()}
         onError={() => {
           setFailedId(assetId);
-          onFailed?.();
+          onFailedRef.current?.();
         }}
         className={cn('h-full w-full', fit === 'contain' ? 'object-contain' : 'object-cover')}
       />

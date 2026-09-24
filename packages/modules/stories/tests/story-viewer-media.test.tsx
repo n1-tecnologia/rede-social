@@ -4,11 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MediaImage } from '@tria/core/ui';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORY_DURATION_MS } from '../contracts/index';
-import {
-  StoryViewer,
-  type StoryViewerItem,
-  type StoryViewerLabels,
-} from '../ui/StoryViewer';
+import { StoryViewer, type StoryViewerItem, type StoryViewerLabels } from '../ui/StoryViewer';
 
 /**
  * The REAL `MediaImage` under the REAL `StoryViewer` (STORY-02, GAP 2 of 05-VERIFICATION.md).

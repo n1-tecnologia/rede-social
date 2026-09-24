@@ -297,27 +297,68 @@ export function StoryViewer({
     return () => clearTimeout(timer);
   }, [current, canPlay, playing, autoplayCheckMs]);
 
-  const controlsFor = (item: StoryViewerItem, k: number): StoryMediaControls => ({
-    active: k === index,
-    paused: paused || k !== index,
-    muted,
-    onLoad: () => setMediaState((state) => ({ ...state, [item.id]: 'ready' })),
-    onError: () => setMediaState((state) => ({ ...state, [item.id]: 'error' })),
-    onCanPlay: () => {
-      setMediaState((state) => ({ ...state, [item.id]: 'ready' }));
-      setCanPlay((state) => ({ ...state, [item.id]: true }));
-    },
-    onPlaying: () => {
-      setPlaying((state) => ({ ...state, [item.id]: true }));
-      setBlocked((state) => ({ ...state, [item.id]: false }));
-    },
-    onTimeUpdate: (currentSeconds, durationSeconds) => {
-      if (durationSeconds <= 0) return;
-      const ratio = currentSeconds / durationSeconds;
-      setVideoProgress((state) => ({ ...state, [item.id]: ratio }));
-      if (ratio >= 1 && k === index) goNext();
-    },
-  });
+  /* ── The media controls ────────────────────────────────────────────────────────────────────────
+   *
+   * These used to be a render-time factory, and that factory was the root cause of GAP 2: it handed
+   * every media child brand-new `onLoad`/`onError` functions on every pass, and a child that takes
+   * a report callback as an effect dependency (`MediaImage` did) then re-arms its effect on every
+   * pass — a loop that ran a verifier probe to a JavaScript heap out-of-memory. `MediaImage` is
+   * fixed at its own end too, but a component that destabilises its children is a defect waiting
+   * for the next consumer to rediscover, so it is fixed at BOTH ends.
+   *
+   * The structure is two memos over a live ref:
+   *   1. the ref carries the only two VOLATILE things the handlers need (the current index and the
+   *      current `goNext`), so no handler has to close over them;
+   *   2. the handler map is memoised over `[items]` alone — each handler closes over its own story
+   *      id and its own position, both fixed for a given array, and every state write is already a
+   *      functional updater, so nothing else needs capturing. The identities therefore live as long
+   *      as the sequence does;
+   *   3. the control-object map is memoised over the four things that legitimately change it. A
+   *      mute toggle SHOULD hand the video bridge a new object; a keystroke should not.
+   */
+  const liveRef = useRef({ index, goNext });
+  liveRef.current = { index, goNext };
+
+  const mediaHandlers = useMemo(() => {
+    const map = new Map<string, Omit<StoryMediaControls, 'active' | 'paused' | 'muted'>>();
+    items.forEach((item, k) => {
+      map.set(item.id, {
+        onLoad: () => setMediaState((state) => ({ ...state, [item.id]: 'ready' })),
+        onError: () => setMediaState((state) => ({ ...state, [item.id]: 'error' })),
+        onCanPlay: () => {
+          setMediaState((state) => ({ ...state, [item.id]: 'ready' }));
+          setCanPlay((state) => ({ ...state, [item.id]: true }));
+        },
+        onPlaying: () => {
+          setPlaying((state) => ({ ...state, [item.id]: true }));
+          setBlocked((state) => ({ ...state, [item.id]: false }));
+        },
+        onTimeUpdate: (currentSeconds: number, durationSeconds: number) => {
+          if (durationSeconds <= 0) return;
+          const ratio = currentSeconds / durationSeconds;
+          setVideoProgress((state) => ({ ...state, [item.id]: ratio }));
+          // The live ref rather than a render closure: same rule, read at call time.
+          if (ratio >= 1 && k === liveRef.current.index) liveRef.current.goNext();
+        },
+      });
+    });
+    return map;
+  }, [items]);
+
+  const mediaControls = useMemo(() => {
+    const map = new Map<string, StoryMediaControls>();
+    items.forEach((item, k) => {
+      const handlers = mediaHandlers.get(item.id);
+      if (!handlers) return;
+      map.set(item.id, {
+        active: k === index,
+        paused: paused || k !== index,
+        muted,
+        ...handlers,
+      });
+    });
+    return map;
+  }, [items, index, paused, muted, mediaHandlers]);
 
   /* ── Gestures ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -464,7 +505,10 @@ export function StoryViewer({
                   className="absolute inset-0 grid place-items-center"
                   key={attempt[item.id] ?? 0}
                 >
-                  {item.media(controlsFor(item, k))}
+                  {(() => {
+                    const controls = mediaControls.get(item.id);
+                    return controls ? item.media(controls) : null;
+                  })()}
                 </div>
               ) : null}
             </div>
