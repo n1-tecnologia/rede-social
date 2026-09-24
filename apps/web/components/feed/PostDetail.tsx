@@ -51,7 +51,7 @@ export type PostDetailProps = {
    * `/inicio`, because the screen the member is standing on has just stopped existing (UI-D-16).
    */
   menu: { labels: PostMenuLabels; deletedLabel: string; onDelete: typeof deletePostAction };
-  comments: Omit<CommentsListProps, 'postId' | 'variant'>;
+  comments: Omit<CommentsListProps, 'targetId' | 'variant'>;
 };
 
 export function PostDetail({
@@ -126,7 +126,7 @@ export function PostDetail({
       {/* No `onOpenComments` and no sheet: the comments ARE the screen below. Wiring the card's
           comment control to a second surface here would open a bottom sheet over a list the member
           is already looking at — D-59's one-implementation rule read literally. */}
-      <CommentsList {...comments} postId={post.id} variant="inline" />
+      <CommentsList {...comments} targetId={post.id} variant="inline" />
     </>
   );
 }

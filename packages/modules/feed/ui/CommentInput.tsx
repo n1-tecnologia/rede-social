@@ -57,8 +57,12 @@ export type CommentInputProps = {
    * than on the target's identity, so tapping "Responder" twice on the same root re-focuses.
    */
   focusKey?: number;
-  /** `sheet` pins the composer to the bottom of the sheet's scrollport; `inline` lets it flow. */
-  variant?: 'sheet' | 'inline';
+  /**
+   * `sheet` pins the composer to the bottom of the sheet's scrollport and `inline` lets it flow.
+   * `flat` (05-07) is a sheet too — the story surface — so it shares the pinned geometry; it is a
+   * separate value only because the LIST needs to tell the two apart.
+   */
+  variant?: 'sheet' | 'inline' | 'flat';
 };
 
 const SUBMIT_SPRING = { type: 'spring', stiffness: 400, damping: 22 } as const;
@@ -106,7 +110,7 @@ export function CommentInput({
       data-comment-input
       className={cn(
         'border-t border-border bg-bg-secondary',
-        variant === 'sheet' && 'sticky bottom-0 z-10 pb-safe',
+        variant !== 'inline' && 'sticky bottom-0 z-10 pb-safe',
       )}
     >
       {errorLabel ? (

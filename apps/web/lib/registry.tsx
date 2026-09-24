@@ -228,6 +228,12 @@ export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Boo
       retryLabel: tf('comments.retry'),
       submitErrorLabel: tf('errors.commentSubmit'),
       replyDepthErrorLabel: tf('errors.replyDepth'),
+      // STORY-05's refusal cannot happen on a POST surface — `feed_comments_parent_fk` only raises
+      // it for a story comment — so the feed's block carries the generic sentence here and the
+      // story host (D-82) overrides this ONE key from its own namespace. The label is required
+      // rather than optional on purpose: a surface where the refusal IS reachable must be made to
+      // choose its wording rather than silently inherit "algo deu errado".
+      storyNoReplyErrorLabel: tf('errors.commentSubmit'),
       loadMoreLabel: tf('comments.loadMore'),
       loadMoreRepliesLabel: tf('comments.loadMoreReplies'),
       // `raw`, not `tf(...)`: these are TEMPLATES the module fills with the count it is showing at

@@ -57,7 +57,7 @@ export type FeedPageOutcome =
  */
 export type FeedCommentsProps = Omit<
   CommentSheetProps,
-  'open' | 'onClose' | 'postId' | 'initialItems' | 'initialCursor' | 'onCountChange'
+  'open' | 'onClose' | 'targetId' | 'initialItems' | 'initialCursor' | 'onCountChange'
 >;
 
 /**
@@ -551,7 +551,7 @@ export function FeedList({
           {...comments}
           open={commentsOpenFor !== null}
           onClose={() => setCommentsOpenFor(null)}
-          postId={commentsOpenFor ?? ''}
+          targetId={commentsOpenFor ?? ''}
           onCountChange={(delta) => {
             if (commentsOpenFor) bumpCount(commentsOpenFor, delta);
           }}

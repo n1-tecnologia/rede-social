@@ -1,7 +1,7 @@
 'use client';
 
 import { MediaImage } from '@tria/core/ui';
-import { LikeButton, useOptimisticLike } from '@tria/module-feed/ui';
+import { type CommentSheetProps, LikeButton, useOptimisticLike } from '@tria/module-feed/ui';
 import {
   type StoryMediaControls,
   StoryViewer,
@@ -38,6 +38,15 @@ import { StoryVideo } from './StoryVideo';
  * the one element that asked, and never rides in the strip's payload (D-44, T-05-34).
  */
 
+/**
+ * Everything the shipped `CommentSheet` needs EXCEPT the three things only this component knows:
+ * whether it is open, how to close it, and WHICH story it is showing.
+ *
+ * It is `Omit<CommentSheetProps, …>` rather than a restatement, so the sheet the story surface
+ * renders and the sheet the feed renders cannot drift apart in their props either (D-82).
+ */
+export type StoryCommentsBinding = Omit<CommentSheetProps, 'open' | 'onClose' | 'targetId'>;
+
 export type StoryViewerHostProps = {
   items: readonly StoryViewerItemView[];
   initialIndex?: number;
@@ -45,6 +54,11 @@ export type StoryViewerHostProps = {
   labels: StoryViewerLabelsView;
   onLike: typeof likeStoryAction;
   onUnlike: typeof unlikeStoryAction;
+  /**
+   * D-82's comment surface. Absent means the affordance is drawn but inert — which is what 05-06
+   * shipped, deliberately, rather than a handler that did nothing.
+   */
+  comments?: StoryCommentsBinding;
   /** Modal mode: the strip owns the history entry, so it also owns the dismissal. */
   onClose?: () => void;
   /** Page mode (a deep link or a refresh): where "close" navigates when there is nothing to pop. */

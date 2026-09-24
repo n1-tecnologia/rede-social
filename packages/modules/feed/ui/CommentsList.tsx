@@ -62,7 +62,7 @@ export type CommentPageOutcome =
  */
 export type CommentCreateOutcome =
   | { ok: true; comment: CommentView }
-  | { ok: false; code?: 'generic' | 'reply_depth_exceeded' };
+  | { ok: false; code?: 'generic' | 'reply_depth_exceeded' | 'story_comment_no_reply' };
 
 /** What a comment like/unlike answers — the authoritative pair, read back in the writing txn. */
 export type CommentLikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false };
@@ -90,6 +90,8 @@ export type CommentsListLabels = {
   submitErrorLabel: string;
   /** The one refusal with its own sentence: the member replied to a reply (D-60). */
   replyDepthErrorLabel: string;
+  /** STORY-05's own sentence: the member tried to reply to a STORY comment (05-07). */
+  storyNoReplyErrorLabel: string;
   /** The root list's own paging control. */
   loadMoreLabel: string;
   /** One root's replies paging control, beneath the expanded thread. */
@@ -114,7 +116,12 @@ export type CommentsListLabels = {
 };
 
 export type CommentsListProps = {
-  postId: string;
+  /**
+   * The thing being commented ON — a post id for the feed's two containers, a STORY id for the
+   * flat variant (05-07). It is opaque to this component: it is handed straight back to the four
+   * handlers the host supplied, and nothing here reads it.
+   */
+  targetId: string;
   /**
    * The page the SERVER rendered, when there is one (the post page). `undefined` means "nothing is
    * seeded" — the sheet, which fetches page 1 on mount behind the skeletons.
@@ -123,15 +130,15 @@ export type CommentsListProps = {
   initialCursor?: string | null;
   /** `true` when the server tried to read page 1 and could not (UI-D-22). */
   initialError?: boolean;
-  variant?: 'sheet' | 'inline';
+  variant?: 'sheet' | 'inline' | 'flat';
   viewer: CommentViewer;
   /** BCP-47 tag from the host: the module formats numbers for it but ships no words (PWA-03). */
   locale: string;
   labels: CommentsListLabels;
-  onLoadComments: (postId: string, cursor?: string) => Promise<CommentPageOutcome>;
+  onLoadComments: (targetId: string, cursor?: string) => Promise<CommentPageOutcome>;
   onLoadReplies: (commentId: string, cursor?: string) => Promise<CommentPageOutcome>;
   onCreateComment: (
-    postId: string,
+    targetId: string,
     body: string,
     parentId?: string,
   ) => Promise<CommentCreateOutcome>;
@@ -189,7 +196,7 @@ export function CommentsListSkeleton() {
 }
 
 export function CommentsList({
-  postId,
+  targetId,
   initialItems,
   initialCursor = null,
   initialError = false,
@@ -214,7 +221,9 @@ export function CommentsList({
   const [threads, setThreads] = useState<Record<string, ReplyThread>>({});
   const [replyTarget, setReplyTarget] = useState<{ commentId: string; name: string } | null>(null);
   const [focusKey, setFocusKey] = useState(0);
-  const [submitError, setSubmitError] = useState<'generic' | 'reply_depth_exceeded' | null>(null);
+  const [submitError, setSubmitError] = useState<
+    'generic' | 'reply_depth_exceeded' | 'story_comment_no_reply' | null
+  >(null);
   const [confirming, setConfirming] = useState<CommentView | null>(null);
 
   const patchThread = useCallback((rootId: string, patch: Partial<ReplyThread>) => {
@@ -230,7 +239,7 @@ export function CommentsList({
     setListError(false);
     let page: CommentPageOutcome = { ok: false };
     try {
-      page = await onLoadComments(postId);
+      page = await onLoadComments(targetId);
     } catch (error) {
       console.error('feed.comments.load_failed', { error: String(error) });
     }
@@ -241,7 +250,7 @@ export function CommentsList({
     }
     setItems(page.items);
     setCursor(page.nextCursor);
-  }, [onLoadComments, postId]);
+  }, [onLoadComments, targetId]);
 
   // Fetch page 1 exactly once when nothing was seeded (the sheet). A seeded list never runs this.
   const fetched = useRef(false);
@@ -258,7 +267,7 @@ export function CommentsList({
     setLoadingMore(true);
     let page: CommentPageOutcome = { ok: false };
     try {
-      page = await onLoadComments(postId, from);
+      page = await onLoadComments(targetId, from);
     } catch (error) {
       console.error('feed.comments.load_more_failed', { error: String(error) });
     }
@@ -269,7 +278,7 @@ export function CommentsList({
     }
     setItems((previous) => [...previous, ...page.items]);
     setCursor(page.nextCursor);
-  }, [cursor, loadingMore, onLoadComments, postId]);
+  }, [cursor, loadingMore, onLoadComments, targetId]);
 
   /** Fetch (or re-fetch) ONE root's first page of replies. The retry and the first tap share it. */
   const fetchReplies = useCallback(
@@ -405,7 +414,7 @@ export function CommentsList({
 
       let outcome: CommentCreateOutcome = { ok: false };
       try {
-        outcome = await onCreateComment(postId, body, parentId);
+        outcome = await onCreateComment(targetId, body, parentId);
       } catch (error) {
         console.error('feed.comment.create_failed', { error: String(error) });
       }
@@ -459,7 +468,7 @@ export function CommentsList({
       onCountChange?.(1);
       return true;
     },
-    [labels.nowLabel, onCountChange, onCreateComment, postId, replyTarget, viewer],
+    [labels.nowLabel, onCountChange, onCreateComment, replyTarget, targetId, viewer],
   );
 
   /**
