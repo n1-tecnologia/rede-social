@@ -8,7 +8,7 @@ import type {
   StoryViewerItemView,
   StoryViewerLabelsView,
 } from '@/lib/story-view';
-import { StoryViewerHost } from './StoryViewerHost';
+import { type StoryCommentsBinding, StoryViewerHost } from './StoryViewerHost';
 
 /**
  * `/inicio`'s stories strip and the viewer it opens (05-05, 05-06).
@@ -45,6 +45,8 @@ export type StoriesSurfaceProps = StoriesStripProps & {
     labels: StoryViewerLabelsView;
     onLike: typeof likeStoryAction;
     onUnlike: typeof unlikeStoryAction;
+    /** D-82's sheet, composed on the server in `lib/registry.tsx` and passed straight through. */
+    comments?: StoryCommentsBinding;
   };
 };
 
@@ -102,6 +104,7 @@ export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
           labels={viewer.labels}
           onLike={viewer.onLike}
           onUnlike={viewer.onUnlike}
+          comments={viewer.comments}
           onClose={close}
         />
       ) : null}

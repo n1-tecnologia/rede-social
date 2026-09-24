@@ -1,7 +1,12 @@
 'use client';
 
 import { MediaImage } from '@tria/core/ui';
-import { type CommentSheetProps, LikeButton, useOptimisticLike } from '@tria/module-feed/ui';
+import {
+  CommentSheet,
+  type CommentSheetProps,
+  LikeButton,
+  useOptimisticLike,
+} from '@tria/module-feed/ui';
 import {
   type StoryMediaControls,
   StoryViewer,
@@ -9,7 +14,7 @@ import {
 } from '@tria/module-stories/ui';
 import { Avatar, IconButton, useToast } from '@tria/ui';
 import { MessageCircle } from 'lucide-react';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import type {
   StoryViewerAuthorView,
@@ -36,6 +41,12 @@ import { StoryVideo } from './StoryVideo';
  * **The playback token is never cached.** There is no `"use cache"`, no `unstable_cache` and no
  * `revalidate` in this file or in `StoryVideo`: the credential is minted when the viewer opens, for
  * the one element that asked, and never rides in the strip's payload (D-44, T-05-34).
+ *
+ * **D-82's comment sheet is composed here for the same boundary reason** (05-07): `CommentSheet`
+ * belongs to `@tria/module-feed`, the viewer to `@tria/module-stories`, and a `module -> module`
+ * package edge is denied. The viewer takes the sheet as an `overlay` NODE and its open state feeds
+ * the `externallyPaused` prop 05-06 left wired and unfed — so "the story waits while you type" is
+ * one prop at the composition point rather than a second pause mechanism.
  */
 
 /**
@@ -45,7 +56,19 @@ import { StoryVideo } from './StoryVideo';
  * It is `Omit<CommentSheetProps, …>` rather than a restatement, so the sheet the story surface
  * renders and the sheet the feed renders cannot drift apart in their props either (D-82).
  */
-export type StoryCommentsBinding = Omit<CommentSheetProps, 'open' | 'onClose' | 'targetId'>;
+export type StoryCommentsBinding = Omit<
+  CommentSheetProps,
+  'open' | 'onClose' | 'targetId' | 'variant' | 'onCountChange' | 'onDeleteComment'
+> & {
+  /**
+   * The ONE handler whose shape differs from the feed's, because the route does:
+   * `DELETE /v1/stories/{storyId}/comments/{commentId}` scopes the removal to the story as well as
+   * to the member, so a comment id belonging to another story answers the same bare 404 instead of
+   * being removed from a conversation nobody was looking at. This component binds the story it has
+   * open, so the LIST still sees the `(commentId) => …` shape it expects and needs no branch.
+   */
+  onDeleteComment: (storyId: string, commentId: string) => Promise<{ ok: boolean }>;
+};
 
 export type StoryViewerHostProps = {
   items: readonly StoryViewerItemView[];
@@ -77,10 +100,32 @@ export function StoryViewerHost({
   labels,
   onLike,
   onUnlike,
+  comments,
   onClose,
   closeHref = '/inicio',
 }: StoryViewerHostProps) {
   const toast = useToast();
+
+  /**
+   * THE story whose comments are open, or null. It is the story ID rather than a boolean because
+   * the sheet reads and writes THAT story's comments — and because `externallyPaused` is then
+   * derived from it rather than tracked separately, which is one fewer thing to keep in step.
+   */
+  const [commentsFor, setCommentsFor] = useState<string | null>(null);
+
+  /**
+   * Per-story comment-count bumpers, registered by the action rows that own them.
+   *
+   * The alternative — holding the deltas in THIS component's state — would change the identity of
+   * the memoised `viewerItems` array on every comment, which re-creates every media render function
+   * and re-mounts the image the member is looking at while the sheet is open. Registering a setter
+   * is the same shape `bindPlay` already uses for the video's `play()`.
+   */
+  const countBumpRef = useRef<Record<string, (delta: number) => void>>({});
+  const bindCountBump = useCallback((storyId: string, bump: ((delta: number) => void) | null) => {
+    if (bump) countBumpRef.current[storyId] = bump;
+    else delete countBumpRef.current[storyId];
+  }, []);
 
   /** Set by `StoryVideo` while a video is mounted; the play badge calls it inside the gesture. */
   const playRef = useRef<(() => void) | null>(null);
@@ -136,10 +181,14 @@ export function StoryViewerHost({
             onLike={onLike}
             onUnlike={onUnlike}
             onError={() => toast.show({ message: labels.genericError, tone: 'error' })}
+            // Absent keeps the affordance INERT rather than giving it a handler that does nothing
+            // — the posture 05-06 shipped it with, now with a destination.
+            onOpenComments={comments ? () => setCommentsFor(item.id) : undefined}
+            bindCountBump={bindCountBump}
           />
         ),
       })),
-    [items, author, labels, onLike, onUnlike, toast, bindPlay],
+    [items, author, labels, onLike, onUnlike, toast, bindPlay, comments, bindCountBump],
   );
 
   return (
@@ -147,6 +196,26 @@ export function StoryViewerHost({
       items={viewerItems}
       initialIndex={initialIndex}
       onClose={close}
+      // The third source of the viewer's single pause boolean, beside the hold gesture and document
+      // visibility. Closing it resumes from the STORED elapsed, because the clock never restarted.
+      externallyPaused={commentsFor !== null}
+      overlay={
+        comments ? (
+          <CommentSheet
+            {...comments}
+            variant="flat"
+            open={commentsFor !== null}
+            onClose={() => setCommentsFor(null)}
+            onDeleteComment={(commentId) => comments.onDeleteComment(commentsFor ?? '', commentId)}
+            // `''` is only ever read while the sheet is closed, and `BottomSheet` renders nothing
+            // then — the list never mounts with an empty target.
+            targetId={commentsFor ?? ''}
+            onCountChange={(delta) => {
+              if (commentsFor) countBumpRef.current[commentsFor]?.(delta);
+            }}
+          />
+        ) : null
+      }
       labels={{
         dialog: labels.dialog,
         close: labels.close,
@@ -181,13 +250,25 @@ function StoryActions({
   onLike,
   onUnlike,
   onError,
+  onOpenComments,
+  bindCountBump,
 }: {
   item: StoryViewerItemView;
   labels: StoryViewerLabelsView;
   onLike: typeof likeStoryAction;
   onUnlike: typeof unlikeStoryAction;
   onError: () => void;
+  onOpenComments?: () => void;
+  bindCountBump: (storyId: string, bump: ((delta: number) => void) | null) => void;
 }) {
+  // The SERVER's count plus whatever this session has added or removed through the sheet. It is a
+  // delta rather than an absolute so the count never claims to be authoritative: the next strip
+  // read replaces it with the trigger-maintained column.
+  const [commentDelta, setCommentDelta] = useState(0);
+  useEffect(() => {
+    bindCountBump(item.id, (delta) => setCommentDelta((value) => value + delta));
+    return () => bindCountBump(item.id, null);
+  }, [bindCountBump, item.id]);
   const { state, toggle, pulseKey } = useOptimisticLike({
     liked: item.viewerLiked,
     likeCount: item.likeCount,
@@ -201,7 +282,11 @@ function StoryActions({
   });
 
   const likeLabel = plural(state.likeCount, labels.likesOne, labels.likesOther);
-  const commentLabel = plural(item.commentCount, labels.commentsOne, labels.commentsOther);
+  const commentLabel = plural(
+    Math.max(0, item.commentCount + commentDelta),
+    labels.commentsOne,
+    labels.commentsOther,
+  );
 
   return (
     <>
@@ -223,15 +308,15 @@ function StoryActions({
           {likeLabel}
         </span>
       )}
-      {/* 05-07 binds the comment sheet to this control and feeds its open state back into the
-          viewer's `externallyPaused`. Until then it is the affordance with no destination — which
-          is why it carries no handler rather than a handler that does nothing. */}
+      {/* D-82. With no binding it stays INERT rather than carrying a handler that does nothing —
+          the posture 05-06 shipped it with, and the 04-09 `createHref` rule. */}
       <IconButton
         icon={MessageCircle}
         size={20}
         label={labels.comment}
         className="text-white"
-        disabled
+        disabled={!onOpenComments}
+        onClick={onOpenComments}
       />
       {commentLabel === null ? null : (
         <span className="mr-3 text-xs font-bold text-white tabular-nums">{commentLabel}</span>

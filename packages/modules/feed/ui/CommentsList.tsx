@@ -8,13 +8,25 @@ import { CommentItem, type CommentItemLabels, type CommentView } from './Comment
 import { type CountTemplates, formatCountLabel } from './meta';
 
 /**
- * THE comment list (D-59) — ONE implementation, two containers.
+ * THE comment list (D-59, D-82) — ONE implementation, THREE containers.
  *
- * `CommentSheet` wraps it for the feed and `/post/[id]` renders it inline; the only difference
- * between them is `variant`, which pins the composer inside the sheet's scrollport and lets it flow
- * at the end of the column on the page. A second renderer for the second surface is the thing this
- * component exists to prevent: two copies would drift on ordering, on paging, on whether the delete
- * control is offered, and the divergence would surface as "it behaves differently in the sheet".
+ * `CommentSheet` wraps it for the feed, `/post/[id]` renders it inline, and 05-07's story viewer
+ * renders it in the `flat` variant inside the same sheet. The only difference between them is
+ * `variant`. A second renderer for a second surface is the thing this component exists to prevent:
+ * two copies would drift on ordering, on paging, on whether the delete control is offered, and the
+ * divergence would surface as "it behaves differently in the sheet".
+ *
+ * **What `flat` changes, and why it is a VALUE on the existing prop rather than a component.** A
+ * story's comments cannot be replied to and cannot be liked — not by policy but by construction:
+ * `feed_comments_parent_fk` and `feed_likes_comment_fk` make both rows unrepresentable in Postgres
+ * (05-07). So the flat variant draws no reply control, no replies toggle and no per-comment like,
+ * and it APPENDS a new root rather than prepending one, because a flat conversation runs forward in
+ * time (D-83) while a post's roots are a ranking of threads (D-62). Everything else — the empty
+ * copy, the two error branches, the optimistic reconciliation, the removed-author row, the composer
+ * — is identical, which is the whole point.
+ *
+ * The UI's silence is the LEAST important of the three layers. It exists so a member is never
+ * invited into a refusal, not as the enforcement.
  *
  * **Container-agnostic and copy-free.** It reads no catalog, formats no date and resolves no URL —
  * every string arrives as a prop and every row arrives already mapped (PWA-03, MOD-02). The one
@@ -212,6 +224,10 @@ export function CommentsList({
   onUnlikeComment,
   onCountChange,
 }: CommentsListProps) {
+  // D-82. Read once, near the top, because six things below branch on it and a scattered
+  // `variant === 'flat'` is how the two lists start becoming two components.
+  const flat = variant === 'flat';
+
   const [items, setItems] = useState<CommentView[]>(initialItems ?? []);
   const [cursor, setCursor] = useState<string | null>(initialCursor);
   const [loading, setLoading] = useState(initialItems === undefined && !initialError);
@@ -409,7 +425,10 @@ export function CommentsList({
           ),
         );
       } else {
-        setItems((previous) => [optimistic, ...previous]);
+        // D-83 vs D-62: the flat list runs oldest-first so a new comment lands at the BOTTOM; the
+        // post's roots run newest-first so it lands at the top. Both put the row where the SERVER's
+        // own ordering would, so the reconciliation never moves a row the member is looking at.
+        setItems((previous) => (flat ? [...previous, optimistic] : [optimistic, ...previous]));
       }
 
       let outcome: CommentCreateOutcome = { ok: false };
@@ -443,7 +462,9 @@ export function CommentsList({
           setItems((previous) => previous.filter((row) => row.id !== optimistic.id));
         }
         setSubmitError(
-          outcome.code === 'reply_depth_exceeded' ? 'reply_depth_exceeded' : 'generic',
+          outcome.code === 'reply_depth_exceeded' || outcome.code === 'story_comment_no_reply'
+            ? outcome.code
+            : 'generic',
         );
         return false;
       }
@@ -468,7 +489,7 @@ export function CommentsList({
       onCountChange?.(1);
       return true;
     },
-    [labels.nowLabel, onCountChange, onCreateComment, replyTarget, targetId, viewer],
+    [flat, labels.nowLabel, onCountChange, onCreateComment, replyTarget, targetId, viewer],
   );
 
   /**
@@ -564,6 +585,9 @@ export function CommentsList({
 
   /** The toggle beneath a root's body: a short rule, then the ICU-plural label **[proto]**. */
   const renderToggle = (comment: CommentView): ReactNode => {
+    // D-82: a story comment cannot HAVE replies, so the toggle would be an affordance pointing at
+    // a row the database refuses to create.
+    if (flat) return null;
     // E11/empty: zero replies draws NEITHER the hairline rule NOR the toggle.
     if (comment.replyCount < 1) return null;
     const expanded = Boolean(threads[comment.id]?.expanded);
@@ -594,6 +618,7 @@ export function CommentsList({
    * inside the root's already-indented body would compound the two.
    */
   const renderThread = (comment: CommentView): ReactNode => {
+    if (flat) return null;
     const thread = threads[comment.id];
     if (!thread?.expanded) return null;
 
@@ -688,9 +713,12 @@ export function CommentsList({
               comment={comment}
               locale={locale}
               labels={labels.item}
-              onReply={startReply}
+              // D-82: BOTH handlers are withheld in the flat variant, and withholding them is what
+              // removes the controls — `CommentItem` chooses its shell from the handlers it was
+              // given, so there is no second branch anywhere about what a comment looks like.
+              onReply={flat ? undefined : startReply}
               onDelete={comment.canDelete ? setConfirming : undefined}
-              onToggleLike={(row) => void toggleLike(row)}
+              onToggleLike={flat ? undefined : (row) => void toggleLike(row)}
             >
               {renderToggle(comment)}
             </CommentItem>
@@ -721,11 +749,11 @@ export function CommentsList({
       data-comments-list
       // The sheet's own scroll container already pads by 16; the list draws its own gutters, so it
       // cancels that padding rather than doubling it. The sheet's HEIGHT is never touched (UI-D-18).
-      className={cn('flex flex-col', variant === 'sheet' && '-mx-4 -my-4')}
+      className={cn('flex flex-col', variant !== 'inline' && '-mx-4 -my-4')}
     >
       {/* E10/partial: the body and the composer are independent — the composer is rendered OUTSIDE
           the chain above, so a failed or still-loading list never takes the input away. */}
-      <div className={cn(variant === 'sheet' && 'flex-1')}>{body}</div>
+      <div className={cn(variant !== 'inline' && 'flex-1')}>{body}</div>
 
       <CommentInput
         viewerAvatarUrl={viewer.avatarUrl}
@@ -740,7 +768,9 @@ export function CommentsList({
             ? null
             : submitError === 'reply_depth_exceeded'
               ? labels.replyDepthErrorLabel
-              : labels.submitErrorLabel
+              : submitError === 'story_comment_no_reply'
+                ? labels.storyNoReplyErrorLabel
+                : labels.submitErrorLabel
         }
         onClearError={() => setSubmitError(null)}
         focusKey={focusKey}

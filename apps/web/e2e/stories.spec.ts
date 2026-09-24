@@ -1,12 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import { STORY_PAGE_SIZE } from '@tria/module-stories/contracts';
+import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
   activeReadyStoryCount,
   cloneActiveStories,
   closeAdmin,
   deleteStoriesByCaptionPrefix,
+  deleteStoryCommentsByBodyPrefix,
   envValue,
 } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
@@ -14,6 +16,13 @@ import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
 const S = storyMessages.stories;
+/**
+ * D-82: the story's comment sheet reads its copy from the FEED namespace, verbatim. Importing the
+ * feed catalog here rather than mirroring the strings into `stories.json` is the same claim the
+ * UI-SPEC's Copywriting Contract makes — if someone duplicates them, this import stops matching
+ * what the sheet renders and the walk below goes red.
+ */
+const F = feedMessages.feed;
 
 /**
  * STORY-01 / STORY-03 / D-78 / D-80 (plan 05-05): the `/inicio` stories strip and the full-screen
@@ -561,5 +570,94 @@ test.describe('the viewer at a FULL strip on a 320px screen (overflow backstop)'
     // …and they are all on ONE row: a wrap would put some of them on a different line.
     const tops = new Set(geometry.map((segment) => Math.round(segment.top)));
     expect(tops.size).toBe(1);
+  });
+});
+
+/**
+ * STORY-05's second half in a real browser (05-07, D-82, D-83).
+ *
+ * The walk is the whole test: open a story, tap "Comentar", watch the progress bar STOP, write a
+ * comment, see it land at the BOTTOM of the list, close the sheet and watch the bar resume from
+ * where it stopped rather than restarting. That sequence is the product claim — "the story waits
+ * for you while you type" — and it is measured the way every other clock assertion in this file is,
+ * by the computed width of a segment rather than by a screenshot.
+ *
+ * The absence assertions ride along in the same test because they need the sheet open: no reply
+ * control, no replies toggle, no per-comment like, anywhere inside it. Those three are UX; the
+ * database refuses all three outright and `supabase/tests/110-communities-stories.sql` is where
+ * that is proved. This is the layer that stops a member being invited into a refusal.
+ */
+test.describe('the story comment sheet — D-82, D-83 (mobile)', () => {
+  const V = S.viewer;
+  const BODY_PREFIX = 'Comentario e2e';
+
+  test.afterAll(async () => {
+    await deleteStoryCommentsByBodyPrefix(BODY_PREFIX);
+  });
+
+  test('the sheet pauses the story, the new comment lands at the BOTTOM, and closing resumes', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the sheet over a full-screen viewer is the phone’s');
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    // A DEEP LINK, for the reason the heart test gives: a single-story sequence keeps the sheet
+    // pointing at one story while the assertions run.
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, '/v1/stories?limit=1');
+    const { items } = (await list.json()) as { items: { id: string }[] };
+    const story = items[0];
+    expect(story, 'the demo tenant has a story to comment on').toBeTruthy();
+
+    await page.goto(`/stories/${(story as { id: string }).id}`);
+    const viewer = page.getByRole('dialog', { name: V.dialog });
+    await expect(viewer).toBeVisible();
+    // The clock does not start until the media reports it loaded, so a non-zero width is also the
+    // proof that the image decoded.
+    await expect
+      .poll(async () => (await page.getByTestId('story-fill-0').boundingBox())?.width ?? -1, {
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(0);
+
+    // Dispatched AT the element for the dev-overlay reason the heart test documents.
+    await viewer.getByRole('button', { name: V.comment }).dispatchEvent('click');
+
+    // The sheet is the SHIPPED one: its title is the feed's "Comentários", not a copy of it.
+    const sheet = page.getByRole('dialog', { name: F.comments.title });
+    await expect(sheet).toBeVisible();
+    await expect(viewer).toHaveAttribute('data-paused', 'true');
+
+    // THE claim: nine hundred milliseconds of wall clock move the bar by nothing at all.
+    const held = (await page.getByTestId('story-fill-0').boundingBox())?.width ?? -1;
+    await page.waitForTimeout(900);
+    const stillHeld = (await page.getByTestId('story-fill-0').boundingBox())?.width ?? -1;
+    expect(Math.abs(stillHeld - held)).toBeLessThan(2);
+
+    // D-82: none of the three affordances the database refuses is drawn anywhere in the sheet.
+    await expect(sheet.locator('[data-comment-reply]')).toHaveCount(0);
+    await expect(sheet.locator('[data-replies-toggle]')).toHaveCount(0);
+    await expect(sheet.locator('[data-comment-like]')).toHaveCount(0);
+
+    // D-83: the new comment lands at the BOTTOM, because a flat conversation runs forward in time.
+    const body = `${BODY_PREFIX} ${Date.now()}`;
+    await sheet.getByPlaceholder(F.comments.placeholder).fill(body);
+    await sheet.getByRole('button', { name: F.comments.submit }).dispatchEvent('click');
+    await expect(sheet.getByText(body)).toBeVisible();
+    const rows = sheet.locator('[data-comment-id]');
+    await expect(rows.last()).toContainText(body);
+
+    // …and it is still the only conversation: no reply control appeared with the new row either.
+    await expect(sheet.locator('[data-comment-reply]')).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+    await expect(viewer).toHaveAttribute('data-paused', 'false');
+
+    // It resumed from WHERE IT STOPPED rather than restarting.
+    await page.waitForTimeout(600);
+    const resumed = (await page.getByTestId('story-fill-0').boundingBox())?.width ?? -1;
+    expect(resumed).toBeGreaterThan(held);
   });
 });

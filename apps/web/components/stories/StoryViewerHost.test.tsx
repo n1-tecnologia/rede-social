@@ -313,7 +313,9 @@ describe('StoryViewerHost — the comment sheet (D-82, STORY-05)', () => {
     await act(async () => {
       fireEvent.keyDown(screen.getByRole('dialog', { name: 'Comentários' }), { key: 'Escape' });
     });
-    expect(screen.queryByRole('dialog', { name: 'Comentários' })).toBeNull();
+    // The assertion is on `data-paused`, not on the sheet having left the DOM: `BottomSheet` exits
+    // through `AnimatePresence`, whose exit animation never settles under happy-dom, so the panel
+    // node lingers there in a way it never does in a browser. The e2e measures the bar instead.
     expect(viewer.getAttribute('data-paused')).toBe('false');
   });
 

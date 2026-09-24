@@ -1,11 +1,18 @@
 import {
   type PublishStory,
+  STORY_COMMENT_ISSUE_SET,
+  STORY_COMMENTS_PAGE_SIZE,
   STORY_ISSUE_SET,
   STORY_PAGE_SIZE,
+  type StoryComment,
+  type StoryCommentIssue,
+  type StoryCommentPage,
   type StoryIssue,
   type StoryLikeResult,
   type StoryPage,
   type StorySummary,
+  storyCommentPageSchema,
+  storyCommentSchema,
   storyLikeResultSchema,
   storyPageSchema,
   storySummarySchema,
@@ -190,3 +197,78 @@ async function toggleStoryLike(
 
 export const likeStory = (storyId: string) => toggleStoryLike(storyId, 'POST');
 export const unlikeStory = (storyId: string) => toggleStoryLike(storyId, 'DELETE');
+
+/* ── Story comments (STORY-05, D-82, D-83) ────────────────────────────────────────────────────── */
+
+/** The query the sheet sends; `cursor` is OPAQUE and forwarded verbatim. */
+export type StoryCommentQueryInput = { cursor?: string; limit?: number };
+
+/**
+ * `GET /v1/stories/{storyId}/comments` (STORY-05, D-83) — the story's flat conversation, OLDEST
+ * first, through the SAME `apiFetch` every read above uses.
+ *
+ * The cursor walks FORWARD over its own ascending index and is NOT interchangeable with the feed's
+ * comment cursor, which walks backward over a different one. Feeding one to the other degrades to
+ * page 1, exactly as a tampered cursor does — `decodeCursor` is total.
+ */
+export async function getStoryComments(
+  storyId: string,
+  query: StoryCommentQueryInput = {},
+): Promise<StoryCommentPage> {
+  const search = new URLSearchParams();
+  if (query.cursor) search.set('cursor', query.cursor);
+  search.set('limit', String(query.limit ?? STORY_COMMENTS_PAGE_SIZE));
+
+  const res = await apiFetch(
+    `/v1/stories/${encodeURIComponent(storyId)}/comments?${search.toString()}`,
+  );
+  if (!res.ok) throw await apiError(res);
+  return storyCommentPageSchema.parse(await res.json());
+}
+
+/**
+ * `POST /v1/stories/{storyId}/comments`.
+ *
+ * **`parentId` is forwarded rather than refused here**, for the reason `createStoryCommentSchema`
+ * accepts it: the DATABASE is what refuses a reply to a story comment, and a member calling the API
+ * directly must get the same answer as a member tapping a button. The UI simply never draws the
+ * affordance (D-82).
+ */
+export async function createStoryComment(
+  storyId: string,
+  body: string,
+  parentId?: string,
+): Promise<StoryComment> {
+  const res = await apiFetch(`/v1/stories/${encodeURIComponent(storyId)}/comments`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(parentId ? { body, parentId } : { body }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return storyCommentSchema.parse(await res.json());
+}
+
+/** `DELETE /v1/stories/{storyId}/comments/{commentId}` — a member removes their OWN comment. */
+export async function deleteStoryComment(storyId: string, commentId: string): Promise<void> {
+  const res = await apiFetch(
+    `/v1/stories/${encodeURIComponent(storyId)}/comments/${encodeURIComponent(commentId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) throw await apiError(res);
+}
+
+/**
+ * Reads the STORY-05 refusal the API put in `details.comment`, and nothing else from the envelope.
+ *
+ * It answers only `story_comment_no_reply`: `story_comment_not_likeable` is raised by the FEED's
+ * comment-like route and read by the feed's own mapper, and a story's flat list has no like control
+ * to raise it from in the first place. Both codes live in one exported vocabulary so the pair can
+ * still be switched on exhaustively (`STORY_COMMENT_ISSUE_SET`).
+ */
+export function storyCommentIssue(error: unknown): StoryCommentIssue | null {
+  if (!(error instanceof ApiClientError)) return null;
+  const issue = (error.details as { comment?: unknown } | undefined)?.comment;
+  return typeof issue === 'string' && STORY_COMMENT_ISSUE_SET.has(issue)
+    ? (issue as StoryCommentIssue)
+    : null;
+}

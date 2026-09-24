@@ -9,6 +9,9 @@ import {
   STORY_EXPIRY_HOURS,
   STORY_MAX_CAPTION,
   STORY_MAX_PAGE_SIZE,
+  type StoryComment,
+  type StoryCommented,
+  type StoryCommentPage,
   type StoryLiked,
   type StoryLikeResult,
   type StoryPage,
@@ -835,6 +838,325 @@ describe('STORY-05 (first half) — the story like toggle is idempotent and coun
     expect(liked.status).toBe(200);
     const unliked = await unlike(tokens.demoMember, storyId);
     expect(unliked.status).toBe(200);
+  });
+});
+
+describe('STORY-05 (second half) — the comment surface, and the two refusals the DATABASE owns', () => {
+  /**
+   * The assertions that matter here are the two REFUSALS, and they are asserted BY MACHINE CODE
+   * rather than by status. A 400 alone would pass if the service had grown an application-level
+   * `if (parentId) throw` — which is precisely the implementation this plan exists to replace,
+   * because it would keep this suite green while the constraint was missing. The code is the
+   * service's TRANSLATION of a SQLSTATE Postgres raised on a named constraint; pgTAP proves the
+   * constraint, and these prove the translation reaches a caller.
+   *
+   * Each refusal ships its POSITIVE CONTROL against a POST in the same block: the Phase 4 reply and
+   * the Phase 4 comment like still work, so a rewrite that had broken commenting outright could not
+   * pass this file.
+   *
+   * Everything runs against THIS FILE'S OWN story and its own post, never the seeded rows — the
+   * `on conflict (id) do nothing` seed cannot repair a mutated fixture (the 05-06 lesson).
+   */
+  let storyId = '';
+  let expiredStoryId = '';
+  let postId = '';
+  let postCommentId = '';
+  const commentEvents: StoryCommented[] = [];
+
+  const listComments = (token: string, id: string, query = '', host = HOSTS.demo) =>
+    request(`/v1/stories/${id}/comments${query}`, token, { headers: { 'x-tenant-host': host } });
+
+  const createComment = (
+    token: string,
+    id: string,
+    body: Record<string, unknown>,
+    host = HOSTS.demo,
+  ) =>
+    request(`/v1/stories/${id}/comments`, token, {
+      method: 'POST',
+      headers: { 'x-tenant-host': host },
+      body: JSON.stringify(body),
+    });
+
+  async function storedCommentCount(id: string): Promise<number> {
+    const rows = await adminSql<{ comment_count: number }[]>`
+      select comment_count from public.stories where id = ${id}::uuid`;
+    return rows[0]?.comment_count ?? -1;
+  }
+
+  async function liveCommentRows(id: string): Promise<number> {
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_comments
+       where story_id = ${id}::uuid and deleted_at is null`;
+    return rows[0]?.n ?? -1;
+  }
+
+  beforeAll(async () => {
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const res = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — comentarios`,
+    });
+    expect(res.status).toBe(201);
+    storyId = ((await res.json()) as StorySummary).id;
+    created.push(storyId);
+
+    // An EXPIRED story of this file's own: commenting on one must still work (A-4), because 05-08
+    // pins expired stories to communities and an affordance that 400d there would be a second copy
+    // of the 24 h window.
+    const expiredAsset = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+    });
+    expiredStoryId = randomUUID();
+    created.push(expiredStoryId);
+    await adminSql`
+      insert into public.stories
+        (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+      select ${expiredStoryId}::uuid, ${tenantIds.demo}::uuid, m.user_id, ${expiredAsset}::uuid,
+             'image', ${`${TEST_CAPTION_PREFIX} — expirada comentada`},
+             now() - interval '30 hours', now() - interval '6 hours'
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       limit 1`;
+
+    // The POSITIVE CONTROLS' target: a tenant-wide post of this file's own (no community, so no
+    // community counter moves) with one ROOT comment on it.
+    postId = randomUUID();
+    postCommentId = randomUUID();
+    await adminSql`
+      insert into public.feed_posts (id, tenant_id, author_user_id, caption)
+      select ${postId}::uuid, ${tenantIds.demo}::uuid, m.user_id, ${`${TEST_CAPTION_PREFIX} — post de controle`}
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       limit 1`;
+    await adminSql`
+      insert into public.feed_comments
+        (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+      select ${postCommentId}::uuid, ${tenantIds.demo}::uuid, ${postId}::uuid, m.user_id,
+             'raiz de controle', 0, null, null, null
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       limit 1`;
+
+    unsubscribes.push(
+      subscribe('story.commented', async (payload) => {
+        commentEvents.push(payload);
+      }),
+    );
+  });
+
+  afterAll(async () => {
+    // The post cascades its comments and their likes; the stories are swept by `created`.
+    await adminSql`delete from public.feed_posts where id = ${postId}::uuid`;
+  });
+
+  it('31. a member comments on a story: 201, the row comes back, and the COUNT moves to 1', async () => {
+    const res = await createComment(tokens.demoMember, storyId, { body: 'Primeiro comentario.' });
+    expect(res.status).toBe(201);
+
+    const created = (await res.json()) as StoryComment;
+    expect(created.body).toBe('Primeiro comentario.');
+    expect(created.authorRemoved).toBe(false);
+    expect(created.canDelete).toBe(true);
+    // The flat shape: four fields a story comment has no concept of are ABSENT from the wire.
+    expect(created).not.toHaveProperty('likeCount');
+    expect(created).not.toHaveProperty('replyCount');
+
+    expect(await storedCommentCount(storyId)).toBe(1);
+  });
+
+  it('32. the list runs OLDEST first and pages FORWARD, never repeating and never skipping', async () => {
+    for (const body of ['Segundo comentario.', 'Terceiro comentario.']) {
+      expect((await createComment(tokens.demoMember, storyId, { body })).status).toBe(201);
+    }
+
+    const first = await listComments(tokens.demoMember, storyId, '?limit=2');
+    expect(first.status).toBe(200);
+    const page1 = (await first.json()) as StoryCommentPage;
+    expect(page1.items.map((c) => c.body)).toEqual(['Primeiro comentario.', 'Segundo comentario.']);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const second = await listComments(
+      tokens.demoMember,
+      storyId,
+      `?limit=2&cursor=${encodeURIComponent(page1.nextCursor ?? '')}`,
+    );
+    const page2 = (await second.json()) as StoryCommentPage;
+    // Page 2 CONTINUES forward: the third row, and no repeat of either row on page 1.
+    expect(page2.items.map((c) => c.body)).toEqual(['Terceiro comentario.']);
+    expect(page2.nextCursor).toBeNull();
+
+    const ids = [...page1.items, ...page2.items].map((c) => c.id);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('33. a REPLY to a story comment is refused BY MACHINE CODE — the database raised it', async () => {
+    const page = (await (
+      await listComments(tokens.demoMember, storyId, '?limit=1')
+    ).json()) as StoryCommentPage;
+    const parentId = page.items[0]?.id ?? '';
+
+    const res = await createComment(tokens.demoMember, storyId, {
+      body: 'Tentando responder.',
+      parentId,
+    });
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    // The CODE, not the status: a 400 alone would also be produced by an application pre-check,
+    // which is exactly the implementation this plan removed.
+    expect(body.error.details?.comment).toBe('story_comment_no_reply');
+
+    // …and nothing was written: the count is still three.
+    expect(await storedCommentCount(storyId)).toBe(3);
+  });
+
+  it('34. POSITIVE CONTROL: a reply to a POST comment still succeeds, unchanged by the rewrite', async () => {
+    const res = await request(`/v1/feed/posts/${postId}/comments`, tokens.demoMember, {
+      method: 'POST',
+      headers: { 'x-tenant-host': HOSTS.demo },
+      body: JSON.stringify({ body: 'Resposta legitima.', parentId: postCommentId }),
+    });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { isReply: boolean }).isReply).toBe(true);
+  });
+
+  it('35. a LIKE on a story comment is refused BY MACHINE CODE, on the feed’s own like route', async () => {
+    const page = (await (
+      await listComments(tokens.demoMember, storyId, '?limit=1')
+    ).json()) as StoryCommentPage;
+    const commentId = page.items[0]?.id ?? '';
+
+    const res = await request(`/v1/feed/comments/${commentId}/like`, tokens.demoMember, {
+      method: 'POST',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.details?.like).toBe('story_comment_not_likeable');
+
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes where comment_id = ${commentId}::uuid`;
+    expect(rows[0]?.n).toBe(0);
+  });
+
+  it('36. POSITIVE CONTROL: a like on a POST comment still succeeds', async () => {
+    const res = await request(`/v1/feed/comments/${postCommentId}/like`, tokens.demoMember, {
+      method: 'POST',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { liked: boolean }).liked).toBe(true);
+  });
+
+  it('37. commenting on an EXPIRED story succeeds — expiry gates the strip, never the interaction', async () => {
+    const res = await createComment(tokens.demoMember, expiredStoryId, { body: 'Ainda aqui.' });
+    expect(res.status).toBe(201);
+    expect(await storedCommentCount(expiredStoryId)).toBe(1);
+  });
+
+  it('38. DELETE soft-deletes the member’s OWN comment and moves the count exactly ONCE', async () => {
+    const page = (await (
+      await listComments(tokens.demoMember, storyId, '?limit=1')
+    ).json()) as StoryCommentPage;
+    const commentId = page.items[0]?.id ?? '';
+
+    const first = await request(`/v1/stories/${storyId}/comments/${commentId}`, tokens.demoMember, {
+      method: 'DELETE',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(first.status).toBe(204);
+    expect(await storedCommentCount(storyId)).toBe(2);
+
+    // The ROW survives for Phase 8 moderation; only `deleted_at` moved.
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_comments where id = ${commentId}::uuid`;
+    expect(rows[0]?.n).toBe(1);
+
+    // A second delete matches nothing: one bare 404, and the count does NOT move again.
+    const second = await request(
+      `/v1/stories/${storyId}/comments/${commentId}`,
+      tokens.demoMember,
+      {
+        method: 'DELETE',
+        headers: { 'x-tenant-host': HOSTS.demo },
+      },
+    );
+    expect(second.status).toBe(404);
+    expect(await storedCommentCount(storyId)).toBe(2);
+  });
+
+  it('39. someone else’s comment, another tenant’s story and an unknown id are ONE bare 404', async () => {
+    const page = (await (
+      await listComments(tokens.demoMember, storyId, '?limit=1')
+    ).json()) as StoryCommentPage;
+    const someoneElses = page.items[0]?.id ?? '';
+
+    // The admin wrote nothing here, so this comment is not theirs to remove.
+    const notMine = await request(
+      `/v1/stories/${storyId}/comments/${someoneElses}`,
+      tokens.demoAdmin,
+      { method: 'DELETE', headers: { 'x-tenant-host': HOSTS.demo } },
+    );
+    expect(notMine.status).toBe(404);
+    // ONE read of the body: it is a stream, and the bare-404 claim is about BOTH halves of the
+    // same envelope — the code, and the absence of any `details` a prober could read.
+    const miss = await envelope(notMine);
+    expect(miss.error.code).toBe('NOT_FOUND');
+    expect(miss.error.details).toBeUndefined();
+
+    // Another tenant's story: the list and the create take the SAME branch.
+    const foreignList = await listComments(tokens.labAdmin, storyId, '', HOSTS.lab);
+    expect(foreignList.status).toBe(404);
+    const foreignCreate = await createComment(
+      tokens.labAdmin,
+      storyId,
+      { body: 'De outro tenant.' },
+      HOSTS.lab,
+    );
+    expect(foreignCreate.status).toBe(404);
+
+    const unknown = await listComments(tokens.demoMember, randomUUID());
+    expect(unknown.status).toBe(404);
+  });
+
+  it('40. the comment routes carry NO permission — a plain member lists, creates and deletes', async () => {
+    const res = await createComment(tokens.demoMember, storyId, { body: 'Sem permissao.' });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as StoryComment;
+
+    expect((await listComments(tokens.demoMember, storyId)).status).toBe(200);
+    const removed = await request(`/v1/stories/${storyId}/comments/${id}`, tokens.demoMember, {
+      method: 'DELETE',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(removed.status).toBe(204);
+  });
+
+  it('41. `story.commented` carries the story AUTHOR and NO body, and the count reconciles', async () => {
+    expect(commentEvents.length).toBeGreaterThan(0);
+    const event = commentEvents[0];
+    expect(event?.storyId).toBe(storyId);
+    expect(event?.storyAuthorUserId).toBeTruthy();
+    expect(event?.storyAuthorUserId).not.toBe(event?.actorUserId);
+    // Ids and flags only — a comment body must never enter an event payload (T-05-43).
+    expect(JSON.stringify(event)).not.toContain('Primeiro comentario');
+    expect(Object.keys(event ?? {}).sort()).toEqual([
+      'actorUserId',
+      'commentId',
+      'storyAuthorUserId',
+      'storyId',
+      'tenantId',
+    ]);
+
+    expect(await storedCommentCount(storyId)).toBe(await liveCommentRows(storyId));
+    expect(await storedCommentCount(expiredStoryId)).toBe(await liveCommentRows(expiredStoryId));
   });
 });
 

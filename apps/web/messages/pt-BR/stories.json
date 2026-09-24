@@ -26,7 +26,9 @@
       },
       "comments": {
         "one": "{count} comentário",
-        "other": "{count} comentários"
+        "other": "{count} comentários",
+        "noReply": "Não é possível responder a um comentário de story.",
+        "notLikeable": "Não é possível curtir um comentário de story."
       },
       "errors": {
         "media": "Não foi possível carregar este story.",

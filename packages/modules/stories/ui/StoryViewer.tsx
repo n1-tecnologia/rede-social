@@ -106,8 +106,27 @@ export interface StoryViewerProps {
   initialIndex?: number;
   labels: StoryViewerLabels;
   onClose: () => void;
-  /** 05-07 feeds the open comment sheet in here — the SAME boolean the hold gesture writes. */
+  /**
+   * 05-07 feeds the open comment sheet in here — the SAME boolean the hold gesture writes, so
+   * "hold to pause" and "the sheet is open" are one mechanism rather than two that can disagree.
+   */
   externallyPaused?: boolean;
+  /**
+   * A node rendered INSIDE the dialog, above everything else — 05-07's `CommentSheet`.
+   *
+   * It is INJECTED rather than imported for the reason the action row is: `CommentSheet` lives in
+   * `@tria/module-feed` and `turbo boundaries` denies a `module -> module` package edge (MOD-02),
+   * so the composition happens in `apps/web`, which may reach both. 05-06 resolved the identical
+   * edge for `LikeButton` the same way.
+   *
+   * It is a CHILD of the dialog root rather than a sibling, and that placement is load-bearing
+   * twice over. The root's focus trap enumerates its own descendants, so a sheet rendered outside
+   * it would have focus yanked back out from under it; and the sheet's own Escape handler calls
+   * `stopPropagation` on the panel, which only shields the viewer's `onKeyDown` when the viewer is
+   * an ANCESTOR. It sits outside the gesture stage, so a tap inside the sheet is never a tap on a
+   * story.
+   */
+  overlay?: ReactNode;
   /** Injected by the unit test; defaults to the browser's own timer and frame scheduler. */
   now?: () => number;
   requestFrame?: (callback: (timestamp: number) => void) => number;
@@ -147,6 +166,7 @@ export function StoryViewer({
   labels,
   onClose,
   externallyPaused = false,
+  overlay,
   now,
   requestFrame,
   cancelFrame,
@@ -570,6 +590,10 @@ export function StoryViewer({
         ) : null}
         <div className="-ml-2.5 mt-2 flex items-center gap-1">{current?.actions}</div>
       </div>
+
+      {/* Last, so it paints over the veil, the caption and the action row; `BottomSheet` is
+          `fixed inset-0 z-[55]`, a rung above this dialog's own `z-[52]`. */}
+      {overlay}
     </div>
   );
 }

@@ -86,6 +86,12 @@ export type CommentItemProps = {
   onReply?: (comment: CommentView) => void;
   /** Raises the list's shared confirmation dialog; the row owns the control, not the dialog. */
   onDelete?: (comment: CommentView) => void;
+  /**
+   * ABSENT MEANS NO HEART AT ALL, not a disabled one (05-07). The flat variant a story's comments
+   * render in has no per-comment like, because `feed_likes_comment_fk` makes the row
+   * unrepresentable — and an affordance a member can see but never use is worse than none. The same
+   * "the presence of a handler chooses the shell" rule `onReply` and `onDelete` already follow.
+   */
   onToggleLike?: (comment: CommentView) => void;
   /** Rendered beneath the body by the LIST: the replies toggle, its skeleton, its retry, its rows. */
   children?: React.ReactNode;
@@ -171,19 +177,21 @@ export function CommentItem({
       </div>
 
       {/* `self-start`: the heart stays on the row's first line however tall the body grows. */}
-      <IconButton
-        icon={Heart}
-        size={16}
-        label={comment.viewerLiked ? labels.unlike : labels.like}
-        aria-pressed={comment.viewerLiked}
-        data-comment-like={comment.viewerLiked ? 'liked' : 'unliked'}
-        disabled={pending || !onToggleLike}
-        onClick={onToggleLike ? () => onToggleLike(comment) : undefined}
-        className={cn(
-          'self-start',
-          comment.viewerLiked ? 'text-like [&_svg]:fill-like' : 'text-text-tertiary',
-        )}
-      />
+      {onToggleLike ? (
+        <IconButton
+          icon={Heart}
+          size={16}
+          label={comment.viewerLiked ? labels.unlike : labels.like}
+          aria-pressed={comment.viewerLiked}
+          data-comment-like={comment.viewerLiked ? 'liked' : 'unliked'}
+          disabled={pending}
+          onClick={() => onToggleLike(comment)}
+          className={cn(
+            'self-start',
+            comment.viewerLiked ? 'text-like [&_svg]:fill-like' : 'text-text-tertiary',
+          )}
+        />
+      ) : null}
     </article>
   );
 }

@@ -603,3 +603,91 @@ describe('a removed author keeps their thread (UI-D-24)', () => {
     expect(post.commentCount).toBeGreaterThanOrEqual(2);
   });
 });
+
+/**
+ * 05-07's REGRESSION GATE on Phase 4.
+ *
+ * `feed_comments_parent_fk` was widened from two columns to three and both CHECKs were rewritten
+ * with null guards, on live tables carrying live rows. Every assertion in this file already covers
+ * the behaviour that rewrite could break — but it covers it in pieces, spread across four describe
+ * blocks, and none of them says WHY it must keep passing. This block does, in one place, so a
+ * future reader touching those constraints has a single named thing to run.
+ *
+ * The four sentences: a reply still works, a second level is still refused with the SAME Phase 4
+ * machine code, a post comment is still likeable, and the discriminator the whole mechanism rests
+ * on is what the database actually generated for a post comment.
+ */
+describe('05-07 regression: the constraint rewrite changed NOTHING about a post (FEED-05, FEED-06)', () => {
+  let postId = '';
+  let rootId = '';
+  let replyId = '';
+
+  beforeAll(async () => {
+    postId = await seedPost('rewrite');
+    const root = await comment(tokens.demoMember, postId, `${BODY_PREFIX} raiz do rewrite`);
+    rootId = root.id;
+    const reply = await comment(
+      tokens.demoOther,
+      postId,
+      `${BODY_PREFIX} resposta do rewrite`,
+      rootId,
+    );
+    replyId = reply.id;
+  });
+
+  it('15. a reply to a root is still ACCEPTED, and still reads back as a reply', async () => {
+    const page = await replies(tokens.demoMember, rootId);
+    const reply = page.items.find((c) => c.id === replyId);
+    expect(reply?.isReply).toBe(true);
+    expect(reply?.replyCount).toBe(0);
+  });
+
+  it('16. a reply to a REPLY is still refused with Phase 4’s OWN machine code, not STORY-05’s', async () => {
+    const res = await request(`/v1/feed/posts/${postId}/comments`, tokens.demoMember, {
+      method: 'POST',
+      body: JSON.stringify({ body: `${BODY_PREFIX} terceiro nivel`, parentId: replyId }),
+    });
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    // Three refusals now travel these paths and each has its own sentence: this one must stay
+    // `reply_depth_exceeded` and must NOT become `story_comment_no_reply`.
+    expect(body.error.details?.comment).toBe('reply_depth_exceeded');
+  });
+
+  it('17. a post comment is still LIKEABLE, and the toggle is still idempotent', async () => {
+    const first = await request(`/v1/feed/comments/${rootId}/like`, tokens.demoMember, {
+      method: 'POST',
+    });
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as LikeResult).likeCount).toBe(1);
+
+    const repeat = await request(`/v1/feed/comments/${rootId}/like`, tokens.demoMember, {
+      method: 'POST',
+    });
+    expect(repeat.status).toBe(200);
+    // Never a 409, and never a second row — `feed_likes_comment_uq` is still the arbiter.
+    expect(((await repeat.json()) as LikeResult).likeCount).toBe(1);
+
+    const rows = await adminSql<{ n: number; kind: string | null }[]>`
+      select count(*)::int as n, min(comment_target_kind) as kind
+        from public.feed_likes where comment_id = ${rootId}::uuid`;
+    expect(rows[0]?.n).toBe(1);
+    // The redundant discriminator the composite foreign key reads — written by the SERVICE as a
+    // literal, never copied from the comment, which is what makes a story comment unlikeable.
+    expect(rows[0]?.kind).toBe('post');
+  });
+
+  it('18. the generated discriminator really is `post` for a post comment and its reply', async () => {
+    const rows = await adminSql<
+      { id: string; target_kind: string; parent_target_kind: string | null }[]
+    >`
+      select id::text, target_kind, parent_target_kind
+        from public.feed_comments where id in (${rootId}::uuid, ${replyId}::uuid)`;
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.target_kind).toBe('post');
+    // The ROOT names no parent; the REPLY names the only legal triple.
+    expect(rows.find((r) => r.id === rootId)?.parent_target_kind).toBeNull();
+    expect(rows.find((r) => r.id === replyId)?.parent_target_kind).toBe('post');
+  });
+});

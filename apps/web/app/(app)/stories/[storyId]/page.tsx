@@ -1,8 +1,9 @@
 import { notFound, redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import { StoryViewerHost } from '@/components/stories/StoryViewerHost';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { storyCommentsProps } from '@/lib/registry';
 import { loadStory } from '@/lib/stories';
 import { storyViewerItem, storyViewerLabels } from '@/lib/story-view';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -47,8 +48,11 @@ export default async function StoryPage({ params }: { params: Promise<{ storyId:
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const { storyId } = await params;
-  const [tf, bootstrap, result] = await Promise.all([
+  const [tf, tfeed, locale, bootstrap, result] = await Promise.all([
     getTranslations('stories'),
+    // D-82: the sheet's copy is the FEED's, verbatim — Phase 5 adds only the refusal sentences.
+    getTranslations('feed'),
+    getLocale(),
     requireBootstrap(),
     loadStory(storyId),
   ]);
@@ -74,6 +78,10 @@ export default async function StoryPage({ params }: { params: Promise<{ storyId:
       labels={storyViewerLabels(tf)}
       onLike={likeStoryAction}
       onUnlike={unlikeStoryAction}
+      // The deep link is a single-story sequence, and it gets the SAME comment surface the strip's
+      // viewer does: a shared link to a story must be a place a member can join the conversation,
+      // not a read-only version of it.
+      comments={storyCommentsProps(locale, tfeed, tf, bootstrap)}
       closeHref="/inicio"
     />
   );

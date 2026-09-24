@@ -1,5 +1,18 @@
-import type { StorySummary } from '@tria/module-stories/contracts';
+import { avatarUrlFor } from '@tria/contracts/profiles';
+import type { CommentView } from '@tria/module-feed/ui';
+import type { StoryComment, StorySummary } from '@tria/module-stories/contracts';
 import { relativeFrom } from '@/lib/relative-time';
+
+/**
+ * The `<time>` element's machine-readable title — the same format `feed-view.tsx` uses for a
+ * comment, restated here rather than imported, because importing it would drag the feed view-model
+ * (and, through it, the media player and the env validation) into every story surface. That import
+ * chain is exactly what deviation 1 of 05-06 had to unpick.
+ */
+const absoluteStoryTime = new Intl.DateTimeFormat('pt-BR', {
+  dateStyle: 'short',
+  timeStyle: 'short',
+});
 
 /**
  * The viewer's view-model (05-06), composed on the SERVER — the `feed-view.ts` rule restated for
@@ -103,5 +116,51 @@ export function storyViewerLabels(tf: StoryLabelReader): StoryViewerLabelsView {
     commentsOne: String(tf.raw('viewer.comments.one')),
     commentsOther: String(tf.raw('viewer.comments.other')),
     genericError: tf('viewer.errors.generic'),
+  };
+}
+
+/**
+ * One story COMMENT, mapped into the SHIPPED `CommentView` the flat list renders (D-82).
+ *
+ * It maps into the feed's row type rather than a story-shaped one, because there is exactly one
+ * comment row component in the product and it is the feed's. The four fields a story comment has no
+ * concept of — `likeCount`, `viewerLiked`, `replyCount`, `isReply` — are pinned to their neutral
+ * values HERE, in one place, rather than left to whatever a future caller happens to pass: with
+ * `likeCount: 0` the row's count segment is dropped entirely (UI-D-21) and with `replyCount: 0` the
+ * toggle is not drawn even in a variant that would draw one. The flat variant suppresses all three
+ * controls anyway; this is the belt to that's braces.
+ *
+ * `now` is the page's SINGLE clock read (UI-D-14) and `nowLabel` is what a comment written seconds
+ * ago reads instead of "há 0 s" — the feed's `commentView` rule, restated across the module edge
+ * that stops the two importing each other.
+ */
+export function storyCommentView(
+  comment: StoryComment,
+  now: number,
+  nowLabel: string,
+): CommentView {
+  const elapsed = now - new Date(comment.createdAt).getTime();
+
+  return {
+    id: comment.id,
+    body: comment.body,
+    author: {
+      displayName: comment.author.displayName,
+      // UI-D-24: a removed author has no membership to link to, and nothing here invents one.
+      profileHref:
+        comment.authorRemoved || comment.author.membershipId === null
+          ? null
+          : `/membros/${comment.author.membershipId}`,
+      avatarUrl: avatarUrlFor(comment.author.avatarAssetId),
+    },
+    authorRemoved: comment.authorRemoved,
+    createdAtIso: comment.createdAt,
+    createdAtRelative: elapsed < 60_000 ? nowLabel : relativeFrom(comment.createdAt, now),
+    createdAtAbsolute: absoluteStoryTime.format(new Date(comment.createdAt)),
+    likeCount: 0,
+    viewerLiked: false,
+    replyCount: 0,
+    isReply: false,
+    canDelete: comment.canDelete,
   };
 }

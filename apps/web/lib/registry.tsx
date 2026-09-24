@@ -19,7 +19,15 @@ import {
   unlikeCommentAction,
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
-import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
+import {
+  createStoryCommentAction,
+  deleteStoryCommentAction,
+  likeStoryAction,
+  loadStoryCommentsAction,
+  refuseStoryCommentLikeAction,
+  refuseStoryRepliesAction,
+  unlikeStoryAction,
+} from '@/app/(app)/stories/story-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { loadFeed } from '@/lib/feed';
@@ -269,6 +277,48 @@ export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Boo
 }
 
 /**
+ * D-82's story comment surface, composed HERE for the same reason `feedCommentsProps` is — and
+ * composed FROM it, deliberately.
+ *
+ * **Every string except one comes from the FEED namespace, verbatim.** The sheet a member opens
+ * over a story is the sheet they already know: the same title, the same placeholder, the same empty
+ * line, the same removed-member label. Duplicating that copy into `stories.json` would be the exact
+ * drift D-82 exists to prevent, one namespace removed — the two would diverge the first time
+ * someone reworded "Nenhum comentário ainda". The UI-SPEC's Copywriting Contract says as much:
+ * Phase 5 adds NO comment copy beyond the refusal sentences.
+ *
+ * The one override is `storyNoReplyErrorLabel`, which is a refusal that cannot happen on a post and
+ * therefore has no honest wording in the feed's namespace.
+ *
+ * The three handlers are the STORY actions, not the feed's: they address `/v1/stories/{id}/comments`
+ * and their refusal vocabulary is STORY-05's. The other three — replies, like, unlike — are wired to
+ * a rejection rather than left undefined, because the flat variant never calls them and a resolved
+ * no-op would be a quieter lie.
+ */
+export function storyCommentsProps(
+  locale: string,
+  tf: Translator,
+  ts: Translator,
+  bootstrap: Bootstrap,
+) {
+  const feed = feedCommentsProps(locale, tf, bootstrap);
+  return {
+    ...feed,
+    title: tf('comments.title'),
+    onLoadComments: loadStoryCommentsAction,
+    onCreateComment: createStoryCommentAction,
+    onDeleteComment: deleteStoryCommentAction,
+    // The three a flat list never calls, wired to a REFUSAL rather than to a resolved no-op — and
+    // they are server ACTIONS rather than plain functions, because a plain function cannot cross
+    // the RSC boundary at all (Next refuses to serialise it, and the whole home slot fails with it).
+    onLoadReplies: refuseStoryRepliesAction,
+    onLikeComment: refuseStoryCommentLikeAction,
+    onUnlikeComment: refuseStoryCommentLikeAction,
+    labels: { ...feed.labels, storyNoReplyErrorLabel: ts('viewer.comments.noReply') },
+  };
+}
+
+/**
  * `stories` → home[0] at order 5 (UI-D-25): the strip sits ABOVE the feed, because a story is the
  * most time-bounded thing on `/inicio` — it is gone in 24 h — while the feed is durable. The module
  * declares no navigation tab at all (D-40/D-80): its publish door is the own-circle below.
@@ -287,7 +337,14 @@ export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Boo
  * never calls a clock in render, so there is no hydration mismatch and no per-second re-render.
  */
 const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
-  const [page, tf] = await Promise.all([loadStories(), getTranslations('stories')]);
+  const [page, tf, tfeed, locale] = await Promise.all([
+    loadStories(),
+    getTranslations('stories'),
+    // D-82: the sheet's own copy is the FEED's, read from the feed namespace rather than copied
+    // into the stories one.
+    getTranslations('feed'),
+    getLocale(),
+  ]);
   const now = Date.now();
   const canPublish = bootstrap.permissions.includes('stories.story.publish');
   const stories = page?.items ?? [];
@@ -321,6 +378,7 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
               labels: storyViewerLabels(tf),
               onLike: likeStoryAction,
               onUnlike: unlikeStoryAction,
+              comments: storyCommentsProps(locale, tfeed, tf, bootstrap),
             }
       }
       ringVariant="brand"

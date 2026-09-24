@@ -624,3 +624,18 @@ export async function deletePostAssetsSince(tenantSlug: string, since: Date): Pr
        and a.purpose in ('post', 'attachment')
        and a.created_at >= ${since.toISOString()}::timestamptz`;
 }
+
+/**
+ * Removes every STORY comment whose body starts with `prefix` (05-07).
+ *
+ * A hard delete rather than a soft one: the spec's own rows must leave no trace in
+ * `stories.comment_count`, and the trigger's DELETE arm is what moves the number back. Using the
+ * UI's own delete control instead would be the file's usual posture, but it would also route the
+ * cleanup through a confirmation dialog stacked over a sheet over a full-screen viewer — three
+ * overlays deep, for a teardown.
+ */
+export async function deleteStoryCommentsByBodyPrefix(prefix: string): Promise<void> {
+  await sql()`
+    delete from public.feed_comments
+     where story_id is not null and body like ${`${prefix}%`}`;
+}

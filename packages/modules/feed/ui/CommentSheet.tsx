@@ -4,14 +4,15 @@ import { BottomSheet } from '@tria/ui';
 import { CommentsList, type CommentsListProps } from './CommentsList';
 
 /**
- * The comment sheet over the feed (D-59) — `[proto]` `comments/CommentSheet.tsx` on the SHIPPED
- * `BottomSheet`.
+ * The comment sheet over the feed (D-59) and over the story viewer (D-82) — `[proto]`
+ * `comments/CommentSheet.tsx` on the SHIPPED `BottomSheet`.
  *
  * **It is a container and nothing else.** Every behaviour a member can observe inside it — the
  * ordering, the paging, the reply expansion, the delete affordance, the two UI-D-22 error branches
  * — belongs to `CommentsList`, which `/post/[id]` renders inline from the same file. That is the
  * whole point of D-59: two surfaces, one implementation. If this component ever grows a conditional
- * about what a comment looks like, the drift the decision exists to prevent has started.
+ * about what a comment looks like, the drift the decision exists to prevent has started. The story
+ * surface is therefore ONE prop — `variant="flat"` — handed straight to the list.
  *
  * **The sheet's HEIGHT is the primitive's, unmodified** (UI-D-18). The prototype set its own
  * `0.7`; the shipped `BottomSheet` uses `0.8` and nothing here overrides it. One sheet geometry
@@ -28,12 +29,24 @@ export type CommentSheetProps = Omit<CommentsListProps, 'variant'> & {
   onClose: () => void;
   /** The sheet's title — a fixed string from the host's catalog, never interpolated (E10/long-text). */
   title: string;
+  /**
+   * `sheet` is the feed's; `flat` is a story's (D-82) — no reply affordance, no replies toggle, no
+   * per-comment like, and new comments appended at the bottom. `inline` is deliberately NOT
+   * offerable here: it is the shape the POST PAGE renders without a sheet at all.
+   */
+  variant?: 'sheet' | 'flat';
 };
 
-export function CommentSheet({ open, onClose, title, ...list }: CommentSheetProps) {
+export function CommentSheet({
+  open,
+  onClose,
+  title,
+  variant = 'sheet',
+  ...list
+}: CommentSheetProps) {
   return (
     <BottomSheet open={open} onClose={onClose} title={title}>
-      <CommentsList {...list} variant="sheet" />
+      <CommentsList {...list} variant={variant} />
     </BottomSheet>
   );
 }
