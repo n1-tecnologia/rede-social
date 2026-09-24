@@ -39,8 +39,9 @@ affects: [05-11, 05-12, stories, media]
 actuals:
   tokens: 18967
   tasks: 3
-  # MEASURED from plan_head_before: 6 task commits (3 RED + 3 GREEN) + this plan's own docs commit.
-  commits: 7
+  # MEASURED from plan_head_before: 6 task commits (3 RED + 3 GREEN) + this plan's docs commit
+  # + the WINDOWS.md ledger commit.
+  commits: 8
 
 plan_head_before: 5e0334f673d229db1c978cce78fabb1c5b869fce
 
