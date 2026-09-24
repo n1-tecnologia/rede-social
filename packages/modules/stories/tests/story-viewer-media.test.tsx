@@ -283,4 +283,31 @@ describe('StoryViewer over the REAL MediaImage — the image path settles (STORY
     expect(readyByAsset.get('asset-1')).toBe(1);
     expect(renderCount).toBeLessThan(SETTLED_RENDER_BOUND * 2);
   });
+
+  it('4. CR-03: a story with an EMPTY variant ladder reaches the error state and is not consumed', () => {
+    const clock = manualClock();
+    // `listCommunityHighlights` omits the `status = 'ready'` filter on purpose, so a pinned,
+    // still-transcoding asset reaches the viewer with no variants published yet.
+    viewer([mediaItem(0, []), mediaItem(1)], {}, clock);
+
+    // The failure is REPORTED rather than swallowed, so the viewer can say something.
+    expect(reports.failed).toBe(1);
+    expect(reports.ready).toBe(1); // the healthy neighbour, not this story
+    expect(screen.getByTestId('media-fallback-asset-0')).toBeInTheDocument();
+
+    // The error copy and its retry, not a permanent `loading` state.
+    expect(screen.getByTestId('story-media-error')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: LABELS.retry })).toBeInTheDocument();
+
+    // A full-screen surface with no way out is a trap, not an error state.
+    const close = screen.getByRole('button', { name: LABELS.close });
+    act(() => close.focus());
+    expect(document.activeElement).toBe(close);
+
+    // The prohibition, made executable: a story the member could NOT see must not be consumed on
+    // their behalf. The clock stays where it stopped and the sequence does not advance.
+    clock.advance(STORY_DURATION_MS * 2);
+    expect(fillOf(0)).toBe('0%');
+    expect(currentIndex()).toBe(0);
+  });
 });
