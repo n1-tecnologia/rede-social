@@ -1105,4 +1105,85 @@ describe('POST/PATCH /v1/communities — the cover asset contract (COMM-01, 05-0
     expect((body.error.details as { community?: string } | undefined)?.community).toBeUndefined();
     expect(await demoCommunityCount()).toBe(countBefore);
   });
+
+  it('33. the DOMESTIC stale cover: retiring a community’s OWN cover must not brick every later write (CR-01)', async () => {
+    // Case 31 owns the FOREIGN stale cover — an id from another tenant, which a PATCH that RE-SENDS
+    // it must still refuse. This case owns the DOMESTIC one, and it is the opposite property: the
+    // community's own admin retires its own cover through the shipped DELETE endpoint, and every
+    // later write — rename, description edit, archive, reactivate — must still be reachable, because
+    // none of them asserted anything about a cover.
+    //
+    // Its OWN asset, never `fixtures.ready`: retiring a shared fixture would poison every other case
+    // in this block. `seedAsset` already pushes into `coverAssets`, so the block's `afterAll`
+    // collects the ASSET. The COMMUNITY is collected by the FILE-level `created` list (`makeCommunity`
+    // pushes into it) and NOT by the block's cover-keyed sweep, because after the self-heal its
+    // `cover_asset_id` is null — which is exactly the null that releases the foreign key that sweep
+    // exists to work around.
+    const ownCover = await seedAsset(
+      tenantIds.demo,
+      'admin@tria-demo.local',
+      'image',
+      'cover',
+      'ready',
+    );
+    const community = await makeCommunity('capa aposentada pelo proprio admin', ownCover);
+    expect(community.coverAssetId).toBe(ownCover);
+
+    // Retired through the SHIPPED endpoint, not by hand: this is a state the product itself produces.
+    const retired = await request(`/v1/media/${ownCover}`, tokens.demoAdmin, {
+      method: 'DELETE',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(retired.status, 'DELETE /v1/media/{assetId}').toBe(200);
+
+    // The asymmetry is NAMED rather than assumed: the community still READS fine, and pre-fix it is
+    // only the WRITES that 404 — which is why the admin sees "Comunidade nao encontrada" about a
+    // community that is open on their screen.
+    const stillReadable = await request(`/v1/communities/${community.id}`, tokens.demoAdmin, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(stillReadable.status).toBe(200);
+
+    const [beforeHeal] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text from public.communities where id = ${community.id}::uuid`;
+    const ownUpdated = () => updatedEvents.filter((event) => event.communityId === community.id);
+    const ownArchived = () => archivedEvents.filter((event) => event.communityId === community.id);
+    expect(ownUpdated()).toHaveLength(0);
+
+    // THE RED. Pre-fix this is a 404: `updateCommunity` re-validates the STORED cover even though
+    // this request asserted nothing about one.
+    const archiveRes = await patch(community.id, { status: 'archived' });
+    expect(archiveRes.status, 'PATCH { status: archived } after the cover was retired').toBe(200);
+
+    // The dangling reference is DROPPED, not enforced: "no cover" is a first-class value (D-69).
+    const [healed] = await adminSql<{ cover_asset_id: string | null }[]>`
+      select cover_asset_id::text from public.communities where id = ${community.id}::uuid`;
+    expect(healed?.cover_asset_id).toBeNull();
+
+    // The self-heal's side effects are PINNED, not merely tolerated. The request carried no cover
+    // claim, yet nulling the dangling reference makes `changedContent` true — so the row really is
+    // written, `updated_at` really does move, and exactly one `community.updated` really is
+    // announced. Three consequences of a request that asserted nothing; each gets an assertion.
+    const [afterHeal] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text from public.communities where id = ${community.id}::uuid`;
+    expect(afterHeal?.updated_at).not.toBe(beforeHeal?.updated_at);
+    expect(ownUpdated()).toHaveLength(1);
+    expect(ownArchived()).toHaveLength(1);
+
+    // The heal is BOUNDED: an identical PATCH immediately after is observably inert again, exactly
+    // as cases 24 and 31 demand of a row that never dangled. A one-time repair, not a write forever.
+    const repeat = await patch(community.id, { status: 'archived' });
+    expect(repeat.status).toBe(200);
+    const [afterRepeat] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text from public.communities where id = ${community.id}::uuid`;
+    expect(afterRepeat?.updated_at).toBe(afterHeal?.updated_at);
+    expect(ownUpdated()).toHaveLength(1);
+    expect(ownArchived()).toHaveLength(1);
+
+    // Every OTHER write verb is reachable too, not just the archive.
+    expect((await patch(community.id, { status: 'active' })).status).toBe(200);
+    expect(
+      (await patch(community.id, { name: `${TEST_NAME_PREFIX} capa aposentada renomeada` })).status,
+    ).toBe(200);
+  });
 });
