@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
 status: executing
-stopped_at: Planned 4 gap-closure plans (05-09..05-12)
-last_updated: "2026-09-24T11:12:56.618Z"
+stopped_at: Completed 05-09-PLAN.md
+last_updated: "2026-09-24T11:52:20.268Z"
 last_activity: 2026-09-24
-last_activity_desc: Phase 05 gap-closure planning complete
-state_head: 753338129a54b578a7bf0dbcbaf9c8deeaf2ebd2
+last_activity_desc: Phase 05 execution started
+state_head: 36424a6dd77ef94c6b84886c46117e5a8d27c41e
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 62
-  completed_plans: 55
+  completed_plans: 56
   percent: 0
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 
 ## Current Position
 
-Phase: 05 (Communities & Stories) — READY TO EXECUTE
-Plan: 8 of 12 (8 executed, 4 gap-closure plans ready)
+Phase: 05 (Communities & Stories) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
-Last activity: 2026-09-24 — Phase 05 gap-closure planning complete
+Last activity: 2026-09-24 — Phase 05 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -113,6 +113,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P06 | 68 | 3 tasks | 30 files |
 | Phase 05 P07 | 79 min | 3 tasks | 38 files |
 | Phase 05 P08 | 2h 12m | 3 tasks | 35 files |
+| Phase 05 P09 | 25min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -333,6 +334,9 @@ Recent decisions affecting current work:
 - [Phase 05]: D-83's story comment list runs oldest-first on its OWN ascending index with no Sort node, and the direction rides the ONE cursor envelope as keysetComparison(direction)
 - [Phase 05]: The flat comment surface is a VALUE on the variant prop CommentsList already had; CommentItem renders no heart when onToggleLike is withheld, so there is no branch about what a comment looks like
 - [Phase 05]: A plain async function cannot cross the RSC boundary — even a no-op handler passed to a client component must be a server action, or the whole home slot fails
+- [Phase 05]: 05-09: community cover ids are resolved inside withTenantTx at the service layer; no composite (tenant_id, id) FK is added to media_assets (assumption-delta: no-change, reversible)
+- [Phase 05]: 05-09: a cover must be exactly (purpose cover, kind image, status ready) — the feed's D-53 processing concession is video-only and is not inherited
+- [Phase 05]: 05-09: the BFF tells the two bare 404s apart by a fact (create sent no community id / edit re-reads with loadCommunity), never by comparing the submitted cover against a remembered one
 
 ### Pending Todos
 
@@ -365,6 +369,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T04:33:25.054Z
-Stopped at: Completed 05-08-PLAN.md
+Last session: 2026-09-24T11:52:10.912Z
+Stopped at: Completed 05-09-PLAN.md
 Resume file: None
