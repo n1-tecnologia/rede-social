@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-09-24T11:52:20.268Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-09-24T12:10:20.523Z"
 last_activity: 2026-09-24
 last_activity_desc: Phase 05 execution started
-state_head: 36424a6dd77ef94c6b84886c46117e5a8d27c41e
+state_head: 1f4b2eb40191c46e158589d9ffb0b6d2968a8724
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 62
-  completed_plans: 56
+  completed_plans: 57
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 05 (Communities & Stories) — EXECUTING
-Plan: 2 of 12
+Plan: 11 of 12
 Status: Ready to execute
 Last activity: 2026-09-24 — Phase 05 execution started
 
@@ -114,6 +114,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P07 | 79 min | 3 tasks | 38 files |
 | Phase 05 P08 | 2h 12m | 3 tasks | 35 files |
 | Phase 05 P09 | 25min | 3 tasks | 8 files |
+| Phase 05 P10 | 42min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -337,6 +338,10 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-09: community cover ids are resolved inside withTenantTx at the service layer; no composite (tenant_id, id) FK is added to media_assets (assumption-delta: no-change, reversible)
 - [Phase 05]: 05-09: a cover must be exactly (purpose cover, kind image, status ready) — the feed's D-53 processing concession is video-only and is not inherited
 - [Phase 05]: 05-09: the BFF tells the two bare 404s apart by a fact (create sent no community id / edit re-reads with loadCommunity), never by comparing the submitted cover against a remembered one
+- [Phase 05]: MediaImage reports through refs: its mount effect depends on [assetId, src] and never on the caller's callback identities (the StoryVideo controlsRef idiom)
+- [Phase 05]: StoryViewer's media controls are two memo layers over a live ref, replacing the render-time controlsFor factory; StoryMediaControls' type is unchanged but its identity lifecycle is not (05-11 must key video effects on values, never handler identities)
+- [Phase 05]: An empty variant ladder routes into MediaImage's EXISTING failure outcome rather than a new three-valued status union (the plan's assumption-delta no-change decision, honoured)
+- [Phase 05]: Gesture isolation is structural, not propagational: the play badge and media-error container are siblings of the stage, with pointer-events-none/auto on the error container and its retry
 
 ### Pending Todos
 
@@ -369,6 +374,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T11:52:10.912Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-09-24T12:10:09.140Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None

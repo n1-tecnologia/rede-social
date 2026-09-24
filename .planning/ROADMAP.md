@@ -337,7 +337,7 @@ Plans:
 **Wave 8** *(gap closure — the two FAILED truths of `05-VERIFICATION.md`)*
 
 - [x] 05-09-PLAN.md — GAP 1 / COMM-01: resolve the community cover asset inside `withTenantTx`, one bare 404 with no existence oracle, the closed `cover_invalid` code, and the cross-tenant integration case with its positive control
-- [ ] 05-10-PLAN.md — GAP 2 image half / STORY-02: stop the `MediaImage` ↔ `StoryViewer` render loop at both ends, report the empty variant ladder (CR-03), take the badge and retry out of the gesture stage (CR-04), and render the real media under the viewer in a test
+- [x] 05-10-PLAN.md — GAP 2 image half / STORY-02: stop the `MediaImage` ↔ `StoryViewer` render loop at both ends, report the empty variant ladder (CR-03), take the badge and retry out of the gesture stage (CR-04), and render the real media under the viewer in a test
 
 **Wave 9** *(blocked on Wave 8)*
 
@@ -413,7 +413,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 | 2. Tenant Shell, Branding & Platform Panel | 20/20 | In Progress|  |
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
 | 4. Feed | 10/10 | In Progress|  |
-| 5. Communities & Stories | 9/12 | In Progress|  |
+| 5. Communities & Stories | 10/12 | In Progress|  |
 | 6. Events | 0/TBD | Not started | - |
 | 7. Notifications, Web Push & Support Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
