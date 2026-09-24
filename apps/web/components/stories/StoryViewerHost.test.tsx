@@ -586,7 +586,10 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
 
     expect(play0, 'the PREVIOUS neighbour must not be played').toHaveBeenCalledTimes(0);
     // ── THE RED ──────────────────────────────────────────────────────────────────────────────
-    expect(play2, 'the NEXT neighbour — forced to attach last — must not be played').toHaveBeenCalledTimes(0);
+    expect(
+      play2,
+      'the NEXT neighbour — forced to attach last — must not be played',
+    ).toHaveBeenCalledTimes(0);
     expect(play1.mock.calls.length, 'the CURRENT story is the one that plays').toBeGreaterThan(0);
 
     // ── The owner-only-clear guard ───────────────────────────────────────────────────────────
@@ -609,9 +612,10 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
       fireEvent.click(badge2);
     });
 
-    expect(play2.mock.calls.length, 'the new current story reaches its own element').toBeGreaterThan(
-      0,
-    );
+    expect(
+      play2.mock.calls.length,
+      'the new current story reaches its own element',
+    ).toBeGreaterThan(0);
     expect(play1, 'the story that left the window is not played').toHaveBeenCalledTimes(0);
   });
 });

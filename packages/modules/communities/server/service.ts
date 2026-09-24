@@ -327,11 +327,7 @@ function isUsableCover(asset: CoverAssetRow): boolean {
  * screen, and no later write to that row can ever succeed again. So a dangling stored reference is
  * self-healed (dropped to null) rather than enforced — see `updateCommunity`.
  */
-async function coverIsUsable(
-  tx: Tx,
-  ctx: RequestContext,
-  coverAssetId: string,
-): Promise<boolean> {
+async function coverIsUsable(tx: Tx, ctx: RequestContext, coverAssetId: string): Promise<boolean> {
   const asset = await loadCoverAsset(tx, ctx, coverAssetId);
   return asset !== undefined && isUsableCover(asset);
 }
@@ -500,7 +496,8 @@ export async function updateCommunity(
 
     const name = input.name ?? before.name;
     const description = input.description ?? before.description;
-    let coverAssetId = input.coverAssetId === undefined ? before.cover_asset_id : input.coverAssetId;
+    let coverAssetId =
+      input.coverAssetId === undefined ? before.cover_asset_id : input.coverAssetId;
     const status = input.status ?? before.status;
 
     // **Validate the cover the REQUEST asserts; never the one the row merely stores.** The

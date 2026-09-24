@@ -199,11 +199,15 @@ describe('StoryVideo — the viewer’s video bridge (STORY-02, UI-D-30, UI-D-34
 
   it('4. flipping paused to false calls the element’s play', async () => {
     const controls: Controls = makeControls(true, true);
-    const { rerender } = render(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />);
+    const { rerender } = render(
+      <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={controls} />,
+    );
     await mountedPlayer();
     await flush();
 
-    rerender(<StoryVideo assetId={ASSET} storyId={STORY_ID} controls={{ ...controls, paused: false }} />);
+    rerender(
+      <StoryVideo assetId={ASSET} storyId={STORY_ID} controls={{ ...controls, paused: false }} />,
+    );
     await flush();
 
     expect(play).toHaveBeenCalledTimes(1);
