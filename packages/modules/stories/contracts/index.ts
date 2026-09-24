@@ -279,3 +279,27 @@ declare module '@tria/contracts' {
     'story.unliked': StoryUnliked;
   }
 }
+
+/* ── Story comments (STORY-05, D-82, D-83) — RED SKELETON ─────────────────────────────────────── */
+
+/** RED skeleton (05-07 Task 1). Replaced by the real contract in the GREEN commit. */
+export const STORY_MAX_COMMENT = 1000;
+export const STORY_COMMENTS_PAGE_SIZE = 20;
+export const STORY_COMMENTS_MAX_PAGE_SIZE = 50;
+export const STORY_COMMENT_ISSUES = ['story_comment_no_reply'] as const;
+export type StoryCommentIssue = (typeof STORY_COMMENT_ISSUES)[number];
+export const STORY_COMMENT_ISSUE_SET: ReadonlySet<string> = new Set(STORY_COMMENT_ISSUES);
+
+export const createStoryCommentSchema = z
+  .object({ body: z.string().trim().min(1).max(STORY_MAX_COMMENT) })
+  .strict();
+export type CreateStoryComment = z.infer<typeof createStoryCommentSchema>;
+
+export const storyCommentsQuerySchema = z.object({}).strict();
+export type StoryCommentsQuery = z.infer<typeof storyCommentsQuerySchema>;
+
+export const storyCommentAuthorSchema = z.object({}).strict();
+export const storyCommentSchema = z.object({}).strict();
+export type StoryComment = z.infer<typeof storyCommentSchema>;
+export const storyCommentPageSchema = z.object({}).strict();
+export type StoryCommentPage = z.infer<typeof storyCommentPageSchema>;

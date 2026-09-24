@@ -42,6 +42,41 @@ export function encodeCursor({ n, id }: KeysetCursor): string {
 }
 
 /**
+ * The two directions ONE envelope may be read in (05-07, D-83).
+ *
+ * `desc` is the repo's default and the direction every Phase 3/4 list already uses. `asc` exists
+ * for a story's FLAT comment list, which is one conversation running forward in time rather than a
+ * ranking of threads — see `feed_comments_tenant_story_root_asc_idx`.
+ */
+export type KeysetDirection = 'desc' | 'asc';
+
+/** The two SQL fragments a page query needs, and the only two things a direction changes. */
+export type KeysetComparison = {
+  /** The row-comparison operator in the page predicate: `(n, id) <op> (after_n, after_id)`. */
+  operator: '<' | '>';
+  /** The `order by` direction — the SAME one the index the comparison rides is built on. */
+  order: 'desc' | 'asc';
+};
+
+/**
+ * THE direction, resolved once (Pitfall 8).
+ *
+ * A second cursor envelope for the ascending list is what the module's docblock forbids, and it
+ * would be the wrong shape anyway: the payload is identical in both directions, so the difference
+ * belongs in the COMPARISON, not in the encoding. Keeping the operator and the order together in
+ * one value is what stops them drifting apart — a `>` paired with `order by … desc` is a backward
+ * scan that pages a list into silently repeating or skipping rows, and the two are far enough apart
+ * in a long statement to disagree unnoticed.
+ *
+ * TOTAL, for the same reason `decodeCursor` is: both fields are spliced RAW into SQL by the caller
+ * (they cannot be bound parameters — an operator is not a value), so "no answer" would put the word
+ * `undefined` into a query. Anything unrecognised is the repo's default.
+ */
+export function keysetComparison(_direction: KeysetDirection): KeysetComparison {
+  return { operator: '>', order: 'desc' };
+}
+
+/**
  * The inverse, and TOTAL: not base64url, not JSON, a wrong version, a missing key or an `id` that is
  * not a uuid all answer `null`, which every page query reads as "no cursor" — the first page.
  * Nothing from this string reaches SQL until it has passed `cursorSchema`.
