@@ -29,6 +29,53 @@ import { CommentsList, type CommentsListLabels, type CommentsListProps } from '.
  * `scripts/check-ui-literals.sh`'s job, not this file's.
  */
 
+/**
+ * `motion/react`, replaced by plain elements.
+ *
+ * Not a convenience: happy-dom's `Animation.cancel()` REJECTS the animation's `finished` promise,
+ * motion attaches no catch to it, and `cleanup()` unmounting a sheet mid-transition therefore
+ * raises an unhandled rejection that fails the whole run while every assertion passes. Nothing in
+ * this file is about animation — the claims are about which nodes exist — so the transitions are
+ * removed rather than waited on.
+ */
+vi.mock('motion/react', async () => {
+  const { createElement, forwardRef } = await import('react');
+  const MOTION_ONLY = new Set([
+    'initial',
+    'animate',
+    'exit',
+    'transition',
+    'variants',
+    'drag',
+    'dragConstraints',
+    'dragElastic',
+    'onDragEnd',
+    'whileTap',
+    'whileHover',
+    'whileFocus',
+    'layout',
+    'layoutId',
+  ]);
+  const proxy = new Proxy(
+    {},
+    {
+      get: (_target, tag: string) =>
+        forwardRef((props: Record<string, unknown>, ref: unknown) => {
+          const plain: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(props)) {
+            if (!MOTION_ONLY.has(key)) plain[key] = value;
+          }
+          return createElement(tag, { ...plain, ref });
+        }),
+    },
+  );
+  return {
+    motion: proxy,
+    AnimatePresence: ({ children }: { children?: unknown }) => children,
+    useReducedMotion: () => true,
+  };
+});
+
 afterEach(cleanup);
 
 const LABELS: CommentsListLabels = {

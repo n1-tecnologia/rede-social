@@ -45,6 +45,53 @@ const lookup = (key: string, values?: Record<string, unknown>) => {
   );
 };
 
+/**
+ * `motion/react`, replaced by plain elements.
+ *
+ * Not a convenience: happy-dom's `Animation.cancel()` REJECTS the animation's `finished` promise,
+ * motion attaches no catch to it, and `cleanup()` unmounting a sheet mid-transition therefore
+ * raises an unhandled rejection that fails the whole run while every assertion passes. Nothing in
+ * this file is about animation — the claims are about which nodes exist — so the transitions are
+ * removed rather than waited on.
+ */
+vi.mock('motion/react', async () => {
+  const { createElement, forwardRef } = await import('react');
+  const MOTION_ONLY = new Set([
+    'initial',
+    'animate',
+    'exit',
+    'transition',
+    'variants',
+    'drag',
+    'dragConstraints',
+    'dragElastic',
+    'onDragEnd',
+    'whileTap',
+    'whileHover',
+    'whileFocus',
+    'layout',
+    'layoutId',
+  ]);
+  const proxy = new Proxy(
+    {},
+    {
+      get: (_target, tag: string) =>
+        forwardRef((props: Record<string, unknown>, ref: unknown) => {
+          const plain: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(props)) {
+            if (!MOTION_ONLY.has(key)) plain[key] = value;
+          }
+          return createElement(tag, { ...plain, ref });
+        }),
+    },
+  );
+  return {
+    motion: proxy,
+    AnimatePresence: ({ children }: { children?: unknown }) => children,
+    useReducedMotion: () => true,
+  };
+});
+
 vi.mock('@tria/ui', async (orig) => ({
   ...(await orig<typeof import('@tria/ui')>()),
   useToast: () => toast,
@@ -313,9 +360,7 @@ describe('StoryViewerHost — the comment sheet (D-82, STORY-05)', () => {
     await act(async () => {
       fireEvent.keyDown(screen.getByRole('dialog', { name: 'Comentários' }), { key: 'Escape' });
     });
-    // The assertion is on `data-paused`, not on the sheet having left the DOM: `BottomSheet` exits
-    // through `AnimatePresence`, whose exit animation never settles under happy-dom, so the panel
-    // node lingers there in a way it never does in a browser. The e2e measures the bar instead.
+    expect(screen.queryByRole('dialog', { name: 'Comentários' })).toBeNull();
     expect(viewer.getAttribute('data-paused')).toBe('false');
   });
 
