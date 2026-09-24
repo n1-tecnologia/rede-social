@@ -133,13 +133,19 @@ vi.mock('@/app/(app)/configuracoes/midia/actions', () => ({
 vi.mock('@mux/mux-player-react', async () => {
   const { createElement, useEffect, useState } = await import('react');
   return {
-    default: function MuxPlayerStandIn() {
+    default: function MuxPlayerStandIn(props: { playbackId?: string }) {
       const [mounted, setMounted] = useState(false);
       useEffect(() => {
         setMounted(true);
       }, []);
       if (!mounted) return null;
-      return createElement('mux-player', { 'data-testid': 'mux-player' });
+      // `data-playback-id` is ADDITIVE and exists for case 14 only: with three elements mounted at
+      // once, it is what traces an element back to the story that asked for its token. No other
+      // case asserts a `playbackId` value.
+      return createElement('mux-player', {
+        'data-testid': 'mux-player',
+        'data-playback-id': props.playbackId,
+      });
     },
   };
 });
@@ -305,6 +311,24 @@ async function mountedPlayer(): Promise<MediaLikeElement> {
   throw new Error('the vendor element never mounted');
 }
 
+/**
+ * `mountedPlayer`'s sibling: the same 20-tick flush, waiting for a COUNT of elements instead of the
+ * first one. Case 14 mounts three at once and releases them one at a time, so "how many have
+ * arrived" is the thing it has to be able to wait on.
+ */
+async function mountedPlayers(count: number): Promise<MediaLikeElement[]> {
+  for (let tick = 0; tick < 20; tick += 1) {
+    const found = document.querySelectorAll('mux-player');
+    if (found.length >= count) return [...found] as MediaLikeElement[];
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  throw new Error(
+    `only ${document.querySelectorAll('mux-player').length} of ${count} vendor elements mounted`,
+  );
+}
+
 async function timeUpdate(player: MediaLikeElement, currentTime: number, duration: number) {
   player.currentTime = currentTime;
   player.duration = duration;
@@ -435,6 +459,160 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
     // …and the end of the asset hands the member the next story.
     await timeUpdate(player, 5, 5);
     expect(viewer.getAttribute('data-story-index')).toBe('1');
+  });
+
+  it('14. the play badge reaches the CURRENT story’s element and NEITHER neighbour’s (CR-02)', async () => {
+    // `StoryViewer` mounts a 3-WIDE neighbour window (`Math.abs(k - index) <= 1`), so with the
+    // middle story active all three `StoryVideo`s are mounted and all three register a play
+    // callback. The host held ONE `playRef` for all of them, so the badge reached whichever element
+    // attached LAST — typically an offscreen neighbour.
+    //
+    // WHICH ASSERTION CARRIES THE RED: **"story 2's spy is at zero"** — the neighbour this harness
+    // FORCES to attach last. It is NOT "story 1 was played": the badge's own handler clears
+    // `blocked[currentId]`, which drops `autoplayBlocked` out of the viewer's `paused`, which
+    // re-runs `StoryVideo`'s pause/mute effect and plays the ACTIVE element on broken and fixed
+    // code alike. A reader who mistakes that half for the evidence will mis-read the next failure
+    // this case produces.
+    const ASSET_0 = '0d000000-0000-4000-8000-0000000000c0';
+    const ASSET_1 = '0d000000-0000-4000-8000-0000000000c1';
+    const ASSET_2 = '0d000000-0000-4000-8000-0000000000c2';
+
+    // THE ATTACH ORDER IS CHOSEN, NOT SAMPLED. Today's single slot is written by every mounted
+    // bridge, the active one included, so if story 1 happened to attach last both neighbours would
+    // sit at zero and this case would go green over the live bug. So the token promises are GATED
+    // and released deliberately — and a neighbour is released last.
+    const gates = new Map<string, (value: unknown) => void>();
+    playbackToken.mockImplementation(
+      (assetId: string) =>
+        new Promise((resolve) => {
+          gates.set(assetId, resolve);
+        }),
+    );
+    const release = async (assetId: string) => {
+      const open = gates.get(assetId);
+      if (!open) throw new Error(`no gate for ${assetId}`);
+      await act(async () => {
+        // The playbackId echoes the asset id back, so an element can be traced to its story.
+        open({
+          ok: true,
+          playback: {
+            playbackId: assetId,
+            tokens: { playback: 'tok-p', thumbnail: 'tok-t', storyboard: 'tok-s' },
+          },
+        });
+        await Promise.resolve();
+      });
+    };
+
+    host({
+      initialIndex: 1,
+      items: [
+        item({ id: 'story-0', mediaKind: 'video', mediaAssetId: ASSET_0 }),
+        item({ id: 'story-1', mediaKind: 'video', mediaAssetId: ASSET_1 }),
+        item({ id: 'story-2', mediaKind: 'video', mediaAssetId: ASSET_2 }),
+      ],
+    });
+
+    // All three bridges asked for a token before any of them is allowed to answer.
+    for (let tick = 0; tick < 20 && gates.size < 3; tick += 1) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    expect(gates.size).toBe(3);
+
+    // Released ONE AT A TIME: story 1 (active) first, then story 0, then story 2. The count and
+    // `data-playback-id` assertions after each release hold both BEFORE and after the fix — they
+    // describe the HARNESS, not the bug — and their whole job is to make a harness that stopped
+    // forcing the order fail loudly instead of going quietly green.
+    await release(ASSET_1);
+    const afterFirst = await mountedPlayers(1);
+    expect(afterFirst).toHaveLength(1);
+    expect(afterFirst[0]?.getAttribute('data-playback-id')).toBe(ASSET_1);
+
+    await release(ASSET_0);
+    const afterSecond = await mountedPlayers(2);
+    expect(afterSecond).toHaveLength(2);
+    const arrivedSecond = afterSecond.filter((el) => el !== afterFirst[0]);
+    expect(arrivedSecond).toHaveLength(1);
+    expect(arrivedSecond[0]?.getAttribute('data-playback-id')).toBe(ASSET_0);
+
+    await release(ASSET_2);
+    const all = await mountedPlayers(3);
+    expect(all).toHaveLength(3);
+    const arrivedThird = all.filter((el) => !afterSecond.includes(el));
+    expect(arrivedThird).toHaveLength(1);
+    expect(arrivedThird[0]?.getAttribute('data-playback-id')).toBe(ASSET_2);
+
+    // Story 2 — a NEIGHBOUR — is now necessarily the last writer of the single unkeyed slot.
+    const byStory = (assetId: string) => {
+      const found = all.find((el) => el.getAttribute('data-playback-id') === assetId);
+      if (!found) throw new Error(`no element for ${assetId}`);
+      return found;
+    };
+    const element0 = byStory(ASSET_0);
+    const element1 = byStory(ASSET_1);
+    const element2 = byStory(ASSET_2);
+
+    // The bound play closure reads `element.play` at CALL time, so assigning after attach is fine.
+    const play0 = vi.fn();
+    const play1 = vi.fn();
+    const play2 = vi.fn();
+    (element0 as unknown as { play: unknown }).play = play0;
+    (element1 as unknown as { play: unknown }).play = play1;
+    (element2 as unknown as { play: unknown }).play = play2;
+
+    // Arm the badge on the ACTIVE story (UI-D-34: `canplay` arms a 400 ms check). Real timers —
+    // no test in this file uses fake ones.
+    await act(async () => {
+      element1.dispatchEvent(new Event('canplay'));
+    });
+    const badge = await screen.findByTestId('story-autoplay-badge');
+
+    // A DETERMINISTIC zero baseline, not a hopeful one: a neighbour's controls carry
+    // `paused: paused || k !== index` so its effect only ever calls `pause()`, and the viewer's own
+    // `paused` ORs in `autoplayBlocked`, so the armed active story is paused too. Clearing also
+    // discards the one play the active element received on mount, before the badge armed.
+    play0.mockClear();
+    play1.mockClear();
+    play2.mockClear();
+    expect(play0).toHaveBeenCalledTimes(0);
+    expect(play1).toHaveBeenCalledTimes(0);
+    expect(play2).toHaveBeenCalledTimes(0);
+
+    await act(async () => {
+      fireEvent.click(badge);
+    });
+
+    expect(play0, 'the PREVIOUS neighbour must not be played').toHaveBeenCalledTimes(0);
+    // ── THE RED ──────────────────────────────────────────────────────────────────────────────
+    expect(play2, 'the NEXT neighbour — forced to attach last — must not be played').toHaveBeenCalledTimes(0);
+    expect(play1.mock.calls.length, 'the CURRENT story is the one that plays').toBeGreaterThan(0);
+
+    // ── The owner-only-clear guard ───────────────────────────────────────────────────────────
+    // REGRESSION GUARD, and it PASSES TODAY. It cannot be promoted into a second RED: pre-fix the
+    // departing neighbour's `detach()` does null the shared slot, but the same tap unblocks the
+    // viewer and the pause/mute effect plays the active element anyway — so the guard is blind to
+    // the clearing bug by construction. No claim to the contrary is recorded here.
+    await timeUpdate(element1, 5, 5);
+    const viewer = screen.getByRole('dialog', { name: 'Story' });
+    expect(viewer.getAttribute('data-story-index')).toBe('2');
+
+    await act(async () => {
+      element2.dispatchEvent(new Event('canplay'));
+    });
+    const badge2 = await screen.findByTestId('story-autoplay-badge');
+
+    play1.mockClear();
+    play2.mockClear();
+    await act(async () => {
+      fireEvent.click(badge2);
+    });
+
+    expect(play2.mock.calls.length, 'the new current story reaches its own element').toBeGreaterThan(
+      0,
+    );
+    expect(play1, 'the story that left the window is not played').toHaveBeenCalledTimes(0);
   });
 });
 
