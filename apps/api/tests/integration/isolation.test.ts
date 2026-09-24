@@ -77,8 +77,18 @@ const throwawayUsers: string[] = [];
 let blockedUserId = '';
 
 /** Phase 3 fixtures: a ready image and a ready video on EACH side, so every negative has a control. */
-const assets = { demoImage: '', labImage: '', demoVideo: '', labVideo: '' };
+const assets = {
+  demoImage: '',
+  labImage: '',
+  demoVideo: '',
+  labVideo: '',
+  /** 05-09: a perfectly usable COVER on each side — the cover gate's negative and its control. */
+  demoCover: '',
+  labCover: '',
+};
 const mediaAssetIds: string[] = [];
+/** Communities the 05-09 cover case creates; removed BEFORE the assets they point at. */
+const coverCommunityIds: string[] = [];
 const displayNames = { demo: '', lab: '' };
 const membershipIds = { demo: '', lab: '' };
 
@@ -135,6 +145,29 @@ async function seedVideo(tenantId: string, email: string, filename: string): Pro
       from public.users u where u.email = ${email}
     returning id`;
   if (!row) throw new Error(`could not seed a video for ${email}`);
+  mediaAssetIds.push(row.id);
+  return row.id;
+}
+
+/**
+ * A READY COVER image, written directly in the `seedVideo` shape (05-09).
+ *
+ * The cover gate's negative is only meaningful beside an asset that is perfectly usable AS A COVER,
+ * so this fixture carries the exact tuple the service accepts — `kind = 'image'`,
+ * `purpose = 'cover'`, `status = 'ready'` — plus a non-empty `variant_widths`, which is what the
+ * community projection hands `MediaImage` as its `srcSet` ladder. A refusal can then only be about
+ * WHOSE asset it is.
+ */
+async function seedCover(tenantId: string, email: string, filename: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+       variant_widths, filename, ready_at)
+    select ${tenantId}::uuid, u.id, 'image', 'cover', 'ready', 'supabase',
+           'image/webp', 262144, 1600, 700, '{320,640,960,1280}'::int[], ${filename}, now()
+      from public.users u where u.email = ${email}
+    returning id`;
+  if (!row) throw new Error(`could not seed a cover for ${email}`);
   mediaAssetIds.push(row.id);
   return row.id;
 }
@@ -276,6 +309,10 @@ beforeAll(async () => {
     'privado-da-demo.mp4',
   );
   assets.labVideo = await seedVideo(tenantIds.lab, 'admin@tria-lab.local', 'privado-do-lab.mp4');
+  // 05-09: one usable cover on each side. Same filename on both, so a leak that matched on content
+  // rather than on `tenant_id` could not pass by looking plausible (the adjacency rule).
+  assets.demoCover = await seedCover(tenantIds.demo, 'admin@tria-demo.local', 'capa.webp');
+  assets.labCover = await seedCover(tenantIds.lab, 'admin@tria-lab.local', 'capa.webp');
 
   displayNames.demo = await displayNameOf(tenantIds.demo, 'member@tria-demo.local');
   displayNames.lab = await displayNameOf(tenantIds.lab, 'member@tria-lab.local');
@@ -295,9 +332,21 @@ afterAll(async () => {
   ] as const) {
     if (assetId) await removeMediaObjects(tenantId, assetId);
   }
+  // 05-09: anything pointing AT a fixture asset goes first. The id list rather than the name is the
+  // arbiter, so a run that crashed mid-case — leaving behind a community the fix will later refuse
+  // to create at all — still cleans up instead of failing the delete below on the foreign key.
+  const fixtureAssets = [...new Set(mediaAssetIds)].filter(Boolean);
+  if (fixtureAssets.length > 0) {
+    await adminSql`
+      delete from public.communities where cover_asset_id = any(${fixtureAssets}::uuid[])`;
+  }
+  if (coverCommunityIds.length > 0) {
+    await adminSql`delete from public.communities where id = any(${coverCommunityIds}::uuid[])`;
+  }
+
   // `uploadAvatar` only creates the asset — no profile row points at it here — so the rows can be
   // deleted outright once their objects are gone.
-  for (const id of [...new Set(mediaAssetIds)].filter(Boolean)) {
+  for (const id of fixtureAssets) {
     await adminSql`delete from public.media_assets where id = ${id}::uuid`;
   }
 
@@ -512,6 +561,109 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     expect(items.length).toBeGreaterThan(0);
     expect(items.some((item) => item.isActive === false)).toBe(true);
     for (const item of items) expect(item.id).not.toBe(labStory);
+  });
+
+  it("b5. covers: a demo admin cannot point a community at the lab's asset, and learns nothing by trying (05-09)", async () => {
+    // GAP 1 of 05-VERIFICATION.md. `cover_asset_id` is the one Phase 5 write that took a
+    // client-supplied id straight into SQL: the single-column foreign key cannot save it, because
+    // referential integrity runs as the TABLE OWNER and therefore bypasses RLS. So a foreign id
+    // PERSISTED, and the 23503-vs-201 split (random uuid -> unhandled 500; real foreign id -> 201)
+    // was a working cross-tenant existence oracle over an enumerable uuid space.
+    //
+    // Both halves are asserted here: the id must not be written, AND the two refusals must be one
+    // answer. The second is the part a status-only assertion would miss.
+    const write = (path: string, method: string, body: unknown) =>
+      api.request(path, {
+        method,
+        headers: {
+          authorization: `Bearer ${tokens.demoAdmin}`,
+          'content-type': 'application/json',
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+        },
+        body: JSON.stringify(body),
+      });
+
+    // The PATCH target, created through the API carrying the DEMO cover — so the "it did not move"
+    // assertion below compares a real id against a real id rather than null against null.
+    const mine = await write('/v1/communities', 'POST', {
+      name: 'Comunidade de isolamento 05-09',
+      coverAssetId: assets.demoCover,
+    });
+    expect(mine.status).toBe(201);
+    const own = (await mine.json()) as { id: string; coverAssetId: string | null };
+    coverCommunityIds.push(own.id);
+    expect(own.coverAssetId).toBe(assets.demoCover);
+
+    // 1. A CREATE naming the lab's cover.
+    const foreign = await write('/v1/communities', 'POST', {
+      name: 'Comunidade com capa do lab',
+      coverAssetId: assets.labCover,
+    });
+    expect(foreign.status).toBe(404);
+    const foreignText = await foreign.text();
+    const foreignBody = JSON.parse(foreignText) as Envelope;
+    expect(foreignBody.error.code).toBe('NOT_FOUND');
+    // No `details` key at all — the absence IS the existence-oracle control.
+    expect(Object.hasOwn(foreignBody.error, 'details')).toBe(false);
+
+    // 2. The same create with a uuid that names NOTHING. The assertion is an EQUALITY between the
+    // two bodies rather than two checks against a literal: a future extra key, a different message
+    // or even a different key ORDER is exactly the change that turns a 404 back into an oracle.
+    const unknown = await write('/v1/communities', 'POST', {
+      name: 'Comunidade com capa inexistente',
+      coverAssetId: crypto.randomUUID(),
+    });
+    expect(unknown.status).toBe(404);
+    const unknownText = await unknown.text();
+    // `requestId` is the ONE field that legitimately differs between two requests — it identifies
+    // the call, not the row — and stripping it is what makes the rest meaningful (the case q rule).
+    const withoutRequestId = (raw: string) => {
+      const parsed = JSON.parse(raw) as Envelope;
+      const { requestId: _requestId, ...error } = parsed.error as Envelope['error'] & {
+        requestId?: string;
+      };
+      return JSON.stringify({ error });
+    };
+    expect(withoutRequestId(unknownText)).toEqual(withoutRequestId(foreignText));
+
+    // 3. The refusal names nothing about the other organisation — not its slug, not its id, not the
+    // asset id it was asked about.
+    for (const needle of ['tria-demo', 'tria-lab', tenantIds.lab, assets.labCover]) {
+      expect(foreignText).not.toContain(needle);
+    }
+
+    // 4. An UPDATE pointing an existing community at the lab's cover takes the same answer, and the
+    // stored value does not move.
+    const patched = await write(`/v1/communities/${own.id}`, 'PATCH', {
+      coverAssetId: assets.labCover,
+    });
+    expect(patched.status).toBe(404);
+    expect(((await patched.json()) as Envelope).error.code).toBe('NOT_FOUND');
+    const [stored] = await adminSql<{ cover_asset_id: string | null }[]>`
+      select cover_asset_id from public.communities where id = ${own.id}::uuid`;
+    expect(stored?.cover_asset_id).toBe(assets.demoCover);
+
+    // 5. Nothing was written on the create side either: no demo community points at the lab's asset.
+    const leaked = await adminSql<{ id: string }[]>`
+      select id from public.communities where cover_asset_id = ${assets.labCover}::uuid`;
+    expect(leaked).toHaveLength(0);
+
+    // 6. The lab's own row is untouched by any of it.
+    const [labAsset] = await adminSql<{ deleted_at: string | null; tenant_id: string }[]>`
+      select deleted_at, tenant_id from public.media_assets where id = ${assets.labCover}::uuid`;
+    expect(labAsset?.deleted_at).toBeNull();
+    expect(labAsset?.tenant_id).toBe(tenantIds.lab);
+
+    // Positive control (T-03-56) IN THE SAME TEST: the demo admin really can use ITS OWN cover, so
+    // the 404s above are isolation rather than a route that refuses every cover.
+    const control = await write('/v1/communities', 'POST', {
+      name: 'Comunidade com capa propria',
+      coverAssetId: assets.demoCover,
+    });
+    expect(control.status).toBe(201);
+    const controlBody = (await control.json()) as { id: string; coverAssetId: string | null };
+    coverCommunityIds.push(controlBody.id);
+    expect(controlBody.coverAssetId).toBe(assets.demoCover);
   });
 
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
