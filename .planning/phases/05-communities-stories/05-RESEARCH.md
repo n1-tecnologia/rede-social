@@ -1090,27 +1090,35 @@ A CSS `animation` cannot be scrubbed back to `elapsedRef.current` on resume, whi
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All four were settled by their own recommendation and acted on during the executed phase
+(05-01…05-08). None of them bears on either FAILED truth of `05-VERIFICATION.md`; the resolutions
+below are recorded so this section cannot be read as outstanding research.
 
 1. **What exactly does "archive" mean to the pilot tenant?**
    - What we know: COMM-01 says "create, edit and archive"; CONTEXT.md leaves the semantics to Claude with one hard constraint (one feed query, one predicate).
    - What's unclear: whether the product owner expects an archived community's posts to disappear from the feed.
    - Recommendation: ship Pattern 7 (posts stay, list hides, page read-only, writes refused, reversible) and put it in the UAT script as an explicit question. It is the only variant that costs zero index and zero denormalisation, and every alternative is additive later.
+   - **RESOLVED — shipped as recommended (05-04).** Pattern 7 is the implemented semantics: the write gate, the list gate and the absence of an archive predicate in `listFeed`. The product-owner question survives as 05-04's archive prohibition, carried `unverified` / `flagged` in `05-VERIFICATION.md` and routed to the human pack by 05-12.
 
 2. **Do the five prototype-less surfaces need one UI-SPEC or two?**
    - What we know: D-33 requires a UI-SPEC + static mockup approved with the design team before a prototype-less screen is coded; D-66 names five surfaces across two modules.
    - What's unclear: whether `/gsd-ui-phase` should produce one `05-UI-SPEC.md` covering both modules or one per module.
    - Recommendation: **one** `05-UI-SPEC.md`. The strip, the viewer and the publish flow share a visual language with the pin flow that lives inside the story history, and the community form is the only outlier; splitting it would duplicate the Copywriting Contract.
+   - **RESOLVED — shipped as recommended.** A single `.planning/phases/05-communities-stories/05-UI-SPEC.md` covers both modules; it is the file the phase's UI-SPEC lift accounting reports 101 of 101 state considerations against.
 
 3. **Does the design team accept the "Destaques" circles becoming interactive?**
    - What we know: D-68 answers PROTOTYPE.md open question 1 with "yes", and the CONTEXT explicitly says the design team should be *told*.
    - What's unclear: nothing blocking — but the prototype's circles are 64 px with a 2 px neutral border, and an interactive circle usually wants a larger hit target and a pressed state.
    - Recommendation: carry it as a line item in the D-33 review rather than a code decision.
+   - **RESOLVED — carried as recommended, not made a code decision.** The Destaques circles shipped interactive per D-68 (`apps/web/app/(app)/comunidades/[communityId]/page.tsx` hands them the same `onOpen` the home strip uses); the hit-target and pressed-state question stays a D-33 review line item and is not a research gap.
 
 4. **Should `/comunidades/[communityId]` be slug-based or id-based?**
    - What we know: the prototype uses `[communityId]`; Phase 4's share target is `/post/[id]` (D-56).
    - What's unclear: whether a readable community URL matters for the pilot.
    - Recommendation: **id-based route, slug stored and unique per tenant**, matching D-56's precedent and keeping a slug-based redirect trivially addable. Do not spend a decision on it.
+   - **RESOLVED — shipped as recommended.** The route is `apps/web/app/(app)/comunidades/[communityId]/`, with the slug stored and unique per tenant (the slug-retry loop in the communities service). A slug-based redirect stays trivially addable.
 
 ---
 
