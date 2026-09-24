@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 05
 current_phase_name: Communities & Stories
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-09-23T23:27:17.166Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-09-24T00:42:33.316Z"
 last_activity: 2026-09-23
 last_activity_desc: Phase 05 execution started
-state_head: e1f5bd8de9a2d29c6bfe24a95e89405545ea3900
+state_head: 380245de22bab0217d73b48c0caaa34d694192b8
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 58
-  completed_plans: 52
+  completed_plans: 53
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-11)
 ## Current Position
 
 Phase: 05 (Communities & Stories) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-09-23 — Phase 05 execution started
 
@@ -110,6 +110,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 05 P03 | 79 min | 3 tasks | 37 files |
 | Phase 05 P04 | 51 min | 3 tasks | 28 files |
 | Phase 05 P05 | 91min | 3 tasks | 46 files |
+| Phase 05 P06 | 68 | 3 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -320,6 +321,10 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-05: STORY-03 is a READ PREDICATE with no job, sweeper or status transition anywhere; the expired row is retained forever, which is what makes the admin history and 05-08's pins possible with no extra state
 - [Phase 05]: 05-05: feed_comments.story_id / feed_likes.story_id got HAND-WRITTEN foreign keys inside the generated migration — a drizzle .references() needs a module -> module package edge turbo boundaries denies (the 05-03 resolution, reused)
 - [Phase 05]: 05-05: a StoryCircle with no onOpen renders as an inert span rather than a dead button, so nothing taps through to a route 05-06 has not created yet
+- [Phase 05]: The viewer's modal route is window.history.pushState (Next 16 native), not an intercepting route: no parallel slot or default.tsx in the app-group layout, and the strip's ordered sequence needs no re-fetch
+- [Phase 05]: StoryViewer takes its media as a RENDER FUNCTION and its action row as a node, so the app tier injects the vendor player and the feed's LikeButton across a boundary turbo forbids the module to cross
+- [Phase 05]: The story like counter REPLACES app.feed_like_count() to fill Phase 4's reserved story branch — one trigger, one writer of every like counter in the product
+- [Phase 05]: next-intl FORMATS on read: a message whose PATTERN must cross to the client is taken with .raw, or it raises FORMATTING_ERROR and takes the home slot down
 
 ### Pending Todos
 
@@ -352,6 +357,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T23:27:17.091Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-09-24T00:42:24.891Z
+Stopped at: Completed 05-06-PLAN.md
 Resume file: None

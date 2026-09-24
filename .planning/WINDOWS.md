@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 25
+open_count: 27
 waived_count: 0
 fixed_count: 11
-total_count: 36
-last_updated: 2026-09-23T23:02:18.390Z
+total_count: 38
+last_updated: 2026-09-24T00:38:56.078Z
 ---
 
 # Broken Windows Ledger
@@ -51,6 +51,8 @@ last_updated: 2026-09-23T23:02:18.390Z
 | 34 | 05 | stub | apps/web/app/(app)/comunidades/[communityId]/page.tsx | 128 | The Destaques (pinned-story) slot on the community page is a null placeholder; 05-08 (STORY-04/D-68) fills it. The section and its SectionTitle are both absent while it is null, which is the correct empty rendering, so no member sees a broken surface. | open |  | 2026-09-23T21:21:16.622Z |  |
 | 35 | 05 | stub | apps/web/components/stories/StoriesSurface.tsx |  | StoriesSurface binds no onOpen, so strip circles render as inert spans rather than buttons until 05-06 ships /stories/[storyId] | open |  | 2026-09-23T23:02:18.301Z |  |
 | 36 | 05 | stub | apps/web/app/(app)/stories/publicar/page.tsx |  | The publish header's 'Seus stories' action points at /stories/meus, a route 05-08 creates; the link is inert until then | open |  | 2026-09-23T23:02:18.390Z |  |
+| 37 | 05 | stub | apps/web/components/stories/StoryViewerHost.tsx |  | The viewer's Comentar control is rendered disabled: 05-07 binds CommentSheet to it and feeds the open sheet into StoryViewer's externallyPaused, which is wired and currently fed by nothing | open |  | 2026-09-24T00:38:56.005Z |  |
+| 38 | 05 | deviation | apps/web/e2e/stories.spec.ts |  | The UI-SPEC overflow backstop states 25 progress segments at 320px; the strip is ONE page and STORY_PAGE_SIZE=10 caps it, so the e2e measures the real ceiling and the 25-segment DOM shape is pinned in story-viewer.test.tsx instead | open |  | 2026-09-24T00:38:56.078Z |  |
 
 ````json
 [
@@ -484,6 +486,30 @@ last_updated: 2026-09-23T23:02:18.390Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-23T23:02:18.390Z",
+    "resolved_at": null
+  },
+  {
+    "id": 37,
+    "kind": "stub",
+    "phase": "05",
+    "file": "apps/web/components/stories/StoryViewerHost.tsx",
+    "line": null,
+    "description": "The viewer's Comentar control is rendered disabled: 05-07 binds CommentSheet to it and feeds the open sheet into StoryViewer's externallyPaused, which is wired and currently fed by nothing",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-24T00:38:56.005Z",
+    "resolved_at": null
+  },
+  {
+    "id": 38,
+    "kind": "deviation",
+    "phase": "05",
+    "file": "apps/web/e2e/stories.spec.ts",
+    "line": null,
+    "description": "The UI-SPEC overflow backstop states 25 progress segments at 320px; the strip is ONE page and STORY_PAGE_SIZE=10 caps it, so the e2e measures the real ceiling and the 25-segment DOM shape is pinned in story-viewer.test.tsx instead",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-24T00:38:56.078Z",
     "resolved_at": null
   }
 ]
