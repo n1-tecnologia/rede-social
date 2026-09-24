@@ -100,6 +100,7 @@
       "loadMore": "Não foi possível carregar mais comunidades.",
       "nameRequired": "Dê um nome para a comunidade.",
       "archived": "Esta comunidade foi arquivada. Não é possível publicar nela.",
+      "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra.",
       "save": "Não foi possível salvar. Revise os campos e tente novamente."
     }
   }

@@ -1,6 +1,7 @@
 'use server';
 
 import {
+  COMMUNITY_ISSUE_SET,
   type CommunityIssue,
   type CommunitySummary,
   communityQuerySchema,
@@ -13,7 +14,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import { createCommunity, getCommunities, updateCommunity } from '@/lib/communities';
+import { createCommunity, getCommunities, loadCommunity, updateCommunity } from '@/lib/communities';
 import { getFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
@@ -172,9 +173,17 @@ export type CommunityWriteResult =
   | { ok: true; communityId: string }
   | { ok: false; code: CommunityIssue | 'not_found' | 'generic' };
 
-/** The API's `details.community` vocabulary, narrowed from an unknown payload. */
+/**
+ * The API's `details.community` vocabulary, narrowed from an unknown payload.
+ *
+ * The membership test runs against the contract's OWN exported set rather than a hand-written
+ * disjunction, so the vocabulary has exactly one definition and a future member cannot be forgotten
+ * here (05-09: `cover_invalid` is the member that exposed the hand-written version).
+ */
 function asCommunityIssue(value: unknown): CommunityIssue | null {
-  return value === 'name_required' || value === 'archived' ? value : null;
+  return typeof value === 'string' && COMMUNITY_ISSUE_SET.has(value)
+    ? (value as CommunityIssue)
+    : null;
 }
 
 /**
@@ -193,6 +202,46 @@ function writeRefusal(error: unknown): CommunityWriteResult {
   // Shape only: a community NAME is member-facing content and never reaches a log line (T-05-06).
   console.error('communities.write_failed', { error: String(error) });
   return { ok: false, code: 'generic' };
+}
+
+/**
+ * Which of the TWO bare 404s this was (05-09).
+ *
+ * The API answers ONE indistinguishable 404 for a missing community and for a missing cover asset,
+ * deliberately: that is the anti-oracle property D-23 buys and `isolation.test.ts` case b5 pins with
+ * a body equality. Nothing here weakens the server to make the client's job easier — the
+ * disambiguation happens in the BFF, and it is decided by a FACT rather than by what the form
+ * remembers.
+ *
+ *  - **On a create** there is no community id to have missed, so a 404 on a submission that carried
+ *    a cover can only be about the asset. No request needed.
+ *  - **On an update** the community is RE-READ. It still reads back → the 404 was the cover.
+ *    Anything else — a miss, or an answer we could not read — keeps `not_found`, which is the
+ *    conservative answer and is still a true statement.
+ *
+ * Two things about that re-read. It runs AFTER the refusal has been produced and is NOT wrapped in a
+ * try/catch of its own: `loadCommunity` already collapses its own transport failures, and its
+ * `redirect()` on an expired session must be allowed to throw exactly as the `redirect(refusal)` at
+ * the bottom of these actions is (Next 16: a catch would swallow the navigation). And it is one
+ * extra GET on an already-failed write, against a resource the admin has open on their screen — it
+ * tells them nothing they did not already know, so it opens no channel of its own and the bare 404
+ * on the wire stays bare.
+ *
+ * Deliberately NOT a comparison against the cover the form started with: a stored cover id that is
+ * already bad and is re-sent UNCHANGED (the row a pre-fix release could have written) shows no
+ * difference to compare, and would be reported as a community that is demonstrably open on the
+ * admin's screen.
+ */
+async function coverAwareRefusal(
+  result: CommunityWriteResult,
+  submittedCoverAssetId: string | null,
+  communityId: string | null,
+): Promise<CommunityWriteResult> {
+  if (result.ok || result.code !== 'not_found' || submittedCoverAssetId === null) return result;
+  if (communityId === null) return { ok: false, code: 'cover_invalid' };
+
+  const community = await loadCommunity(communityId);
+  return community.status === 'ok' ? { ok: false, code: 'cover_invalid' } : result;
 }
 
 /**
@@ -229,6 +278,9 @@ export async function createCommunityAction(input: unknown): Promise<CommunityWr
     if (!refusal) result = writeRefusal(error);
   }
 
+  // No community id was sent, so a bare 404 on a submission carrying a cover is the cover (05-09).
+  result = await coverAwareRefusal(result, body.data.coverAssetId ?? null, null);
+
   // The new community has to appear on the server-rendered list the admin lands back on.
   if (result.ok) revalidatePath('/comunidades');
   if (refusal) redirect(refusal);
@@ -260,6 +312,10 @@ export async function updateCommunityAction(
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
     if (!refusal) result = writeRefusal(error);
   }
+
+  // Archive and reactivate reach here with a `status` key only, so their submitted cover is null and
+  // neither pays for the re-read (05-09).
+  result = await coverAwareRefusal(result, body.data.coverAssetId ?? null, communityId);
 
   if (result.ok) {
     revalidatePath('/comunidades');

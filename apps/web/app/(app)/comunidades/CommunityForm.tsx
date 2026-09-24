@@ -154,6 +154,13 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
         return t('errors.nameRequired');
       case 'archived':
         return t('errors.archived');
+      case 'cover_invalid':
+        // 05-09. The server refused the chosen cover — another tenant's asset, an unknown one, or a
+        // real one of ours that cannot serve as a cover. The action already decided that this 404
+        // was about the COVER (it re-reads the community on an edit), so the form says so instead
+        // of falling through to "Comunidade não encontrada", which on `/comunidades/nova` would be
+        // a false statement: no community id was sent at all.
+        return t('errors.coverInvalid');
       case 'not_found':
         // The container vanished under the admin (archived elsewhere is still readable; this is a
         // real miss). The same words the page's own not-found screen uses, so the two agree.
