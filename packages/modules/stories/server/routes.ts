@@ -13,11 +13,13 @@ import {
   highlightMembershipResultSchema,
   highlightSummarySchema,
   publishStorySchema,
+  reorderHighlightsSchema,
   STORY_HIGHLIGHT_ISSUE_SET,
   STORY_ISSUE_SET,
   storyCommentPageSchema,
   storyCommentSchema,
   storyCommentsQuerySchema,
+  storyHighlightIdsSchema,
   storyHighlightsQuerySchema,
   storyLikeResultSchema,
   storyPageSchema,
@@ -39,13 +41,16 @@ import {
   likeStory,
   listActiveStories,
   listCommunityHighlights,
+  listHighlightCatalog,
   listHighlights,
   listOwnStories,
   listStoryComments,
+  listStoryHighlightIds,
   listStoryPins,
   pinStory,
   publishStory,
   removeStoryFromHighlight,
+  reorderHighlights,
   unlikeStory,
   unpinStory,
   updateHighlight,
@@ -191,6 +196,52 @@ const listHighlightsRoute = createRoute({
       description:
         '`scope=all` was asked for by a caller without `stories.story.manage` — the flag cannot widen a member’s read.',
     },
+    404: {
+      description:
+        'The named community is unknown, another tenant’s, removed, or the `communities` module is off. One bare code, no details (D-23).',
+    },
+  },
+});
+
+/**
+ * 05.2-03's two LITERAL-path highlight routes, declared (and registered) BEFORE
+ * `GET /highlights/{highlightId}`: `catalog` and `order` are not uuids, so the param route would 400
+ * on them rather than falling through. Both are manage-only (the literal middleware, T-05.2-11).
+ */
+const highlightCatalogRoute = createRoute({
+  method: 'get',
+  path: '/highlights/catalog',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  responses: {
+    200: {
+      description:
+        'Every highlight the "add to highlight" sheet may offer (D-110), in ONE statement: Início’s first, then each ACTIVE community’s, ordered by community, position and id. Highlights of archived or removed communities are absent, and with the `communities` module off no community highlight is listed (their rows are untouched). Empty highlights are included — this is the curator’s read.',
+      content: { 'application/json': { schema: highlightListSchema } },
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+  },
+});
+
+const reorderHighlightsRoute = createRoute({
+  method: 'put',
+  path: '/highlights/order',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: reorderHighlightsSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The place’s curator row (Início when `communityId` is absent) in the new order, with dense positions 0..n-1 written in ONE statement under the place lock. A permutation equal to the current order changes nothing and emits nothing.',
+      content: { 'application/json': { schema: highlightListSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.highlight` = `order_stale` (the ids are not exactly the place’s current set — missing, extra, duplicated or foreign) or `archived` (the community is archived). Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
     404: {
       description:
         'The named community is unknown, another tenant’s, removed, or the `communities` module is off. One bare code, no details (D-23).',
@@ -558,6 +609,23 @@ const storyPinResponses = {
   },
 } as const;
 
+const storyHighlightIdsRoute = createRoute({
+  method: 'get',
+  path: '/{storyId}/highlights',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: { params: storyIdParam },
+  responses: {
+    200: {
+      description:
+        'The ids of the highlights this story is in — the shared sheet’s initial state (D-110). Ids only: the sheet already holds the titles from the catalogue.',
+      content: { 'application/json': { schema: storyHighlightIdsSchema } },
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    404: { description: 'No story with that id is visible to this tenant (D-23).' },
+  },
+});
+
 const pinStoryRoute = createRoute({
   method: 'put',
   path: '/{storyId}/pins/{communityId}',
@@ -624,6 +692,12 @@ export const storiesRoutes = stories
       200,
     );
   })
+  .openapi(highlightCatalogRoute, async (c) =>
+    c.json(await listHighlightCatalog(c.get('ctx')), 200),
+  )
+  .openapi(reorderHighlightsRoute, async (c) =>
+    c.json(await reorderHighlights(c.get('ctx'), c.req.valid('json')), 200),
+  )
   .openapi(getHighlightRoute, async (c) => {
     const ctx = c.get('ctx');
     const { highlightId } = c.req.valid('param');
@@ -695,6 +769,10 @@ export const storiesRoutes = stories
     const { storyId, commentId } = c.req.valid('param');
     await deleteStoryComment(c.get('ctx'), storyId, commentId);
     return c.body(null, 204);
+  })
+  .openapi(storyHighlightIdsRoute, async (c) => {
+    const { storyId } = c.req.valid('param');
+    return c.json(await listStoryHighlightIds(c.get('ctx'), storyId), 200);
   })
   .openapi(listStoryPinsRoute, async (c) => {
     const { storyId } = c.req.valid('param');

@@ -77,6 +77,8 @@ type StoryRow = {
   viewer_liked: boolean;
   /** STORY-04's per-story pin count, counted in the SAME statement (null before 05-08's GREEN). */
   pinned_community_count: number | null;
+  /** 05.2: how many highlights the story is in, counted in the SAME statement (D-100). */
+  highlight_count: number | null;
 };
 
 /**
@@ -117,6 +119,11 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  * `feed-query-budget.test.ts` has a ceiling for. It rides the strip's read too, unread, because one
  * projection serving three surfaces is what stops the three disagreeing about what a story is.
  *
+ * `highlight_count` (05.2, D-100) is the same idea for highlights — one story may sit in several —
+ * and rides every projection for the same reason: "Seus stories" renders it, so it is counted here
+ * rather than per row. `story_highlight_items_uq` (`highlight_id, story_id`) cannot serve a lookup by
+ * story alone; the per-story subquery is bounded by the handful of highlights one story is in.
+ *
  * `extra` is how the Destaques read adds the two PIN columns its cursor is built from without
  * either duplicating this column list or pushing pin-specific columns onto the other two reads.
  */
@@ -144,7 +151,11 @@ function storyProjection(viewerUserId: string, extra: SQL | null = null) {
            (
              select count(*)::int from story_community_pins sp
               where sp.story_id = s.id
-           ) as pinned_community_count
+           ) as pinned_community_count,
+           (
+             select count(*)::int from story_highlight_items hi
+              where hi.story_id = s.id
+           ) as highlight_count
            ${extra ?? sql``}
       from stories s
       join media_assets a on a.id = s.media_asset_id`;
@@ -170,8 +181,7 @@ const toStory = (row: StoryRow): StorySummary => ({
   commentCount: row.comment_count,
   viewerLiked: row.viewer_liked,
   pinnedCommunityCount: row.pinned_community_count ?? 0,
-  // RED STUB (05.2-03 Task 2): inert until GREEN counts it in `storyProjection`.
-  highlightCount: 0,
+  highlightCount: row.highlight_count ?? 0,
 });
 
 /** The over-fetch page split, shared by both list reads so the two cannot disagree about `nextCursor`. */
@@ -2088,24 +2098,177 @@ export async function removeStoryFromHighlight(
   return { highlighted: false, highlightCount };
 }
 
-/*
- * RED STUBS (05.2-03 Task 2). Deliberately INERT so the new cases fail on their ASSERTIONS rather
- * than on a missing export. The GREEN commit replaces all three.
+/* ── Reorder and the sheet's reads (05.2-03: R-D-C, D-110, HIGHLIGHT-04) ─────────────────────── */
+
+/**
+ * `PUT /v1/stories/highlights/order` — reorder ONE place's highlights (R-D-C).
+ *
+ * One `withTenantTx`, three steps:
+ *  1. the place is resolved for `curate` (an archived community refuses with `archived`, the module
+ *     off or a removed community is the bare 404) — the one seam, R-D-K;
+ *  2. the place's rows are locked `for update`, and the LOCKED id set is compared with the request:
+ *     same size, no duplicates, identical members. Anything else — missing, extra, duplicated,
+ *     foreign — is `{ highlight: 'order_stale' }` and nothing is written (T-05.2-14). Locking first
+ *     is what makes the comparison meaningful: a create or delete racing this reorder waits for it
+ *     instead of changing the set between the check and the write;
+ *  3. ONE renumber statement writes dense positions `0..n-1` from `unnest(…) with ordinality`,
+ *     touching only rows whose position really changes (`position <> ord - 1`).
+ *
+ * `highlight.reordered` is emitted only when the renumber returned rows: a permutation equal to the
+ * current order changes nothing and announces nothing. The answer is the place's CURATOR row (empty
+ * highlights included) in the new order.
  */
 export async function reorderHighlights(
-  _ctx: RequestContext,
-  _input: ReorderHighlights,
+  ctx: RequestContext,
+  input: ReorderHighlights,
 ): Promise<HighlightList> {
-  return { items: [] };
+  const communityId = input.communityId ?? null;
+  const requested = input.highlightIds;
+  const gate = await readPlaceGate(ctx);
+
+  const { rows, moved } = await withTenantTx(ctx, async (tx) => {
+    await resolveHighlightPlace(tx, ctx, communityId, 'curate', gate);
+
+    const locked = await tx.execute<{ id: string }>(sql`
+      select h.id
+        from story_highlights h
+       where h.tenant_id = ${ctx.tenantId}::uuid
+         and ${placePredicate('h', communityId)}
+       for update`);
+    const current = new Set(locked.map((row) => row.id));
+    const distinct = new Set(requested);
+    if (
+      requested.length !== current.size ||
+      distinct.size !== requested.length ||
+      requested.some((id) => !current.has(id))
+    ) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'order_stale' });
+    }
+
+    // The ids travel as ONE Postgres array literal: drizzle's `sql` would expand a JS array into a
+    // comma-separated parameter list. Every element is a Zod-validated uuid AND a member of the set
+    // just locked, so nothing caller-shaped reaches the literal.
+    const renumbered = await tx.execute<{ id: string }>(sql`
+      update story_highlights h
+         set position = o.ord - 1, updated_at = now()
+        from unnest(${`{${requested.join(',')}}`}::uuid[]) with ordinality as o(id, ord)
+       where h.id = o.id
+         and h.tenant_id = ${ctx.tenantId}::uuid
+         and h.position <> o.ord - 1
+      returning h.id`);
+
+    const list = await tx.execute<HighlightSummaryRow>(sql`
+      ${highlightProjection(
+        sql`h.tenant_id = ${ctx.tenantId}::uuid and ${placePredicate('h', communityId)}`,
+      )}
+       order by hp.position, hp.id`);
+    return { rows: list, moved: renumbered.length };
+  });
+
+  if (moved > 0) {
+    emit(ctx, 'highlight.reordered', {
+      tenantId: ctx.tenantId,
+      communityId,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  log.info(
+    {
+      event: 'stories.highlights_reordered',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      communityId,
+      count: requested.length,
+      moved,
+    },
+    'story highlights reordered',
+  );
+
+  return { items: rows.map(toHighlight) };
 }
 
-export async function listHighlightCatalog(_ctx: RequestContext): Promise<HighlightList> {
-  return { items: [] };
+/**
+ * `GET /v1/stories/highlights/catalog` (D-110) — every highlight the shared "add to highlight" sheet
+ * may offer, in ONE statement over `highlightProjection`: Início's, then each ACTIVE community's,
+ * ordered `community_id nulls first, position, id` (a total order).
+ *
+ * - A community highlight is listed only while its community is this tenant's, not removed and
+ *   `active`: an archived community takes no new content, so offering it in the sheet would only
+ *   lead to an `archived` refusal.
+ * - With the `communities` module OFF no community highlight is listed at all (HIGHLIGHT-04) — the
+ *   rows are untouched and come back with the module.
+ * - It is the CURATOR's read (manage-only at the route): empty highlights are included.
+ */
+export async function listHighlightCatalog(ctx: RequestContext): Promise<HighlightList> {
+  const gate = await readPlaceGate(ctx);
+  const communityPlaces = gate.communitiesOn
+    ? sql`exists (
+          select 1 from communities hc
+           where hc.id = h.community_id
+             and hc.tenant_id = ${ctx.tenantId}::uuid
+             and hc.status = 'active'
+             and hc.deleted_at is null
+        )`
+    : sql`false`;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<HighlightSummaryRow>(sql`
+      ${highlightProjection(
+        sql`h.tenant_id = ${ctx.tenantId}::uuid and (h.community_id is null or ${communityPlaces})`,
+      )}
+       order by hp.community_id nulls first, hp.position, hp.id`),
+  );
+
+  log.info(
+    {
+      event: 'stories.highlight_catalog',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      communitiesOn: gate.communitiesOn,
+      returned: rows.length,
+    },
+    'story highlight catalog listed',
+  );
+
+  return { items: rows.map(toHighlight) };
 }
 
+/**
+ * `GET /v1/stories/{storyId}/highlights` (D-110) — the ids of the highlights one story is in, the
+ * shared sheet's initial state. Ids only: the sheet already holds the titles from the catalogue.
+ *
+ * The story is resolved first so a miss is the same bare 404 every story-scoped route gives, rather
+ * than an empty list that would say "this story exists and is in no highlight". With the
+ * `communities` module off, community highlights are left out, exactly as the catalogue leaves them.
+ */
 export async function listStoryHighlightIds(
-  _ctx: RequestContext,
-  _storyId: string,
+  ctx: RequestContext,
+  storyId: string,
 ): Promise<StoryHighlightIds> {
-  return { highlightIds: [] };
+  const gate = await readPlaceGate(ctx);
+  const places = gate.communitiesOn ? sql`true` : sql`h.community_id is null`;
+
+  const highlightIds = await withTenantTx(ctx, async (tx) => {
+    const stories = await tx.execute<{ id: string }>(sql`
+      select s.id from stories s
+       where s.id = ${storyId}::uuid
+         and s.tenant_id = ${ctx.tenantId}::uuid
+         and s.deleted_at is null`);
+    if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
+
+    const rows = await tx.execute<{ highlight_id: string }>(sql`
+      select i.highlight_id
+        from story_highlight_items i
+        join story_highlights h on h.id = i.highlight_id
+       where i.story_id = ${storyId}::uuid
+         and i.tenant_id = ${ctx.tenantId}::uuid
+         and ${places}
+       order by h.community_id nulls first, h.position, h.id`);
+    return rows.map((row) => row.highlight_id);
+  });
+
+  return { highlightIds };
 }
