@@ -355,25 +355,33 @@ type AssetRow = { kind: string; purpose: string };
  *   `ctx.events`; the response middleware delivers it once the handler returned. A subscriber can
  *   therefore never observe a story that a rollback erased (MOD-03).
  *
- * **Born attached (05.1, D-99).** An optional `communityId` makes the story and its
- * `story_community_pins` row ONE write: the community lookup, the story insert and the pin insert
- * share this `withTenantTx`, so any refusal rolls the whole publish back and no client-side "publish
- * then pin" sequence exists anywhere. The target rules are `pinStory`'s own, through the SAME
- * helpers (`assertCommunityPinnable`, `insertStoryPin`): this tenant, not deleted, `status =
- * 'active'`; archived is `400 { pin: 'archived' }`, every miss the bare 404.
+ * **One destination or none (05.2, D-113/D-114; 05.1's D-99 carried).** The body names at most one
+ * of `highlightId` (an existing highlight), `newHighlight` (one created by this request) or the
+ * retiring `communityId` (a pin, until plan 05.2-11). Whichever it is, the destination lookup, the
+ * story, any new highlight and the item (or pin) row are ONE `withTenantTx`, so any refusal rolls the
+ * whole publish back and no client-side "create, then publish, then add" sequence exists anywhere.
  *
- * - **Destination first**, as `createPost` does: community → asset → insert → pin → projection. A
- *   refused destination costs no asset validation, is the first thing the caller is told, and a
- *   refusal never follows a (rolled-back) insert. WITHOUT a community the statements are exactly
- *   today's three (asset → insert → projection).
- * - **The ROUTE owns the permission.** A body naming a community additionally needs
- *   `stories.story.manage` (pinning is the manage half); that check runs in the handler before this
+ * - **Destination first**, as `createPost` does. With `highlightId`: the highlight (`for update`) →
+ *   its community for `curate` (Início has none) → the room count → asset → story insert → item →
+ *   projection. With `newHighlight`: its community for `curate` → the place lock and cap → asset →
+ *   story insert → highlight insert (at the END of the place) → item → projection. With the pin:
+ *   community → asset → insert → pin → projection. A refused destination costs no asset validation
+ *   and never follows a (rolled-back) insert. WITHOUT a destination the statements are exactly
+ *   today's three (asset → insert → projection) and the module flag is not read at all.
+ * - **The place rules are the highlight seam's own** (`resolveHighlight` / `resolveHighlightPlace`
+ *   / `lockHighlightPlace` / `insertHighlight` / `insertHighlightItem`): an archived community is
+ *   `{ highlight: 'archived' }`, a full highlight or place `{ highlight: 'full' }`, every miss the
+ *   bare 404. A story born in a highlight and a story added later are therefore the SAME item row.
+ *   The module flag is read BEFORE the transaction opens (the `PlaceGate` rule: one request never
+ *   holds two pooled connections).
+ * - **The ROUTE owns the permission.** A body naming any destination additionally needs
+ *   `stories.story.manage` (curation is the manage half); that check runs in the handler before this
  *   function is called, so this file never compares roles or permissions.
- * - **Events:** `story.published` keeps its five keys; when a pin row was written, `story.pinned` is
- *   emitted once in the existing `StoryPinned` shape — one event per pin row, whichever path wrote
- *   it. **Phase 7 caveat:** a born-attached story therefore raises BOTH events; a member-notification
- *   consumer must dedupe by `storyId` (or ignore `story.pinned`), or members get two notifications
- *   for one story.
+ * - **Events, after commit, ids only:** `story.published` keeps its five keys; then `story.pinned`
+ *   for a pin, or `highlight.created` for an inline highlight and `story.highlighted` for the item.
+ *   **Phase 7 caveat:** a story published into a highlight raises `story.published` AND
+ *   `story.highlighted`; a member-notification consumer must dedupe by `storyId`, or members get two
+ *   notifications for one story.
  */
 export async function publishStory(
   ctx: RequestContext,
@@ -387,12 +395,31 @@ export async function publishStory(
   }
 
   const communityId = input.communityId;
+  const highlightId = input.highlightId;
+  const newHighlight = input.newHighlight;
+  // Read BEFORE the transaction, and only when a highlight is named: the plain publish stays three
+  // statements with no flag read.
+  const gate =
+    highlightId !== undefined || newHighlight !== undefined ? await readPlaceGate(ctx) : null;
 
-  const { row: created, pinned } = await withTenantTx(ctx, async (tx) => {
+  const {
+    row: created,
+    pinned,
+    createdHighlightId,
+    itemHighlightId,
+  } = await withTenantTx(ctx, async (tx) => {
     // BEFORE the asset: a refused destination is the first thing the caller is told (see above).
     if (communityId !== undefined) {
       const community = await resolvePublishCommunity(tx, ctx, communityId);
       assertCommunityPinnable(community.status);
+    }
+    if (highlightId !== undefined && gate !== null) {
+      await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
+      await assertHighlightHasRoom(tx, ctx, highlightId, null);
+    }
+    if (newHighlight !== undefined && gate !== null) {
+      await resolveHighlightPlace(tx, ctx, newHighlight.communityId, 'curate', gate);
+      await lockHighlightPlace(tx, ctx, newHighlight.communityId);
     }
 
     const assets = await tx.execute<AssetRow>(sql`
@@ -425,13 +452,27 @@ export async function publishStory(
     const pinWritten =
       communityId !== undefined ? await insertStoryPin(tx, ctx, id, communityId) : false;
 
+    // The inline highlight is written AFTER the story, through the one highlight insert.
+    const newId =
+      newHighlight !== undefined
+        ? await insertHighlight(tx, ctx, newHighlight.communityId, newHighlight.title)
+        : null;
+    const target = highlightId ?? newId;
+    // The one item statement `addStoryToHighlight` also uses: born in ≡ added later.
+    const itemWritten = target !== null ? await insertHighlightItem(tx, ctx, target, id) : false;
+
     const rows = await tx.execute<StoryRow>(sql`
       ${storyProjection(ctx.userId)}
        where s.id = ${id}::uuid
        limit 1`);
     const row = rows[0];
     if (!row) throw new ApiError(500, 'INTERNAL');
-    return { row, pinned: pinWritten };
+    return {
+      row,
+      pinned: pinWritten,
+      createdHighlightId: newId,
+      itemHighlightId: itemWritten ? target : null,
+    };
   });
 
   emit(ctx, 'story.published', {
@@ -451,6 +492,24 @@ export async function publishStory(
     });
   }
 
+  if (createdHighlightId !== null && newHighlight !== undefined) {
+    emit(ctx, 'highlight.created', {
+      tenantId: ctx.tenantId,
+      highlightId: createdHighlightId,
+      communityId: newHighlight.communityId,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  if (itemHighlightId !== null) {
+    emit(ctx, 'story.highlighted', {
+      tenantId: ctx.tenantId,
+      storyId: created.id,
+      highlightId: itemHighlightId,
+      actorUserId: ctx.userId,
+    });
+  }
+
   log.info(
     {
       event: 'stories.published',
@@ -462,6 +521,9 @@ export async function publishStory(
       mediaStatus: created.media_status,
       // An id or null, never a community NAME (T-05-06).
       communityId: communityId ?? null,
+      // An id or null and a flag — never a highlight TITLE (T-05.2-37).
+      highlightId: highlightId ?? createdHighlightId,
+      newHighlight: newHighlight !== undefined,
       // Lengths and flags, never the words themselves (T-05-29).
       captionLength: input.caption.length,
     },
@@ -1537,6 +1599,80 @@ const toHighlight = (row: HighlightSummaryRow): HighlightSummary => ({
 });
 
 /**
+ * Lock a place's highlight rows `for update` and refuse a place already holding
+ * `STORY_HIGHLIGHT_MAX_PER_PLACE` with `{ highlight: 'full' }` — the append's guard, shared by
+ * `createHighlight` and a publish that creates its highlight inline (D-114), so both appends
+ * serialise on the same lock and count the same way.
+ */
+async function lockHighlightPlace(
+  tx: Tx,
+  ctx: RequestContext,
+  communityId: string | null,
+): Promise<void> {
+  const place = await tx.execute<{ id: string }>(sql`
+    select h.id
+      from story_highlights h
+     where h.tenant_id = ${ctx.tenantId}::uuid
+       and ${placePredicate('h', communityId)}
+     for update`);
+  if (place.length >= STORY_HIGHLIGHT_MAX_PER_PLACE) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'full' });
+  }
+}
+
+/**
+ * THE ONE statement that creates a highlight, at the END of its place (`coalesce(max(position) + 1,
+ * 0)`) — shared by `createHighlight` and the inline create inside `publishStory`, so a highlight
+ * created from the manage screen and one created while publishing are the same row by construction.
+ * The caller has already resolved the place for `curate` and taken `lockHighlightPlace`.
+ */
+async function insertHighlight(
+  tx: Tx,
+  ctx: RequestContext,
+  communityId: string | null,
+  title: string,
+): Promise<string> {
+  const inserted = await tx.execute<{ id: string }>(sql`
+    insert into story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+    select ${ctx.tenantId}::uuid,
+           ${communityId}::uuid,
+           ${title},
+           coalesce(max(h.position) + 1, 0),
+           ${ctx.userId}::uuid
+      from story_highlights h
+     where h.tenant_id = ${ctx.tenantId}::uuid
+       and ${placePredicate('h', communityId)}
+    returning id`);
+  const id = inserted[0]?.id;
+  if (!id) throw new ApiError(500, 'INTERNAL');
+  return id;
+}
+
+/**
+ * Refuse a NEW story for a highlight already holding `STORY_HIGHLIGHT_MAX_ITEMS` with `{ highlight:
+ * 'full' }`; a story already in it (`present`) is never refused — the repeat add is the idempotent
+ * 200. Shared by `addStoryToHighlight` and a publish into an existing highlight (`storyId` null: a
+ * story being born cannot be present). Read under `resolveHighlight`'s `for update`, so the count is
+ * exact against a concurrent add.
+ */
+async function assertHighlightHasRoom(
+  tx: Tx,
+  ctx: RequestContext,
+  highlightId: string,
+  storyId: string | null,
+): Promise<void> {
+  const held = await tx.execute<{ n: number; present: boolean }>(sql`
+    select count(*)::int as n, coalesce(bool_or(i.story_id = ${storyId}::uuid), false) as present
+      from story_highlight_items i
+     where i.highlight_id = ${highlightId}::uuid
+       and i.tenant_id = ${ctx.tenantId}::uuid`);
+  const counted = held[0];
+  if (counted && !counted.present && counted.n >= STORY_HIGHLIGHT_MAX_ITEMS) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'full' });
+  }
+}
+
+/**
  * `POST /v1/stories/highlights` — a new highlight at the END of its place's row (R-D-C).
  *
  * One `withTenantTx`: the place is resolved for `curate` (archived → `{ highlight: 'archived' }`),
@@ -1558,30 +1694,8 @@ export async function createHighlight(
 
   const created = await withTenantTx(ctx, async (tx) => {
     await resolveHighlightPlace(tx, ctx, communityId, 'curate', gate);
-
-    const place = await tx.execute<{ id: string }>(sql`
-      select h.id
-        from story_highlights h
-       where h.tenant_id = ${ctx.tenantId}::uuid
-         and ${placePredicate('h', communityId)}
-       for update`);
-    if (place.length >= STORY_HIGHLIGHT_MAX_PER_PLACE) {
-      throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'full' });
-    }
-
-    const inserted = await tx.execute<{ id: string }>(sql`
-      insert into story_highlights (tenant_id, community_id, title, position, created_by_user_id)
-      select ${ctx.tenantId}::uuid,
-             ${communityId}::uuid,
-             ${input.title},
-             coalesce(max(h.position) + 1, 0),
-             ${ctx.userId}::uuid
-        from story_highlights h
-       where h.tenant_id = ${ctx.tenantId}::uuid
-         and ${placePredicate('h', communityId)}
-      returning id`);
-    const id = inserted[0]?.id;
-    if (!id) throw new ApiError(500, 'INTERNAL');
+    await lockHighlightPlace(tx, ctx, communityId);
+    const id = await insertHighlight(tx, ctx, communityId, input.title);
 
     const rows = await tx.execute<HighlightSummaryRow>(sql`
       ${highlightProjection(sql`h.id = ${id}::uuid`)}`);
@@ -1616,8 +1730,8 @@ export async function createHighlight(
 }
 
 /**
- * THE ONE statement that writes a highlight item — shared by `addStoryToHighlight` and, from plan
- * 06, by a publish into a highlight, so a story born in a highlight and a story added later are the
+ * THE ONE statement that writes a highlight item — shared by `addStoryToHighlight` and by a
+ * publish into a highlight (`publishStory`, 05.2-08), so a story born in a highlight and a story added later are the
  * same row by construction.
  *
  * It INSERT-SELECTS (T-05-33): both ids are read back from the tables under explicit tenant
@@ -1685,15 +1799,7 @@ export async function addStoryToHighlight(
          and s.deleted_at is null`);
     if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
 
-    const held = await tx.execute<{ n: number; present: boolean }>(sql`
-      select count(*)::int as n, coalesce(bool_or(i.story_id = ${storyId}::uuid), false) as present
-        from story_highlight_items i
-       where i.highlight_id = ${highlightId}::uuid
-         and i.tenant_id = ${ctx.tenantId}::uuid`);
-    const counted = held[0];
-    if (counted && !counted.present && counted.n >= STORY_HIGHLIGHT_MAX_ITEMS) {
-      throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'full' });
-    }
+    await assertHighlightHasRoom(tx, ctx, highlightId, storyId);
 
     const created = await insertHighlightItem(tx, ctx, highlightId, storyId);
     return { highlightCount: await readHighlightCount(tx, ctx, storyId), created };

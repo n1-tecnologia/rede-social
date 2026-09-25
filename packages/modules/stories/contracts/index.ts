@@ -166,46 +166,10 @@ export const storyPageSchema = z
   .strict();
 export type StoryPage = z.infer<typeof storyPageSchema>;
 
-/**
- * `POST /v1/stories` (STORY-01).
- *
- * Four fields and nothing else: the media the admin picked, what kind it is, the optional caption,
- * and ONE optional destination community. There is no `expiresAt` and there never will be — the
- * window is a COLUMN DEFAULT, so a client cannot ask for a story that outlives 24 h, and no route
- * edit is needed to keep that true.
- *
- * `communityId` (05.1, D-95/D-99) is ONE community or none — a single optional uuid, never an array
- * and never nullable: "no destination" is the ABSENCE of the key, exactly how the post composer's
- * `createPostSchema.communityId` already says it. Absent means a tenant-wide story, byte-for-byte
- * today's publish. Present, the story is born pinned there: the `story_community_pins` row is written
- * in the SAME transaction as the story (D-99), under the rules `pinStory` applies, and the route
- * additionally requires `stories.story.manage` — pinning is the moderation half, and V2 hands
- * `publish` to members without it. More communities are still pinned afterwards from `/stories/meus`.
- *
- * `caption` defaults to `''` rather than being nullable, matching the column (`not null default ''`):
- * "no caption" is one value everywhere, so no renderer has to branch on null and empty separately.
- *
- * Deliberately NOT idempotent (edge: idempotency): two identical requests create two stories. An
- * admin who publishes the same photo twice made two broadcasts, and a create endpoint with no
- * client-supplied key cannot tell a retry from a deliberate repeat.
+/*
+ * `publishStorySchema` (`POST /v1/stories`) lives after the highlight section below: its
+ * `newHighlight.title` IS `storyHighlightTitleSchema`, and a `const` must be declared before it is read.
  */
-export const publishStorySchema = z
-  .object({
-    mediaAssetId: z.uuid().nullable().default(null),
-    mediaKind: z.enum(STORY_MEDIA_KINDS),
-    caption: z.string().trim().max(STORY_MAX_CAPTION).default(''),
-    communityId: z.uuid().optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    // A story with no media has nothing to show; the caption alone is a feed post. The MACHINE code
-    // rides as the issue `message` (there is nowhere else on a Zod issue to put one) and the route's
-    // `defaultHook` lifts it into `details.story`.
-    if (value.mediaAssetId === null) {
-      ctx.addIssue({ code: 'custom', path: ['mediaAssetId'], message: 'media_required' });
-    }
-  });
-export type PublishStory = z.infer<typeof publishStorySchema>;
 
 /**
  * `POST /v1/stories/{storyId}/likes` and its DELETE (STORY-05's first half).
@@ -651,6 +615,74 @@ export const createStoryHighlightSchema = z
   })
   .strict();
 export type CreateStoryHighlight = z.infer<typeof createStoryHighlightSchema>;
+
+/**
+ * `POST /v1/stories` (STORY-01).
+ *
+ * The media the admin picked, what kind it is, the optional caption, and AT MOST ONE destination.
+ * There is no `expiresAt` and there never will be — the window is a COLUMN DEFAULT, so a client
+ * cannot ask for a story that outlives 24 h, and no route edit is needed to keep that true.
+ *
+ * **One destination or none (05.2, D-113).** The destination is a single optional key, never an
+ * array; "Nenhum" is the ABSENCE of every destination key, and that request, its statements, its
+ * response and its `story.published` payload are byte-for-byte the plain publish:
+ *  - `highlightId` — the story is born inside an EXISTING highlight (Início or a community's).
+ *  - `newHighlight: { communityId, title }` (D-114) — the story is born inside a highlight created
+ *    by the SAME request, appended at the END of its place (`communityId: null` is Início here: the
+ *    object always names its place explicitly, so there is no absent-key ambiguity inside it).
+ *  - `communityId` (05.1, D-95) — the retiring pin destination. Still accepted, still writing a
+ *    `story_community_pins` row, until plan 05.2-11 retires the pin model; nothing in the web sends
+ *    it any more.
+ * The refinement allows at most ONE of the three.
+ *
+ * **One write (D-99, carried).** Whichever destination is named, the destination lookup, the story,
+ * any new highlight and the item row are ONE `withTenantTx`: a refusal rolls the whole publish back,
+ * and no client-side "create, then publish, then add" sequence exists anywhere.
+ *
+ * **Manage is required for any destination.** Putting a story into a highlight is curation — the
+ * manage half — so the route additionally requires `stories.story.manage` whenever a destination key
+ * is present, BEFORE any lookup (T-05.1-05 / T-05.2-32). V2 hands `publish` to members without it.
+ *
+ * `caption` defaults to `''` rather than being nullable, matching the column (`not null default ''`):
+ * "no caption" is one value everywhere, so no renderer has to branch on null and empty separately.
+ *
+ * Deliberately NOT idempotent (edge: idempotency): two identical requests create two stories. An
+ * admin who publishes the same photo twice made two broadcasts, and a create endpoint with no
+ * client-supplied key cannot tell a retry from a deliberate repeat.
+ */
+export const publishStorySchema = z
+  .object({
+    mediaAssetId: z.uuid().nullable().default(null),
+    mediaKind: z.enum(STORY_MEDIA_KINDS),
+    caption: z.string().trim().max(STORY_MAX_CAPTION).default(''),
+    communityId: z.uuid().optional(),
+    highlightId: z.uuid().optional(),
+    newHighlight: z
+      .object({ communityId: z.uuid().nullable(), title: storyHighlightTitleSchema })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    // A story with no media has nothing to show; the caption alone is a feed post. The MACHINE code
+    // rides as the issue `message` (there is nowhere else on a Zod issue to put one) and the route's
+    // `defaultHook` lifts it into `details.story`.
+    if (value.mediaAssetId === null) {
+      ctx.addIssue({ code: 'custom', path: ['mediaAssetId'], message: 'media_required' });
+    }
+    // D-113: ONE destination or none — never two, so the service never has to pick one.
+    const destinations = [value.communityId, value.highlightId, value.newHighlight].filter(
+      (destination) => destination !== undefined,
+    );
+    if (destinations.length > 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['highlightId'],
+        message: 'At most one destination: communityId, highlightId or newHighlight.',
+      });
+    }
+  });
+export type PublishStory = z.infer<typeof publishStorySchema>;
 
 /**
  * `GET /v1/stories/highlights?communityId=&scope=` — one place's row. No `communityId` means Início.

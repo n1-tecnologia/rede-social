@@ -429,15 +429,15 @@ const publishStoryRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.story` carrying exactly one machine code: `media_required` (a story with no media has nothing to show) or `media_invalid` (an asset of this tenant whose purpose is not `story`, or whose kind does not match) — or with `details.pin` = `archived` when the chosen `communityId` is an archived community (the same refusal `PUT /{storyId}/pins/{communityId}` answers). No story is written.',
+        '`VALIDATION_FAILED` with `details.story` carrying exactly one machine code: `media_required` (a story with no media has nothing to show) or `media_invalid` (an asset of this tenant whose purpose is not `story`, or whose kind does not match). With a highlight destination, `details.highlight` carries `archived` (the destination community is archived), `title_invalid` (`newHighlight.title` is empty after trimming or longer than 15) or `full` (the highlight or the place is at its cap). The retiring `communityId` answers `details.pin` = `archived` until plan 05.2-11. Naming more than one destination is a plain `VALIDATION_FAILED`. In every case NO story, highlight or item is written.',
     },
     403: {
       description:
-        'The caller does not hold `stories.story.publish` in this tenant — or the body carries a `communityId` and the caller does not also hold `stories.story.manage` (attaching at publish is a pin, 05.1).',
+        'The caller does not hold `stories.story.publish` in this tenant — or the body names a destination (`highlightId`, `newHighlight` or `communityId`) and the caller does not also hold `stories.story.manage` (curating at publish is the manage half). Checked before any lookup.',
     },
     404: {
       description:
-        'The media asset — or the chosen `communityId` — is unknown, another tenant’s, or removed. One bare code, no details (T-05-26, D-23).',
+        'The media asset — or the chosen highlight, `newHighlight.communityId` or `communityId` — is unknown, another tenant’s, or removed (or the communities module is off). One bare code, no details, byte-identical for every miss (T-05-26, D-23).',
     },
   },
 });
@@ -735,10 +735,15 @@ export const storiesRoutes = stories
   .openapi(publishStoryRoute, async (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');
-    // 05.1 (OQ-1): attaching a community AT PUBLISH is a pin, and pinning is the manage half. The
-    // middleware keeps the publish literal; this second check runs only when a destination was named,
-    // BEFORE any lookup, so a publish-only caller learns nothing about the id it sent (T-05.1-05).
-    if (body.communityId !== undefined) {
+    // 05.1 (OQ-1) / 05.2 (D-113): putting a story somewhere AT PUBLISH — a highlight, a highlight
+    // created inline, or the retiring pin — is curation, the manage half. The middleware keeps the
+    // publish literal; this second check runs whenever ANY destination key is present, BEFORE any
+    // lookup, so a publish-only caller learns nothing about the id it sent (T-05.1-05, T-05.2-32).
+    if (
+      body.communityId !== undefined ||
+      body.highlightId !== undefined ||
+      body.newHighlight !== undefined
+    ) {
       const granted = await permissionsForRequest(ctx);
       if (!granted.includes('stories.story.manage')) throw new ApiError(403, 'FORBIDDEN');
     }

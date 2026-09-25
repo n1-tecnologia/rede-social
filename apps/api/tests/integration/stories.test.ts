@@ -2974,7 +2974,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
   });
 
   it('05.2-22 a publish-ONLY caller cannot curate through publish (403 before any lookup), and still publishes with no destination', async () => {
-    const home = await create(tokens.demoAdmin, { title: 'Teste Sem Gestao' });
+    const home = await create(tokens.demoAdmin, { title: 'Teste Gestao' });
 
     setPermissionResolver((role, enabled, settings) => {
       const granted = permissionsFor(role, enabled, settings);
@@ -2993,7 +2993,6 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
         expect((await envelope(res)).error.code).toBe('FORBIDDEN');
         expect(await captionCount(caption)).toBe(0);
       }
-      expect((await curated(home.id)).itemCount).toBe(0);
 
       // Positive control under the SAME resolver: publishing itself is untouched.
       const { res } = await publishInto('sem manage, sem destino', {});
@@ -3002,6 +3001,9 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     } finally {
       setPermissionResolver(permissionsFor);
     }
+
+    // Read with the manage half restored (the curator read is itself manage-only): nothing moved.
+    expect((await curated(home.id)).itemCount).toBe(0);
   });
 
   it('05.2-23 THE INVARIANT: born in a highlight ≡ added later — same row, same count, same membership, same event', async () => {
