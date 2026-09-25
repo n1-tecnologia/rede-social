@@ -74,7 +74,17 @@ export default mergeConfig(
   defineConfig({
     test: {
       include: ['tests/**/*.test.ts'],
-      env: { ...defaults, ...readEnvFile(), ...fromProcess },
+      env: {
+        ...defaults,
+        ...readEnvFile(),
+        ...fromProcess,
+        // LAST, on purpose (05.1 Wave 0, RESEARCH Pitfall 2): a developer's `.env.local` may carry
+        // `VIDEO_PROVIDER=mux` with real vendor credentials, and `readEnvFile()` above copies every
+        // key it finds. Vitest's `test.env` beats an exported variable too (probed in RESEARCH), so
+        // this entry is what guarantees no automated test ever reaches a real video vendor. It is
+        // deliberately NOT in `KEYS`: no run of this suite wants anything but the fake.
+        VIDEO_PROVIDER: 'fake',
+      },
       globalSetup: integrationRun ? ['tests/integration/global-setup.ts'] : [],
       fileParallelism: false,
       testTimeout: 30_000,

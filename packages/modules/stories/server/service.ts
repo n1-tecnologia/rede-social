@@ -329,6 +329,26 @@ type AssetRow = { kind: string; purpose: string };
  * - `emit` runs only after `withTenantTx` RESOLVES, and even then only QUEUES the event on
  *   `ctx.events`; the response middleware delivers it once the handler returned. A subscriber can
  *   therefore never observe a story that a rollback erased (MOD-03).
+ *
+ * **Born attached (05.1, D-99).** An optional `communityId` makes the story and its
+ * `story_community_pins` row ONE write: the community lookup, the story insert and the pin insert
+ * share this `withTenantTx`, so any refusal rolls the whole publish back and no client-side "publish
+ * then pin" sequence exists anywhere. The target rules are `pinStory`'s own, through the SAME
+ * helpers (`assertCommunityPinnable`, `insertStoryPin`): this tenant, not deleted, `status =
+ * 'active'`; archived is `400 { pin: 'archived' }`, every miss the bare 404.
+ *
+ * - **Destination first**, as `createPost` does: community → asset → insert → pin → projection. A
+ *   refused destination costs no asset validation, is the first thing the caller is told, and a
+ *   refusal never follows a (rolled-back) insert. WITHOUT a community the statements are exactly
+ *   today's three (asset → insert → projection).
+ * - **The ROUTE owns the permission.** A body naming a community additionally needs
+ *   `stories.story.manage` (pinning is the manage half); that check runs in the handler before this
+ *   function is called, so this file never compares roles or permissions.
+ * - **Events:** `story.published` keeps its five keys; when a pin row was written, `story.pinned` is
+ *   emitted once in the existing `StoryPinned` shape — one event per pin row, whichever path wrote
+ *   it. **Phase 7 caveat:** a born-attached story therefore raises BOTH events; a member-notification
+ *   consumer must dedupe by `storyId` (or ignore `story.pinned`), or members get two notifications
+ *   for one story.
  */
 export async function publishStory(
   ctx: RequestContext,
@@ -341,7 +361,15 @@ export async function publishStory(
     throw new ApiError(400, 'VALIDATION_FAILED', { story: 'media_required' });
   }
 
-  const created = await withTenantTx(ctx, async (tx) => {
+  const communityId = input.communityId;
+
+  const { row: created, pinned } = await withTenantTx(ctx, async (tx) => {
+    // BEFORE the asset: a refused destination is the first thing the caller is told (see above).
+    if (communityId !== undefined) {
+      const community = await resolvePublishCommunity(tx, ctx, communityId);
+      assertCommunityPinnable(community.status);
+    }
+
     const assets = await tx.execute<AssetRow>(sql`
       select kind, purpose
         from media_assets
@@ -367,13 +395,18 @@ export async function publishStory(
     const id = inserted[0]?.id;
     if (!id) throw new ApiError(500, 'INTERNAL');
 
+    // A brand-new story cannot already be pinned, so this always inserts; the boolean is still read
+    // from `returning id` rather than assumed, because it is what decides the event below.
+    const pinWritten =
+      communityId !== undefined ? await insertStoryPin(tx, ctx, id, communityId) : false;
+
     const rows = await tx.execute<StoryRow>(sql`
       ${storyProjection(ctx.userId)}
        where s.id = ${id}::uuid
        limit 1`);
     const row = rows[0];
     if (!row) throw new ApiError(500, 'INTERNAL');
-    return row;
+    return { row, pinned: pinWritten };
   });
 
   emit(ctx, 'story.published', {
@@ -384,6 +417,15 @@ export async function publishStory(
     expiresAt: created.expires_at,
   });
 
+  if (pinned && communityId !== undefined) {
+    emit(ctx, 'story.pinned', {
+      tenantId: ctx.tenantId,
+      storyId: created.id,
+      communityId,
+      actorUserId: ctx.userId,
+    });
+  }
+
   log.info(
     {
       event: 'stories.published',
@@ -393,6 +435,8 @@ export async function publishStory(
       storyId: created.id,
       mediaKind: created.media_kind,
       mediaStatus: created.media_status,
+      // An id or null, never a community NAME (T-05-06).
+      communityId: communityId ?? null,
       // Lengths and flags, never the words themselves (T-05-29).
       captionLength: input.caption.length,
     },
@@ -944,6 +988,68 @@ async function readPinnedCount(tx: Tx, storyId: string): Promise<number> {
 }
 
 /**
+ * The ONE archived refusal both pin write paths raise — `pinStory` and a publish that names a
+ * community (05.1, D-99) — so the two can never answer the same rule with different words. An
+ * archived container takes no new content (05-03's own `archived` code), and a pin is new content.
+ */
+function assertCommunityPinnable(status: string): void {
+  if (status !== 'active') {
+    throw new ApiError(400, 'VALIDATION_FAILED', { pin: 'archived' });
+  }
+}
+
+/**
+ * The ONE statement that writes a pin row, shared by `pinStory` and `publishStory` so a story born
+ * attached and a story pinned later are the same row by construction (05.1's invariant).
+ *
+ * `story_community_pins_uq` is the idempotency arbiter (`on conflict … do nothing`), and `returning
+ * id` is what tells a created row from an absorbed repeat — the caller emits `story.pinned` only
+ * for the former. Both ids must already have been RESOLVED in this transaction by the caller.
+ */
+async function insertStoryPin(
+  tx: Tx,
+  ctx: RequestContext,
+  storyId: string,
+  communityId: string,
+): Promise<boolean> {
+  const inserted = await tx.execute<{ id: string }>(sql`
+    insert into story_community_pins (tenant_id, story_id, community_id, pinned_by_user_id)
+    values (${ctx.tenantId}::uuid,
+            ${storyId}::uuid,
+            ${communityId}::uuid,
+            ${ctx.userId}::uuid)
+    on conflict (story_id, community_id) do nothing
+    returning id`);
+  return inserted.length > 0;
+}
+
+/**
+ * The destination lookup of a publish that names a community (05.1, D-99): ONE statement over
+ * `public.communities` with exactly the predicate `resolvePinTarget` joins on — this tenant, not
+ * soft-deleted — through RAW SQL, for the same MOD-02 reason (no `module -> module` package edge).
+ *
+ * Unknown, removed and another tenant's community are ONE bare 404 with no `details` (D-23,
+ * T-05-49); only a community this lane CAN see reaches `assertCommunityPinnable`, so `pin:
+ * 'archived'` can never become an existence oracle.
+ */
+async function resolvePublishCommunity(
+  tx: Tx,
+  ctx: RequestContext,
+  communityId: string,
+): Promise<{ status: string }> {
+  const rows = await tx.execute<{ status: string }>(sql`
+    select c.status
+      from communities c
+     where c.id = ${communityId}::uuid
+       and c.tenant_id = ${ctx.tenantId}::uuid
+       and c.deleted_at is null
+     limit 1`);
+  const community = rows[0];
+  if (!community) throw new ApiError(404, 'NOT_FOUND');
+  return community;
+}
+
+/**
  * `PUT /v1/stories/{storyId}/pins/{communityId}` (STORY-04) — the editorial act, behind
  * `stories.story.manage`.
  *
@@ -972,22 +1078,13 @@ export async function pinStory(
 ): Promise<StoryPinResult> {
   const { pinnedCommunityCount, created } = await withTenantTx(ctx, async (tx) => {
     const target = await resolvePinTarget(tx, ctx, storyId, communityId);
-    if (target.community_status !== 'active') {
-      throw new ApiError(400, 'VALIDATION_FAILED', { pin: 'archived' });
-    }
+    assertCommunityPinnable(target.community_status);
 
-    const inserted = await tx.execute<{ id: string }>(sql`
-      insert into story_community_pins (tenant_id, story_id, community_id, pinned_by_user_id)
-      values (${ctx.tenantId}::uuid,
-              ${target.story_id}::uuid,
-              ${target.community_id}::uuid,
-              ${ctx.userId}::uuid)
-      on conflict (story_id, community_id) do nothing
-      returning id`);
+    const created = await insertStoryPin(tx, ctx, target.story_id, target.community_id);
 
     return {
       pinnedCommunityCount: await readPinnedCount(tx, storyId),
-      created: inserted.length > 0,
+      created,
     };
   });
 

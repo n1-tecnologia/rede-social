@@ -162,9 +162,18 @@ export type StoryPage = z.infer<typeof storyPageSchema>;
 /**
  * `POST /v1/stories` (STORY-01).
  *
- * Three fields and nothing else: the media the admin picked, what kind it is, and the optional
- * caption. There is no `expiresAt` and there never will be — the window is a COLUMN DEFAULT, so a
- * client cannot ask for a story that outlives 24 h, and no route edit is needed to keep that true.
+ * Four fields and nothing else: the media the admin picked, what kind it is, the optional caption,
+ * and ONE optional destination community. There is no `expiresAt` and there never will be — the
+ * window is a COLUMN DEFAULT, so a client cannot ask for a story that outlives 24 h, and no route
+ * edit is needed to keep that true.
+ *
+ * `communityId` (05.1, D-95/D-99) is ONE community or none — a single optional uuid, never an array
+ * and never nullable: "no destination" is the ABSENCE of the key, exactly how the post composer's
+ * `createPostSchema.communityId` already says it. Absent means a tenant-wide story, byte-for-byte
+ * today's publish. Present, the story is born pinned there: the `story_community_pins` row is written
+ * in the SAME transaction as the story (D-99), under the rules `pinStory` applies, and the route
+ * additionally requires `stories.story.manage` — pinning is the moderation half, and V2 hands
+ * `publish` to members without it. More communities are still pinned afterwards from `/stories/meus`.
  *
  * `caption` defaults to `''` rather than being nullable, matching the column (`not null default ''`):
  * "no caption" is one value everywhere, so no renderer has to branch on null and empty separately.
@@ -178,6 +187,7 @@ export const publishStorySchema = z
     mediaAssetId: z.uuid().nullable().default(null),
     mediaKind: z.enum(STORY_MEDIA_KINDS),
     caption: z.string().trim().max(STORY_MAX_CAPTION).default(''),
+    communityId: z.uuid().optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -552,6 +562,9 @@ export interface StoryPinCommunity {
  * announces nothing: a subscriber counting these is counting transitions, and a second
  * announcement of a state that never changed would be a lie it cannot detect — the `story.unliked`
  * rule, applied to both halves of this toggle rather than only to the removal.
+ *
+ * `POST /v1/stories` emits it too when a story is born attached (05.1, D-99) — one event per pin row,
+ * whichever path wrote it, so a subscriber tracking pins sees every pin through this one name.
  */
 export interface StoryPinned {
   tenantId: string;

@@ -3,7 +3,7 @@ import type { AppEnv } from '@tria/core/server/auth/context';
 import { requireAuth } from '@tria/core/server/auth/require-auth';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { requireModule } from '@tria/core/server/modules/require-module';
-import { requirePermission } from '@tria/core/server/rbac/permissions';
+import { permissionsForRequest, requirePermission } from '@tria/core/server/rbac/permissions';
 import {
   createStoryCommentSchema,
   publishStorySchema,
@@ -168,12 +168,15 @@ const publishStoryRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.story` carrying exactly one machine code: `media_required` (a story with no media has nothing to show) or `media_invalid` (an asset of this tenant whose purpose is not `story`, or whose kind does not match).',
+        '`VALIDATION_FAILED` with `details.story` carrying exactly one machine code: `media_required` (a story with no media has nothing to show) or `media_invalid` (an asset of this tenant whose purpose is not `story`, or whose kind does not match) — or with `details.pin` = `archived` when the chosen `communityId` is an archived community (the same refusal `PUT /{storyId}/pins/{communityId}` answers). No story is written.',
     },
-    403: { description: 'The caller does not hold `stories.story.publish` in this tenant' },
+    403: {
+      description:
+        'The caller does not hold `stories.story.publish` in this tenant — or the body carries a `communityId` and the caller does not also hold `stories.story.manage` (attaching at publish is a pin, 05.1).',
+    },
     404: {
       description:
-        'The media asset is unknown, another tenant’s, or removed. One bare code, no details (T-05-26).',
+        'The media asset — or the chosen `communityId` — is unknown, another tenant’s, or removed. One bare code, no details (T-05-26, D-23).',
     },
   },
 });
@@ -406,9 +409,18 @@ export const storiesRoutes = stories
     const { storyId } = c.req.valid('param');
     return c.json(await getStory(c.get('ctx'), storyId), 200);
   })
-  .openapi(publishStoryRoute, async (c) =>
-    c.json(await publishStory(c.get('ctx'), c.req.valid('json')), 201),
-  )
+  .openapi(publishStoryRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const body = c.req.valid('json');
+    // 05.1 (OQ-1): attaching a community AT PUBLISH is a pin, and pinning is the manage half. The
+    // middleware keeps the publish literal; this second check runs only when a destination was named,
+    // BEFORE any lookup, so a publish-only caller learns nothing about the id it sent (T-05.1-05).
+    if (body.communityId !== undefined) {
+      const granted = await permissionsForRequest(ctx);
+      if (!granted.includes('stories.story.manage')) throw new ApiError(403, 'FORBIDDEN');
+    }
+    return c.json(await publishStory(ctx, body), 201);
+  })
   .openapi(deleteStoryRoute, async (c) => {
     const { storyId } = c.req.valid('param');
     await deleteStory(c.get('ctx'), storyId);
