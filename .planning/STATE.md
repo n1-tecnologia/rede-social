@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-03-PLAN.md
-last_updated: "2026-09-25T20:13:59.437Z"
+stopped_at: Completed 05.2-04-PLAN.md
+last_updated: "2026-09-25T21:58:09.445Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.2-03 (highlight curation API — rename, re-cover, reorder, delete, remove, catalogue, memberships, highlightCount, communities-off)
-state_head: 8171e77c43005f03b3f62ee496657a97719f11c2
+last_activity_desc: Completed 05.2-04 (Início tenant circle — one logo/monogram circle playing the newest 25 oldest first, plus Início's highlight circles; reworked StoryCircle/StoriesStrip descriptors)
+state_head: 1f15cde4e1506b650a766d126380fe49e714c975
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 67
+  completed_plans: 68
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 4 of 12
-Status: Executing Phase 05.2 — next is 05.2-04
-Last activity: 2026-09-25 — Completed 05.2-03 (highlight curation API: PATCH/DELETE highlight, remove item, PUT order, catalog and membership reads, highlightCount, communities-off bare 404, six ids-only event handlers, row-read budget 1)
+Plan: 5 of 12
+Status: Executing Phase 05.2 — next is 05.2-05
+Last activity: 2026-09-25 — Completed 05.2-04 (Início row: one tenant circle, logo or monogram, playing the newest 25 live stories oldest → newest, then Início's highlight circles; StoryCircle ring/disc props, StoriesStrip link/open/static descriptors, loadHighlights, e2e on :3100)
 
-Progress: [███████████████░░░░░] 67/88 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████░░░░░] 68/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -127,6 +127,7 @@ Progress: [███████████████░░░░░] 67/88 p
 | Phase 05.2 P02 | 10 min | 2 tasks | 3 files |
 | Phase 05.2 P01 | 36min | 3 tasks | 13 files |
 | Phase 05.2 P03 | 21 min | 2 tasks | 7 files |
+| Phase 05.2 P04 | 44 min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -383,6 +384,9 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-03: every highlight write enters through resolveHighlight (in-lane, for update) then resolveHighlightPlace; take-downs (delete, remove) use the takedown intent and stay allowed on archived communities
 - [Phase 05.2]: 05.2-03: reorder locks the place rows, compares the locked id set (order_stale on any mismatch) and renumbers in ONE unnest-with-ordinality statement; uuid arrays cross drizzle as one Postgres array literal
 - [Phase 05.2]: 05.2-03: getHighlight keeps its single projection read as its in-lane resolve; listStoryHighlightIds hides community highlights while the communities module is off, like the catalogue
+- [Phase 05.2]: [05.2-04]: StoriesStrip speaks circle descriptors (link/open/static); highlight circles are static inert spans until 05.2-05 makes the viewer group-aware
+- [Phase 05.2]: [05.2-04]: the Inicio tenant circle reads GET /v1/stories?limit=25 and reverses it on the web (D-106); the UI-D-59 composition is the pure inicioRow builder in apps/web/lib/story-view.ts
+- [Phase 05.2]: [05.2-04]: stories.circle.action stays until 05.2-08 replaces the community pinned row, its last reader
 
 ### Pending Todos
 
@@ -436,6 +440,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T20:13:47.503Z
-Stopped at: Completed 05.2-03-PLAN.md
+Last session: 2026-09-25T21:58:02.144Z
+Stopped at: Completed 05.2-04-PLAN.md
 Resume file: None
