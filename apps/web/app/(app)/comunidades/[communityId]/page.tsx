@@ -1,6 +1,7 @@
 import { COMMUNITY_PERMISSIONS } from '@tria/module-communities/contracts';
 import { CommunityHeader } from '@tria/module-communities/ui';
 import { FEED_CAPTION_TRUNCATE_AT, FEED_PERMISSIONS } from '@tria/module-feed/contracts';
+import { STORY_PERMISSIONS } from '@tria/module-stories/contracts';
 import { EmptyState, SectionTitle, StatusPill } from '@tria/ui';
 import { CircleAlert, Pencil } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
@@ -149,12 +150,32 @@ export default async function CommunityPage({
    * ring variant is a property of the ROW, never of the story. `isActive` still rides the payload
    * because the viewer needs it for the expired-mid-view case.
    *
+   * **The leading `+` is the D-80 door restated for this row (D-92, UI-D-53).** It is the strip's
+   * own `own` circle — "Seu story", in the same geometry and position the admin already uses on
+   * `/inicio` — pointed at `/stories/publicar?comunidade={id}`, so the composer opens already
+   * addressed to this community and the story is born attached in the one publish transaction
+   * (05.1-01). It sits exactly where the result will appear.
+   *
+   * **Its gate is the ATTACH permission pair**, `stories.story.publish` AND `stories.story.manage` —
+   * exactly what the API requires for a publish carrying `communityId` and what the composer's
+   * "Publicar em" row checks (05.1-04) — so this door never opens onto a composer that cannot
+   * attach. A tenant with stories off composes neither permission and shows no `+`.
+   *
+   * **An ARCHIVED community offers no story entry at all (D-93)** — not a disabled one; its pinned
+   * circles still render.
+   *
    * `null` means the row AND its `SectionTitle` are both absent with nothing in their place
-   * (UI-SPEC E12/empty) — never a reserved height and never an empty-state card of its own.
+   * (UI-SPEC E12/empty, UI-D-53) — never a reserved height and never an empty-state card of its
+   * own. That is the case only with no pins AND no `+`: an admin on a community with zero pins sees
+   * the row with the `+` alone, and a member still sees nothing.
    */
   const highlightItems = pinned?.items ?? [];
+  const canPublishHere =
+    !archived &&
+    bootstrap.permissions.includes(STORY_PERMISSIONS.publish) &&
+    bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
   const highlights: ReactNode =
-    highlightItems.length === 0 ? null : (
+    highlightItems.length === 0 && !canPublishHere ? null : (
       <StoriesSurface
         items={highlightItems.map((story) => {
           const time = relativeFrom(story.publishedAt, now);
@@ -169,22 +190,38 @@ export default async function CommunityPage({
         // STORY-02's rule, restated for this row: the viewer opens on the ROW'S OWN ordered
         // sequence, built from the same read in the same request — so the Nth circle and the Nth
         // segment can never disagree, and opening the viewer costs no second round trip.
-        viewer={{
-          items: highlightItems.map((story) => storyViewerItem(story, now)),
-          author: {
-            // V1's single publisher IS the tenant; see the note in `StoryViewerHost`.
-            name: bootstrap.tenant.displayName,
-            avatarUrl: bootstrap.tenant.branding.logoUrl,
-          },
-          labels: storyViewerLabels(ts),
-          onLike: likeStoryAction,
-          onUnlike: unlikeStoryAction,
-          comments: storyCommentsProps(locale, tf, ts, bootstrap),
-        }}
+        // With no pins (the `+` alone) there is no sequence to open, so there is no viewer at all —
+        // the home strip's rule.
+        viewer={
+          highlightItems.length === 0
+            ? undefined
+            : {
+                items: highlightItems.map((story) => storyViewerItem(story, now)),
+                author: {
+                  // V1's single publisher IS the tenant; see the note in `StoryViewerHost`.
+                  name: bootstrap.tenant.displayName,
+                  avatarUrl: bootstrap.tenant.branding.logoUrl,
+                },
+                labels: storyViewerLabels(ts),
+                onLike: likeStoryAction,
+                onUnlike: unlikeStoryAction,
+                comments: storyCommentsProps(locale, tf, ts, bootstrap),
+              }
+        }
         // UI-D-27: the neutral ring. The brand ring means "live now, tap me" and belongs to the
         // strip alone; Destaques is the community's editorial archive.
         ringVariant="neutral"
         regionLabel={tc('page.highlights')}
+        own={
+          canPublishHere
+            ? {
+                href: `/stories/publicar?comunidade=${community.id}`,
+                label: ts('own.label'),
+                actionLabel: ts('own.actionCommunity', { community: community.name }),
+                avatarUrl: bootstrap.membership.profile.avatarUrl,
+              }
+            : undefined
+        }
       />
     );
 

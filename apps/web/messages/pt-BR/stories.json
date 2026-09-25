@@ -3,7 +3,8 @@
     "region": "Stories",
     "own": {
       "label": "Seu story",
-      "action": "Publicar um story"
+      "action": "Publicar um story",
+      "actionCommunity": "Publicar um story em {community}"
     },
     "circle": {
       "action": "Abrir story de {time}"
