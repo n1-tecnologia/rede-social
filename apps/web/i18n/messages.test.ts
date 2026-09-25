@@ -187,6 +187,77 @@ describe('UI-D-46 vocabulary amendment (the retired sense of "comunidade")', () 
   });
 });
 
+/**
+ * 05.1 — every string the phase added, pinned in the UI-SPEC's words (Copywriting Contract, "New
+ * keys: 16"), plus each `{community}` / `{tenant}` placeholder and the reused words the phase
+ * deliberately did NOT reword.
+ *
+ * The placeholder rows are the point: deleting a brace would not fail typecheck (the call site
+ * would pass an argument nobody reads) and would ship a sentence with a hole in it. Here it is a
+ * test failure instead.
+ */
+describe('05.1 — the new entry-point strings and their placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function at(dotted: string): string {
+    const value = dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+    expect(typeof value, dotted).toBe('string');
+    return value as string;
+  }
+
+  it.each([
+    ['communities.list.filter.label', 'Filtrar comunidades'],
+    ['communities.list.filter.active', 'Ativas'],
+    ['communities.list.filter.archived', 'Arquivadas'],
+    ['communities.list.regionArchived', 'Comunidades arquivadas de {tenant}'],
+    ['communities.emptyArchived.title', 'Nenhuma comunidade arquivada'],
+    [
+      'communities.emptyArchived.body',
+      'Quando você arquivar uma comunidade, ela aparece aqui para ser reativada.',
+    ],
+    ['communities.confirm.reactivate.title', 'Reativar comunidade?'],
+    [
+      'communities.confirm.reactivate.body',
+      'Ela volta para a lista de comunidades e pode receber publicações de novo.',
+    ],
+    ['communities.confirm.reactivate.confirm', 'Reativar'],
+    ['communities.confirm.reactivate.cancel', 'Cancelar'],
+    ['communities.errors.reactivate', 'Não foi possível reativar a comunidade. Tente novamente.'],
+    ['stories.own.actionCommunity', 'Publicar um story em {community}'],
+    ['stories.publish.destination.none', 'Nenhuma comunidade'],
+    [
+      'stories.publish.destination.helper',
+      'O story aparece no início por 24 h e continua nos Destaques da comunidade.',
+    ],
+    ['stories.publish.toastCommunity', 'Story publicado em {community}.'],
+    [
+      'stories.publish.errors.archived',
+      'A comunidade {community} foi arquivada e o story não foi publicado. Escolha outra comunidade ou publique sem comunidade.',
+    ],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(at(key)).toBe(expected);
+  });
+
+  it.each([
+    ['communities.list.regionArchived', '{tenant}'],
+    ['stories.own.actionCommunity', '{community}'],
+    ['stories.publish.toastCommunity', '{community}'],
+    ['stories.publish.errors.archived', '{community}'],
+  ])('%s carries the %s placeholder', (key, placeholder) => {
+    expect(at(key)).toContain(placeholder);
+  });
+
+  it.each([
+    ['communities.picker.default', 'Feed principal'],
+    ['stories.own.label', 'Seu story'],
+    ['communities.archived.pill', 'Arquivada'],
+  ])('%s — a word the phase reuses — is not reworded', (key, expected) => {
+    expect(at(key)).toBe(expected);
+  });
+});
+
 describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   function run(files: Record<string, string>): { status: number | null; out: string } {
     const dir = mkdtempSync(path.join(tmpdir(), 'tria-literals-'));
