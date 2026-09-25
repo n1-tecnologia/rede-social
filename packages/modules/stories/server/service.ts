@@ -15,12 +15,14 @@ import {
   type HighlightMembershipResult,
   type HighlightSummary,
   type PublishStory,
+  type ReorderHighlights,
   STORY_HIGHLIGHT_MAX_ITEMS,
   STORY_HIGHLIGHT_MAX_PER_PLACE,
   STORY_HIGHLIGHT_MAX_TITLE,
   type StoryComment,
   type StoryCommentPage,
   type StoryCommentsQuery,
+  type StoryHighlightIds,
   type StoryLikeResult,
   type StoryMediaKind,
   type StoryPage,
@@ -168,6 +170,8 @@ const toStory = (row: StoryRow): StorySummary => ({
   commentCount: row.comment_count,
   viewerLiked: row.viewer_liked,
   pinnedCommunityCount: row.pinned_community_count ?? 0,
+  // RED STUB (05.2-03 Task 2): inert until GREEN counts it in `storyProjection`.
+  highlightCount: 0,
 });
 
 /** The over-fetch page split, shared by both list reads so the two cannot disagree about `nextCursor`. */
@@ -2082,4 +2086,26 @@ export async function removeStoryFromHighlight(
   );
 
   return { highlighted: false, highlightCount };
+}
+
+/*
+ * RED STUBS (05.2-03 Task 2). Deliberately INERT so the new cases fail on their ASSERTIONS rather
+ * than on a missing export. The GREEN commit replaces all three.
+ */
+export async function reorderHighlights(
+  _ctx: RequestContext,
+  _input: ReorderHighlights,
+): Promise<HighlightList> {
+  return { items: [] };
+}
+
+export async function listHighlightCatalog(_ctx: RequestContext): Promise<HighlightList> {
+  return { items: [] };
+}
+
+export async function listStoryHighlightIds(
+  _ctx: RequestContext,
+  _storyId: string,
+): Promise<StoryHighlightIds> {
+  return { highlightIds: [] };
 }

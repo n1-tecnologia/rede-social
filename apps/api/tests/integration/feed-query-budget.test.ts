@@ -66,6 +66,16 @@ export const COMMUNITY_LIST_STATEMENT_BUDGET = 1;
 export const STORY_LIST_STATEMENT_BUDGET = 1;
 
 /**
+ * `GET /v1/stories/highlights` (05.2): EXACTLY one statement against the story tables — the place's
+ * row with each highlight's read-time cover (a lateral over the uploaded asset, the chosen story and
+ * the most recently added image item) and its member-visible `itemCount`, all in the statement the
+ * highlight rows come from. The row renders on `/inicio` and on every community page, so a lookup per
+ * circle would be paid by every member on every visit.
+ */
+// biome-ignore lint/suspicious/noExportsInTest: colocated with the only assertion that proves it
+export const STORY_HIGHLIGHT_ROW_STATEMENT_BUDGET = 1;
+
+/**
  * Every table the feed module reads. `feed_comments` and `feed_likes` are now real (04-03) and the
  * list budget still holds at ONE: `viewerLiked`'s `feed_likes` join landed in the SAME statement,
  * which is exactly what this regex was written in 04-01 to force. `feed_post_media` and
@@ -86,6 +96,12 @@ const COMMUNITY_TABLES_PATTERN = 'communit(ies|y_members)';
  * story page borrow the feed's budget headroom.
  */
 const STORY_TABLES_PATTERN = 'stories';
+
+/**
+ * The highlight tables AND `stories`: the row read's cover and `itemCount` join `stories`, so a
+ * per-highlight lookup against either would be counted.
+ */
+const STORY_HIGHLIGHT_TABLES_PATTERN = 'stor(ies|y_highlights|y_highlight_items)';
 
 let token = '';
 /**
@@ -331,6 +347,39 @@ describe('GET /v1/stories — the strip query budget (05-05, Pitfall 11)', () =>
     const calls = await storyCalls();
     expect(calls).toBeGreaterThan(0);
     expect(calls).toBeLessThanOrEqual(STORY_LIST_STATEMENT_BUDGET);
+  });
+});
+
+/** Sum of `calls` over the story AND highlight tables since the last reset — filtered, never a total. */
+async function storyHighlightCalls(): Promise<number> {
+  const [measured] = await adminSql<{ calls: number }[]>`
+    select coalesce(sum(calls), 0)::int as calls
+      from pg_stat_statements
+     where query ~ ${STORY_HIGHLIGHT_TABLES_PATTERN}`;
+  return measured?.calls ?? 0;
+}
+
+describe('GET /v1/stories/highlights — the row read budget (05.2)', () => {
+  it(`costs exactly ${STORY_HIGHLIGHT_ROW_STATEMENT_BUDGET} statement against the story tables, covers and counts included`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const res = await api.request('/v1/stories/highlights', {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { coverAssetId: string | null; itemCount: number }[];
+    };
+    // Guard against a vacuous pass: the seeded `Bastidores` is on the member's row with an automatic
+    // image cover, so the cover lateral and the count really ran.
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.some((item) => item.coverAssetId !== null)).toBe(true);
+    expect(body.items.every((item) => item.itemCount > 0)).toBe(true);
+
+    // Ceiling AND floor, as the strip case: a zero would mean the regex matched nothing.
+    const calls = await storyHighlightCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(STORY_HIGHLIGHT_ROW_STATEMENT_BUDGET);
   });
 });
 

@@ -48,6 +48,12 @@ let moved = true;
 let highlightCount = 0;
 /** Whether the communities module is on for the tenant. */
 let communitiesOn = true;
+/** The ids the reorder's place lock finds — the place's CURRENT set, in its current order. */
+let placeIds: string[] = [];
+
+const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 /** Every statement the scripted transaction saw, by the kind the script recognised… */
 let seen: string[] = [];
@@ -57,6 +63,8 @@ let texts: string[] = [];
 function classify(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim();
   if (/^select h\.id, h\.community_id/.test(t)) return 'highlight';
+  if (/^select h\.id from story_highlights h .* for update$/.test(t)) return 'lock';
+  if (/^update story_highlights h set position/.test(t)) return 'renumber';
   if (/from communities c/.test(t)) return 'place';
   if (/^select s\.id from stories s/.test(t)) return 'story';
   if (/^delete from story_highlight_items/.test(t)) return 'remove';
@@ -79,6 +87,10 @@ const tx = {
         return highlight === null ? [] : [highlight];
       case 'place':
         return [{ status: communityStatus }];
+      case 'lock':
+        return placeIds.map((id) => ({ id }));
+      case 'renumber':
+        return moved ? [{ id: A }] : [];
       case 'story':
         return [{ id: STORY_ID }];
       case 'remove':
@@ -118,9 +130,8 @@ vi.mock('@tria/core/server/modules/flags-cache', () => ({
   moduleFlags: { isEnabled: async () => communitiesOn },
 }));
 
-const { deleteHighlight, removeStoryFromHighlight, updateHighlight } = await import(
-  '../server/service'
-);
+const { deleteHighlight, removeStoryFromHighlight, reorderHighlights, updateHighlight } =
+  await import('../server/service');
 
 function context(): RequestContext {
   return {
@@ -136,6 +147,7 @@ type Payload = Record<string, unknown>;
 let unhighlighted: Payload[] = [];
 let updated: Payload[] = [];
 let deleted: Payload[] = [];
+let reordered: Payload[] = [];
 let unsubscribe: Array<() => void> = [];
 
 beforeEach(() => {
@@ -150,12 +162,17 @@ beforeEach(() => {
   moved = true;
   highlightCount = 0;
   communitiesOn = true;
+  placeIds = [A, B, C];
   seen = [];
   texts = [];
   unhighlighted = [];
   updated = [];
   deleted = [];
+  reordered = [];
   unsubscribe = [
+    subscribe('highlight.reordered', async (payload) => {
+      reordered.push(payload as unknown as Payload);
+    }),
     subscribe('story.unhighlighted', async (payload) => {
       unhighlighted.push(payload as unknown as Payload);
     }),
@@ -316,6 +333,72 @@ describe('05.2-03 — curating a highlight: idempotent, transitions-only, ids-on
     const thrown = await deleteHighlight(ctx, HIGHLIGHT_ID).catch((error: unknown) => error);
     expect(thrown).toMatchObject({ status: 404, code: 'NOT_FOUND' });
     expect(seen).toEqual(['highlight']);
+    expect(ctx.events).toHaveLength(0);
+  });
+
+  it("9. a reorder whose set is NOT the place's current set is `order_stale` after the lock, and writes nothing", async () => {
+    for (const highlightIds of [
+      [C, A], // missing B
+      [C, A, B, B], // a duplicate
+      [C, A, HIGHLIGHT_ID], // a foreign id in place of B
+      [C, A, B, HIGHLIGHT_ID], // an extra id
+    ]) {
+      seen = [];
+      const ctx = context();
+      await expect(
+        reorderHighlights(ctx, { highlightIds }),
+        JSON.stringify(highlightIds),
+      ).rejects.toMatchObject({
+        status: 400,
+        code: 'VALIDATION_FAILED',
+        details: { highlight: 'order_stale' },
+      });
+      // Início has no community to resolve: the lock ran, then the transaction stopped.
+      expect(seen).toEqual(['lock']);
+      expect(ctx.events).toHaveLength(0);
+    }
+  });
+
+  it('10. a permutation EQUAL to the current order renumbers nothing and emits nothing', async () => {
+    const ctx = context();
+    moved = false;
+
+    const result = await reorderHighlights(ctx, { highlightIds: [A, B, C] });
+
+    expect(result.items).toHaveLength(1);
+    expect(seen).toEqual(['lock', 'renumber', 'summary']);
+    expect(ctx.events).toHaveLength(0);
+    await flush(ctx);
+    expect(reordered).toHaveLength(0);
+  });
+
+  it('11. a real reorder emits highlight.reordered once, ids only, and names the place', async () => {
+    const ctx = context();
+
+    await reorderHighlights(ctx, { communityId: COMMUNITY_ID, highlightIds: [C, A, B] });
+
+    // The community place is resolved for `curate` BEFORE the place's rows are locked.
+    expect(seen).toEqual(['place', 'lock', 'renumber', 'summary']);
+    // ONE renumber statement for the whole permutation (R-D-C).
+    expect(texts.filter((text) => /with ordinality/.test(text))).toHaveLength(1);
+    await flush(ctx);
+    expect(reordered).toHaveLength(1);
+    expect(Object.keys(reordered[0] ?? {}).sort()).toEqual([
+      'actorUserId',
+      'communityId',
+      'tenantId',
+    ]);
+    expect(reordered[0]).toMatchObject({ communityId: COMMUNITY_ID, tenantId: TENANT_ID });
+  });
+
+  it('12. an ARCHIVED community refuses a reorder with `archived` before its rows are locked', async () => {
+    communityStatus = 'archived';
+    const ctx = context();
+
+    await expect(
+      reorderHighlights(ctx, { communityId: COMMUNITY_ID, highlightIds: [A, B, C] }),
+    ).rejects.toMatchObject({ status: 400, details: { highlight: 'archived' } });
+    expect(seen).toEqual(['place']);
     expect(ctx.events).toHaveLength(0);
   });
 });

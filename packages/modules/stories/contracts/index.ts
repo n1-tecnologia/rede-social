@@ -146,6 +146,13 @@ export const storySummarySchema = z
      * stops the three disagreeing about what a story looks like.
      */
     pinnedCommunityCount: z.number().int(),
+    /**
+     * 05.2: how many highlights this story is in (D-100 — one story may sit in several), counted in
+     * the SAME statement as every story projection, never per row. It is what "Seus stories" will
+     * render beside the pin indicator. `pinnedCommunityCount` stays until plan 11 retires the pins,
+     * so no web read changes shape before the web is ready for it.
+     */
+    highlightCount: z.number().int(),
   })
   .strict();
 export type StorySummary = z.infer<typeof storySummarySchema>;
@@ -755,6 +762,32 @@ export const updateHighlightSchema = z
     message: 'Informe title ou cover.',
   });
 export type UpdateHighlight = z.infer<typeof updateHighlightSchema>;
+
+/**
+ * `PUT /v1/stories/highlights/order` — reorder ONE place's highlights (R-D-C). `communityId` absent
+ * means Início. `highlightIds` must be the place's FULL current set in the new order: a set that
+ * differs from it in any way — missing, extra, duplicated or foreign — is `{ highlight: 'order_stale' }`
+ * and writes nothing. Duplicates are left to the service on purpose, so every stale shape answers
+ * ONE code instead of some of them answering a Zod `issues` list. The cap mirrors the place's own
+ * (`STORY_HIGHLIGHT_MAX_PER_PLACE`), so an oversized permutation is refused before any lookup.
+ *
+ * The answer is the place's CURATOR row (`highlightListSchema`) in the new order.
+ */
+export const reorderHighlightsSchema = z
+  .object({
+    communityId: z.uuid().optional(),
+    highlightIds: z.array(z.uuid()).min(1).max(STORY_HIGHLIGHT_MAX_PER_PLACE),
+  })
+  .strict();
+export type ReorderHighlights = z.infer<typeof reorderHighlightsSchema>;
+
+/**
+ * `GET /v1/stories/{storyId}/highlights` — the ids of the highlights one story is in (the shared
+ * sheet's initial state), in position order. Ids only: the sheet already holds the titles from the
+ * catalogue read, and sending them again would be a second source of the same words.
+ */
+export const storyHighlightIdsSchema = z.object({ highlightIds: z.array(z.uuid()) }).strict();
+export type StoryHighlightIds = z.infer<typeof storyHighlightIdsSchema>;
 
 /**
  * A highlight was created. **Ids only** — never the title (T-05-29/T-05-06): the manifest's own

@@ -24,6 +24,7 @@ import {
   type StoryPinned,
   type StoryPublished,
   type StorySummary,
+  storyHighlightIdsSchema,
 } from '@tria/module-stories/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '../../src/modules/registry';
@@ -2554,6 +2555,218 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
 
     expect(await itemRows(highlight.id, storyId)).toBe(1);
     expect((await curated(highlight.id)).title).toBe('Teste Proibido');
+  });
+  /* ── 05.2-03: reorder, the sheet's two reads, highlightCount, communities off (R-D-C, D-110) ──── */
+
+  const reorder = (token: string, body: Record<string, unknown>) =>
+    hlRequest(token, '/order', { method: 'PUT', body: JSON.stringify(body) });
+
+  /** One place's curator row as `[id, position]` pairs, in the server's order. */
+  async function positions(communityId?: string): Promise<[string, number][]> {
+    const query = communityId ? `?scope=all&communityId=${communityId}` : '?scope=all';
+    return (await row(tokens.demoAdmin, query)).map((item) => [item.id, item.position]);
+  }
+
+  it('05.2-14 reorder: the FULL permutation renumbers densely in one write; an equal order is inert; any other set is `order_stale`', async () => {
+    // A fresh community place holds exactly A, B, C, so the dense positions are literally 0, 1, 2.
+    const community = await makeHighlightCommunity('Destaque ordem');
+    const a = await create(tokens.demoAdmin, { communityId: community, title: 'Teste A' });
+    const b = await create(tokens.demoAdmin, { communityId: community, title: 'Teste B' });
+    const c = await create(tokens.demoAdmin, { communityId: community, title: 'Teste C' });
+    const before = eventsNamed('highlight.reordered').length;
+
+    const res = await reorder(tokens.demoAdmin, {
+      communityId: community,
+      highlightIds: [c.id, a.id, b.id],
+    });
+    expect(res.status).toBe(200);
+    const body = highlightListSchema.parse(await res.json());
+    expect(body.items.map((item) => [item.id, item.position])).toEqual([
+      [c.id, 0],
+      [a.id, 1],
+      [b.id, 2],
+    ]);
+    expect(eventsNamed('highlight.reordered')).toHaveLength(before + 1);
+    const event = eventsNamed('highlight.reordered').at(-1)?.payload ?? {};
+    expect(Object.keys(event).sort()).toEqual(['actorUserId', 'communityId', 'tenantId']);
+    expect(event.communityId).toBe(community);
+
+    // The SAME permutation again: 200, nothing moved, nothing announced.
+    const again = await reorder(tokens.demoAdmin, {
+      communityId: community,
+      highlightIds: [c.id, a.id, b.id],
+    });
+    expect(again.status).toBe(200);
+    expect(eventsNamed('highlight.reordered')).toHaveLength(before + 1);
+
+    // Stale sets: missing, duplicated, and one naming the LAB tenant's seeded highlight. Each is the
+    // one code, and none moves a position.
+    const [lab] = await adminSql<{ id: string }[]>`
+      select id::text from public.story_highlights
+       where tenant_id = ${tenantIds.lab}::uuid limit 1`;
+    expect(lab?.id ?? '').not.toBe('');
+    const snapshot = await positions(community);
+    for (const highlightIds of [
+      [c.id, a.id],
+      [c.id, a.id, b.id, b.id],
+      [c.id, a.id, lab?.id],
+    ]) {
+      const stale = await reorder(tokens.demoAdmin, { communityId: community, highlightIds });
+      expect(stale.status, JSON.stringify(highlightIds)).toBe(400);
+      expect((await envelope(stale)).error.details).toEqual({ highlight: 'order_stale' });
+    }
+    expect(await positions(community)).toEqual(snapshot);
+    expect(eventsNamed('highlight.reordered')).toHaveLength(before + 1);
+
+    // Início is a place too: the full set with three new ones moved to the end. The seeded
+    // `Bastidores` / `Aulas` keep positions 0 and 1 because they stay first in the permutation.
+    const x = await create(tokens.demoAdmin, { title: 'Teste X' });
+    const y = await create(tokens.demoAdmin, { title: 'Teste Y' });
+    const z = await create(tokens.demoAdmin, { title: 'Teste Z' });
+    const current = (await positions()).map(([id]) => id);
+    const others = current.filter((id) => ![x.id, y.id, z.id].includes(id));
+    const order = [...others, z.id, x.id, y.id];
+    const home = await reorder(tokens.demoAdmin, { highlightIds: order });
+    expect(home.status).toBe(200);
+    const homeBody = highlightListSchema.parse(await home.json());
+    expect(homeBody.items.map((item) => item.id)).toEqual(order);
+    expect(homeBody.items.map((item) => item.position)).toEqual(order.map((_, index) => index));
+    expect(
+      homeBody.items
+        .filter((item) => ['Bastidores', 'Aulas'].includes(item.title))
+        .map((item) => [item.title, item.position]),
+    ).toEqual([
+      ['Bastidores', 0],
+      ['Aulas', 1],
+    ]);
+
+    // A member cannot reorder.
+    expect((await reorder(tokens.demoMember, { highlightIds: order })).status).toBe(403);
+  });
+
+  it('05.2-15 catalog: Início first, then each ACTIVE community in position order; never an archived one; manage-only', async () => {
+    const active = await makeHighlightCommunity('Destaque catalogo');
+    const inActive = await create(tokens.demoAdmin, {
+      communityId: active,
+      title: 'Teste Catalogo',
+    });
+    const archived = await makeHighlightCommunity('Destaque catalogo arq');
+    const inArchived = await create(tokens.demoAdmin, {
+      communityId: archived,
+      title: 'Teste Arquivo C',
+    });
+    await adminSql`update public.communities set status = 'archived' where id = ${archived}::uuid`;
+
+    const res = await hlRequest(tokens.demoAdmin, '/catalog');
+    expect(res.status).toBe(200);
+    const items = highlightListSchema.parse(await res.json()).items;
+    const ids = items.map((item) => item.id);
+    expect(ids).toContain(inActive.id);
+    expect(ids).not.toContain(inArchived.id);
+    // The curator's catalogue includes EMPTY highlights (the seeded `Aulas`).
+    expect(items.some((item) => item.title === 'Aulas' && item.itemCount === 0)).toBe(true);
+
+    // Início first, then `community_id, position, id` — a total order.
+    const firstCommunity = items.findIndex((item) => item.communityId !== null);
+    expect(firstCommunity).toBeGreaterThan(0);
+    expect(items.slice(0, firstCommunity).every((item) => item.communityId === null)).toBe(true);
+    expect(items.slice(firstCommunity).every((item) => item.communityId !== null)).toBe(true);
+    const key = (item: HighlightSummary) =>
+      [item.communityId ?? '', String(item.position).padStart(6, '0'), item.id].join('|');
+    const communityKeys = items.slice(firstCommunity).map(key);
+    expect(communityKeys).toEqual([...communityKeys].sort());
+    const homePositions = items.slice(0, firstCommunity).map((item) => item.position);
+    expect(homePositions).toEqual([...homePositions].sort((l, r) => l - r));
+
+    expect((await hlRequest(tokens.demoMember, '/catalog')).status).toBe(403);
+  });
+
+  /** The story 05.2-16 puts in two highlights; 05.2-17 reads its count. */
+  let twoHomes = '';
+
+  it('05.2-16 memberships: a story in two highlights reads exactly those two ids; manage-only; an unknown story is the bare 404', async () => {
+    const first = await create(tokens.demoAdmin, { title: 'Teste Dupla A' });
+    const second = await create(tokens.demoAdmin, { title: 'Teste Dupla B' });
+    const { storyId } = await publishImage('duas memberships');
+    twoHomes = storyId;
+    expect((await addItem(tokens.demoAdmin, first.id, storyId)).status).toBe(200);
+    expect((await addItem(tokens.demoAdmin, second.id, storyId)).status).toBe(200);
+
+    const read = (token: string, id: string) =>
+      request(`/v1/stories/${id}/highlights`, token, { headers: { 'x-tenant-host': HOSTS.demo } });
+
+    const res = await read(tokens.demoAdmin, storyId);
+    expect(res.status).toBe(200);
+    const body = storyHighlightIdsSchema.parse(await res.json());
+    expect(body.highlightIds).toEqual([first.id, second.id]);
+
+    expect((await read(tokens.demoMember, storyId)).status).toBe(403);
+    const unknown = await read(tokens.demoAdmin, randomUUID());
+    expect(unknown.status).toBe(404);
+    expect((await envelope(unknown)).error.details).toBeUndefined();
+  });
+
+  it('05.2-17 highlightCount rides every story projection: the detail read and the admin history', async () => {
+    expect(twoHomes).not.toBe('');
+    const detail = await request(`/v1/stories/${twoHomes}`, tokens.demoAdmin, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(detail.status).toBe(200);
+    expect(((await detail.json()) as StorySummary).highlightCount).toBe(2);
+
+    const mine = await walk(tokens.demoAdmin, '/v1/stories/mine', STORY_MAX_PAGE_SIZE);
+    expect(mine.find((story) => story.id === twoHomes)?.highlightCount).toBe(2);
+    // A story in no highlight reads 0, never null.
+    expect(mine.every((story) => Number.isInteger(story.highlightCount))).toBe(true);
+  });
+
+  it('05.2-18 communities OFF: every community highlight route is the bare 404, Início keeps answering, and the rows come back intact', async () => {
+    const community = await makeHighlightCommunity('Destaque desligada');
+    const placed = await create(tokens.demoAdmin, {
+      communityId: community,
+      title: 'Teste Desliga',
+    });
+    const { storyId } = await publishImage('comunidade desligada');
+    expect((await addItem(tokens.demoAdmin, placed.id, storyId)).status).toBe(200);
+
+    const flipped = await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${tenantIds.demo}::uuid and module_key = 'communities'`;
+    expect(flipped.count).toBe(1);
+    moduleFlags.invalidate(tenantIds.demo);
+    try {
+      await expectBare404s([
+        await hlRequest(tokens.demoMember, `?communityId=${community}`),
+        await hlRequest(tokens.demoAdmin, `?scope=all&communityId=${community}`),
+        await createHighlight(tokens.demoAdmin, { communityId: community, title: 'Teste Fora' }),
+        await hlRequest(tokens.demoMember, `/${placed.id}`),
+        await patchHighlight(tokens.demoAdmin, placed.id, { title: 'Teste Outro' }),
+        await deleteHighlightReq(tokens.demoAdmin, placed.id),
+        await removeItem(tokens.demoAdmin, placed.id, storyId),
+        await addItem(tokens.demoAdmin, placed.id, storyId),
+        await reorder(tokens.demoAdmin, { communityId: community, highlightIds: [placed.id] }),
+      ]);
+
+      // Início is untouched by the flag.
+      expect((await hlRequest(tokens.demoMember, '')).status).toBe(200);
+      const catalog = await hlRequest(tokens.demoAdmin, '/catalog');
+      expect(catalog.status).toBe(200);
+      const items = highlightListSchema.parse(await catalog.json()).items;
+      expect(items.length).toBeGreaterThan(0);
+      expect(items.every((item) => item.communityId === null)).toBe(true);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${tenantIds.demo}::uuid and module_key = 'communities'`;
+      moduleFlags.invalidate(tenantIds.demo);
+    }
+
+    // Back ON: the same highlight answers 200 with its rows intact — the flag never touched them.
+    const back = await row(tokens.demoAdmin, `?scope=all&communityId=${community}`);
+    expect(back.map((item) => [item.id, item.title, item.itemCount])).toEqual([
+      [placed.id, 'Teste Desliga', 1],
+    ]);
+    expect(await itemRows(placed.id, storyId)).toBe(1);
   });
 });
 
