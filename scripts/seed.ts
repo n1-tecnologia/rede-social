@@ -756,6 +756,70 @@ const SEED_STORY_PIN_IDS: Record<string, readonly [string, string]> = {
 const SEED_STORY_PIN_STORY_INDEXES = [3, 1] as const;
 
 /**
+ * 05.2-01 (HIGHLIGHT-01/02/05) — THREE named highlights per tenant, the fixture every later 05.2
+ * plan's screens, integration cases and e2e read.
+ *
+ *  - Início `Bastidores` at position 0 holds `SEED_STORIES[2]` (an ACTIVE image) and
+ *    `SEED_STORIES[3]` (the EXPIRED image). It is the STORY-04 contrast on Início: the expired story
+ *    is absent from the strip and plays from this highlight, because the item row is the override.
+ *    `[2]` is added a minute after `[3]`, so the automatic cover (the most recently ADDED live image
+ *    item, R-D-D rule 3) is the active image.
+ *  - Início `Aulas` at position 1 holds NOTHING: the admin-only empty highlight (D-102) — kept,
+ *    listed for the curator with `itemCount: 0`, invisible to members.
+ *  - community[0] `Destaques` at position 0 holds EXACTLY the two seeded pinned stories, with
+ *    `added_by_user_id` = the pinner and `added_at` = each pin's `pinned_at` — the state migration
+ *    file 1's backfill would have produced for these pins. The seed runs AFTER migrations on a
+ *    `db reset`, so without this block the pins would have no highlight at all.
+ *
+ * Ids are fixed (items too), so a re-run is a no-op (`on conflict (id) do nothing`) and the suites
+ * can name the rows. The pins stay seeded until plan 11 retires them.
+ */
+const SEED_HIGHLIGHT_IDS: Record<
+  string,
+  {
+    home: string;
+    homeEmpty: string;
+    community: string;
+    homeItems: readonly [string, string];
+    communityItems: readonly [string, string];
+  }
+> = {
+  'tria-demo': {
+    home: '0d000000-0000-4000-8000-0000000002a1',
+    homeEmpty: '0d000000-0000-4000-8000-0000000002a2',
+    community: '0d000000-0000-4000-8000-0000000002a3',
+    homeItems: ['0d000000-0000-4000-8000-0000000002b1', '0d000000-0000-4000-8000-0000000002b2'],
+    communityItems: [
+      '0d000000-0000-4000-8000-0000000002b3',
+      '0d000000-0000-4000-8000-0000000002b4',
+    ],
+  },
+  'tria-lab': {
+    home: '0e000000-0000-4000-8000-0000000002a1',
+    homeEmpty: '0e000000-0000-4000-8000-0000000002a2',
+    community: '0e000000-0000-4000-8000-0000000002a3',
+    homeItems: ['0e000000-0000-4000-8000-0000000002b1', '0e000000-0000-4000-8000-0000000002b2'],
+    communityItems: [
+      '0e000000-0000-4000-8000-0000000002b3',
+      '0e000000-0000-4000-8000-0000000002b4',
+    ],
+  },
+};
+
+/**
+ * Exported so `apps/web/e2e` and the integration suite assert against the FIXTURE rather than a
+ * literal that could drift from the seed (the 04-06 rule). Identical in both tenants on purpose.
+ */
+export const SEED_HIGHLIGHT_TITLES = {
+  home: 'Bastidores',
+  homeEmpty: 'Aulas',
+  community: 'Destaques',
+} as const;
+
+/** Which `SEED_STORIES` index each `Bastidores` item names: the active image, then the expired one. */
+const SEED_HIGHLIGHT_HOME_STORY_INDEXES = [2, 3] as const;
+
+/**
  * Exported so `apps/web/e2e` and the integration suite assert against the FIXTURE rather than
  * against a literal that could drift from the seed on the next edit (the 04-06 rule). Identical in
  * both tenants on purpose: a leak cannot hide behind "the rows look different".
@@ -1699,8 +1763,101 @@ for (const t of SEED_TENANTS) {
           });
         }
 
+        // 05.2-01 (HIGHLIGHT-01/02/05): the named highlights — see `SEED_HIGHLIGHT_IDS`. `position`
+        // is written explicitly (the API computes it as `max + 1` under a lock; the seed is the
+        // fixture writer of record). `Destaques` mirrors the pins above row for row, with the pin's
+        // own curator and time, exactly what migration file 1's backfill writes for a pin.
+        const highlightIds = SEED_HIGHLIGHT_IDS[t.slug];
+        let seededHighlights = 0;
+        let seededHighlightItems = 0;
+        if (highlightIds) {
+          await withAdminTx(async (tx) => {
+            const highlight = async (
+              id: string,
+              communityId: string | null,
+              title: string,
+              position: number,
+              at: Date,
+              updatedAt: Date = at,
+            ) => {
+              await tx.execute(sql`
+                insert into public.story_highlights
+                  (id, tenant_id, community_id, title, position, created_by_user_id, created_at,
+                   updated_at)
+                values (
+                  ${id}::uuid, ${tenantId}::uuid, ${communityId}::uuid, ${title}, ${position},
+                  ${authorUserId}::uuid, ${at.toISOString()}::timestamptz,
+                  ${updatedAt.toISOString()}::timestamptz
+                )
+                on conflict (id) do nothing`);
+              seededHighlights += 1;
+            };
+            const item = async (
+              id: string,
+              highlightId: string,
+              storyId: string,
+              addedAt: Date,
+            ) => {
+              await tx.execute(sql`
+                insert into public.story_highlight_items
+                  (id, tenant_id, highlight_id, story_id, added_by_user_id, added_at)
+                values (
+                  ${id}::uuid, ${tenantId}::uuid, ${highlightId}::uuid, ${storyId}::uuid,
+                  ${authorUserId}::uuid, ${addedAt.toISOString()}::timestamptz
+                )
+                on conflict (id) do nothing`);
+              seededHighlightItems += 1;
+            };
+
+            const created = new Date(storyClock - 10 * 60_000);
+            await highlight(highlightIds.home, null, SEED_HIGHLIGHT_TITLES.home, 0, created);
+            await highlight(
+              highlightIds.homeEmpty,
+              null,
+              SEED_HIGHLIGHT_TITLES.homeEmpty,
+              1,
+              created,
+            );
+            for (const [index, itemId] of highlightIds.homeItems.entries()) {
+              const storyId = storyIds[SEED_HIGHLIGHT_HOME_STORY_INDEXES[index] ?? 0];
+              if (!storyId) continue;
+              // `[0]` (the active image) is added a minute AFTER `[1]` (the expired one), so the
+              // automatic cover is the active image.
+              await item(
+                itemId,
+                highlightIds.home,
+                storyId,
+                new Date(storyClock - (index + 1) * 60_000),
+              );
+            }
+
+            if (pinCommunityId) {
+              await highlight(
+                highlightIds.community,
+                pinCommunityId,
+                SEED_HIGHLIGHT_TITLES.community,
+                0,
+                // created = the first pin, updated = the last one — the backfill's own span.
+                new Date(storyClock - SEED_STORY_PIN_STORY_INDEXES.length * 60_000),
+                new Date(storyClock - 60_000),
+              );
+              for (const [index, itemId] of highlightIds.communityItems.entries()) {
+                const storyId = storyIds[SEED_STORY_PIN_STORY_INDEXES[index] ?? 0];
+                if (!storyId) continue;
+                // The pin's own `pinned_at` (see the pins block above), so the mirror is exact.
+                await item(
+                  itemId,
+                  highlightIds.community,
+                  storyId,
+                  new Date(storyClock - (index + 1) * 60_000),
+                );
+              }
+            }
+          });
+        }
+
         console.log(
-          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest, ${seededPins} community pins (1 on the EXPIRED story)`,
+          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest, ${seededPins} community pins (1 on the EXPIRED story), ${seededHighlights} highlights (1 empty) with ${seededHighlightItems} items (Destaques mirrors the pins)`,
         );
       }
     }
