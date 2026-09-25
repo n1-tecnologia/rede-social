@@ -13,6 +13,7 @@ import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import {
+  asStoryHighlightIssue,
   asStoryIssue,
   attemptStoryPublish,
   createStoryComment,
@@ -42,29 +43,43 @@ import { type StoryHistoryItemView, storyCommentView, storyHistoryView } from '@
  *     swallow the navigation — which is why `attemptStoryPublish` returns the path instead of taking
  *     it.
  *
- * **The landing page for an attached story is its community** (05.1, D-94): when the body carries a
- * `communityId` the action revalidates `/comunidades/{communityId}` beside `/inicio`.
+ * **The landing place comes from the composer** (05.2-08, D-115): `landing.communityId` is the
+ * community whose highlight the story was published into (or null for Início and "Nenhum"). The
+ * action always revalidates `/inicio` — every story is in the tenant circle for its 24 h (D-111) —
+ * and, for a community landing, `/comunidades/{id}`, whose highlight row must carry the story. The
+ * landing id is uuid-validated and chooses a revalidation path, nothing else (T-05.2-36).
  *
  * **No file byte ever passes through here.** The composer uploads straight to Storage (or to the
  * streaming vendor) with a brokered signed target (Phase 3), and this action carries an asset ID
  * only — which is also why Cloud Run's 32 MiB body cap is irrelevant to publishing a 400 MB video.
  */
-export async function publishStoryAction(input: unknown): Promise<StoryWriteResult> {
+export async function publishStoryAction(
+  input: unknown,
+  landing: { communityId: string | null } = { communityId: null },
+): Promise<StoryWriteResult> {
   const body = publishStorySchema.safeParse(input);
   if (!body.success) {
-    const story = body.error.issues.map((issue) => asStoryIssue(issue.message)).find(Boolean);
-    return { ok: false, code: story ?? 'generic' };
+    const messages = body.error.issues.map((issue) => issue.message);
+    const code =
+      messages.map(asStoryIssue).find(Boolean) ?? messages.map(asStoryHighlightIssue).find(Boolean);
+    return { ok: false, code: code ?? 'generic' };
   }
+  // Untrusted like the body: a landing that is not a uuid (or null) is refused before any request.
+  const landingId = z
+    .uuid()
+    .nullable()
+    .safeParse(landing?.communityId ?? null);
+  if (!landingId.success) return { ok: false, code: 'generic' };
 
   const { result, refusal } = await attemptStoryPublish(body.data);
   // The new circle has to appear on the server-rendered home slot the admin lands back on; without
   // this they would read a cached page 1 that does not carry what they just published.
   if (result.ok) revalidatePath('/inicio');
-  // A story born attached (05.1, D-94) LANDS on its community, whose Destaques must carry it — so
-  // that page is invalidated too (Pitfall 8). One write carried both the story and the pin (D-99):
-  // nothing here, or in the composer, runs a second pin request after the publish.
-  if (result.ok && body.data.communityId) {
-    revalidatePath(`/comunidades/${body.data.communityId}`);
+  // A story published into a community's highlight LANDS on that community (D-115), whose row must
+  // carry it — so that page is invalidated too (Pitfall 8). One write carried the story, any new
+  // highlight and the item (D-99): nothing here, or in the composer, runs a second request after it.
+  if (result.ok && landingId.data !== null) {
+    revalidatePath(`/comunidades/${landingId.data}`);
   }
 
   if (refusal) redirect(refusal);

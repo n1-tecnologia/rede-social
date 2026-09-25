@@ -11,7 +11,6 @@ import {
   STORY_HIGHLIGHT_ISSUE_SET,
   STORY_ISSUE_SET,
   STORY_PAGE_SIZE,
-  STORY_PIN_ISSUE_SET,
   type StoryComment,
   type StoryCommentIssue,
   type StoryCommentPage,
@@ -20,7 +19,6 @@ import {
   type StoryIssue,
   type StoryLikeResult,
   type StoryPage,
-  type StoryPinIssue,
   type StorySummary,
   storyCommentPageSchema,
   storyCommentSchema,
@@ -105,13 +103,14 @@ export async function loadStories(query: StoryQueryInput = {}): Promise<StoryPag
  *
  * `not_found` is the API's single bare 404 for every miss — an unknown asset id, another tenant's,
  * and one soft-deleted between the upload and the publish — so the screen says ONE thing for all of
- * them (D-23, T-05-26). Since 05.1-01 the same bare 404 also covers a `communityId` that is unknown,
- * removed or another tenant's.
+ * them (D-23, T-05-26). Since 05.2-08 the same bare 404 also covers a destination highlight or
+ * community that is unknown, removed or another tenant's.
  *
- * `archived` (a `StoryPinIssue`, 05.1) is the pin refusal: a publish that names a community which was
- * archived AFTER the composer opened answers `400 { pin: 'archived' }` — the very answer the post-hoc
- * pin toggle gives, because both writes share one refusal site. It is read rather than folded into
- * `generic` so the composer can name the community and reset its selection (UI-D-58, Pitfall 7).
+ * `archived`, `title_invalid` and `full` (a `StoryHighlightIssue`, 05.2-08) are the highlight
+ * refusals of a publish that names a destination: a community archived AFTER the composer opened, a
+ * pending title the API refuses, a highlight or place at its cap. They are the highlight writes'
+ * own closed vocabulary (`details.highlight`), read rather than folded into `generic` so the composer
+ * can name the community, reset its selection and state the title rule (UI-D-71).
  *
  * **Why this lives HERE and not beside the action.** A `'use server'` module may export nothing but
  * async functions, so a refusal mapper, a `ReadonlySet` and a result type cannot sit next to
@@ -119,7 +118,7 @@ export async function loadStories(query: StoryQueryInput = {}): Promise<StoryPag
  */
 export type StoryWriteResult =
   | { ok: true; storyId: string }
-  | { ok: false; code: StoryIssue | StoryPinIssue | 'not_found' | 'generic' };
+  | { ok: false; code: StoryIssue | StoryHighlightIssue | 'not_found' | 'generic' };
 
 const STORY_ISSUE_LOOKUP: ReadonlySet<string> = STORY_ISSUE_SET;
 
@@ -128,22 +127,29 @@ export function asStoryIssue(value: unknown): StoryIssue | null {
   return typeof value === 'string' && STORY_ISSUE_LOOKUP.has(value) ? (value as StoryIssue) : null;
 }
 
+/** True for a code of the highlight writes' closed vocabulary (`details.highlight`), and nothing else. */
+export function asStoryHighlightIssue(value: unknown): StoryHighlightIssue | null {
+  return typeof value === 'string' && STORY_HIGHLIGHT_ISSUE_SET.has(value)
+    ? (value as StoryHighlightIssue)
+    : null;
+}
+
 /**
- * Reads the refusal the API put in `details.story` — or, for a publish that named a community, in
- * `details.pin` — and nothing else from the envelope.
+ * Reads the refusal the API put in `details.story` — or, for a publish that named a highlight, in
+ * `details.highlight` — and nothing else from the envelope.
  *
- * The pin code is accepted ONLY when it belongs to `STORY_PIN_ISSUE_SET`: an unrecognised value is
- * null (and so the generic failure), never a string passed through to the screen.
+ * The highlight code is accepted ONLY when it belongs to `STORY_HIGHLIGHT_ISSUE_SET`: an unrecognised
+ * value is null (and so the generic failure), never a string passed through to the screen. The
+ * retired pin refusal is no longer read: nothing in the web sends `communityId` any more.
  */
-export function storyWriteIssue(error: unknown): StoryIssue | StoryPinIssue | 'not_found' | null {
+export function storyWriteIssue(
+  error: unknown,
+): StoryIssue | StoryHighlightIssue | 'not_found' | null {
   if (!(error instanceof ApiClientError)) return null;
-  // An unknown, foreign or removed ASSET (or community) is the same bare 404 an unknown story id is.
+  // An unknown, foreign or removed ASSET (or highlight, or community) is one bare 404.
   if (error.status === 404) return 'not_found';
-  const details = error.details as { story?: unknown; pin?: unknown } | undefined;
-  const story = asStoryIssue(details?.story);
-  if (story) return story;
-  const pin = details?.pin;
-  return typeof pin === 'string' && STORY_PIN_ISSUE_SET.has(pin) ? (pin as StoryPinIssue) : null;
+  const details = error.details as { story?: unknown; highlight?: unknown } | undefined;
+  return asStoryIssue(details?.story) ?? asStoryHighlightIssue(details?.highlight);
 }
 
 /**

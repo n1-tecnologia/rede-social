@@ -1256,7 +1256,9 @@ test.describe('05.1 — a story from a community page (criteria 3-5)', () => {
     // D-94: it lands where the story went, with the story already in that community's Destaques.
     await expect(page).toHaveURL(new RegExp(`/comunidades/${COMMUNITY.unpinnedId}$`));
     await expect(
-      page.getByText(S.publish.toastCommunity.replace('{community}', name), { exact: true }),
+      page.getByText(S.publish.toastHighlightCommunity.replace('{community}', name), {
+        exact: true,
+      }),
     ).toBeVisible();
     await expect(destaques(page).getByRole('button')).not.toHaveCount(0);
 

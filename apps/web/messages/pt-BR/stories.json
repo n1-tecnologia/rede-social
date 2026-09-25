@@ -99,15 +99,19 @@
       "processingTitle": "Processando o vídeo…",
       "processingNote": "Seu story aparece no início assim que o vídeo terminar de processar.",
       "toast": "Story publicado.",
-      "toastCommunity": "Story publicado em {community}.",
+      "toastHighlight": "Story publicado no destaque {title}.",
+      "toastHighlightCommunity": "Story publicado no destaque {title} de {community}.",
       "destination": {
-        "none": "Nenhuma comunidade",
-        "helper": "O story aparece no início por 24 h e continua nos Destaques da comunidade."
+        "label": "Destaque",
+        "none": "Nenhum",
+        "value": "{place} · {title}",
+        "choose": "Escolher destaque"
       },
       "errors": {
         "noMedia": "Escolha uma foto ou um vídeo para publicar.",
         "failed": "Não foi possível publicar seu story. Tente novamente.",
-        "archived": "A comunidade {community} foi arquivada e o story não foi publicado. Escolha outra comunidade ou publique sem comunidade."
+        "archived": "A comunidade {community} foi arquivada e o story não foi publicado. Escolha outro destaque ou publique sem destaque.",
+        "titleInvalid": "O nome do destaque precisa ter de 1 a {limit} caracteres. Escolha o destaque de novo."
       },
       "discard": {
         "title": "Descartar story?",
