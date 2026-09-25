@@ -1,23 +1,24 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
-import { StoriesStrip, type StoryCircleItem } from '../ui/StoriesStrip';
-import { StoryCircle } from '../ui/StoryCircle';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { StoriesStrip, type StoryStripCircle } from '../ui/StoriesStrip';
+import { StoryCircle, StoryMonogram } from '../ui/StoryCircle';
 
 /**
- * D-78 / D-79 / UI-D-26 / UI-D-27 / UI-D-28 — the strip and its circle, asserted as observable
- * contract rather than as pixels.
+ * D-104 / D-105 / D-106 / UI-D-26 / UI-D-59..UI-D-63 — the strip and its circle, asserted as
+ * observable contract rather than as pixels.
  *
- * The three claims worth a test are the three that a later edit could quietly break:
+ * The claims worth a test are the ones a later edit could quietly break:
  *
- *  1. **UI-D-26's all-or-nothing empty.** A member with no active story must get NO DOM node — not
- *     an empty state, not a reserved height, not a zero-height row. The `/inicio` column has to
- *     close up, and "renders nothing" is a fact about the container, so only the container can
- *     assert it. An admin gets the own-circle ALONE, because it is the only publish door (D-80).
- *  2. **D-78's one-circle-per-story.** N stories and the publish permission is N+1 circles, in the
- *     server's order, with no grouping by publisher — with V1's single publisher, grouping would
- *     collapse the row to one circle forever and read as a bug.
+ *  1. **UI-D-26's all-or-nothing empty.** A viewer with no circle must get NO DOM node — not an
+ *     empty state, not a reserved height, not a zero-height row. The `/inicio` column has to close
+ *     up, and "renders nothing" is a fact about the container, so only the container can assert it.
+ *     WHICH circles a viewer gets (the admin's `+`, the tenant circle, the highlights) is the HOST's
+ *     decision (UI-D-59); the strip renders exactly the ordered descriptors it is handed.
+ *  2. **One circle unit, every disc and ring** (UI-D-60..UI-D-63): the ring is a prop independent of
+ *     the disc, and the monogram takes the first GRAPHEME — never a `.slice()` that could split a
+ *     surrogate pair or a joined emoji.
  *  3. **UI-D-14's no-clock-in-render.** The label is a STRING the host already formatted; the
  *     component must never derive it. A sentinel string is what proves it is passed through.
  *
@@ -29,37 +30,45 @@ afterEach(cleanup);
 
 const LADDER = [640, 1080] as const;
 
-function story(n: number): StoryCircleItem {
+function asset(n: number): StoryStripCircle {
   return {
-    id: `s${n}`,
+    kind: 'open',
+    key: `s${n}`,
     label: `label-${n}`,
     actionLabel: `open-${n}`,
-    assetId: `0000000${n}-1111-4111-8111-111111111111`,
-    variantWidths: LADDER,
+    ring: 'brand',
+    disc: {
+      kind: 'asset',
+      assetId: `0000000${n}-1111-4111-8111-111111111111`,
+      variantWidths: LADDER,
+    },
+    group: 0,
+    index: n - 1,
   };
 }
 
-const OWN = {
+const OWN: StoryStripCircle = {
+  kind: 'link',
+  key: 'own',
   href: '/stories/publicar',
   label: 'own-label',
   actionLabel: 'own-action',
-  avatarUrl: null,
+  ring: 'neutral',
+  disc: { kind: 'own', avatarUrl: null },
 };
 
 function strip(overrides: Partial<React.ComponentProps<typeof StoriesStrip>> = {}) {
-  return render(
-    <StoriesStrip items={[]} ringVariant="brand" regionLabel="strip-region" {...overrides} />,
-  );
+  return render(<StoriesStrip circles={[]} regionLabel="strip-region" {...overrides} />);
 }
 
-describe('StoriesStrip — the /inicio home slot (UI-D-25..UI-D-28, D-78)', () => {
-  it('1. zero stories and NO publish permission renders no DOM node at all (UI-D-26)', () => {
-    const { container } = strip({ items: [] });
+describe('StoriesStrip — the ordered row of circle descriptors (UI-D-59, UI-D-26, D-104)', () => {
+  it('1. an empty circle list renders no DOM node at all (UI-D-26)', () => {
+    const { container } = strip({ circles: [] });
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('2. zero stories WITH the publish permission renders exactly one circle — the own-circle', () => {
-    strip({ items: [], own: OWN });
+  it('2. the link circle alone renders exactly one circle — an anchor to its href', () => {
+    strip({ circles: [OWN] });
     const row = screen.getByRole('list', { name: 'strip-region' });
     expect(within(row).getAllByRole('listitem')).toHaveLength(1);
     expect(within(row).getByRole('link', { name: 'own-action' })).toHaveAttribute(
@@ -68,8 +77,8 @@ describe('StoriesStrip — the /inicio home slot (UI-D-25..UI-D-28, D-78)', () =
     );
   });
 
-  it('3. N stories plus the permission is N+1 circles, own-circle FIRST, newest-first order kept', () => {
-    strip({ items: [story(1), story(2), story(3)], own: OWN });
+  it('3. descriptors render in the GIVEN order inside role="list"', () => {
+    strip({ circles: [OWN, asset(1), asset(2), asset(3)] });
     const items = within(screen.getByRole('list', { name: 'strip-region' })).getAllByRole(
       'listitem',
     );
@@ -83,53 +92,161 @@ describe('StoriesStrip — the /inicio home slot (UI-D-25..UI-D-28, D-78)', () =
   });
 
   it('4. loading draws three skeleton circles and no listitem, so the feed below does not shift', () => {
-    const { container } = strip({ items: [], loading: true });
+    const { container } = strip({ circles: [], loading: true });
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
     expect(container.querySelectorAll('[data-testid="story-circle-skeleton"]')).toHaveLength(3);
   });
 
   it('5. the row contains its own horizontal overscroll so a swipe never triggers back', () => {
-    const { container } = strip({ items: [story(1)] });
-    expect(container.querySelector('[data-testid="stories-strip"]')?.className).toContain(
-      'overscroll-x-contain',
+    const { container } = strip({ circles: [asset(1)] });
+    const row = container.querySelector('[data-testid="stories-strip"]');
+    expect(row?.className).toContain('overscroll-x-contain');
+    expect(row?.className).toContain('overflow-x-auto');
+  });
+
+  it('6. an open circle calls onOpen(group, index) with ITS OWN pair', () => {
+    const onOpen = vi.fn();
+    const highlight: StoryStripCircle = {
+      ...asset(9),
+      key: 'h1',
+      actionLabel: 'open-highlight',
+      ring: 'neutral',
+      group: 2,
+      index: 0,
+    };
+    strip({ circles: [asset(1), highlight], onOpen });
+    fireEvent.click(screen.getByRole('button', { name: 'open-highlight' }));
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(2, 0);
+    fireEvent.click(screen.getByRole('button', { name: 'open-1' }));
+    expect(onOpen).toHaveBeenLastCalledWith(0, 0);
+  });
+
+  it('7. without onOpen an open circle is inert — no button anywhere in the row', () => {
+    strip({ circles: [asset(1), asset(2)] });
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('8. only the first three discs of the row load eagerly', () => {
+    const { container } = strip({ circles: [asset(1), asset(2), asset(3), asset(4)] });
+    const loading = Array.from(container.querySelectorAll('img')).map((img) =>
+      img.getAttribute('loading'),
     );
+    expect(loading).toEqual(['eager', 'eager', 'eager', 'lazy']);
   });
 });
 
-describe('StoryCircle — 64x64, three variants, one geometry (UI-D-27, UI-D-28)', () => {
-  it('6. the label is the host string, verbatim and truncated — never derived from a clock', () => {
-    render(<StoryCircle variant="brand" label="ha 2 h" actionLabel="open" assetId={null} />);
+describe('StoryCircle — 64x64, every disc and ring, one geometry (UI-D-60..UI-D-63)', () => {
+  function ringOf(container: HTMLElement): string {
+    return container.querySelector('[data-testid="story-circle-ring"]')?.className ?? '';
+  }
+
+  it('9. the label is the host string, verbatim and truncated — never derived from a clock', () => {
+    render(
+      <StoryCircle
+        ring="brand"
+        disc={{ kind: 'asset', assetId: null, variantWidths: [] }}
+        label="ha 2 h"
+        actionLabel="open"
+      />,
+    );
     const label = screen.getByText('ha 2 h');
     expect(label.className).toContain('truncate');
     expect(label.className).toContain('max-w-16');
   });
 
-  it('7. a circle with no onOpen is inert; with one it is a button carrying the action label', () => {
-    const { rerender } = render(
-      <StoryCircle variant="brand" label="l" actionLabel="open-me" assetId={null} />,
-    );
-    expect(screen.queryByRole('button')).toBeNull();
-
-    rerender(
-      <StoryCircle
-        variant="brand"
-        label="l"
-        actionLabel="open-me"
-        assetId={null}
-        onOpen={() => {}}
-      />,
-    );
-    expect(screen.getByRole('button', { name: 'open-me' })).toBeInTheDocument();
+  it('10. ring="brand" wears border-brand; neutral wears border-border; both keep the geometry', () => {
+    const disc = { kind: 'asset', assetId: null, variantWidths: [] } as const;
+    const brand = render(<StoryCircle ring="brand" disc={disc} label="l" actionLabel="a" />);
+    expect(ringOf(brand.container)).toContain('border-brand');
+    for (const cls of ['border-2', 'p-0.5', 'rounded-full']) {
+      expect(ringOf(brand.container)).toContain(cls);
+    }
+    cleanup();
+    const neutral = render(<StoryCircle ring="neutral" disc={disc} label="l" actionLabel="a" />);
+    expect(ringOf(neutral.container)).toContain('border-border');
+    expect(ringOf(neutral.container)).not.toContain('border-brand');
   });
 
-  it('8. the own variant is an anchor (never a button) and wears the Plus badge', () => {
+  it('11. ring="dashed" is border-dashed on border-border-secondary, same geometry', () => {
     const { container } = render(
       <StoryCircle
-        variant="own"
+        ring="dashed"
+        disc={{ kind: 'asset', assetId: null, variantWidths: [] }}
+        label="l"
+        actionLabel="a"
+      />,
+    );
+    const ring = ringOf(container);
+    for (const cls of ['border-dashed', 'border-border-secondary', 'border-2', 'p-0.5']) {
+      expect(ring).toContain(cls);
+    }
+  });
+
+  it('12. a logo disc is an alt="" img, object-contain, inside a 48px box on bg-bg-secondary', () => {
+    const { container } = render(
+      <StoryCircle
+        ring="brand"
+        disc={{ kind: 'logo', src: '/logo.png' }}
+        label="tenant"
+        actionLabel="a"
+      />,
+    );
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img).toHaveAttribute('src', '/logo.png');
+    expect(img).toHaveAttribute('alt', '');
+    expect(img?.className).toContain('object-contain');
+    expect(img?.parentElement?.className).toContain('h-12');
+    expect(img?.parentElement?.className).toContain('w-12');
+    expect(container.querySelector('[data-testid="story-disc-logo"]')?.className).toContain(
+      'bg-bg-secondary',
+    );
+  });
+
+  it('13. a monogram disc shows the first grapheme of its text, upper-cased', () => {
+    const { container } = render(
+      <StoryCircle
+        ring="neutral"
+        disc={{ kind: 'monogram', text: 'édson' }}
+        label="l"
+        actionLabel="a"
+      />,
+    );
+    const mono = container.querySelector('[data-testid="story-monogram"]');
+    expect(mono?.textContent).toBe('É');
+    expect(mono?.className).toContain('text-on-brand');
+    expect(mono?.className).toContain('font-bold');
+  });
+
+  it('14. a joined family emoji is ONE grapheme — the whole sequence, never a broken surrogate', () => {
+    const family = '\u{1F469}‍\u{1F469}‍\u{1F467}';
+    render(<StoryMonogram text={`${family} grupo`} />);
+    expect(screen.getByTestId('story-monogram').textContent).toBe(family);
+  });
+
+  it('15. a glyph disc renders the host icon on bg-bg-tertiary', () => {
+    const { container } = render(
+      <StoryCircle
+        ring="dashed"
+        disc={{ kind: 'glyph', icon: <svg data-testid="host-icon" /> }}
+        label="l"
+        actionLabel="a"
+      />,
+    );
+    expect(screen.getByTestId('host-icon')).toBeInTheDocument();
+    expect(container.querySelector('[data-testid="story-disc-glyph"]')?.className).toContain(
+      'bg-bg-tertiary',
+    );
+  });
+
+  it('16. the own disc keeps the Plus badge; with an href the circle is an anchor, never a button', () => {
+    const { container } = render(
+      <StoryCircle
+        ring="neutral"
+        disc={{ kind: 'own', avatarUrl: null }}
         label="own-label"
         actionLabel="own-action"
         href="/stories/publicar"
-        avatarUrl={null}
       />,
     );
     expect(screen.getByRole('link', { name: 'own-action' })).toHaveAttribute(
@@ -138,5 +255,18 @@ describe('StoryCircle — 64x64, three variants, one geometry (UI-D-27, UI-D-28)
     );
     expect(screen.queryByRole('button')).toBeNull();
     expect(container.querySelector('[data-testid="story-own-badge"]')).not.toBeNull();
+  });
+
+  it('17. with onOpen the circle is one button carrying the action label; with neither it is inert', () => {
+    const disc = { kind: 'monogram', text: 'x' } as const;
+    const { rerender } = render(
+      <StoryCircle ring="brand" disc={disc} label="l" actionLabel="open-me" />,
+    );
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
+
+    rerender(<StoryCircle ring="brand" disc={disc} label="l" actionLabel="open-me" onOpen={() => {}} />);
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'open-me' })).toBeInTheDocument();
   });
 });
