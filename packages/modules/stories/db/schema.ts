@@ -60,8 +60,9 @@ import {
  *    **05.2 carries the same rule to highlights.** Removing a story from a highlight deletes its
  *    `story_highlight_items` row, and deleting a highlight deletes the highlight row (its items go
  *    with it through `on delete cascade`). Both are HARD deletes for the pin's reasons: neither row
- *    carries authored content or moderation evidence, and `story_highlight_items_uq` is the
- *    idempotency arbiter, so a repeat add is absorbed and a removal has at most one row to remove.
+ *    carries authored content or moderation evidence, and the item's unique (highlight, story) pair
+ *    is the idempotency arbiter, so a repeat add is absorbed and a removal has at most one row to
+ *    remove.
  *    The STORY row is never touched by either — a highlight is an editorial pointer, not a copy.
  *
  * 6. **THE PIN ROW IS THE EXPIRY OVERRIDE.** `listCommunityHighlights` carries NO expiry predicate
