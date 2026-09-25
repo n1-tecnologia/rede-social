@@ -25,11 +25,13 @@ import {
   storyPinsSchema,
   storyQuerySchema,
   storySummarySchema,
+  updateHighlightSchema,
 } from '../contracts/index';
 import {
   addStoryToHighlight,
   createHighlight,
   createStoryComment,
+  deleteHighlight,
   deleteStory,
   deleteStoryComment,
   getHighlight,
@@ -43,8 +45,10 @@ import {
   listStoryPins,
   pinStory,
   publishStory,
+  removeStoryFromHighlight,
   unlikeStory,
   unpinStory,
+  updateHighlight,
 } from './service';
 
 /**
@@ -154,7 +158,7 @@ const highlightsRoute = createRoute({
 /* ── Highlights (05.2, HIGHLIGHT-01/02, D-100..D-103) ─────────────────────────────────────────── */
 
 /**
- * ALL FOUR are declared BEFORE `/{storyId}` so the literal `highlights` segment wins the match: it is
+ * ALL of them are declared BEFORE `/{storyId}` so the literal `highlights` segment wins the match: it is
  * not a uuid, so the param route would 400 on it rather than falling through.
  *
  * The two READS carry no permission — every member of the tenant sees a place's highlights, exactly
@@ -255,6 +259,80 @@ const addHighlightItemRoute = createRoute({
     400: {
       description:
         "`VALIDATION_FAILED` with `details.highlight` = `archived` (the highlight's community is archived) or `full` (the highlight already holds 100 stories).",
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    404: {
+      description:
+        'The highlight or the story is unknown, another tenant’s, or removed — ONE bare code for all of them, no details (D-23).',
+    },
+  },
+});
+
+/**
+ * 05.2-03's curation writes. The same literal manage-permission middleware as the two writes above
+ * (T-05.2-11) — the one string a reviewer greps for — and every place rule decided by the service's
+ * one seam (`resolveHighlightPlace`): an ARCHIVED community refuses what ADDS content (rename,
+ * re-cover) with `{ highlight: 'archived' }` and allows what TAKES IT DOWN (delete the highlight,
+ * remove a story). Every miss is one bare 404.
+ */
+const updateHighlightRoute = createRoute({
+  method: 'patch',
+  path: '/highlights/{highlightId}',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: {
+    params: highlightIdParam,
+    body: { content: { 'application/json': { schema: updateHighlightSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The highlight AFTER the write. `title` renames it; `cover` re-covers it with ONE of two shapes — `{ storyId }` (a live IMAGE story of THIS highlight; covers are image-only in 05.2) or `{ assetId }` (an uploaded image: purpose `cover`, kind `image`, status `ready`, of this tenant) — or `null`, which returns it to the automatic cover. Choosing one kind clears the other; replacing an uploaded cover never deletes the old asset. A PATCH identical to the stored row changes nothing and emits nothing.',
+      content: { 'application/json': { schema: highlightSummarySchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.highlight` = `title_invalid` (empty after trimming, or longer than 15) or `archived` (the highlight’s community is archived and takes no curation); or with `details.issues` for a body naming neither `title` nor `cover`. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    404: {
+      description:
+        'The highlight, the cover story or the cover asset is unknown, another tenant’s, removed, a video, not in this highlight, not a ready cover image — or the highlight’s community is removed or the `communities` module is off. ONE bare code for all of them, no details (D-23).',
+    },
+  },
+});
+
+const deleteHighlightRoute = createRoute({
+  method: 'delete',
+  path: '/highlights/{highlightId}',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: { params: highlightIdParam },
+  responses: {
+    204: {
+      description:
+        'The highlight is deleted with its items. Its STORIES, their likes and their comments are never touched — a highlight is an editorial pointer. Allowed on an archived community (take-down must stay possible).',
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    404: {
+      description:
+        'No highlight with that id is visible to this tenant — unknown, another tenant’s, ALREADY deleted, in a removed community, or the `communities` module is off. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const removeHighlightItemRoute = createRoute({
+  method: 'delete',
+  path: '/highlights/{highlightId}/stories/{storyId}',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: { params: highlightIdParam.extend({ storyId: z.uuid() }) },
+  responses: {
+    // Deliberately NO 400: removing a story is a TAKE-DOWN, allowed on an archived community.
+    200: {
+      description:
+        'The story is out of the highlight. `highlightCount` is how many highlights the STORY is still in. Idempotent: removing a pair that is not there answers the identical body and announces nothing. The story row is never changed, and the highlight is kept even when this removed its last story. If the story was the chosen cover, the highlight returns to its automatic cover.',
+      content: { 'application/json': { schema: highlightMembershipResultSchema } },
     },
     403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
     404: {
@@ -559,6 +637,19 @@ export const storiesRoutes = stories
   .openapi(addHighlightItemRoute, async (c) => {
     const { highlightId, storyId } = c.req.valid('param');
     return c.json(await addStoryToHighlight(c.get('ctx'), highlightId, storyId), 200);
+  })
+  .openapi(updateHighlightRoute, async (c) => {
+    const { highlightId } = c.req.valid('param');
+    return c.json(await updateHighlight(c.get('ctx'), highlightId, c.req.valid('json')), 200);
+  })
+  .openapi(deleteHighlightRoute, async (c) => {
+    const { highlightId } = c.req.valid('param');
+    await deleteHighlight(c.get('ctx'), highlightId);
+    return c.body(null, 204);
+  })
+  .openapi(removeHighlightItemRoute, async (c) => {
+    const { highlightId, storyId } = c.req.valid('param');
+    return c.json(await removeStoryFromHighlight(c.get('ctx'), highlightId, storyId), 200);
   })
   .openapi(listRoute, async (c) =>
     c.json(await listActiveStories(c.get('ctx'), c.req.valid('query')), 200),

@@ -9,6 +9,7 @@ import { type SQL, sql } from 'drizzle-orm';
 import {
   type CreateStoryComment,
   type CreateStoryHighlight,
+  type HighlightCover,
   type HighlightDetail,
   type HighlightList,
   type HighlightMembershipResult,
@@ -16,6 +17,7 @@ import {
   type PublishStory,
   STORY_HIGHLIGHT_MAX_ITEMS,
   STORY_HIGHLIGHT_MAX_PER_PLACE,
+  STORY_HIGHLIGHT_MAX_TITLE,
   type StoryComment,
   type StoryCommentPage,
   type StoryCommentsQuery,
@@ -1364,6 +1366,48 @@ async function resolveHighlightPlace(
   }
 }
 
+/** What `resolveHighlight` reads back: the row's place and the columns a curation write compares. */
+type HighlightRef = {
+  id: string;
+  community_id: string | null;
+  title: string;
+  cover_story_id: string | null;
+  cover_asset_id: string | null;
+};
+
+/**
+ * Resolve ONE highlight in-lane, then its place through `resolveHighlightPlace` — the entry every
+ * highlight write shares, so "which highlight, which place, may this caller act on it" has exactly
+ * one definition.
+ *
+ * - The row is read under the explicit `tenant_id` predicate AND RLS; a miss (unknown, another
+ *   tenant's) is the bare 404 (D-23).
+ * - Write intents take it `for update`: two writes to the same highlight serialise, which is what
+ *   keeps `is distinct from` honest and the `full` count exact.
+ * - The place rules are NOT restated here (R-D-K): `curate` refuses an archived community,
+ *   `takedown` does not, and the `communities` module being off is the bare 404 — all decided by
+ *   the one seam.
+ */
+async function resolveHighlight(
+  tx: Tx,
+  ctx: RequestContext,
+  highlightId: string,
+  intent: PlaceIntent,
+  gate: PlaceGate,
+): Promise<HighlightRef> {
+  const lock = intent === 'read' ? sql`` : sql`for update`;
+  const rows = await tx.execute<HighlightRef>(sql`
+    select h.id, h.community_id, h.title, h.cover_story_id, h.cover_asset_id
+      from story_highlights h
+     where h.id = ${highlightId}::uuid
+       and h.tenant_id = ${ctx.tenantId}::uuid
+     ${lock}`);
+  const highlight = rows[0];
+  if (!highlight) throw new ApiError(404, 'NOT_FOUND');
+  await resolveHighlightPlace(tx, ctx, highlight.community_id, intent, gate);
+  return highlight;
+}
+
 /**
  * A MEMBER-VISIBLE item (R-D-H), written ONCE: the story is not removed and its asset is `ready`.
  * The row read's `item_count` and the items read both use this fragment, so the two can never
@@ -1617,16 +1661,7 @@ export async function addStoryToHighlight(
   const gate = await readPlaceGate(ctx);
 
   const { highlightCount, created } = await withTenantTx(ctx, async (tx) => {
-    const highlights = await tx.execute<{ community_id: string | null }>(sql`
-      select h.community_id
-        from story_highlights h
-       where h.id = ${highlightId}::uuid
-         and h.tenant_id = ${ctx.tenantId}::uuid
-       for update`);
-    const highlight = highlights[0];
-    if (!highlight) throw new ApiError(404, 'NOT_FOUND');
-
-    await resolveHighlightPlace(tx, ctx, highlight.community_id, 'curate', gate);
+    await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
 
     const stories = await tx.execute<{ id: string }>(sql`
       select s.id
@@ -1780,24 +1815,271 @@ export async function getHighlight(
   return { highlight: toHighlight(detail.highlight), items: detail.items.map(toStory) };
 }
 
-/*
- * RED STUBS (05.2-03 Task 1). Deliberately INERT so the new unit and integration cases fail on
- * their ASSERTIONS rather than on a missing export. The GREEN commit replaces all three.
+/* ── Curation writes (05.2-03: HIGHLIGHT-01/02, D-101, R-D-E, R-D-F, R-D-L) ───────────────────── */
+
+/**
+ * Resolve a CHOSEN cover (D-101) inside the writing transaction and answer the two stored columns.
+ * Every miss is the ONE bare 404 (D-23, the 05-09 shape) — a per-cause code over an enumerable uuid
+ * space would be an existence oracle.
+ *
+ * - `{ assetId }`: an asset of THIS tenant (explicit predicate + RLS) with purpose `cover`, kind
+ *   `image`, status `ready`, not removed — the community-cover tuple. A story asset, a processing
+ *   one, a file, another tenant's: all the same 404 (T-05.2-12).
+ * - `{ storyId }`: a live IMAGE item of THIS highlight — the story not removed, its asset `ready`
+ *   (`MEMBER_VISIBLE`), `media_kind = 'image'`. A video item is the bare 404 (the developer's
+ *   image-only decision, 2026-09-25), and so is a story that is not in this highlight (T-05.2-13).
+ * - `null`: both columns cleared, back to the automatic rule. No lookup.
+ *
+ * Choosing one kind clears the other — `story_highlights_cover_chk` would refuse both at once.
  */
-export async function updateHighlight(
-  _ctx: RequestContext,
-  _highlightId: string,
-  _input: UpdateHighlight,
-): Promise<HighlightSummary> {
-  throw new ApiError(500, 'INTERNAL');
+async function resolveChosenCover(
+  tx: Tx,
+  ctx: RequestContext,
+  highlightId: string,
+  cover: HighlightCover | null,
+): Promise<{ coverStoryId: string | null; coverAssetId: string | null }> {
+  if (cover === null) return { coverStoryId: null, coverAssetId: null };
+
+  if ('assetId' in cover) {
+    const assets = await tx.execute<{ id: string }>(sql`
+      select a.id
+        from media_assets a
+       where a.id = ${cover.assetId}::uuid
+         and a.tenant_id = ${ctx.tenantId}::uuid
+         and a.purpose = 'cover'
+         and a.kind = 'image'
+         and a.status = 'ready'
+         and a.deleted_at is null`);
+    const asset = assets[0];
+    if (!asset) throw new ApiError(404, 'NOT_FOUND');
+    return { coverStoryId: null, coverAssetId: asset.id };
+  }
+
+  const items = await tx.execute<{ id: string }>(sql`
+    select s.id
+      from story_highlight_items i
+      join stories s on s.id = i.story_id
+      join media_assets a on a.id = s.media_asset_id
+     where i.highlight_id = ${highlightId}::uuid
+       and i.tenant_id = ${ctx.tenantId}::uuid
+       and i.story_id = ${cover.storyId}::uuid
+       and s.media_kind = 'image'
+       and ${MEMBER_VISIBLE}`);
+  const item = items[0];
+  if (!item) throw new ApiError(404, 'NOT_FOUND');
+  return { coverStoryId: item.id, coverAssetId: null };
 }
 
-export async function deleteHighlight(_ctx: RequestContext, _highlightId: string): Promise<void> {}
+/**
+ * `PATCH /v1/stories/highlights/{highlightId}` — rename and/or re-cover (HIGHLIGHT-01, D-101).
+ *
+ * One `withTenantTx`: the highlight is resolved `for update` with the `curate` intent (an archived
+ * community refuses with `{ highlight: 'archived' }` BEFORE any write), the chosen cover is resolved
+ * in-lane, then ONE guarded `update … where (title, cover_story_id, cover_asset_id) is distinct from
+ * (new values) returning id`. That predicate — not a JavaScript comparison — decides whether
+ * anything changed, so an identical PATCH moves no `updated_at` and announces nothing:
+ * `highlight.updated` fires only when `returning` produced a row (transitions, not requests).
+ *
+ * Replacing or clearing an uploaded cover never deletes or retires the old asset (R-D-E). The answer
+ * is the highlight's summary re-read through `highlightProjection`, so the cover it shows is the
+ * read-time rule's, exactly as every row read computes it.
+ */
+export async function updateHighlight(
+  ctx: RequestContext,
+  highlightId: string,
+  input: UpdateHighlight,
+): Promise<HighlightSummary> {
+  // The service re-states the route's title rule: this function is also reachable from handlers
+  // that assemble their own input, none of which pass through the route validator.
+  const requestedTitle = input.title === undefined ? undefined : input.title.trim();
+  if (
+    requestedTitle !== undefined &&
+    (requestedTitle.length === 0 || requestedTitle.length > STORY_HIGHLIGHT_MAX_TITLE)
+  ) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'title_invalid' });
+  }
 
+  const gate = await readPlaceGate(ctx);
+
+  const { row, changed } = await withTenantTx(ctx, async (tx) => {
+    const current = await resolveHighlight(tx, ctx, highlightId, 'curate', gate);
+
+    const title = requestedTitle ?? current.title;
+    const cover =
+      input.cover === undefined
+        ? { coverStoryId: current.cover_story_id, coverAssetId: current.cover_asset_id }
+        : await resolveChosenCover(tx, ctx, highlightId, input.cover);
+
+    const updated = await tx.execute<{ id: string }>(sql`
+      update story_highlights
+         set title = ${title},
+             cover_story_id = ${cover.coverStoryId}::uuid,
+             cover_asset_id = ${cover.coverAssetId}::uuid,
+             updated_at = now()
+       where id = ${highlightId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+         and (title, cover_story_id, cover_asset_id)
+             is distinct from (${title}::text, ${cover.coverStoryId}::uuid, ${cover.coverAssetId}::uuid)
+      returning id`);
+
+    const rows = await tx.execute<HighlightSummaryRow>(sql`
+      ${highlightProjection(sql`h.id = ${highlightId}::uuid and h.tenant_id = ${ctx.tenantId}::uuid`)}`);
+    const summary = rows[0];
+    if (!summary) throw new ApiError(500, 'INTERNAL');
+    return { row: summary, changed: updated.length > 0 };
+  });
+
+  if (changed) {
+    emit(ctx, 'highlight.updated', {
+      tenantId: ctx.tenantId,
+      highlightId,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  log.info(
+    {
+      event: 'stories.highlight_updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      highlightId,
+      changed,
+      // Flags and LENGTHS, never the words (T-05.2-17).
+      titleLength: requestedTitle?.length ?? null,
+      cover:
+        input.cover === undefined
+          ? 'unchanged'
+          : input.cover === null
+            ? 'cleared'
+            : 'assetId' in input.cover
+              ? 'asset'
+              : 'story',
+    },
+    'story highlight updated',
+  );
+
+  return toHighlight(row);
+}
+
+/**
+ * `DELETE /v1/stories/highlights/{highlightId}` — a HARD delete of the editorial pointer.
+ *
+ * The `takedown` intent: an ARCHIVED community still allows it (removal must stay possible, the
+ * unpin rule). The items cascade with the highlight; the STORIES, their likes and their comments are
+ * never touched (R-D-F) — a highlight is a pointer, not content.
+ *
+ * Idempotent-by-404, the `deleteStory` rule: a second delete is the bare 404, because "already
+ * deleted" answering 204 would confirm that an id existed. `highlight.deleted` is emitted on a real
+ * delete only, ids only.
+ */
+export async function deleteHighlight(ctx: RequestContext, highlightId: string): Promise<void> {
+  const gate = await readPlaceGate(ctx);
+
+  const removed = await withTenantTx(ctx, async (tx) => {
+    await resolveHighlight(tx, ctx, highlightId, 'takedown', gate);
+    const rows = await tx.execute<{ id: string; community_id: string | null }>(sql`
+      delete from story_highlights
+       where id = ${highlightId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+      returning id, community_id`);
+    return rows[0];
+  });
+
+  if (!removed) throw new ApiError(404, 'NOT_FOUND');
+
+  emit(ctx, 'highlight.deleted', {
+    tenantId: ctx.tenantId,
+    highlightId: removed.id,
+    communityId: removed.community_id,
+    actorUserId: ctx.userId,
+  });
+
+  log.info(
+    {
+      event: 'stories.highlight_deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      highlightId: removed.id,
+      communityId: removed.community_id,
+    },
+    'story highlight deleted',
+  );
+}
+
+/**
+ * `DELETE /v1/stories/highlights/{highlightId}/stories/{storyId}` — take a story OUT of a highlight
+ * (HIGHLIGHT-02).
+ *
+ * - The `takedown` intent: allowed on an ARCHIVED community (take-down must stay possible).
+ * - The highlight and the story are both resolved in-lane; every miss is the bare 404.
+ * - The item row is HARD-deleted (the pair arbiter, like a pin). Removing a pair that is not there
+ *   is the idempotent 200 with the current count and NO event (transitions, not requests).
+ * - When the removed story was the highlight's CHOSEN cover, `cover_story_id` is cleared in the SAME
+ *   transaction, so `coverChosen` falls back to false and no stale pointer resurrects later.
+ * - The STORY row is never written (R-D-F): a highlight is an editorial pointer, and removing the
+ *   pointer never takes the story, its 24 h in Início, its likes or its comments. The highlight
+ *   itself is KEPT even when this removed its last story (D-102).
+ */
 export async function removeStoryFromHighlight(
-  _ctx: RequestContext,
-  _highlightId: string,
-  _storyId: string,
+  ctx: RequestContext,
+  highlightId: string,
+  storyId: string,
 ): Promise<HighlightMembershipResult> {
-  return { highlighted: true, highlightCount: 0 };
+  const gate = await readPlaceGate(ctx);
+
+  const { highlightCount, removed } = await withTenantTx(ctx, async (tx) => {
+    await resolveHighlight(tx, ctx, highlightId, 'takedown', gate);
+
+    const stories = await tx.execute<{ id: string }>(sql`
+      select s.id from stories s
+       where s.id = ${storyId}::uuid
+         and s.tenant_id = ${ctx.tenantId}::uuid
+         and s.deleted_at is null`);
+    if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
+
+    const deleted = await tx.execute<{ id: string }>(sql`
+      delete from story_highlight_items
+       where highlight_id = ${highlightId}::uuid
+         and story_id = ${storyId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+      returning id`);
+    const removed = deleted.length > 0;
+
+    if (removed) {
+      await tx.execute(sql`
+        update story_highlights set cover_story_id = null, updated_at = now()
+         where id = ${highlightId}::uuid
+           and tenant_id = ${ctx.tenantId}::uuid
+           and cover_story_id = ${storyId}::uuid`);
+    }
+
+    return { highlightCount: await readHighlightCount(tx, ctx, storyId), removed };
+  });
+
+  if (removed) {
+    emit(ctx, 'story.unhighlighted', {
+      tenantId: ctx.tenantId,
+      storyId,
+      highlightId,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  log.info(
+    {
+      event: 'stories.unhighlighted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      highlightId,
+      storyId,
+      removed,
+      highlightCount,
+    },
+    'story removed from a highlight',
+  );
+
+  return { highlighted: false, highlightCount };
 }

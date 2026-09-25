@@ -25,6 +25,17 @@ const log = moduleLogger('module-stories');
  * No `jobs` key either: **expiry is a predicate, not a job** (STORY-03). There is nothing to
  * schedule, and an empty array here would suggest there might be one day.
  */
+/**
+ * One ids-only log handler (05.2's highlight events). The payloads are IDS ONLY — never a highlight
+ * title or a story caption (T-05.2-17) — and this handler logging them verbatim is exactly why their
+ * key sets are asserted in `story-highlights.test.ts` rather than trusted.
+ */
+function logIds(event: string, message: string) {
+  return async (payload: object) => {
+    log.info({ event, ...payload }, message);
+  };
+}
+
 export const storiesModule = defineModule({
   key: 'stories',
   home: [{ order: 5 }],
@@ -89,6 +100,24 @@ export const storiesModule = defineModule({
       handler: async (payload) => {
         log.info({ event: 'story.unpinned', ...payload }, 'story unpinned from a community');
       },
+    },
+    // 05.2 highlights (R-D-L). They count TRANSITIONS, not requests: a repeat add, a PATCH identical
+    // to the stored row, a reorder equal to the current order and a removal of a pair that is not
+    // there all answer 200 and announce nothing.
+    { event: 'highlight.created', handler: logIds('highlight.created', 'story highlight created') },
+    { event: 'highlight.updated', handler: logIds('highlight.updated', 'story highlight updated') },
+    {
+      event: 'highlight.reordered',
+      handler: logIds('highlight.reordered', 'story highlights reordered'),
+    },
+    { event: 'highlight.deleted', handler: logIds('highlight.deleted', 'story highlight deleted') },
+    {
+      event: 'story.highlighted',
+      handler: logIds('story.highlighted', 'story added to a highlight'),
+    },
+    {
+      event: 'story.unhighlighted',
+      handler: logIds('story.unhighlighted', 'story removed from a highlight'),
     },
   ],
   defaultRolePermissions: {
