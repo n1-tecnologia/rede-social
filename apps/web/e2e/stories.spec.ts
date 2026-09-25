@@ -71,6 +71,12 @@ const SEEDED = {
   /** `SEED_HIGHLIGHT_TITLES`: `home` has items; `homeEmpty` is curator-only and never on a member row. */
   homeHighlight: 'Bastidores',
   homeEmptyHighlight: 'Aulas',
+  /**
+   * `Bastidores` holds `SEED_STORIES[2]` (`…d3`, an ACTIVE image published 18 h ago, no caption) and
+   * `SEED_STORIES[3]` (`…d4`, the EXPIRED image published 30 h ago). A highlight plays OLDEST first
+   * by publish time (D-103), so the expired story is its FIRST segment (STORY-04 in the viewer).
+   */
+  homeHighlightStoryCount: 2,
 } as const;
 
 /** The tenant's live strip size, read once per file from the database (see the note above). */
@@ -97,6 +103,21 @@ const tenantCircle = (page: Page) =>
   strip(page).getByRole('button', {
     name: S.circle.tenant.replace('{tenant}', SEEDED.tenantName),
   });
+
+/** A highlight circle, by its catalog accessible name ("Abrir destaque {title}", UI-D-61). */
+const highlightCircle = (page: Page, title: string) =>
+  strip(page).getByRole('button', { name: S.circle.highlight.replace('{title}', title) });
+
+/**
+ * The viewer's ONE polite live region, filled from the catalog's own template — `{group}: story
+ * {current} de {total}` (UI-D-65). It names the GROUP, which is what tells a tenant story that
+ * happens to mention "Bastidores" in its caption apart from the Bastidores highlight.
+ */
+const positionOf = (group: string, current: number, total: number) =>
+  S.viewer.positionGroup
+    .replace('{group}', group)
+    .replace('{current}', String(current))
+    .replace('{total}', String(total));
 
 /**
  * The length of the tenant circle's sequence, read where a member meets it: the viewer's segment
@@ -168,8 +189,9 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
     await expect(row.getByText(SEEDED.homeEmptyHighlight, { exact: true })).toHaveCount(0);
     // Tenant circle + one highlight: the row does not grow with the number of stories.
     await expect(row.getByRole('listitem')).toHaveCount(2);
-    // The highlight circle is inert until the viewer learns groups (plan 05): no button for it.
-    await expect(row.getByRole('button')).toHaveCount(1);
+    // 05.2-05: every circle OPENS — the tenant circle and the highlight's, named for its title.
+    await expect(row.getByRole('button')).toHaveCount(2);
+    await expect(highlightCircle(page, SEEDED.homeHighlight)).toHaveCount(1);
 
     // D-80 / UI-D-28: the own-circle is the ONLY publish entry point, and a member has none.
     await expect(row.getByRole('link', { name: S.own.action })).toHaveCount(0);
@@ -260,6 +282,144 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
     // The next-NEWER story: the second element of the oldest-first sequence.
     const next = sequence[1];
     if (next?.caption) await expect(dialog).toContainText(next.caption.slice(0, 20));
+  });
+});
+
+/**
+ * D-107 / UI-D-65 / R-D-M in a real browser (05.2-05): the viewer plays the ROW. Every Início circle
+ * opens its own group — the tenant circle group 0, `Bastidores` group 1 — and the boundaries move
+ * between them: a tap past a group's last story enters the next group, a tap back from a group's
+ * first story enters the previous group's LAST, a horizontal swipe skips a whole group, and a tap
+ * past the row's last story closes the viewer.
+ *
+ * The highlight's items are NOT in `/inicio`'s server render; they arrive through the lazy group
+ * read. Every assertion about "which group am I in" reads the dialog's `data-story-group` or the
+ * live region's `{group}: story {current} de {total}` — never the header text alone, because a
+ * seeded tenant story's caption also contains the word "Bastidores".
+ *
+ * Read-only: nothing here writes, so the shared seed is left exactly as it was found.
+ */
+test.describe('the grouped viewer — circles in a row (D-107, UI-D-65, mobile)', () => {
+  const V = S.viewer;
+  const dialog = (page: Page) => page.getByRole('dialog', { name: V.dialog });
+  const position = (page: Page) => page.getByTestId('story-position');
+
+  test('a member opens Bastidores: its own stories, OLDEST first — the expired one included', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    await highlightCircle(page, SEEDED.homeHighlight).click();
+    await expect(dialog(page)).toBeVisible();
+    // Bastidores follows the tenant circle, so it is group 1 — and a highlight keeps the URL.
+    await expect(dialog(page)).toHaveAttribute('data-story-group', '1');
+    await expect(page).toHaveURL(/\/inicio$/);
+    await expect(position(page)).toHaveText(
+      positionOf(SEEDED.homeHighlight, 1, SEEDED.homeHighlightStoryCount),
+    );
+    await expect(page.getByTestId('story-progress-bars')).toHaveAttribute(
+      'data-story-count',
+      String(SEEDED.homeHighlightStoryCount),
+    );
+    // D-103 + STORY-04: the FIRST segment is the EXPIRED story (published 30 h ago) — it is gone
+    // from the tenant circle, and it plays here like any other.
+    await expect(page.getByTestId('story-caption')).toHaveText(SEEDED.expiredCaption);
+
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    await page.mouse.click(Math.round(size.width * 0.8), Math.round(size.height * 0.5));
+    await expect(dialog(page)).toHaveAttribute('data-story-index', '1');
+    await expect(position(page)).toHaveText(
+      positionOf(SEEDED.homeHighlight, 2, SEEDED.homeHighlightStoryCount),
+    );
+    // The second is the 18 h image, which carries no caption.
+    await expect(page.getByTestId('story-caption')).toHaveCount(0);
+  });
+
+  test('tapping right runs from the tenant circle INTO Bastidores, and past its last story CLOSES', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await tenantCircle(page).click();
+    await expect(dialog(page)).toHaveAttribute('data-story-group', '0');
+
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    const tapRight = () =>
+      page.mouse.click(Math.round(size.width * 0.8), Math.round(size.height * 0.5));
+
+    // Through every tenant story, one tap each…
+    for (let index = 1; index < activeStories; index += 1) {
+      await tapRight();
+      await expect(dialog(page)).toHaveAttribute('data-story-index', String(index));
+    }
+    // …and one more tap crosses the boundary into the next circle's FIRST story (UI-D-65).
+    await tapRight();
+    await expect(dialog(page)).toHaveAttribute('data-story-group', '1');
+    await expect(dialog(page)).toHaveAttribute('data-story-index', '0');
+    await expect(position(page)).toHaveText(
+      positionOf(SEEDED.homeHighlight, 1, SEEDED.homeHighlightStoryCount),
+    );
+
+    // Bastidores is the row's LAST circle: past its last story the viewer closes (D-107).
+    await tapRight();
+    await expect(dialog(page)).toHaveAttribute('data-story-index', '1');
+    await tapRight();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inicio$/);
+    await expect(strip(page)).toBeVisible();
+  });
+
+  test('a LEFT swipe on the tenant circle’s first story skips straight to Bastidores’ first', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    test.skip(activeStories < 2, 'a skip is only distinguishable from a tap with two stories');
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await tenantCircle(page).click();
+    await expect(dialog(page)).toHaveAttribute('data-story-index', '0');
+
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    const y = Math.round(size.height * 0.5);
+    const from = Math.round(size.width * 0.75);
+    await page.mouse.move(from, y);
+    await page.mouse.down();
+    // Past the 60px threshold, horizontal-dominant: a GROUP skip, not a story step (R-D-M).
+    for (const step of [40, 90, 140, 180]) await page.mouse.move(from - step, y);
+    await page.mouse.up();
+
+    await expect(dialog(page)).toHaveAttribute('data-story-group', '1');
+    await expect(dialog(page)).toHaveAttribute('data-story-index', '0');
+    await expect(position(page)).toHaveText(
+      positionOf(SEEDED.homeHighlight, 1, SEEDED.homeHighlightStoryCount),
+    );
+  });
+
+  test('a tap on the LEFT third of Bastidores’ first story returns to the tenant circle’s LAST story', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    await highlightCircle(page, SEEDED.homeHighlight).click();
+    await expect(dialog(page)).toHaveAttribute('data-story-group', '1');
+    await expect(position(page)).toHaveText(
+      positionOf(SEEDED.homeHighlight, 1, SEEDED.homeHighlightStoryCount),
+    );
+
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    await page.mouse.click(Math.round(size.width * 0.15), Math.round(size.height * 0.5));
+
+    // The exact mirror of next (R A2): the previous group's LAST story, not its first.
+    await expect(dialog(page)).toHaveAttribute('data-story-group', '0');
+    await expect(dialog(page)).toHaveAttribute('data-story-index', String(activeStories - 1));
+    await expect(position(page)).toHaveText(
+      positionOf(SEEDED.tenantName, activeStories, activeStories),
+    );
   });
 });
 
