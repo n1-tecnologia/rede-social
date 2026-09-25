@@ -1,6 +1,22 @@
 /** `@tria/module-stories/ui` — the only surface `apps/web` may import from this module. */
 
 export {
+  type HighlightEditCover,
+  type HighlightEditHighlight,
+  type HighlightEditItem,
+  HighlightEditSheet,
+  type HighlightEditSheetLabels,
+  type HighlightEditSheetProps,
+  type HighlightEditStep,
+  HighlightStoryThumb,
+} from './HighlightEditSheet';
+export {
+  type HighlightManageItem,
+  HighlightManageList,
+  type HighlightManageListLabels,
+  type HighlightManageListProps,
+} from './HighlightManageList';
+export {
   HighlightMembershipList,
   type HighlightMembershipListProps,
   type HighlightMembershipRow,
