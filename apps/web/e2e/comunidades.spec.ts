@@ -45,15 +45,20 @@ const SEEDED = {
    */
   archivedId: '0d000000-0000-4000-8000-0000000000c5',
   /**
-   * 05-08 / STORY-04: `SEED_COMMUNITY_IDS['tria-demo'][0]` — the community the seed pins BOTH the
-   * EXPIRED story and an active one to, and `SEED_COMMUNITY_IDS[1]`, which has no pin at all. The
-   * pair is what makes the Destaques assertions below say something: one renders the row and its
-   * `SectionTitle`, the other renders NEITHER (UI-SPEC E12/empty).
+   * 05.2 / HIGHLIGHT-04: `SEED_COMMUNITY_IDS['tria-demo'][0]` — the community holding the seeded
+   * community highlight `Destaques` (the EXPIRED story and an active one) — and
+   * `SEED_COMMUNITY_IDS[1]`, which has no highlight at all. The pair is what makes the Destaques
+   * assertions below say something: one renders the row and its `SectionTitle`, the other renders
+   * NEITHER for a member (UI E02 empty).
    */
-  pinnedId: '0d000000-0000-4000-8000-0000000000c1',
-  unpinnedId: '0d000000-0000-4000-8000-0000000000c2',
-  /** The caption of the EXPIRED story the seed pins — absent from `/inicio`, present here. */
-  pinnedExpiredCaption: 'Publicado ontem, ja fora da regua.',
+  withHighlightId: '0d000000-0000-4000-8000-0000000000c1',
+  withoutHighlightId: '0d000000-0000-4000-8000-0000000000c2',
+  /** `SEED_HIGHLIGHT_TITLES.community`: the one seeded community highlight. */
+  communityHighlight: 'Destaques',
+  /** `SEED_TENANTS['tria-demo'].displayName` — the tenant circle's name on Início, never here. */
+  tenantName: 'TRIA Demo',
+  /** The caption of the EXPIRED story `Destaques` holds — absent from `/inicio`, present here. */
+  expiredCaption: 'Publicado ontem, ja fora da regua.',
 } as const;
 
 /**
@@ -574,7 +579,12 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
  * surfaces disagreeing on purpose. Only an end-to-end walk can put both on one screen sequence;
  * pgTAP proves the same pair of predicates inside one transaction.
  */
-test.describe('Destaques — the pinned circles, and the expiry they outlive (D-68, STORY-04)', () => {
+/**
+ * HIGHLIGHT-04 / UI-D-64 (05.2-08): under "Destaques", a community page shows ONLY that community's
+ * named highlights — the same row Início draws, minus the tenant circle (D-104 is Início's alone).
+ * The pinned-story row this replaced is gone. Every case reads; nothing here writes.
+ */
+test.describe("Destaques — the community's highlights (HIGHLIGHT-04, UI-D-64)", () => {
   const ST = storyMessages.stories;
 
   /** The Destaques row, named by the catalog label the page passes as its `aria-label`. */
@@ -582,61 +592,73 @@ test.describe('Destaques — the pinned circles, and the expiry they outlive (D-
     return page.getByRole('list', { name: C.page.highlights });
   }
 
-  test('a community with pins renders the row AND its section title; one without renders neither', async ({
+  const highlightCircle = (page: Page, title: string) =>
+    destaques(page).getByRole('button', { name: ST.circle.highlight.replace('{title}', title) });
+
+  test('a member sees the section with the Destaques highlight and NO tenant circle; a community with none renders neither', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
-    await page.goto(`${hosts.demo}/comunidades/${SEEDED.pinnedId}`);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.withHighlightId}`);
     await expect(destaques(page)).toBeVisible();
     await expect(page.getByText(C.page.highlights, { exact: true }).first()).toBeVisible();
-    // At least one circle, never an exact count — the SAME reason `stories.spec.ts` refuses to
-    // mirror the strip's size. The seed pins two stories here (the expired one and an active
-    // VIDEO), but `media-video.spec.ts` performs a hard, total reset of the demo tenant's video
-    // library and takes that video's ASSET with it; the highlights read inner-joins `media_assets`,
-    // so under a full-suite run the video's circle is legitimately gone. A constant here would make
-    // this assertion depend on the order the suite happened to run in.
-    //
-    // The claim an exact count would have carried — that an active and an expired pinned story come
-    // back from ONE query distinguished only by the projected flag — is asserted exactly where it
-    // can be: `110-communities-stories.sql` case 53 and `stories.test.ts` case 29.
-    await expect(destaques(page).getByRole('button')).not.toHaveCount(0);
+    await expect(highlightCircle(page, SEEDED.communityHighlight)).toBeVisible();
+    // D-104: the tenant circle belongs to Início. Here there is none, by name or by count.
+    await expect(
+      destaques(page).getByRole('button', {
+        name: ST.circle.tenant.replace('{tenant}', SEEDED.tenantName),
+      }),
+    ).toHaveCount(0);
+    // UI E02 zero-one-many: ONE seeded highlight is ONE circle — a member has no `+` beside it.
+    await expect(destaques(page).getByRole('listitem')).toHaveCount(1);
 
-    // UI-SPEC E12/empty: with nothing pinned the ROW and its `SectionTitle` are both ABSENT — not
-    // an empty state, not a reserved height. This is the half a "renders the row" test would miss.
-    await page.goto(`${hosts.demo}/comunidades/${SEEDED.unpinnedId}`);
+    // UI E02 empty: with no non-empty highlight the ROW and its `SectionTitle` are both ABSENT —
+    // not an empty state, not a reserved height.
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.withoutHighlightId}`);
+    await expect(page.locator('[data-community-name]')).toBeVisible();
     await expect(destaques(page)).toHaveCount(0);
     await expect(page.getByText(C.page.highlights, { exact: true })).toHaveCount(0);
   });
 
-  test('a member opens the pinned EXPIRED story from Destaques, and the same story is absent from /inicio', async ({
+  test('a member opens Destaques and plays the EXPIRED story first; the same story is not in Início’s tenant circle', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/comunidades/${SEEDED.pinnedId}`);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.withHighlightId}`);
 
-    // Newest pin first: the seed writes the EXPIRED story's pin last, so it leads the row.
-    await destaques(page).getByRole('button').first().click();
+    await highlightCircle(page, SEEDED.communityHighlight).click();
     const viewer = page.getByRole('dialog', { name: ST.viewer.dialog });
     await expect(viewer).toBeVisible();
-    // The caption is the identity: this is the story `stories.spec.ts` asserts is NOT on the strip.
-    await expect(viewer.getByText(SEEDED.pinnedExpiredCaption)).toBeVisible();
-    await expect(page).toHaveURL(/\/stories\/[0-9a-f-]{36}$/);
-    const storyId = page.url().split('/').pop() ?? '';
-    expect(storyId).toMatch(/^[0-9a-f-]{36}$/);
+    // A highlight group keeps the URL (D-107), and it is the row's only group.
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${SEEDED.withHighlightId}$`));
+    await expect(viewer).toHaveAttribute('data-story-group', '0');
+    // D-103: oldest first by publish time, so the EXPIRED story (30 h ago) is the first segment —
+    // the item row is the expiry override (STORY-04 re-delivered through a highlight).
+    await expect(viewer).toHaveAttribute('data-story-index', '0');
+    await expect(page.getByTestId('story-caption')).toHaveText(SEEDED.expiredCaption);
+    await page.keyboard.press('Escape');
+    await expect(viewer).toHaveCount(0);
 
-    // THE SAME STORY, the same session, the tenant-wide strip: absent. Its window closed, and the
-    // pin is what kept it on the community page — the two surfaces disagree deliberately.
+    // THE SAME STORY, the same session, Início's tenant circle: walk its whole group (group 0) and
+    // the expired caption never plays. Its window closed; the highlight is what keeps it here.
     await page.goto(`${hosts.demo}/inicio`);
     const strip = page.getByRole('list', { name: ST.region });
-    await expect(strip).toBeVisible();
-    await expect(strip.locator(`a[href="/stories/${storyId}"]`)).toHaveCount(0);
-    await expect(page.getByText(SEEDED.pinnedExpiredCaption)).toHaveCount(0);
-
-    // …and it is still READABLE by id: expiry gates the strip's read and nothing else (A-4).
-    await page.goto(`${hosts.demo}/stories/${storyId}`);
-    await expect(page.getByRole('dialog', { name: ST.viewer.dialog })).toBeVisible();
-    await expect(page.getByText(SEEDED.pinnedExpiredCaption)).toBeVisible();
+    await strip
+      .getByRole('button', { name: ST.circle.tenant.replace('{tenant}', SEEDED.tenantName) })
+      .click();
+    const tenantViewer = page.getByRole('dialog', { name: ST.viewer.dialog });
+    await expect(tenantViewer).toBeVisible();
+    const count = Number(
+      await page.getByTestId('story-progress-bars').getAttribute('data-story-count'),
+    );
+    expect(count).toBeGreaterThan(0);
+    for (let index = 0; index < count; index += 1) {
+      await expect(tenantViewer).toHaveAttribute('data-story-group', '0');
+      await expect(tenantViewer).toHaveAttribute('data-story-index', String(index));
+      await expect(page.getByText(SEEDED.expiredCaption)).toHaveCount(0);
+      if (index < count - 1) await page.keyboard.press('ArrowRight');
+    }
   });
 });
 
@@ -938,38 +960,43 @@ test.describe('05.1 — reactivate from the page, and the Destaques `+` (D-90, D
   test('the `+` belongs to the admin, on active communities only', async ({ page }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
 
-    // Zero pins + the attach permission: the section renders with the `+` ALONE (UI-D-53).
-    await page.goto(`${hosts.demo}/comunidades/${SEEDED.unpinnedId}`);
-    const unpinnedName = await heading(page);
-    expect(unpinnedName.length).toBeGreaterThan(0);
+    // No highlight + publish AND manage: the section renders with the `+` ALONE (UI-D-53, UI E02).
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.withoutHighlightId}`);
+    const plainName = await heading(page);
+    expect(plainName.length).toBeGreaterThan(0);
     await expect(destaques(page)).toBeVisible();
     await expect(destaques(page).getByRole('listitem')).toHaveCount(1);
     const door = destaques(page).getByRole('link', {
-      name: ST.own.actionCommunity.replace('{community}', unpinnedName),
+      name: ST.own.actionCommunity.replace('{community}', plainName),
     });
     await expect(door).toBeVisible();
-    await expect(door).toHaveAttribute('href', `/stories/publicar?comunidade=${SEEDED.unpinnedId}`);
+    await expect(door).toHaveAttribute(
+      'href',
+      `/stories/publicar?comunidade=${SEEDED.withoutHighlightId}`,
+    );
     // "Seu story" is the circle's visible caption, a sibling of the link (the link's name is the
     // community-scoped action label).
     await expect(destaques(page).getByRole('listitem').first()).toContainText(ST.own.label);
 
-    // Pins + the permission: the `+` FIRST, then the pinned circles.
-    await page.goto(`${hosts.demo}/comunidades/${SEEDED.pinnedId}`);
-    const pinnedName = await heading(page);
+    // A highlight + the permission: the `+` FIRST, then the community's highlight circles.
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.withHighlightId}`);
+    const highlightedName = await heading(page);
     const first = destaques(page).getByRole('listitem').first();
     await expect(
-      first.getByRole('link', { name: ST.own.actionCommunity.replace('{community}', pinnedName) }),
-    ).toHaveAttribute('href', `/stories/publicar?comunidade=${SEEDED.pinnedId}`);
+      first.getByRole('link', {
+        name: ST.own.actionCommunity.replace('{community}', highlightedName),
+      }),
+    ).toHaveAttribute('href', `/stories/publicar?comunidade=${SEEDED.withHighlightId}`);
     await expect(destaques(page).getByRole('button')).not.toHaveCount(0);
 
-    // D-93: an archived community offers no story entry at all — not a disabled one.
+    // D-93 / UI-D-64: an archived community offers no story entry at all — not a disabled one.
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
     await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
     await expect(storyDoors(page)).toHaveCount(0);
 
-    // A member holds neither permission: no `+`, and with no pins no section at all.
+    // A member holds neither permission: no `+`, and with no highlight no section at all.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/comunidades/${SEEDED.unpinnedId}`);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.withoutHighlightId}`);
     await expect(page.locator('[data-community-name]')).toBeVisible();
     await expect(destaques(page)).toHaveCount(0);
     await expect(storyDoors(page)).toHaveCount(0);

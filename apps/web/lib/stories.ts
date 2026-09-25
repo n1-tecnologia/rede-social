@@ -310,32 +310,6 @@ export function storyCommentIssue(error: unknown): StoryCommentIssue | null {
 /* ── Community pins (STORY-04, D-68) ──────────────────────────────────────────────────────────── */
 
 /**
- * `GET /v1/stories/pinned?communityId=` (STORY-04, D-68) — one community's Destaques row.
- *
- * **It NEVER redirects and never rethrows**, exactly as `loadStories` does not and for the same
- * reason (UI-SPEC E12/error): the row is a widget ABOVE the post list on a screen reachable from a
- * shared link. A failed highlights read must render NOTHING and leave the community page
- * untouched — turning a transient failure into an error card, or into a navigation, would cost a
- * member the whole page over a strip they may not even have.
- *
- * It answers `null` for a tenant whose `stories` module is OFF, too: the API 404s
- * `MODULE_DISABLED`, this swallows it, and the community page simply has no Destaques section —
- * which is the behaviour `phase5-smoke.spec.ts` witnesses in both directions.
- */
-export async function loadCommunityHighlights(communityId: string): Promise<StoryPage | null> {
-  try {
-    const search = new URLSearchParams({ communityId, limit: String(STORY_PAGE_SIZE) });
-    const res = await apiFetch(`/v1/stories/pinned?${search.toString()}`);
-    if (!res.ok) throw await apiError(res);
-    return storyPageSchema.parse(await res.json());
-  } catch (error) {
-    // Shape only: a story CAPTION is member-facing content and never reaches a log line (T-05-29).
-    console.error('stories.highlights_failed', { error: String(error) });
-    return null;
-  }
-}
-
-/**
  * `GET /v1/stories/mine` (D-84) — the admin's own history, expired stories included.
  *
  * Unlike the strip's read this one DOES surface its failure, because the history IS the screen: an

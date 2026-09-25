@@ -28,9 +28,8 @@ import {
   postMenuLabels,
   storyCommentsProps,
 } from '@/lib/registry';
-import { relativeFrom } from '@/lib/relative-time';
-import { loadCommunityHighlights } from '@/lib/stories';
-import { pinsGroupView, storyViewerItem, storyViewerLabels } from '@/lib/story-view';
+import { loadHighlights } from '@/lib/stories';
+import { highlightCircleView, highlightGroupView, storyViewerLabels } from '@/lib/story-view';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 import { CommunityPosts } from './CommunityPosts';
 import { ReactivateCommunity } from './ReactivateCommunity';
@@ -85,9 +84,9 @@ export default async function CommunityPage({
   const [tc, tf, ts, te, locale, bootstrap, shareOrigin, result] = await Promise.all([
     getTranslations('communities'),
     getTranslations('feed'),
-    // D-68's circles are the stories module's component with the stories module's copy — the
-    // Destaques SECTION TITLE is the communities namespace's, because it names the section rather
-    // than the things in it.
+    // The highlight circles are the stories module's component with the stories module's copy —
+    // the Destaques SECTION TITLE is the communities namespace's, because it names the section
+    // rather than the things in it.
     getTranslations('stories'),
     getTranslations('app.error'),
     getLocale(),
@@ -128,48 +127,44 @@ export default async function CommunityPage({
   // The community is readable, so its posts are asked for SECOND rather than in the `Promise.all`
   // above: a miss must not pay for a page of posts nobody will see, and a cross-tenant probe must
   // not cost the API a second query either (the `/post/[postId]` rule).
-  const [page, pinned] = await Promise.all([
+  const [page, placed] = await Promise.all([
     loadFeed({ communityId: community.id }),
-    // D-68 / STORY-04: the community's Destaques. `null` is "the tenant has no stories module" or
-    // "we could not read it" — both render NOTHING, which is the same answer an empty list gives.
-    loadCommunityHighlights(community.id),
+    // HIGHLIGHT-04: this community's named highlights, the MEMBER read (never `scope: 'all'`), so an
+    // empty highlight is never drawn here (D-102). `null` is "the tenant has no stories module" or
+    // "we could not read it" — both render NOTHING, which is the same answer an empty row gives.
+    loadHighlights({ communityId: community.id }),
   ]);
   const now = Date.now();
   const { media, ...card } = postCardLabels(tf);
 
   /**
-   * D-68's pinned-story circle row, answered YES: the Destaques circles ARE the pinned stories, and
-   * a tap OPENS THE VIEWER on this community's own pinned sequence.
+   * HIGHLIGHT-04 / UI-D-64: under "Destaques", the community's NAMED HIGHLIGHTS — the same row
+   * Início draws, minus the tenant circle (D-104 is Início's alone). The pinned-story row this
+   * replaced (D-68's "the Destaques circles ARE the pinned stories") is gone.
    *
-   * **It is the SAME `StoriesStrip` the `/inicio` home slot renders** — one component, two data
-   * sources, two ring variants (UI-D-27). `StoriesSurface` is the client shell that gives the
-   * circles their `onOpen`, exactly as it does on the home screen, so a Destaques tap and a strip
-   * tap reach the identical screen. There is no tabbed layout on this page and must not be (D-68).
-   *
-   * **Every circle is visually identical whether its story is active or expired** (D-79, A-4): the
-   * ring variant is a property of the ROW, never of the story. `isActive` still rides the payload
-   * because the viewer needs it for the expired-mid-view case.
+   * **It is the SAME `StoriesStrip` the `/inicio` home slot renders** through the same
+   * `StoriesSurface` client shell, with the same builders (`highlightCircleView`,
+   * `highlightGroupView`): one circle per highlight in the API's `position, id` order, each OPENING
+   * its own viewer group at its first story (D-107). A group's items are NOT carried by this render:
+   * the viewer reads them lazily when the member reaches that circle, exactly as on Início. Every
+   * circle wears the neutral archive ring (UI-D-61). There is no tabbed layout here (D-68).
    *
    * **The leading `+` is the D-80 door restated for this row (D-92, UI-D-53).** It is the strip's
-   * `link` circle with the `own` disc — "Seu story", in the same geometry and position the admin already uses on
-   * `/inicio` — pointed at `/stories/publicar?comunidade={id}`, so the composer opens already
-   * addressed to this community and the story is born attached in the one publish transaction
-   * (05.1-01). It sits exactly where the result will appear.
+   * `link` circle with the `own` disc — "Seu story" — pointed at `/stories/publicar?comunidade={id}`,
+   * so the composer opens pre-filled with this community's first highlight (or its D-112 gate when it
+   * has none) and the story lands in this row. **Its gate is unchanged**: `stories.story.publish` AND
+   * `stories.story.manage` AND an active community — what the API requires for a publish that names
+   * a destination (T-05.2-32) — so this door never opens onto a composer that cannot choose one.
    *
-   * **Its gate is the ATTACH permission pair**, `stories.story.publish` AND `stories.story.manage` —
-   * exactly what the API requires for a publish carrying `communityId` and what the composer's
-   * "Publicar em" row checks (05.1-04) — so this door never opens onto a composer that cannot
-   * attach. A tenant with stories off composes neither permission and shows no `+`.
+   * **An ARCHIVED community shows its non-empty highlights read-only** (UI-D-64, the D-93 analogue):
+   * no `+` at all — not a disabled one — while its circles still open.
    *
-   * **An ARCHIVED community offers no story entry at all (D-93)** — not a disabled one; its pinned
-   * circles still render.
-   *
-   * `null` means the row AND its `SectionTitle` are both absent with nothing in their place
-   * (UI-SPEC E12/empty, UI-D-53) — never a reserved height and never an empty-state card of its
-   * own. That is the case only with no pins AND no `+`: an admin on a community with zero pins sees
-   * the row with the `+` alone, and a member still sees nothing.
+   * `null` means the row AND its `SectionTitle` are both absent with nothing in their place (UI E02
+   * empty, UI-D-53) — never a reserved height. That is the case only with no highlight AND no `+`:
+   * an admin on a community with none sees the `+` alone, and a member sees nothing. The manage
+   * circle joins in plan 05.2-09.
    */
-  const highlightItems = pinned?.items ?? [];
+  const highlightItems = placed?.items ?? [];
   const canPublishHere =
     !archived &&
     bootstrap.permissions.includes(STORY_PERMISSIONS.publish) &&
@@ -195,48 +190,17 @@ export default async function CommunityPage({
                 },
               ]
             : []),
-          // UI-D-27: the neutral ring. The brand ring belongs to Início's tenant circle alone;
-          // Destaques is the community's editorial archive. One circle per pinned story, opening
-          // the pinned sequence at its own index, until plan 08 replaces the row with highlights.
-          ...highlightItems.map((story, index) => {
-            const time = relativeFrom(story.publishedAt, now);
-            return {
-              kind: 'open' as const,
-              key: story.id,
-              label: time,
-              actionLabel: ts('circle.action', { time }),
-              ring: 'neutral' as const,
-              disc: {
-                kind: 'asset' as const,
-                assetId: story.mediaAssetId,
-                variantWidths: story.mediaVariantWidths,
-              },
-              group: 0,
-              index,
-            };
-          }),
+          // One circle per highlight; circle k opens group k — the two lists below are built from
+          // the same read in the same order, so a circle and its group can never disagree.
+          ...highlightItems.map((summary, index) => highlightCircleView(summary, ts, index)),
         ]}
-        // STORY-02's rule, restated for this row: the viewer opens on the ROW'S OWN ordered
-        // sequence, built from the same read in the same request — so the Nth circle and the Nth
-        // segment can never disagree, and opening the viewer costs no second round trip.
-        // With no pins (the `+` alone) there is no sequence to open, so there is no viewer at all —
+        // With no highlight (the `+` alone) there is nothing to open, so there is no viewer at all —
         // the home strip's rule.
         viewer={
           highlightItems.length === 0
             ? undefined
             : {
-                // ONE group: the pinned sequence, headed by the tenant (V1's single publisher; see
-                // the note in `StoryViewerHost`) — unchanged behaviour until plan 08 replaces this
-                // row with the community's highlights.
-                groups: [
-                  pinsGroupView(
-                    {
-                      displayName: bootstrap.tenant.displayName,
-                      logoUrl: bootstrap.tenant.branding.logoUrl,
-                    },
-                    highlightItems.map((story) => storyViewerItem(story, now)),
-                  ),
-                ],
+                groups: highlightItems.map(highlightGroupView),
                 labels: storyViewerLabels(ts),
                 onLike: likeStoryAction,
                 onUnlike: unlikeStoryAction,

@@ -1190,106 +1190,233 @@ test.describe('"Destacar" from the viewer (D-110 route 1)', () => {
 });
 
 /**
- * 05.1-05 — ROADMAP criteria 3, 4 and 5 walked end to end: a story started from a community's
- * Destaques `+` (D-92) is born attached in ONE publish (05.1-01), lands back on that community with
- * its circle already in Destaques (D-94), and heads the `/inicio` strip once the worker has readied
- * its asset (D-96) — no second editorial step anywhere.
+ * 05.2-08 — publishing INTO a highlight (D-111..D-115, UI-D-68..UI-D-71), the successor of 05.1's
+ * "Publicar em" flows.
  *
- * Every story this describe publishes carries `TEST_CAPTION_PREFIX` and every one is an IMAGE
- * (`post-a.jpg`), so nothing here can reach a video vendor (T-05.1-43); the `afterAll` hard sweep
- * removes the rows (and, by cascade, their pins) exactly as the publish walk above does.
+ * The composer's one "Destaque" row: zero taps to publish tenant-wide from `/stories/publicar`,
+ * pre-filled with a community's FIRST highlight from its `+` (D-112), and — when the community has
+ * none — the gate: "Publicar" opens the sheet on "Novo destaque" instead of publishing, and the new
+ * highlight is written by the publish itself (D-114, one write). It lands where the story is kept
+ * (D-115): the community page, whose row shows the highlight.
+ *
+ * Every story this describe publishes is an IMAGE (`post-a.jpg`, T-05.1-43) whose caption starts with
+ * `TEST_CAPTION_PREFIX`, hard-swept after each case that leaves one; every highlight it creates is
+ * titled `Teste …` and deleted through the API (before the describe too, so a crashed run cannot
+ * leak one into the seeded rows other specs read).
  */
-test.describe('05.1 — a story from a community page (criteria 3-5)', () => {
+test.describe('05.2 — publishing into a highlight (D-111..D-115)', () => {
   /**
    * Mirrored from `scripts/seed.ts`'s `SEED_COMMUNITY_IDS['tria-demo']` (the `comunidades.spec.ts`
-   * convention): `…c2` is the ACTIVE community the seed pins nothing to, `…c5` the ARCHIVED one.
+   * convention): `…c1` holds the seeded community highlight `Destaques`, `…c2` is an ACTIVE community
+   * with no highlight, `…c5` the ARCHIVED one.
    */
   const COMMUNITY = {
-    unpinnedId: '0d000000-0000-4000-8000-0000000000c2',
+    withHighlightId: '0d000000-0000-4000-8000-0000000000c1',
+    withoutHighlightId: '0d000000-0000-4000-8000-0000000000c2',
     archivedId: '0d000000-0000-4000-8000-0000000000c5',
-    /** The 60-character seeded name — the E06 truncation backstop. */
+    /** `SEED_LONG_COMMUNITY_NAME` — the E11 truncation backstop. */
     longName: 'Grupo de trabalho de comunicacao interna e eventos do ano 26',
   } as const;
 
+  /** Exactly 15 UTF-16 units — the title cap — for the E11 backstop's value. */
+  const LONG_TITLE = 'Teste de quinze';
+
   let stopWorker: (() => Promise<void>) | null = null;
+
+  /** Deletes every `Teste …` highlight of the demo tenant through the API (manage-only). */
+  async function deleteTestHighlights(): Promise<void> {
+    const token = await adminToken();
+    const catalog = await storiesApi(token, '/v1/stories/highlights/catalog');
+    expect(catalog.status, 'the cleanup could read the catalog').toBe(200);
+    const { items } = (await catalog.json()) as { items: { id: string; title: string }[] };
+    for (const item of items.filter((candidate) => candidate.title.startsWith('Teste '))) {
+      const removed = await storiesApi(token, `/v1/stories/highlights/${item.id}`, {
+        method: 'DELETE',
+      });
+      expect(removed.status, `the e2e removed the highlight it created`).toBe(204);
+    }
+  }
 
   test.beforeAll(async () => {
     stopWorker = await ensureWorker();
+    await deleteTestHighlights();
   });
 
   test.afterAll(async () => {
     await stopWorker?.();
     await deleteStoriesByCaptionPrefix(TEST_CAPTION_PREFIX);
+    await deleteTestHighlights();
   });
 
   const destaques = (page: Page) =>
     page.getByRole('list', { name: communityMessages.communities.page.highlights });
-  const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const communityHighlightCircle = (page: Page, title: string) =>
+    destaques(page).getByRole('button', { name: S.circle.highlight.replace('{title}', title) });
+  const destinationValue = (page: Page) => page.locator('[data-story-destination-value]');
+  const value = (place: string, title: string) =>
+    S.publish.destination.value.replace('{place}', place).replace('{title}', title);
 
-  test('UAT replay: publish a photo from a community page; it lands there in Destaques and heads the strip once ready', async ({
-    page,
-  }) => {
-    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/comunidades/${COMMUNITY.unpinnedId}`);
+  async function communityName(page: Page): Promise<string> {
     const name = ((await page.locator('[data-community-name]').textContent()) ?? '').trim();
     expect(name.length).toBeGreaterThan(0);
+    return name;
+  }
 
-    // The door (D-92): the Destaques `+`, the strip's own circle restated for this row.
+  /** The page's `+` circle, by its community-scoped action label (D-92). */
+  async function openComposerFrom(page: Page, name: string, communityId: string): Promise<void> {
     await destaques(page)
       .getByRole('link', { name: S.own.actionCommunity.replace('{community}', name) })
       .click();
-    await expect(page).toHaveURL(
-      new RegExp(`/stories/publicar\\?comunidade=${COMMUNITY.unpinnedId}$`),
-    );
+    await expect(page).toHaveURL(new RegExp(`/stories/publicar\\?comunidade=${communityId}$`));
+  }
 
+  async function pickPhoto(page: Page): Promise<void> {
     await page.locator('#story-photo-input').setInputFiles(PHOTO);
-    const caption = page.getByLabel(S.publish.captionLabel);
-    await expect(caption).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByLabel(S.publish.captionLabel)).toBeVisible({ timeout: 30_000 });
+  }
 
-    // Criterion 5: the composer states the destination before "Publicar" is reachable.
-    await expect(page.locator('[data-story-destination]')).toHaveAccessibleName(
-      new RegExp(escapeRegExp(name)),
-    );
-    await caption.fill(`${TEST_CAPTION_PREFIX} — comunidade ${Date.now()}`);
-    await page.getByRole('button', { name: S.publish.submit, exact: true }).click();
+  const publishButton = (page: Page) =>
+    page.getByRole('button', { name: S.publish.submit, exact: true });
 
-    // D-94: it lands where the story went, with the story already in that community's Destaques.
-    await expect(page).toHaveURL(new RegExp(`/comunidades/${COMMUNITY.unpinnedId}$`));
+  test('UAT replay: from a community’s `+` the row reads "{community} · Destaques"; the story lands there as Destaques’ LAST segment and joins the tenant circle', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${COMMUNITY.withHighlightId}`);
+    const name = await communityName(page);
+    await openComposerFrom(page, name, COMMUNITY.withHighlightId);
+
+    await pickPhoto(page);
+    // D-112: pre-filled with the community's FIRST highlight, stated before "Publicar" is reachable.
+    await expect(destinationValue(page)).toHaveText(value(name, SEEDED.communityHighlight));
+    const caption = `${TEST_CAPTION_PREFIX} — destaque ${Date.now()}`;
+    await page.getByLabel(S.publish.captionLabel).fill(caption);
+    await publishButton(page).click();
+
+    // D-115 / UI-D-70: it lands on the community, and the toast names the highlight.
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${COMMUNITY.withHighlightId}$`));
     await expect(
-      page.getByText(S.publish.toastHighlightCommunity.replace('{community}', name), {
-        exact: true,
-      }),
+      page.getByText(
+        S.publish.toastHighlightCommunity
+          .replace('{title}', SEEDED.communityHighlight)
+          .replace('{community}', name),
+        { exact: true },
+      ),
     ).toBeVisible();
-    await expect(destaques(page).getByRole('button')).not.toHaveCount(0);
 
-    // D-96: the SAME story joins the tenant circle on `/inicio` once the worker has readied its
-    // asset (D-104: one circle, whose sequence grows by one). The wait is the worker's, exactly as
-    // in the publish walk above. (Login ran on `hosts.demo`, the file's `baseURL`.)
+    // D-111: the SAME story joins Início's tenant circle once the worker has readied its asset.
     await expect(async () => {
       await expectTenantSequence(page, activeStories + 1);
     }).toPass({ timeout: 60_000 });
+    await page.keyboard.press('Escape');
+
+    // …and it is the LAST segment of `Destaques` (D-103: oldest first by publish time).
+    await page.goto(`${hosts.demo}/comunidades/${COMMUNITY.withHighlightId}`);
+    await communityHighlightCircle(page, SEEDED.communityHighlight).click();
+    const viewer = page.getByRole('dialog', { name: S.viewer.dialog });
+    await expect(viewer).toBeVisible();
+    // The group's items are read lazily (R-P6): while they load the bars show ONE empty segment, so
+    // the count is read once the group has landed — the seeded expired story plus the new one.
+    const bars = page.getByTestId('story-progress-bars');
+    await expect
+      .poll(async () => Number(await bars.getAttribute('data-story-count')))
+      .toBeGreaterThan(1);
+    const count = Number(await bars.getAttribute('data-story-count'));
+    for (let index = 1; index < count; index += 1) {
+      await page.keyboard.press('ArrowRight');
+      await expect(viewer).toHaveAttribute('data-story-index', String(index));
+    }
+    await expect(page.getByTestId('story-caption')).toHaveText(caption);
+    await page.keyboard.press('Escape');
 
     await removeNewestStory();
     await expectTenantSequence(page, activeStories);
   });
 
-  test('an archived or unknown `?comunidade=` falls back to "Nenhuma comunidade"', async ({
+  test('a community with NO highlight reads "Escolher destaque"; "Publicar" opens the sheet; a new "Teste Novo" is created by the publish and shows on the page', async ({
     page,
   }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${COMMUNITY.withoutHighlightId}`);
+    const name = await communityName(page);
+    await openComposerFrom(page, name, COMMUNITY.withoutHighlightId);
+
+    await pickPhoto(page);
+    await expect(destinationValue(page)).toHaveText(S.publish.destination.choose);
+    const caption = `${TEST_CAPTION_PREFIX} — novo destaque ${Date.now()}`;
+    await page.getByLabel(S.publish.captionLabel).fill(caption);
+
+    // The D-112 gate: "Publicar" is enabled, publishes NOTHING, and opens the sheet on the
+    // origin's "Novo destaque".
+    await publishButton(page).click();
+    const sheet = page.getByRole('dialog', { name: S.highlights.select.title, exact: true });
+    await expect(sheet).toBeVisible();
+    const create = sheet.locator(
+      `[data-highlight-sheet-item="create:${COMMUNITY.withoutHighlightId}"]`,
+    );
+    await expect(create).toBeFocused();
+    await expect(page).toHaveURL(/\/stories\/publicar\?comunidade=/);
+
+    await create.click();
+    await sheet.getByLabel(S.highlights.create.label).fill('Teste Novo');
+    await sheet.getByRole('button', { name: S.highlights.create.submit }).click();
+    await expect(sheet).toHaveCount(0);
+    // Nothing was created yet (D-114): the row states the PENDING highlight.
+    await expect(destinationValue(page)).toHaveText(value(name, 'Teste Novo'));
+
+    await publishButton(page).click();
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${COMMUNITY.withoutHighlightId}$`));
+    await expect(
+      page.getByText(
+        S.publish.toastHighlightCommunity
+          .replace('{title}', 'Teste Novo')
+          .replace('{community}', name),
+        { exact: true },
+      ),
+    ).toBeVisible();
+
+    // The new circle joins the community's row once the worker has readied the image (a member
+    // never sees an empty highlight, and the row read is the member's, D-102).
+    await expect(async () => {
+      await page.reload();
+      await expect(communityHighlightCircle(page, 'Teste Novo')).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 60_000 });
+
+    await deleteStoriesByCaptionPrefix(caption);
+    await deleteTestHighlights();
+  });
+
+  test('/stories/publicar with no context reads "Nenhum" and publishes tenant-wide in zero extra taps', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/stories/publicar`);
+    await pickPhoto(page);
+    await expect(destinationValue(page)).toHaveText(S.publish.destination.none);
+
+    const caption = `${TEST_CAPTION_PREFIX} — nenhum ${Date.now()}`;
+    await page.getByLabel(S.publish.captionLabel).fill(caption);
+    await publishButton(page).click();
+
+    await expect(page).toHaveURL(/\/inicio$/);
+    await expect(page.getByText(S.publish.toast, { exact: true })).toBeVisible();
+    await deleteStoriesByCaptionPrefix(caption);
+  });
+
+  test('an archived or unknown `?comunidade=` falls back to "Nenhum"', async ({ page }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
 
     for (const id of [COMMUNITY.archivedId, crypto.randomUUID()]) {
       await page.goto(`${hosts.demo}/stories/publicar?comunidade=${id}`);
-      await page.locator('#story-photo-input').setInputFiles(PHOTO);
-      await expect(page.getByLabel(S.publish.captionLabel)).toBeVisible({ timeout: 30_000 });
+      await pickPhoto(page);
       // D-93: silent — no error, just the tenant-wide default.
-      await expect(page.locator('[data-story-destination-value]')).toHaveText(
-        S.publish.destination.none,
-      );
+      await expect(destinationValue(page)).toHaveText(S.publish.destination.none);
     }
   });
 
-  test('a 60-character community name truncates inside the row at 320px', async ({ page }) => {
+  test('UI E11 backstop: a 60-character community and a 15-character title truncate inside the row at 320px', async ({
+    page,
+  }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.setViewportSize({ width: 320, height: 740 });
 
@@ -1301,50 +1428,64 @@ test.describe('05.1 — a story from a community page (criteria 3-5)', () => {
     const communityId = href.split('/').pop() ?? '';
     expect(communityId).toMatch(/^[0-9a-f-]{36}$/);
 
-    await page.goto(`${hosts.demo}/stories/publicar?comunidade=${communityId}`);
-    await page.locator('#story-photo-input').setInputFiles(PHOTO);
-    await expect(page.getByLabel(S.publish.captionLabel)).toBeVisible({ timeout: 30_000 });
-
-    const row = page.locator('[data-story-destination]');
-    const value = row.locator('[data-story-destination-value]');
-    await expect(value).toHaveText(COMMUNITY.longName);
-
-    const geometry = await row.evaluate((node) => {
-      const box = (el: Element | null) => el?.getBoundingClientRect() ?? null;
-      const valueNode = node.querySelector('[data-story-destination-value]') as HTMLElement;
-      return {
-        row: box(node),
-        label: box(node.querySelector('span')),
-        chevron: box(node.querySelector('svg')),
-        truncated: valueNode.scrollWidth > valueNode.clientWidth,
-        overflow: document.documentElement.scrollWidth - window.innerWidth,
-      };
+    // A highlight in the long-named community, through the API, so the row arrives pre-filled.
+    expect(LONG_TITLE).toHaveLength(15);
+    const created = await storiesApi(await adminToken(), '/v1/stories/highlights', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ communityId, title: LONG_TITLE }),
     });
-    expect(geometry.row?.height ?? 0).toBeGreaterThanOrEqual(44);
-    expect(geometry.truncated, 'the long name is truncated, not wrapped').toBe(true);
-    for (const part of ['label', 'chevron'] as const) {
-      const inner = geometry[part];
-      const outer = geometry.row;
-      expect(inner, `${part} renders`).not.toBeNull();
-      expect(inner?.left ?? -1, `${part} starts inside the row`).toBeGreaterThanOrEqual(
-        (outer?.left ?? 0) - 0.5,
-      );
-      expect(
-        inner?.right ?? Number.POSITIVE_INFINITY,
-        `${part} ends inside the row`,
-      ).toBeLessThanOrEqual((outer?.right ?? 0) + 0.5);
-    }
-    expect(geometry.overflow, 'the page scrolls sideways').toBeLessThanOrEqual(0);
+    expect(created.status).toBe(201);
 
-    // UI-D-57: closing goes back to where the admin started, through the discard dialog.
-    await page
-      .getByRole('button', { name: S.publish.close })
-      .filter({ visible: true })
-      .first()
-      .click();
-    const dialog = page.getByRole('dialog', { name: S.publish.discard.title });
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: S.publish.discard.confirm }).click();
-    await expect(page).toHaveURL(new RegExp(`/comunidades/${communityId}$`));
+    try {
+      await page.goto(`${hosts.demo}/stories/publicar?comunidade=${communityId}`);
+      await pickPhoto(page);
+
+      const row = page.locator('[data-story-destination]');
+      await expect(destinationValue(page)).toHaveText(value(COMMUNITY.longName, LONG_TITLE));
+
+      const geometry = await row.evaluate((node) => {
+        const box = (el: Element | null) => el?.getBoundingClientRect() ?? null;
+        const valueNode = node.querySelector('[data-story-destination-value]') as HTMLElement;
+        const lineHeight = Number.parseFloat(getComputedStyle(valueNode).lineHeight);
+        return {
+          row: box(node),
+          label: box(node.querySelector('span')),
+          chevron: box(node.querySelector('svg')),
+          truncated: valueNode.scrollWidth > valueNode.clientWidth,
+          oneLine: valueNode.getBoundingClientRect().height <= lineHeight + 1,
+          overflow: document.documentElement.scrollWidth - window.innerWidth,
+        };
+      });
+      expect(geometry.row?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(geometry.truncated, 'the value is truncated, not wrapped').toBe(true);
+      expect(geometry.oneLine, 'the value stays on one line').toBe(true);
+      for (const part of ['label', 'chevron'] as const) {
+        const inner = geometry[part];
+        const outer = geometry.row;
+        expect(inner, `${part} renders`).not.toBeNull();
+        expect(inner?.left ?? -1, `${part} starts inside the row`).toBeGreaterThanOrEqual(
+          (outer?.left ?? 0) - 0.5,
+        );
+        expect(
+          inner?.right ?? Number.POSITIVE_INFINITY,
+          `${part} ends inside the row`,
+        ).toBeLessThanOrEqual((outer?.right ?? 0) + 0.5);
+      }
+      expect(geometry.overflow, 'the page scrolls sideways').toBeLessThanOrEqual(0);
+
+      // UI-D-70: closing goes back to where the admin started, through the discard dialog.
+      await page
+        .getByRole('button', { name: S.publish.close })
+        .filter({ visible: true })
+        .first()
+        .click();
+      const dialog = page.getByRole('dialog', { name: S.publish.discard.title });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: S.publish.discard.confirm }).click();
+      await expect(page).toHaveURL(new RegExp(`/comunidades/${communityId}$`));
+    } finally {
+      await deleteTestHighlights();
+    }
   });
 });
