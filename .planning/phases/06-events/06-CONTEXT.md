@@ -82,7 +82,7 @@ Out of this phase:
 - **D-205: The RSVP control is a segmented pair, `Vou` / `Não vou`,** replacing the prototype's single "Garantir minha vaga" CTA.
   - `Não vou` is a **recorded answer**, so the admin can tell "declined" from "never answered".
   - Rejected: a single "Confirmar presença" toggle, which merges an explicit no and a change of mind.
-- **D-206: Members see a count only: "N confirmados"** on the poster card and the detail page, exactly EVENT-03.
+- **D-206: Members see a count only, "N confirmados",** on the poster card and the detail page, exactly EVENT-03.
   - No avatar stack and no "Ana, João e mais 21". Who is going stays between each member and the admin.
   - That avoids exposing attendance tenant-wide, and avoids a second rule for staff whom D-47 hides from the directory.
 - **D-207: An online event's link is gated by the member's answer and by the window.**
