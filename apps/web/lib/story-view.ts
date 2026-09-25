@@ -72,6 +72,9 @@ export type StoryViewerLabelsView = {
   commentsOne: string;
   commentsOther: string;
   genericError: string;
+  loadingGroup: string;
+  groupError: string;
+  positionGroup: string;
 };
 
 /** Who the sequence is FROM. V1 has a single publisher, so it is the tenant (see the host's note). */
@@ -122,6 +125,10 @@ export function storyViewerLabels(tf: StoryLabelReader): StoryViewerLabelsView {
     commentsOne: String(tf.raw('viewer.comments.one')),
     commentsOther: String(tf.raw('viewer.comments.other')),
     genericError: tf('viewer.errors.generic'),
+    // 05.2-05 RED STUB — inert; GREEN reads the catalog.
+    loadingGroup: '',
+    groupError: '',
+    positionGroup: '',
   };
 }
 
@@ -341,6 +348,7 @@ export function tenantCircleView(
 export function highlightCircleView(
   summary: HighlightSummary,
   t: RowLabelReader,
+  _group = 0,
 ): StoryStripCircle {
   return {
     kind: 'static',
@@ -396,4 +404,47 @@ export function inicioRow(
   if (input.sequenceLength > 0) row.push(tenantCircleView(input.tenant, t));
   for (const summary of input.highlights) row.push(highlightCircleView(summary, t));
   return row;
+}
+
+/* ── 05.2-05 RED STUB — deliberately INERT; the GREEN commit replaces this block. ────────────── */
+
+export type StoryGroupView = {
+  key: string;
+  kind: 'tenant' | 'highlight' | 'pins' | 'story';
+  highlightId: string | null;
+  name: string;
+  avatar:
+    | { kind: 'logo'; src: string }
+    | { kind: 'avatar'; src: string | null }
+    | { kind: 'monogram'; text: string }
+    | { kind: 'asset'; assetId: string; variantWidths: readonly number[] };
+  items: StoryViewerItemView[] | null;
+};
+
+const INERT_GROUP: StoryGroupView = {
+  key: '',
+  kind: 'story',
+  highlightId: null,
+  name: '',
+  avatar: { kind: 'avatar', src: null },
+  items: [],
+};
+
+export function tenantGroupView(
+  _tenant: { displayName: string; logoUrl: string | null },
+  _items: StoryViewerItemView[],
+): StoryGroupView {
+  return INERT_GROUP;
+}
+
+export function highlightGroupView(_summary: HighlightSummary): StoryGroupView {
+  return INERT_GROUP;
+}
+
+export function inicioGroups(_input: {
+  tenant: { displayName: string; logoUrl: string | null };
+  sequence: StoryViewerItemView[];
+  highlights: readonly HighlightSummary[];
+}): StoryGroupView[] {
+  return [];
 }

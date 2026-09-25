@@ -18,6 +18,7 @@ import { MessageCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import type {
+  StoryGroupView,
   StoryViewerAuthorView,
   StoryViewerItemView,
   StoryViewerLabelsView,
@@ -72,9 +73,14 @@ export type StoryCommentsBinding = Omit<
 };
 
 export type StoryViewerHostProps = {
-  items: readonly StoryViewerItemView[];
+  items?: readonly StoryViewerItemView[];
   initialIndex?: number;
-  author: StoryViewerAuthorView;
+  author?: StoryViewerAuthorView;
+  /** 05.2-05 RED STUB — accepted but flattened: only `groups[initialGroup]` plays. */
+  groups?: readonly (StoryGroupView & { failed?: boolean })[];
+  initialGroup?: number;
+  onNeedGroup?: (group: number) => void;
+  onRetryGroup?: (group: number) => void;
   labels: StoryViewerLabelsView;
   onLike: typeof likeStoryAction;
   onUnlike: typeof unlikeStoryAction;
@@ -95,9 +101,11 @@ function fill(template: string, values: Record<string, number>): string {
 }
 
 export function StoryViewerHost({
-  items,
+  items: itemsProp,
   initialIndex = 0,
-  author,
+  author: authorProp,
+  groups: groupsProp,
+  initialGroup = 0,
   labels,
   onLike,
   onUnlike,
@@ -106,6 +114,9 @@ export function StoryViewerHost({
   closeHref = '/inicio',
 }: StoryViewerHostProps) {
   const toast = useToast();
+  // RED STUB: the initial group alone, as the old single sequence.
+  const items = itemsProp ?? groupsProp?.[initialGroup]?.items ?? [];
+  const author = authorProp ?? { name: groupsProp?.[initialGroup]?.name ?? '', avatarUrl: null };
 
   /**
    * THE story whose comments are open, or null. It is the story ID rather than a boolean because

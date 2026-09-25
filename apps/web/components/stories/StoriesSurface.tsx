@@ -4,6 +4,7 @@ import { StoriesStrip, type StoriesStripProps } from '@tria/module-stories/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import type {
+  StoryGroupView,
   StoryViewerAuthorView,
   StoryViewerItemView,
   StoryViewerLabelsView,
@@ -40,8 +41,10 @@ export type StoriesSurfaceProps = StoriesStripProps & {
    * nothing, the 04-09 `createHref` posture.
    */
   viewer?: {
-    items: readonly StoryViewerItemView[];
-    author: StoryViewerAuthorView;
+    items?: readonly StoryViewerItemView[];
+    author?: StoryViewerAuthorView;
+    /** 05.2-05 RED STUB — accepted but flattened to group 0. */
+    groups?: readonly StoryGroupView[];
     labels: StoryViewerLabelsView;
     onLike: typeof likeStoryAction;
     onUnlike: typeof unlikeStoryAction;
@@ -71,7 +74,7 @@ export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
 
   const open = useCallback(
     (index: number) => {
-      const story = viewer?.items[index];
+      const story = (viewer?.items ?? viewer?.groups?.[0]?.items ?? [])[index];
       if (!story) return;
       originRef.current = document.activeElement as HTMLElement | null;
       window.history.pushState(null, '', `/stories/${story.id}`);
@@ -105,9 +108,9 @@ export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
       <StoriesStrip {...strip} onOpen={viewer ? openCircle : undefined} />
       {viewer && openIndex !== null ? (
         <StoryViewerHost
-          items={viewer.items}
+          items={viewer.items ?? viewer.groups?.[0]?.items ?? []}
           initialIndex={openIndex}
-          author={viewer.author}
+          author={viewer.author ?? { name: viewer.groups?.[0]?.name ?? '', avatarUrl: null }}
           labels={viewer.labels}
           onLike={viewer.onLike}
           onUnlike={viewer.onUnlike}

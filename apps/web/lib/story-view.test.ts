@@ -5,9 +5,14 @@ import { describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import {
   highlightCircleView,
+  highlightGroupView,
+  inicioGroups,
   inicioRow,
   monogramOf,
+  type StoryViewerItemView,
+  storyViewerLabels,
   tenantCircleView,
+  tenantGroupView,
   tenantSequence,
 } from '@/lib/story-view';
 
@@ -24,6 +29,10 @@ import {
  *     the title's monogram. Both take the first GRAPHEME, trimmed, upper-cased.
  *  3. **UI-D-59's composition and render rule**: `+` (permission-gated) → tenant (iff something is
  *     live) → highlights in the API's order; a member with nothing gets NO circle at all.
+ *  4. **05.2-05: every openable circle IS a viewer group, in the same order** (D-107, UI-D-65). The
+ *     tenant circle opens group 0 and highlight circle k opens the group right after the ones before
+ *     it — so the circles and the groups the viewer walks can never disagree. A highlight group
+ *     carries NO items (they load lazily, never in `/inicio`'s SSR).
  */
 
 // The catalog is loaded at runtime, so next-intl cannot type its keys here; the translator is cast
@@ -135,8 +144,12 @@ describe('highlightCircleView — one highlight circle (UI-D-61, UI-D-62)', () =
     expect(circle.ring).toBe('neutral');
   });
 
-  it('12. is INERT in this plan — a static circle, never a link and never an opener', () => {
-    expect(highlightCircleView(highlight(), t).kind).toBe('static');
+  it('12. is an OPENER of its own viewer group (05.2-05), never a link', () => {
+    expect(highlightCircleView(highlight(), t, 3)).toMatchObject({
+      kind: 'open',
+      group: 3,
+      index: 0,
+    });
   });
 });
 
@@ -161,6 +174,9 @@ describe('inicioRow — UI-D-59 order and the all-or-nothing render rule', () =>
     expect(row.map((c) => c.label)).toEqual(['Seu story', 'Demo', 'Segundo', 'Primeiro']);
     expect(row[0]).toMatchObject({ kind: 'link', href: '/stories/publicar', ring: 'neutral' });
     expect(row[1]).toMatchObject({ kind: 'open', ring: 'brand', group: 0, index: 0 });
+    // Each highlight opens the group right after the tenant's, in row order.
+    expect(row[2]).toMatchObject({ kind: 'open', group: 1, index: 0 });
+    expect(row[3]).toMatchObject({ kind: 'open', group: 2, index: 0 });
   });
 
   it('14. a member never gets the + circle', () => {
@@ -174,6 +190,8 @@ describe('inicioRow — UI-D-59 order and the all-or-nothing render rule', () =>
       t,
     );
     expect(row.map((c) => c.label)).toEqual(['Bastidores']);
+    // With no tenant group in front of it, the first highlight IS group 0.
+    expect(row[0]).toMatchObject({ kind: 'open', group: 0, index: 0 });
   });
 
   it('16. a member with nothing gets NO circle at all (UI-D-26)', () => {
@@ -185,5 +203,113 @@ describe('inicioRow — UI-D-59 order and the all-or-nothing render rule', () =>
   it('17. an admin with nothing still gets the + circle alone (D-108)', () => {
     const row = inicioRow({ canPublish: true, own, tenant, sequenceLength: 0, highlights: [] }, t);
     expect(row.map((c) => c.kind)).toEqual(['link']);
+  });
+});
+
+/* ── 05.2-05: the viewer's groups (D-107, UI-D-65, R-P6) ─────────────────────────────────────── */
+
+function viewerItem(id: string): StoryViewerItemView {
+  return {
+    id,
+    mediaKind: 'image',
+    mediaAssetId: '0000000d-1111-4111-8111-111111111111',
+    mediaVariantWidths: [640],
+    caption: '',
+    timeLabel: 'há 1 h',
+    likeCount: 0,
+    commentCount: 0,
+    viewerLiked: false,
+  };
+}
+
+describe('the viewer groups — one per openable circle, in row order (05.2-05)', () => {
+  it('18. tenantGroupView: the tenant name and logo head the group, which carries its sequence', () => {
+    const items = [viewerItem('a'), viewerItem('b')];
+    expect(tenantGroupView({ displayName: 'Demo', logoUrl: '/logo.png' }, items)).toEqual({
+      key: 'tenant',
+      kind: 'tenant',
+      highlightId: null,
+      name: 'Demo',
+      avatar: { kind: 'avatar', src: '/logo.png' },
+      items,
+    });
+  });
+
+  it('19. highlightGroupView: the title and cover head the group, and its items are NOT loaded', () => {
+    expect(highlightGroupView(highlight())).toEqual({
+      key: '0000000a-1111-4111-8111-111111111111',
+      kind: 'highlight',
+      highlightId: '0000000a-1111-4111-8111-111111111111',
+      name: 'Bastidores',
+      avatar: {
+        kind: 'asset',
+        assetId: '0000000b-1111-4111-8111-111111111111',
+        variantWidths: [640, 1080],
+      },
+      items: null,
+    });
+    // No resolvable cover: the title's monogram, the circle's own fallback (UI-D-62).
+    expect(highlightGroupView(highlight({ coverAssetId: null, title: 'aulas' })).avatar).toEqual({
+      kind: 'monogram',
+      text: 'A',
+    });
+  });
+
+  it('20. inicioGroups: [tenant (items), highlight 1 (null), highlight 2 (null)] — the circles’ order', () => {
+    const tenant = { displayName: 'Demo', logoUrl: null };
+    const second = highlight({ id: '0000000c-1111-4111-8111-111111111111', title: 'Segundo' });
+    const groups = inicioGroups({
+      tenant,
+      sequence: [viewerItem('a')],
+      highlights: [highlight(), second],
+    });
+    expect(groups.map((g) => [g.kind, g.name, g.items === null])).toEqual([
+      ['tenant', 'Demo', false],
+      ['highlight', 'Bastidores', true],
+      ['highlight', 'Segundo', true],
+    ]);
+
+    // …and the row agrees, circle for group: the viewer opens where the circle says.
+    const row = inicioRow(
+      {
+        canPublish: false,
+        own: { avatarUrl: null },
+        tenant,
+        sequenceLength: 1,
+        highlights: [highlight(), second],
+      },
+      t,
+    );
+    expect(row.map((c) => (c.kind === 'open' ? groups[c.group]?.name : null))).toEqual([
+      'Demo',
+      'Bastidores',
+      'Segundo',
+    ]);
+  });
+
+  it('21. with nothing live the groups are the highlights alone — no empty tenant group', () => {
+    const groups = inicioGroups({
+      tenant: { displayName: 'Demo', logoUrl: null },
+      sequence: [],
+      highlights: [highlight()],
+    });
+    expect(groups.map((g) => g.kind)).toEqual(['highlight']);
+  });
+
+  it('22. the viewer labels carry the group template raw, the loading line and the group error', () => {
+    const labels = storyViewerLabels(
+      Object.assign(t, {
+        raw: (key: string) =>
+          key
+            .split('.')
+            .reduce<unknown>(
+              (node, part) => (node as Record<string, unknown>)?.[part],
+              (loadMessages() as { stories: unknown }).stories,
+            ),
+      }),
+    );
+    expect(labels.positionGroup).toBe('{group}: story {current} de {total}');
+    expect(labels.loadingGroup).toBe('Carregando destaque…');
+    expect(labels.groupError).toBe('Não foi possível carregar este destaque.');
   });
 });

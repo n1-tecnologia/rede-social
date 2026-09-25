@@ -265,6 +265,42 @@ describe('05.1 — the new entry-point strings and their placeholders', () => {
   });
 });
 
+/**
+ * 05.2-05 — the grouped viewer's three strings (UI-SPEC Copywriting Contract, "Viewer (UI-D-65/66)")
+ * and the three placeholders of its live-region template. `viewer.position` is REPLACED by
+ * `viewer.positionGroup`, so its absence is pinned too: a key nothing reads is a string nobody
+ * reviews.
+ */
+describe('05.2-05 — the grouped viewer strings and their placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['stories.viewer.positionGroup', '{group}: story {current} de {total}'],
+    ['stories.viewer.loadingGroup', 'Carregando destaque…'],
+    ['stories.highlights.errors.load', 'Não foi possível carregar este destaque.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['stories.viewer.positionGroup', '{group}'],
+    ['stories.viewer.positionGroup', '{current}'],
+    ['stories.viewer.positionGroup', '{total}'],
+  ])('%s carries the %s placeholder', (key, placeholder) => {
+    expect(String(lookup(key))).toContain(placeholder);
+  });
+
+  it('stories.viewer.position is gone — the group template replaced it', () => {
+    expect(lookup('stories.viewer.position')).toBeUndefined();
+  });
+});
+
 describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   function run(files: Record<string, string>): { status: number | null; out: string } {
     const dir = mkdtempSync(path.join(tmpdir(), 'tria-literals-'));

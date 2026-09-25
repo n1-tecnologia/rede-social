@@ -32,20 +32,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *     over to the next story when the asset ends.
  */
 
-const { catalog, feedCatalog, toast, like, unlike, playbackToken } = await vi.hoisted(async () => {
-  const { readFileSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const read = (name: string) =>
-    JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
-  return {
-    catalog: read('stories').stories as Record<string, unknown>,
-    feedCatalog: read('feed').feed as Record<string, unknown>,
-    toast: { show: vi.fn(), dismiss: vi.fn() },
-    like: vi.fn(),
-    unlike: vi.fn(),
-    playbackToken: vi.fn(),
-  };
-});
+const { catalog, feedCatalog, toast, like, unlike, playbackToken, loadHighlight } =
+  await vi.hoisted(async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const read = (name: string) =>
+      JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
+    return {
+      catalog: read('stories').stories as Record<string, unknown>,
+      feedCatalog: read('feed').feed as Record<string, unknown>,
+      toast: { show: vi.fn(), dismiss: vi.fn() },
+      like: vi.fn(),
+      unlike: vi.fn(),
+      playbackToken: vi.fn(),
+      loadHighlight: vi.fn(),
+    };
+  });
 
 const lookup = (key: string, values?: Record<string, unknown>) => {
   const raw = key
@@ -150,8 +152,19 @@ vi.mock('@mux/mux-player-react', async () => {
   };
 });
 
-const { storyViewerLabels } = await import('@/lib/story-view');
+/**
+ * 05.2-05: the lazy highlight read is a SERVER ACTION — the seam a unit test stubs, for the reason
+ * the playback token is: the request and its authorisation happen on the server.
+ */
+vi.mock('@/app/(app)/stories/highlight-actions', () => ({
+  loadHighlightItemsAction: loadHighlight,
+}));
+
+const { highlightGroupView, inicioGroups, inicioRow, storyViewerLabels } = await import(
+  '@/lib/story-view'
+);
 const { StoryViewerHost } = await import('./StoryViewerHost');
+const { StoriesSurface } = await import('./StoriesSurface');
 
 // `next-intl`'s reader FORMATS on read, so the templated strings are taken with `.raw` — this
 // stand-in exposes the same two calls the real translator does.
@@ -260,16 +273,29 @@ function item(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * One TENANT group holding `items` — the shape every single-sequence caller hands the host. An
+ * `items` override is folded into that one group so each case below reads as it always has.
+ */
 function host(overrides: Record<string, unknown> = {}) {
+  const { items = [item()], ...rest } = overrides as { items?: ReturnType<typeof item>[] };
   return render(
     <StoryViewerHost
-      items={[item()]}
-      author={{ name: 'Direcao TRIA Demo', avatarUrl: null }}
+      groups={[
+        {
+          key: 'tenant',
+          kind: 'tenant',
+          highlightId: null,
+          name: 'Direcao TRIA Demo',
+          avatar: { kind: 'avatar', src: null },
+          items,
+        },
+      ]}
       labels={LABELS}
       onLike={like as never}
       onUnlike={unlike as never}
       onClose={() => {}}
-      {...overrides}
+      {...rest}
     />,
   );
 }
@@ -675,5 +701,197 @@ describe('StoryViewerHost — the comment sheet (D-82, STORY-05)', () => {
   it('12. with NO binding the affordance stays inert rather than doing nothing on tap', () => {
     host();
     expect(screen.getByRole('button', { name: 'Comentar' }).hasAttribute('disabled')).toBe(true);
+  });
+});
+
+/* ── 05.2-05: the row of groups (D-107, UI-D-65, HIGHLIGHT-02/03) ────────────────────────────── */
+
+const H1 = '0000000a-1111-4111-8111-000000000001';
+const H2 = '0000000a-1111-4111-8111-000000000002';
+
+function summary(id: string, title: string) {
+  return {
+    id,
+    communityId: null,
+    title,
+    position: 0,
+    coverAssetId: null,
+    coverVariantWidths: [],
+    coverStoryId: null,
+    coverChosen: false,
+    itemCount: 1,
+  };
+}
+
+/** A deferred promise, so a case decides WHEN the lazy read answers. */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+describe('StoryViewerHost — a highlight group (05.2-05, UI-D-65)', () => {
+  it('15. a highlight group’s TITLE heads the viewer while it loads and after its items arrive', () => {
+    const onNeedGroup = vi.fn();
+    const loading = [highlightGroupView(summary(H1, 'Bastidores'))];
+    const props = {
+      labels: LABELS,
+      onLike: like as never,
+      onUnlike: unlike as never,
+      onClose: () => {},
+      onNeedGroup,
+    };
+    const { rerender } = render(<StoryViewerHost groups={loading} {...props} />);
+
+    // The loading frame (UI-D-65): the spinner, the group's header, the clock paused.
+    expect(screen.getByTestId('story-group-loading')).toBeTruthy();
+    expect(screen.getByText('Bastidores')).toBeTruthy();
+    expect(screen.getByTestId('story-position').textContent).toBe('Carregando destaque…');
+    expect(onNeedGroup).toHaveBeenCalledWith(0);
+
+    rerender(<StoryViewerHost groups={[{ ...loading[0], items: [item()] }]} {...props} />);
+
+    expect(screen.queryByTestId('story-group-loading')).toBeNull();
+    // Every story in the group is headed by the group's title, not the tenant's name.
+    expect(screen.getByText('Bastidores')).toBeTruthy();
+    expect(screen.getByTestId('story-caption').textContent).toBe('Bastidores do encontro de hoje.');
+    expect(screen.getByTestId('story-position').textContent).toBe('Bastidores: story 1 de 1');
+  });
+
+  it('16. a FAILED group shows the highlight error and its retry, which asks again', () => {
+    const onRetryGroup = vi.fn();
+    render(
+      <StoryViewerHost
+        groups={[{ ...highlightGroupView(summary(H1, 'Bastidores')), failed: true }]}
+        labels={LABELS}
+        onLike={like as never}
+        onUnlike={unlike as never}
+        onClose={() => {}}
+        onRetryGroup={onRetryGroup}
+      />,
+    );
+
+    const error = screen.getByTestId('story-group-error');
+    expect(error.textContent).toContain('Não foi possível carregar este destaque.');
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+    expect(onRetryGroup).toHaveBeenCalledWith(0);
+  });
+});
+
+/**
+ * The Início row, end to end at the unit level: the SAME builders `lib/registry.tsx` composes the
+ * slot with (`inicioRow` for the circles, `inicioGroups` for the viewer), handed to the real
+ * `StoriesSurface` — so "circle k opens group k" is asserted through the props the server really
+ * passes, not through a restatement of them.
+ */
+describe('StoriesSurface — every Início circle opens its own group (05.2-05, D-107)', () => {
+  const tenant = { displayName: 'Demo', logoUrl: null };
+
+  function surface({ live }: { live: boolean }) {
+    const sequence = live ? [item()] : [];
+    const highlights = [summary(H1, 'Primeiro'), summary(H2, 'Segundo')];
+    return render(
+      <StoriesSurface
+        regionLabel="Stories"
+        circles={inicioRow(
+          {
+            canPublish: false,
+            own: { avatarUrl: null },
+            tenant,
+            sequenceLength: sequence.length,
+            highlights,
+          },
+          lookup,
+        )}
+        viewer={{
+          groups: inicioGroups({ tenant, sequence, highlights }),
+          labels: LABELS,
+          onLike: like as never,
+          onUnlike: unlike as never,
+        }}
+      />,
+    );
+  }
+
+  const openCircle = async (name: string) => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name }));
+    });
+    return screen.getByRole('dialog', { name: 'Story' });
+  };
+
+  it('17. the tenant circle opens (0, 0) on its own story, and PREFETCHES the first highlight', async () => {
+    loadHighlight.mockReturnValue(new Promise(() => {}));
+    surface({ live: true });
+
+    const dialog = await openCircle('Abrir stories de Demo');
+    expect(dialog.getAttribute('data-story-group')).toBe('0');
+    expect(dialog.getAttribute('data-story-index')).toBe('0');
+    // The tenant group's history entry names the story it opened on (planning decision 3).
+    expect(window.location.pathname).toBe('/stories/0d000000-0000-4000-8000-0000000000d1');
+    // Its only story is its last: the next group's items are already being fetched.
+    expect(loadHighlight).toHaveBeenCalledTimes(1);
+    expect(loadHighlight).toHaveBeenCalledWith(H1);
+  });
+
+  it('18. highlight circle k opens (k, 0): loading, ONE read, then its own stories — the URL untouched', async () => {
+    const answer = deferred<unknown>();
+    loadHighlight.mockReturnValue(answer.promise);
+    surface({ live: true });
+    const before = window.location.pathname;
+
+    const dialog = await openCircle('Abrir destaque Segundo');
+    expect(dialog.getAttribute('data-story-group')).toBe('2');
+    expect(screen.getByTestId('story-group-loading')).toBeTruthy();
+    expect(screen.getByText('Segundo')).toBeTruthy();
+
+    await act(async () => {
+      answer.resolve({
+        ok: true,
+        items: [item({ id: '0d000000-0000-4000-8000-0000000000d9', caption: 'Do destaque.' })],
+      });
+    });
+
+    expect(screen.queryByTestId('story-group-loading')).toBeNull();
+    expect(screen.getByTestId('story-caption').textContent).toBe('Do destaque.');
+    // In-flight dedupe: entering the group and re-rendering asked the server exactly once.
+    expect(loadHighlight.mock.calls.filter(([id]) => id === H2)).toHaveLength(1);
+    // A highlight group pushes the CURRENT url, so a refresh never lands on a route that cannot
+    // rebuild the row (planning decision 3).
+    expect(window.location.pathname).toBe(before);
+  });
+
+  it('19. with nothing live the groups are the highlights alone: the first highlight opens (0, 0)', async () => {
+    loadHighlight.mockReturnValue(new Promise(() => {}));
+    surface({ live: false });
+
+    expect(screen.queryByRole('button', { name: 'Abrir stories de Demo' })).toBeNull();
+    const dialog = await openCircle('Abrir destaque Primeiro');
+    expect(dialog.getAttribute('data-story-group')).toBe('0');
+    expect(loadHighlight).toHaveBeenCalledWith(H1);
+  });
+
+  it('20. a failed read shows the error; the retry reads again and the group plays', async () => {
+    loadHighlight.mockResolvedValueOnce({ ok: false });
+    surface({ live: false });
+
+    await openCircle('Abrir destaque Segundo');
+    expect(screen.getByTestId('story-group-error').textContent).toContain(
+      'Não foi possível carregar este destaque.',
+    );
+
+    loadHighlight.mockResolvedValueOnce({
+      ok: true,
+      items: [item({ caption: 'Depois do erro.' })],
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+    });
+
+    expect(loadHighlight.mock.calls.filter(([id]) => id === H2)).toHaveLength(2);
+    expect(screen.queryByTestId('story-group-error')).toBeNull();
+    expect(screen.getByTestId('story-caption').textContent).toBe('Depois do erro.');
   });
 });
