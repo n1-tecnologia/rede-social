@@ -489,7 +489,42 @@ Plans:
   3. `admin_tenant` can see the attendance list per event with confirmed vs checked-in status.
   4. Member can add an event to their calendar via .ics download and a Google Calendar link.
 
-**Plans**: TBD
+**Plans**: 9 plans
+
+Plans:
+
+**Wave 1**
+
+- [ ] 06-01-PLAN.md — Tracer: `@tria/module-events` with `events` + the role-gated `event_secrets`, wall-clock→UTC create, the Próximos/Passados keysets in the tenant timezone, `bootstrap.tenant.timezone`, the `Eventos` tab, pgTAP 130 + isolation, the seeded events
+- [ ] 06-02-PLAN.md — The D-33 design gate: a sketch of the six prototype-less surfaces plus the three proto deltas, shipped `approved: false`
+
+**Wave 2** *(blocked on Wave 1; Task 3 blocked on the sketch approval)*
+
+- [ ] 06-03-PLAN.md — Detail page + RSVP: `event_attendances`, the `app.event_attendance_guard()` trigger, counts (D-219), `SegmentedControl`, `Vou` / `Não vou`
+
+**Wave 3** *(blocked on Wave 2 and the sketch approval)*
+
+- [ ] 06-04-PLAN.md — Admin authoring from a phone: `EventForm` create/edit, `PUT`/`PATCH`, cancel and `Reativar`, `event.updated`/`cancelled`/`reactivated`
+
+**Wave 4**
+
+- [ ] 06-05-PLAN.md — In-person check-in: `app.events_check_in` (SECURITY DEFINER, outcomes, guess bound), walk-ins, the ported boarding-pass ticket
+
+**Wave 5**
+
+- [ ] 06-06-PLAN.md — Online `Entrar`: `app.events_enter`, the `/eventos/{id}/entrar` route handler and refusal page, calendar-link login continuity, the production-build prefetch proof
+
+**Wave 6**
+
+- [ ] 06-07-PLAN.md — `Participantes`: three keyset chips with counts, walk-in tag, the door code and its regeneration
+
+**Wave 7**
+
+- [ ] 06-08-PLAN.md — Calendar export (`.ics` + Google link, online location = `/entrar`) and the Início "Próximo evento" card that becomes the check-in door
+
+**Wave 8**
+
+- [ ] 06-09-PLAN.md — Tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS §(l), the phase witness, `pnpm verify` and the phone UAT
 **UI hint**: yes
 **Research needed**: None (conventional); confirm the pilot tenant's timezone handling (store UTC + tenant timezone field, render America/Sao_Paulo).
 **Notes**: `events.attendances` holds one row per user with `going | not_going | checked_in` transitions (no boolean pairs). `event.published`, `event.rsvp`, `event.cancelled` domain events are emitted here; reminder scheduling and delivery (EVENT-07) are built in Phase 7 once the notification module exists.
@@ -610,7 +645,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
-| 6. Events | 0/TBD | Not started | - |
+| 6. Events | 0/9 | Planned | - |
 | 7. Notifications, Web Push & Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
