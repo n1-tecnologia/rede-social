@@ -82,6 +82,12 @@
         "body": "Ela sai da lista e ninguém mais publica nela. As publicações continuam no feed.",
         "confirm": "Arquivar",
         "cancel": "Cancelar"
+      },
+      "reactivate": {
+        "title": "Reativar comunidade?",
+        "body": "Ela volta para a lista de comunidades e pode receber publicações de novo.",
+        "confirm": "Reativar",
+        "cancel": "Cancelar"
       }
     },
     "discard": {
@@ -111,7 +117,8 @@
       "nameRequired": "Dê um nome para a comunidade.",
       "archived": "Esta comunidade foi arquivada. Não é possível publicar nela.",
       "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra.",
-      "save": "Não foi possível salvar. Revise os campos e tente novamente."
+      "save": "Não foi possível salvar. Revise os campos e tente novamente.",
+      "reactivate": "Não foi possível reativar a comunidade. Tente novamente."
     }
   }
 }
