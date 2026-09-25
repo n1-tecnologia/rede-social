@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   HighlightMembershipList,
@@ -37,6 +38,9 @@ import { HighlightTitleStep, type HighlightTitleStepProps } from '../ui/Highligh
  *
  * Every string here is a fixture word (`place-home`, `row:…`): the module ships none (PWA-03).
  */
+
+// Springs have nothing to animate under happy-dom, and a cancelled one rejects AFTER the run ends.
+MotionGlobalConfig.skipAnimations = true;
 
 afterEach(cleanup);
 

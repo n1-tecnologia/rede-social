@@ -1,6 +1,20 @@
 /** `@tria/module-stories/ui` — the only surface `apps/web` may import from this module. */
 
 export {
+  HighlightMembershipList,
+  type HighlightMembershipListProps,
+  type HighlightMembershipRow,
+  type HighlightSelection,
+  HighlightSheet,
+  type HighlightSheetChecklistProps,
+  type HighlightSheetPlace,
+  type HighlightSheetProps,
+  type HighlightSheetRow,
+  type HighlightSheetSingleProps,
+  type HighlightSheetTitleStepLabels,
+} from './HighlightSheet';
+export { HighlightTitleStep, type HighlightTitleStepProps } from './HighlightTitleStep';
+export {
   type CommunityPickerSheetBody,
   type PinStoryCommunityRow,
   PinStorySheet,
