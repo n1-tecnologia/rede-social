@@ -57,11 +57,29 @@ import {
  *    threaded through every join that reads it, plus a decision about what re-pinning a
  *    soft-deleted pair means. `story.unpinned` is the record that it happened.
  *
+ *    **05.2 carries the same rule to highlights.** Removing a story from a highlight deletes its
+ *    `story_highlight_items` row, and deleting a highlight deletes the highlight row (its items go
+ *    with it through `on delete cascade`). Both are HARD deletes for the pin's reasons: neither row
+ *    carries authored content or moderation evidence, and `story_highlight_items_uq` is the
+ *    idempotency arbiter, so a repeat add is absorbed and a removal has at most one row to remove.
+ *    The STORY row is never touched by either — a highlight is an editorial pointer, not a copy.
+ *
  * 6. **THE PIN ROW IS THE EXPIRY OVERRIDE.** `listCommunityHighlights` carries NO expiry predicate
  *    at all — that ABSENCE is the mechanism, not an oversight, and it is asserted under a clock the
  *    test controls in `110-communities-stories.sql`. There is deliberately no column on `stories`
  *    recording that it is pinned: STORY-04 says "one or more communities", which a boolean cannot
  *    represent, and a denormalised count would be a second writer of a fact the join already holds.
+ *
+ *    **05.2: THE ITEM ROW IS THE EXPIRY OVERRIDE TOO.** A story in a highlight is playable from it
+ *    for every value of `now()`: the highlight items read (`getHighlight`) carries NO expiry
+ *    predicate — only `s.deleted_at is null` — and `120-story-highlights.sql` asserts it under a
+ *    controlled clock beside the strip predicate refusing the same row. An item is a story's
+ *    membership in a NAMED highlight that belongs to exactly one PLACE (Início, or one community).
+ *
+ * **Highlights replace pins (05.2, D-116).** `story_highlights` / `story_highlight_items` generalise
+ * `story_community_pins`: migration file 1 (`*_story_highlights.sql`) copies every pin into a
+ * `Destaques` highlight of its own community under a no-loss guard, and plan 11 drops the pins table,
+ * its routes and its events. Until then both exist, so nothing that still reads pins goes red.
  *
  * Authorship is the generic `author_user_id -> users.id` (SCHEMA-CONVENTIONS §(c).1), so V2 member
  * stories are rows rather than a migration.
@@ -186,5 +204,103 @@ export const storyCommunityPins = pgTable(
       t.id.desc().nullsFirst(),
     ),
     tenantIsolationPolicy('story_community_pins_tenant_isolation'),
+  ],
+).enableRLS();
+
+/**
+ * A NAMED HIGHLIGHT (HIGHLIGHT-01/02, D-100..D-103) — a curated, titled circle that belongs to exactly
+ * one PLACE and outlives the 24 h window of every story in it.
+ *
+ * **The place is `community_id`, and NULL means Início** (R-D-A). There is no `place_kind` column:
+ * two places exist, and V2's creator-scoped publishing (Phase 10) extends the service's one
+ * `resolveHighlightPlace` seam, not this shape.
+ *
+ * **`community_id` carries no drizzle `.references()`, and that is not an omission** — the pins'
+ * reason restated: `public.communities` lives in `@tria/module-communities/db`, and reaching it from
+ * here is the `module -> module` package edge `turbo boundaries` denies (MOD-02). The foreign key is
+ * REAL: `story_highlights_community_fk` (`on delete cascade`) is hand-written SQL in the table's own
+ * migration, and `120-story-highlights.sql` asserts it with a 23503 and a positive control.
+ *
+ * - `title` is required, trimmed and 1..15 characters (`STORY_HIGHLIGHT_MAX_TITLE`); duplicates are
+ *   allowed inside a place (ids disambiguate). `story_highlights_title_chk` is the backstop.
+ * - `position` orders a place's row. There is deliberately NO unique index on it: every read orders
+ *   by `(position, id)`, a total order, and a create appends at `max + 1` under a lock on the place's
+ *   rows. A unique index would only add transient collisions to a renumber.
+ * - The cover is resolved at READ time (R-D-D): `cover_asset_id` (an uploaded image) or
+ *   `cover_story_id` (a chosen story), never both (`story_highlights_cover_chk`), else the most
+ *   recently added live image item. `on delete set null` on the story reference means a deleted
+ *   cover story falls back rather than breaking the row.
+ */
+export const storyHighlights = pgTable(
+  'story_highlights',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    /** NULL = Início. -> `public.communities.id` on delete cascade, declared in SQL (MOD-02). */
+    communityId: uuid('community_id'),
+    title: text().notNull(),
+    position: integer().notNull(),
+    coverStoryId: uuid('cover_story_id').references(() => stories.id, { onDelete: 'set null' }),
+    coverAssetId: uuid('cover_asset_id').references(() => mediaAssets.id),
+    createdByUserId: uuid('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Tenant first (040's rule), then the place, then the row's own total order — the one index
+    // both the row read and the create's place lock walk.
+    index('story_highlights_tenant_place_idx').on(t.tenantId, t.communityId, t.position, t.id),
+    check(
+      'story_highlights_title_chk',
+      sql`char_length(${t.title}) between 1 and 15 and ${t.title} = btrim(${t.title})`,
+    ),
+    check(
+      'story_highlights_cover_chk',
+      sql`num_nonnulls(${t.coverStoryId}, ${t.coverAssetId}) <= 1`,
+    ),
+    check('story_highlights_position_chk', sql`${t.position} >= 0`),
+    tenantIsolationPolicy('story_highlights_tenant_isolation'),
+  ],
+).enableRLS();
+
+/**
+ * A story's membership in a highlight — the many-to-many join D-100 asks for (one story may sit in
+ * several highlights). Items 5 and 6 of the module docblock apply to this row verbatim: a removal is
+ * a HARD delete, and the ROW is the expiry override (the items read carries no expiry predicate).
+ *
+ * There is deliberately NO ordering column here (D-103): a highlight plays its stories by PUBLISH
+ * time, oldest first (`order by s.published_at, s.id`), never by when they were added. `added_at` is
+ * kept because it is the automatic cover rule's input (the most recently ADDED image item) and the
+ * migrated pin's `pinned_at`.
+ */
+export const storyHighlightItems = pgTable(
+  'story_highlight_items',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    highlightId: uuid('highlight_id')
+      .notNull()
+      .references(() => storyHighlights.id, { onDelete: 'cascade' }),
+    storyId: uuid('story_id')
+      .notNull()
+      .references(() => stories.id, { onDelete: 'cascade' }),
+    addedByUserId: uuid('added_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // THE IDEMPOTENCY ARBITER, and the by-highlight read's index: `on conflict … do nothing` against
+    // this pair is what makes a repeat add a no-op rather than a 409.
+    uniqueIndex('story_highlight_items_uq').on(t.highlightId, t.storyId),
+    // Tenant first; serves "how many highlights is this story in" and the sheet's initial state.
+    index('story_highlight_items_tenant_story_idx').on(t.tenantId, t.storyId),
+    tenantIsolationPolicy('story_highlight_items_tenant_isolation'),
   ],
 ).enableRLS();

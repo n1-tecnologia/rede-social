@@ -3,21 +3,29 @@ import type { RequestContext } from '@tria/core/server/auth/context';
 import { emit } from '@tria/core/server/events/bus';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { moduleLogger } from '@tria/core/server/logging';
+import { moduleFlags } from '@tria/core/server/modules/flags-cache';
 import { decodeCursor, encodeCursor, keysetComparison } from '@tria/core/server/paging';
 import { type SQL, sql } from 'drizzle-orm';
-import type {
-  CreateStoryComment,
-  PublishStory,
-  StoryComment,
-  StoryCommentPage,
-  StoryCommentsQuery,
-  StoryLikeResult,
-  StoryMediaKind,
-  StoryPage,
-  StoryPinResult,
-  StoryPins,
-  StoryQuery,
-  StorySummary,
+import {
+  type CreateStoryComment,
+  type CreateStoryHighlight,
+  type HighlightDetail,
+  type HighlightList,
+  type HighlightMembershipResult,
+  type HighlightSummary,
+  type PublishStory,
+  STORY_HIGHLIGHT_MAX_ITEMS,
+  STORY_HIGHLIGHT_MAX_PER_PLACE,
+  type StoryComment,
+  type StoryCommentPage,
+  type StoryCommentsQuery,
+  type StoryLikeResult,
+  type StoryMediaKind,
+  type StoryPage,
+  type StoryPinResult,
+  type StoryPins,
+  type StoryQuery,
+  type StorySummary,
 } from '../contracts/index';
 
 const log = moduleLogger('module-stories');
@@ -1281,4 +1289,492 @@ export async function listStoryPins(ctx: RequestContext, storyId: string): Promi
   });
 
   return { communityIds };
+}
+
+/* ── Highlights (05.2) ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The module flag the place rules depend on, read BEFORE the transaction opens.
+ *
+ * `moduleFlags` answers from a per-tenant cache and, on a miss, opens its OWN tenant transaction.
+ * Reading it inside `withTenantTx` would hold two pooled connections for one request (the pool is
+ * `max: 5`), which is a starvation hazard under load — so every highlight function reads it first,
+ * exactly where `listCommunityFeed` does, and hands the answer to `resolveHighlightPlace`.
+ */
+type PlaceGate = { communitiesOn: boolean };
+
+async function readPlaceGate(ctx: RequestContext): Promise<PlaceGate> {
+  return { communitiesOn: await moduleFlags.isEnabled(ctx, 'communities') };
+}
+
+/** What a place-resolving caller intends: reading, taking content down, or adding/curating it. */
+type PlaceIntent = 'read' | 'takedown' | 'curate';
+
+/**
+ * A highlight's PLACE as a SQL predicate on `alias.community_id` — one of exactly two literal
+ * fragments. Never `is not distinct from`: an index cannot serve it, while both of these walk
+ * `story_highlights_tenant_place_idx` directly.
+ */
+function placePredicate(alias: 'h', communityId: string | null): SQL {
+  const column = sql.raw(`${alias}.community_id`);
+  return communityId === null ? sql`${column} is null` : sql`${column} = ${communityId}::uuid`;
+}
+
+/**
+ * THE ONE PLACE-RESOLUTION SEAM (R-D-K). Every highlight read and write resolves its place here, so
+ * there is exactly one definition of "a place this caller may use":
+ *
+ *  - `null` is Início — the tenant's own place, always present while `stories` is on.
+ *  - A community is resolved in-lane: this tenant, not soft-deleted. The `communities` module being
+ *    OFF answers the same bare 404 the feed answers (a tenant without the module has no communities
+ *    to name, D-74), and so does every miss — unknown, another tenant's, removed (D-23).
+ *  - Write intents take the row `for share`, so an archive that commits concurrently waits for this
+ *    transaction instead of racing it (closes 05.1's residual R-1 for this path).
+ *  - `curate` — anything that ADDS content (create, add an item) — refuses a non-`active` community
+ *    with `{ highlight: 'archived' }`. A `takedown` does not: archiving gates new content, and
+ *    removal must stay possible (the unpin rule).
+ *
+ * Phase 10's creator-scoped publishing extends THIS function with its creator branch; no route or
+ * other service function has to learn what a place is. The table is named through RAW SQL rather
+ * than `@tria/module-communities`'s schema export (MOD-02, the `resolvePinTarget` posture).
+ */
+async function resolveHighlightPlace(
+  tx: Tx,
+  ctx: RequestContext,
+  communityId: string | null,
+  intent: PlaceIntent,
+  gate: PlaceGate,
+): Promise<void> {
+  if (communityId === null) return;
+  if (!gate.communitiesOn) throw new ApiError(404, 'NOT_FOUND');
+
+  const lock = intent === 'read' ? sql`` : sql`for share`;
+  const rows = await tx.execute<{ status: string }>(sql`
+    select c.status
+      from communities c
+     where c.id = ${communityId}::uuid
+       and c.tenant_id = ${ctx.tenantId}::uuid
+       and c.deleted_at is null
+     ${lock}`);
+  const community = rows[0];
+  if (!community) throw new ApiError(404, 'NOT_FOUND');
+  if (intent === 'curate' && community.status !== 'active') {
+    throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'archived' });
+  }
+}
+
+/**
+ * A MEMBER-VISIBLE item (R-D-H), written ONCE: the story is not removed and its asset is `ready`.
+ * The row read's `item_count` and the items read both use this fragment, so the two can never
+ * disagree about what "empty" means (Pitfall 6) — a highlight a member sees in the row always has
+ * something to play. Expects the aliases `s` (stories) and `a` (media_assets).
+ */
+const MEMBER_VISIBLE = sql`s.deleted_at is null and a.status = 'ready'`;
+
+/** One hydrated row of `highlightProjection`, snake_case straight off `tx.execute`. */
+type HighlightSummaryRow = {
+  id: string;
+  community_id: string | null;
+  title: string;
+  position: number;
+  cover_asset_id: string | null;
+  cover_variant_widths: number[] | null;
+  cover_story_id: string | null;
+  cover_chosen: boolean | null;
+  item_count: number;
+};
+
+/**
+ * THE highlight projection — ONE statement over `story_highlights h`, filtered by `where`, wrapped
+ * so the caller can filter and order on the computed columns (`hp.item_count`, `hp.position`).
+ *
+ * `item_count` counts MEMBER-VISIBLE items (see `MEMBER_VISIBLE`).
+ *
+ * The COVER is resolved here, at read time, in rule order (R-D-D) — one lateral that takes the
+ * first rule producing a row:
+ *   1. the uploaded `cover_asset_id`, when it is still a `cover` / `image` / `ready` / not-deleted
+ *      asset;
+ *   2. the chosen `cover_story_id`, when that story is still a member-visible IMAGE item of THIS
+ *      highlight;
+ *   3. the most recently ADDED member-visible image item (`added_at desc, id desc`) — for a
+ *      migrated highlight, the most recently pinned story (D-116);
+ *   4. otherwise none, and the circle draws its brand-gradient fallback.
+ * `cover_chosen` is true exactly when rule 1 or 2 produced the cover. Image items only (D-101,
+ * developer's plan-time decision 2026-09-25): the media broker serves no video poster, so a
+ * highlight whose items are all videos resolves no automatic cover. A later `poster` variant slots
+ * into rules 2 and 3 as one more branch, with no schema change. Read-time resolution means a removed
+ * cover story or a deleted cover asset self-heals with no trigger.
+ */
+function highlightProjection(where: SQL) {
+  return sql`
+    select hp.* from (
+      select h.id,
+             h.community_id,
+             h.title,
+             h.position,
+             h.cover_story_id,
+             cover.asset_id as cover_asset_id,
+             cover.variant_widths as cover_variant_widths,
+             cover.chosen as cover_chosen,
+             (
+               select count(*)::int
+                 from story_highlight_items i
+                 join stories s on s.id = i.story_id
+                 join media_assets a on a.id = s.media_asset_id
+                where i.highlight_id = h.id
+                  and ${MEMBER_VISIBLE}
+             ) as item_count
+        from story_highlights h
+        left join lateral (
+          select c.asset_id, c.variant_widths, c.chosen
+            from (
+              select ca.id as asset_id, ca.variant_widths, true as chosen, 1 as rule
+                from media_assets ca
+               where ca.id = h.cover_asset_id
+                 and ca.purpose = 'cover'
+                 and ca.kind = 'image'
+                 and ca.status = 'ready'
+                 and ca.deleted_at is null
+              union all
+              select a.id, a.variant_widths, true, 2
+                from story_highlight_items i
+                join stories s on s.id = i.story_id
+                join media_assets a on a.id = s.media_asset_id
+               where i.highlight_id = h.id
+                 and i.story_id = h.cover_story_id
+                 and s.media_kind = 'image'
+                 and ${MEMBER_VISIBLE}
+              union all
+              (
+                select a.id, a.variant_widths, false, 3
+                  from story_highlight_items i
+                  join stories s on s.id = i.story_id
+                  join media_assets a on a.id = s.media_asset_id
+                 where i.highlight_id = h.id
+                   and s.media_kind = 'image'
+                   and ${MEMBER_VISIBLE}
+                 order by i.added_at desc, i.id desc
+                 limit 1
+              )
+            ) c
+           order by c.rule
+           limit 1
+        ) cover on true
+       where ${where}
+    ) hp`;
+}
+
+/** Row → published contract. */
+const toHighlight = (row: HighlightSummaryRow): HighlightSummary => ({
+  id: row.id,
+  communityId: row.community_id,
+  title: row.title,
+  position: row.position,
+  coverAssetId: row.cover_asset_id,
+  coverVariantWidths: row.cover_variant_widths ?? [],
+  coverStoryId: row.cover_story_id,
+  coverChosen: row.cover_chosen ?? false,
+  itemCount: row.item_count,
+});
+
+/**
+ * `POST /v1/stories/highlights` — a new highlight at the END of its place's row (R-D-C).
+ *
+ * One `withTenantTx`: the place is resolved for `curate` (archived → `{ highlight: 'archived' }`),
+ * the place's existing rows are locked `for update` so two appends to a populated row serialise, a
+ * place already holding `STORY_HIGHLIGHT_MAX_PER_PLACE` is refused `{ highlight: 'full' }`, and the
+ * insert takes `coalesce(max(position) + 1, 0)`. Two creates racing into an EMPTY place have no row
+ * to lock and may both take position 0; every read orders by `(position, id)`, a total order, so
+ * the row is still stable — and the first reorder renumbers it densely.
+ *
+ * `tenant_id` and `created_by_user_id` come from `ctx`, never the body (the policy's `with check`
+ * turns a forged stamp into 42501). `highlight.created` is emitted after the transaction, ids only.
+ */
+export async function createHighlight(
+  ctx: RequestContext,
+  input: CreateStoryHighlight,
+): Promise<HighlightSummary> {
+  const communityId = input.communityId ?? null;
+  const gate = await readPlaceGate(ctx);
+
+  const created = await withTenantTx(ctx, async (tx) => {
+    await resolveHighlightPlace(tx, ctx, communityId, 'curate', gate);
+
+    const place = await tx.execute<{ id: string }>(sql`
+      select h.id
+        from story_highlights h
+       where h.tenant_id = ${ctx.tenantId}::uuid
+         and ${placePredicate('h', communityId)}
+       for update`);
+    if (place.length >= STORY_HIGHLIGHT_MAX_PER_PLACE) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'full' });
+    }
+
+    const inserted = await tx.execute<{ id: string }>(sql`
+      insert into story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+      select ${ctx.tenantId}::uuid,
+             ${communityId}::uuid,
+             ${input.title},
+             coalesce(max(h.position) + 1, 0),
+             ${ctx.userId}::uuid
+        from story_highlights h
+       where h.tenant_id = ${ctx.tenantId}::uuid
+         and ${placePredicate('h', communityId)}
+      returning id`);
+    const id = inserted[0]?.id;
+    if (!id) throw new ApiError(500, 'INTERNAL');
+
+    const rows = await tx.execute<HighlightSummaryRow>(sql`
+      ${highlightProjection(sql`h.id = ${id}::uuid`)}`);
+    const row = rows[0];
+    if (!row) throw new ApiError(500, 'INTERNAL');
+    return row;
+  });
+
+  emit(ctx, 'highlight.created', {
+    tenantId: ctx.tenantId,
+    highlightId: created.id,
+    communityId,
+    actorUserId: ctx.userId,
+  });
+
+  log.info(
+    {
+      event: 'stories.highlight_created',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      highlightId: created.id,
+      communityId,
+      position: created.position,
+      // The LENGTH, never the words (T-05-29 / T-05.2-07).
+      titleLength: input.title.length,
+    },
+    'story highlight created',
+  );
+
+  return toHighlight(created);
+}
+
+/**
+ * THE ONE statement that writes a highlight item — shared by `addStoryToHighlight` and, from plan
+ * 06, by a publish into a highlight, so a story born in a highlight and a story added later are the
+ * same row by construction.
+ *
+ * It INSERT-SELECTS (T-05-33): both ids are read back from the tables under explicit tenant
+ * predicates and RLS, so a foreign or removed id writes nothing even if a caller skipped resolving
+ * it. `story_highlight_items_uq` is the idempotency arbiter (`on conflict … do nothing`), and
+ * `returning id` tells a created row from an absorbed repeat — the caller announces only the former.
+ */
+export async function insertHighlightItem(
+  tx: Tx,
+  ctx: RequestContext,
+  highlightId: string,
+  storyId: string,
+): Promise<boolean> {
+  const inserted = await tx.execute<{ id: string }>(sql`
+    insert into story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+    select ${ctx.tenantId}::uuid, h.id, s.id, ${ctx.userId}::uuid
+      from story_highlights h, stories s
+     where h.id = ${highlightId}::uuid
+       and h.tenant_id = ${ctx.tenantId}::uuid
+       and s.id = ${storyId}::uuid
+       and s.tenant_id = ${ctx.tenantId}::uuid
+       and s.deleted_at is null
+    on conflict (highlight_id, story_id) do nothing
+    returning id`);
+  return inserted.length > 0;
+}
+
+/** How many highlights a story is in, read back from the ROWS inside the same transaction. */
+async function readHighlightCount(tx: Tx, ctx: RequestContext, storyId: string): Promise<number> {
+  const rows = await tx.execute<{ highlight_count: number }>(sql`
+    select count(*)::int as highlight_count
+      from story_highlight_items
+     where tenant_id = ${ctx.tenantId}::uuid
+       and story_id = ${storyId}::uuid`);
+  return rows[0]?.highlight_count ?? 0;
+}
+
+/**
+ * `PUT /v1/stories/highlights/{highlightId}/stories/{storyId}` — add a story to a highlight.
+ *
+ * The highlight is resolved in-lane `for update` (serialising adds to the same highlight, which is
+ * what makes the `full` count honest), then its place for `curate`, then the story in-lane; every
+ * miss is the bare 404. A highlight already holding `STORY_HIGHLIGHT_MAX_ITEMS` refuses a NEW story
+ * with `{ highlight: 'full' }` — a repeat of a story already in it is still the idempotent 200.
+ *
+ * **No expiry predicate anywhere** (docblock item 6): adding an expired story is the point — the item
+ * row is the override. The STORY row is never written: a highlight is an editorial pointer.
+ * `story.highlighted` is emitted only when a row was really created (transitions, not requests).
+ */
+export async function addStoryToHighlight(
+  ctx: RequestContext,
+  highlightId: string,
+  storyId: string,
+): Promise<HighlightMembershipResult> {
+  const gate = await readPlaceGate(ctx);
+
+  const { highlightCount, created } = await withTenantTx(ctx, async (tx) => {
+    const highlights = await tx.execute<{ community_id: string | null }>(sql`
+      select h.community_id
+        from story_highlights h
+       where h.id = ${highlightId}::uuid
+         and h.tenant_id = ${ctx.tenantId}::uuid
+       for update`);
+    const highlight = highlights[0];
+    if (!highlight) throw new ApiError(404, 'NOT_FOUND');
+
+    await resolveHighlightPlace(tx, ctx, highlight.community_id, 'curate', gate);
+
+    const stories = await tx.execute<{ id: string }>(sql`
+      select s.id
+        from stories s
+       where s.id = ${storyId}::uuid
+         and s.tenant_id = ${ctx.tenantId}::uuid
+         and s.deleted_at is null`);
+    if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
+
+    const held = await tx.execute<{ n: number; present: boolean }>(sql`
+      select count(*)::int as n, coalesce(bool_or(i.story_id = ${storyId}::uuid), false) as present
+        from story_highlight_items i
+       where i.highlight_id = ${highlightId}::uuid
+         and i.tenant_id = ${ctx.tenantId}::uuid`);
+    const counted = held[0];
+    if (counted && !counted.present && counted.n >= STORY_HIGHLIGHT_MAX_ITEMS) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'full' });
+    }
+
+    const created = await insertHighlightItem(tx, ctx, highlightId, storyId);
+    return { highlightCount: await readHighlightCount(tx, ctx, storyId), created };
+  });
+
+  if (created) {
+    emit(ctx, 'story.highlighted', {
+      tenantId: ctx.tenantId,
+      storyId,
+      highlightId,
+      actorUserId: ctx.userId,
+    });
+  }
+
+  log.info(
+    {
+      event: 'stories.highlighted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      highlightId,
+      storyId,
+      created,
+      highlightCount,
+    },
+    'story added to a highlight',
+  );
+
+  return { highlighted: true, highlightCount };
+}
+
+/**
+ * `GET /v1/stories/highlights?communityId=&scope=` — one place's row, in `(position, id)` order.
+ *
+ * ONE statement. A member sees only highlights with at least one MEMBER-VISIBLE item (D-102: an
+ * empty highlight is kept but never shown to members); a `curator` read (the route grants it only
+ * for `scope=all` with `stories.story.manage`) sees every highlight, empty ones with `itemCount: 0`.
+ */
+export async function listHighlights(
+  ctx: RequestContext,
+  options: { communityId: string | null; curator: boolean },
+): Promise<HighlightList> {
+  const { communityId, curator } = options;
+  const gate = await readPlaceGate(ctx);
+
+  const rows = await withTenantTx(ctx, async (tx) => {
+    await resolveHighlightPlace(tx, ctx, communityId, 'read', gate);
+    return tx.execute<HighlightSummaryRow>(sql`
+      ${highlightProjection(
+        sql`h.tenant_id = ${ctx.tenantId}::uuid and ${placePredicate('h', communityId)}`,
+      )}
+       where (${curator} or hp.item_count > 0)
+       order by hp.position, hp.id`);
+  });
+
+  log.info(
+    {
+      event: 'stories.highlights_listed',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      communityId,
+      curator,
+      returned: rows.length,
+    },
+    'story highlights listed',
+  );
+
+  return { items: rows.map(toHighlight) };
+}
+
+/**
+ * `GET /v1/stories/highlights/{highlightId}` — the highlight and its stories.
+ *
+ * **READ THE `where` CLAUSE FOR WHAT IS NOT IN IT.** There is no expiry predicate: the item row IS
+ * the override (docblock item 6), so an expired story plays from its highlight for every value of
+ * `now()`, carrying its server-computed `isActive: false`. What IS there: `s.deleted_at is null`
+ * (a removed story leaves every surface at once), and for a member `a.status = 'ready'` through the
+ * shared `MEMBER_VISIBLE` fragment. A curator (`stories.story.manage`) sees every live item with its
+ * `mediaStatus`, so the edit sheet can show a processing video.
+ *
+ * Stories come back OLDEST first by PUBLISH time (D-103), never by when they were added, `limit`ed
+ * to `STORY_HIGHLIGHT_MAX_ITEMS`. A member asking for a highlight with zero member-visible items
+ * gets the bare 404 an unknown id gets — an empty highlight is the curator's, not theirs (D-102).
+ */
+export async function getHighlight(
+  ctx: RequestContext,
+  highlightId: string,
+  options: { curator: boolean },
+): Promise<HighlightDetail> {
+  const { curator } = options;
+  const gate = await readPlaceGate(ctx);
+
+  const detail = await withTenantTx(ctx, async (tx) => {
+    const highlights = await tx.execute<HighlightSummaryRow>(sql`
+      ${highlightProjection(
+        sql`h.id = ${highlightId}::uuid and h.tenant_id = ${ctx.tenantId}::uuid`,
+      )}`);
+    const highlight = highlights[0];
+    if (!highlight) throw new ApiError(404, 'NOT_FOUND');
+
+    await resolveHighlightPlace(tx, ctx, highlight.community_id, 'read', gate);
+    if (!curator && highlight.item_count === 0) throw new ApiError(404, 'NOT_FOUND');
+
+    const visible = curator ? sql`s.deleted_at is null` : MEMBER_VISIBLE;
+    const items = await tx.execute<StoryRow>(sql`
+      ${storyProjection(ctx.userId)}
+      join story_highlight_items i
+        on i.story_id = s.id
+       and i.tenant_id = s.tenant_id
+       where i.highlight_id = ${highlightId}::uuid
+         and i.tenant_id = ${ctx.tenantId}::uuid
+         and ${visible}
+       order by s.published_at, s.id
+       limit ${STORY_HIGHLIGHT_MAX_ITEMS}`);
+
+    return { highlight, items };
+  });
+
+  log.info(
+    {
+      event: 'stories.highlight_read',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      highlightId,
+      curator,
+      returned: detail.items.length,
+    },
+    'story highlight read',
+  );
+
+  return { highlight: toHighlight(detail.highlight), items: detail.items.map(toStory) };
 }

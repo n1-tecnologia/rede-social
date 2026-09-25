@@ -211,6 +211,13 @@
       "when": 1790216767203,
       "tag": "20260924022607_story_community_pins",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1790363516254,
+      "tag": "20260925191156_story_highlights",
+      "breakpoints": true
     }
   ]
 }

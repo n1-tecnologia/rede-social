@@ -6,7 +6,14 @@ import { requireModule } from '@tria/core/server/modules/require-module';
 import { permissionsForRequest, requirePermission } from '@tria/core/server/rbac/permissions';
 import {
   createStoryCommentSchema,
+  createStoryHighlightSchema,
+  highlightDetailSchema,
+  highlightListQuerySchema,
+  highlightListSchema,
+  highlightMembershipResultSchema,
+  highlightSummarySchema,
   publishStorySchema,
+  STORY_HIGHLIGHT_ISSUE_SET,
   STORY_ISSUE_SET,
   storyCommentPageSchema,
   storyCommentSchema,
@@ -20,13 +27,17 @@ import {
   storySummarySchema,
 } from '../contracts/index';
 import {
+  addStoryToHighlight,
+  createHighlight,
   createStoryComment,
   deleteStory,
   deleteStoryComment,
+  getHighlight,
   getStory,
   likeStory,
   listActiveStories,
   listCommunityHighlights,
+  listHighlights,
   listOwnStories,
   listStoryComments,
   listStoryPins,
@@ -56,10 +67,18 @@ import {
  * carries the MACHINE CODE as its issue `message` (there is nowhere else on a Zod issue to put one),
  * so the web switches on the same closed vocabulary the service uses when it refuses the same shape
  * — one code per rule, whichever layer caught it.
+ *
+ * 05.2: a highlight title's refusal rides the same way — `storyHighlightTitleSchema`'s issue message
+ * IS `title_invalid`, lifted here to `details.highlight`, the key the service's own refusals
+ * (`archived`, `full`) use, so the web has one switch over `STORY_HIGHLIGHT_ISSUES`.
  */
 const stories = new OpenAPIHono<AppEnv>({
   defaultHook: (result) => {
     if (!result.success) {
+      const highlight = result.error.issues
+        .map((issue) => issue.message)
+        .find((message) => STORY_HIGHLIGHT_ISSUE_SET.has(message));
+      if (highlight) throw new ApiError(400, 'VALIDATION_FAILED', { highlight });
       const story = result.error.issues
         .map((issue) => issue.message)
         .find((message) => STORY_ISSUE_SET.has(message));
@@ -128,6 +147,119 @@ const highlightsRoute = createRoute({
       description:
         "One keyset page of the community's PINNED stories, newest pin first — EXPIRED ones included. The query carries no expiry predicate at all: the pin row IS the override (STORY-04). A community with no pins answers an empty `items` and a null `nextCursor`, never a 404.",
       content: { 'application/json': { schema: storyPageSchema } },
+    },
+  },
+});
+
+/* ── Highlights (05.2, HIGHLIGHT-01/02, D-100..D-103) ─────────────────────────────────────────── */
+
+/**
+ * ALL FOUR are declared BEFORE `/{storyId}` so the literal `highlights` segment wins the match: it is
+ * not a uuid, so the param route would 400 on it rather than falling through.
+ *
+ * The two READS carry no permission — every member of the tenant sees a place's highlights, exactly
+ * as they see its stories — while the two WRITES carry the manage-permission middleware, spelled
+ * out as a literal at each call site because it is the one string a reviewer greps for when asking
+ * "what guards curating highlights?". Phase 10's creator-scoped curation swaps these guards for an
+ * in-handler check; the place rules themselves already live in ONE service seam
+ * (`resolveHighlightPlace`).
+ *
+ * The reads compute `curator` from `permissionsForRequest(ctx)`, the publish handler's seam: the
+ * service never compares roles or permissions, it only honours the flag the route computed.
+ *
+ * Every miss — unknown, another tenant's, a removed community, the `communities` module off, and
+ * for a member an EMPTY highlight — is ONE bare 404 with no `details` (D-23). The only 400 codes are
+ * the closed `details.highlight` vocabulary.
+ */
+const highlightIdParam = z.object({ highlightId: z.uuid() });
+
+const listHighlightsRoute = createRoute({
+  method: 'get',
+  path: '/highlights',
+  request: { query: highlightListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One place's highlight row — Início when `communityId` is absent — in `position` order (ties by id, a total order). A member sees only highlights with at least one member-visible story (not removed, media `ready`); EMPTY highlights are curator-only and appear only under `scope=all`, with `itemCount: 0`. The cover is resolved by the server at read time: uploaded image, else the chosen story's image, else the most recently added image story, else null (the brand fallback).",
+      content: { 'application/json': { schema: highlightListSchema } },
+    },
+    403: {
+      description:
+        '`scope=all` was asked for by a caller without `stories.story.manage` — the flag cannot widen a member’s read.',
+    },
+    404: {
+      description:
+        'The named community is unknown, another tenant’s, removed, or the `communities` module is off. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const getHighlightRoute = createRoute({
+  method: 'get',
+  path: '/highlights/{highlightId}',
+  request: { params: highlightIdParam },
+  responses: {
+    200: {
+      description:
+        'The highlight and its stories, OLDEST first by publish time (D-103), at most 100. The items read carries NO expiry predicate: the item row is the override, so an expired story plays from its highlight with `isActive: false`. A member gets member-visible stories only; a curator gets every live story with its `mediaStatus`.',
+      content: { 'application/json': { schema: highlightDetailSchema } },
+    },
+    404: {
+      description:
+        'No highlight with that id is visible to this tenant — unknown, another tenant’s, in a removed community — or, for a member, it holds no member-visible story (an empty highlight is the curator’s). One bare code, no details (D-23, D-102).',
+    },
+  },
+});
+
+const createHighlightRoute = createRoute({
+  method: 'post',
+  path: '/highlights',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: {
+    body: {
+      content: { 'application/json': { schema: createStoryHighlightSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    201: {
+      description:
+        'The created highlight, appended to the END of its place’s row (Início when `communityId` is absent), with `itemCount: 0` until a story is added.',
+      content: { 'application/json': { schema: highlightSummarySchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.highlight` carrying exactly one machine code: `title_invalid` (empty after trimming, or longer than 15), `archived` (the community is archived and takes no new content) or `full` (the place already holds 50 highlights). Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    404: {
+      description:
+        'The named community is unknown, another tenant’s, removed, or the `communities` module is off. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const addHighlightItemRoute = createRoute({
+  method: 'put',
+  path: '/highlights/{highlightId}/stories/{storyId}',
+  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
+  middleware: [requirePermission('stories.story.manage')] as const,
+  request: { params: highlightIdParam.extend({ storyId: z.uuid() }) },
+  responses: {
+    200: {
+      description:
+        'The story is in the highlight. `highlightCount` is how many highlights the STORY is in, read back from the rows in the same transaction. Idempotent: a repeat returns the identical body, creates no second row and never answers 409. An EXPIRED story is accepted — keeping it is the point. The story row itself is never changed.',
+      content: { 'application/json': { schema: highlightMembershipResultSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED` with `details.highlight` = `archived` (the highlight's community is archived) or `full` (the highlight already holds 100 stories).",
+    },
+    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
+    404: {
+      description:
+        'The highlight or the story is unknown, another tenant’s, or removed — ONE bare code for all of them, no details (D-23).',
     },
   },
 });
@@ -401,6 +533,32 @@ export const storiesRoutes = stories
   .openapi(highlightsRoute, async (c) => {
     const { communityId, ...query } = c.req.valid('query');
     return c.json(await listCommunityHighlights(c.get('ctx'), communityId, query), 200);
+  })
+  .openapi(listHighlightsRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { communityId, scope } = c.req.valid('query');
+    const granted = await permissionsForRequest(ctx);
+    const curator = granted.includes('stories.story.manage');
+    // `scope=all` is the curator's read (empty highlights included); it cannot widen a member's.
+    if (scope === 'all' && !curator) throw new ApiError(403, 'FORBIDDEN');
+    return c.json(
+      await listHighlights(ctx, { communityId: communityId ?? null, curator: scope === 'all' }),
+      200,
+    );
+  })
+  .openapi(getHighlightRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { highlightId } = c.req.valid('param');
+    const granted = await permissionsForRequest(ctx);
+    const curator = granted.includes('stories.story.manage');
+    return c.json(await getHighlight(ctx, highlightId, { curator }), 200);
+  })
+  .openapi(createHighlightRoute, async (c) =>
+    c.json(await createHighlight(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(addHighlightItemRoute, async (c) => {
+    const { highlightId, storyId } = c.req.valid('param');
+    return c.json(await addStoryToHighlight(c.get('ctx'), highlightId, storyId), 200);
   })
   .openapi(listRoute, async (c) =>
     c.json(await listActiveStories(c.get('ctx'), c.req.valid('query')), 200),
