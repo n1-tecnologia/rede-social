@@ -1,0 +1,1632 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRIA — Fase 05.2 · Destaques de stories (mockup estático para revisão do time de design)</title>
+<style>
+/* =====================================================================================
+   0. NENHUM ASSET EXTERNO. Um arquivo, zero rede: nenhuma fonte remota, nenhum script
+      remoto, nenhuma folha de estilo remota, nenhum quadro incorporado. O arquivo abre
+      offline e pode ser enviado por e-mail ao time de design como está. Manrope renderiza
+      se estiver instalada na máquina (`local()` abaixo); sem ela o fallback do sistema
+      renderiza com as MESMAS medidas de tipo.
+
+   1. TOKENS — packages/ui/src/styles/tokens.css copiado verbatim (mesmos nomes, mesmos
+      valores, mesmas camadas), incluindo --theme-border-secondary (o anel tracejado),
+      --brand-on-primary e a derivação de --brand-gradient (o monograma).
+      A Fase 05.2 NÃO acrescenta nenhum token, nenhuma medida de espaçamento, nenhum
+      tamanho de tipo e nenhum peso. Um valor que pareça novo é defeito do desenho.
+   ===================================================================================== */
+@font-face { font-family: "Manrope"; src: local("Manrope"), local("Manrope Regular"); font-weight: 400; }
+@font-face { font-family: "Manrope"; src: local("Manrope Bold"), local("Manrope-Bold"); font-weight: 700; }
+
+:root, [data-theme="light"] {
+  --theme-bg: #f5f7fb;
+  --theme-bg-secondary: #ffffff;
+  --theme-bg-tertiary: #e9eef7;
+  --theme-bg-input: #eef2f9;
+  --theme-bg-hover: rgba(31, 58, 95, 0.04);
+  --theme-bg-active: rgba(31, 58, 95, 0.08);
+  --theme-text: #16233b;
+  --theme-text-secondary: #51617c;
+  --theme-text-tertiary: #8595ad;
+  --theme-text-inverse: #ffffff;
+  --theme-border: rgba(22, 35, 59, 0.1);
+  --theme-border-secondary: rgba(22, 35, 59, 0.16);
+  --theme-divider: rgba(22, 35, 59, 0.06);
+  --theme-card: #ffffff;
+  --theme-card-hover: #f8fafd;
+  --theme-overlay: rgba(10, 18, 32, 0.4);
+  --theme-handle: #c3cede;
+  --theme-glass-bar: rgba(255, 255, 255, 0.82);
+  --theme-chip: rgba(22, 35, 59, 0.06);
+  --color-like: #ef4444;
+}
+:root {
+  --brand-primary: #2e6fd0;
+  --brand-secondary: #5b9cf8;
+  --brand-on-primary: #ffffff;
+  --brand-primary-dark: #5b9cf8;
+  --brand-on-primary-dark: #0f1118;
+  --color-success: #16a34a;
+  --color-danger: #ef4444;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
+  --safe-top: 12px;
+  --safe-bottom: 8px;
+  --nav-height: 64px;
+}
+[data-theme="dark"] {
+  --theme-bg: #0f1118;
+  --theme-bg-secondary: #181c26;
+  --theme-bg-tertiary: #232937;
+  --theme-bg-input: #232937;
+  --theme-bg-hover: rgba(255, 255, 255, 0.06);
+  --theme-bg-active: rgba(255, 255, 255, 0.1);
+  --theme-text: #f2f5fa;
+  --theme-text-secondary: #a6b1c4;
+  --theme-text-tertiary: #64718a;
+  --theme-text-inverse: #0f1118;
+  --theme-border: rgba(255, 255, 255, 0.08);
+  --theme-border-secondary: rgba(255, 255, 255, 0.12);
+  --theme-divider: rgba(255, 255, 255, 0.05);
+  --theme-card: #181c26;
+  --theme-card-hover: #232937;
+  --theme-overlay: rgba(0, 0, 0, 0.7);
+  --theme-handle: #3c4658;
+  --theme-glass-bar: rgba(24, 28, 38, 0.82);
+  --theme-chip: rgba(255, 255, 255, 0.1);
+  --color-like: #ef4444;
+}
+* {
+  --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  /* o token que UI-D-60/UI-D-62 consomem: o monograma do tenant sem logo e do destaque sem capa */
+  --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+}
+[data-theme="dark"], [data-theme="dark"] * {
+  --brand-accent: var(--brand-primary-dark);
+  --brand-on-accent: var(--brand-on-primary-dark);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
+}
+
+/* =====================================================================================
+   2. BASE + CHROME DO MOCKUP — fora do produto
+   ===================================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { font-family: Manrope, system-ui, -apple-system, sans-serif; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--theme-bg); color: var(--theme-text); font-size: 14px; line-height: 1.5; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.i-16 { width: 16px !important; height: 16px !important; } .i-18 { width: 18px !important; height: 18px !important; } .i-20 { width: 20px !important; height: 20px !important; }
+.i-28 { width: 28px !important; height: 28px !important; } .i-40 { width: 40px !important; height: 40px !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+.toolbar { position: sticky; top: 0; z-index: 200; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 24px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); }
+.toolbar .brandname { font-weight: 700; letter-spacing: -0.02em; font-size: 16px; }
+.toolbar .brandname small { font-weight: 400; color: var(--theme-text-secondary); margin-left: 8px; font-size: 12px; }
+.toolbar label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--theme-text-secondary); }
+.toolbar input[type="color"] { width: 32px; height: 32px; padding: 0; border: 1px solid var(--theme-border); border-radius: 8px; background: none; }
+.toolbar .preset, .toolbar .toggle { height: 32px; padding: 0 12px; border-radius: 999px; background: var(--theme-bg-input); font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.toolbar .toggle { background: var(--theme-bg-tertiary); color: var(--theme-text); }
+.toolbar .preset:hover { background: var(--theme-bg-tertiary); }
+.toolbar nav { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; width: 100%; }
+.toolbar nav a { color: var(--theme-text-tertiary); } .toolbar nav a:hover { color: var(--brand-accent); }
+.readout { font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+
+main.sheet { max-width: 1400px; margin: 0 auto; padding: 24px 24px 120px; }
+section.screen { padding: 40px 0; border-bottom: 1px solid var(--theme-divider); }
+section.screen > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+section.screen > header h2 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+section.screen > header code { font-size: 12px; color: var(--theme-text-tertiary); background: var(--theme-bg-input); padding: 2px 8px; border-radius: 6px; }
+section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(--theme-text-secondary); max-width: 1000px; }
+.frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.frame-wrap { display: flex; flex-direction: column; gap: 8px; }
+.frame-label { font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); max-width: 390px; }
+.frame-label code { font-weight: 400; color: var(--theme-text-tertiary); }
+.caption { font-size: 12px; color: var(--theme-text-tertiary); margin: 0; max-width: 390px; }
+.note { font-size: 12px; color: var(--theme-text-secondary); margin: 12px 0 0; max-width: 1000px; }
+.stack { display: flex; flex-direction: column; }
+
+/* =====================================================================================
+   3. MOLDURAS — telefone 390px, telefone estreito 320px, coluna desktop de 680px
+   ===================================================================================== */
+.phone { width: 390px; height: 800px; border: 1px solid var(--theme-border-secondary); border-radius: 40px; overflow: hidden; background: var(--theme-bg); position: relative; flex: none; display: flex; flex-direction: column; }
+.phone.narrow { width: 320px; }
+.phone.short { height: 560px; }
+.phone .body { flex: 1; overflow: auto; }
+.phone .bottomnav { position: absolute; left: 14px; width: calc(100% - 28px); bottom: calc(var(--safe-bottom) + 8px); border-radius: 999px; padding: 4px 6px; display: flex; z-index: 50; background: var(--theme-glass-bar); border: 1px solid var(--theme-border-secondary); box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16); backdrop-filter: blur(2px) saturate(1.5); }
+.bottomnav a { flex: 1; display: grid; place-items: center; padding: 6px 0; }
+.bottomnav .chip { width: 50px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.bottomnav a[aria-current="page"] .chip { background: var(--theme-chip); color: var(--brand-accent); }
+.desk { width: 100%; max-width: 900px; min-height: 360px; border: 1px solid var(--theme-border-secondary); border-radius: 16px; background: var(--theme-bg); padding: 24px; display: flex; justify-content: center; }
+.desk > .column { width: 100%; max-width: 680px; }
+
+/* PageHeader stickyTop="0px" */
+.page-header { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 4px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); min-width: 0; }
+.page-header h1 { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* =====================================================================================
+   4. PRIMITIVAS @tria/ui — mesmas medidas, escritas em CSS puro
+   ===================================================================================== */
+.icon-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--theme-text); flex: none; }
+.icon-btn:hover { background: var(--theme-bg-hover); }
+.icon-btn.tertiary { color: var(--theme-text-tertiary); }
+.icon-btn.secondary { color: var(--theme-text-secondary); }
+.icon-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.btn { height: 44px; padding: 0 20px; border-radius: 12px; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn.full { width: 100%; }
+.btn.brand { background: var(--brand-accent); color: var(--brand-on-accent); }
+.btn.brand:hover { background: var(--brand-primary-hover); }
+.btn.outline { border: 1px solid var(--theme-border-secondary); color: var(--theme-text); }
+.btn.ghost { color: var(--theme-text-secondary); }
+.btn.ghost.danger { color: var(--color-danger); }
+.btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.btn[aria-busy="true"] { opacity: 0.75; }
+.card { background: var(--theme-card); border-radius: 12px; box-shadow: 0 1px 3px rgba(22, 35, 59, 0.06); overflow: hidden; }
+[data-theme="dark"] .card { border: 1px solid var(--theme-border); }
+.avatar { width: 32px; height: 32px; border-radius: 999px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.t12 { font-size: 12px; } .t12b { font-size: 12px; font-weight: 700; }
+.t14 { font-size: 14px; } .t14b { font-size: 14px; font-weight: 700; }
+.t16 { font-size: 16px; } .t16b { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.t24b { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.sec { color: var(--theme-text-secondary); } .ter { color: var(--theme-text-tertiary); } .dgr { color: var(--color-danger); }
+.num { font-variant-numeric: tabular-nums; }
+.trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.section-title { font-size: 12px; font-weight: 700; color: var(--brand-accent); letter-spacing: 0.04em; text-transform: uppercase; padding: 16px 16px 8px; }
+.pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--theme-chip); color: var(--theme-text-secondary); flex: none; }
+.pill.warning { background: color-mix(in oklch, var(--color-warning), transparent 88%); color: var(--color-warning); }
+.pill.danger { background: color-mix(in oklch, var(--color-danger), transparent 88%); color: var(--color-danger); }
+.rule { height: 1px; background: var(--theme-border); }
+.skel { background: var(--theme-bg-tertiary); border-radius: 12px; }
+.empty { padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.empty.plain { padding: 24px 8px; }
+.empty .circle { width: 64px; height: 64px; border-radius: 999px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; }
+.empty p { margin: 0; max-width: 280px; font-size: 14px; color: var(--theme-text-secondary); }
+.empty h3 { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.2; }
+.input { width: 100%; background: var(--theme-bg-input); border: 1px solid var(--theme-border); border-radius: 12px; padding: 12px 14px; font-size: 16px; line-height: 1.5; color: var(--theme-text); }
+.input::placeholder { color: var(--theme-text-tertiary); }
+.input.focused { border-color: var(--brand-accent); box-shadow: 0 0 0 2px var(--brand-primary-soft); }
+.input.error { border-color: var(--color-danger); }
+.field-label { font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); margin-bottom: 8px; display: block; }
+.counter { margin-top: 6px; text-align: right; font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+.field-error { margin-top: 6px; font-size: 12px; color: var(--color-danger); }
+.progress { height: 4px; border-radius: 999px; background: var(--theme-bg-tertiary); overflow: hidden; }
+.progress > i { display: block; height: 100%; background: var(--brand-accent); }
+.scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 70; }
+.scrim.over-viewer { z-index: 95; }
+/* BottomSheet — teto de 80% da altura da tela, rola por dentro */
+.bsheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 80; background: var(--theme-bg-secondary); border-radius: 16px 16px 0 0; padding: 8px 0 calc(var(--safe-bottom) + 16px); max-height: 80%; overflow: auto; }
+.bsheet.over-viewer { z-index: 96; }
+.bsheet .handle { width: 40px; height: 4px; border-radius: 999px; background: var(--theme-handle); margin: 4px auto 8px; }
+.bsheet .sheet-head { display: flex; align-items: center; gap: 4px; padding: 0 16px; min-height: 44px; }
+.bsheet .sheet-head h3 { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 700; line-height: 1.2; }
+.bsheet .sheet-head .back { margin-left: -12px; }
+.bsheet .helper { margin: 4px 0 0; padding: 0 16px; font-size: 12px; color: var(--theme-text-tertiary); }
+.bsheet .sheet-body { padding: 0 8px; }
+.bsheet .sheet-body.padded { padding: 16px; display: flex; flex-direction: column; gap: 24px; }
+.dialog { width: 320px; background: var(--theme-bg-secondary); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 24px 48px rgba(15, 23, 42, 0.24); }
+[data-theme="dark"] .dialog { border: 1px solid var(--theme-border); }
+.dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
+.switch { width: 44px; height: 26px; border-radius: 999px; background: var(--theme-bg-tertiary); position: relative; flex: none; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 999px; background: #ffffff; box-shadow: 0 1px 3px rgba(22, 35, 59, 0.24); }
+.switch[aria-checked="true"] { background: var(--brand-accent); }
+.switch[aria-checked="true"]::after { transform: translateX(18px); }
+.switch[aria-disabled="true"] { opacity: 0.5; }
+.toast { position: absolute; left: 16px; right: 16px; bottom: calc(var(--safe-bottom) + 88px); z-index: 60; background: var(--theme-text); color: var(--theme-text-inverse); border-radius: 12px; padding: 12px 14px; font-size: 14px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.24); }
+.focus-ring { outline: 2px solid var(--brand-accent); outline-offset: 2px; }
+
+/* =====================================================================================
+   5. SUPERFÍCIES 1 e 2 — a fileira de círculos (StoriesStrip + StoryCircle) · UI-D-59..UI-D-64
+      Geometria da fileira: flex gap-4 overflow-x-auto overscroll-x-contain px-4 py-3 scrollbar-none
+      Círculo: disco 64×64 dentro de um anel border-2 com inset p-0.5; rótulo 12/400 terciário max-w-16 truncate
+   ===================================================================================== */
+.strip { display: flex; gap: 16px; padding: 12px 16px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.strip::-webkit-scrollbar { display: none; }
+.strip-item { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+/* anel sólido da marca = item 11 da lista reservada, agora condicionado a "há story não visto" (UI-D-61) */
+.ring { padding: 2px; border-radius: 999px; border: 2px solid var(--brand-accent); display: block; }
+/* anel neutro = tenant já visto + TODO destaque (UI-D-61) */
+.ring.neutral { border-color: var(--theme-border); }
+/* anel tracejado = "só você vê" (UI-D-63): border-2 border-dashed border-border-secondary */
+.ring.dashed { border-style: dashed; border-color: var(--theme-border-secondary); }
+.disc { width: 64px; height: 64px; border-radius: 999px; overflow: hidden; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; position: relative; }
+/* UI-D-60 — logo do tenant: bg-bg-secondary, <img> object-contain dentro de uma caixa centrada de 48×48 (8px de respiro) */
+.disc.logo { background: var(--theme-bg-secondary); }
+.disc.logo .logo-box { width: 48px; height: 48px; display: grid; place-items: center; }
+.disc.logo .logo-box svg { width: 48px; height: 48px; }
+/* UI-D-60 / UI-D-62 — monograma: --brand-gradient + inicial 16/700 --brand-on-primary maiúscula */
+.mono { background: var(--brand-gradient); color: var(--brand-on-primary); font-weight: 700; text-transform: uppercase; }
+.disc.mono { font-size: 16px; }
+/* UI-D-63 — círculo de gerenciar: disco bg-bg-tertiary + Pencil 20 text-text-secondary */
+.disc.glyph { background: var(--theme-bg-tertiary); color: var(--theme-text-secondary); }
+/* capa de destaque (placeholder de MediaImage object-cover) */
+.disc.cover { background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); }
+.strip-item .label { font-size: 12px; color: var(--theme-text-tertiary); max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.own-badge { position: absolute; bottom: 0; right: 0; width: 24px; height: 24px; border-radius: 999px; background: var(--brand-accent); color: var(--brand-on-accent); display: grid; place-items: center; border: 2px solid var(--theme-bg); }
+.own-wrap { position: relative; display: block; }
+.anno { font-size: 12px; color: var(--theme-text-tertiary); padding: 8px 16px 0; margin: 0; }
+.anno strong { color: var(--theme-text-secondary); }
+.legend { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 16px; font-size: 12px; color: var(--theme-text-secondary); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend .sw { width: 20px; height: 20px; border-radius: 999px; border: 2px solid var(--brand-accent); }
+.legend .sw.neutral { border-color: var(--theme-border); }
+.legend .sw.dashed { border-style: dashed; border-color: var(--theme-border-secondary); }
+
+/* =====================================================================================
+   6. SUPERFÍCIE 3 — tela de gerenciar (HighlightManageList) · UI-D-72, UI-D-73, UI-D-80
+   ===================================================================================== */
+.manage-body { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
+.mlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.mrow { display: flex; align-items: center; gap: 12px; min-height: 64px; border-radius: 12px; background: var(--theme-bg-secondary); padding: 8px; position: relative; }
+[data-theme="dark"] .mrow { border: 1px solid var(--theme-border); }
+.mrow.lifted { box-shadow: 0 8px 24px rgba(22, 35, 59, 0.16); z-index: 10; }
+.mrow .handle { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--theme-text-tertiary); flex: none; touch-action: none; }
+.cover48 { width: 48px; height: 48px; border-radius: 999px; overflow: hidden; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.cover48.mono { font-size: 16px; }
+.mrow .mbody { min-width: 0; flex: 1; text-align: left; display: flex; flex-direction: column; }
+.archived-note { font-size: 14px; color: var(--theme-text-secondary); margin: 0; }
+
+/* =====================================================================================
+   7. SUPERFÍCIE 4 — folha de editar (HighlightEditSheet) · UI-D-74..UI-D-76
+   ===================================================================================== */
+.edit-cover { display: flex; align-items: center; gap: 16px; }
+.pos-row { display: flex; align-items: center; gap: 4px; }
+.pos-row .t14 { flex: 1; }
+.srow { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 4px 0; }
+.srow .thumb { width: 32px; height: 48px; border-radius: 6px; overflow: hidden; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.srow .sbody { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.srow .smeta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.danger-row { display: flex; align-items: center; gap: 8px; height: 44px; color: var(--color-danger); font-size: 14px; font-weight: 700; }
+.cover-grid { display: flex; flex-wrap: wrap; gap: 16px; }
+.cover-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 68px; position: relative; }
+.cover-tile .progress { width: 64px; margin-top: 4px; }
+.sel-badge { position: absolute; bottom: 0; right: 0; width: 24px; height: 24px; border-radius: 999px; background: var(--brand-accent); color: var(--brand-on-accent); display: grid; place-items: center; border: 2px solid var(--theme-bg-secondary); }
+
+/* =====================================================================================
+   8. SUPERFÍCIE 5 — folha de destaques (HighlightSheet) · UI-D-67 (lista) · UI-D-68 (seleção única)
+      Linha: min-h-11 gap-3 px-2 py-2 (a geometria do CommunityPickerSheet, restabelecida aqui)
+   ===================================================================================== */
+.group-label { font-size: 12px; font-weight: 700; color: var(--theme-text-tertiary); padding: 16px 8px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hrow { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px; text-align: left; border-radius: 12px; }
+button.hrow:hover { background: var(--theme-bg-hover); }
+.thumb32 { width: 32px; height: 32px; border-radius: 999px; overflow: hidden; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.thumb32.mono { font-size: 12px; }
+.thumb32.dashed { background: transparent; border: 2px dashed var(--theme-border-secondary); color: var(--theme-text-secondary); }
+.hrow .htitle { min-width: 0; flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hrow .check { color: var(--brand-accent); }
+
+/* =====================================================================================
+   9. SUPERFÍCIES 6 e 7 — quadros pretos: composer pós-escolha e visualizador · UI-D-65, UI-D-66, UI-D-69..UI-D-71
+   ===================================================================================== */
+.black { position: absolute; inset: 0; background: #000000; overflow: hidden; }
+.black .media { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255, 255, 255, 0.35); }
+.black .media .frame { width: 78%; aspect-ratio: 9 / 16; background: #1b1f2b; display: grid; place-items: center; }
+.veil { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,0.5), transparent 22%, transparent 52%, rgba(0,0,0,0.72)); }
+.bars { position: absolute; left: 0; right: 0; z-index: 3; display: flex; gap: 4px; padding: 0 8px; top: calc(var(--safe-top) + 8px); }
+.bars > span { height: 2px; flex: 1; border-radius: 999px; background: rgba(255, 255, 255, 0.35); overflow: hidden; }
+.bars > span > i { display: block; height: 100%; background: #ffffff; }
+.vhead { position: absolute; left: 0; right: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 0 16px; top: calc(var(--safe-top) + 24px); color: #ffffff; }
+.vhead .who { min-width: 0; flex: 1; }
+.vhead .vavatar { width: 32px; height: 32px; border-radius: 999px; overflow: hidden; display: grid; place-items: center; flex: none; }
+.vhead .vavatar.logo { background: var(--theme-bg-secondary); }
+.vhead .vavatar.logo svg { width: 24px; height: 24px; }
+.vhead .vavatar.cover { background: rgba(255, 255, 255, 0.2); color: #ffffff; }
+.vhead .vavatar.mono { font-size: 12px; }
+.v-icon { width: 44px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: #ffffff; flex: none; }
+.v-icon.scrim { background: rgba(0, 0, 0, 0.35); }
+.vbottom { position: absolute; left: 0; right: 0; z-index: 3; padding: 0 16px; bottom: calc(var(--safe-bottom) + 12px); color: #ffffff; }
+.vcap { font-size: 16px; line-height: 1.5; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 0; }
+.vacts { display: flex; align-items: center; gap: 4px; margin-left: -10px; margin-top: 8px; }
+.vacts .cnt { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 12px; }
+/* UI-D-66 — "Destacar": inline-flex h-11 items-center gap-2 rounded-full bg-black/35 px-4 text-sm font-bold text-white, ml-auto */
+.v-pill { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 44px; border-radius: 999px; background: rgba(0, 0, 0, 0.35); padding: 0 16px; font-size: 14px; font-weight: 700; color: #ffffff; flex: none; }
+.vcenter { position: absolute; z-index: 4; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #ffffff; padding: 0 32px; text-align: center; }
+.vcenter a { font-size: 14px; font-weight: 700; text-decoration: underline; }
+.spin { color: rgba(255, 255, 255, 0.7); animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+/* composer pós-escolha: bloco de baixo = linha "Destaque" → legenda + "Publicar" */
+.composer-bottom { position: absolute; left: 0; right: 0; bottom: calc(var(--safe-bottom) + 12px); z-index: 3; padding: 0 16px; display: flex; flex-direction: column; gap: 12px; }
+/* UI-D-69 — flex min-h-11 w-full items-center gap-2 rounded-xl bg-black/45 px-3 py-2 */
+.dest-row { display: flex; align-items: center; gap: 8px; min-height: 44px; width: 100%; border-radius: 12px; background: rgba(0, 0, 0, 0.45); padding: 8px 12px; text-align: left; color: #ffffff; }
+.dest-row .dl { font-size: 14px; color: rgba(255, 255, 255, 0.7); flex: none; }
+.dest-row .dv { font-size: 14px; font-weight: 700; color: #ffffff; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dest-row .dc { color: rgba(255, 255, 255, 0.7); flex: none; }
+.cap-line { display: flex; align-items: flex-end; gap: 12px; }
+.cap-line textarea { flex: 1; min-width: 0; background: transparent; border: 0; resize: none; color: #ffffff; font-size: 16px; line-height: 1.5; min-height: 48px; outline: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.cap-line textarea::placeholder { color: rgba(255, 255, 255, 0.6); }
+.alert-card { position: absolute; z-index: 4; left: 16px; right: 16px; top: calc(var(--safe-top) + 64px); background: var(--color-danger); color: #ffffff; border-radius: 12px; padding: 12px 14px; font-size: 14px; display: flex; gap: 10px; align-items: flex-start; }
+.hist-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; text-align: left; }
+.hist-row .thumb { width: 48px; height: 64px; border-radius: 8px; overflow: hidden; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; flex: none; }
+.hist-row .hbody { min-width: 0; flex: 1; }
+.hist-row .hlmeta { display: inline-flex; align-items: center; gap: 4px; color: var(--theme-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+.menu-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; font-size: 14px; text-align: left; min-height: 44px; }
+.menu-row.danger { color: var(--color-danger); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 5.7a5 5 0 0 0-7 0l-.9.9-.9-.9a5 5 0 0 0-7 7l8 8 8-8a5 5 0 0 0 0-7Z"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 20.5l1.6-4.8A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5Z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-chev-u" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.2 6.8a2.8 2.8 0 0 0-4-4L3.8 16.2a2 2 0 0 0-.5.8l-1.3 4.4a.5.5 0 0 0 .6.6l4.4-1.3a2 2 0 0 0 .8-.5Z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></symbol>
+  <symbol id="i-bookmark-plus" viewBox="0 0 24 24"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/><path d="M12 7v6"/><path d="M15 10H9"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></symbol>
+  <symbol id="i-image-plus" viewBox="0 0 24 24"><path d="M16 5h6"/><path d="M19 2v6"/><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/><circle cx="9" cy="9" r="2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
+  <!-- o logo do tenant é uma IMAGEM, não um token: um wordmark largo (o formato mais comum de logo) -->
+  <symbol id="logo-wordmark" viewBox="0 0 120 40"><rect x="0" y="10" width="20" height="20" rx="6" fill="var(--brand-primary)"/><text x="26" y="27" font-family="Manrope, system-ui, sans-serif" font-size="16" font-weight="700" fill="var(--brand-primary)">TRIA Demo</text></symbol>
+</svg>
+
+<!-- ============ barra do mockup (não é superfície do produto) ============ -->
+<div class="toolbar" role="region" aria-label="Controles do mockup">
+  <span class="brandname">TRIA · Fase 05.2 <small>Destaques de stories · as sete superfícies sem protótipo · 05.2-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
+  <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
+  <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
+  <span>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
+    <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
+    <button class="preset" type="button" data-p="#b91c1c" data-s="#f87171">Vermelho</button>
+  </span>
+  <span class="readout" id="brand-readout"></span>
+  <nav aria-label="Telas">
+    <a href="#s1">1 · fileira do início</a>
+    <a href="#s2">2 · fileira da comunidade</a>
+    <a href="#s3">3 · gerenciar destaques</a>
+    <a href="#s4">4 · editar destaque</a>
+    <a href="#s5">5 · folha de destaques</a>
+    <a href="#s6">6 · linha "Destaque" do composer</a>
+    <a href="#s7">7 · visualizador e "Destacar"</a>
+  </nav>
+</div>
+
+<main class="sheet">
+
+<!-- =====================================================================================
+     SUPERFÍCIE 1 — A FILEIRA DO INÍCIO
+     ===================================================================================== -->
+<section id="s1" class="screen">
+  <header><h2>Superfície 1 — a fileira do início</h2><code>/inicio · StoriesStrip + StoryCircle · UI-D-59..UI-D-63 · D-104, D-105, D-108, D-109</code>
+    <p>Da esquerda para a direita: <strong>[+ Seu story] [círculo do tenant] [destaques…] [Gerenciar]</strong>. O admin vê os quatro grupos; o membro vê só os dois do meio. O <strong>círculo do tenant</strong> junta todos os stories ativos (&lt; 24 h) num só círculo, com o logo do tenant e o nome de exibição (D-104, reverte D-78). O anel dele é <strong>da marca enquanto há story não visto</strong> e <strong>neutro quando tudo foi visto</strong> (D-105, reverte D-79). Destaques têm sempre anel neutro — são arquivo, não novidade. O <strong>anel tracejado</strong> é a regra nova para "só você vê": o círculo "Gerenciar" e o destaque vazio.</p>
+  </header>
+
+  <div class="frames">
+
+    <!-- A · admin, com story não visto -->
+    <div class="frame-wrap">
+      <span class="frame-label">A · admin — há story não visto <code>/inicio</code></span>
+      <div class="phone">
+        <div class="body" style="padding-bottom:120px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
+            <div style="width:64px;height:64px;border-radius:16px;background:var(--theme-bg-secondary);display:grid;place-items:center"><svg style="width:48px;height:48px"><use href="#logo-wordmark"/></svg></div>
+            <h1 class="t24b" style="margin:0">Bem-vindo(a) à TRIA Demo</h1>
+          </div>
+          <div class="strip" role="list" aria-label="Stories">
+            <span class="strip-item" role="listitem"><a href="#s6" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="disc"><svg class="i i-28"><use href="#i-user"/></svg></span><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></a><span class="label">Seu story</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de TRIA Demo. Há stories novos."><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">TRIA Demo</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Protocolos"><span class="ring neutral"><span class="disc cover" role="img" aria-label="Capa do destaque Protocolos"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Protocolos</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Anatomia"><span class="ring neutral"><span class="disc cover" role="img" aria-label="Capa do destaque Anatomia"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Anatomia</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Bastidores"><span class="ring neutral"><span class="disc mono">B</span></span></button><span class="label">Bastidores</span></span>
+            <span class="strip-item" role="listitem"><a href="#s4" aria-label="Editar destaque Aulas. Vazio, só você vê."><span class="ring dashed"><span class="disc mono">A</span></span></a><span class="label">Aulas</span></span>
+            <span class="strip-item" role="listitem"><a href="#s3" aria-label="Gerenciar destaques do início"><span class="ring dashed"><span class="disc glyph"><svg class="i i-20"><use href="#i-pencil"/></svg></span></span></a><span class="label">Gerenciar</span></span>
+          </div>
+          <p class="anno">A fileira rola na horizontal; <strong>"Gerenciar" é sempre o último</strong>. Role para ver o destaque vazio "Aulas" e o círculo "Gerenciar", ambos tracejados.</p>
+          <div class="card" style="margin:12px 16px 0">
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;min-width:0">
+              <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+            </div>
+            <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
+          </div>
+        </div>
+        <div class="bottomnav">
+          <a href="#s1" aria-current="page"><span class="chip"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s2"><span class="chip"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s1"><span class="chip"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">Tinta da marca na fileira: o anel do tenant (não visto) e o selo de 24px do "Seu story". Nada mais.</p>
+    </div>
+
+    <!-- B · membro, tudo visto -->
+    <div class="frame-wrap">
+      <span class="frame-label">B · membro — tudo visto <code>/inicio</code></span>
+      <div class="phone">
+        <div class="body" style="padding-bottom:120px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
+            <div style="width:64px;height:64px;border-radius:16px;background:var(--theme-bg-secondary);display:grid;place-items:center"><svg style="width:48px;height:48px"><use href="#logo-wordmark"/></svg></div>
+            <h1 class="t24b" style="margin:0">Bem-vindo(a) à TRIA Demo</h1>
+          </div>
+          <div class="strip" role="list" aria-label="Stories">
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de TRIA Demo"><span class="ring neutral"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">TRIA Demo</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Protocolos"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Protocolos</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Anatomia"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Anatomia</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Bastidores"><span class="ring neutral"><span class="disc mono">B</span></span></button><span class="label">Bastidores</span></span>
+          </div>
+          <p class="anno">O membro não vê "+", nem "Aulas" (vazio), nem "Gerenciar". Com tudo visto, <strong>a fileira inteira fica neutra</strong>: esse é o sinal de "você está em dia". O nome acessível perde "Há stories novos." — o estado não depende só de cor.</p>
+          <div class="card" style="margin:12px 16px 0">
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;min-width:0">
+              <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+            </div>
+            <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
+          </div>
+        </div>
+        <div class="bottomnav">
+          <a href="#s1" aria-current="page"><span class="chip"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s2"><span class="chip"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s1"><span class="chip"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">Abrir o círculo do tenant retoma no primeiro story não visto; com tudo visto, começa no primeiro.</p>
+    </div>
+
+    <!-- C · discos em close: logo largo, logo quadrado, monograma; anéis -->
+    <div class="frame-wrap">
+      <span class="frame-label">C · o disco do tenant e os três anéis, em close</span>
+      <div class="phone short">
+        <div class="body">
+          <p class="anno" style="padding-top:16px"><strong>UI-D-60 — logo do tenant.</strong> Disco em <code>bg-bg-secondary</code>; o logo é <code>object-contain</code> dentro de uma caixa centrada de 48×48, então um wordmark largo aparece inteiro, nunca recortado.</p>
+          <div class="strip" role="list" aria-label="Variações do círculo do tenant">
+            <span class="strip-item" role="listitem"><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span><span class="label">TRIA Demo</span></span>
+            <span class="strip-item" role="listitem"><span class="ring"><span class="disc logo"><span class="logo-box"><svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="0" fill="#ffffff"/><circle cx="24" cy="24" r="12" fill="var(--brand-primary)"/></svg></span></span></span><span class="label">Clínica Vida</span></span>
+            <span class="strip-item" role="listitem"><span class="ring"><span class="disc mono">T</span></span><span class="label">TRIA Demo</span></span>
+          </div>
+          <p class="anno">1 · wordmark largo, inteiro. 2 · logo quadrado com fundo branco: os 8px de respiro evitam que o branco encoste no anel. 3 · <strong>sem logo</strong>: o disco <code>--brand-gradient</code> com a primeira letra do nome, 16/700 em <code>--brand-on-primary</code> — o mesmo monograma do destaque sem capa ("B" de Bastidores), um só componente.</p>
+          <div class="rule" style="margin:16px"></div>
+          <p class="anno" style="padding-top:0"><strong>UI-D-61 / UI-D-63 — os três anéis.</strong> A geometria (<code>p-0.5 border-2</code>) nunca muda; só a cor e o traço.</p>
+          <div class="strip" role="list" aria-label="Anéis">
+            <span class="strip-item" role="listitem"><span class="ring"><span class="disc mono">T</span></span><span class="label">Não visto</span></span>
+            <span class="strip-item" role="listitem"><span class="ring neutral"><span class="disc mono">T</span></span><span class="label">Visto</span></span>
+            <span class="strip-item" role="listitem"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span><span class="label">Destaque</span></span>
+            <span class="strip-item" role="listitem"><span class="ring dashed"><span class="disc mono">A</span></span><span class="label">Vazio</span></span>
+          </div>
+          <div class="legend" style="padding:0 16px">
+            <span><i class="sw"></i><code>border-brand</code> — tenant com story não visto</span>
+            <span><i class="sw neutral"></i><code>border-border</code> — tenant visto, todo destaque</span>
+            <span><i class="sw dashed"></i><code>border-dashed border-border-secondary</code> — só você vê</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- D · vazios e parciais -->
+    <div class="frame-wrap">
+      <span class="frame-label">D · vazios e parciais <code>/inicio</code></span>
+      <div class="phone short">
+        <div class="body">
+          <p class="anno" style="padding-top:16px"><strong>Membro sem nada para ver</strong> (nenhum story ativo e nenhum destaque com story): <strong>nenhum nó</strong>, nenhuma altura reservada, nenhum texto. O feed sobe (UI-D-26, mantido).</p>
+          <div class="rule" style="margin:16px"></div>
+          <p class="anno" style="padding-top:0"><strong>Admin sem nada</strong>: sobram só as duas portas dele, "+" e "Gerenciar" (D-108).</p>
+          <div class="strip" role="list" aria-label="Stories">
+            <span class="strip-item" role="listitem"><a href="#s6" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="disc"><svg class="i i-28"><use href="#i-user"/></svg></span><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></a><span class="label">Seu story</span></span>
+            <span class="strip-item" role="listitem"><a href="#s3" aria-label="Gerenciar destaques do início"><span class="ring dashed"><span class="disc glyph"><svg class="i i-20"><use href="#i-pencil"/></svg></span></span></a><span class="label">Gerenciar</span></span>
+          </div>
+          <div class="rule" style="margin:8px 16px 16px"></div>
+          <p class="anno" style="padding-top:0"><strong>Membro, nada ao vivo mas com destaques</strong>: o círculo do tenant é <strong>omitido</strong> (nunca um anel vazio) e os destaques ficam sozinhos.</p>
+          <div class="strip" role="list" aria-label="Stories">
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Protocolos"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Protocolos</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Bastidores"><span class="ring neutral"><span class="disc mono">B</span></span></button><span class="label">Bastidores</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- E · desktop -->
+    <div class="desk">
+      <div class="column">
+        <p class="t12 ter" style="margin:0 0 12px">UI-D-47 carregado — desktop: geometria idêntica dentro da coluna de 680px. Sem setas, sem máscara de fade. Admin com story não visto.</p>
+        <div class="strip" role="list" aria-label="Stories" style="background:var(--theme-bg);border-radius:12px">
+          <span class="strip-item" role="listitem"><a href="#s6" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="disc"><svg class="i i-28"><use href="#i-user"/></svg></span><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></a><span class="label">Seu story</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de TRIA Demo. Há stories novos."><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">TRIA Demo</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Protocolos"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Protocolos</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Anatomia"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Anatomia</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Bastidores"><span class="ring neutral"><span class="disc mono">B</span></span></button><span class="label">Bastidores</span></span>
+          <span class="strip-item" role="listitem"><a href="#s4" aria-label="Editar destaque Aulas. Vazio, só você vê."><span class="ring dashed"><span class="disc mono">A</span></span></a><span class="label">Aulas</span></span>
+          <span class="strip-item" role="listitem"><a href="#s3" aria-label="Gerenciar destaques do início"><span class="ring dashed"><span class="disc glyph"><svg class="i i-20"><use href="#i-pencil"/></svg></span></span></a><span class="label">Gerenciar</span></span>
+        </div>
+        <p class="t12 ter" style="margin:16px 0 0">Toque no círculo do tenant → visualizador no grupo 0, no primeiro story não visto. Toque num destaque → aquele grupo, story 0. <strong>O destaque vazio e "Gerenciar" são links (<code>&lt;a&gt;</code>)</strong> para <code>/stories/destaques</code> — o vazio com <code>?editar={id}</code>, que abre a folha de editar dele na chegada. Nunca abrem o visualizador.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 2 — A FILEIRA DA COMUNIDADE
+     ===================================================================================== -->
+<section id="s2" class="screen">
+  <header><h2>Superfície 2 — a fileira da comunidade</h2><code>/comunidades/[communityId] · UI-D-64 · D-108, D-109</code>
+    <p>O mesmo componente de fileira, <strong>sem o círculo do tenant</strong> (D-104 é do início): <code>SectionTitle</code> "Destaques" → [+ Seu story] → os destaques da comunidade → [Gerenciar] → o fio <code>h-px bg-border</code>. Os círculos continuam onde o protótipo os desenhou, entre a descrição e a primeira publicação. Uma comunidade arquivada mostra os destaques só para leitura: sem "+", sem "Gerenciar", e os destaques vazios não aparecem.</p>
+  </header>
+  <div class="frames">
+
+    <div class="frame-wrap">
+      <span class="frame-label">A · admin <code>/comunidades/[communityId]</code></span>
+      <div class="phone short">
+        <div class="body">
+          <div style="height:144px;background:var(--brand-gradient)" aria-hidden="true"></div>
+          <div style="padding:0 16px 16px">
+            <h2 class="t24b" style="margin:16px 0 0">Coral TRIA</h2>
+            <p class="t14 sec" style="margin:8px 0 0">Fotos, bastidores e o calendário do coral.</p>
+          </div>
+          <div class="section-title">Destaques</div>
+          <div class="strip" role="list" aria-label="Destaques">
+            <span class="strip-item" role="listitem"><a href="#s6" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="disc"><svg class="i i-28"><use href="#i-user"/></svg></span><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></a><span class="label">Seu story</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Ensaios"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Ensaios</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Destaques"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Destaques</span></span>
+            <span class="strip-item" role="listitem"><a href="#s3" aria-label="Gerenciar destaques de Coral TRIA"><span class="ring dashed"><span class="disc glyph"><svg class="i i-20"><use href="#i-pencil"/></svg></span></span></a><span class="label">Gerenciar</span></span>
+          </div>
+          <div class="rule"></div>
+          <p class="anno" style="padding-top:12px">"Destaques" é o destaque criado pela migração a partir dos stories que antes estavam presos a esta comunidade (D-116). A fileira toda é neutra, exceto o selo do "+".</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">B · membro <code>/comunidades/[communityId]</code></span>
+      <div class="phone short">
+        <div class="body">
+          <div style="height:144px;background:var(--brand-gradient)" aria-hidden="true"></div>
+          <div style="padding:0 16px 16px">
+            <h2 class="t24b" style="margin:16px 0 0">Coral TRIA</h2>
+            <p class="t14 sec" style="margin:8px 0 0">Fotos, bastidores e o calendário do coral.</p>
+          </div>
+          <div class="section-title">Destaques</div>
+          <div class="strip" role="list" aria-label="Destaques">
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Ensaios"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Ensaios</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Destaques"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Destaques</span></span>
+          </div>
+          <div class="rule"></div>
+          <p class="anno" style="padding-top:12px">Membro numa comunidade <strong>sem nenhum destaque com story</strong>: sem seção, sem título "Destaques", sem altura reservada (a forma de UI-D-53).</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">C · comunidade arquivada (todos) <code>/comunidades/[communityId]</code></span>
+      <div class="phone short">
+        <div class="body">
+          <div style="height:144px;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
+          <div style="padding:0 16px 16px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:16px">
+              <h2 class="t24b" style="margin:0">Mutirão 2025</h2>
+              <span class="pill">Arquivada</span>
+            </div>
+            <p class="t14 sec" style="margin:8px 0 0">Esta comunidade foi arquivada. Você ainda pode ler as publicações.</p>
+          </div>
+          <div class="section-title">Destaques</div>
+          <div class="strip" role="list" aria-label="Destaques">
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Resultado"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Resultado</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Equipe"><span class="ring neutral"><span class="disc mono">E</span></span></button><span class="label">Equipe</span></span>
+          </div>
+          <div class="rule"></div>
+          <p class="anno" style="padding-top:12px">Somente leitura para todos, admin incluído: <strong>sem "+" e sem "Gerenciar"</strong> na fileira. A tomada de conteúdo continua possível por link direto à tela de gerenciar (Superfície 3, variante arquivada).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 3 — GERENCIAR DESTAQUES
+     ===================================================================================== -->
+<section id="s3" class="screen">
+  <header><h2>Superfície 3 — a tela de gerenciar destaques</h2><code>/stories/destaques · /comunidades/[communityId]/destaques · HighlightManageList · UI-D-72, UI-D-73, UI-D-80 · D-109</code>
+    <p>Uma <strong>lista, não círculos</strong>: arrastar círculos dentro de uma fileira que rola é o que D-109 rejeitou. O arrasto começa <strong>só pela alça</strong> (44×44, <code>GripVertical</code>), então um dedo no corpo da linha rola a página. Com a alça focada, as setas ↑/↓ movem a linha uma posição. Tocar no corpo abre a folha de editar (Superfície 4). A ordem da lista é a ordem da fileira.</p>
+  </header>
+  <div class="frames">
+
+    <div class="frame-wrap">
+      <span class="frame-label">A · populada, uma linha sendo arrastada <code>/stories/destaques</code></span>
+      <div class="phone">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+          <div class="manage-body">
+            <span class="btn brand full"><svg class="i i-16"><use href="#i-plus"/></svg>Novo destaque</span>
+            <p class="t12 ter" style="margin:0">Arraste para mudar a ordem. É a mesma ordem da fileira.</p>
+            <ul class="mlist" aria-label="Destaques em ordem">
+              <li class="mrow">
+                <button class="handle" type="button" aria-label="Mover Protocolos"><svg class="i i-20"><use href="#i-grip"/></svg></button>
+                <span class="cover48"><svg class="i i-20"><use href="#i-image"/></svg></span>
+                <button class="mbody" type="button" aria-label="Editar destaque Protocolos"><span class="t14b trunc">Protocolos</span><span class="t12 ter">3 stories</span></button>
+                <svg class="i i-18 ter"><use href="#i-chev-r"/></svg>
+              </li>
+              <li class="mrow lifted">
+                <button class="handle focus-ring" type="button" aria-label="Mover Bastidores"><svg class="i i-20"><use href="#i-grip"/></svg></button>
+                <span class="cover48 mono">B</span>
+                <button class="mbody" type="button" aria-label="Editar destaque Bastidores"><span class="t14b trunc">Bastidores</span><span class="t12 ter">5 stories</span></button>
+                <svg class="i i-18 ter"><use href="#i-chev-r"/></svg>
+              </li>
+              <li class="mrow">
+                <button class="handle" type="button" aria-label="Mover Anatomia"><svg class="i i-20"><use href="#i-grip"/></svg></button>
+                <span class="cover48"><svg class="i i-20"><use href="#i-image"/></svg></span>
+                <button class="mbody" type="button" aria-label="Editar destaque Anatomia"><span class="t14b trunc">Anatomia</span><span class="t12 ter">1 story</span></button>
+                <svg class="i i-18 ter"><use href="#i-chev-r"/></svg>
+              </li>
+              <li class="mrow">
+                <button class="handle" type="button" aria-label="Mover Aulas"><svg class="i i-20"><use href="#i-grip"/></svg></button>
+                <span class="cover48 mono">A</span>
+                <button class="mbody" type="button" aria-label="Editar destaque Aulas"><span class="t14b trunc">Aulas</span><span class="t12 ter">Vazio · só você vê</span></button>
+                <svg class="i i-18 ter"><use href="#i-chev-r"/></svg>
+              </li>
+            </ul>
+            <p class="sr-only" aria-live="polite">Bastidores agora está na posição 2 de 4.</p>
+            <p class="anno" style="padding:0">Linha levantada: sombra <code>0 8px 24px rgba(22,35,59,.16)</code> e <code>z-10</code>, <strong>sem escala</strong>. Ao soltar (ou a cada seta), um único <code>PUT</code> com a ordem inteira, otimista. A região viva diz: "Bastidores agora está na posição 2 de 4."</p>
+          </div>
+        </div>
+        <div class="toast" role="status">Destaque criado.</div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">B · vazia <code>/stories/destaques</code></span>
+      <div class="phone short">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+          <div class="manage-body">
+            <div class="card">
+              <div class="empty">
+                <div class="circle"><svg class="i i-28"><use href="#i-bookmark"/></svg></div>
+                <h3>Nenhum destaque ainda</h3>
+                <p>Crie um destaque para manter stories no início depois das 24 h.</p>
+                <span class="btn brand"><svg class="i i-16"><use href="#i-plus"/></svg>Novo destaque</span>
+              </div>
+            </div>
+            <p class="anno" style="padding:0">O botão do topo some: o <code>EmptyState</code> carrega o CTA e é o único preenchimento da marca da tela. Numa comunidade, o corpo diz "Crie um destaque para manter stories nesta comunidade depois das 24 h."</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">C · título na folha "Novo destaque" <code>/stories/destaques</code></span>
+      <div class="phone short">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Novo destaque">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Novo destaque</h3></div>
+          <p class="helper">Em Início</p>
+          <div class="sheet-body padded">
+            <div>
+              <label class="field-label" for="nt1">Nome</label>
+              <input class="input focused" id="nt1" value="Bastidores" maxlength="15" placeholder="Ex.: Bastidores">
+              <div class="counter">10/15</div>
+            </div>
+            <span class="btn brand full">Criar destaque</span>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Ao criar: o destaque entra <strong>no fim da lista</strong>, o toast "Destaque criado." aparece e a folha de editar dele abre em seguida, para adicionar stories e capa.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">D · título vazio, enviando <code>/stories/destaques</code></span>
+      <div class="phone short">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Novo destaque">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Novo destaque</h3></div>
+          <p class="helper">Em Início</p>
+          <div class="sheet-body padded">
+            <div>
+              <label class="field-label" for="nt2">Nome</label>
+              <input class="input error" id="nt2" value="" maxlength="15" placeholder="Ex.: Bastidores" aria-invalid="true">
+              <div class="field-error">Dê um nome para o destaque.</div>
+              <div class="counter">0/15</div>
+            </div>
+            <span class="btn brand full" aria-disabled="true">Criar destaque</span>
+            <div class="rule"></div>
+            <div>
+              <label class="field-label" for="nt3">Nome</label>
+              <input class="input" id="nt3" value="Aulas ao vivo" maxlength="15" placeholder="Ex.: Bastidores">
+              <div class="counter">13/15</div>
+            </div>
+            <span class="btn brand full" aria-busy="true" aria-disabled="true">Criando…</span>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Em cima: "Criar destaque" desabilitado com o título vazio (Enter mostra o erro em linha). Embaixo: enviando, rótulo "Criando…", segundo toque é ignorado e o título digitado fica.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">E · nome de 60 caracteres em 320px <code>/comunidades/[communityId]/destaques</code></span>
+      <div class="phone narrow short">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s2" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques de Associação de Moradores e Amigos do Bairro Jardim das Flores</h1>
+          </div>
+          <div class="manage-body">
+            <span class="btn brand full"><svg class="i i-16"><use href="#i-plus"/></svg>Novo destaque</span>
+            <ul class="mlist" aria-label="Destaques em ordem">
+              <li class="mrow">
+                <button class="handle" type="button" aria-label="Mover Assembleias"><svg class="i i-20"><use href="#i-grip"/></svg></button>
+                <span class="cover48"><svg class="i i-20"><use href="#i-image"/></svg></span>
+                <button class="mbody" type="button" aria-label="Editar destaque Assembleias"><span class="t14b trunc">Assembleias</span><span class="t12 ter">12 stories</span></button>
+                <svg class="i i-18 ter"><use href="#i-chev-r"/></svg>
+              </li>
+            </ul>
+            <p class="anno" style="padding:0">O título do <code>PageHeader</code> trunca e o voltar continua na tela. Com <strong>um só destaque</strong>, a linha de ajuda do arrasto não aparece; a alça fica, e os botões de mover da folha de editar ficam desabilitados.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">F · comunidade arquivada, por link direto <code>/comunidades/[communityId]/destaques</code></span>
+      <div class="phone short">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s2" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques de Mutirão 2025</h1>
+          </div>
+          <div class="manage-body">
+            <p class="archived-note">Esta comunidade foi arquivada. Você ainda pode remover stories e excluir destaques.</p>
+            <ul class="mlist" aria-label="Destaques em ordem">
+              <li class="mrow">
+                <span class="cover48"><svg class="i i-20"><use href="#i-image"/></svg></span>
+                <button class="mbody" type="button" aria-label="Editar destaque Resultado"><span class="t14b trunc">Resultado</span><span class="t12 ter">4 stories</span></button>
+                <svg class="i i-18 ter"><use href="#i-chev-r"/></svg>
+              </li>
+              <li class="mrow">
+                <span class="cover48 mono">E</span>
+                <button class="mbody" type="button" aria-label="Editar destaque Equipe"><span class="t14b trunc">Equipe</span><span class="t12 ter">2 stories</span></button>
+                <svg class="i i-18 ter"><use href="#i-chev-r"/></svg>
+              </li>
+            </ul>
+            <p class="anno" style="padding:0">Sem "Novo destaque" e <strong>sem alças</strong>. As linhas ainda abrem a folha de editar reduzida (Superfície 4, variante arquivada): só remover stories e excluir o destaque.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 4 — A FOLHA DE EDITAR DESTAQUE
+     ===================================================================================== -->
+<section id="s4" class="screen">
+  <header><h2>Superfície 4 — a folha de editar destaque, com os passos "Escolher capa" e "Adicionar stories"</h2><code>/stories/destaques?editar={id} · HighlightEditSheet · UI-D-74, UI-D-75, UI-D-76, UI-D-78 · D-101, D-102, D-109</code>
+    <p>Uma única <code>BottomSheet</code> "Editar destaque" com corpo <code>gap-6</code>, e dois passos que trocam o corpo dentro da mesma folha. <strong>Todo controle grava na hora</strong>, exceto o nome — o único campo de texto livre ganha "Salvar nome", para um título pela metade nunca chegar aos membros. Remover um story <strong>não pede confirmação</strong> (é reversível e o story continua intacto); só "Excluir destaque" pede.</p>
+  </header>
+  <div class="frames">
+
+    <div class="frame-wrap">
+      <span class="frame-label">A · passo principal, populado</span>
+      <div class="phone">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Editar destaque" style="max-height:92%">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Editar destaque</h3></div>
+          <div class="sheet-body padded">
+            <div>
+              <span class="field-label">Capa</span>
+              <div class="edit-cover">
+                <span class="ring neutral"><span class="disc cover" role="img" aria-label="Capa do destaque Protocolos"><svg class="i i-28"><use href="#i-image"/></svg></span></span>
+                <span class="btn outline">Trocar capa</span>
+              </div>
+            </div>
+            <div>
+              <label class="field-label" for="highlight-title">Nome</label>
+              <input class="input" id="highlight-title" value="Protocolos" maxlength="15">
+              <div class="counter">10/15</div>
+              <span class="btn brand" aria-disabled="true" style="margin-top:8px">Salvar nome</span>
+            </div>
+            <div class="pos-row">
+              <span class="t14">Posição 2 de 4</span>
+              <button class="icon-btn secondary" type="button" aria-label="Mover para cima"><svg class="i i-20"><use href="#i-chev-u"/></svg></button>
+              <button class="icon-btn secondary" type="button" aria-label="Mover para baixo"><svg class="i i-20"><use href="#i-chev-d"/></svg></button>
+            </div>
+            <div>
+              <span class="t12b ter" style="display:block;margin-bottom:4px">Stories neste destaque</span>
+              <div class="srow">
+                <span class="thumb"><svg class="i i-16"><use href="#i-image"/></svg></span>
+                <span class="sbody"><span class="t14 trunc">2 mar</span><span class="smeta"><span class="pill">Capa</span></span></span>
+                <button class="icon-btn secondary" type="button" aria-label="Remover do destaque o story de 2 mar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+              </div>
+              <div class="srow">
+                <span class="thumb"><svg class="i i-16"><use href="#i-video"/></svg></span>
+                <span class="sbody"><span class="t14 trunc">9 mar</span><span class="smeta"><span class="pill warning">Processando</span></span></span>
+                <button class="icon-btn secondary" type="button" aria-label="Remover do destaque o story de 9 mar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+              </div>
+              <div class="srow">
+                <span class="thumb"><svg class="i i-16"><use href="#i-image"/></svg></span>
+                <span class="sbody"><span class="t14 trunc">12 mar</span></span>
+                <button class="icon-btn secondary" type="button" aria-label="Remover do destaque o story de 12 mar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+              </div>
+              <span class="btn outline full" style="margin-top:8px"><svg class="i i-16"><use href="#i-plus"/></svg>Adicionar stories</span>
+            </div>
+            <button class="danger-row" type="button"><svg class="i i-20"><use href="#i-trash"/></svg>Excluir destaque</button>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Stories em <strong>ordem de publicação, do mais antigo</strong> — a ordem em que tocam. O neutro "Capa" marca o story que hoje resolve a capa; "Processando" aparece para o admin e o story fica escondido dos membros até ficar pronto. "Salvar nome" só habilita quando o nome muda.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">B · vazio, e a confirmação de excluir</span>
+      <div class="phone">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Editar destaque" style="max-height:92%">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Editar destaque</h3></div>
+          <div class="sheet-body padded">
+            <div>
+              <span class="field-label">Capa</span>
+              <div class="edit-cover">
+                <span class="ring neutral"><span class="disc mono">A</span></span>
+                <span class="btn outline">Trocar capa</span>
+              </div>
+            </div>
+            <div>
+              <label class="field-label" for="hl-title-2">Nome</label>
+              <input class="input" id="hl-title-2" value="Aulas" maxlength="15">
+              <div class="counter">5/15</div>
+              <span class="btn brand" aria-disabled="true" style="margin-top:8px">Salvar nome</span>
+            </div>
+            <div class="empty plain">
+              <div class="circle"><svg class="i i-28"><use href="#i-bookmark"/></svg></div>
+              <h3>Nenhum story neste destaque</h3>
+              <p>Só você vê este destaque. Ele aparece para os membros quando tiver um story.</p>
+              <span class="btn brand"><svg class="i i-16"><use href="#i-plus"/></svg>Adicionar stories</span>
+            </div>
+            <button class="danger-row" type="button"><svg class="i i-20"><use href="#i-trash"/></svg>Excluir destaque</button>
+          </div>
+        </div>
+        <div class="scrim" style="z-index:98"></div>
+        <div style="position:absolute;inset:0;z-index:99;display:grid;place-items:center">
+          <div class="dialog" role="alertdialog" aria-label="Excluir destaque?">
+            <h3 class="t16b" style="margin:0">Excluir destaque?</h3>
+            <p class="t14 sec" style="margin:0">O destaque Aulas sai da fileira para todos. Os stories continuam em Seus stories.</p>
+            <div class="row"><button class="btn outline" type="button">Manter destaque</button><button class="btn ghost danger" type="button">Excluir destaque</button></div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">O vazio é o <code>EmptyState</code> <code>plain</code> com <code>Bookmark</code> 28; a prévia da capa mostra o monograma. O confirm nomeia a ação ("Excluir destaque") e o cancelar é "Manter destaque" — é o único confirm destrutivo novo da fase.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">C · passo "Escolher capa"</span>
+      <div class="phone short">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Escolher capa">
+          <div class="handle"></div>
+          <div class="sheet-head"><span class="btn ghost back" style="padding:0 12px"><svg class="i i-20"><use href="#i-chev-l"/></svg>Voltar</span></div>
+          <div class="sheet-head"><h3>Escolher capa</h3></div>
+          <div class="sheet-body padded">
+            <div class="cover-grid">
+              <div class="cover-tile">
+                <button type="button" aria-label="Enviar imagem"><span class="ring dashed"><span class="disc glyph"><svg class="i i-20"><use href="#i-image-plus"/></svg></span></span></button>
+                <span class="t12 ter">Enviar imagem</span>
+                <div class="progress"><i style="width:62%"></i></div>
+                <span class="t12 ter num" aria-live="polite">62% enviado</span>
+              </div>
+              <div class="cover-tile">
+                <button type="button" aria-label="Usar o story de 2 mar como capa. Capa atual" style="position:relative"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span><span class="sel-badge"><svg class="i i-16"><use href="#i-check"/></svg></span></button>
+              </div>
+              <div class="cover-tile">
+                <button type="button" aria-label="Usar o story de 12 mar como capa"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button>
+              </div>
+            </div>
+            <div>
+              <span class="btn ghost" style="padding:0">Usar capa automática</span>
+              <p class="t12 ter" style="margin:4px 0 0">Sem uma capa escolhida, usamos o story adicionado por último.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Círculos de 64px mostram exatamente o que a fileira vai mostrar. <strong>Só stories com foto</strong> viram opção de capa (o vídeo de 9 mar não aparece; D-101, capas só de imagem). A capa atual leva o selo de 24px <code>bg-brand</code> com <code>Check</code> 16. O tile "Enviar imagem" usa o anel tracejado.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">D · "Escolher capa" sem stories com foto</span>
+      <div class="phone short">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Escolher capa">
+          <div class="handle"></div>
+          <div class="sheet-head"><span class="btn ghost back" style="padding:0 12px"><svg class="i i-20"><use href="#i-chev-l"/></svg>Voltar</span></div>
+          <div class="sheet-head"><h3>Escolher capa</h3></div>
+          <div class="sheet-body padded">
+            <div style="display:flex;gap:16px;align-items:flex-start">
+              <div class="cover-tile">
+                <button type="button" aria-label="Enviar imagem"><span class="ring dashed"><span class="disc glyph"><svg class="i i-20"><use href="#i-image-plus"/></svg></span></span></button>
+                <span class="t12 ter">Enviar imagem</span>
+              </div>
+              <p class="t14 sec" style="margin:0;min-width:0;flex:1">Este destaque ainda não tem stories com foto. Envie uma imagem para a capa.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Destaque só de vídeos: a fileira mostra o monograma até o admin enviar uma capa. Sem "Usar capa automática" aqui — ele só aparece quando há uma capa escolhida.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">E · passo "Adicionar stories" <code>fonte: /stories/meus</code></span>
+      <div class="phone">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques do início</h1>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Adicionar stories" style="max-height:88%">
+          <div class="handle"></div>
+          <div class="sheet-head"><span class="btn ghost back" style="padding:0 12px"><svg class="i i-20"><use href="#i-chev-l"/></svg>Voltar</span></div>
+          <div class="sheet-head"><h3>Adicionar stories</h3></div>
+          <p class="helper">Stories expirados também podem entrar em um destaque.</p>
+          <div class="sheet-body" style="padding:8px 16px 0">
+            <div class="srow">
+              <span class="thumb"><svg class="i i-16"><use href="#i-image"/></svg></span>
+              <span class="sbody"><span class="t14 trunc">há 2 h</span><span class="t12 ter trunc">A assembleia de terça mudou para o auditório B.</span></span>
+              <span class="switch" role="switch" aria-checked="false" aria-label="Adicionar ao destaque o story de há 2 h"></span>
+            </div>
+            <div class="srow">
+              <span class="thumb"><svg class="i i-16"><use href="#i-video"/></svg></span>
+              <span class="sbody"><span class="t14 trunc">há 6 h</span><span class="smeta"><span class="pill warning">Processando</span><span class="t12 ter trunc">Trecho do coral no encerramento.</span></span></span>
+              <span class="switch" role="switch" aria-checked="false" aria-label="Adicionar ao destaque o story de há 6 h"></span>
+            </div>
+            <div class="srow">
+              <span class="thumb"><svg class="i i-16"><use href="#i-image"/></svg></span>
+              <span class="sbody"><span class="t14 trunc">12 mar</span><span class="t12 ter trunc">Sem legenda</span></span>
+              <span class="switch" role="switch" aria-checked="true" aria-label="Adicionar ao destaque o story de 12 mar"></span>
+            </div>
+            <div class="srow">
+              <span class="thumb"><svg class="i i-16"><use href="#i-video"/></svg></span>
+              <span class="sbody"><span class="t14 trunc">9 mar</span><span class="t12 ter trunc">Ensaio geral antes da apresentação de sábado, com o coro completo.</span></span>
+              <span class="switch" role="switch" aria-checked="true" aria-label="Adicionar ao destaque o story de 9 mar"></span>
+            </div>
+            <div class="srow">
+              <span class="thumb"><svg class="i i-16"><use href="#i-image"/></svg></span>
+              <span class="sbody"><span class="t14 trunc">2 mar</span><span class="t12 ter trunc">Prestação de contas do trimestre.</span></span>
+              <span class="switch" role="switch" aria-checked="true" aria-label="Adicionar ao destaque o story de 2 mar"></span>
+            </div>
+            <div class="srow" aria-hidden="true">
+              <span class="skel" style="width:32px;height:48px;border-radius:6px"></span>
+              <span class="sbody"><span class="skel" style="width:64px;height:14px;border-radius:999px"></span><span class="skel" style="width:160px;height:12px;border-radius:999px"></span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">O histórico do admin, do mais novo, com <code>InfiniteScroll</code> (a última linha é o esqueleto de mais uma página). <strong>Stories expirados</strong> (12, 9 e 2 mar) entram e já aparecem ligados quando estão neste destaque. Cada <code>Switch</code> é uma gravação imediata; não há "Salvar".</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">F · variantes: histórico vazio, comunidade arquivada</span>
+      <div class="phone">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s2" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></a>
+            <h1>Destaques de Mutirão 2025</h1>
+          </div>
+          <div class="card" style="margin:16px">
+            <div class="sheet-head" style="padding:12px 16px 0"><h3 class="t16b" style="margin:0">Adicionar stories</h3></div>
+            <div class="empty plain">
+              <p>Você ainda não publicou nenhum story.</p>
+              <a class="t14b" href="#s6" style="color:var(--brand-accent)">Publicar story</a>
+            </div>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Editar destaque">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Editar destaque</h3></div>
+          <div class="sheet-body padded">
+            <p class="archived-note">Esta comunidade foi arquivada. Não é possível mudar a capa, o nome ou adicionar stories.</p>
+            <div>
+              <span class="t12b ter" style="display:block;margin-bottom:4px">Stories neste destaque</span>
+              <div class="srow">
+                <span class="thumb"><svg class="i i-16"><use href="#i-image"/></svg></span>
+                <span class="sbody"><span class="t14 trunc">18 fev</span><span class="smeta"><span class="pill">Capa</span></span></span>
+                <button class="icon-btn secondary" type="button" aria-label="Remover do destaque o story de 18 fev"><svg class="i i-20"><use href="#i-x"/></svg></button>
+              </div>
+              <div class="srow">
+                <span class="thumb"><svg class="i i-16"><use href="#i-image"/></svg></span>
+                <span class="sbody"><span class="t14 trunc">3 fev</span></span>
+                <button class="icon-btn secondary" type="button" aria-label="Remover do destaque o story de 3 fev"><svg class="i i-20"><use href="#i-x"/></svg></button>
+              </div>
+            </div>
+            <button class="danger-row" type="button"><svg class="i i-20"><use href="#i-trash"/></svg>Excluir destaque</button>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Em cima (desenhado fora da folha, para caber): o passo "Adicionar stories" com o histórico vazio. Na folha: a variante arquivada — capa, nome, posição e "Adicionar stories" somem, a nota explica, e só remover e excluir ficam.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 5 — A FOLHA DE DESTAQUES (dois modos)
+     ===================================================================================== -->
+<section id="s5" class="screen">
+  <header><h2>Superfície 5 — a folha de destaques, em modo lista e em modo seleção única</h2><code>HighlightSheet · /stories/meus · /stories/publicar · UI-D-67, UI-D-68, UI-D-77 · D-110..D-114</code>
+    <p>Uma só folha, dois modos. <strong>Modo lista</strong> ("Destacar story", aberto pelo "Destacar" do visualizador e pelo menu de "Seus stories"): um <code>Switch</code> por destaque, agrupados por lugar, cada um uma gravação imediata — <strong>sem "Salvar"</strong> e sem criar destaque aqui. <strong>Modo seleção única</strong> ("Destaque", aberto pela linha do composer): uma escolha só, "Nenhum" sempre a um toque, e "Novo destaque" no fim de cada lugar. Os rótulos de grupo são 12/700 terciários (não <code>SectionTitle</code>), para manter a tinta da marca fora de um cabeçalho repetido.</p>
+  </header>
+  <div class="frames">
+
+    <div class="frame-wrap">
+      <span class="frame-label">A · modo lista <code>/stories/meus</code></span>
+      <div class="phone">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></a>
+            <h1>Seus stories</h1>
+          </div>
+          <button class="hist-row" type="button">
+            <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+            <span class="hbody"><span class="t14 trunc" style="display:block">A assembleia de terça mudou para o auditório B.</span><span class="t12 ter num" style="display:block">12 mar <span aria-hidden="true">·</span> 12 curtidas</span></span>
+            <span class="hlmeta"><svg class="i i-16"><use href="#i-bookmark"/></svg>Em 2 destaques</span>
+          </button>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Destacar story" style="max-height:84%">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Destacar story</h3></div>
+          <p class="helper">Um story em um destaque continua visível depois das 24 h.</p>
+          <div class="sheet-body">
+            <div class="group-label">Início</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Protocolos</span><span class="switch" role="switch" aria-checked="true" aria-label="Destacar em Protocolos, Início"></span></div>
+            <div class="hrow"><span class="thumb32 mono">B</span><span class="htitle">Bastidores</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Bastidores, Início"></span></div>
+            <div class="hrow"><span class="thumb32 mono">A</span><span class="htitle">Aulas</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Aulas, Início"></span></div>
+            <div class="group-label">Avisos da diretoria</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Assembleias</span><span class="switch" role="switch" aria-checked="true" aria-label="Destacar em Assembleias, Avisos da diretoria"></span></div>
+            <div class="group-label">Coral TRIA</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Ensaios, Coral TRIA"></span></div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Destaques</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Destaques, Coral TRIA"></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">"Início" primeiro, depois as comunidades <strong>ativas</strong> que têm destaque. O destaque vazio "Aulas" aparece aqui (o admin está enchendo ele). A linha em si é inerte: o controle é só o <code>Switch</code>. Na lista atrás, o indicador vira <code>Bookmark</code> + "Em 2 destaques" e atualiza a cada toque confirmado.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">B · modo lista: carregando e vazio</span>
+      <div class="phone">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></a>
+            <h1>Seus stories</h1>
+          </div>
+          <div class="card" style="margin:16px;padding:0 8px 8px">
+            <div class="group-label">Início</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Protocolos</span><span class="switch" role="switch" aria-checked="false" aria-disabled="true" aria-label="Destacar em Protocolos, Início"></span></div>
+            <div class="hrow"><span class="thumb32 mono">B</span><span class="htitle">Bastidores</span><span class="switch" role="switch" aria-checked="false" aria-disabled="true" aria-label="Destacar em Bastidores, Início"></span></div>
+            <p class="t12 ter" style="margin:8px">Enquanto a leitura das associações está em curso, os <code>Switch</code> ficam desabilitados na geometria real — nenhum mostra um estado errado.</p>
+          </div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Destacar story">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Destacar story</h3></div>
+          <p class="helper">Um story em um destaque continua visível depois das 24 h.</p>
+          <div class="sheet-body">
+            <div class="empty plain">
+              <p class="t14 sec" style="margin:0">Nenhum destaque ainda.</p>
+              <p>Crie um destaque no início ou em uma comunidade para guardar este story.</p>
+              <a class="t14b" href="#s3" style="color:var(--brand-accent)">Criar destaque</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Vazio: nenhum destaque em lugar nenhum. O link "Criar destaque" leva a <code>/stories/destaques</code> — a curadoria tem uma porta só (D-109).</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">C · seleção única, sem origem <code>/stories/publicar</code></span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+        </div>
+        <div class="scrim" style="z-index:70"></div>
+        <div class="bsheet" role="dialog" aria-label="Destaque" style="max-height:84%">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Destaque</h3></div>
+          <p class="helper">O story aparece no início por 24 h e continua no destaque escolhido.</p>
+          <div class="sheet-body" style="padding-top:8px">
+            <button class="hrow" type="button"><span class="thumb32 mono" aria-hidden="true"></span><span class="htitle">Nenhum</span><svg class="i i-20 check" role="img" aria-label="Selecionado"><use href="#i-check"/></svg></button>
+            <div class="group-label">Início</div>
+            <button class="hrow" type="button" aria-label="Publicar no destaque Protocolos, Início"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Protocolos</span></button>
+            <button class="hrow" type="button" aria-label="Publicar no destaque Bastidores, Início"><span class="thumb32 mono">B</span><span class="htitle">Bastidores</span></button>
+            <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
+            <div class="group-label">Coral TRIA</div>
+            <button class="hrow" type="button" aria-label="Publicar no destaque Ensaios, Coral TRIA"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span></button>
+            <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
+            <div class="group-label">Voluntariado</div>
+            <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
+          </div>
+        </div>
+      </div>
+      <p class="caption">"Nenhum" (miniatura <code>--brand-gradient</code> do 05.1) com o <code>Check</code> 20 da marca, "Selecionado". Cada lugar termina em "Novo destaque" — disco tracejado com <code>Plus</code>. "Voluntariado" ainda não tem destaque, então mostra só a linha "Novo destaque".</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">D · seleção única, vinda do "+" de uma comunidade sem destaque <code>/stories/publicar?comunidade={id}</code></span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+        </div>
+        <div class="scrim" style="z-index:70"></div>
+        <div class="bsheet" role="dialog" aria-label="Destaque" style="max-height:84%">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Destaque</h3></div>
+          <p class="helper">O story aparece no início por 24 h e continua no destaque escolhido.</p>
+          <div class="sheet-body">
+            <div class="group-label">Voluntariado</div>
+            <button class="hrow focus-ring" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
+            <div style="height:8px"></div>
+            <button class="hrow" type="button"><span class="thumb32 mono" aria-hidden="true"></span><span class="htitle">Nenhum</span></button>
+            <div class="group-label">Início</div>
+            <button class="hrow" type="button" aria-label="Publicar no destaque Protocolos, Início"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Protocolos</span></button>
+            <button class="hrow" type="button" aria-label="Publicar no destaque Bastidores, Início"><span class="thumb32 mono">B</span><span class="htitle">Bastidores</span></button>
+            <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
+            <div class="group-label">Coral TRIA</div>
+            <button class="hrow" type="button" aria-label="Publicar no destaque Ensaios, Coral TRIA"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span></button>
+            <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><strong>O grupo da comunidade de origem vem primeiro</strong>; sem destaques, "Novo destaque" é a primeira linha e recebe o foco quando o admin toca "Publicar" com a linha em "Escolher destaque" (Superfície 6). Nada está selecionado ainda. "Nenhum" continua a um toque, logo abaixo.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">E · seleção única: passo "Novo destaque"</span>
+      <div class="phone short">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+        </div>
+        <div class="scrim" style="z-index:70"></div>
+        <div class="bsheet" role="dialog" aria-label="Novo destaque">
+          <div class="handle"></div>
+          <div class="sheet-head"><span class="btn ghost back" style="padding:0 12px"><svg class="i i-20"><use href="#i-chev-l"/></svg>Voltar</span></div>
+          <div class="sheet-head"><h3>Novo destaque</h3></div>
+          <p class="helper">Em Voluntariado</p>
+          <div class="sheet-body padded">
+            <div>
+              <label class="field-label" for="nt4">Nome</label>
+              <input class="input focused" id="nt4" value="" maxlength="15" placeholder="Ex.: Bastidores">
+              <div class="counter">0/15</div>
+            </div>
+            <div>
+              <span class="btn brand full" aria-disabled="true">Criar destaque</span>
+              <p class="t12 ter" style="margin:8px 0 0">O destaque é criado junto com o story, quando você publicar.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">O mesmo passo de título da tela de gerenciar, com a linha de ajuda do composer. Confirmar <strong>não cria nada ainda</strong>: fecha a folha com um destaque pendente, e a gravação acontece dentro da transação de publicar (D-114).</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">F · nomes longos em 320px <code>/stories/meus</code></span>
+      <div class="phone narrow short">
+        <div class="body"></div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Destacar story" style="max-height:88%">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Destacar story</h3></div>
+          <p class="helper">Um story em um destaque continua visível depois das 24 h.</p>
+          <div class="sheet-body">
+            <div class="group-label">Associação de Moradores e Amigos do Bairro Jardim das Flores</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Assembleias 2026</span><span class="switch" role="switch" aria-checked="true" aria-label="Destacar em Assembleias 2026, Associação de Moradores e Amigos do Bairro Jardim das Flores"></span></div>
+            <div class="hrow"><span class="thumb32 mono">P</span><span class="htitle">Prestação conta</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Prestação conta, Associação de Moradores e Amigos do Bairro Jardim das Flores"></span></div>
+            <div class="group-label">Comissão de festas e confraternizações de fim de ano</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Natal</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Natal, Comissão de festas e confraternizações de fim de ano"></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Rótulos de grupo e títulos truncam numa linha; o <code>Switch</code> nunca sai da linha. A folha tem teto de 80% da altura e rola por dentro.</p>
+    </div>
+  </div>
+
+  <div class="frames" style="margin-top:24px">
+    <div class="frame-wrap">
+      <span class="frame-label">G · "Seus stories" depois dos destaques <code>/stories/meus</code> · UI-D-77, UI-D-78</span>
+      <div class="phone short">
+        <div class="body">
+          <div class="page-header">
+            <a class="icon-btn" href="#s1" aria-label="Fechar"><svg class="i"><use href="#i-x"/></svg></a>
+            <h1>Seus stories</h1>
+          </div>
+          <button class="hist-row" type="button">
+            <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+            <span class="hbody"><span class="t14 trunc" style="display:block">A assembleia de terça mudou para o auditório B.</span><span class="t12 ter num" style="display:block">12 mar <span aria-hidden="true">·</span> 12 curtidas</span></span>
+            <span class="hlmeta"><svg class="i i-16"><use href="#i-bookmark"/></svg>Em 2 destaques</span>
+          </button>
+          <button class="hist-row" type="button">
+            <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+            <span class="hbody"><span class="t14 trunc" style="display:block">Sem legenda</span><span class="t12 ter num" style="display:block">8 mar <span aria-hidden="true">·</span> 5 curtidas</span></span>
+            <span class="hlmeta"><svg class="i i-16"><use href="#i-bookmark"/></svg>Em 1 destaque</span>
+          </button>
+          <button class="hist-row" type="button">
+            <span class="thumb"><svg class="i i-20"><use href="#i-image"/></svg></span>
+            <span class="hbody"><span class="t14 trunc" style="display:block">Prestação de contas do trimestre.</span><span class="t12 ter num" style="display:block">6 mar <span aria-hidden="true">·</span> 22 curtidas</span></span>
+          </button>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-label="Opções do story">
+          <div class="handle"></div>
+          <button class="menu-row" type="button"><svg class="i i-20 ter"><use href="#i-bookmark-plus"/></svg>Destacar</button>
+          <button class="menu-row" type="button"><svg class="i i-20 ter"><use href="#i-eye"/></svg>Ver story</button>
+          <button class="menu-row danger" type="button"><svg class="i i-20"><use href="#i-trash"/></svg>Excluir story</button>
+        </div>
+      </div>
+      <p class="caption">Contexto, não uma das sete: o indicador só aparece com contagem &gt; 0 ("Em 1 destaque" / "Em 2 destaques"), e o menu passa a "Destacar" · "Ver story" · "Excluir story".</p>
+    </div>
+    <div class="frame-wrap" style="align-self:center">
+      <div class="dialog" role="alertdialog" aria-label="Excluir story?">
+        <h3 class="t16b" style="margin:0">Excluir story?</h3>
+        <p class="t14 sec" style="margin:0">Ele sai do início e de todos os destaques onde está.</p>
+        <div class="row"><button class="btn outline" type="button">Manter story</button><button class="btn ghost danger" type="button">Excluir story</button></div>
+      </div>
+      <p class="caption">O confirm de excluir story, reescrito pela mesma regra do "Excluir destaque": o corpo fala de destaques e os botões nomeiam a ação.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 6 — A LINHA "DESTAQUE" DO COMPOSER
+     ===================================================================================== -->
+<section id="s6" class="screen">
+  <header><h2>Superfície 6 — a linha "Destaque" do composer</h2><code>/stories/publicar · StoryComposer · UI-D-69, UI-D-70, UI-D-71 · D-111..D-115</code>
+    <p>A linha "Publicar em" do 05.1 vira <strong>uma linha só: "Destaque: {valor} ›"</strong>, no mesmo lugar sobre a mídia (<code>bg-black/45</code>, sem tinta da marca). Três valores: <strong>"Nenhum"</strong> (sem contexto — o padrão de zero toques), <strong>"{lugar} · {destaque}"</strong>, e <strong>"Escolher destaque"</strong> (vindo de uma comunidade sem destaque). Só o valor trunca; "Destaque" e a seta ficam. "Publicar" continua o único preenchimento da marca e <strong>continua habilitado</strong>: com a linha em "Escolher destaque", tocar "Publicar" abre a folha em vez de publicar.</p>
+  </header>
+  <div class="frames">
+
+    <div class="frame-wrap">
+      <span class="frame-label">A · "Nenhum" — sem contexto <code>/stories/publicar</code></span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+          <span class="veil" aria-hidden="true"></span>
+          <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          <div class="composer-bottom">
+            <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Nenhum</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
+            <div class="cap-line">
+              <textarea aria-label="Legenda" placeholder="Escreva uma legenda (opcional)…"></textarea>
+              <span class="btn brand">Publicar</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Publicar com "Nenhum" → <code>/inicio</code>, toast "Story publicado.". Todo story publicado fica no círculo do tenant por 24 h, com ou sem destaque.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">B · "{lugar} · {destaque}" — vindo de uma comunidade com destaques <code>/stories/publicar?comunidade={id}</code></span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-video"/></svg></span></div>
+          <span class="veil" aria-hidden="true"></span>
+          <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          <div class="composer-bottom">
+            <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Coral TRIA · Ensaios</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
+            <div class="cap-line">
+              <textarea aria-label="Legenda">Trecho do coral no encerramento.</textarea>
+              <span class="btn brand">Publicar</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Chega <strong>preenchida com o primeiro destaque da comunidade</strong>, dito na linha antes de "Publicar". Publicar → <code>/comunidades/{id}</code>, toast "Story publicado no destaque Ensaios de Coral TRIA.". Num destaque do início: "Início · Protocolos" → <code>/inicio</code>, "Story publicado no destaque Protocolos.".</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">C · "Escolher destaque" — comunidade sem destaques <code>/stories/publicar?comunidade={id}</code></span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+          <span class="veil" aria-hidden="true"></span>
+          <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          <div class="composer-bottom">
+            <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Escolher destaque</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
+            <div class="cap-line">
+              <textarea aria-label="Legenda" placeholder="Escreva uma legenda (opcional)…"></textarea>
+              <span class="btn brand">Publicar</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">O portão de D-112: "Publicar" <strong>não fica morto</strong>. Tocá-lo abre a folha de seleção única (Superfície 5, quadro D) com foco no "Novo destaque" da comunidade. Qualquer escolha — inclusive "Nenhum" explícito — resolve a linha, e o próximo "Publicar" publica.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">D · nome de 60 caracteres em 320px, e um destaque pendente</span>
+      <div class="phone narrow">
+        <div class="black">
+          <div class="media"><span class="frame" style="width:86%"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+          <span class="veil" aria-hidden="true"></span>
+          <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          <div class="composer-bottom">
+            <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Associação de Moradores e Amigos do Bairro Jardim das Flores · Assembleias 2026</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
+            <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Voluntariado · Mutirões</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
+            <div class="cap-line">
+              <textarea aria-label="Legenda" placeholder="Escreva uma legenda (opcional)…"></textarea>
+              <span class="btn brand">Publicar</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Duas linhas só para comparar (o produto tem uma). Em cima: nome de 60 caracteres + título de 15 — só o valor trunca, a linha fica em <code>min-h-11</code>. Embaixo: um destaque <strong>pendente</strong> criado no passo "Novo destaque" ("Mutirões") lê igual a um existente.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">E · recusa: comunidade arquivada no meio do caminho</span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+          <span class="veil" aria-hidden="true"></span>
+          <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          <div class="alert-card" role="alert"><svg class="i i-20"><use href="#i-alert"/></svg><span>A comunidade Coral TRIA foi arquivada e o story não foi publicado. Escolha outro destaque ou publique sem destaque.</span></div>
+          <div class="composer-bottom">
+            <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Nenhum</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
+            <div class="cap-line">
+              <textarea aria-label="Legenda">Trecho do coral no encerramento.</textarea>
+              <span class="btn brand">Publicar</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Nada publica; mídia e legenda ficam; a linha volta a "Nenhum" e o grupo da comunidade some da folha nesta sessão. O cartão <code>role="alert"</code> <code>bg-danger text-white</code> é a mesma gramática de recusa do 05.1 (UI-D-58).</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 7 — O VISUALIZADOR EM GRUPOS E O "DESTACAR"
+     ===================================================================================== -->
+<section id="s7" class="screen">
+  <header><h2>Superfície 7 — o visualizador em grupos e a pílula "Destacar"</h2><code>StoryViewer · UI-D-65, UI-D-66 · D-107, D-110</code>
+    <p>Os grupos são os círculos que abrem, na ordem da fileira. Toque = próximo/anterior story <strong>dentro do grupo</strong>; no fim do grupo, o próximo grupo; depois do último círculo da fileira, fecha. <strong>Arrastar na horizontal pula um grupo inteiro</strong>; arrastar para baixo fecha. As barras mostram <strong>só o grupo atual</strong>. A pílula <strong>"Destacar"</strong> (só para quem tem <code>stories.story.manage</code>) fica no fim da linha de ações, em <code>bg-black/35</code> — o fundo do botão de som —, então o visualizador continua sem nenhuma tinta da marca.</p>
+  </header>
+  <div class="frames">
+
+    <div class="frame-wrap">
+      <span class="frame-label">A · grupo do tenant, admin</span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+          <span class="veil" aria-hidden="true"></span>
+          <div class="bars" aria-hidden="true"><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:38%"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span></div>
+          <div class="vhead">
+            <span class="vavatar logo"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span>
+            <span class="who"><span class="t14b trunc" style="display:block">TRIA Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 6 h</span></span>
+            <button class="v-icon scrim" type="button" aria-label="Ativar som"><svg class="i i-20"><use href="#i-mute"/></svg></button>
+            <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          </div>
+          <div class="vbottom">
+            <p class="vcap">A assembleia de terça mudou para o auditório B. Quem já confirmou não precisa fazer nada.</p>
+            <div class="vacts">
+              <button class="v-icon" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-20"><use href="#i-heart"/></svg></button>
+              <span class="cnt">12 curtidas</span>
+              <button class="v-icon" type="button" aria-label="Comentar"><svg class="i i-20"><use href="#i-chat"/></svg></button>
+              <span class="cnt">3 comentários</span>
+              <button class="v-pill" type="button"><svg class="i i-16"><use href="#i-bookmark-plus"/></svg>Destacar</button>
+            </div>
+          </div>
+          <p class="sr-only" aria-live="polite">TRIA Demo: story 3 de 5</p>
+        </div>
+      </div>
+      <p class="caption">Cabeçalho do grupo do tenant: logo + nome de exibição + tempo relativo (como hoje). A região viva anuncia "TRIA Demo: story 3 de 5". Membros não recebem o nó "Destacar".</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">B · grupo de destaque, story expirado</span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+          <span class="veil" aria-hidden="true"></span>
+          <div class="bars" aria-hidden="true"><span><i style="width:100%"></i></span><span><i style="width:54%"></i></span><span><i style="width:0"></i></span></div>
+          <div class="vhead">
+            <span class="vavatar cover"><svg class="i i-16"><use href="#i-image"/></svg></span>
+            <span class="who"><span class="t14b trunc" style="display:block">Protocolos</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">12 mar</span></span>
+            <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          </div>
+          <div class="vbottom">
+            <div class="vacts" style="margin-top:0">
+              <button class="v-icon" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-20"><use href="#i-heart"/></svg></button>
+              <span class="cnt">31 curtidas</span>
+              <button class="v-icon" type="button" aria-label="Comentar"><svg class="i i-20"><use href="#i-chat"/></svg></button>
+              <span class="cnt">8 comentários</span>
+              <button class="v-pill" type="button"><svg class="i i-16"><use href="#i-bookmark-plus"/></svg>Destacar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Cabeçalho de destaque: o disco da capa no lugar do avatar + <strong>o título</strong> 14/700 branco + o tempo 12/400 branco/75. As barras recomeçam em cada grupo: aqui são 3 (os stories deste destaque), não os 5 do tenant.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">C · grupo carregando</span>
+      <div class="phone short">
+        <div class="black">
+          <div class="bars" aria-hidden="true"><span><i style="width:0"></i></span></div>
+          <div class="vhead">
+            <span class="vavatar mono">B</span>
+            <span class="who"><span class="t14b trunc" style="display:block">Bastidores</span></span>
+            <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          </div>
+          <div class="vcenter">
+            <svg class="i spin" aria-hidden="true"><use href="#i-loader"/></svg>
+            <span class="sr-only">Carregando destaque…</span>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Os stories do destaque ainda não chegaram: fundo preto, o cabeçalho do grupo, <strong>um segmento vazio</strong>, <code>Loader2</code> 24 branco/70 girando, relógio parado. O próximo grupo é pré-carregado quando o story atual é o último.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">D · erro ao carregar o grupo</span>
+      <div class="phone short">
+        <div class="black">
+          <div class="bars" aria-hidden="true"><span><i style="width:0"></i></span></div>
+          <div class="vhead">
+            <span class="vavatar mono">B</span>
+            <span class="who"><span class="t14b trunc" style="display:block">Bastidores</span></span>
+            <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          </div>
+          <div class="vcenter">
+            <p class="t14" style="margin:0">Não foi possível carregar este destaque.</p>
+            <a href="#s7">Tentar novamente</a>
+          </div>
+        </div>
+      </div>
+      <p class="caption">O bloco de erro de mídia que já existe, com o texto do destaque. Fechar e arrastar para o próximo grupo continuam funcionando.</p>
+    </div>
+
+    <div class="frame-wrap">
+      <span class="frame-label">E · "Destacar" aberto sobre o visualizador</span>
+      <div class="phone">
+        <div class="black">
+          <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
+          <span class="veil" aria-hidden="true"></span>
+          <div class="bars" aria-hidden="true"><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:38%"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span></div>
+          <div class="vhead">
+            <span class="vavatar logo"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span>
+            <span class="who"><span class="t14b trunc" style="display:block">TRIA Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 6 h</span></span>
+            <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
+          </div>
+        </div>
+        <div class="scrim over-viewer"></div>
+        <div class="bsheet over-viewer" role="dialog" aria-label="Destacar story">
+          <div class="handle"></div>
+          <div class="sheet-head"><h3>Destacar story</h3></div>
+          <p class="helper">Um story em um destaque continua visível depois das 24 h.</p>
+          <div class="sheet-body">
+            <div class="group-label">Início</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Protocolos</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Protocolos, Início"></span></div>
+            <div class="hrow"><span class="thumb32 mono">B</span><span class="htitle">Bastidores</span><span class="switch" role="switch" aria-checked="true" aria-label="Destacar em Bastidores, Início"></span></div>
+            <div class="group-label">Avisos da diretoria</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Assembleias</span><span class="switch" role="switch" aria-checked="true" aria-label="Destacar em Assembleias, Avisos da diretoria"></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">A mesma folha em modo lista (Superfície 5), em <code>z-[55]</code> sobre o visualizador. <strong>O relógio pausa enquanto ela está aberta</strong> — a regra da folha de comentários (D-82) — e retoma de onde parou ao fechar. A barra do story atual fica congelada em 38%.</p>
+    </div>
+  </div>
+  <p class="note"><strong>Fronteiras entre grupos.</strong> Anterior no primeiro story de um grupo vai ao <em>último</em> story do grupo anterior; anterior no primeiro story do primeiro grupo reinicia o relógio. Próximo depois do último story do último círculo fecha. As chaves de cada segmento são <code>${grupo}:${story}</code>, então um story que está no tenant e num destaque não confunde as barras. Movimento reduzido: as trocas de grupo viram instantâneas e o relógio continua.</p>
+</section>
+
+</main>
+
+<script>
+(function () {
+  const html = document.documentElement;
+  const NEUTRAL = { primary: '#2e6fd0', secondary: '#5b9cf8' };
+  const state = { ...NEUTRAL };
+
+  /* a mesma derivação que brandStyleVars() faz no servidor (D-25/D-41) */
+  const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  const toHex = (rgb) => '#' + rgb.map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('');
+  const mixWhite = (c, amount) => toHex(hex(c).map((v) => v + (255 - v) * amount));
+  const lum = (c) => { const [r, g, b] = hex(c).map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+  const onColour = (c) => (ratio('#ffffff', c) >= ratio('#16233b', c) ? '#ffffff' : '#16233b');
+
+  function apply() {
+    const primary = state.primary, secondary = state.secondary;
+    const primaryDark = mixWhite(primary, 0.3);
+    const onPrimary = onColour(primary), onPrimaryDark = onColour(primaryDark);
+    const vars = {
+      '--brand-primary': primary,
+      '--brand-secondary': secondary,
+      '--brand-on-primary': onPrimary,
+      '--brand-primary-dark': primaryDark,
+      '--brand-on-primary-dark': onPrimaryDark,
+    };
+    for (const [k, v] of Object.entries(vars)) html.style.setProperty(k, v);
+    document.getElementById('pick-primary').value = primary;
+    document.getElementById('pick-secondary').value = secondary;
+    document.getElementById('brand-readout').textContent =
+      'primary ' + primary + ' · on ' + onPrimary + ' · dark ' + primaryDark + ' · on-dark ' + onPrimaryDark;
+  }
+
+  const setBrand = (p, s) => { state.primary = p.toLowerCase(); state.secondary = s.toLowerCase(); apply(); };
+  document.getElementById('pick-primary').addEventListener('input', (e) => setBrand(e.target.value, state.secondary));
+  document.getElementById('pick-secondary').addEventListener('input', (e) => setBrand(state.primary, e.target.value));
+  document.querySelectorAll('.preset').forEach((b) => b.addEventListener('click', () => setBrand(b.dataset.p, b.dataset.s)));
+
+  function setTheme(dark) {
+    html.setAttribute('data-theme', dark ? 'dark' : 'light');
+    const t = document.getElementById('theme-toggle');
+    t.setAttribute('aria-pressed', String(dark));
+    document.getElementById('theme-label').textContent = dark ? 'Tema claro' : 'Tema escuro';
+    t.querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+  }
+  const isDark = () => html.getAttribute('data-theme') === 'dark';
+  document.getElementById('theme-toggle').addEventListener('click', () => setTheme(!isDark()));
+  if (window.matchMedia('(prefers-color-scheme: dark)').matches) setTheme(true);
+  apply();
+})();
+</script>
+</body>
+</html>
