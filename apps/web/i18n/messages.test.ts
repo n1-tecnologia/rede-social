@@ -236,6 +236,10 @@ describe('05.1 — the new entry-point strings and their placeholders', () => {
       'stories.publish.errors.archived',
       'A comunidade {community} foi arquivada e o story não foi publicado. Escolha outra comunidade ou publique sem comunidade.',
     ],
+    ['stories.circle.tenant', 'Abrir stories de {tenant}'],
+    ['stories.circle.highlight', 'Abrir destaque {title}'],
+    ['stories.highlights.coverAlt', 'Capa do destaque {title}'],
+    ['stories.highlights.place.home', 'Início'],
   ])('%s is the UI-SPEC string', (key, expected) => {
     expect(at(key)).toBe(expected);
   });
@@ -245,6 +249,9 @@ describe('05.1 — the new entry-point strings and their placeholders', () => {
     ['stories.own.actionCommunity', '{community}'],
     ['stories.publish.toastCommunity', '{community}'],
     ['stories.publish.errors.archived', '{community}'],
+    ['stories.circle.tenant', '{tenant}'],
+    ['stories.circle.highlight', '{title}'],
+    ['stories.highlights.coverAlt', '{title}'],
   ])('%s carries the %s placeholder', (key, placeholder) => {
     expect(at(key)).toContain(placeholder);
   });

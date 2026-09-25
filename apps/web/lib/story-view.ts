@@ -256,3 +256,56 @@ export function storyHistoryView(
     viewHref: `/stories/${story.id}`,
   };
 }
+
+/* ── The Início row (05.2-04: HIGHLIGHT-03, D-104, D-106, UI-D-59..UI-D-62) ──────────────────── */
+
+// RED STUBS (05.2-04 Task 2): deliberately inert placeholders so `story-view.test.ts` can fail on
+// its assertions rather than on a missing export. Every one is replaced by the GREEN commit.
+type RowLabelReader = (key: string, values?: Record<string, string | number>) => string;
+type StubCircle = import('@tria/module-stories/ui').StoryStripCircle;
+
+export function monogramOf(_text: string): string {
+  return '?';
+}
+
+export function tenantSequence<T>(_page: { items: readonly T[] } | null): T[] {
+  return [];
+}
+
+const STUB_CIRCLE: StubCircle = {
+  kind: 'open',
+  key: '',
+  label: '',
+  actionLabel: '',
+  ring: 'brand',
+  disc: { kind: 'monogram', text: '' },
+  group: 0,
+  index: 0,
+};
+
+export function tenantCircleView(
+  _tenant: { displayName: string; logoUrl: string | null },
+  _t: RowLabelReader,
+): StubCircle {
+  return STUB_CIRCLE;
+}
+
+export function highlightCircleView(
+  _summary: import('@tria/module-stories/contracts').HighlightSummary,
+  _t: RowLabelReader,
+): StubCircle {
+  return STUB_CIRCLE;
+}
+
+export function inicioRow(
+  _input: {
+    canPublish: boolean;
+    own: { avatarUrl: string | null };
+    tenant: { displayName: string; logoUrl: string | null };
+    sequenceLength: number;
+    highlights: readonly import('@tria/module-stories/contracts').HighlightSummary[];
+  },
+  _t: RowLabelReader,
+): StubCircle[] {
+  return [];
+}
