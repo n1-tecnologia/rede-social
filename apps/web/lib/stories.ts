@@ -99,7 +99,13 @@ export async function loadStories(query: StoryQueryInput = {}): Promise<StoryPag
  *
  * `not_found` is the API's single bare 404 for every miss — an unknown asset id, another tenant's,
  * and one soft-deleted between the upload and the publish — so the screen says ONE thing for all of
- * them (D-23, T-05-26).
+ * them (D-23, T-05-26). Since 05.1-01 the same bare 404 also covers a `communityId` that is unknown,
+ * removed or another tenant's.
+ *
+ * `archived` (a `StoryPinIssue`, 05.1) is the pin refusal: a publish that names a community which was
+ * archived AFTER the composer opened answers `400 { pin: 'archived' }` — the very answer the post-hoc
+ * pin toggle gives, because both writes share one refusal site. It is read rather than folded into
+ * `generic` so the composer can name the community and reset its selection (UI-D-58, Pitfall 7).
  *
  * **Why this lives HERE and not beside the action.** A `'use server'` module may export nothing but
  * async functions, so a refusal mapper, a `ReadonlySet` and a result type cannot sit next to
@@ -107,7 +113,7 @@ export async function loadStories(query: StoryQueryInput = {}): Promise<StoryPag
  */
 export type StoryWriteResult =
   | { ok: true; storyId: string }
-  | { ok: false; code: StoryIssue | 'not_found' | 'generic' };
+  | { ok: false; code: StoryIssue | StoryPinIssue | 'not_found' | 'generic' };
 
 const STORY_ISSUE_LOOKUP: ReadonlySet<string> = STORY_ISSUE_SET;
 
@@ -116,12 +122,22 @@ export function asStoryIssue(value: unknown): StoryIssue | null {
   return typeof value === 'string' && STORY_ISSUE_LOOKUP.has(value) ? (value as StoryIssue) : null;
 }
 
-/** Reads the refusal the API put in `details.story`, and nothing else from the envelope. */
-export function storyWriteIssue(error: unknown): StoryIssue | 'not_found' | null {
+/**
+ * Reads the refusal the API put in `details.story` — or, for a publish that named a community, in
+ * `details.pin` — and nothing else from the envelope.
+ *
+ * The pin code is accepted ONLY when it belongs to `STORY_PIN_ISSUE_SET`: an unrecognised value is
+ * null (and so the generic failure), never a string passed through to the screen.
+ */
+export function storyWriteIssue(error: unknown): StoryIssue | StoryPinIssue | 'not_found' | null {
   if (!(error instanceof ApiClientError)) return null;
-  // An unknown, foreign or removed ASSET is the same bare 404 an unknown story id is (D-23).
+  // An unknown, foreign or removed ASSET (or community) is the same bare 404 an unknown story id is.
   if (error.status === 404) return 'not_found';
-  return asStoryIssue((error.details as { story?: unknown } | undefined)?.story);
+  const details = error.details as { story?: unknown; pin?: unknown } | undefined;
+  const story = asStoryIssue(details?.story);
+  if (story) return story;
+  const pin = details?.pin;
+  return typeof pin === 'string' && STORY_PIN_ISSUE_SET.has(pin) ? (pin as StoryPinIssue) : null;
 }
 
 /**

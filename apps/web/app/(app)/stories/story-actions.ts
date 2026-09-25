@@ -46,6 +46,9 @@ import { type StoryHistoryItemView, storyCommentView, storyHistoryView } from '@
  *     swallow the navigation — which is why `attemptStoryPublish` returns the path instead of taking
  *     it.
  *
+ * **The landing page for an attached story is its community** (05.1, D-94): when the body carries a
+ * `communityId` the action revalidates `/comunidades/{communityId}` beside `/inicio`.
+ *
  * **No file byte ever passes through here.** The composer uploads straight to Storage (or to the
  * streaming vendor) with a brokered signed target (Phase 3), and this action carries an asset ID
  * only — which is also why Cloud Run's 32 MiB body cap is irrelevant to publishing a 400 MB video.
@@ -61,6 +64,12 @@ export async function publishStoryAction(input: unknown): Promise<StoryWriteResu
   // The new circle has to appear on the server-rendered home slot the admin lands back on; without
   // this they would read a cached page 1 that does not carry what they just published.
   if (result.ok) revalidatePath('/inicio');
+  // A story born attached (05.1, D-94) LANDS on its community, whose Destaques must carry it — so
+  // that page is invalidated too (Pitfall 8). One write carried both the story and the pin (D-99):
+  // nothing here, or in the composer, runs a second pin request after the publish.
+  if (result.ok && body.data.communityId) {
+    revalidatePath(`/comunidades/${body.data.communityId}`);
+  }
 
   if (refusal) redirect(refusal);
   return result;

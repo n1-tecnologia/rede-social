@@ -5,6 +5,7 @@ import {
   STORY_MAX_CAPTION,
   type StoryIssue,
   type StoryMediaKind,
+  type StoryPinIssue,
 } from '@tria/module-stories/contracts';
 import { Button, ConfirmDialog, FileDropZone, IconButton, PageHeader, useToast } from '@tria/ui';
 import { Image as ImageIcon, Loader, Video, X } from 'lucide-react';
@@ -138,10 +139,11 @@ export function StoryComposer({ historyHref }: StoryComposerProps) {
   const publishable = picked !== null && picked.assetId !== '';
 
   /** The closed refusal vocabulary, mapped to copy exhaustively — a new code cannot compile silently. */
-  const refusalCopy = (code: StoryIssue | 'not_found' | 'generic'): string => {
-    const map: Record<StoryIssue | 'not_found' | 'generic', string> = {
+  const refusalCopy = (code: StoryIssue | StoryPinIssue | 'not_found' | 'generic'): string => {
+    const map: Record<StoryIssue | StoryPinIssue | 'not_found' | 'generic', string> = {
       media_required: t('publish.errors.noMedia'),
       media_invalid: t('publish.errors.failed'),
+      archived: t('publish.errors.failed'),
       not_found: t('publish.errors.failed'),
       generic: t('publish.errors.failed'),
     };

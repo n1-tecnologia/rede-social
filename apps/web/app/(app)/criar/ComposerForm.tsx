@@ -42,6 +42,7 @@ import { createPostAction } from '@/app/(app)/criar/actions';
 // The SAME action the card's overflow menu drives, imported from where it lives: a `'use server'`
 // module cannot re-export another one (Turbopack drops the re-export), so the import is direct.
 import { updatePostAction } from '@/app/(app)/inicio/feed-actions';
+import { PickerDefaultRow } from '@/components/communities/PickerDefaultRow';
 import { MediaImage } from '@/components/media/MediaImage';
 import { formatMediaLimit, useSignedUpload } from '@/components/media/useSignedUpload';
 import { VideoPlayer } from '@/components/media/VideoPlayer';
@@ -954,31 +955,18 @@ export function ComposerForm({
             clearErrors();
           }}
           leadingRow={
-            <button
-              type="button"
-              data-picker-default
-              aria-label={tc('picker.default')}
-              onClick={() => {
+            // The SAME host row the story composer's sheet renders (UI-D-55): one component, two
+            // labels, so the two pickers cannot drift.
+            <PickerDefaultRow
+              label={tc('picker.default')}
+              selected={communityId === null}
+              selectedLabel={tc('picker.selected')}
+              onSelect={() => {
                 setCommunityId(null);
                 setPickerOpen(false);
                 clearErrors();
               }}
-              className="flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-            >
-              <span
-                aria-hidden
-                className="h-8 w-8 shrink-0 rounded-lg"
-                style={{ backgroundImage: 'var(--brand-gradient)' }}
-              />
-              <span className="min-w-0 flex-1 truncate text-sm font-normal text-text">
-                {tc('picker.default')}
-              </span>
-              <span className="shrink-0">
-                {communityId === null ? (
-                  <Check aria-label={tc('picker.selected')} size={20} className="text-brand" />
-                ) : null}
-              </span>
-            </button>
+            />
           }
         />
       ) : null}
