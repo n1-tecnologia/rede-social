@@ -360,7 +360,7 @@ Plans:
   4. The attachment is written in the same transaction as the story, not as a follow-up pin the admin could forget or half-apply.
   5. The story composer ITSELF asks. Publishing from `/stories/publicar` with no community context, the admin states up front whether the story goes to a community or to none — the choice is part of composing, not a step they discover afterwards in `/stories/meus`. "No community" stays a first-class answer: a tenant-wide story is the V1 default and must not become harder to publish than a community one.
 
-**Plans**: 1/5 plans executed
+**Plans**: 2/5 plans executed
 **UI hint**: yes — three surfaces change (`/comunidades` list, the community page, the story composer); the design system and the existing components cover all three.
 **Research needed**: None. Every mechanism already exists; this phase is wiring, not invention.
 **Notes**: Criteria 3 and 5 are ONE mechanism, not two — plan them together. Criterion 5 puts a community selector in the composer; criterion 3 is that same selector arriving PRE-FILLED when the admin came from a community page (the `?comunidade=` param seeds it). Building 3 as its own context-only path would leave the composer's own flow unanswered and invent a second way to attach a story. NO SCHEMA CHANGE. `story_community_pins` (`packages/modules/stories/db/schema.ts:152`) is already many-to-many, so creating the story and its pin together satisfies criterion 3 additively — the post-hoc pin flow from `/stories/meus` (`PinStorySheet`) stays exactly as shipped and remains the way to attach a story to ADDITIONAL communities. Criteria 1 and 2 are the same defect shape twice: a working route with nothing linking to it. Source: Phase 5 UAT, 2026-09-24, all three user-reported — criterion 2 is carried from `05-UAT.md` "## Deferred Follow-Ups"; criteria 1 and 3 were reported directly. The user asked that this ship before Phase 6.
@@ -373,7 +373,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 05.1-02-PLAN.md — `GET /v1/communities?status=archived`: manager-only (403 otherwise), `updated_at desc, id desc` keyset, no schema change, budget + pgTAP evidence
+- [x] 05.1-02-PLAN.md — `GET /v1/communities?status=archived`: manager-only (403 otherwise), `updated_at desc, id desc` keyset, no schema change, budget + pgTAP evidence
 - [ ] 05.1-04-PLAN.md — The story composer asks: `?comunidade=` resolved on the server, the "Publicar em" row and sheet, origin-aware landings, the archived-race refusal
 
 **Wave 3** *(blocked on Wave 2)*

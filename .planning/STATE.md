@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.1"
 current_phase_name: Community Authoring Entry Points
 status: executing
-stopped_at: Completed 05.1-01-PLAN.md
-last_updated: "2026-09-25T13:26:35.443Z"
+stopped_at: Completed 05.1-02-PLAN.md
+last_updated: "2026-09-25T13:38:41.015Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.1-01 (story born attached to a community)
-state_head: 050eef0b3bfab94f0622cf57f35b87d9f7e61e60
+last_activity_desc: Completed 05.1-02 (manager-only archived community list at the API)
+state_head: 4d63d6261ebb10f6d2e06f9035e0a938b667c9bb
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 67
-  completed_plans: 60
+  completed_plans: 61
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.1 (Community Authoring Entry Points) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
-Last activity: 2026-09-25 — Completed 05.1-01 (story born attached to a community; local DB backed up and reset)
+Last activity: 2026-09-25 — Completed 05.1-02 (manager-only archived community list at the API; GET /v1/communities?status=archived)
 
 Progress: [███████████████████░] 59/62 plans ([░░░░░░░░░░] 0%)
 
@@ -119,6 +119,7 @@ Progress: [███████████████████░] 59/62 p
 | Phase 05 P11 | 13min | 3 tasks | 4 files |
 | Phase 05 P12 | 15 | 2 tasks | 3 files |
 | Phase 05.1 P01 | 12min | 3 tasks | 7 files |
+| Phase 05.1 P02 | 9 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -358,6 +359,9 @@ Recent decisions affecting current work:
 - [Phase 05.1]: 05.1-01: developer chose backup-then-reset; data-only dump at ~/tria-local-backups/pre-05.1-reset.sql (251,640 bytes, outside the repo) before db:reset + db:seed
 - [Phase 05.1]: 05.1-01: attaching a community at publish needs stories.story.publish AND stories.story.manage (OQ-1); story + pin row in one withTenantTx (D-99)
 - [Phase 05.1]: 05.1-01: born-attached story emits story.published then one story.pinned; Phase 7 notification consumer must dedupe by storyId
+- [Phase 05.1]: 05.1-02: GET /v1/communities?status=archived is REFUSED 403 for callers without communities.community.manage (D-89 at the API); coercing a shared web link is the web tier's job (05.1-03)
+- [Phase 05.1]: 05.1-02: communityQuerySchema.status is a closed enum defaulting to active, with no clamp; unknown or re-cased values are 400 VALIDATION_FAILED
+- [Phase 05.1]: 05.1-02: listCommunities picks one of two literal statements in TypeScript (status never bound); archived orders updated_at desc, id desc with a microsecond cursor_at kept off the wire; no index by decision (D-91), pinned to one statement by the budget test
 
 ### Pending Todos
 
@@ -396,6 +400,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T13:26:35.336Z
-Stopped at: Completed 05.1-01-PLAN.md
+Last session: 2026-09-25T13:38:33.986Z
+Stopped at: Completed 05.1-02-PLAN.md
 Resume file: None
