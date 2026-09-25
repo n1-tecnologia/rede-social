@@ -3,7 +3,7 @@ status: complete
 phase: 05-communities-stories
 source: [05-VERIFICATION.md]
 started: 2026-09-24T15:40:00Z
-updated: 2026-09-25T02:25:00Z
+updated: 2026-09-25T02:40:00Z
 ---
 
 ## Current Test
@@ -154,7 +154,7 @@ residual: "The admin is still not told when a dangling cover is dropped. The rul
 
 total: 12
 passed: 12
-issues: 1
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0
@@ -172,7 +172,16 @@ blocked: 0
 
 - gap_id: G-05-OBS-01
   truth: "A story whose media fails shows ONE legible error message with its recourse"
-  status: failed
+  status: resolved
+  resolved_at: 2026-09-25
+  resolved_by: "environment — not reproducible once the real video provider exists; no code change"
+  resolution: |
+    Revisited at exactly the condition the deferral named. With VIDEO_PROVIDER=mux, the tester opened the
+    seeded video story (0d000000-0000-4000-8000-0000000000a4, a provider=fake asset that still fails against
+    real Mux) and confirmed only the app's own pt-BR overlay appears — no mux-player English dialog stacked on
+    top. Before accepting, the orchestrator separated the two possible readings of "funciona certinho" (seed
+    story showing a single error vs. a real video simply playing); the tester confirmed the former. The
+    stacking was therefore produced by the fake provider's malformed token, not by the viewer.
   reason: "Observed by the orchestrator in the tester's screenshot while setting up test 3, NOT reported as a test failure — test 3's own assertion passed. On the seeded VIDEO story the viewer stacks TWO error layers on the same centre point, overlapping into illegibility: the app's own pt-BR overlay (`Não foi possível carregar este story.` + `Tentar novamente`, StoryViewer.tsx:580-602) and mux-player's built-in English dialog (`Video URL is formatted incorrectly`). Neither sentence can be read. Reachability is NOT confined to VIDEO_PROVIDER=fake: mux-player renders its own dialog whenever playback fails, and our overlay renders whenever `onError` sets `mediaState = 'error'` (StoryViewer.tsx:327) — a real Mux asset that fails in production would stack the same two layers."
   severity: minor
   test: 3
