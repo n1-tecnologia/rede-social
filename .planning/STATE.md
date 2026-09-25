@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.1"
 current_phase_name: Community Authoring Entry Points
 status: executing
-stopped_at: Completed 05.1-04-PLAN.md
-last_updated: "2026-09-25T13:48:28.599Z"
+stopped_at: Completed 05.1-03-PLAN.md
+last_updated: "2026-09-25T14:07:20.153Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.1-04 (story composer Publicar em row, ?comunidade= pre-fill, archived-race refusal)
-state_head: c69832d60c60523431696f55a287de5614965a5c
+last_activity_desc: Completed 05.1-03 (/comunidades create control in the title row, Ativas/Arquivadas chips)
+state_head: 6a265f1d676d0d17ae909ecf1bbd42e2ddfbbd76
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 67
-  completed_plans: 62
+  completed_plans: 63
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.1 (Community Authoring Entry Points) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
-Last activity: 2026-09-25 — Completed 05.1-04 (story composer asks where the story goes: server-resolved ?comunidade=, Publicar em row and sheet, origin-aware landings, archived-race refusal)
+Last activity: 2026-09-25 — Completed 05.1-03 (/comunidades title-row create control, manager-only Ativas/Arquivadas chips, archived pill and empty state, status-aware refresh and load-more)
 
 Progress: [███████████████████░] 59/62 plans ([░░░░░░░░░░] 0%)
 
@@ -121,6 +121,7 @@ Progress: [███████████████████░] 59/62 p
 | Phase 05.1 P01 | 12min | 3 tasks | 7 files |
 | Phase 05.1 P02 | 9 min | 2 tasks | 6 files |
 | Phase 05.1 P04 | 7 min | 2 tasks | 9 files |
+| Phase 05.1 P03 | 16 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -404,6 +405,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T13:48:09.823Z
-Stopped at: Completed 05.1-04-PLAN.md
+Last session: 2026-09-25T14:07:20.032Z
+Stopped at: Completed 05.1-03-PLAN.md
 Resume file: None
