@@ -1956,12 +1956,45 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     return rows[0]?.n ?? 0;
   }
 
+  /**
+   * Communities this block creates, a SIBLING of the pin block's `makeCommunity` (that one is scoped
+   * inside its own `describe`). Removed in `afterAll`; `story_highlights_community_fk` cascades, so
+   * any highlight placed in one goes with it.
+   */
+  const highlightCommunities: string[] = [];
+
+  async function makeHighlightCommunity(
+    name: string,
+    opts: { status?: 'active' | 'archived'; removed?: boolean } = {},
+  ): Promise<string> {
+    const id = randomUUID();
+    highlightCommunities.push(id);
+    await adminSql`
+      insert into public.communities (id, tenant_id, created_by_user_id, name, slug, status, deleted_at)
+      select ${id}::uuid, ${tenantIds.demo}::uuid, m.user_id, ${name}, ${id}, ${opts.status ?? 'active'},
+             case when ${opts.removed ?? false} then now() end
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       limit 1`;
+    return id;
+  }
+
+  /** `requestId` identifies the CALL, not the row — strip it before comparing two refusals. */
+  const withoutRequestId = (raw: string) => {
+    const { requestId: _requestId, ...error } = (JSON.parse(raw) as Envelope).error;
+    return JSON.stringify({ error });
+  };
+
   afterAll(async () => {
     if (createdHighlights.length > 0) {
       await adminSql`delete from public.story_highlights where id = any(${createdHighlights}::uuid[])`;
     }
     // Crash sweep: nothing seeded or migrated starts with `Teste `.
     await adminSql`delete from public.story_highlights where title like 'Teste %'`;
+    if (highlightCommunities.length > 0) {
+      await adminSql`delete from public.communities where id = any(${highlightCommunities}::uuid[])`;
+    }
   });
 
   it('05.2-1 an admin keeps an EXPIRED story in an Início highlight and a member plays it from there', async () => {
@@ -2054,6 +2087,150 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     expect(res.status).toBe(200);
     const detail = highlightDetailSchema.parse(await res.json());
     expect(detail.items.map((story) => story.id)).toEqual([older.storyId, newer.storyId]);
+  });
+
+  it('05.2-4 every refusal is the closed vocabulary or ONE bare 404 — and an active community still creates', async () => {
+    // Titles: the Zod contract's issue message IS the machine code, lifted to `details.highlight`.
+    for (const title of ['', 'Teste de 16 unid']) {
+      expect(title.length === 0 || title.length === 16).toBe(true);
+      const res = await createHighlight(tokens.demoAdmin, { title });
+      expect(res.status, JSON.stringify(title)).toBe(400);
+      const body = await envelope(res);
+      expect(body.error.code).toBe('VALIDATION_FAILED');
+      expect(body.error.details).toEqual({ highlight: 'title_invalid' });
+    }
+
+    // T-05.2-01: curating is a PERMISSION. A member is refused on both writes, before any lookup.
+    const target = await create(tokens.demoAdmin, { title: 'Teste Recusas' });
+    const { storyId } = await publishImage('recusas');
+    const memberCreate = await createHighlight(tokens.demoMember, { title: 'Teste Membro' });
+    expect(memberCreate.status).toBe(403);
+    const memberAdd = await addItem(tokens.demoMember, target.id, storyId);
+    expect(memberAdd.status).toBe(403);
+    expect(await itemRows(target.id, storyId)).toBe(0);
+
+    // D-23: an unknown highlight, an unknown story and a REMOVED community are ONE answer — 404,
+    // no `details`, and bodies equal once the per-call `requestId` is stripped.
+    const removed = await makeHighlightCommunity('Destaque removida', { removed: true });
+    const refusals = [
+      await addItem(tokens.demoAdmin, randomUUID(), storyId),
+      await addItem(tokens.demoAdmin, target.id, randomUUID()),
+      await createHighlight(tokens.demoAdmin, { communityId: removed, title: 'Teste Removida' }),
+    ];
+    const texts: string[] = [];
+    for (const res of refusals) {
+      expect(res.status).toBe(404);
+      const text = await res.text();
+      const body = JSON.parse(text) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(Object.hasOwn(body.error, 'details')).toBe(false);
+      texts.push(withoutRequestId(text));
+    }
+    expect(new Set(texts).size).toBe(1);
+    const [removedRows] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_highlights where community_id = ${removed}::uuid`;
+    expect(removedRows?.n).toBe(0);
+
+    // Positive control IN THE SAME TEST: an ACTIVE community of this tenant creates, so the 404
+    // above is about the removed row, not a community branch that refuses everything.
+    const active = await makeHighlightCommunity('Destaque ativa');
+    const placed = await create(tokens.demoAdmin, { communityId: active, title: 'Teste Ativa' });
+    expect(placed.communityId).toBe(active);
+    expect(placed.position).toBe(0);
+  });
+
+  it('05.2-5 an ARCHIVED community refuses a new highlight with `archived` — and writes nothing', async () => {
+    const archived = await makeHighlightCommunity('Destaque arquivada', { status: 'archived' });
+    const res = await createHighlight(tokens.demoAdmin, {
+      communityId: archived,
+      title: 'Teste Arquivo',
+    });
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.details).toEqual({ highlight: 'archived' });
+
+    const [rows] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_highlights where title = 'Teste Arquivo'`;
+    expect(rows?.n).toBe(0);
+  });
+
+  it('05.2-6 D-100: one story sits in an Início highlight AND a community highlight', async () => {
+    const community = await makeHighlightCommunity('Destaque dupla');
+    const home = await create(tokens.demoAdmin, { title: 'Teste Casa' });
+    const place = await create(tokens.demoAdmin, { communityId: community, title: 'Teste Lugar' });
+    const { storyId } = await publishImage('duas casas');
+
+    const first = await addItem(tokens.demoAdmin, home.id, storyId);
+    expect(first.status).toBe(200);
+    expect(highlightMembershipResultSchema.parse(await first.json())).toEqual({
+      highlighted: true,
+      highlightCount: 1,
+    });
+
+    const second = await addItem(tokens.demoAdmin, place.id, storyId);
+    expect(second.status).toBe(200);
+    expect(highlightMembershipResultSchema.parse(await second.json())).toEqual({
+      highlighted: true,
+      highlightCount: 2,
+    });
+
+    // Two rows, never merged — and BOTH reads list the story.
+    expect(await itemRows(home.id, storyId)).toBe(1);
+    expect(await itemRows(place.id, storyId)).toBe(1);
+    for (const highlight of [home, place]) {
+      const res = await hlRequest(tokens.demoMember, `/${highlight.id}`);
+      expect(res.status).toBe(200);
+      const detail = highlightDetailSchema.parse(await res.json());
+      expect(detail.items.map((story) => story.id)).toContain(storyId);
+    }
+    const communityRow = await row(tokens.demoMember, `?communityId=${community}`);
+    expect(communityRow.map((item) => item.id)).toEqual([place.id]);
+  });
+
+  it('05.2-7 the SEED is the fixture: Bastidores for members, Aulas for the curator, Destaques mirrors the pins', async () => {
+    // Início, as a member: the seeded `Bastidores` (it holds live stories) and never `Aulas` (the
+    // seeded EMPTY highlight, D-102).
+    const memberHome = await row(tokens.demoMember);
+    const memberTitles = memberHome.map((item) => item.title);
+    expect(memberTitles).toContain('Bastidores');
+    expect(memberTitles).not.toContain('Aulas');
+
+    // Início, as the curator with `scope=all`: both, in POSITION order (R-D-C).
+    const curatorHome = (await row(tokens.demoAdmin, '?scope=all')).filter((item) =>
+      ['Bastidores', 'Aulas'].includes(item.title),
+    );
+    expect(curatorHome.map((item) => [item.title, item.position])).toEqual([
+      ['Bastidores', 0],
+      ['Aulas', 1],
+    ]);
+    expect(curatorHome.find((item) => item.title === 'Aulas')?.itemCount).toBe(0);
+
+    // The seeded pins' community carries `Destaques` — the state migration file 1's backfill would
+    // have produced for those pins — and its items include the seeded EXPIRED story, playable.
+    const [pinned] = await adminSql<{ community_id: string }[]>`
+      select distinct community_id::text from public.story_community_pins
+       where tenant_id = ${tenantIds.demo}::uuid`;
+    const pinnedCommunity = pinned?.community_id ?? '';
+    expect(pinnedCommunity).not.toBe('');
+    const communityRow = await row(tokens.demoMember, `?communityId=${pinnedCommunity}`);
+    const destaques = communityRow.find((item) => item.title === 'Destaques');
+    expect(destaques).toBeDefined();
+
+    const res = await hlRequest(tokens.demoMember, `/${destaques?.id}`);
+    expect(res.status).toBe(200);
+    const detail = highlightDetailSchema.parse(await res.json());
+    const expired = detail.items.find((story) => story.caption === SEEDED_EXPIRED_CAPTION);
+    expect(expired).toBeDefined();
+    expect(expired?.isActive).toBe(false);
+
+    // …and exactly the pinned stories, no more: the seeded highlight mirrors the seeded pins.
+    const pins = await adminSql<{ story_id: string }[]>`
+      select story_id::text from public.story_community_pins
+       where tenant_id = ${tenantIds.demo}::uuid and community_id = ${pinnedCommunity}::uuid`;
+    expect(detail.items.map((story) => story.id).sort()).toEqual(
+      pins.map((pin) => pin.story_id).sort(),
+    );
   });
 });
 

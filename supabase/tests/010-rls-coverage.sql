@@ -120,11 +120,19 @@ select is_empty(
         -- meaningful: those two constraints are HAND-WRITTEN SQL rather than drizzle references
         -- (a `module -> module` package edge is denied by `turbo boundaries`), so nothing in the TS
         -- schema would notice if this table stopped being created.
-        ('stories')
+        ('stories'),
+        -- Phase 05.2 (05.2-01). `story_highlights` and `story_highlight_items` both carry
+        -- `tenant_id` and the standard isolation policy, so assertions 1-2 already cover them; they
+        -- are listed here for the same reason their siblings are — a migration that silently stopped
+        -- being applied must not let those assertions pass vacuously. NEITHER is exempted anywhere,
+        -- and they matter more than most: a highlight item is the row that lets a story OUTLIVE its
+        -- 24 h, so a leak would be permanent rather than a day long. `story_highlights`' community
+        -- foreign key is hand-written SQL (MOD-02), so nothing in the TS schema would notice either.
+        ('story_highlights'), ('story_highlight_items')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-5 declare exists in public'
+  'every table Phases 1-05.2 declare exists in public'
 );
 
 select * from finish();

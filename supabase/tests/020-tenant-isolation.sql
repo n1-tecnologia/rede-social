@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(100);
+select plan(116);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -169,6 +169,28 @@ insert into public.story_community_pins
    '0a000000-0000-4000-8000-000000000002'),
   ('0b000000-0000-4000-8000-0000000000e5', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-0000000000d1', '0b000000-0000-4000-8000-0000000000c1',
+   '0b000000-0000-4000-8000-000000000002');
+
+-- 05.2-01: ONE named highlight and ONE item per tenant, structurally identical on both sides — the
+-- pin block's adjacency, carried to the rows that replace pins. Each highlight sits on its own
+-- tenant's first community with the SAME title, and each item points that highlight at its own
+-- tenant's story. A read that filtered on the title, the community slug or the item pair instead of
+-- on `tenant_id` would match BOTH rows. The foreign keys make a cross-tenant item impossible to even
+-- insert here, which is why the WITH CHECK cases below stamp a tenant rather than borrow an id.
+insert into public.story_highlights
+  (id, tenant_id, community_id, title, position, created_by_user_id) values
+  ('0a000000-0000-4000-8000-0000000000e6', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-0000000000c1', 'Destaques', 0, '0a000000-0000-4000-8000-000000000002'),
+  ('0b000000-0000-4000-8000-0000000000e6', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-0000000000c1', 'Destaques', 0, '0b000000-0000-4000-8000-000000000002');
+
+insert into public.story_highlight_items
+  (id, tenant_id, highlight_id, story_id, added_by_user_id) values
+  ('0a000000-0000-4000-8000-0000000000e7', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-0000000000e6', '0a000000-0000-4000-8000-0000000000d1',
+   '0a000000-0000-4000-8000-000000000002'),
+  ('0b000000-0000-4000-8000-0000000000e7', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-0000000000e6', '0b000000-0000-4000-8000-0000000000d1',
    '0b000000-0000-4000-8000-000000000002');
 
 -- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
@@ -529,6 +551,102 @@ select results_eq(
   'USING: an unpin aimed at B''s pins removes nothing — and unpin is a HARD delete, so there is no soft-delete predicate hiding the miss'
 );
 
+-- ── story_highlights: the same five cases, plus its own positive control (05.2-01) ────────────
+-- A highlight is where a story OUTLIVES its own expiry — on Início and on every community page —
+-- so a leak here would put another organisation's broadcast in this one's permanent row. It is
+-- proved on the same six axes as the pins it replaces, never on the assumption that its foreign
+-- keys already constrain it (a foreign key runs as the table owner and bypasses RLS).
+select results_eq(
+  $$ select count(*)::int from public.story_highlights
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own story_highlights row'
+);
+select results_eq(
+  $$ select count(*)::int from public.story_highlights where title = 'Destaques' $$,
+  ARRAY[1],
+  'adjacency: both tenants named their community highlight Destaques, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.story_highlights $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the highlight it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.story_highlights
+      where id = '0b000000-0000-4000-8000-0000000000e6' $$,
+  'detail by id: B''s highlight is not found through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.story_highlights
+       (tenant_id, community_id, title, position, created_by_user_id)
+     values ('0b000000-0000-4000-8000-000000000001', null, 'Destaques', 1,
+             '0b000000-0000-4000-8000-000000000002') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a highlight stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with d as (
+       delete from public.story_highlights
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from d $$,
+  ARRAY[0],
+  'USING: a delete aimed at B''s highlights removes nothing — a highlight delete is a HARD delete, so no soft-delete predicate hides the miss'
+);
+
+-- ── story_highlight_items: the same five cases, plus its own positive control (05.2-01) ───────
+-- The item row IS the expiry override (docblock item 6), and the items read carries no expiry
+-- predicate by design — so the only thing standing between A's lane and B's kept stories is the
+-- tenant predicate this block proves. The READ is asserted as the join a highlight's viewer runs,
+-- aimed at B's highlight id, not only as the bare table.
+select results_eq(
+  $$ select count(*)::int from public.story_highlight_items
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own story_highlight_items row'
+);
+select results_eq(
+  $$ select count(*)::int from public.story_highlight_items $$,
+  ARRAY[1],
+  'adjacency: both tenants kept their first story in their Destaques, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.story_highlight_items $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the item it returns belongs to A'
+);
+select is_empty(
+  $$ select s.id
+       from public.story_highlight_items i
+       join public.stories s on s.id = i.story_id and s.tenant_id = i.tenant_id
+      where i.highlight_id = '0b000000-0000-4000-8000-0000000000e6'
+        and s.deleted_at is null
+     union all
+     select id from public.story_highlight_items
+      where id = '0b000000-0000-4000-8000-0000000000e7' $$,
+  'detail by id: B''s item is not found by its id, nor by the items JOIN aimed at B''s highlight, through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.story_highlight_items
+       (tenant_id, highlight_id, story_id, added_by_user_id)
+     values ('0b000000-0000-4000-8000-000000000001',
+             '0b000000-0000-4000-8000-0000000000e6',
+             '0b000000-0000-4000-8000-0000000000d1',
+             '0b000000-0000-4000-8000-000000000002') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write an item stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with d as (
+       delete from public.story_highlight_items
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from d $$,
+  ARRAY[0],
+  'USING: a removal aimed at B''s items removes nothing'
+);
+
 -- ── community_members: the same five cases (05-01). The table is UNUSED in V1 and still proved:
 --    V2-CONT-02 is only a policy change if the policy is already correct today. ─────────────────
 select results_eq(
@@ -799,6 +917,26 @@ select is_empty(
   $$ select id from public.story_community_pins
       where id = '0a000000-0000-4000-8000-0000000000e5' $$,
   'symmetry: A''s pin is not found through B''s lane'
+);
+select results_eq(
+  $$ select tenant_id::text from public.story_highlights where title = 'Destaques' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s highlight for the same title'
+);
+select is_empty(
+  $$ select id from public.story_highlights
+      where id = '0a000000-0000-4000-8000-0000000000e6' $$,
+  'symmetry: A''s highlight is not found through B''s lane'
+);
+select results_eq(
+  $$ select tenant_id::text from public.story_highlight_items $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s item for the same structurally identical pair'
+);
+select is_empty(
+  $$ select id from public.story_highlight_items
+      where id = '0a000000-0000-4000-8000-0000000000e7' $$,
+  'symmetry: A''s item is not found through B''s lane'
 );
 select results_eq(
   $$ select host::text from public.tenant_domains $$,

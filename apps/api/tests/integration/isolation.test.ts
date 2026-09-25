@@ -763,6 +763,131 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("b7. highlights: the lab's highlight, story and community ids are each the bare 404 through every highlight route (05.2-01)", async () => {
+    // A highlight item is the row that lets a story OUTLIVE its 24 h, on Início and on a community
+    // page — so a leak here would be permanent, not a day long (T-05.2-02). Every id the four routes
+    // take is probed from the DEMO admin, the session most likely to succeed by accident: the
+    // service resolves each id in-lane with an explicit tenant predicate under RLS and inserts by
+    // insert-select, so a foreign id produces no row to act on rather than a refused one.
+    //
+    // Named b7 because 05.1-01 already took b6 for the born-attached publish.
+    const [labHighlight] = await adminSql<{ id: string }[]>`
+      select id from public.story_highlights
+       where tenant_id = ${tenantIds.lab}::uuid and community_id is null and title = 'Bastidores'`;
+    const [demoHighlight] = await adminSql<{ id: string }[]>`
+      select id from public.story_highlights
+       where tenant_id = ${tenantIds.demo}::uuid and community_id is null and title = 'Bastidores'`;
+    const [labStory] = await adminSql<{ id: string }[]>`
+      select id from public.stories
+       where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null limit 1`;
+    const [demoStory] = await adminSql<{ id: string }[]>`
+      select id from public.stories
+       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null limit 1`;
+    const [labCommunity] = await adminSql<{ id: string }[]>`
+      select id from public.communities
+       where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null and status = 'active' limit 1`;
+    const ids = {
+      labHighlight: labHighlight?.id ?? '',
+      demoHighlight: demoHighlight?.id ?? '',
+      labStory: labStory?.id ?? '',
+      demoStory: demoStory?.id ?? '',
+      labCommunity: labCommunity?.id ?? '',
+    };
+    // The SEEDED highlights are the fixture (scripts/seed.ts `SEED_HIGHLIGHT_IDS`) — a missing one
+    // means the seed is stale, not that isolation holds.
+    for (const [name, id] of Object.entries(ids)) expect(id, `seeded ${name}`).not.toBe('');
+
+    const call = (path: string, method = 'GET', body?: unknown) =>
+      api.request(`/v1/stories/highlights${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${tokens.demoAdmin}`,
+          ...(body ? { 'content-type': 'application/json' } : {}),
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    // `requestId` identifies the CALL, not the row — stripping it is what makes two refusals
+    // comparable (the case q rule).
+    const withoutRequestId = (raw: string) => {
+      const { requestId: _requestId, ...error } = (JSON.parse(raw) as Envelope)
+        .error as Envelope['error'] & {
+        requestId?: string;
+      };
+      return JSON.stringify({ error });
+    };
+    const title = `Isolamento ${String(RUN).slice(-4)}`;
+    const labItems = async () => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.story_highlight_items
+         where highlight_id = ${ids.labHighlight}::uuid`;
+      return row?.n ?? 0;
+    };
+    const demoItemsOfLabStory = async () => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.story_highlight_items
+         where story_id = ${ids.labStory}::uuid and tenant_id = ${tenantIds.demo}::uuid`;
+      return row?.n ?? 0;
+    };
+
+    const labItemsBefore = await labItems();
+    // The one answer every crossing must produce, measured against an id that names NOTHING.
+    const unknown = await call(`/${crypto.randomUUID()}`);
+    expect(unknown.status).toBe(404);
+    const unknownText = await unknown.text();
+
+    const crossings: [string, string, string, unknown?][] = [
+      ['GET the lab highlight', `/${ids.labHighlight}`, 'GET'],
+      [
+        'PUT a demo story into the lab highlight',
+        `/${ids.labHighlight}/stories/${ids.demoStory}`,
+        'PUT',
+      ],
+      [
+        'PUT a lab story into the demo highlight',
+        `/${ids.demoHighlight}/stories/${ids.labStory}`,
+        'PUT',
+      ],
+      ['GET the lab community row', `?communityId=${ids.labCommunity}`, 'GET'],
+      [
+        'POST a highlight into the lab community',
+        '',
+        'POST',
+        { communityId: ids.labCommunity, title },
+      ],
+    ];
+    for (const [label, path, method, body] of crossings) {
+      const res = await call(path, method, body);
+      expect(res.status, label).toBe(404);
+      const text = await res.text();
+      const parsed = JSON.parse(text) as Envelope;
+      expect(parsed.error.code, label).toBe('NOT_FOUND');
+      // No `details` key at all — the absence IS the existence-oracle control.
+      expect(Object.hasOwn(parsed.error, 'details'), label).toBe(false);
+      expect(withoutRequestId(text), label).toEqual(withoutRequestId(unknownText));
+      for (const needle of ['tria-lab', tenantIds.lab, ids.labHighlight, ids.labCommunity]) {
+        expect(text, label).not.toContain(needle);
+      }
+    }
+
+    // Nothing was written in EITHER tenant: no item under the lab highlight, no demo item naming the
+    // lab story, and no highlight carrying this case's title anywhere.
+    expect(await labItems()).toBe(labItemsBefore);
+    expect(await demoItemsOfLabStory()).toBe(0);
+    const [written] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_highlights where title = ${title}`;
+    expect(written?.n).toBe(0);
+
+    // Positive control (T-03-56) IN THE SAME TEST: the demo lane really does read its OWN seeded
+    // highlight — so the 404s above are isolation, not a route that 404s for everybody.
+    const own = await call(`/${ids.demoHighlight}`);
+    expect(own.status).toBe(200);
+    const detail = (await own.json()) as { highlight: { id: string }; items: { id: string }[] };
+    expect(detail.highlight.id).toBe(ids.demoHighlight);
+    expect(detail.items.length).toBeGreaterThan(0);
+    for (const item of detail.items) expect(item.id).not.toBe(ids.labStory);
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,
@@ -843,6 +968,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       // every new endpoint adds a cross-tenant case here. It takes a query parameter, which is
       // exactly why it is worth including: the host check must fire before the parameter is read.
       '/v1/stories/pinned?communityId=00000000-0000-4000-8000-000000000000',
+      // 05.2-01: the highlight row read joins the loop — SCHEMA-CONVENTIONS §(j) rule 2, every new
+      // endpoint adds a cross-tenant case here. It resolves a place before it reads anything, and
+      // the host check must refuse the session before that resolution ever runs.
+      '/v1/stories/highlights',
     ]) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);
