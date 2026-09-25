@@ -1,9 +1,17 @@
 'use client';
 
-import type { CommunitySummary } from '@tria/module-communities/contracts';
+import type { CommunityStatus, CommunitySummary } from '@tria/module-communities/contracts';
 import { CommunityCard } from '@tria/module-communities/ui';
-import { Button, Card, EmptyState, InfiniteScroll, PullToRefresh, Skeleton } from '@tria/ui';
-import { TriangleAlert, Users } from 'lucide-react';
+import {
+  Button,
+  Card,
+  EmptyState,
+  InfiniteScroll,
+  PullToRefresh,
+  Skeleton,
+  StatusPill,
+} from '@tria/ui';
+import { Archive, TriangleAlert, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';
 import { loadMoreCommunitiesAction, refreshCommunitiesAction } from './actions';
@@ -18,6 +26,12 @@ export interface CommunitiesListProps {
   tenantName: string;
   /** The composed `communities.community.manage` permission — never a role comparison here. */
   canManage: boolean;
+  /**
+   * Which list this is (05.1, D-88). The PAGE decides it on the server — `archived` only for a
+   * manager asking `?status=arquivadas` — and remounts this component per status, so no state is
+   * ever carried from one list into the other. Refresh and load-more pass it on (Pitfall 9).
+   */
+  status?: CommunityStatus;
 }
 
 /** The geometry of a real card: a 16/7 cover block and a counts row. */
@@ -65,6 +79,14 @@ export function CommunitiesSkeleton() {
  *
  * Ordering is the server's (`last_activity_at desc, id desc`) and is never restated here: nothing in
  * this file sorts, re-sorts or filters what the API answered.
+ *
+ * **05.1 — the `Arquivadas` list (D-88) is the same machine over a different keyset.** `status`
+ * travels with every refresh and load-more, so a pull or a scroll on `Arquivadas` never swaps the
+ * active list in. Its zero state is its own (UI-D-51: named, and with NO call to action, because
+ * archiving happens on the edit form); each archived row carries the neutral "Arquivada" pill in the
+ * card's slot (UI-D-50, not dimmed); and the region says which list it is. The title-row create
+ * control lives on the PAGE; `createCta` here serves the Ativas empty state only, which keeps its
+ * own route to the form (D-87).
  */
 export function CommunitiesList({
   initialItems,
@@ -72,6 +94,7 @@ export function CommunitiesList({
   initialError,
   tenantName,
   canManage,
+  status = 'active',
 }: CommunitiesListProps) {
   const t = useTranslations('communities');
 
@@ -97,7 +120,7 @@ export function CommunitiesList({
    */
   const refresh = useCallback(async () => {
     try {
-      const page = await refreshCommunitiesAction();
+      const page = await refreshCommunitiesAction(status);
       if (!page.ok) {
         setFirstLoadFailed(items.length === 0);
         return;
@@ -110,14 +133,14 @@ export function CommunitiesList({
       console.error('communities.refresh_failed', { error: String(error) });
       setFirstLoadFailed(items.length === 0);
     }
-  }, [items.length]);
+  }, [items.length, status]);
 
   /** APPEND: every card already on screen keeps its order and its DOM position. */
   const loadMore = useCallback(async () => {
     if (!cursor) return;
     const from = cursor;
     try {
-      const page = await loadMoreCommunitiesAction(from);
+      const page = await loadMoreCommunitiesAction(from, status);
       if (!page.ok) {
         setPageFailed(true);
         return;
@@ -131,7 +154,7 @@ export function CommunitiesList({
       console.error('communities.load_more_failed', { error: String(error) });
       setPageFailed(true);
     }
-  }, [cursor]);
+  }, [cursor, status]);
 
   /**
    * The retry RE-ARMS the sentinel rather than fetching itself. The retry control renders AT the
@@ -176,6 +199,20 @@ export function CommunitiesList({
         />
       </div>
     );
+  } else if (items.length === 0 && status === 'archived') {
+    // UI-D-51: nothing archived is a named, honest state with NO call to action — the Ativas chip
+    // sits directly above it and the create control is in the title row.
+    body = (
+      <div className="px-4">
+        <EmptyState
+          variant="card"
+          icon={Archive}
+          data-testid="communities-empty-archived"
+          title={t('emptyArchived.title')}
+          body={t('emptyArchived.body')}
+        />
+      </div>
+    );
   } else if (items.length === 0) {
     // D-77: the tab STAYS VISIBLE with zero communities — navigation is driven by the module flag,
     // never by data — and for an admin this card is also the creation entry point.
@@ -205,6 +242,12 @@ export function CommunitiesList({
               coverVariantWidths={community.coverVariantWidths}
               postCountLabel={t('card.posts', { count: community.postCount })}
               coverAlt={t('card.cover', { community: community.name })}
+              // UI-D-50: decided per ROW from the row's own status, never from the list's.
+              statusPill={
+                community.status === 'archived' ? (
+                  <StatusPill tone="neutral">{t('archived.pill')}</StatusPill>
+                ) : undefined
+              }
             />
           ))}
         </div>
@@ -243,7 +286,14 @@ export function CommunitiesList({
       {/* `list.region` names the LIST; `communities.region` names one community's post list on its
           own page (UI-SPEC §Copywriting Contract). 05-04 moved this key so the spec's own name is
           free for the surface the spec gives it to. */}
-      <section aria-label={t('list.region', { tenant: tenantName })} className="flex flex-col pb-6">
+      <section
+        aria-label={
+          status === 'archived'
+            ? t('list.regionArchived', { tenant: tenantName })
+            : t('list.region', { tenant: tenantName })
+        }
+        className="flex flex-col pb-6"
+      >
         {body}
       </section>
     </PullToRefresh>
