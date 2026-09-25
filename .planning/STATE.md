@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-02-PLAN.md
-last_updated: "2026-09-25T19:08:11.259Z"
+stopped_at: Completed 05.2-01-PLAN.md
+last_updated: "2026-09-25T19:46:56.441Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.2-02 (sketch 004 design gate, shipped approved false)
-state_head: 68b6890d6848ffe925e6d47beaf94ff993f5e34d
+last_activity_desc: Completed 05.2-01 (highlights tracer — tables, migration file 1, routes, pgTAP 120, isolation b7, seeded highlights)
+state_head: 38f7eb99e4239820b581d6f8e7e23eb32a82bee3
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 65
+  completed_plans: 66
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 2 of 12
-Status: Executing Phase 05.2
-Last activity: 2026-09-25 — Completed 05.2-02 (sketch 004 design gate, shipped `approved: false`)
+Plan: 3 of 12
+Status: Executing Phase 05.2 — next is 05.2-03
+Last activity: 2026-09-25 — Completed 05.2-01 (highlights tracer: tables, migration file 1 with the no-loss backfill guard, four routes, pgTAP 120, isolation b7, seeded Bastidores/Aulas/Destaques; local DB reset on the developer's consent)
 
 Progress: [███████████████████░] 59/62 plans ([░░░░░░░░░░] 0%)
 
@@ -125,6 +125,7 @@ Progress: [███████████████████░] 59/62 p
 | Phase 05.1 P03 | 16 min | 3 tasks | 10 files |
 | Phase 05.1 P05 | 33 min | 3 tasks | 8 files |
 | Phase 05.2 P02 | 10 min | 2 tasks | 3 files |
+| Phase 05.2 P01 | 36min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -374,6 +375,10 @@ Recent decisions affecting current work:
 - [Phase 05.1]: 05.1-05: e2e that needs the new catalog keys runs against a production next start on :3100 through a scratchpad config overriding baseURL only (PLAYWRIGHT_BASE_URL would mark the run remote and skip phase5-smoke); e2e needing seeded image bytes must re-seed after test:integration — The developer's long-running next dev memoizes the catalog; media-sweeper.test.ts empties the seeded media bucket
 - [Phase 05.1]: Phase 05.2 goes next, not 01.1 — `phase.complete` picked 01.1 numerically again; pointer moved by hand (cloud work stays deferred to the end)
 - [Phase 05.2]: 05.2-02: sketch 004 ships approved: false; the 12 precondition-gated UI tasks in plans 04-10 stay blocked until the D-33 review is recorded in its README (a provisional product-owner approval releases them)
+- [Phase 05.2]: 05.2-01: local DB reset on the developer's explicit reset at the blocking-human checkpoint; pre-reset data-only backup at ~/tria-local-backups/pre-05.2-highlights.sql
+- [Phase 05.2]: 05.2-01: highlight services read the communities module flag BEFORE withTenantTx (PlaceGate) so one request never holds two pooled connections
+- [Phase 05.2]: 05.2-01: seeded Destaques mirrors the seeded pins row for row (pinner, pinned_at); Bastidores holds an active + the expired image; Aulas is the empty curator-only highlight
+- [Phase 05.2]: 05.2-01: the API isolation case for highlights is b7 (05.1-01 owns b6)
 
 ### Pending Todos
 
@@ -427,6 +432,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T19:08:11.173Z
-Stopped at: Completed 05.2-02-PLAN.md
+Last session: 2026-09-25T19:46:46.557Z
+Stopped at: Completed 05.2-01-PLAN.md
 Resume file: None
