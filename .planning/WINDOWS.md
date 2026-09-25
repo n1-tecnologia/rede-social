@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 31
+open_count: 32
 waived_count: 0
 fixed_count: 14
-total_count: 45
-last_updated: 2026-09-25T22:53:35.615Z
+total_count: 46
+last_updated: 2026-09-25T23:10:22.646Z
 ---
 
 # Broken Windows Ledger
@@ -60,6 +60,7 @@ last_updated: 2026-09-25T22:53:35.615Z
 | 43 | 05 | unrun-verify | .planning/phases/05-communities-stories/05-VERIFICATION-DEBT.md |  | 22 of Phase 5's 23 fail-closed verification items are still unresolved and now assembled in one dossier: 13 carried prohibitions (P-05-01..P-05-14 minus the converted P-05-10), 5 backstop visual claims needing a 320px viewport (B-05-01..B-05-05), the device half of H-05-01, and the error-copy tap hole under P-05-10/H-05-04. H-05-02 is tracked separately as entry 42. None may be folded into a passing verdict. | open |  | 2026-09-24T12:52:00.328Z |  |
 | 44 | 05.2 | stub | apps/web/lib/story-view.ts | 346 | Inicio highlight circles are inert static spans (no accessible name, no onOpen) until plan 05.2-05 makes the viewer group-aware | fixed |  | 2026-09-25T21:56:21.623Z | 2026-09-25T22:30:47.123Z |
 | 45 | 05.2 | stub | apps/web/components/stories/StoryViewerHost.tsx | 514 | The Destacar sheet's empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the story deep link's not-found screen | open |  | 2026-09-25T22:53:35.615Z |  |
+| 46 | 05.2 | stub | apps/web/app/(app)/stories/meus/StoryHistoryList.tsx | 450 | Highlight sheet empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the not-found screen | open |  | 2026-09-25T23:10:22.646Z |  |
 
 ````json
 [
@@ -601,6 +602,18 @@ last_updated: 2026-09-25T22:53:35.615Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-25T22:53:35.615Z",
+    "resolved_at": null
+  },
+  {
+    "id": 46,
+    "kind": "stub",
+    "phase": "05.2",
+    "file": "apps/web/app/(app)/stories/meus/StoryHistoryList.tsx",
+    "line": 450,
+    "description": "Highlight sheet empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the not-found screen",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-25T23:10:22.646Z",
     "resolved_at": null
   }
 ]
