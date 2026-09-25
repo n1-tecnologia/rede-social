@@ -2247,6 +2247,10 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
       'highlight.deleted',
       'highlight.reordered',
       'story.unhighlighted',
+      // 05.2-08: the publish path's three, so one log carries their order.
+      'story.published',
+      'highlight.created',
+      'story.highlighted',
     ] as const) {
       curationOffs.push(
         subscribe(name, async (payload) => {
@@ -2767,6 +2771,281 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
       [placed.id, 'Teste Desliga', 1],
     ]);
     expect(await itemRows(placed.id, storyId)).toBe(1);
+  });
+
+  /* ── 05.2-08: a story born INSIDE a highlight (D-111..D-115, D-99's one write carried) ────────── */
+
+  /**
+   * The publish path's events, in the ONE ordered log the block's hook fills, so a case can assert
+   * the ORDER across names (`story.published`, then `highlight.created`, then `story.highlighted`).
+   */
+  const PUBLISH_EVENTS = new Set(['story.published', 'highlight.created', 'story.highlighted']);
+  const publishEventsSince = (before: number) =>
+    curationEvents.slice(before).filter((event) => PUBLISH_EVENTS.has(event.name));
+
+  /** "No story row" is measured against THIS case's caption (unique per case), never the table. */
+  async function captionCount(caption: string): Promise<number> {
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.stories where caption = ${caption}`;
+    return rows[0]?.n ?? 0;
+  }
+
+  /** The item row of one pair, with the columns the born ≡ added invariant compares. */
+  async function itemRow(highlightId: string, storyId: string) {
+    const rows = await adminSql<{ tenant_id: string; added_by_user_id: string }[]>`
+      select tenant_id::text, added_by_user_id::text from public.story_highlight_items
+       where highlight_id = ${highlightId}::uuid and story_id = ${storyId}::uuid`;
+    return rows;
+  }
+
+  /** A publish into a destination, remembered for the sweep when it answers 201. */
+  async function publishInto(
+    label: string,
+    destination: Record<string, unknown>,
+    token = tokens.demoAdmin,
+  ): Promise<{ res: Response; caption: string }> {
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const caption = `${TEST_CAPTION_PREFIX} — ${label} ${randomUUID()}`;
+    const res = await publish(token, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption,
+      ...destination,
+    });
+    return { res, caption };
+  }
+
+  it('05.2-19 a story published with an Início `highlightId` is born inside it: 201, count 1, in the highlight AND the strip, published + highlighted', async () => {
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Nasce' });
+
+    const before = curationEvents.length;
+    const { res } = await publishInto('nasce no destaque', { highlightId: highlight.id });
+    expect(res.status).toBe(201);
+    const story = (await res.json()) as StorySummary;
+    created.push(story.id);
+    expect(story.highlightCount).toBe(1);
+
+    const detailRes = await hlRequest(tokens.demoMember, `/${highlight.id}`);
+    expect(detailRes.status).toBe(200);
+    const detail = highlightDetailSchema.parse(await detailRes.json());
+    expect(detail.items.map((item) => item.id)).toContain(story.id);
+
+    // D-111 / D-96: a story born in a highlight is in Início's tenant circle for its 24 h.
+    const strip = await walk(tokens.demoMember, '/v1/stories', STORY_MAX_PAGE_SIZE);
+    expect(strip.some((item) => item.id === story.id)).toBe(true);
+
+    const log = publishEventsSince(before);
+    expect(log.map((entry) => entry.name)).toEqual(['story.published', 'story.highlighted']);
+    expect(Object.keys(log[0]?.payload ?? {}).sort()).toEqual([
+      'authorUserId',
+      'expiresAt',
+      'mediaKind',
+      'storyId',
+      'tenantId',
+    ]);
+    expect(Object.keys(log[1]?.payload ?? {}).sort()).toEqual([
+      'actorUserId',
+      'highlightId',
+      'storyId',
+      'tenantId',
+    ]);
+    expect(log[1]?.payload).toMatchObject({ storyId: story.id, highlightId: highlight.id });
+  });
+
+  it('05.2-20 `newHighlight` creates the highlight at the END of its community row in the SAME write: published, created, highlighted', async () => {
+    const community = await makeHighlightCommunity('Destaque inline');
+    const existing = await create(tokens.demoAdmin, {
+      communityId: community,
+      title: 'Teste Antes',
+    });
+
+    const before = curationEvents.length;
+    const { res } = await publishInto('destaque inline', {
+      newHighlight: { communityId: community, title: '  Teste Inline  ' },
+    });
+    expect(res.status).toBe(201);
+    const story = (await res.json()) as StorySummary;
+    created.push(story.id);
+    expect(story.highlightCount).toBe(1);
+
+    const placeRow = await row(tokens.demoAdmin, `?scope=all&communityId=${community}`);
+    expect(placeRow.map((item) => item.title)).toEqual(['Teste Antes', 'Teste Inline']);
+    const inline = placeRow[1] as HighlightSummary;
+    createdHighlights.push(inline.id);
+    expect(inline.position).toBeGreaterThan(existing.position);
+    expect(inline.itemCount).toBe(1);
+    expect(await itemRows(inline.id, story.id)).toBe(1);
+
+    const log = publishEventsSince(before);
+    expect(log.map((entry) => entry.name)).toEqual([
+      'story.published',
+      'highlight.created',
+      'story.highlighted',
+    ]);
+    expect(log[1]?.payload).toMatchObject({ highlightId: inline.id, communityId: community });
+    expect(Object.keys(log[1]?.payload ?? {}).sort()).toEqual([
+      'actorUserId',
+      'communityId',
+      'highlightId',
+      'tenantId',
+    ]);
+    expect(log[2]?.payload).toMatchObject({ storyId: story.id, highlightId: inline.id });
+    // The curator's words never ride an event (T-05.2-37).
+    expect(JSON.stringify(log)).not.toContain('Teste Inline');
+  });
+
+  it('05.2-21 every refusal writes NOTHING: archived, title_invalid, both destinations, and ONE bare 404 for every miss', async () => {
+    const archivedCommunity = await makeHighlightCommunity('Destaque arquiva');
+    const inArchived = await create(tokens.demoAdmin, {
+      communityId: archivedCommunity,
+      title: 'Teste Arquiva',
+    });
+    await adminSql`
+      update public.communities set status = 'archived' where id = ${archivedCommunity}::uuid`;
+    const home = await create(tokens.demoAdmin, { title: 'Teste Recusa' });
+
+    // Another tenant's highlight and community: the lab tenant has stories ON for this file.
+    const labRes = await createHighlight(tokens.labAdmin, { title: 'Teste Lab' }, HOSTS.lab);
+    expect(labRes.status).toBe(201);
+    const labHighlight = highlightSummarySchema.parse(await labRes.json());
+    createdHighlights.push(labHighlight.id);
+    const labCommunity = randomUUID();
+    highlightCommunities.push(labCommunity);
+    await adminSql`
+      insert into public.communities (id, tenant_id, created_by_user_id, name, slug, status)
+      select ${labCommunity}::uuid, ${tenantIds.lab}::uuid, m.user_id, 'Lab destaque', ${labCommunity}, 'active'
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.lab}::uuid and u.email = 'admin@tria-lab.local'
+       limit 1`;
+
+    const before = curationEvents.length;
+    const refusals: [string, Record<string, unknown>, number, Record<string, unknown> | null][] = [
+      ['archived highlight', { highlightId: inArchived.id }, 400, { highlight: 'archived' }],
+      [
+        'archived inline',
+        { newHighlight: { communityId: archivedCommunity, title: 'Teste Novo' } },
+        400,
+        { highlight: 'archived' },
+      ],
+      [
+        'long title',
+        { newHighlight: { communityId: null, title: 'x'.repeat(16) } },
+        400,
+        { highlight: 'title_invalid' },
+      ],
+    ];
+    for (const [label, destination, status, details] of refusals) {
+      const { res, caption } = await publishInto(label, destination);
+      expect(res.status, label).toBe(status);
+      const body = await envelope(res);
+      expect(body.error.code, label).toBe('VALIDATION_FAILED');
+      expect(body.error.details, label).toEqual(details);
+      expect(await captionCount(caption), label).toBe(0);
+    }
+
+    // Both destinations at once: the contract refuses the shape, never picks one.
+    const both = await publishInto('dois destinos', {
+      highlightId: home.id,
+      newHighlight: { communityId: null, title: 'Teste Dois' },
+    });
+    expect(both.res.status).toBe(400);
+    expect((await envelope(both.res)).error.code).toBe('VALIDATION_FAILED');
+    expect(await captionCount(both.caption)).toBe(0);
+
+    const misses: Response[] = [];
+    for (const destination of [
+      { highlightId: randomUUID() },
+      { highlightId: labHighlight.id },
+      { newHighlight: { communityId: labCommunity, title: 'Teste Fora' } },
+      { newHighlight: { communityId: randomUUID(), title: 'Teste Fora' } },
+    ]) {
+      const { res, caption } = await publishInto('destino invisivel', destination);
+      misses.push(res);
+      expect(await captionCount(caption)).toBe(0);
+    }
+    await expectBare404s(misses);
+
+    // Nothing was announced by any refusal, and nothing was created in either place.
+    expect(publishEventsSince(before)).toHaveLength(0);
+    const archivedRow = await row(tokens.demoAdmin, `?scope=all&communityId=${archivedCommunity}`);
+    expect(archivedRow.map((item) => item.id)).toEqual([inArchived.id]);
+    expect((await curated(home.id)).itemCount).toBe(0);
+  });
+
+  it('05.2-22 a publish-ONLY caller cannot curate through publish (403 before any lookup), and still publishes with no destination', async () => {
+    const home = await create(tokens.demoAdmin, { title: 'Teste Sem Gestao' });
+
+    setPermissionResolver((role, enabled, settings) => {
+      const granted = permissionsFor(role, enabled, settings);
+      return role === 'admin_tenant'
+        ? granted.filter((permission) => permission !== 'stories.story.manage')
+        : granted;
+    });
+    try {
+      for (const destination of [
+        { highlightId: home.id },
+        { highlightId: randomUUID() },
+        { newHighlight: { communityId: null, title: 'Teste Proibido' } },
+      ]) {
+        const { res, caption } = await publishInto('sem manage', destination);
+        expect(res.status).toBe(403);
+        expect((await envelope(res)).error.code).toBe('FORBIDDEN');
+        expect(await captionCount(caption)).toBe(0);
+      }
+      expect((await curated(home.id)).itemCount).toBe(0);
+
+      // Positive control under the SAME resolver: publishing itself is untouched.
+      const { res } = await publishInto('sem manage, sem destino', {});
+      expect(res.status).toBe(201);
+      created.push(((await res.json()) as StorySummary).id);
+    } finally {
+      setPermissionResolver(permissionsFor);
+    }
+  });
+
+  it('05.2-23 THE INVARIANT: born in a highlight ≡ added later — same row, same count, same membership, same event', async () => {
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Igual' });
+    const adminRows = await adminSql<{ id: string }[]>`
+      select id::text from public.users where email = 'admin@tria-demo.local' limit 1`;
+    const adminUserId = adminRows[0]?.id ?? '';
+
+    const before = curationEvents.length;
+    const born = await publishInto('nasce igual', { highlightId: highlight.id });
+    expect(born.res.status).toBe(201);
+    const storyA = (await born.res.json()) as StorySummary;
+    created.push(storyA.id);
+
+    const { storyId: storyB } = await publishImage('adicionado depois');
+    const added = await addItem(tokens.demoAdmin, highlight.id, storyB);
+    expect(added.status).toBe(200);
+
+    const rowA = await itemRow(highlight.id, storyA.id);
+    const rowB = await itemRow(highlight.id, storyB);
+    expect(rowA).toHaveLength(1);
+    expect(rowB).toHaveLength(1);
+    expect(rowA).toEqual(rowB);
+    expect(rowA[0]).toEqual({ tenant_id: tenantIds.demo, added_by_user_id: adminUserId });
+
+    for (const storyId of [storyA.id, storyB]) {
+      const res = await request(`/v1/stories/${storyId}`, tokens.demoAdmin, {
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      expect(((await res.json()) as StorySummary).highlightCount).toBe(1);
+    }
+
+    const detail = highlightDetailSchema.parse(
+      await (await hlRequest(tokens.demoMember, `/${highlight.id}`)).json(),
+    );
+    expect(detail.items.map((item) => item.id).sort()).toEqual([storyA.id, storyB].sort());
+
+    const highlightedEvents = publishEventsSince(before).filter(
+      (entry) => entry.name === 'story.highlighted',
+    );
+    expect(highlightedEvents.map((entry) => entry.payload.storyId)).toEqual([storyA.id, storyB]);
+    expect(Object.keys(highlightedEvents[0]?.payload ?? {}).sort()).toEqual(
+      Object.keys(highlightedEvents[1]?.payload ?? {}).sort(),
+    );
   });
 });
 

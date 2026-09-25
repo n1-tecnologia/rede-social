@@ -1,5 +1,7 @@
 import type { RequestContext } from '@tria/core/server/auth/context';
 import { flush, subscribe } from '@tria/core/server/events/bus';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -61,13 +63,88 @@ let executeCall = 0;
  * `'community'` a publish that names a community issues FIVE, destination first: 1 = the community
  * row, 2 = the asset, 3 = the insert id, 4 = the pin insert (`returning id`), 5 = the projection.
  */
-let mode: 'plain' | 'community' = 'plain';
+let mode: 'plain' | 'community' | 'highlight' | 'inline' = 'plain';
 /** What the community lookup answers in `'community'` mode: a visible row, or nothing at all. */
 let community: { status: string } | null = { status: 'active' };
 
+/**
+ * 05.2 (D-113/D-114): `'highlight'` and `'inline'` publish INTO a highlight. Those two modes answer
+ * by the statement's TEXT (rendered through drizzle's own `PgDialect`, `story-highlights.test.ts`'s
+ * script) rather than by its index, so each case can assert the ORDER the statements ran in by name.
+ * The four cases above never enter this branch and keep their index-based answers unchanged.
+ */
+const dialect = new PgDialect();
+const HIGHLIGHT_ID = '66666666-6666-4666-8666-666666666666';
+const NEW_HIGHLIGHT_ID = '77777777-7777-4777-8777-777777777777';
+const PLACE_ID = '55555555-5555-4555-8555-555555555555';
+/** The existing highlight's place: null is Início, else a community id. */
+let highlightPlace: string | null = null;
+/** The place community's status (only read when a community place is named). */
+let placeStatus = 'active';
+/** How many stories the existing highlight already holds. */
+let heldItems = 0;
+/** How many highlights the inline place already holds (its `for update` lock answers that many). */
+let placeHighlights = 0;
+/** Whether the communities module is on — the place gate is read BEFORE the transaction. */
+let communitiesOn = true;
+/** How many times the module flag was read: a publish with no destination must read it zero times. */
+let flagReads = 0;
+/** Every statement the scripted modes saw, by the kind the script recognised. */
+let seen: string[] = [];
+
+function classify(text: string): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (/^select h\.id, h\.community_id/.test(t)) return 'highlight';
+  if (/from communities c/.test(t)) return 'place';
+  if (/^select count\(\*\)::int as n, coalesce\(bool_or/.test(t)) return 'room';
+  if (/^select h\.id from story_highlights h .* for update$/.test(t)) return 'lock';
+  if (/^select kind, purpose from media_assets/.test(t)) return 'asset';
+  if (/^insert into stories /.test(t)) return 'story-insert';
+  if (/^insert into story_highlights /.test(t)) return 'highlight-insert';
+  if (/^insert into story_highlight_items/.test(t)) return 'item';
+  if (/^select s\.id, s\.author_user_id/.test(t)) return 'projection';
+  return `unknown: ${t.slice(0, 60)}`;
+}
+
+function scripted(query: SQL): unknown[] {
+  const kind = classify(dialect.sqlToQuery(query).sql);
+  seen.push(kind);
+  switch (kind) {
+    case 'highlight':
+      return [
+        {
+          id: HIGHLIGHT_ID,
+          community_id: highlightPlace,
+          title: 'Aulas',
+          cover_story_id: null,
+          cover_asset_id: null,
+        },
+      ];
+    case 'place':
+      return [{ status: placeStatus }];
+    case 'room':
+      return [{ n: heldItems, present: false }];
+    case 'lock':
+      return Array.from({ length: placeHighlights }, (_, index) => ({ id: `h-${index}` }));
+    case 'asset':
+      return asset === null ? [] : [asset];
+    case 'story-insert':
+      return [{ id: STORY_ID }];
+    case 'highlight-insert':
+      return [{ id: NEW_HIGHLIGHT_ID }];
+    case 'item':
+      return [{ id: 'item-row' }];
+    case 'projection':
+      return [{ ...row, pinned_community_count: 0, highlight_count: 1 }];
+    default:
+      return [];
+  }
+}
+
 const tx = {
-  execute: async () => {
+  execute: async (query: SQL) => {
     executeCall += 1;
+    if (mode === 'highlight' || mode === 'inline') return scripted(query);
     if (mode === 'community') {
       if (executeCall === 1) return community === null ? [] : [community];
       if (executeCall === 2) return asset === null ? [] : [asset];
@@ -83,6 +160,15 @@ const tx = {
 
 vi.mock('@tria/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
+}));
+
+vi.mock('@tria/core/server/modules/flags-cache', () => ({
+  moduleFlags: {
+    isEnabled: async () => {
+      flagReads += 1;
+      return communitiesOn;
+    },
+  },
 }));
 
 const { publishStory } = await import('../server/service');
@@ -105,6 +191,13 @@ let unsubscribe: () => void = () => {};
 beforeEach(() => {
   mode = 'plain';
   community = { status: 'active' };
+  highlightPlace = null;
+  placeStatus = 'active';
+  heldItems = 0;
+  placeHighlights = 0;
+  communitiesOn = true;
+  flagReads = 0;
+  seen = [];
   transaction = 'commit';
   asset = { kind: 'image', purpose: 'story' };
   executeCall = 0;
@@ -345,5 +438,184 @@ describe('05.1 — a publish that names a community: destination first, both eve
     await flush(ctx);
     expect(received).toHaveLength(1);
     expect(pinned).toHaveLength(0);
+  });
+});
+
+describe('05.2 — a publish INTO a highlight: destination first, one write, events after commit (D-113/D-114)', () => {
+  let highlighted: Record<string, unknown>[] = [];
+  let createdHighlights: Record<string, unknown>[] = [];
+  const offs: (() => void)[] = [];
+
+  beforeEach(() => {
+    highlighted = [];
+    createdHighlights = [];
+    offs.push(
+      subscribe('story.highlighted', async (payload) => {
+        highlighted.push(payload as unknown as Record<string, unknown>);
+      }),
+      subscribe('highlight.created', async (payload) => {
+        createdHighlights.push(payload as unknown as Record<string, unknown>);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    for (const off of offs.splice(0)) off();
+  });
+
+  it('12. into an existing Início highlight: highlight row → room → asset → insert → item → projection, then published + highlighted', async () => {
+    mode = 'highlight';
+    const ctx = context();
+    const story = await publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID });
+
+    expect(seen).toEqual(['highlight', 'room', 'asset', 'story-insert', 'item', 'projection']);
+    expect(story.highlightCount).toBe(1);
+    // Queued in order, NOT delivered yet (MOD-03).
+    expect(ctx.events.map((event) => event.name)).toEqual(['story.published', 'story.highlighted']);
+    expect(highlighted).toHaveLength(0);
+
+    await flush(ctx);
+
+    expect(received).toHaveLength(1);
+    expect(highlighted).toHaveLength(1);
+    expect(Object.keys(highlighted[0] ?? {}).sort()).toEqual([
+      'actorUserId',
+      'highlightId',
+      'storyId',
+      'tenantId',
+    ]);
+    expect(highlighted[0]).toMatchObject({
+      tenantId: TENANT_ID,
+      storyId: STORY_ID,
+      highlightId: HIGHLIGHT_ID,
+      actorUserId: USER_ID,
+    });
+    expect(JSON.stringify(highlighted[0])).not.toContain('legenda');
+  });
+
+  it('13. a highlight in an ARCHIVED community is refused `archived` after its two destination statements, and queues nothing', async () => {
+    mode = 'highlight';
+    highlightPlace = PLACE_ID;
+    placeStatus = 'archived';
+    const ctx = context();
+
+    await expect(publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID })).rejects.toMatchObject({
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      details: { highlight: 'archived' },
+    });
+
+    // Destination first: no asset lookup, no insert.
+    expect(seen).toEqual(['highlight', 'place']);
+    expect(ctx.events).toHaveLength(0);
+    await flush(ctx);
+    expect(received).toHaveLength(0);
+    expect(highlighted).toHaveLength(0);
+  });
+
+  it('14. a FULL highlight refuses the new story `full` before the asset, and queues nothing', async () => {
+    mode = 'highlight';
+    heldItems = 100;
+    const ctx = context();
+
+    await expect(publishStory(ctx, { ...input, highlightId: HIGHLIGHT_ID })).rejects.toMatchObject({
+      status: 400,
+      details: { highlight: 'full' },
+    });
+    expect(seen).toEqual(['highlight', 'room']);
+    expect(ctx.events).toHaveLength(0);
+  });
+
+  it('15. inline into a community: place → place lock → asset → story insert → highlight insert → item → projection, three events in order', async () => {
+    mode = 'inline';
+    placeHighlights = 2;
+    const ctx = context();
+    const story = await publishStory(ctx, {
+      ...input,
+      newHighlight: { communityId: PLACE_ID, title: 'Teste Um' },
+    });
+
+    expect(seen).toEqual([
+      'place',
+      'lock',
+      'asset',
+      'story-insert',
+      'highlight-insert',
+      'item',
+      'projection',
+    ]);
+    expect(story.highlightCount).toBe(1);
+    expect(ctx.events.map((event) => event.name)).toEqual([
+      'story.published',
+      'highlight.created',
+      'story.highlighted',
+    ]);
+
+    await flush(ctx);
+
+    expect(createdHighlights).toHaveLength(1);
+    expect(Object.keys(createdHighlights[0] ?? {}).sort()).toEqual([
+      'actorUserId',
+      'communityId',
+      'highlightId',
+      'tenantId',
+    ]);
+    expect(createdHighlights[0]).toMatchObject({
+      highlightId: NEW_HIGHLIGHT_ID,
+      communityId: PLACE_ID,
+      actorUserId: USER_ID,
+    });
+    // Ids only: the curator-written title never rides an event (T-05.2-37).
+    expect(JSON.stringify(createdHighlights[0])).not.toContain('Teste Um');
+    expect(highlighted[0]).toMatchObject({ storyId: STORY_ID, highlightId: NEW_HIGHLIGHT_ID });
+  });
+
+  it('16. inline into Início skips the community read; a FULL place is refused `full` after the lock and writes nothing', async () => {
+    mode = 'inline';
+    const ctx = context();
+    await publishStory(ctx, { ...input, newHighlight: { communityId: null, title: 'Teste Dois' } });
+    expect(seen).toEqual([
+      'lock',
+      'asset',
+      'story-insert',
+      'highlight-insert',
+      'item',
+      'projection',
+    ]);
+
+    seen = [];
+    placeHighlights = 50;
+    const refusedCtx = context();
+    await expect(
+      publishStory(refusedCtx, {
+        ...input,
+        newHighlight: { communityId: null, title: 'Teste Tres' },
+      }),
+    ).rejects.toMatchObject({ status: 400, details: { highlight: 'full' } });
+    expect(seen).toEqual(['lock']);
+    expect(refusedCtx.events).toHaveLength(0);
+  });
+
+  it('17. an inline create into an ARCHIVED community is refused `archived` after ONE statement', async () => {
+    mode = 'inline';
+    placeStatus = 'archived';
+    const ctx = context();
+
+    await expect(
+      publishStory(ctx, { ...input, newHighlight: { communityId: PLACE_ID, title: 'Teste' } }),
+    ).rejects.toMatchObject({ status: 400, details: { highlight: 'archived' } });
+    expect(seen).toEqual(['place']);
+    expect(ctx.events).toHaveLength(0);
+  });
+
+  it('18. WITHOUT a destination the module flag is never read and exactly three statements run', async () => {
+    mode = 'plain';
+    const ctx = context();
+
+    await publishStory(ctx, input);
+
+    expect(flagReads).toBe(0);
+    expect(executeCall).toBe(3);
+    expect(ctx.events.map((event) => event.name)).toEqual(['story.published']);
   });
 });
