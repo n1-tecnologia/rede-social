@@ -387,6 +387,52 @@ describe('05.2-06 — the highlight sheet strings and their placeholders', () =>
   });
 });
 
+/**
+ * 05.2-07 — "Seus stories" after pins (UI-D-77, UI-D-78, UI-D-79). The history's indicator and menu
+ * speak of highlights, the delete dialog names them with action-named buttons, and the pin
+ * vocabulary is RETIRED: `stories.pin.*`, `stories.history.pinned` and `stories.history.menu.pin` are
+ * pinned ABSENT, so a stray re-add of "Fixar" fails here.
+ */
+describe('05.2-07 — the "Seus stories" strings, and the pin vocabulary retired', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    [
+      'stories.history.highlighted',
+      '{count, plural, one {Em # destaque} other {Em # destaques}}',
+    ],
+    ['stories.history.menu.highlight', 'Destacar'],
+    ['stories.history.confirmDelete.title', 'Excluir story?'],
+    ['stories.history.confirmDelete.body', 'Ele sai do início e de todos os destaques onde está.'],
+    ['stories.history.confirmDelete.confirm', 'Excluir story'],
+    ['stories.history.confirmDelete.cancel', 'Manter story'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('stories.history.highlighted carries the {count} plural', () => {
+    expect(String(lookup('stories.history.highlighted'))).toContain('{count, plural,');
+  });
+
+  it.each([
+    'stories.pin',
+    'stories.history.pinned',
+    'stories.history.menu.pin',
+  ])('%s is gone — "fixar" is retired (UI-D-79)', (key) => {
+    expect(lookup(key)).toBeUndefined();
+  });
+
+  it('no string under stories.history says "Fixar" or "fixado"', () => {
+    expect(JSON.stringify(lookup('stories.history'))).not.toMatch(/[Ff]ixa/);
+  });
+});
+
 describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   function run(files: Record<string, string>): { status: number | null; out: string } {
     const dir = mkdtempSync(path.join(tmpdir(), 'tria-literals-'));

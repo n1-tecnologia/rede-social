@@ -1,4 +1,4 @@
-import type { HighlightSummary } from '@tria/module-stories/contracts';
+import type { HighlightSummary, StorySummary } from '@tria/module-stories/contracts';
 import { STORY_MAX_PAGE_SIZE } from '@tria/module-stories/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
@@ -10,6 +10,7 @@ import {
   inicioGroups,
   inicioRow,
   monogramOf,
+  storyHistoryView,
   type StoryViewerItemView,
   storyViewerLabels,
   tenantCircleView,
@@ -401,5 +402,53 @@ describe('05.2-06 — highlightPlacesView groups the catalogue by place', () => 
       [A, 0],
       [B, 1],
     ]);
+  });
+});
+
+describe('05.2-07 — storyHistoryView carries the highlight indicator (UI-D-77, UI E12)', () => {
+  const tm = createTranslator({
+    locale: 'pt-BR',
+    messages: loadMessages(),
+    namespace: 'media',
+  } as never) as unknown as (key: string, values?: Record<string, string | number>) => string;
+
+  function story(overrides: Partial<StorySummary> = {}): StorySummary {
+    return {
+      id: '0000000c-1111-4111-8111-111111111111',
+      authorUserId: '0000000d-1111-4111-8111-111111111111',
+      mediaAssetId: '0000000e-1111-4111-8111-111111111111',
+      mediaKind: 'image',
+      mediaVariantWidths: [640, 1080],
+      mediaStatus: 'ready',
+      mediaFailureReason: null,
+      caption: 'Ensaio geral',
+      publishedAt: '2026-09-20T12:00:00.000Z',
+      expiresAt: '2026-09-21T12:00:00.000Z',
+      isActive: false,
+      durationSeconds: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewerLiked: false,
+      pinnedCommunityCount: 0,
+      highlightCount: 0,
+      ...overrides,
+    };
+  }
+
+  it('V1. highlightCount 2 → highlighted { count: 2, label: "Em 2 destaques" }; 1 → the singular', () => {
+    expect(storyHistoryView(story({ highlightCount: 2 }), t, tm).highlighted).toEqual({
+      count: 2,
+      label: 'Em 2 destaques',
+    });
+    expect(storyHistoryView(story({ highlightCount: 1 }), t, tm).highlighted).toEqual({
+      count: 1,
+      label: 'Em 1 destaque',
+    });
+  });
+
+  it('V1. highlightCount 0 → the key is ABSENT (never "Em 0 destaques"), and pins no longer count', () => {
+    const view = storyHistoryView(story({ highlightCount: 0, pinnedCommunityCount: 3 }), t, tm);
+    expect('highlighted' in view).toBe(false);
+    expect('pinned' in view).toBe(false);
   });
 });

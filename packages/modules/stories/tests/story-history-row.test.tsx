@@ -9,10 +9,11 @@ import { StoryHistoryRow, type StoryHistoryRowProps } from '../ui/StoryHistoryRo
  *
  * The four claims worth a test are the four a later edit could quietly break:
  *
- *  1. **The row exists FOR the counts and the pinned state** (that is why D-84 rejected a grid), so
- *     the meta line and the pin indicator are the two things that must always be reachable.
- *  2. **UI zero-one-many/E08: a story pinned NOWHERE renders NO pin indicator at all** — not a
- *     zero, not a hollow glyph. The count is the presence test.
+ *  1. **The row exists FOR the counts and the highlighted state** (that is why D-84 rejected a
+ *     grid), so the meta line and the highlight indicator are the two things that must always be
+ *     reachable.
+ *  2. **UI-D-77 / UI E12 zero-one-many: a story in NO highlight renders NO indicator at all** — not
+ *     a zero ("Em 0 destaques"), not a hollow glyph. The count is the presence test.
  *  3. **UI partial/E08: a row may carry a pill, an indicator, BOTH or NEITHER, and the caption may
  *     be the absent-caption fallback** — and none of the four combinations may change the row's
  *     height, because the geometry is fixed by the thumbnail.
@@ -37,7 +38,7 @@ function props(overrides: Partial<StoryHistoryRowProps> = {}): StoryHistoryRowPr
   };
 }
 
-describe('StoryHistoryRow — UI-D-40, the row that exists for its counts and its pinned state', () => {
+describe('StoryHistoryRow — UI-D-40/UI-D-77, the row that exists for its counts and its highlights', () => {
   it('1. the whole row is ONE control carrying the accessible name the host passed', async () => {
     const onOpen = vi.fn();
     render(<StoryHistoryRow {...props({ onOpen })} />);
@@ -69,24 +70,36 @@ describe('StoryHistoryRow — UI-D-40, the row that exists for its counts and it
     expect(screen.getByText('meta-line').className).toContain('tabular-nums');
   });
 
-  it('4. with NO pill and NO pin count, neither element exists at all (zero-one-many E08)', () => {
+  it('4. with NO pill and NO highlight count, neither element exists at all (zero-one-many E08)', () => {
     render(<StoryHistoryRow {...props()} />);
 
-    expect(screen.queryByTestId('story-history-pin')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('story-history-highlighted')).not.toBeInTheDocument();
     expect(screen.queryByTestId('story-history-status')).not.toBeInTheDocument();
   });
 
-  it('5. a pinned story renders the indicator with the PLURAL-AWARE label the host composed', () => {
-    render(<StoryHistoryRow {...props({ pinned: { count: 2, label: 'pinned-in-2' } })} />);
+  it('5. R1: a highlighted story renders the Bookmark glyph and the PLURAL-AWARE label the host composed', () => {
+    render(<StoryHistoryRow {...props({ highlighted: { count: 1, label: 'in-1-highlight' } })} />);
 
-    const indicator = screen.getByTestId('story-history-pin');
-    expect(indicator).toHaveTextContent('pinned-in-2');
+    const indicator = screen.getByTestId('story-history-highlighted');
+    expect(indicator).toHaveTextContent('in-1-highlight');
+    // UI-D-77: `Bookmark` 16 in `text-text-secondary` — the pin glyph is retired with the pin model.
+    const glyph = indicator.querySelector('svg');
+    expect(glyph?.getAttribute('class') ?? '').toContain('lucide-bookmark');
+    expect(glyph?.getAttribute('width')).toBe('16');
+    expect(indicator.className).toContain('text-text-secondary');
   });
 
-  it('6. a count of ZERO renders no indicator — the count is the presence test, never a null check', () => {
-    render(<StoryHistoryRow {...props({ pinned: { count: 0, label: 'pinned-in-0' } })} />);
+  it('6. R1: a count of ZERO renders no indicator — the count is the presence test, never a null check', () => {
+    render(<StoryHistoryRow {...props({ highlighted: { count: 0, label: 'in-0-highlights' } })} />);
 
-    expect(screen.queryByTestId('story-history-pin')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('story-history-highlighted')).not.toBeInTheDocument();
+  });
+
+  it('6b. R1 / UI E12 overflow: the indicator sits in the shrink-0 trailing slot, beside the truncating body', () => {
+    render(<StoryHistoryRow {...props({ highlighted: { count: 2, label: 'in-2-highlights' } })} />);
+
+    const slot = screen.getByTestId('story-history-highlighted').parentElement;
+    expect(slot?.className).toContain('shrink-0');
   });
 
   it('7. a pill and an indicator can BOTH render, and the row keeps its minimum height (partial E08)', () => {
@@ -94,13 +107,13 @@ describe('StoryHistoryRow — UI-D-40, the row that exists for its counts and it
       <StoryHistoryRow
         {...props({
           status: { tone: 'warning', label: 'status-label' },
-          pinned: { count: 1, label: 'pinned-in-1' },
+          highlighted: { count: 1, label: 'in-1-highlight' },
         })}
       />,
     );
 
     expect(screen.getByTestId('story-history-status')).toHaveTextContent('status-label');
-    expect(screen.getByTestId('story-history-pin')).toHaveTextContent('pinned-in-1');
+    expect(screen.getByTestId('story-history-highlighted')).toHaveTextContent('in-1-highlight');
     expect(screen.getByRole('button', { name: 'open-row' }).className).toContain('min-h-14');
   });
 
@@ -132,7 +145,7 @@ describe('StoryHistoryRow — UI-D-40, the row that exists for its counts and it
       <StoryHistoryRow
         {...props({
           status: { tone: 'danger', label: 'status-label' },
-          pinned: { count: 3, label: 'pinned-in-3' },
+          highlighted: { count: 3, label: 'in-3-highlights' },
           note: 'note-line',
         })}
       />,
@@ -143,13 +156,13 @@ describe('StoryHistoryRow — UI-D-40, the row that exists for its counts and it
       'caption-text',
       'meta-line',
       'status-label',
-      'pinned-in-3',
+      'in-3-highlights',
       'note-line',
     ]) {
       expect(text).toContain(passed);
     }
     // Nothing else: the concatenation of the props IS the row's whole text.
-    const remainder = ['caption-text', 'meta-line', 'note-line', 'status-label', 'pinned-in-3']
+    const remainder = ['caption-text', 'meta-line', 'note-line', 'status-label', 'in-3-highlights']
       .reduce((acc, passed) => acc.replace(passed, ''), text)
       .trim();
     expect(remainder).toBe('');
