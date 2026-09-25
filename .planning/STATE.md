@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-04-PLAN.md
-last_updated: "2026-09-25T21:58:09.445Z"
+stopped_at: Completed 05.2-05-PLAN.md
+last_updated: "2026-09-25T22:32:57.197Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.2-04 (Início tenant circle — one logo/monogram circle playing the newest 25 oldest first, plus Início's highlight circles; reworked StoryCircle/StoriesStrip descriptors)
-state_head: 1f15cde4e1506b650a766d126380fe49e714c975
+last_activity_desc: Completed 05.2-05 (grouped story viewer — every Início circle plays its own group; highlights loaded lazily with prefetch and retry; composite per-segment keys; onSegmentShown)
+state_head: ee308343f11468e6724861986579ff1cf2be3e98
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 68
+  completed_plans: 69
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 5 of 12
-Status: Executing Phase 05.2 — next is 05.2-05
-Last activity: 2026-09-25 — Completed 05.2-04 (Início row: one tenant circle, logo or monogram, playing the newest 25 live stories oldest → newest, then Início's highlight circles; StoryCircle ring/disc props, StoriesStrip link/open/static descriptors, loadHighlights, e2e on :3100)
+Plan: 6 of 12
+Status: Executing Phase 05.2 — next is 05.2-06
+Last activity: 2026-09-25 — Completed 05.2-05 (the grouped story viewer: UI-D-65 row boundaries, swipe-skip, loading/failed group frames and prefetch; loadHighlightItemsAction; every Início highlight circle opens its own group; e2e on :3100)
 
-Progress: [███████████████░░░░░] 68/88 plans ([░░░░░░░░░░] 0%)
+Progress: [████████████████░░░░] 69/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -128,6 +128,7 @@ Progress: [███████████████░░░░░] 68/88 p
 | Phase 05.2 P01 | 36min | 3 tasks | 13 files |
 | Phase 05.2 P03 | 21 min | 2 tasks | 7 files |
 | Phase 05.2 P04 | 44 min | 3 tasks | 13 files |
+| Phase 05.2 P05 | 30 min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -387,6 +388,9 @@ Recent decisions affecting current work:
 - [Phase 05.2]: [05.2-04]: StoriesStrip speaks circle descriptors (link/open/static); highlight circles are static inert spans until 05.2-05 makes the viewer group-aware
 - [Phase 05.2]: [05.2-04]: the Inicio tenant circle reads GET /v1/stories?limit=25 and reverses it on the web (D-106); the UI-D-59 composition is the pure inicioRow builder in apps/web/lib/story-view.ts
 - [Phase 05.2]: [05.2-04]: stories.circle.action stays until 05.2-08 replaces the community pinned row, its last reader
+- [Phase 05.2]: 05.2-05: a horizontal swipe skips a whole group for every viewer caller; on the single-group deep link and community pinned row a left swipe closes and a right swipe returns to the first story
+- [Phase 05.2]: 05.2-05: highlight groups load lazily through loadHighlightItemsAction (uuid guard, bare 404 -> ok:false, never revalidates); StoriesSurface keeps loaded groups for the page's life with in-flight dedupe; highlight groups never change the URL
+- [Phase 05.2]: 05.2-05: every per-segment key, state map and host registry is ${group.key}:${item.id} (Pitfall 4); onSegmentShown fires once per showing of a ready current segment, ready for plan 10
 
 ### Pending Todos
 
@@ -440,6 +444,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T21:58:02.144Z
-Stopped at: Completed 05.2-04-PLAN.md
+Last session: 2026-09-25T22:32:57.104Z
+Stopped at: Completed 05.2-05-PLAN.md
 Resume file: None
