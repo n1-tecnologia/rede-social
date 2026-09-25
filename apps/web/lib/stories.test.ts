@@ -4,10 +4,12 @@ import { storyWriteIssue } from '@/lib/stories';
 
 /**
  * `storyWriteIssue` is the ONE place the web reads a story-publish refusal out of the API envelope.
- * Since 05.1-01 a publish can carry a `communityId`, so the refusal is no longer only the story
- * module's own `details.story` vocabulary: a community archived after the composer opened answers
- * `400 { pin: 'archived' }`, exactly what the post-hoc pin toggle answers (Pitfall 7). These cases pin
- * that the web tells that refusal apart from a generic failure — and reads nothing else.
+ * Since 05.2-08 a publish can name a highlight (`highlightId` or `newHighlight`), so the refusal is
+ * no longer only the story module's own `details.story` vocabulary: a destination community archived
+ * after the composer opened answers `400 { highlight: 'archived' }`, and a pending title the API
+ * refuses answers `{ highlight: 'title_invalid' }` — the highlight writes' own closed vocabulary.
+ * These cases pin that the web tells those refusals apart from a generic failure, reads nothing
+ * else, and no longer reads the retired `details.pin`.
  *
  * What is stubbed: `lib/env` only. What is real: the error class and the mapping.
  */
@@ -34,15 +36,22 @@ describe('storyWriteIssue — the publish refusal the composer can switch on', (
     ).toBe('media_invalid');
   });
 
-  it('3. a 400 carrying details.pin archived is archived (the community was archived while composing)', () => {
-    expect(storyWriteIssue(new ApiClientError(400, 'VALIDATION_FAILED', { pin: 'archived' }))).toBe(
-      'archived',
-    );
+  it('3. a 400 carrying details.highlight archived / title_invalid / full is that code', () => {
+    for (const code of ['archived', 'title_invalid', 'full'] as const) {
+      expect(
+        storyWriteIssue(new ApiClientError(400, 'VALIDATION_FAILED', { highlight: code })),
+      ).toBe(code);
+    }
   });
 
-  it('4. an unknown pin code, a 400 with no details and a non-API error are all null', () => {
+  it('4. an unknown highlight code, the retired details.pin, a 400 with no details and a non-API error are all null', () => {
     expect(
-      storyWriteIssue(new ApiClientError(400, 'VALIDATION_FAILED', { pin: 'something-else' })),
+      storyWriteIssue(
+        new ApiClientError(400, 'VALIDATION_FAILED', { highlight: 'something-else' }),
+      ),
+    ).toBeNull();
+    expect(
+      storyWriteIssue(new ApiClientError(400, 'VALIDATION_FAILED', { pin: 'archived' })),
     ).toBeNull();
     expect(storyWriteIssue(new ApiClientError(400, 'VALIDATION_FAILED'))).toBeNull();
     expect(storyWriteIssue(new Error('boom'))).toBeNull();

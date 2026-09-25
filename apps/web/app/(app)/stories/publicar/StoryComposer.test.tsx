@@ -26,12 +26,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *     life while the provider transcodes (Pitfall 5).
  *  5. **The caption cap is the CONTRACT's**, not a number typed into this file.
  *
- * Cases 7-15 (05.1-04) are the "Publicar em" row, ROADMAP criteria 3 and 5 as one mechanism: the
- * composer states where the story goes before it can be published (D-97, UI-D-54), arrives
- * pre-filled from a community page (D-93), sends ONE write with `communityId` only when one is
- * chosen (D-99), lands where the story went (D-94, UI-D-57) and recovers legibly when the chosen
- * community is archived under the admin's feet (UI-D-58). The `communities` catalog is real too, so
- * the row's and the sheet's words are asserted against the shipped copy.
+ * Cases P1-P8 (05.2-08) are the "Destaque" row (D-111..D-115, UI-D-68..UI-D-71), which replaced
+ * 05.1's "Publicar em" row: zero taps to publish tenant-wide, a community origin pre-filled with its
+ * first highlight, the D-112 gate when the origin has none, a pending new highlight written by the
+ * publish itself (D-114, one write), the landings and toasts, and the refusal grammar. The payload's
+ * top-level keys are asserted in P1-P4 so the retiring `communityId` can never ride a publish again.
+ * Cases 9-12 carry the row's remaining rules (origin on close, disabled while busy, re-pick, E11).
  */
 
 const { catalog, mediaCatalog, communitiesCatalog, toast, push, publish, upload } =
@@ -57,7 +57,7 @@ const { catalog, mediaCatalog, communitiesCatalog, toast, push, publish, upload 
   });
 
 // Springs have nothing to animate under happy-dom, and a cancelled one rejects AFTER the run ends —
-// the "Publicar em" sheet and the discard dialog both animate (the community-picker-sheet pattern).
+// the "Destaque" sheet and the discard dialog both animate (the community-picker-sheet pattern).
 MotionGlobalConfig.skipAnimations = true;
 
 const lookup = (tree: Record<string, unknown>, key: string, values?: Record<string, unknown>) => {
@@ -108,7 +108,9 @@ vi.mock('@/components/media/useSignedUpload', () => ({
 }));
 
 const { MEDIA_LIMITS } = await import('@tria/contracts/media');
-const { STORY_MAX_CAPTION } = await import('@tria/module-stories/contracts');
+const { STORY_HIGHLIGHT_MAX_TITLE, STORY_MAX_CAPTION } = await import(
+  '@tria/module-stories/contracts'
+);
 const { StoryComposer } = await import('./StoryComposer');
 
 /** Drives the captured `onCompleted` / `onHandedToProvider` seam for one kind. */
@@ -189,11 +191,14 @@ describe('StoryComposer — the two-state publish screen (UI-D-39, D-81)', () =>
       fireEvent.click(screen.getByRole('button', { name: lookup(catalog, 'publish.submit') }));
     });
 
-    expect(publish).toHaveBeenCalledWith({
-      mediaAssetId: 'a1111111-1111-4111-8111-111111111111',
-      mediaKind: 'image',
-      caption: 'ola',
-    });
+    expect(publish).toHaveBeenCalledWith(
+      {
+        mediaAssetId: 'a1111111-1111-4111-8111-111111111111',
+        mediaKind: 'image',
+        caption: 'ola',
+      },
+      { communityId: null },
+    );
     expect(push).toHaveBeenCalledWith('/inicio');
   });
 
@@ -212,45 +217,82 @@ describe('StoryComposer — the two-state publish screen (UI-D-39, D-81)', () =>
   });
 });
 
-/* ── 05.1-04: "Publicar em" — the composer asks where the story goes ─────────────────────────── */
+/* ── 05.2-08: "Destaque" — the composer asks for a highlight (D-111..D-115) ───────────────────── */
 
 const A = 'c1111111-1111-4111-8111-111111111111';
 const B = 'c2222222-2222-4222-8222-222222222222';
+const H_HOME = 'd0000000-0000-4000-8000-000000000000';
+const H_A1 = 'd1111111-1111-4111-8111-111111111111';
+const H_A2 = 'd1111112-1111-4111-8111-111111111111';
 const IMAGE = 'a1111111-1111-4111-8111-111111111111';
 const OTHER_IMAGE = 'a2222222-2222-4222-8222-222222222222';
-const VIDEO = 'b1111111-1111-4111-8111-111111111111';
 
-/** Cover-less on purpose: the gradient branch renders, and no media request is ever made. */
-const row = (id: string, name: string) => ({
-  id,
-  name,
-  coverAssetId: null,
-  coverVariantWidths: [] as number[],
-  coverAlt: lookup(communitiesCatalog, 'picker.cover', { community: name }),
-});
 const NAME_A = 'Comunidade Alfa';
 const NAME_B = 'Comunidade Beta';
 /** UI long-text backstop: a 60-character name must reach the alert in full. */
 const LONG_A = 'Comunidade de Moradores do Condomínio Jardim das Palmeiras 1';
-const COMMUNITIES = [row(A, NAME_A), row(B, NAME_B)];
+const HOME = lookup(catalog, 'highlights.place.home');
 
-const NONE = lookup(catalog, 'publish.destination.none');
-const rowName = (value: string) => `${lookup(communitiesCatalog, 'picker.label')} ${value}`;
+type Place = {
+  key: string;
+  label: string;
+  communityId: string | null;
+  rows: { id: string; title: string; cover: null }[];
+};
 
-const withCommunities = (
-  props: { initialCommunityId?: string | null; communities?: ReturnType<typeof row>[] } = {},
+/** Cover-less on purpose: the monogram branch renders, and no media request is ever made. */
+const placesFor = (nameA = NAME_A): Place[] => [
+  {
+    key: 'home',
+    label: HOME,
+    communityId: null,
+    rows: [{ id: H_HOME, title: 'Bastidores', cover: null }],
+  },
+  {
+    key: A,
+    label: nameA,
+    communityId: A,
+    rows: [
+      { id: H_A1, title: 'Destaques', cover: null },
+      { id: H_A2, title: 'Aulas', cover: null },
+    ],
+  },
+  // A community with no highlight yet: it is still a place (its own "Novo destaque", UI E10 partial).
+  { key: B, label: NAME_B, communityId: B, rows: [] },
+];
+
+type Selection =
+  | { kind: 'none' }
+  | { kind: 'choose' }
+  | { kind: 'highlight'; highlightId: string }
+  | { kind: 'pending'; communityId: string | null; title: string };
+
+const withPlaces = (
+  props: { places?: Place[]; originCommunityId?: string | null; initialSelection?: Selection } = {},
 ) =>
   render(
     <StoryComposer
       historyHref="/stories/meus"
-      communities={props.communities ?? COMMUNITIES}
-      initialCommunityId={props.initialCommunityId ?? null}
+      places={props.places ?? placesFor()}
+      originCommunityId={props.originCommunityId ?? null}
+      initialSelection={props.initialSelection ?? { kind: 'none' }}
     />,
   );
 
-/** The composer's "Publicar em" row — located by its marker, since a sheet row shares its name. */
+const NONE = lookup(catalog, 'publish.destination.none');
+const CHOOSE = lookup(catalog, 'publish.destination.choose');
+const LABEL = lookup(catalog, 'publish.destination.label');
+const value = (place: string, title: string) =>
+  lookup(catalog, 'publish.destination.value', { place, title });
+
+/** The composer's "Destaque" row — located by its marker, since a sheet row may share its words. */
 const destinationRow = () =>
   document.querySelector('[data-story-destination]') as HTMLButtonElement | null;
+const destinationValue = () =>
+  document.querySelector('[data-story-destination-value]')?.textContent ?? null;
+
+/** The object `publishStoryAction` received — the FIRST argument of its last call. */
+const lastPayload = () => (publish.mock.lastCall?.[0] ?? {}) as Record<string, unknown>;
 
 async function publishNow() {
   await act(async () => {
@@ -260,45 +302,51 @@ async function publishNow() {
 
 async function openSheet() {
   const button = destinationRow();
-  if (!button) throw new Error('the Publicar em row is not rendered');
+  if (!button) throw new Error('the Destaque row is not rendered');
   await act(async () => {
     fireEvent.click(button);
   });
   return screen.getByRole('dialog');
 }
 
-async function choose(dialog: HTMLElement, name: string) {
+async function tap(element: Element) {
   await act(async () => {
-    fireEvent.click(within(dialog).getByRole('button', { name }));
+    fireEvent.click(element);
   });
+}
+
+const sheetItem = (dialog: HTMLElement, item: string) =>
+  dialog.querySelector(`[data-highlight-sheet-item="${item}"]`) as HTMLElement | null;
+
+/** The title step: type the name and confirm — the sheet records a PENDING highlight and closes. */
+async function confirmTitle(dialog: HTMLElement, title: string) {
+  fireEvent.change(within(dialog).getByLabelText(lookup(catalog, 'highlights.create.label')), {
+    target: { value: title },
+  });
+  await tap(
+    within(dialog).getByRole('button', { name: lookup(catalog, 'highlights.create.submit') }),
+  );
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 }
 
-describe('StoryComposer — "Publicar em" (05.1-04, D-93..D-99, UI-D-54..UI-D-58)', () => {
-  it('7. the row sits above the caption, reads "Nenhuma comunidade" by default, and the tenant-wide body is exactly today’s', async () => {
-    withCommunities();
-    await completeUpload('video', VIDEO);
+describe('StoryComposer — "Destaque" (05.2-08, D-111..D-115, UI-D-68..UI-D-71)', () => {
+  it('P1. no context: the row reads "Destaque · Nenhum", and Publicar publishes tenant-wide with no destination and lands on /inicio', async () => {
+    withPlaces();
+    await completeUpload('image', IMAGE);
 
-    const button = screen.getByRole('button', { name: rowName(NONE) });
-    expect(button).toBe(destinationRow());
-    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
-    expect(button.getAttribute('aria-label')).toBeNull();
-    // Order in the bottom block: processing row -> "Publicar em" -> caption + Publicar (D-97).
-    const processing = screen.getByText(lookup(catalog, 'publish.processingNote'));
-    const caption = screen.getByLabelText(lookup(catalog, 'publish.captionLabel'));
-    expect(
-      processing.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(button.compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const row = destinationRow();
+    expect(row?.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(row?.textContent).toContain(LABEL);
+    expect(destinationValue()).toBe(NONE);
 
     await publishNow();
-    // `toStrictEqual` on the key list: the `communityId` key is OMITTED, never sent as null (D-99).
-    expect(Object.keys(publish.mock.calls[0]?.[0] ?? {})).toStrictEqual([
-      'mediaAssetId',
-      'mediaKind',
-      'caption',
-    ]);
-    expect(publish).toHaveBeenCalledWith({ mediaAssetId: VIDEO, mediaKind: 'video', caption: '' });
+    // Zero taps (05.1 criterion 5): the body is exactly the plain publish.
+    expect(Object.keys(lastPayload())).toStrictEqual(['mediaAssetId', 'mediaKind', 'caption']);
+    expect(Object.keys(lastPayload())).not.toContain('communityId');
+    expect(publish).toHaveBeenCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: '' },
+      { communityId: null },
+    );
     expect(toast.show).toHaveBeenCalledWith({
       tone: 'success',
       message: lookup(catalog, 'publish.toast'),
@@ -306,65 +354,215 @@ describe('StoryComposer — "Publicar em" (05.1-04, D-93..D-99, UI-D-54..UI-D-58
     expect(push).toHaveBeenCalledWith('/inicio');
   });
 
-  it('8. a resolved ?comunidade= pre-fills the row; publishing sends it, names it in the toast and lands on it', async () => {
-    withCommunities({ initialCommunityId: A });
+  it('P2. an origin WITH highlights arrives pre-filled with its first one; publishing sends that highlightId and lands on the community', async () => {
+    withPlaces({
+      originCommunityId: A,
+      initialSelection: { kind: 'highlight', highlightId: H_A1 },
+    });
     await completeUpload('image', IMAGE);
 
-    expect(screen.getByRole('button', { name: rowName(NAME_A) })).toBe(destinationRow());
+    expect(destinationValue()).toBe(value(NAME_A, 'Destaques'));
     await publishNow();
 
-    expect(publish).toHaveBeenCalledWith({
-      mediaAssetId: IMAGE,
-      mediaKind: 'image',
-      caption: '',
-      communityId: A,
-    });
     expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: '', highlightId: H_A1 },
+      { communityId: A },
+    );
+    expect(Object.keys(lastPayload())).not.toContain('communityId');
+    expect(Object.keys(lastPayload())).not.toContain('newHighlight');
     expect(toast.show).toHaveBeenCalledWith({
       tone: 'success',
-      message: lookup(catalog, 'publish.toastCommunity', { community: NAME_A }),
+      message: lookup(catalog, 'publish.toastHighlightCommunity', {
+        title: 'Destaques',
+        community: NAME_A,
+      }),
     });
     expect(push).toHaveBeenCalledWith(`/comunidades/${A}`);
   });
 
-  it('9. the sheet re-picks: B sends B and lands on B; "Nenhuma comunidade" sends none and lands on /inicio; each choice closes it and clears the error', async () => {
-    withCommunities();
+  it('P3. an origin with NO highlight reads "Escolher destaque": Publicar opens the sheet instead of publishing; a new title is sent as newHighlight; an explicit "Nenhum" resolves it too', async () => {
+    const first = withPlaces({ originCommunityId: B, initialSelection: { kind: 'choose' } });
     await completeUpload('image', IMAGE);
+    expect(destinationValue()).toBe(CHOOSE);
 
-    // A shown error first, so the sheet choice has something to clear.
-    publish.mockResolvedValueOnce({ ok: false, code: 'not_found' });
+    // The D-112 gate: "Publicar" stays enabled, sends NOTHING, and opens the sheet on the origin's
+    // "Novo destaque".
     await publishNow();
-    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(publish).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog');
+    const create = sheetItem(dialog, `create:${B}`);
+    expect(create).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(create));
 
-    let dialog = await openSheet();
-    // The sheet teaches D-96 before the choice, and "Nenhuma comunidade" leads the list (D-98).
-    expect(within(dialog).getByText(lookup(catalog, 'publish.destination.helper'))).toBeTruthy();
-    expect(
-      within(dialog).getByRole('button', { name: NONE }).hasAttribute('data-picker-default'),
-    ).toBe(true);
-    await choose(dialog, lookup(communitiesCatalog, 'picker.row', { community: NAME_B }));
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(destinationRow()?.textContent).toContain(NAME_B);
+    await tap(create as HTMLElement);
+    await confirmTitle(dialog, 'Teste Um');
+    // Nothing was created by the sheet (D-114): no request yet, the row states the pending choice.
+    expect(publish).not.toHaveBeenCalled();
+    expect(destinationValue()).toBe(value(NAME_B, 'Teste Um'));
 
     await publishNow();
-    expect(publish).toHaveBeenLastCalledWith({
-      mediaAssetId: IMAGE,
-      mediaKind: 'image',
-      caption: '',
-      communityId: B,
+    expect(publish).toHaveBeenCalledWith(
+      {
+        mediaAssetId: IMAGE,
+        mediaKind: 'image',
+        caption: '',
+        newHighlight: { communityId: B, title: 'Teste Um' },
+      },
+      { communityId: B },
+    );
+    expect(Object.keys(lastPayload())).not.toContain('communityId');
+    expect(Object.keys(lastPayload())).not.toContain('highlightId');
+    expect(toast.show).toHaveBeenLastCalledWith({
+      tone: 'success',
+      message: lookup(catalog, 'publish.toastHighlightCommunity', {
+        title: 'Teste Um',
+        community: NAME_B,
+      }),
     });
     expect(push).toHaveBeenLastCalledWith(`/comunidades/${B}`);
+    first.unmount();
 
-    dialog = await openSheet();
-    await choose(dialog, NONE);
-    expect(destinationRow()?.textContent).toContain(NONE);
-
+    // …or the admin SEES the choice and picks "Nenhum": the row resolves, the next tap publishes.
+    publish.mockClear();
+    withPlaces({ originCommunityId: B, initialSelection: { kind: 'choose' } });
+    await completeUpload('image', IMAGE);
     await publishNow();
-    expect(Object.keys(publish.mock.lastCall?.[0] ?? {})).not.toContain('communityId');
-    expect(push).toHaveBeenLastCalledWith('/inicio');
+    const again = screen.getByRole('dialog');
+    await tap(sheetItem(again, 'none') as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(destinationValue()).toBe(NONE);
+    await publishNow();
+    expect(Object.keys(lastPayload())).toStrictEqual(['mediaAssetId', 'mediaKind', 'caption']);
+    expect(publish).toHaveBeenLastCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: '' },
+      { communityId: null },
+    );
   });
 
-  it('10. close and a confirmed discard return to the ORIGIN: /comunidades/{A} when pre-filled, /inicio otherwise', async () => {
+  it('P4. an Início highlight chosen in the sheet lands on /inicio and names the highlight in the toast', async () => {
+    withPlaces();
+    await completeUpload('image', IMAGE);
+
+    const dialog = await openSheet();
+    // The sheet's order: no origin, so "Nenhum" leads, then Início, then every community.
+    expect(within(dialog).getByText(lookup(catalog, 'highlights.select.helper'))).toBeTruthy();
+    await tap(
+      within(dialog).getByRole('button', {
+        name: lookup(catalog, 'highlights.select.row', { title: 'Bastidores', place: HOME }),
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(destinationValue()).toBe(value(HOME, 'Bastidores'));
+
+    await publishNow();
+    expect(publish).toHaveBeenCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: '', highlightId: H_HOME },
+      { communityId: null },
+    );
+    expect(Object.keys(lastPayload())).not.toContain('communityId');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: lookup(catalog, 'publish.toastHighlight', { title: 'Bastidores' }),
+    });
+    expect(push).toHaveBeenCalledWith('/inicio');
+  });
+
+  it('P5. archived at publish: nothing publishes, media and caption stay, the row reads "Nenhum", the community leaves the sheet and the alert names it', async () => {
+    withPlaces({
+      places: placesFor(LONG_A),
+      originCommunityId: A,
+      initialSelection: { kind: 'highlight', highlightId: H_A1 },
+    });
+    await completeUpload('image', IMAGE);
+    fireEvent.change(screen.getByLabelText(lookup(catalog, 'publish.captionLabel')), {
+      target: { value: 'ola' },
+    });
+
+    publish.mockResolvedValueOnce({ ok: false, code: 'archived' });
+    await publishNow();
+
+    expect(LONG_A).toHaveLength(60);
+    expect(screen.getByRole('alert').textContent).toBe(
+      lookup(catalog, 'publish.errors.archived', { community: LONG_A }),
+    );
+    expect(push).not.toHaveBeenCalled();
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(destinationValue()).toBe(NONE);
+    expect(screen.getByTestId('story-preview')).toBeTruthy();
+    expect(
+      (screen.getByLabelText(lookup(catalog, 'publish.captionLabel')) as HTMLTextAreaElement).value,
+    ).toBe('ola');
+
+    const dialog = await openSheet();
+    expect(sheetItem(dialog, `label:${A}`)).toBeNull();
+    expect(sheetItem(dialog, `create:${A}`)).toBeNull();
+    expect(sheetItem(dialog, `label:${B}`)).not.toBeNull();
+    // The next publish is tenant-wide only after the admin saw the reset row.
+    await tap(sheetItem(dialog, 'none') as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await publishNow();
+    expect(publish).toHaveBeenLastCalledWith(
+      { mediaAssetId: IMAGE, mediaKind: 'image', caption: 'ola' },
+      { communityId: null },
+    );
+  });
+
+  it('P6. title_invalid: the alert states the rule; the row returns to "Escolher destaque" when the origin forced it, else to "Nenhum"', async () => {
+    const forced = withPlaces({ originCommunityId: B, initialSelection: { kind: 'choose' } });
+    await completeUpload('image', IMAGE);
+    await publishNow();
+    let dialog = screen.getByRole('dialog');
+    await tap(sheetItem(dialog, `create:${B}`) as HTMLElement);
+    await confirmTitle(dialog, 'Teste Um');
+
+    publish.mockResolvedValueOnce({ ok: false, code: 'title_invalid' });
+    await publishNow();
+    expect(screen.getByRole('alert').textContent).toBe(
+      lookup(catalog, 'publish.errors.titleInvalid', { limit: STORY_HIGHLIGHT_MAX_TITLE }),
+    );
+    expect(destinationValue()).toBe(CHOOSE);
+    expect(push).not.toHaveBeenCalled();
+    forced.unmount();
+
+    withPlaces();
+    await completeUpload('image', IMAGE);
+    dialog = await openSheet();
+    await tap(sheetItem(dialog, 'create:home') as HTMLElement);
+    await confirmTitle(dialog, 'Teste Dois');
+    expect(destinationValue()).toBe(value(HOME, 'Teste Dois'));
+
+    publish.mockResolvedValueOnce({ ok: false, code: 'title_invalid' });
+    await publishNow();
+    expect(destinationValue()).toBe(NONE);
+  });
+
+  it('P7. a bare 404 keeps the generic publish error AND the selection', async () => {
+    withPlaces({
+      originCommunityId: A,
+      initialSelection: { kind: 'highlight', highlightId: H_A1 },
+    });
+    await completeUpload('image', IMAGE);
+
+    publish.mockResolvedValueOnce({ ok: false, code: 'not_found' });
+    await publishNow();
+
+    expect(screen.getByRole('alert').textContent).toBe(lookup(catalog, 'publish.errors.failed'));
+    expect(destinationValue()).toBe(value(NAME_A, 'Destaques'));
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('P8. a caller without stories.story.manage gets no row, before or after a pick, and publishes plain', async () => {
+    withPlaces({ places: [] });
+    expect(destinationRow()).toBeNull();
+    await completeUpload('image', IMAGE);
+    expect(destinationRow()).toBeNull();
+
+    await publishNow();
+    expect(Object.keys(lastPayload())).toStrictEqual(['mediaAssetId', 'mediaKind', 'caption']);
+  });
+
+  it('9. close and a confirmed discard return to the ORIGIN: /comunidades/{A} when pre-filled, /inicio otherwise', async () => {
     const leave = async () => {
       // Before a pick: the header's close control leaves at once.
       await act(async () => {
@@ -382,7 +580,10 @@ describe('StoryComposer — "Publicar em" (05.1-04, D-93..D-99, UI-D-54..UI-D-58
       });
     };
 
-    const first = withCommunities({ initialCommunityId: A });
+    const first = withPlaces({
+      originCommunityId: A,
+      initialSelection: { kind: 'highlight', highlightId: H_A1 },
+    });
     await leave();
     expect(push.mock.calls.map(([path]) => path)).toStrictEqual([
       `/comunidades/${A}`,
@@ -391,100 +592,63 @@ describe('StoryComposer — "Publicar em" (05.1-04, D-93..D-99, UI-D-54..UI-D-58
     first.unmount();
 
     push.mockClear();
-    withCommunities();
+    withPlaces();
     await leave();
     expect(push.mock.calls.map(([path]) => path)).toStrictEqual(['/inicio', '/inicio']);
   });
 
-  it('11. archived while composing: nothing publishes, the alert names it, the row resets, it leaves the sheet, and the next publish is tenant-wide', async () => {
-    withCommunities({ communities: [row(A, LONG_A), row(B, NAME_B)], initialCommunityId: A });
-    await completeUpload('image', IMAGE);
-    fireEvent.change(screen.getByLabelText(lookup(catalog, 'publish.captionLabel')), {
-      target: { value: 'ola' },
+  it('10. while a publish is in flight the row is disabled, so the destination cannot change mid-publish (UI E11 loading)', async () => {
+    withPlaces({
+      originCommunityId: A,
+      initialSelection: { kind: 'highlight', highlightId: H_A1 },
     });
-
-    publish.mockResolvedValueOnce({ ok: false, code: 'archived' });
-    await publishNow();
-
-    expect(LONG_A).toHaveLength(60);
-    expect(screen.getByRole('alert').textContent).toBe(
-      lookup(catalog, 'publish.errors.archived', { community: LONG_A }),
-    );
-    expect(push).not.toHaveBeenCalled();
-    expect(toast.show).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: rowName(NONE) })).toBe(destinationRow());
-    // Media and caption are kept: the admin re-picks or publishes, and loses nothing.
-    expect(screen.getByTestId('story-preview')).toBeTruthy();
-    expect(
-      (screen.getByLabelText(lookup(catalog, 'publish.captionLabel')) as HTMLTextAreaElement).value,
-    ).toBe('ola');
-    expect(screen.getByRole('button', { name: lookup(catalog, 'publish.submit') })).toBeTruthy();
-
-    const dialog = await openSheet();
-    expect(
-      within(dialog).queryByRole('button', {
-        name: lookup(communitiesCatalog, 'picker.row', { community: LONG_A }),
-      }),
-    ).toBeNull();
-    expect(
-      within(dialog).getByRole('button', {
-        name: lookup(communitiesCatalog, 'picker.row', { community: NAME_B }),
-      }),
-    ).toBeTruthy();
-    await choose(dialog, NONE);
-
-    await publishNow();
-    expect(publish).toHaveBeenLastCalledWith({
-      mediaAssetId: IMAGE,
-      mediaKind: 'image',
-      caption: 'ola',
-    });
-  });
-
-  it('12. a bare 404 keeps the generic publish error AND the selection', async () => {
-    withCommunities({ initialCommunityId: A });
-    await completeUpload('image', IMAGE);
-
-    publish.mockResolvedValueOnce({ ok: false, code: 'not_found' });
-    await publishNow();
-
-    expect(screen.getByRole('alert').textContent).toBe(lookup(catalog, 'publish.errors.failed'));
-    expect(screen.getByRole('button', { name: rowName(NAME_A) })).toBe(destinationRow());
-  });
-
-  it('13. with no communities there is no "Publicar em" row, before or after a pick', async () => {
-    withCommunities({ communities: [] });
-    expect(document.querySelector('[data-story-destination]')).toBeNull();
-    await completeUpload('image', IMAGE);
-    expect(document.querySelector('[data-story-destination]')).toBeNull();
-    expect(screen.getByRole('button', { name: lookup(catalog, 'publish.submit') })).toBeTruthy();
-  });
-
-  it('14. while a publish is in flight the row is disabled, so the destination cannot change mid-publish', async () => {
-    withCommunities({ initialCommunityId: A });
     await completeUpload('image', IMAGE);
 
     publish.mockReturnValueOnce(new Promise(() => {}));
     await publishNow();
 
     expect(destinationRow()?.disabled).toBe(true);
+    expect(destinationRow()?.className).toContain('disabled:opacity-50');
   });
 
-  it('15. the destination survives a re-pick of the media', async () => {
-    withCommunities();
+  it('11. the destination survives a re-pick of the media', async () => {
+    withPlaces();
     await completeUpload('image', IMAGE);
 
     const dialog = await openSheet();
-    await choose(dialog, lookup(communitiesCatalog, 'picker.row', { community: NAME_B }));
+    await tap(
+      within(dialog).getByRole('button', {
+        name: lookup(catalog, 'highlights.select.row', { title: 'Aulas', place: NAME_A }),
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await completeUpload('image', OTHER_IMAGE);
 
-    expect(screen.getByRole('button', { name: rowName(NAME_B) })).toBe(destinationRow());
+    expect(destinationValue()).toBe(value(NAME_A, 'Aulas'));
     await publishNow();
-    expect(publish).toHaveBeenLastCalledWith({
-      mediaAssetId: OTHER_IMAGE,
-      mediaKind: 'image',
-      caption: '',
-      communityId: B,
+    expect(publish).toHaveBeenLastCalledWith(
+      { mediaAssetId: OTHER_IMAGE, mediaKind: 'image', caption: '', highlightId: H_A2 },
+      { communityId: A },
+    );
+  });
+
+  it('12. UI E11 overflow: one min-h-11 line where ONLY the value shrinks — "Destaque" and the chevron are shrink-0', async () => {
+    withPlaces({
+      places: placesFor(LONG_A),
+      originCommunityId: A,
+      initialSelection: { kind: 'highlight', highlightId: H_A1 },
     });
+    await completeUpload('image', IMAGE);
+
+    const row = destinationRow() as HTMLButtonElement;
+    expect(row.className).toContain('min-h-11');
+    expect(row.className).toContain('bg-black/45');
+    const [label, valueNode, chevron] = Array.from(row.children);
+    expect(label?.textContent).toBe(LABEL);
+    expect(label?.className).toContain('shrink-0');
+    expect(valueNode?.className).toContain('min-w-0');
+    expect(valueNode?.className).toContain('flex-1');
+    expect(valueNode?.className).toContain('truncate');
+    expect(chevron?.getAttribute('class')).toContain('shrink-0');
   });
 });

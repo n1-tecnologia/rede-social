@@ -226,16 +226,6 @@ describe('05.1 — the new entry-point strings and their placeholders', () => {
     ['communities.confirm.reactivate.cancel', 'Cancelar'],
     ['communities.errors.reactivate', 'Não foi possível reativar a comunidade. Tente novamente.'],
     ['stories.own.actionCommunity', 'Publicar um story em {community}'],
-    ['stories.publish.destination.none', 'Nenhuma comunidade'],
-    [
-      'stories.publish.destination.helper',
-      'O story aparece no início por 24 h e continua nos Destaques da comunidade.',
-    ],
-    ['stories.publish.toastCommunity', 'Story publicado em {community}.'],
-    [
-      'stories.publish.errors.archived',
-      'A comunidade {community} foi arquivada e o story não foi publicado. Escolha outra comunidade ou publique sem comunidade.',
-    ],
     ['stories.circle.tenant', 'Abrir stories de {tenant}'],
     ['stories.circle.highlight', 'Abrir destaque {title}'],
     ['stories.highlights.coverAlt', 'Capa do destaque {title}'],
@@ -247,8 +237,6 @@ describe('05.1 — the new entry-point strings and their placeholders', () => {
   it.each([
     ['communities.list.regionArchived', '{tenant}'],
     ['stories.own.actionCommunity', '{community}'],
-    ['stories.publish.toastCommunity', '{community}'],
-    ['stories.publish.errors.archived', '{community}'],
     ['stories.circle.tenant', '{tenant}'],
     ['stories.circle.highlight', '{title}'],
     ['stories.highlights.coverAlt', '{title}'],
@@ -426,6 +414,72 @@ describe('05.2-07 — the "Seus stories" strings, and the pin vocabulary retired
 
   it('no string under stories.history says "Fixar" or "fixado"', () => {
     expect(JSON.stringify(lookup('stories.history'))).not.toMatch(/[Ff]ixa/);
+  });
+});
+
+/**
+ * 05.2-08 — the composer's "Destaque" row (UI-D-69), its landings (UI-D-70) and refusals (UI-D-71).
+ * 05.1's "Publicar em" words are retired with the row: `publish.toastCommunity` and
+ * `publish.destination.helper` are pinned ABSENT, and `destination.none` / `errors.archived` are
+ * pinned to their rewording, so a key nothing reads cannot linger unreviewed.
+ */
+describe('05.2-08 — the composer "Destaque" strings, and the "Publicar em" words retired', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['stories.publish.destination.label', 'Destaque'],
+    ['stories.publish.destination.none', 'Nenhum'],
+    ['stories.publish.destination.value', '{place} · {title}'],
+    ['stories.publish.destination.choose', 'Escolher destaque'],
+    ['stories.publish.toast', 'Story publicado.'],
+    ['stories.publish.toastHighlight', 'Story publicado no destaque {title}.'],
+    [
+      'stories.publish.toastHighlightCommunity',
+      'Story publicado no destaque {title} de {community}.',
+    ],
+    [
+      'stories.publish.errors.archived',
+      'A comunidade {community} foi arquivada e o story não foi publicado. Escolha outro destaque ou publique sem destaque.',
+    ],
+    [
+      'stories.publish.errors.titleInvalid',
+      'O nome do destaque precisa ter de 1 a {limit} caracteres. Escolha o destaque de novo.',
+    ],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['stories.publish.destination.value', '{place}'],
+    ['stories.publish.destination.value', '{title}'],
+    ['stories.publish.toastHighlight', '{title}'],
+    ['stories.publish.toastHighlightCommunity', '{title}'],
+    ['stories.publish.toastHighlightCommunity', '{community}'],
+    ['stories.publish.errors.archived', '{community}'],
+    ['stories.publish.errors.titleInvalid', '{limit}'],
+  ])('%s carries the %s placeholder', (key, placeholder) => {
+    expect(String(lookup(key))).toContain(placeholder);
+  });
+
+  it('the title rule interpolates the limit — no digit is typed into it (UI-D-05)', () => {
+    expect(String(lookup('stories.publish.errors.titleInvalid'))).not.toMatch(/\b15\b/);
+  });
+
+  it.each(['stories.publish.toastCommunity', 'stories.publish.destination.helper'])(
+    '%s is gone — the "Publicar em" row is retired',
+    (key) => {
+      expect(lookup(key)).toBeUndefined();
+    },
+  );
+
+  it('no string under stories.publish says "Nenhuma comunidade"', () => {
+    expect(JSON.stringify(lookup('stories.publish'))).not.toContain('Nenhuma comunidade');
   });
 });
 
