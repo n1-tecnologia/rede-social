@@ -1,6 +1,12 @@
 import { avatarUrlFor } from '@tria/contracts/profiles';
 import type { CommentView } from '@tria/module-feed/ui';
-import type { StoryComment, StorySummary } from '@tria/module-stories/contracts';
+import {
+  type HighlightSummary,
+  STORY_MAX_PAGE_SIZE,
+  type StoryComment,
+  type StorySummary,
+} from '@tria/module-stories/contracts';
+import type { StoryStripCircle } from '@tria/module-stories/ui';
 import { relativeFrom } from '@/lib/relative-time';
 
 /**
@@ -259,53 +265,135 @@ export function storyHistoryView(
 
 /* ── The Início row (05.2-04: HIGHLIGHT-03, D-104, D-106, UI-D-59..UI-D-62) ──────────────────── */
 
-// RED STUBS (05.2-04 Task 2): deliberately inert placeholders so `story-view.test.ts` can fail on
-// its assertions rather than on a missing export. Every one is replaced by the GREEN commit.
+/**
+ * The Início row's circles, composed on the SERVER — the `feed-view.ts` rule restated: every value
+ * is a string, a number or an id (no function, no URL built from a title), so the descriptors cross
+ * into `StoriesSurface` untouched and the module's `StoriesStrip` renders them in the given order.
+ */
 type RowLabelReader = (key: string, values?: Record<string, string | number>) => string;
-type StubCircle = import('@tria/module-stories/ui').StoryStripCircle;
 
-export function monogramOf(_text: string): string {
-  return '?';
+/**
+ * The first user-perceived character of `text`, trimmed and upper-cased (UI-D-60, UI-D-62) — never a
+ * string slice, which would split a surrogate pair or a joined emoji. `Intl.Segmenter` is the
+ * grapheme authority; `Array.from` (code points) is the fallback. An empty text is `''`: the
+ * gradient disc with no letter.
+ */
+export function monogramOf(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed === '') return '';
+  const first =
+    typeof Intl.Segmenter === 'function'
+      ? new Intl.Segmenter('pt-BR', { granularity: 'grapheme' })
+          .segment(trimmed)
+          [Symbol.iterator]()
+          .next().value?.segment
+      : Array.from(trimmed)[0];
+  return (first ?? '').toLocaleUpperCase('pt-BR');
 }
 
-export function tenantSequence<T>(_page: { items: readonly T[] } | null): T[] {
-  return [];
+/**
+ * D-106: the tenant circle plays OLDEST → NEWEST over the newest `STORY_MAX_PAGE_SIZE` live stories.
+ *
+ * `GET /v1/stories` keeps its `expires_at desc, id desc` statement and its index-only plan; the web
+ * asks for ONE bounded page and reverses it here, rather than asking the API for an ascending read
+ * that would walk the oldest stories first and page toward the news (R-D-6's anti-pattern). The cap
+ * is applied to the API order FIRST, so a page longer than the cap still plays the NEWEST 25. A
+ * missing page (a failed read) is an empty sequence. The input is never mutated.
+ */
+export function tenantSequence<T>(page: { items: readonly T[] } | null): T[] {
+  if (page === null) return [];
+  return page.items.slice(0, STORY_MAX_PAGE_SIZE).reverse();
 }
 
-const STUB_CIRCLE: StubCircle = {
-  kind: 'open',
-  key: '',
-  label: '',
-  actionLabel: '',
-  ring: 'brand',
-  disc: { kind: 'monogram', text: '' },
-  group: 0,
-  index: 0,
-};
-
+/**
+ * The tenant circle (D-104): the tenant's logo and display name — the same identity the viewer
+ * header shows, so the circle and the screen it opens agree. No logo → the display name's monogram
+ * (UI-D-60). It opens group 0 at index 0; plan 10 adds the resume index and the seen ring.
+ */
 export function tenantCircleView(
-  _tenant: { displayName: string; logoUrl: string | null },
-  _t: RowLabelReader,
-): StubCircle {
-  return STUB_CIRCLE;
+  tenant: { displayName: string; logoUrl: string | null },
+  t: RowLabelReader,
+): Extract<StoryStripCircle, { kind: 'open' }> {
+  return {
+    kind: 'open',
+    key: 'tenant',
+    label: tenant.displayName,
+    actionLabel: t('circle.tenant', { tenant: tenant.displayName }),
+    ring: 'brand',
+    disc:
+      tenant.logoUrl !== null
+        ? { kind: 'logo', src: tenant.logoUrl }
+        : { kind: 'monogram', text: monogramOf(tenant.displayName) },
+    group: 0,
+    index: 0,
+  };
 }
 
+/**
+ * One highlight circle (UI-D-62): the server-resolved cover, or the title's monogram when nothing
+ * resolves (video-only, cover deleted); the title as label; always the neutral archive ring
+ * (UI-D-61). The cover goes through `MediaImage` BY ASSET ID — no URL is ever built from tenant
+ * content (T-05.2-21).
+ *
+ * `static` in this plan: a highlight has nowhere to open yet, so it renders as an inert span rather
+ * than as a button that does nothing. Plan 05 makes the viewer group-aware and turns it into `open`.
+ */
 export function highlightCircleView(
-  _summary: import('@tria/module-stories/contracts').HighlightSummary,
-  _t: RowLabelReader,
-): StubCircle {
-  return STUB_CIRCLE;
+  summary: HighlightSummary,
+  t: RowLabelReader,
+): StoryStripCircle {
+  return {
+    kind: 'static',
+    key: summary.id,
+    label: summary.title,
+    actionLabel: t('circle.highlight', { title: summary.title }),
+    ring: 'neutral',
+    disc:
+      summary.coverAssetId !== null
+        ? {
+            kind: 'asset',
+            assetId: summary.coverAssetId,
+            variantWidths: summary.coverVariantWidths,
+          }
+        : { kind: 'monogram', text: monogramOf(summary.title) },
+  };
 }
 
+/**
+ * UI-D-59's order and render rule for Início, as one pure function:
+ *
+ * 1. the admin's `+ Seu story` link — ONLY with `stories.story.publish` (the caller passes the
+ *    permission check's result, never a role, UI-D-28);
+ * 2. the tenant circle — iff the tenant sequence is non-empty (a circle means something to watch);
+ * 3. Início's highlights, one circle each, in the order the API returned (`position, id`).
+ *
+ * A member with nothing gets `[]`, and `StoriesStrip` then renders NO node (UI-D-26). The three
+ * parts are independent (UI E01 partial): highlights render without the tenant circle and vice
+ * versa, and an admin with nothing still gets the `+` alone (D-108).
+ */
 export function inicioRow(
-  _input: {
+  input: {
     canPublish: boolean;
     own: { avatarUrl: string | null };
     tenant: { displayName: string; logoUrl: string | null };
     sequenceLength: number;
-    highlights: readonly import('@tria/module-stories/contracts').HighlightSummary[];
+    highlights: readonly HighlightSummary[];
   },
-  _t: RowLabelReader,
-): StubCircle[] {
-  return [];
+  t: RowLabelReader,
+): StoryStripCircle[] {
+  const row: StoryStripCircle[] = [];
+  if (input.canPublish) {
+    row.push({
+      kind: 'link',
+      key: 'own',
+      href: '/stories/publicar',
+      label: t('own.label'),
+      actionLabel: t('own.action'),
+      ring: 'neutral',
+      disc: { kind: 'own', avatarUrl: input.own.avatarUrl },
+    });
+  }
+  if (input.sequenceLength > 0) row.push(tenantCircleView(input.tenant, t));
+  for (const summary of input.highlights) row.push(highlightCircleView(summary, t));
+  return row;
 }

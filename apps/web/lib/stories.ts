@@ -1,4 +1,6 @@
 import {
+  type HighlightList,
+  highlightListSchema,
   type PublishStory,
   STORY_COMMENT_ISSUE_SET,
   STORY_COMMENTS_PAGE_SIZE,
@@ -398,4 +400,50 @@ export function storyPinIssue(error: unknown): StoryPinIssue | 'not_found' | nul
   return typeof issue === 'string' && STORY_PIN_ISSUE_SET.has(issue)
     ? (issue as StoryPinIssue)
     : null;
+}
+
+/* ── Highlights (05.2) ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The query a place's highlight row sends. No `communityId` means Início — the ABSENCE of the id,
+ * never a null or a sentinel. `scope: 'all'` is the CURATOR's read (empty highlights included,
+ * D-102); the API refuses it 403 to a caller without `stories.story.manage`, and the Início row
+ * never asks for it (T-05.2-20).
+ */
+export type HighlightQueryInput = { communityId?: string; scope?: 'all' };
+
+/**
+ * `GET /v1/stories/highlights?communityId=&scope=` (HIGHLIGHT-03) — one place's row in `position,
+ * id` order, each highlight with its server-resolved cover (R-D-D). No paging: a place holds at most
+ * `STORY_HIGHLIGHT_MAX_PER_PLACE`.
+ */
+export async function getHighlights(query: HighlightQueryInput = {}): Promise<HighlightList> {
+  const search = new URLSearchParams();
+  if (query.communityId) search.set('communityId', query.communityId);
+  if (query.scope) search.set('scope', query.scope);
+  const qs = search.toString();
+
+  const res = await apiFetch(`/v1/stories/highlights${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw await apiError(res);
+  return highlightListSchema.parse(await res.json());
+}
+
+/**
+ * One place's highlights, or `null` when the API could not answer.
+ *
+ * **It NEVER navigates and never rethrows** — the `loadStories` rule, for the same reason (UI E01/E02
+ * error, T-05.2-22): the row sits above the feed on the screen every member lands on, and a row
+ * must never be why a page errors. A tenant whose `stories` module is off answers 404 here, which is
+ * swallowed into the same `null` an empty row renders as.
+ */
+export async function loadHighlights(
+  query: HighlightQueryInput = {},
+): Promise<HighlightList | null> {
+  try {
+    return await getHighlights(query);
+  } catch (error) {
+    // Shape only: a highlight TITLE is tenant content and never reaches a log line (T-05-29).
+    console.error('stories.highlights_list_failed', { error: String(error) });
+    return null;
+  }
 }

@@ -7,7 +7,15 @@
       "actionCommunity": "Publicar um story em {community}"
     },
     "circle": {
-      "action": "Abrir story de {time}"
+      "action": "Abrir story de {time}",
+      "tenant": "Abrir stories de {tenant}",
+      "highlight": "Abrir destaque {title}"
+    },
+    "highlights": {
+      "coverAlt": "Capa do destaque {title}",
+      "place": {
+        "home": "Início"
+      }
     },
     "viewer": {
       "dialog": "Story",

@@ -2,6 +2,7 @@ import type { Bootstrap, ModuleKey } from '@tria/contracts';
 import type { HomeSlot } from '@tria/core/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@tria/module-feed/ui';
+import { STORY_MAX_PAGE_SIZE } from '@tria/module-stories/contracts';
 import { EmptyState } from '@tria/ui';
 import { TriangleAlert } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -31,9 +32,9 @@ import {
 import { FeedSurface } from '@/components/feed/FeedSurface';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { loadFeed } from '@/lib/feed';
-import { postCardView, relativeFrom } from '@/lib/feed-view';
-import { loadStories } from '@/lib/stories';
-import { storyViewerItem, storyViewerLabels } from '@/lib/story-view';
+import { postCardView } from '@/lib/feed-view';
+import { loadHighlights, loadStories } from '@/lib/stories';
+import { inicioRow, storyViewerItem, storyViewerLabels, tenantSequence } from '@/lib/story-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -319,26 +320,37 @@ export function storyCommentsProps(
 }
 
 /**
- * `stories` → home[0] at order 5 (UI-D-25): the strip sits ABOVE the feed, because a story is the
+ * `stories` → home[0] at order 5 (UI-D-25): the row sits ABOVE the feed, because a story is the
  * most time-bounded thing on `/inicio` — it is gone in 24 h — while the feed is durable. The module
- * declares no navigation tab at all (D-40/D-80): its publish door is the own-circle below.
+ * declares no navigation tab at all (D-40/D-80): its publish door is the `+` circle below.
  *
- * **The own-circle's visibility is a PERMISSION, never a role** (UI-D-28, T-05-25). It renders
+ * **D-104 / D-106 replace D-78.** Início shows ONE tenant circle — the tenant's logo and display
+ * name — holding every active, ready story of the tenant, played OLDEST → NEWEST over the newest
+ * `STORY_MAX_PAGE_SIZE` (the API's newest-first page, reversed here by `tenantSequence`), followed by
+ * Início's highlights, one circle each, in `position, id` order (UI-D-59, built by `inicioRow`).
+ * The viewer still opens the tenant sequence at index 0 — the single-sequence viewer, which plan 05
+ * turns into group 0 and plan 10 gives a resume index. Highlight circles are inert until plan 05.
+ *
+ * **The `+` circle's visibility is a PERMISSION, never a role** (UI-D-28, T-05-25). It renders
  * exactly when the bootstrap carries `stories.story.publish` — the same composed value the API's
  * `requirePermission` guard evaluates — so turning members into publishers in V2 is a settings flip
  * with no web change. A role comparison here would hard-code V1 into the home screen.
  *
- * **A failed read renders NOTHING** (UI-SPEC E01/error): `loadStories` swallows the failure into
- * `null`, this returns an empty strip, and `StoriesStrip` then collapses to no node for a member.
- * The strip must never be the reason `/inicio` shows an error card — which is also why it is NOT
- * allowed to reject into `homeSlotsFor`'s generic error slot the way the feed deliberately is.
+ * **A failed read renders NOTHING for its part** (UI-SPEC E01/error, T-05.2-22): `loadStories` and
+ * `loadHighlights` each swallow a failure into `null` and never navigate, so a failed stories read
+ * drops only the tenant circle and a failed highlights read drops only the highlights. A member
+ * with nothing gets an empty `circles` list and `StoriesStrip` collapses to no node. The row must
+ * never be the reason `/inicio` shows an error card — which is also why it is NOT allowed to reject
+ * into `homeSlotsFor`'s generic error slot the way the feed deliberately is. The member-scope read
+ * (`loadHighlights({})`, never `scope: 'all'`) already excludes empty highlights (T-05.2-20).
  *
- * Every relative-time label is formatted HERE from the page's single `now` (UI-D-14): the circle
+ * Every relative-time label is formatted HERE from the page's single `now` (UI-D-14): the viewer
  * never calls a clock in render, so there is no hydration mismatch and no per-second re-render.
  */
 const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
-  const [page, tf, tfeed, locale] = await Promise.all([
-    loadStories(),
+  const [page, highlights, tf, tfeed, locale] = await Promise.all([
+    loadStories({ limit: STORY_MAX_PAGE_SIZE }),
+    loadHighlights({}),
     getTranslations('stories'),
     // D-82: the sheet's own copy is the FEED's, read from the feed namespace rather than copied
     // into the stories one.
@@ -346,56 +358,37 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
     getLocale(),
   ]);
   const now = Date.now();
-  const canPublish = bootstrap.permissions.includes('stories.story.publish');
-  const stories = page?.items ?? [];
+  const tenant = {
+    displayName: bootstrap.tenant.displayName,
+    logoUrl: bootstrap.tenant.branding.logoUrl,
+  };
+  // D-106: one bounded page, played oldest first.
+  const sequence = tenantSequence(page);
 
   return (
     <StoriesSurface
-      circles={[
-        ...(canPublish
-          ? [
-              {
-                kind: 'link' as const,
-                key: 'own',
-                href: '/stories/publicar',
-                label: tf('own.label'),
-                actionLabel: tf('own.action'),
-                ring: 'neutral' as const,
-                disc: { kind: 'own' as const, avatarUrl: bootstrap.membership.profile.avatarUrl },
-              },
-            ]
-          : []),
-        ...stories.map((story, index) => {
-          const time = relativeFrom(story.publishedAt, now);
-          return {
-            kind: 'open' as const,
-            key: story.id,
-            label: time,
-            actionLabel: tf('circle.action', { time }),
-            ring: 'brand' as const,
-            disc: {
-              kind: 'asset' as const,
-              assetId: story.mediaAssetId,
-              variantWidths: story.mediaVariantWidths,
-            },
-            group: 0,
-            index,
-          };
-        }),
-      ]}
-      // STORY-02: the viewer opens on the STRIP'S OWN ordered sequence, built from the same page in
-      // the same request — so the Nth circle and the Nth segment can never disagree, and opening
-      // the viewer costs no second round trip. No stories means no `viewer` prop at all, which is
-      // what keeps the circles inert rather than linking to a sequence with nothing in it.
+      circles={inicioRow(
+        {
+          canPublish: bootstrap.permissions.includes('stories.story.publish'),
+          own: { avatarUrl: bootstrap.membership.profile.avatarUrl },
+          tenant,
+          sequenceLength: sequence.length,
+          highlights: highlights?.items ?? [],
+        },
+        tf,
+      )}
+      // STORY-02: the viewer opens on the tenant circle's OWN ordered sequence, built from the same
+      // page in the same request — so the circle and the segments can never disagree, and opening
+      // the viewer costs no second round trip. No live story means no `viewer` prop at all.
       viewer={
-        stories.length === 0
+        sequence.length === 0
           ? undefined
           : {
-              items: stories.map((story) => storyViewerItem(story, now)),
+              items: sequence.map((story) => storyViewerItem(story, now)),
               author: {
                 // V1's single publisher IS the tenant; see the note in `StoryViewerHost`.
-                name: bootstrap.tenant.displayName,
-                avatarUrl: bootstrap.tenant.branding.logoUrl,
+                name: tenant.displayName,
+                avatarUrl: tenant.logoUrl,
               },
               labels: storyViewerLabels(tf),
               onLike: likeStoryAction,

@@ -21,10 +21,11 @@ import { StoryCircle, type StoryCircleDisc, type StoryCircleRing } from './Story
  * the tenant — its logo and name — whatever the number of live stories; a highlight is where a
  * story ALSO stays, never where it is taken from.
  *
- * **Two descriptor kinds.** `link` is an `<a>` to a host route (the `+` circle; the manage circle
- * and empty highlights later). `open` is a `<button>` that calls `onOpen(group, index)` with its
- * OWN pair — the tenant circle, a highlight circle, a pinned story — and is inert until the host
- * supplies `onOpen`.
+ * **Three descriptor kinds.** `link` is an `<a>` to a host route (the `+` circle; the manage
+ * circle and empty highlights later). `open` is a `<button>` that calls `onOpen(group, index)` with
+ * its OWN pair — the tenant circle, a pinned story, a highlight circle once the viewer is
+ * group-aware — and is inert until the host supplies `onOpen`. `static` is always inert: a circle
+ * with nowhere to go yet renders as a span, never as a button that does nothing when tapped.
  *
  * **UI-D-47: identical geometry on desktop.** No arrows, no fade mask, no grid reflow. A circle row
  * is a phone idiom that survives unchanged inside the 680px column, and desktop-only chrome here
@@ -44,10 +45,15 @@ interface StoryStripCircleBase {
   disc: StoryCircleDisc;
 }
 
-/** One circle of the row, in the order the host decided. */
+/**
+ * One circle of the row, in the order the host decided. `static` is a circle with nowhere to go
+ * yet — an inert `<span>` even when the row has an `onOpen` (a highlight circle until the viewer
+ * learns groups in plan 05).
+ */
 export type StoryStripCircle =
   | (StoryStripCircleBase & { kind: 'link'; href: string })
-  | (StoryStripCircleBase & { kind: 'open'; group: number; index: number });
+  | (StoryStripCircleBase & { kind: 'open'; group: number; index: number })
+  | (StoryStripCircleBase & { kind: 'static' });
 
 export interface StoriesStripProps {
   /** The row, in render order. Empty → no node at all (UI-D-26). */

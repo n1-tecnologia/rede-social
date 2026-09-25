@@ -126,6 +126,22 @@ describe('StoriesStrip — the ordered row of circle descriptors (UI-D-59, UI-D-
     expect(screen.queryByRole('button')).toBeNull();
   });
 
+  it('7b. a static circle is inert even when the row has onOpen — a span, never a button', () => {
+    const onOpen = vi.fn();
+    const inert: StoryStripCircle = {
+      kind: 'static',
+      key: 'h-static',
+      label: 'static-label',
+      actionLabel: 'static-action',
+      ring: 'neutral',
+      disc: { kind: 'monogram', text: 'b' },
+    };
+    strip({ circles: [asset(1), inert], onOpen });
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'static-action' })).toBeNull();
+    expect(screen.getByText('static-label')).toBeInTheDocument();
+  });
+
   it('8. only the first three discs of the row load eagerly', () => {
     // happy-dom reports every `<img>` as `complete` with a zero `naturalWidth`, so `MediaImage`
     // would take its degraded branch and drop the `<img>`; a decoded image is forced for this case
