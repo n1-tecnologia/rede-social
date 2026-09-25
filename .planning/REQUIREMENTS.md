@@ -72,8 +72,17 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [x] **STORY-01**: `admin_tenant` can publish a story with an image or a short video (up to ~60 s, via the streaming vendor) and optional caption
 - [x] **STORY-02**: Members see active stories in a horizontally scrollable strip; tapping opens a full-screen viewer with progress bars, auto-advance, tap-to-navigate and hold-to-pause
 - [x] **STORY-03**: A story is visible for 24 h after publishing; after that it is hidden by an `expires_at` filter but the record is retained
-- [x] **STORY-04**: `admin_tenant` can pin a story to one or more communities; a pinned story stays visible in that community after the 24 h expiry until unpinned
+- [x] **STORY-04**: `admin_tenant` can keep a story visible after its 24 h expiry in one or more curated places (a community or Início) until it is removed — delivered by Phase 5 as per-community pins and re-delivered by Phase 05.2 through named highlights (HIGHLIGHT-02, HIGHLIGHT-04), which retire the pin model (HIGHLIGHT-05)
 - [x] **STORY-05**: Member can like a story and comment on it; story comments cannot be liked or replied to
+
+### Story Highlights
+
+- [ ] **HIGHLIGHT-01**: `admin_tenant` can create, rename, re-cover (a frame of one of the highlight's image stories, or an uploaded image) and delete named highlights (a title of up to 15 characters plus a cover) on Início and on each active community, and reorder a place's highlights from that place's "Destaques" manage screen; a highlight with no story is kept and shown only to the admin
+- [ ] **HIGHLIGHT-02**: `admin_tenant` can add a story to, or remove it from, specific highlights — a story may sit in several — from the viewer, from "Seus stories", from a highlight's edit sheet, or into one highlight at publish; a story inside a highlight stays viewable after its 24 h window, and a highlight plays its stories oldest first by publish time
+- [ ] **HIGHLIGHT-03**: Início shows ONE grouped circle (the tenant's logo and display name) holding every active story of the tenant, played oldest to newest, followed by Início's highlights in the admin's order, one circle each; at the end of a circle the viewer moves on to the next circle in the row
+- [ ] **HIGHLIGHT-04**: A community page shows only that community's highlights, with no active-stories circle; with the communities module off, community highlights are unreachable while Início's are unaffected
+- [ ] **HIGHLIGHT-05**: Every existing community pin is migrated into highlights without loss (one "Destaques" highlight per community that had pins, each pin's author and time carried over), and the pin model — its table, routes, events and the publish `communityId` — is retired
+- [ ] **HIGHLIGHT-06**: Members get a server-side, cross-device seen state for active stories: the grouped circle's ring is brand-coloured while any active story is unseen and neutral once all are seen, and opening it resumes at the first unseen story (the seen-ring half of V2-CONT-05; the admin's "quem viu" list stays V2)
 
 ### Events
 
@@ -148,7 +157,7 @@ Deferred to future release. Tracked but not in current roadmap.
 - ~~**V2-CONT-02**: Members can create communities~~ — promoted to Phase 10 (post-MVP) via the `social` module (only the creator publishes in it), 2026-09-25; private/opt-in communities using COMM-02's membership table remain V2
 - **V2-CONT-03**: Pin post to top of feed/community
 - **V2-CONT-04**: Scheduled publishing of posts
-- **V2-CONT-05**: Story seen/unseen ring and admin "who viewed" list
+- ~~**V2-CONT-05**: Story seen/unseen ring and admin "who viewed" list~~ — seen/unseen ring promoted to V1 as HIGHLIGHT-06 (Phase 05.2), 2026-09-25; the admin "who viewed" list remains V2
 - **V2-CONT-06**: Emoji reactions instead of plain like
 
 ### Chat & Notifications
@@ -252,8 +261,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORY-01 | Phase 5 | Complete |
 | STORY-02 | Phase 5 | Complete |
 | STORY-03 | Phase 5 | Complete |
-| STORY-04 | Phase 5 | Complete |
+| STORY-04 | Phase 5 (re-delivered by Phase 05.2) | Complete (re-delivery through highlights pending in Phase 05.2) |
 | STORY-05 | Phase 5 | Complete |
+| HIGHLIGHT-01 | Phase 05.2 | Pending |
+| HIGHLIGHT-02 | Phase 05.2 | Pending |
+| HIGHLIGHT-03 | Phase 05.2 | Pending |
+| HIGHLIGHT-04 | Phase 05.2 | Pending |
+| HIGHLIGHT-05 | Phase 05.2 | Pending |
+| HIGHLIGHT-06 | Phase 05.2 | Pending |
 | EVENT-01 | Phase 6 | Pending |
 | EVENT-02 | Phase 6 | Pending |
 | EVENT-03 | Phase 6 | Pending |
@@ -296,10 +311,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 78 total
-- Mapped to phases: 78
+- v1 requirements: 89 total (recounted from the traceability table on 2026-09-25: 83 before Phase 05.2 — the earlier "78" predated the 2026-09-25 promotions — plus HIGHLIGHT-01..06)
+- Mapped to phases: 89
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-11*
-*Last updated: 2026-09-11 after roadmap creation (traceability filled)*
+*Last updated: 2026-09-25 — Phase 05.2 planning added HIGHLIGHT-01..06, reworded STORY-04 (re-delivered through highlights, kept `[x]` per the 05.1 re-open precedent) and promoted V2-CONT-05's seen ring*

@@ -395,7 +395,7 @@ Plans:
 
 **Goal**: Stories work like Instagram's. Início shows ONE circle with all active stories and, beside it, one circle per highlight; a community page shows only its highlights. An `admin_tenant` curates named highlights and adds each story to a specific one. This replaces today's loose "pin a story to a community" model, which Phase 05.1 just wired into the composer.
 **Depends on**: Phase 05.1 (`story_community_pins`, the born-attached publish, the composer's "Publicar em" row, `PinStorySheet`)
-**Requirements**: TBD (new HIGHLIGHT-* to be defined in discuss/plan)
+**Requirements**: HIGHLIGHT-01..HIGHLIGHT-06, STORY-04 (re-delivered through highlights)
 **Success Criteria** (what must be TRUE):
 
   1. An `admin_tenant` creates, renames, re-covers, reorders and deletes named highlights (title + cover) on Início and on any community, and adds or removes a story from a SPECIFIC highlight. Stories kept in a highlight stay viewable after the 24 h window.
@@ -408,9 +408,54 @@ Plans:
 **Research needed**: Yes — the migration from `story_community_pins`, and the Instagram grouped-viewer behaviour (resume from the first unseen story).
 **Notes**: Publishing is still admin-only in this phase; member authoring arrives in Phases 9/10 (post-MVP) and must fit this model, not reshape it. Open questions for discuss-phase: (a) can one story sit in several highlights (Instagram: yes); (b) cover = uploaded image or a frame of one of its stories; (c) where the admin's publish door lives once the own-circle (D-80) becomes the grouped circle; (d) how the grouped circle shows seen vs unseen (V2-CONT-05 "seen/unseen ring" may need pulling in). There is NO feed-level pin today, so the Início half is new. Source: user requests 2026-09-25; 05.2 was split into 05.2-05.5 the same day for vertical, independently shippable slices, and later that day the MVP cut made Reels 05.3 and moved the two "Rede social" phases to 9-10.
 
+**Plans**: 12 plans
+
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 05.2 to break down)
+**Wave 1**
+
+- [ ] 05.2-01-PLAN.md — Tracer: highlights at the API end to end (two tables, migration file 1 with the pin backfill and its no-loss guard, live replay after a backup), the reset consent, pgTAP 120, two-tenant isolation and the seeded highlights
+- [ ] 05.2-02-PLAN.md — The D-33 design gate: sketch 004 for the seven prototype-less surfaces, shipped `approved: false`
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 05.2-03-PLAN.md — Curation API: the image-only cover decision, rename / re-cover / delete / remove, reorder, the sheet's catalogue and membership reads, `highlightCount`, communities-off, the full event vocabulary
+
+**Wave 3** *(blocked on Wave 2 and the sketch approval)*
+
+- [ ] 05.2-04-PLAN.md — Início: one tenant circle (logo + name, oldest → newest) plus Início's highlight circles; the reworked circle and strip
+
+**Wave 4**
+
+- [ ] 05.2-05-PLAN.md — The grouped viewer: next circle at a boundary, swipe skips a circle, lazy highlight groups, composite keys, the segment-shown callback
+
+**Wave 5**
+
+- [ ] 05.2-06-PLAN.md — The shared highlight sheet (checklist + single-select + title step) and "Destacar" in the viewer
+
+**Wave 6**
+
+- [ ] 05.2-07-PLAN.md — "Seus stories" curates highlights; the pin sheet and the web's pin calls are deleted
+
+**Wave 7**
+
+- [ ] 05.2-08-PLAN.md — Publishing into a highlight (existing or inline, one write) and the community page's highlight row; the composer's "Destaque" row replaces "Publicar em"
+
+**Wave 8**
+
+- [ ] 05.2-09-PLAN.md — The manage screens (`/stories/destaques`, `/comunidades/[id]/destaques`), the edit sheet, reorder, covers, and the admin-only manage and empty-highlight circles
+
+**Wave 9**
+
+- [ ] 05.2-10-PLAN.md — Server-side seen state: `story_views`, `POST /v1/stories/views`, the seen ring and resume-at-first-unseen
+
+**Wave 10**
+
+- [ ] 05.2-11-PLAN.md — Retire the pin model behind a one-way `checkpoint:decision`: delete the pin API and contract, drop the table (migration file 2), rehearse file 1 → file 2 on an edge fixture
+
+**Wave 11**
+
+- [ ] 05.2-12-PLAN.md — Phase gate: the six-step UAT replay in one e2e spec (cross-device seen ring as a second browser context) and the full local suite
 
 ### Phase 05.3: Reels (INSERTED)
 
