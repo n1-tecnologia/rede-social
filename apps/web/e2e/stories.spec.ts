@@ -54,13 +54,15 @@ test.use({ serviceWorkers: 'block' });
 const SEEDED = {
   /** The caption of the EXPIRED story: it must not appear on the strip in any form. */
   expiredCaption: 'Publicado ontem, ja fora da regua.',
+  /** `SEED_STORY_IDS['tria-demo'][3]`: the EXPIRED story (`SEED_STORIES[3]`). */
+  expiredStoryId: '0d000000-0000-4000-8000-0000000000d4',
   /**
-   * 05-08: `SEED_COMMUNITY_IDS['tria-demo'][0]`'s NAME — the community the seed pins to, and the
-   * row the pin sheet opens with its switch already ON. `SEED_COMMUNITIES[1]` carries no pin, so
-   * it is the row a toggle can be walked on without disturbing the shared fixture.
+   * 05.2-07: `SEED_COMMUNITY_IDS['tria-demo'][0]`'s NAME — the place of the community highlight
+   * `Destaques`, which holds the expired story. With `Bastidores` that puts the expired story in TWO
+   * highlights, and `Aulas` (empty) is the switch a toggle can be walked on and undone.
    */
-  pinnedCommunityName: 'Avisos da diretoria',
-  unpinnedCommunityName: 'Eventos e encontros',
+  communityHighlightPlace: 'Avisos da diretoria',
+  communityHighlight: 'Destaques',
   /** `SEED_TENANTS['tria-demo'].displayName` — the tenant circle's label and accessible name. */
   tenantName: 'TRIA Demo',
   /**
@@ -916,16 +918,59 @@ test.describe('the story comment sheet — D-82, D-83 (mobile)', () => {
 });
 
 /**
- * D-84 / UI-D-40 / UI-D-41 (05-08) — "Seus stories", the one Phase 5 flow with no prototype at all,
- * and the pin sheet that lives inside it.
+ * UI-D-77's indicator, resolved from the catalog's OWN ICU plural rather than typed: the
+ * `one`/`other` branch is picked with pt-BR's plural rules and `#` becomes the count, which is
+ * exactly what next-intl does on the server. The cases below also pin the resolved words once
+ * ("Em 2 destaques"), so a broken plural in the catalog fails here rather than rendering raw ICU.
+ */
+function highlightedLabel(count: number): string {
+  const match = /one \{([^}]*)\} other \{([^}]*)\}/.exec(S.history.highlighted);
+  if (!match) throw new Error('stories.history.highlighted is not a one/other plural');
+  const branch = new Intl.PluralRules('pt-BR').select(count) === 'one' ? match[1] : match[2];
+  return (branch ?? '').replace('#', String(count));
+}
+
+/** The highlight sheet's switch name ("Destacar em {title}, {place}"). */
+const highlightSwitchName = (title: string, place: string) =>
+  S.highlights.sheet.row.replace('{title}', title).replace('{place}', place);
+
+/**
+ * Takes the expired story back OUT of `Aulas` through the API, whatever state a failed walk left it
+ * in, so the shared seed is exactly as found. `DELETE` of a membership that does not exist is the
+ * same success, so this is safe to run after a passing walk too.
+ */
+async function restoreAulas(): Promise<void> {
+  const token = await adminToken();
+  const catalog = await storiesApi(token, '/v1/stories/highlights/catalog');
+  if (!catalog.ok) return;
+  const { items } = (await catalog.json()) as {
+    items: { id: string; title: string; communityId: string | null }[];
+  };
+  const aulas = items.find(
+    (item) => item.communityId === null && item.title === SEEDED.homeEmptyHighlight,
+  );
+  if (!aulas) return;
+  await storiesApi(token, `/v1/stories/highlights/${aulas.id}/stories/${SEEDED.expiredStoryId}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * D-84 / D-110 route 2 / UI-D-77 (05.2-07) — "Seus stories", the admin's story home, curating
+ * HIGHLIGHTS: the row menu says "Destacar" and opens the same checklist sheet the viewer opens, the
+ * row's "Em # destaques" follows each confirmed toggle, and the delete dialog names highlights.
  *
  * Everything that WRITES here undoes itself: the one toggle the walk performs is turned back off in
- * the same test, so the shared seed is left exactly as it was found and the file stays re-runnable
- * in any order. The DELETE case publishes its own story first rather than removing a seeded one.
+ * the same test (and `restoreAulas` backs that up), so the shared seed is left exactly as it was
+ * found. The DELETE case publishes its own story first rather than removing a seeded one.
  */
-test.describe('"Seus stories" — the admin history and the pin sheet (D-84, UI-D-40, UI-D-41)', () => {
+test.describe('"Seus stories" — the admin history and the highlight sheet (D-84, D-110, UI-D-77)', () => {
   const H = S.history;
-  const P = S.pin;
+  const HS = S.highlights;
+
+  test.afterAll(async () => {
+    await restoreAulas();
+  });
 
   test('the two doors UI-D-29 specifies both reach the history, and the "+" circle still publishes', async ({
     page,
@@ -963,71 +1008,103 @@ test.describe('"Seus stories" — the admin history and the pin sheet (D-84, UI-
     await expect(page).toHaveURL(/\/inicio$/);
   });
 
-  test('the history lists EXPIRED stories too, with their counts and their pinned indicator', async ({
+  test('the history lists the EXPIRED story "Em 2 destaques", and the one-highlight rows "Em 1 destaque"', async ({
     page,
   }) => {
+    // The resolved words themselves (UI E12 zero-one-many): singular at 1, plural above.
+    expect(highlightedLabel(1)).toBe('Em 1 destaque');
+    expect(highlightedLabel(2)).toBe('Em 2 destaques');
+
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/stories/meus`);
 
     const rows = page.locator('[data-story-history-row]');
     await expect(rows.first()).toBeVisible();
     // D-84: the history is the SAME query as the strip with the range predicate dropped, so the
-    // expired story is here — and it is the whole reason this screen exists.
-    await expect(page.getByText(SEEDED.expiredCaption)).toBeVisible();
+    // expired story is here — and it is the story "Destacar" exists to keep visible.
+    const expired = rows.filter({ hasText: SEEDED.expiredCaption }).first();
+    await expect(expired).toBeVisible();
+    // It sits in Bastidores AND Destaques (the seed), so its indicator reads the plural.
+    await expect(expired.getByTestId('story-history-highlighted')).toHaveText(highlightedLabel(2));
     // UI-D-40: a story with no caption reads as the fallback rather than as an empty line.
     await expect(page.getByText(H.noCaption, { exact: true }).first()).toBeVisible();
-    // …and the pinned indicator is present exactly where the seed pinned (zero-one-many E08).
-    await expect(page.locator('[data-testid="story-history-pin"]')).not.toHaveCount(0);
+    // The stories in exactly ONE highlight read the singular…
+    await expect(
+      page.getByTestId('story-history-highlighted').filter({ hasText: highlightedLabel(1) }),
+    ).not.toHaveCount(0);
+    // …and a story in NO highlight has no indicator at all — never "Em 0 destaques".
+    await expect(page.getByText(highlightedLabel(0))).toHaveCount(0);
+    // The pin model is gone from the screen (UI-D-79).
+    await expect(page.locator('[data-testid="story-history-pin"]')).toHaveCount(0);
   });
 
-  test('the pin sheet toggles ONE community immediately, with no save button anywhere', async ({
+  test('"Destacar" on the EXPIRED story opens the shared sheet, and each toggle moves the row count', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/stories/meus`);
 
-    // Open the row menu on the EXPIRED story — the one the pin flow exists for.
-    await page
+    const row = page
       .locator('[data-story-history-row]')
       .filter({ hasText: SEEDED.expiredCaption })
-      .first()
-      .click();
+      .first();
+    const indicator = row.getByTestId('story-history-highlighted');
+    await expect(indicator).toHaveText(highlightedLabel(2));
+
+    // UI-D-77's menu: "Destacar" · "Ver story" · "Excluir story", and no pin word anywhere.
+    await row.click();
     const menu = page.getByRole('dialog', { name: H.menu.title });
     await expect(menu).toBeVisible();
-    await expect(menu.getByText(H.menu.pin, { exact: true })).toBeVisible();
+    await expect(menu.getByText(H.menu.highlight, { exact: true })).toBeVisible();
     await expect(menu.getByText(H.menu.view, { exact: true })).toBeVisible();
     await expect(menu.getByText(H.menu.delete, { exact: true })).toBeVisible();
+    await expect(menu.getByText(/fixar/i)).toHaveCount(0);
 
-    await menu.getByText(H.menu.pin, { exact: true }).click();
-    const sheet = page.getByRole('dialog', { name: P.title });
+    await menu.getByText(H.menu.highlight, { exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: HS.sheet.title });
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByText(P.helper)).toBeVisible();
+    await expect(sheet.getByText(HS.sheet.helper)).toBeVisible();
 
-    // UI-D-41's whole product rule, as an absence: there is no save button in this sheet.
+    // UI-D-67: grouped Início first, then the community — each switch in that order, seeded ON
+    // exactly where the story already is.
+    const home = HS.place.home;
+    const names = await sheet
+      .getByRole('switch')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')));
+    expect(names).toEqual([
+      highlightSwitchName(SEEDED.homeHighlight, home),
+      highlightSwitchName(SEEDED.homeEmptyHighlight, home),
+      highlightSwitchName(SEEDED.communityHighlight, SEEDED.communityHighlightPlace),
+    ]);
+    const bastidores = sheet.getByRole('switch', {
+      name: highlightSwitchName(SEEDED.homeHighlight, home),
+    });
+    const aulas = sheet.getByRole('switch', {
+      name: highlightSwitchName(SEEDED.homeEmptyHighlight, home),
+    });
+    const destaques = sheet.getByRole('switch', {
+      name: highlightSwitchName(SEEDED.communityHighlight, SEEDED.communityHighlightPlace),
+    });
+    await expect(bastidores).toHaveAttribute('aria-checked', 'true');
+    await expect(aulas).toHaveAttribute('aria-checked', 'false');
+    await expect(destaques).toHaveAttribute('aria-checked', 'true');
+    // No save button: every switch is its own write (UI-D-67).
     await expect(sheet.getByRole('button', { name: /salvar/i })).toHaveCount(0);
 
-    // The seeded community reads as ALREADY pinned, without the sheet asking the admin anything.
-    const pinnedRow = sheet.getByRole('switch', {
-      name: P.row.replace('{community}', SEEDED.pinnedCommunityName),
-    });
-    await expect(pinnedRow).toHaveAttribute('aria-checked', 'true');
+    // ON: the toast confirms and the row behind the sheet already reads the server's new count.
+    await aulas.dispatchEvent('click');
+    await expect(aulas).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText(HS.toasts.added, { exact: true })).toBeVisible();
+    await expect(indicator).toHaveText(highlightedLabel(3));
 
-    // One toggle on an unpinned community: immediate, optimistic, and confirmed by the toast.
-    const target = sheet.getByRole('switch', {
-      name: P.row.replace('{community}', SEEDED.unpinnedCommunityName),
-    });
-    await expect(target).toHaveAttribute('aria-checked', 'false');
-    await target.dispatchEvent('click');
-    await expect(target).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByText(P.pinned, { exact: true })).toBeVisible();
-
-    // Turn it back off, so the shared seed is left exactly as it was found.
-    await target.dispatchEvent('click');
-    await expect(target).toHaveAttribute('aria-checked', 'false');
-    await expect(page.getByText(P.unpinned, { exact: true })).toBeVisible();
+    // OFF: back to where the seed had it, with no reload.
+    await aulas.dispatchEvent('click');
+    await expect(aulas).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByText(HS.toasts.removed, { exact: true })).toBeVisible();
+    await expect(indicator).toHaveText(highlightedLabel(2));
   });
 
-  test('a story the walk published is deleted from the history, dialog and toast included', async ({
+  test('a story the walk published is deleted from the history, with the reworded dialog and toast', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
@@ -1048,18 +1125,67 @@ test.describe('"Seus stories" — the admin history and the pin sheet (D-84, UI-
     await page.goto(`${hosts.demo}/stories/meus`);
     const row = page.locator('[data-story-history-row]').filter({ hasText: caption }).first();
     await expect(row).toBeVisible();
+    // A fresh story is in no highlight: no indicator on its row (UI E12 zero).
+    await expect(row.getByTestId('story-history-highlighted')).toHaveCount(0);
     await row.click();
 
     await page.getByRole('dialog', { name: H.menu.title }).getByText(H.menu.delete).click();
     const dialog = page.getByRole('dialog', { name: H.confirmDelete.title });
     await expect(dialog).toBeVisible();
+    // UI-D-78: the body names highlights and both buttons name the action.
     await expect(dialog.getByText(H.confirmDelete.body)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: H.confirmDelete.cancel })).toBeVisible();
     await dialog.getByRole('button', { name: H.confirmDelete.confirm }).dispatchEvent('click');
 
     await expect(page.getByText(H.toasts.deleted, { exact: true })).toBeVisible();
     await expect(page.locator('[data-story-history-row]').filter({ hasText: caption })).toHaveCount(
       0,
     );
+  });
+});
+
+/**
+ * D-110 route 1 / UI-D-66 (05.2-06, proven in the browser in 05.2-07) — "Destacar" in the viewer.
+ * A curator's viewer carries the pill; tapping it pauses the story and opens the SAME checklist
+ * sheet "Seus stories" opens; closing it resumes. A member's viewer has no pill at all.
+ *
+ * `data-paused` is read off the viewer element directly: with the `aria-modal` sheet open,
+ * Playwright hides the viewer dialog from role queries.
+ */
+test.describe('"Destacar" from the viewer (D-110 route 1)', () => {
+  test('an ADMIN taps "Destacar": the sheet opens with the story paused, and closing resumes', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/inicio`);
+    await tenantCircle(page).click();
+
+    const viewer = page.getByRole('dialog', { name: S.viewer.dialog });
+    await expect(viewer).toBeVisible();
+    const paused = page.locator('[data-paused]').first();
+    await expect(paused).toHaveAttribute('data-paused', 'false', { timeout: 15_000 });
+
+    await viewer.getByRole('button', { name: S.viewer.highlight }).dispatchEvent('click');
+    const sheet = page.getByRole('dialog', { name: S.highlights.sheet.title });
+    await expect(sheet).toBeVisible();
+    await expect(paused).toHaveAttribute('data-paused', 'true');
+    await expect(sheet.getByRole('switch').first()).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+    await expect(paused).toHaveAttribute('data-paused', 'false');
+  });
+
+  test('a MEMBER’s viewer has no "Destacar"', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/inicio`);
+    await tenantCircle(page).click();
+
+    const viewer = page.getByRole('dialog', { name: S.viewer.dialog });
+    await expect(viewer).toBeVisible();
+    // The comment control proves the action row rendered; the curation pill is simply absent.
+    await expect(viewer.getByRole('button', { name: S.viewer.comment })).toBeVisible();
+    await expect(viewer.getByRole('button', { name: S.viewer.highlight })).toHaveCount(0);
   });
 });
 

@@ -21,16 +21,12 @@ import {
   type StoryLikeResult,
   type StoryPage,
   type StoryPinIssue,
-  type StoryPinResult,
-  type StoryPins,
   type StorySummary,
   storyCommentPageSchema,
   storyCommentSchema,
   storyHighlightIdsSchema,
   storyLikeResultSchema,
   storyPageSchema,
-  storyPinResultSchema,
-  storyPinsSchema,
   storySummarySchema,
 } from '@tria/module-stories/contracts';
 import { apiFetch } from '@/lib/api';
@@ -355,59 +351,10 @@ export async function loadOwnStories(query: StoryQueryInput = {}): Promise<Story
   }
 }
 
-/** `GET /v1/stories/{storyId}/pins` — the community ids a story is pinned to (the sheet's state). */
-export async function getStoryPins(storyId: string): Promise<StoryPins> {
-  const res = await apiFetch(`/v1/stories/${encodeURIComponent(storyId)}/pins`);
-  if (!res.ok) throw await apiError(res);
-  return storyPinsSchema.parse(await res.json());
-}
-
-/**
- * `PUT` / `DELETE /v1/stories/{storyId}/pins/{communityId}` — one toggle, one request, no batch.
- *
- * The response is the AUTHORITATIVE `{ pinned, pinnedCommunityCount }` read back inside the API's
- * transaction. Nothing here increments anything: the optimistic value lives in the switch and is
- * replaced by this pair, or reverted when the request rejects (UI-D-41).
- */
-async function toggleStoryPin(
-  storyId: string,
-  communityId: string,
-  method: 'PUT' | 'DELETE',
-): Promise<StoryPinResult> {
-  const res = await apiFetch(
-    `/v1/stories/${encodeURIComponent(storyId)}/pins/${encodeURIComponent(communityId)}`,
-    { method },
-  );
-  if (!res.ok) throw await apiError(res);
-  return storyPinResultSchema.parse(await res.json());
-}
-
-export const pinStory = (storyId: string, communityId: string) =>
-  toggleStoryPin(storyId, communityId, 'PUT');
-export const unpinStory = (storyId: string, communityId: string) =>
-  toggleStoryPin(storyId, communityId, 'DELETE');
-
 /** `DELETE /v1/stories/{storyId}` (D-84) — the admin soft-deletes one of their tenant's stories. */
 export async function deleteStory(storyId: string): Promise<void> {
   const res = await apiFetch(`/v1/stories/${encodeURIComponent(storyId)}`, { method: 'DELETE' });
   if (!res.ok) throw await apiError(res);
-}
-
-/**
- * Reads the STORY-04 refusal the API put in `details.pin`, and nothing else from the envelope.
- *
- * One code (`archived`) and one miss (a bare 404, which is the SAME answer for an unknown story, an
- * unknown community and another tenant's of either). Both become the generic error toast in the
- * sheet — UI-D-41 asks for no inline message — but they are read here rather than guessed, so a
- * future screen that wants to say "essa comunidade foi arquivada" has the code to switch on.
- */
-export function storyPinIssue(error: unknown): StoryPinIssue | 'not_found' | null {
-  if (!(error instanceof ApiClientError)) return null;
-  if (error.status === 404) return 'not_found';
-  const issue = (error.details as { pin?: unknown } | undefined)?.pin;
-  return typeof issue === 'string' && STORY_PIN_ISSUE_SET.has(issue)
-    ? (issue as StoryPinIssue)
-    : null;
 }
 
 /* ── Highlights (05.2) ────────────────────────────────────────────────────────────────────────── */

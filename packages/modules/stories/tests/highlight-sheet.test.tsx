@@ -218,6 +218,44 @@ describe('HighlightSheet — checklist mode (UI-D-67)', () => {
   });
 });
 
+/**
+ * 05.2-07 — the three invariants of the retired pin sheet that had no case here yet, carried over
+ * when that sheet was deleted (UI-D-79), so retiring it lost no coverage: the switch flips BEFORE the write
+ * settles; the OFF direction reverts the same way; a closed sheet renders nothing.
+ */
+describe('HighlightSheet — invariants carried from the retired pin sheet (05.2-07)', () => {
+  it('M5. the switch flips OPTIMISTICALLY, before the write settles', async () => {
+    let settle: (ok: boolean) => void = () => {};
+    const onToggle = vi.fn(() => new Promise<boolean>((resolve) => (settle = resolve)));
+    render(<HighlightMembershipList {...machineProps({ onToggle })} />);
+
+    fireEvent.click(machineSwitch('b'));
+
+    // Still in flight, and the control already reads as on — no spinner, no wait.
+    await waitFor(() => expect(onToggle).toHaveBeenCalledTimes(1));
+    expect(machineSwitch('b')).toHaveAttribute('aria-checked', 'true');
+    await act(async () => settle(true));
+    expect(machineSwitch('b')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('M6. switching OFF sends the false direction and reverts to ON when the write fails', async () => {
+    const onToggle = vi.fn(async () => false);
+    render(<HighlightMembershipList {...machineProps({ onToggle })} />);
+
+    fireEvent.click(machineSwitch('a'));
+
+    await waitFor(() => expect(onToggle).toHaveBeenCalledWith('a', false));
+    await waitFor(() => expect(machineSwitch('a')).toHaveAttribute('aria-checked', 'true'));
+  });
+
+  it('C3. a closed checklist sheet renders nothing at all', () => {
+    render(<HighlightSheet {...checklistProps({ open: false })} />);
+
+    expect(screen.queryByText('sheet-title')).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('switch')).toHaveLength(0);
+  });
+});
+
 /* ── Single-select mode ──────────────────────────────────────────────────────────────────────── */
 
 const TITLE_STEP: HighlightSheetTitleStepLabels = {

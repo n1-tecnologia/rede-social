@@ -19,15 +19,11 @@ import {
   deleteStory,
   deleteStoryComment,
   getStoryComments,
-  getStoryPins,
   likeStory,
   loadOwnStories,
-  pinStory,
   type StoryWriteResult,
   storyCommentIssue,
-  storyPinIssue,
   unlikeStory,
-  unpinStory,
 } from '@/lib/stories';
 import { type StoryHistoryItemView, storyCommentView, storyHistoryView } from '@/lib/story-view';
 
@@ -282,90 +278,20 @@ export async function refuseStoryCommentLikeAction(): Promise<{ ok: false }> {
   return { ok: false };
 }
 
-/* ── Community pins and delete (STORY-04, D-84) ───────────────────────────────────────────────── */
+/* ── Delete and the history pager (D-84) ─────────────────────────────────────────────────────── */
 
 /**
- * The three admin actions "Seus stories" owns, in the SAME three conventions as everything above:
- * the arguments are untrusted and validated here (a server action is a public endpoint, T-05-48),
- * a refusal is a catalog KEY and never pt-BR copy, and every one goes through `lib/stories.ts` —
- * the ONE fetch implementation.
+ * The admin actions "Seus stories" still owns once its highlight toggles moved to
+ * `highlight-actions.ts` (05.2-07, D-110 route 2 — the pin actions are retired with the pin model,
+ * UI-D-79). They follow the SAME three conventions as everything above: the arguments are untrusted
+ * and validated here (a server action is a public endpoint, T-05-48), a refusal is a closed code and
+ * never pt-BR copy, and every one goes through `lib/stories.ts` — the ONE fetch implementation.
  *
- * **What each of them revalidates, and why it is not the same set.**
- *  - A PIN or an UNPIN changes what a COMMUNITY PAGE shows, so `/comunidades/[communityId]` is
- *    revalidated for the affected container. It does NOT touch `/inicio`: pinning does not move a
- *    story into or out of the strip, and re-rendering the home screen on every switch would be a
- *    visible cost for no change.
- *  - A DELETE changes everything at once — the strip, the history and every community that had it
- *    pinned — so it revalidates `/inicio` and the history. The community pages are left to their
- *    own next read rather than enumerated: the action does not know which containers held the pin,
- *    and asking would cost a round trip to invalidate caches that expire anyway.
+ * **A DELETE changes everything at once** — the strip, the history and every highlight that held the
+ * story — so it revalidates `/inicio` and the history. The community pages are left to their own
+ * next read rather than enumerated: the action does not know which places held the story, and asking
+ * would cost a round trip to invalidate caches that expire anyway.
  */
-
-/**
- * The pin sheet's INITIAL state, read when the sheet opens (D-84).
- *
- * It is a server action rather than a direct `lib/stories.ts` call because `StoryHistoryList` is a
- * CLIENT component: `apiFetch` reads the session cookie through `next/headers` and cannot run in a
- * browser at all. Every read a client surface performs in this app crosses the same way.
- *
- * `null` is "we could not read it" — the host shows the generic error toast and does not open a
- * sheet whose switches would describe a state nobody verified.
- */
-export async function loadStoryPinsAction(storyId: string): Promise<string[] | null> {
-  const id = z.uuid().safeParse(storyId);
-  if (!id.success) return null;
-
-  let refusal: string | null = null;
-  let communityIds: string[] | null = null;
-  try {
-    communityIds = (await getStoryPins(id.data)).communityIds;
-  } catch (error) {
-    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
-    if (!refusal) console.error('stories.pins.load_failed', { error: String(error) });
-  }
-
-  if (refusal) redirect(refusal);
-  return communityIds;
-}
-
-/** `true` when the write landed. `false` is what makes `PinStorySheet` revert its switch. */
-export async function pinStoryAction(storyId: string, communityId: string): Promise<boolean> {
-  return togglePinAction(storyId, communityId, true);
-}
-
-export async function unpinStoryAction(storyId: string, communityId: string): Promise<boolean> {
-  return togglePinAction(storyId, communityId, false);
-}
-
-async function togglePinAction(
-  storyId: string,
-  communityId: string,
-  next: boolean,
-): Promise<boolean> {
-  const story = z.uuid().safeParse(storyId);
-  const community = z.uuid().safeParse(communityId);
-  if (!story.success || !community.success) return false;
-
-  let refusal: string | null = null;
-  let ok = false;
-  try {
-    if (next) await pinStory(story.data, community.data);
-    else await unpinStory(story.data, community.data);
-    ok = true;
-  } catch (error) {
-    // The refusal is READ rather than guessed at, so a later screen that wants to say "essa
-    // comunidade foi arquivada" has the machine code to switch on. Today both outcomes are the
-    // same generic toast the sheet fires (UI-D-41: no inline message).
-    const issue = storyPinIssue(error);
-    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
-    // Shape only: neither a story caption nor a community name reaches a log line (T-05-29/T-05-06).
-    if (!refusal) console.error('stories.pin_failed', { error: String(error), issue, next });
-  }
-
-  if (ok) revalidatePath(`/comunidades/${community.data}`);
-  if (refusal) redirect(refusal);
-  return ok;
-}
 
 /**
  * Soft-delete one of the tenant's stories (D-84), behind the API's own

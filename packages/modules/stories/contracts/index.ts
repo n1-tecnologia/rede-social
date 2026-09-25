@@ -540,11 +540,12 @@ export const storyHighlightsQuerySchema = z
 export type StoryHighlightsQuery = z.infer<typeof storyHighlightsQuerySchema>;
 
 /**
- * The community row the pin sheet draws, declared HERE rather than imported from
- * `@tria/module-communities/contracts`.
+ * The community row the pin sheet drew, declared HERE rather than imported from
+ * `@tria/module-communities/contracts`. **Retired on the web in 05.2-07** (the pin sheet was deleted
+ * with the pin vocabulary, UI-D-79); the type stays until plan 11 retires the pin contracts.
  *
- * **This is not a preference.** `turbo boundaries` denies a `module -> module` package edge
- * (MOD-02), and `PinStorySheet` lives in this module — so the shape the sheet consumes is declared
+ * **This was not a preference.** `turbo boundaries` denies a `module -> module` package edge
+ * (MOD-02), and the pin sheet lived in this module — so the shape the sheet consumed is declared
  * in the module that consumes it, exactly as `storyLikeResultSchema` and `STORY_MAX_COMMENT`
  * restate the feed's. The host (`apps/web`, which may reach both) maps `CommunitySummary` onto this
  * in one place, so the four fields below are the whole contract between the two modules and they

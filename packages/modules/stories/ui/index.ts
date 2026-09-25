@@ -15,12 +15,6 @@ export {
 } from './HighlightSheet';
 export { HighlightTitleStep, type HighlightTitleStepProps } from './HighlightTitleStep';
 export {
-  type CommunityPickerSheetBody,
-  type PinStoryCommunityRow,
-  PinStorySheet,
-  type PinStorySheetProps,
-} from './PinStorySheet';
-export {
   StoriesStrip,
   type StoriesStripProps,
   type StoryStripCircle,
