@@ -1490,6 +1490,114 @@ describe('STORY-04 / D-68 — pinning a story to a community, and the Destaques 
   });
 });
 
+describe('05.1 — a story born attached to a community (STORY-04 authoring half, D-99)', () => {
+  /**
+   * `POST /v1/stories` with an optional `communityId` writes the story AND its pin row inside ONE
+   * `withTenantTx` (D-99): the attachment is part of the publish, never a second client call.
+   *
+   * This block's OWN fixture, for the reason the pin block gives: the seeded pins exist and the e2e
+   * depends on them. The community helper is a SIBLING of the pin block's `makeCommunity` (that one
+   * is scoped inside its own `describe`), and every community created here is removed in this
+   * block's `afterAll`; `story_community_pins`' foreign keys cascade, so the pin rows go with them.
+   * Every story carries `TEST_CAPTION_PREFIX`, so the file's sweep removes them all.
+   */
+  const bornCommunities: string[] = [];
+  let demoAdminUserId = '';
+
+  async function makeBornCommunity(name: string, status = 'active'): Promise<string> {
+    const id = randomUUID();
+    bornCommunities.push(id);
+    await adminSql`
+      insert into public.communities (id, tenant_id, created_by_user_id, name, slug, status)
+      select ${id}::uuid, ${tenantIds.demo}::uuid, m.user_id, ${name}, ${`${id}`}, ${status}
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       limit 1`;
+    return id;
+  }
+
+  /** The pin rows of one pair, with the columns the born-attached ≡ pinned-later claim compares. */
+  async function bornPinRows(storyId: string, communityId: string) {
+    return adminSql<{ tenant_id: string; pinned_by_user_id: string }[]>`
+      select tenant_id::text, pinned_by_user_id::text from public.story_community_pins
+       where story_id = ${storyId}::uuid and community_id = ${communityId}::uuid`;
+  }
+
+  const destaques = (communityId: string) =>
+    page(tokens.demoMember, '/v1/stories/pinned', `?communityId=${communityId}`);
+
+  beforeAll(async () => {
+    const rows = await adminSql<{ id: string }[]>`
+      select id::text from public.users where email = 'admin@tria-demo.local' limit 1`;
+    demoAdminUserId = rows[0]?.id ?? '';
+    expect(demoAdminUserId).not.toBe('');
+  });
+
+  afterAll(async () => {
+    if (bornCommunities.length > 0) {
+      await adminSql`delete from public.communities where id = any(${bornCommunities}::uuid[])`;
+    }
+  });
+
+  it('05.1-0. Wave 0: the integration worker never reaches the real video vendor (Pitfall 2)', () => {
+    // `apps/api/vitest.config.ts` pins this as the LAST `test.env` entry, so neither a developer's
+    // `.env.local` (`VIDEO_PROVIDER=mux`) nor an exported variable can override it.
+    expect(process.env.VIDEO_PROVIDER).toBe('fake');
+  });
+
+  it('05.1-1. a story published with a community is born pinned there — one row, both events', async () => {
+    const community = await makeBornCommunity('Nasce fixada');
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+
+    const publishedBefore = events.length;
+    const pinnedBefore = pinEvents.length;
+    const res = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — nasce na comunidade`,
+      communityId: community,
+    });
+    expect(res.status).toBe(201);
+    const story = (await res.json()) as StorySummary;
+    created.push(story.id);
+
+    // The response shape is unchanged; its existing count already reports the attachment.
+    expect(story.pinnedCommunityCount).toBe(1);
+
+    const rows = await bornPinRows(story.id, community);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tenant_id).toBe(tenantIds.demo);
+    expect(rows[0]?.pinned_by_user_id).toBe(demoAdminUserId);
+
+    // A MEMBER reads it in that community's Destaques immediately.
+    const row = await destaques(community);
+    expect(row.items.map((item) => item.id)).toContain(story.id);
+
+    // `story.published` is exactly today's five keys…
+    const published = events.slice(publishedBefore);
+    expect(published).toHaveLength(1);
+    expect(Object.keys(published[0] ?? {}).sort()).toEqual([
+      'authorUserId',
+      'expiresAt',
+      'mediaKind',
+      'storyId',
+      'tenantId',
+    ]);
+    // …and the attachment is announced once, in the existing `StoryPinned` shape (ids only).
+    const pinned = pinEvents.slice(pinnedBefore);
+    expect(pinned.map((entry) => entry.name)).toEqual(['story.pinned']);
+    expect(Object.keys(pinned[0]?.payload ?? {}).sort()).toEqual([
+      'actorUserId',
+      'communityId',
+      'storyId',
+      'tenantId',
+    ]);
+    expect(pinned[0]?.payload.communityId).toBe(community);
+    expect(pinned[0]?.payload.storyId).toBe(story.id);
+  });
+});
+
 describe('MOD-04 / UI-D-25 — the module flag governs the routes in both directions', () => {
   it('20. with stories OFF every route 404s and the bootstrap carries neither slot nor permission', async () => {
     await adminSql`
