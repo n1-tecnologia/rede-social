@@ -1,6 +1,7 @@
 'use client';
 
 import { MEDIA_LIMITS, mediaAcceptFor } from '@tria/contracts/media';
+import { type CommunityPickerRow, CommunityPickerSheet } from '@tria/module-communities/ui';
 import {
   STORY_MAX_CAPTION,
   type StoryIssue,
@@ -8,11 +9,12 @@ import {
   type StoryPinIssue,
 } from '@tria/module-stories/contracts';
 import { Button, ConfirmDialog, FileDropZone, IconButton, PageHeader, useToast } from '@tria/ui';
-import { Image as ImageIcon, Loader, Video, X } from 'lucide-react';
+import { Check, ChevronRight, Image as ImageIcon, Loader, Video, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { publishStoryAction } from '@/app/(app)/stories/story-actions';
+import { PickerDefaultRow } from '@/components/communities/PickerDefaultRow';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 
 /**
@@ -40,12 +42,38 @@ import { useSignedUpload } from '@/components/media/useSignedUpload';
  * ready. So publishing a video is allowed while it transcodes: the row is created immediately, the
  * strip filters it out until the asset is ready, and the note states plainly that the 24 h window
  * starts at PUBLISH — the alternative is silently losing story life.
+ *
+ * **"Publicar em" — the composer states where the story goes before it can be published** (05.1,
+ * D-97, UI-D-54). In the post-pick bottom block, directly above the caption and "Publicar", one row
+ * reads "Publicar em {Nenhuma comunidade | community}" and opens the shipped `CommunityPickerSheet`
+ * (D-95, UI-D-55). It costs zero taps when the default is right, and it is the SAME selector a
+ * community page pre-fills through `?comunidade=` (criteria 3 and 5 are one mechanism): the page
+ * resolves the id on the server and hands it in as `initialCommunityId`. With no communities — the
+ * module off, none active, or a viewer without the attach permission — there is no row and no gap
+ * (UI-D-56).
+ *
+ * **One write** (D-99): the publish carries `communityId` only when one is chosen — the key is
+ * omitted, never null — and nothing here runs a second pin request afterwards. Publishing lands
+ * where the story went; leaving without publishing returns to where the admin started (UI-D-57).
+ * A community archived while the admin composed is refused by the API, and the composer resets the
+ * row to "Nenhuma comunidade" and SAYS so, so a tenant-wide publish always takes a second, visible
+ * tap (UI-D-58).
  */
 
 export interface StoryComposerProps {
-  /** Where the header's trailing text action points (05-08 creates the destination). */
+  /** Where the header's trailing text action points (`/stories/meus`). */
   historyHref: string;
+  /**
+   * The ACTIVE communities this viewer may attach a story to — empty unless they hold both
+   * `stories.story.publish` and `stories.story.manage`. Empty renders no "Publicar em" row at all.
+   */
+  communities?: readonly CommunityPickerRow[];
+  /** The server-resolved `?comunidade=` (D-93): a listed community's id, or null. */
+  initialCommunityId?: string | null;
 }
+
+/** One shared empty list, so an omitted prop is a stable reference rather than a fresh `[]`. */
+const NO_COMMUNITIES: readonly CommunityPickerRow[] = [];
 
 /** What the admin picked: the brokered asset, its kind, and a LOCAL preview of the real bytes. */
 type Picked = { assetId: string; kind: StoryMediaKind; previewUrl: string | null };
@@ -72,9 +100,14 @@ function durationLabel(seconds: number): string {
   return seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${seconds} s`;
 }
 
-export function StoryComposer({ historyHref }: StoryComposerProps) {
+export function StoryComposer({
+  historyHref,
+  communities = NO_COMMUNITIES,
+  initialCommunityId = null,
+}: StoryComposerProps) {
   const t = useTranslations('stories');
   const tm = useTranslations('media');
+  const tc = useTranslations('communities');
   const router = useRouter();
   const toast = useToast();
 
@@ -83,6 +116,15 @@ export function StoryComposer({ historyHref }: StoryComposerProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const [busy, startPublish] = useTransition();
+  /**
+   * The destination (D-95: one community or none). Initialised from `?comunidade=` and changed ONLY
+   * through the sheet or the UI-D-58 reset — picking, re-picking and a failed upload never touch it
+   * (UI-D-56), which is why `take` and `previewFile` below do not mention it.
+   */
+  const [selectedId, setSelectedId] = useState<string | null>(initialCommunityId);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /** Communities the API refused as archived during THIS session: they leave the sheet (UI-D-58). */
+  const [refused, setRefused] = useState<ReadonlySet<string>>(() => new Set());
   /** The object URL currently held, so it is revoked exactly once when it is replaced or dropped. */
   const preview = useRef<string | null>(null);
 
@@ -138,7 +180,31 @@ export function StoryComposer({ historyHref }: StoryComposerProps) {
   /** Ready to publish: a brokered asset id exists. A local preview alone is not enough. */
   const publishable = picked !== null && picked.assetId !== '';
 
-  /** The closed refusal vocabulary, mapped to copy exhaustively — a new code cannot compile silently. */
+  /** The row exists only when there is something to choose besides "Nenhuma comunidade" (UI-D-56). */
+  const canChoose = communities.length > 0;
+  const pickable = communities.filter((community) => !refused.has(community.id));
+  /**
+   * What the row SHOWS is what the publish SENDS: both read this one value, so no selection can
+   * reach a publish the admin did not see stated above "Publicar".
+   */
+  const chosen = canChoose
+    ? (pickable.find((community) => community.id === selectedId) ?? null)
+    : null;
+  /** Where "close" and a confirmed discard go: back to where the admin started (UI-D-57). */
+  const origin = initialCommunityId ? `/comunidades/${initialCommunityId}` : '/inicio';
+
+  /** The sheet's one select behaviour, for a community and for "Nenhuma comunidade" alike. */
+  const selectDestination = (id: string | null) => {
+    setSelectedId(id);
+    setPickerOpen(false);
+    setFormError(null);
+  };
+
+  /**
+   * The closed refusal vocabulary, mapped to copy exhaustively — a new code cannot compile silently.
+   * `archived` lands here only in the edge where no community was captured at submit; with one, the
+   * UI-D-58 branch in `submit` names it instead.
+   */
   const refusalCopy = (code: StoryIssue | StoryPinIssue | 'not_found' | 'generic'): string => {
     const map: Record<StoryIssue | StoryPinIssue | 'not_found' | 'generic', string> = {
       media_required: t('publish.errors.noMedia'),
@@ -157,18 +223,40 @@ export function StoryComposer({ historyHref }: StoryComposerProps) {
       return;
     }
     setFormError(null);
+    // Captured NOW: the destination the admin saw stated on the row at the moment of the tap.
+    const target = chosen;
+    const communityId = target?.id;
     startPublish(async () => {
       const result = await publishStoryAction({
         mediaAssetId: picked.assetId,
         mediaKind: picked.kind,
         caption,
+        // Omitted, never null (D-99): a tenant-wide story's body is exactly today's three fields.
+        ...(communityId ? { communityId } : {}),
       });
       if (!result.ok) {
+        if (result.code === 'archived' && target) {
+          // UI-D-58: nothing was published. Keep the media and the caption, drop the community
+          // from the sheet, reset the row to "Nenhuma comunidade" and SAY so — publishing
+          // tenant-wide now takes a second, deliberate tap on a row that visibly changed.
+          setRefused((current) => new Set(current).add(target.id));
+          setSelectedId(null);
+          setFormError(t('publish.errors.archived', { community: target.name }));
+          return;
+        }
+        // Every other refusal (a bare 404 included) keeps the selection as it is.
         setFormError(refusalCopy(result.code));
         return;
       }
-      toast.show({ tone: 'success', message: t('publish.toast') });
-      router.push('/inicio');
+      toast.show({
+        tone: 'success',
+        message: target
+          ? t('publish.toastCommunity', { community: target.name })
+          : t('publish.toast'),
+      });
+      // Publish lands where the story went (D-94, UI-D-57): the community's Destaques, or the
+      // `/inicio` strip. The action revalidated that path on the server.
+      router.push(target ? `/comunidades/${target.id}` : '/inicio');
       // `revalidatePath('/inicio')` in the action clears the SERVER cache; this clears the client
       // Router Cache, which still holds the `/inicio` payload the admin navigated away from. Both
       // are needed and neither is redundant: without the refresh the admin lands back on the exact
@@ -179,7 +267,7 @@ export function StoryComposer({ historyHref }: StoryComposerProps) {
   };
 
   const close = () => {
-    if (picked === null) return router.push('/inicio');
+    if (picked === null) return router.push(origin);
     setDiscarding(true);
   };
 
@@ -401,6 +489,34 @@ export function StoryComposer({ historyHref }: StoryComposerProps) {
               </div>
             ) : null}
 
+            {/* D-97 / UI-D-54: the destination, stated before "Publicar" is reachable. White over
+                the processing row's own `bg-black/45` ground — no brand ink, so "Publicar" stays
+                the frame's single brand fill. The accessible name IS the visible text (no
+                `aria-label`); the `{' '}` keeps the two words apart for assistive tech and renders
+                nothing between flex items. Disabled while a publish is in flight, so the
+                destination cannot change mid-publish. */}
+            {canChoose ? (
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                data-story-destination
+                disabled={busy}
+                onClick={() => setPickerOpen(true)}
+                className="flex min-h-11 w-full items-center gap-2 rounded-xl bg-black/45 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-50"
+              >
+                <span className="shrink-0 text-sm font-normal text-white/70">
+                  {tc('picker.label')}
+                </span>{' '}
+                <span
+                  data-story-destination-value
+                  className="min-w-0 flex-1 truncate text-sm font-bold text-white"
+                >
+                  {chosen ? chosen.name : t('publish.destination.none')}
+                </span>
+                <ChevronRight size={18} aria-hidden className="shrink-0 text-white/70" />
+              </button>
+            ) : null}
+
             <div className="flex items-end gap-3">
               <span className="min-w-0 flex-1">
                 {/* A transparent field: the media IS the background, so the textarea carries no
@@ -457,9 +573,38 @@ export function StoryComposer({ historyHref }: StoryComposerProps) {
         body={t('publish.discard.body')}
         confirmLabel={t('publish.discard.confirm')}
         cancelLabel={t('publish.discard.cancel')}
-        onConfirm={() => router.push('/inicio')}
+        onConfirm={() => router.push(origin)}
         onClose={() => setDiscarding(false)}
       />
+
+      {/* UI-D-55: the shipped sheet in its `onSelect` + `Check` variant, exactly as `/criar` uses
+          it, with the SAME host-built leading row. Its rows are the server-rendered `communities`
+          prop, so it opens fully drawn — no fetch, no spinner — and stacks at the sheet's own
+          `z-[55]` above this frame's `z-[52]`. */}
+      {canChoose ? (
+        <CommunityPickerSheet
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          title={tc('picker.title')}
+          helper={t('publish.destination.helper')}
+          rows={pickable}
+          rowLabel={(row) => tc('picker.row', { community: row.name })}
+          trailing={(row) =>
+            row.id === chosen?.id ? (
+              <Check aria-label={tc('picker.selected')} size={20} className="text-brand" />
+            ) : null
+          }
+          onSelect={(row) => selectDestination(row.id)}
+          leadingRow={
+            <PickerDefaultRow
+              label={t('publish.destination.none')}
+              selected={chosen === null}
+              selectedLabel={tc('picker.selected')}
+              onSelect={() => selectDestination(null)}
+            />
+          }
+        />
+      ) : null}
     </form>
   );
 }

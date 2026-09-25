@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -54,6 +55,10 @@ const { catalog, mediaCatalog, communitiesCatalog, toast, push, publish, upload 
       },
     };
   });
+
+// Springs have nothing to animate under happy-dom, and a cancelled one rejects AFTER the run ends —
+// the "Publicar em" sheet and the discard dialog both animate (the community-picker-sheet pattern).
+MotionGlobalConfig.skipAnimations = true;
 
 const lookup = (tree: Record<string, unknown>, key: string, values?: Record<string, unknown>) => {
   const raw = key
