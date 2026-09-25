@@ -5,7 +5,13 @@
     "list": {
       "title": "Comunidades",
       "subtitle": "Escolha onde você quer entrar hoje.",
-      "region": "Comunidades de {tenant}"
+      "region": "Comunidades de {tenant}",
+      "regionArchived": "Comunidades arquivadas de {tenant}",
+      "filter": {
+        "label": "Filtrar comunidades",
+        "active": "Ativas",
+        "archived": "Arquivadas"
+      }
     },
     "card": {
       "posts": "{count, plural, one {# publicação} other {# publicações}}",
@@ -88,6 +94,10 @@
       "title": "Nenhuma comunidade ainda",
       "body": "As comunidades de {tenant} vão aparecer aqui.",
       "bodyAdmin": "Crie a primeira comunidade para organizar as publicações."
+    },
+    "emptyArchived": {
+      "title": "Nenhuma comunidade arquivada",
+      "body": "Quando você arquivar uma comunidade, ela aparece aqui para ser reativada."
     },
     "notFound": {
       "title": "Comunidade não encontrada",
