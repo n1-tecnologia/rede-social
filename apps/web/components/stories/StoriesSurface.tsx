@@ -50,6 +50,8 @@ export type StoriesSurfaceProps = StoriesStripProps & {
     onUnlike: typeof unlikeStoryAction;
     /** D-82's sheet, composed on the server in `lib/registry.tsx` and passed straight through. */
     comments?: StoryCommentsBinding;
+    /** `stories.story.manage` from the bootstrap: the viewer's "Destacar" pill (UI-D-66). */
+    canCurate?: boolean;
   };
 };
 
@@ -206,6 +208,7 @@ export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
           onLike={viewer.onLike}
           onUnlike={viewer.onUnlike}
           comments={viewer.comments}
+          canCurate={viewer.canCurate}
           onClose={close}
         />
       ) : null}

@@ -7,7 +7,10 @@ import {
   LikeButton,
   useOptimisticLike,
 } from '@tria/module-feed/ui';
+import { STORY_HIGHLIGHT_MAX_ITEMS } from '@tria/module-stories/contracts';
 import {
+  HighlightSheet,
+  type HighlightSheetPlace,
   type StoryMediaControls,
   StoryMonogram,
   StoryViewer,
@@ -15,10 +18,21 @@ import {
   type StoryViewerItem,
 } from '@tria/module-stories/ui';
 import { Avatar, IconButton, useToast } from '@tria/ui';
-import { MessageCircle } from 'lucide-react';
+import { BookmarkPlus, MessageCircle } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  addStoryToHighlightAction,
+  loadHighlightSheetAction,
+  removeStoryFromHighlightAction,
+} from '@/app/(app)/stories/highlight-actions';
 import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
-import type { StoryGroupView, StoryViewerItemView, StoryViewerLabelsView } from '@/lib/story-view';
+import type {
+  HighlightPlaceView,
+  StoryGroupView,
+  StoryViewerItemView,
+  StoryViewerLabelsView,
+} from '@/lib/story-view';
 import { StoryVideo } from './StoryVideo';
 
 /**
@@ -51,6 +65,18 @@ import { StoryVideo } from './StoryVideo';
  * package edge is denied. The viewer takes the sheet as an `overlay` NODE and its open state feeds
  * the `externallyPaused` prop 05-06 left wired and unfed — so "the story waits while you type" is
  * one prop at the composition point rather than a second pause mechanism.
+ *
+ * **"Destacar" is D-110's first door** (05.2-06, UI-D-66). A curator — `canCurate`, which every
+ * caller computes from the bootstrap's `stories.story.manage` PERMISSION, never a role — gets a
+ * labelled pill at the end of every story's action row; members never get the node. Tapping it
+ * reads the CURRENT story's sheet in one server action (catalogue, memberships and place names,
+ * composed on the server) and opens the module's `HighlightSheet` in checklist mode as a second
+ * overlay beside the comment sheet. The clock stays paused from the tap until the sheet closes (the
+ * D-82 rule, fed through the same `externallyPaused`), and each switch is one immediate write with
+ * `revalidate: false` — re-rendering `/inicio` behind an open viewer would rebuild the row under the
+ * curator's finger (the like-action rule). The API's literal `requirePermission` is the boundary;
+ * this gate is UX (T-05.2-26). The sheet's words are read here with `useTranslations('stories')`,
+ * so the three composition points pass only `canCurate`.
  */
 
 /**
@@ -101,6 +127,25 @@ export type StoryViewerHostProps = {
   onClose?: () => void;
   /** Page mode (a deep link or a refresh): where "close" navigates when there is nothing to pop. */
   closeHref?: string;
+  /**
+   * `stories.story.manage` from the bootstrap (a permission, never a role): the "Destacar" pill and
+   * its sheet exist only when true (UI-D-66). Absent is false.
+   */
+  canCurate?: boolean;
+};
+
+/**
+ * The highlight sheet's state. `target` is the story the curator tapped "Destacar" on — set from
+ * the tap until the sheet closes, so the clock is paused through the read too, and the sheet always
+ * describes the story it was opened for. `sheet` is the last composed read; it OUTLIVES the close so
+ * the sheet's exit animation keeps its rows instead of flashing the empty state.
+ */
+type HighlightTarget = { storyId: string };
+type HighlightSheetState = {
+  storyId: string;
+  places: HighlightPlaceView[];
+  selectedIds: string[];
+  open: boolean;
 };
 
 /** `{group}: story {current} de {total}` and the two plural templates, resolved on the client. */
@@ -148,8 +193,10 @@ export function StoryViewerHost({
   comments,
   onClose,
   closeHref = '/inicio',
+  canCurate = false,
 }: StoryViewerHostProps) {
   const toast = useToast();
+  const t = useTranslations('stories');
 
   /**
    * THE story whose comments are open, or null. It names the story rather than being a boolean
@@ -217,6 +264,91 @@ export function StoryViewerHost({
     [bindPlay],
   );
 
+  /**
+   * D-110 route 1. `highlightFor` is non-null from the tap until the sheet closes — the pause source
+   * `externallyPaused` reads — and a second tap while the read is in flight is a no-op.
+   */
+  const [highlightFor, setHighlightFor] = useState<HighlightTarget | null>(null);
+  const [highlightSheet, setHighlightSheet] = useState<HighlightSheetState | null>(null);
+  const highlightReading = useRef(false);
+  const genericError = labels.genericError;
+
+  const openHighlight = useCallback(
+    async (storyId: string) => {
+      if (highlightReading.current) return;
+      highlightReading.current = true;
+      setHighlightFor({ storyId });
+      let opened = false;
+      try {
+        const result = await loadHighlightSheetAction(storyId);
+        if (result.ok) {
+          setHighlightSheet({
+            storyId,
+            places: result.places,
+            selectedIds: result.selectedIds,
+            open: true,
+          });
+          opened = true;
+        }
+      } catch {
+        // The same answer as `{ ok: false }`: nothing opens and the generic toast says so.
+      } finally {
+        highlightReading.current = false;
+      }
+      if (!opened) {
+        setHighlightFor(null);
+        toast.show({ tone: 'error', message: genericError });
+      }
+    },
+    [toast, genericError],
+  );
+
+  // STABLE: `BottomSheet`'s focus trap re-arms (and refocuses) whenever its `onClose` identity changes.
+  const closeHighlight = useCallback(() => {
+    setHighlightSheet((current) => (current ? { ...current, open: false } : current));
+    setHighlightFor(null);
+  }, []);
+
+  const highlightStoryId = highlightSheet?.storyId ?? null;
+  const toggleHighlight = useCallback(
+    async (highlightId: string, next: boolean, place: HighlightSheetPlace): Promise<boolean> => {
+      if (highlightStoryId === null) return false;
+      const write = next ? addStoryToHighlightAction : removeStoryFromHighlightAction;
+      let result: Awaited<ReturnType<typeof write>>;
+      try {
+        // `revalidate: false` — the viewer never re-renders the row under an open viewer.
+        result = await write(highlightStoryId, highlightId, {
+          communityId: place.communityId,
+          revalidate: false,
+        });
+      } catch {
+        result = { ok: false, code: 'generic' };
+      }
+      if (result.ok) {
+        toast.show({
+          tone: 'success',
+          message: t(next ? 'highlights.toasts.added' : 'highlights.toasts.removed'),
+        });
+        return true;
+      }
+      toast.show({
+        tone: 'error',
+        message:
+          result.code === 'archived'
+            ? t('highlights.errors.archived')
+            : result.code === 'full'
+              ? t('highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS })
+              : t('highlights.errors.generic'),
+      });
+      // `false` is what makes the sheet's machine REVERT the switch in place.
+      return false;
+    },
+    [highlightStoryId, toast, t],
+  );
+
+  /** A plain string, so `buildItem` does not change identity with the translator. */
+  const highlightLabel = canCurate ? t('viewer.highlight') : null;
+
   const close = useCallback(() => {
     if (onClose) {
       onClose();
@@ -279,11 +411,24 @@ export function StoryViewerHost({
               comments ? () => setCommentsFor({ storyId: item.id, segment }) : undefined
             }
             bindCountBump={bindCountBump}
+            // UI-D-66: the node exists only for a curator. Members never get it.
+            highlightLabel={highlightLabel ?? undefined}
+            onHighlight={highlightLabel === null ? undefined : () => void openHighlight(item.id)}
           />
         ),
       };
     },
-    [labels, onLike, onUnlike, toast, bindPlayFor, comments, bindCountBump],
+    [
+      labels,
+      onLike,
+      onUnlike,
+      toast,
+      bindPlayFor,
+      comments,
+      bindCountBump,
+      highlightLabel,
+      openHighlight,
+    ],
   );
 
   /**
@@ -321,25 +466,61 @@ export function StoryViewerHost({
       onClose={close}
       // The third source of the viewer's single pause boolean, beside the hold gesture and document
       // visibility. Closing it resumes from the STORED elapsed, because the clock never restarted.
-      externallyPaused={commentsFor !== null}
+      // D-82, twice: the comment sheet and the highlight sheet (from the tap until it closes).
+      externallyPaused={commentsFor !== null || highlightFor !== null}
       overlay={
-        comments ? (
-          <CommentSheet
-            {...comments}
-            variant="flat"
-            open={commentsFor !== null}
-            onClose={() => setCommentsFor(null)}
-            onDeleteComment={(commentId) =>
-              comments.onDeleteComment(commentsFor?.storyId ?? '', commentId)
-            }
-            // `''` is only ever read while the sheet is closed, and `BottomSheet` renders nothing
-            // then — the list never mounts with an empty target.
-            targetId={commentsFor?.storyId ?? ''}
-            onCountChange={(delta) => {
-              if (commentsFor) countBumpRef.current[commentsFor.segment]?.(delta);
-            }}
-          />
-        ) : null
+        <>
+          {comments ? (
+            <CommentSheet
+              {...comments}
+              variant="flat"
+              open={commentsFor !== null}
+              onClose={() => setCommentsFor(null)}
+              onDeleteComment={(commentId) =>
+                comments.onDeleteComment(commentsFor?.storyId ?? '', commentId)
+              }
+              // `''` is only ever read while the sheet is closed, and `BottomSheet` renders nothing
+              // then — the list never mounts with an empty target.
+              targetId={commentsFor?.storyId ?? ''}
+              onCountChange={(delta) => {
+                if (commentsFor) countBumpRef.current[commentsFor.segment]?.(delta);
+              }}
+            />
+          ) : null}
+          {canCurate && highlightSheet ? (
+            <HighlightSheet
+              mode="checklist"
+              open={highlightSheet.open}
+              onClose={closeHighlight}
+              title={t('highlights.sheet.title')}
+              helper={t('highlights.sheet.helper')}
+              places={highlightSheet.places}
+              selectedIds={highlightSheet.selectedIds}
+              rowLabel={(row, place) =>
+                t('highlights.sheet.row', { title: row.title, place: place.label })
+              }
+              onToggle={toggleHighlight}
+              empty={
+                // UI-D-67 empty: no highlight anywhere. Curation has ONE door (D-109), so the CTA
+                // leaves for the manage screen rather than creating inline.
+                <div className="flex flex-col items-start gap-2 py-4">
+                  <p className="text-sm font-normal text-text-secondary">
+                    {t('highlights.sheet.emptyTitle')}
+                  </p>
+                  <p className="text-sm font-normal text-text-tertiary">
+                    {t('highlights.sheet.emptyBody')}
+                  </p>
+                  <a
+                    href="/stories/destaques"
+                    className="rounded text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    {t('highlights.sheet.emptyCta')}
+                  </a>
+                </div>
+              }
+            />
+          ) : null}
+        </>
       }
       labels={{
         dialog: labels.dialog,
@@ -380,6 +561,8 @@ function StoryActions({
   onError,
   onOpenComments,
   bindCountBump,
+  highlightLabel,
+  onHighlight,
 }: {
   item: StoryViewerItemView;
   /** `${group.key}:${story.id}` — the count bump is registered per segment (Pitfall 4). */
@@ -390,6 +573,9 @@ function StoryActions({
   onError: () => void;
   onOpenComments?: () => void;
   bindCountBump: (segment: string, bump: ((delta: number) => void) | null) => void;
+  /** UI-D-66: present only for a curator. */
+  highlightLabel?: string;
+  onHighlight?: () => void;
 }) {
   // The SERVER's count plus whatever this session has added or removed through the sheet. It is a
   // delta rather than an absolute so the count never claims to be authoritative: the next strip
@@ -451,6 +637,18 @@ function StoryActions({
       {commentLabel === null ? null : (
         <span className="mr-3 text-xs font-bold text-white tabular-nums">{commentLabel}</span>
       )}
+      {/* UI-D-66: a LABELLED pill at the right end of the row, out of the like/comment grammar. Its
+          ground is the mute toggle's `bg-black/35`, so no brand ink enters the viewer (UI-D-39). */}
+      {onHighlight && highlightLabel ? (
+        <button
+          type="button"
+          onClick={onHighlight}
+          className="ml-auto inline-flex h-11 items-center gap-2 rounded-full bg-black/35 px-4 text-sm font-bold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        >
+          <BookmarkPlus aria-hidden size={16} />
+          {highlightLabel}
+        </button>
+      ) : null}
     </>
   );
 }

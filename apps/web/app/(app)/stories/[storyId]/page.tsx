@@ -1,3 +1,4 @@
+import { STORY_PERMISSIONS } from '@tria/module-stories/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
@@ -87,6 +88,9 @@ export default async function StoryPage({ params }: { params: Promise<{ storyId:
       // viewer does: a shared link to a story must be a place a member can join the conversation,
       // not a read-only version of it.
       comments={storyCommentsProps(locale, tfeed, tf, bootstrap)}
+      // UI-D-66: a curator can put ANY story into a highlight, the deep link's included. A
+      // permission, never a role; the API's own `requirePermission` is the boundary.
+      canCurate={bootstrap.permissions.includes(STORY_PERMISSIONS.manage)}
       closeHref="/inicio"
     />
   );

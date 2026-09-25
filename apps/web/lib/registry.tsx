@@ -2,7 +2,7 @@ import type { Bootstrap, ModuleKey } from '@tria/contracts';
 import type { HomeSlot } from '@tria/core/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@tria/module-feed/ui';
-import { STORY_MAX_PAGE_SIZE } from '@tria/module-stories/contracts';
+import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@tria/module-stories/contracts';
 import { EmptyState } from '@tria/ui';
 import { TriangleAlert } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -405,6 +405,10 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
               onLike: likeStoryAction,
               onUnlike: unlikeStoryAction,
               comments: storyCommentsProps(locale, tfeed, tf, bootstrap),
+              // UI-D-66 / D-110 route 1: the viewer's "Destacar" pill, on every Início group —
+              // gated on the composed PERMISSION, never a role (the API re-checks it on every read
+              // and write the sheet makes, T-05.2-26).
+              canCurate: bootstrap.permissions.includes(STORY_PERMISSIONS.manage),
             }
       }
       regionLabel={tf('region')}

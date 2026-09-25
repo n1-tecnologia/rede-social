@@ -241,6 +241,8 @@ export default async function CommunityPage({
                 onLike: likeStoryAction,
                 onUnlike: unlikeStoryAction,
                 comments: storyCommentsProps(locale, tf, ts, bootstrap),
+                // UI-D-66: "Destacar" for a curator on any story, a permission never a role.
+                canCurate: bootstrap.permissions.includes(STORY_PERMISSIONS.manage),
               }
         }
         regionLabel={tc('page.highlights')}
