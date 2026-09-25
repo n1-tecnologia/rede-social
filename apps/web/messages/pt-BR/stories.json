@@ -50,9 +50,15 @@
       "processingTitle": "Processando o vídeo…",
       "processingNote": "Seu story aparece no início assim que o vídeo terminar de processar.",
       "toast": "Story publicado.",
+      "toastCommunity": "Story publicado em {community}.",
+      "destination": {
+        "none": "Nenhuma comunidade",
+        "helper": "O story aparece no início por 24 h e continua nos Destaques da comunidade."
+      },
       "errors": {
         "noMedia": "Escolha uma foto ou um vídeo para publicar.",
-        "failed": "Não foi possível publicar seu story. Tente novamente."
+        "failed": "Não foi possível publicar seu story. Tente novamente.",
+        "archived": "A comunidade {community} foi arquivada e o story não foi publicado. Escolha outra comunidade ou publique sem comunidade."
       },
       "discard": {
         "title": "Descartar story?",
