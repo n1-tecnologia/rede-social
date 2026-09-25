@@ -4,7 +4,11 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import { getHighlight } from '@/lib/stories';
-import { type StoryViewerItemView, storyViewerItem } from '@/lib/story-view';
+import {
+  type HighlightPlaceView,
+  type StoryViewerItemView,
+  storyViewerItem,
+} from '@/lib/story-view';
 
 /**
  * The grouped viewer's LAZY group read (05.2-05, HIGHLIGHT-02, R-P6) — one Início highlight's
@@ -45,4 +49,38 @@ export async function loadHighlightItemsAction(highlightId: string): Promise<Hig
 
   if (refusal) redirect(refusal);
   return result;
+}
+
+/*
+ * RED STUBS (05.2-06 Task 2) — deliberately inert: every answer is the refusal, and nothing is
+ * requested. The GREEN commit replaces all three with the sheet's real plumbing.
+ */
+export type HighlightSheetResult =
+  | { ok: true; places: HighlightPlaceView[]; selectedIds: string[] }
+  | { ok: false };
+
+export type HighlightTogglePlace = { communityId: string | null; revalidate: boolean };
+
+export type HighlightToggleResult =
+  | { ok: true; highlightCount: number }
+  | { ok: false; code: 'archived' | 'full' | 'generic' };
+
+export async function loadHighlightSheetAction(_storyId: string): Promise<HighlightSheetResult> {
+  return { ok: false };
+}
+
+export async function addStoryToHighlightAction(
+  _storyId: string,
+  _highlightId: string,
+  _place: HighlightTogglePlace,
+): Promise<HighlightToggleResult> {
+  return { ok: false, code: 'generic' };
+}
+
+export async function removeStoryFromHighlightAction(
+  _storyId: string,
+  _highlightId: string,
+  _place: HighlightTogglePlace,
+): Promise<HighlightToggleResult> {
+  return { ok: false, code: 'generic' };
 }

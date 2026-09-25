@@ -6,6 +6,7 @@ import { loadMessages } from '@/i18n/messages';
 import {
   highlightCircleView,
   highlightGroupView,
+  highlightPlacesView,
   inicioGroups,
   inicioRow,
   monogramOf,
@@ -311,5 +312,94 @@ describe('the viewer groups — one per openable circle, in row order (05.2-05)'
     expect(labels.positionGroup).toBe('{group}: story {current} de {total}');
     expect(labels.loadingGroup).toBe('Carregando destaque…');
     expect(labels.groupError).toBe('Não foi possível carregar este destaque.');
+  });
+});
+
+/**
+ * 05.2-06 — the highlight sheet's place groups (D-110, UI-D-67, UI E09 partial / zero-one-many).
+ *
+ * The catalogue answers Início first and then each community's highlights in the community's own
+ * `position` order; the SHEET groups them by place in the communities LIST order (the order the
+ * member sees communities everywhere else), labels each group with the place's name, and drops what
+ * a curator cannot act on: a highlight whose community is not in the active list (archived, or the
+ * communities module off). A place with no highlight has no group — unless the caller is the
+ * composer's single-select sheet (plan 08), which asks for every place so each can end with its own
+ * "Novo destaque".
+ */
+describe('05.2-06 — highlightPlacesView groups the catalogue by place', () => {
+  const A = '0c000000-0000-4000-8000-00000000000a';
+  const B = '0c000000-0000-4000-8000-00000000000b';
+  const GONE = '0c000000-0000-4000-8000-0000000000ff';
+  const communities = [
+    { id: A, name: 'Avisos da diretoria' },
+    { id: B, name: 'Coral TRIA' },
+  ];
+  const home = highlight({ id: '0000000a-1111-4111-8111-000000000001', title: 'Protocolos' });
+  const empty = highlight({
+    id: '0000000a-1111-4111-8111-000000000002',
+    title: 'Aulas',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    itemCount: 0,
+    position: 1,
+  });
+  const inB = highlight({
+    id: '0000000a-1111-4111-8111-000000000003',
+    communityId: B,
+    title: 'Ensaios',
+  });
+  const inA = highlight({
+    id: '0000000a-1111-4111-8111-000000000004',
+    communityId: A,
+    title: 'Assembleias',
+    coverAssetId: null,
+    coverVariantWidths: [],
+  });
+  const orphan = highlight({
+    id: '0000000a-1111-4111-8111-000000000005',
+    communityId: GONE,
+    title: 'Antigo',
+  });
+
+  it('23. Início first under its label, then communities in the LIST order, each row with its cover or null', () => {
+    const places = highlightPlacesView([home, empty, inB, inA], communities, {
+      homeLabel: 'Início',
+    });
+
+    expect(places.map((p) => [p.key, p.label, p.communityId])).toEqual([
+      ['home', 'Início', null],
+      [A, 'Avisos da diretoria', A],
+      [B, 'Coral TRIA', B],
+    ]);
+    // Empty highlights ARE listed (a curator is filling them, UI E09 partial), in catalogue order.
+    expect(places[0]?.rows).toEqual([
+      {
+        id: home.id,
+        title: 'Protocolos',
+        cover: { assetId: '0000000b-1111-4111-8111-111111111111', variantWidths: [640, 1080] },
+      },
+      { id: empty.id, title: 'Aulas', cover: null },
+    ]);
+    expect(places[1]?.rows).toEqual([{ id: inA.id, title: 'Assembleias', cover: null }]);
+  });
+
+  it('24. a highlight of a community NOT in the active list is dropped; a place with no highlight has no group', () => {
+    expect(
+      highlightPlacesView([inB, orphan], communities, { homeLabel: 'Início' }).map((p) => p.key),
+    ).toEqual([B]);
+    // Zero highlights anywhere: no group at all — the sheet's empty state (UI E09 empty).
+    expect(highlightPlacesView([], communities, { homeLabel: 'Início' })).toEqual([]);
+  });
+
+  it('25. includeEmptyPlaces lists Início and EVERY active community, highlights or not (plan 08)', () => {
+    const places = highlightPlacesView([inB, orphan], communities, {
+      homeLabel: 'Início',
+      includeEmptyPlaces: true,
+    });
+    expect(places.map((p) => [p.key, p.rows.length])).toEqual([
+      ['home', 0],
+      [A, 0],
+      [B, 1],
+    ]);
   });
 });

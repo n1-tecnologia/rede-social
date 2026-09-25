@@ -522,3 +522,22 @@ export function inicioGroups(input: {
   groups.push(...input.highlightGroups);
   return groups;
 }
+
+/* ── The highlight sheet's places (05.2-06) ───────────────────────────────────────────────────── */
+
+/** One place's group in the highlight sheet — the module's `HighlightSheetPlace`, as plain data. */
+export type HighlightPlaceView = {
+  key: string;
+  label: string;
+  communityId: string | null;
+  rows: { id: string; title: string; cover: { assetId: string; variantWidths: number[] } | null }[];
+};
+
+/** RED STUB (05.2-06 Task 2) — deliberately inert; the GREEN commit groups the catalogue by place. */
+export function highlightPlacesView(
+  _catalog: readonly HighlightSummary[],
+  _communities: readonly { id: string; name: string }[],
+  _labels: { homeLabel: string; includeEmptyPlaces?: boolean },
+): HighlightPlaceView[] {
+  return [];
+}

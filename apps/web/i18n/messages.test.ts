@@ -301,6 +301,92 @@ describe('05.2-05 — the grouped viewer strings and their placeholders', () => 
   });
 });
 
+/**
+ * 05.2-06 — the highlight sheet's words (UI-SPEC Copywriting Contract: "Checklist sheet (UI-D-67)",
+ * "Single-select sheet (UI-D-68)", "Title step", the curation toasts and errors, and the viewer's
+ * "Destacar"). Every placeholder is pinned, so a missing brace fails here rather than rendering a
+ * raw `{title}` to a curator. `{limit}` is interpolated from `STORY_HIGHLIGHT_MAX_TITLE` /
+ * `STORY_HIGHLIGHT_MAX_ITEMS` and never typed into copy.
+ */
+describe('05.2-06 — the highlight sheet strings and their placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['stories.viewer.highlight', 'Destacar'],
+    ['stories.highlights.sheet.title', 'Destacar story'],
+    [
+      'stories.highlights.sheet.helper',
+      'Um story em um destaque continua visível depois das 24 h.',
+    ],
+    ['stories.highlights.sheet.row', 'Destacar em {title}, {place}'],
+    ['stories.highlights.sheet.emptyTitle', 'Nenhum destaque ainda.'],
+    [
+      'stories.highlights.sheet.emptyBody',
+      'Crie um destaque no início ou em uma comunidade para guardar este story.',
+    ],
+    ['stories.highlights.sheet.emptyCta', 'Criar destaque'],
+    ['stories.highlights.select.title', 'Destaque'],
+    [
+      'stories.highlights.select.helper',
+      'O story aparece no início por 24 h e continua no destaque escolhido.',
+    ],
+    ['stories.highlights.select.none', 'Nenhum'],
+    ['stories.highlights.select.create', 'Novo destaque'],
+    ['stories.highlights.select.row', 'Publicar no destaque {title}, {place}'],
+    ['stories.highlights.select.selected', 'Selecionado'],
+    ['stories.highlights.create.title', 'Novo destaque'],
+    ['stories.highlights.create.place', 'Em {place}'],
+    ['stories.highlights.create.label', 'Nome'],
+    ['stories.highlights.create.placeholder', 'Ex.: Bastidores'],
+    ['stories.highlights.create.counter', '{count}/{limit}'],
+    ['stories.highlights.create.back', 'Voltar'],
+    [
+      'stories.highlights.create.composerHelper',
+      'O destaque é criado junto com o story, quando você publicar.',
+    ],
+    ['stories.highlights.create.submit', 'Criar destaque'],
+    ['stories.highlights.create.submitting', 'Criando…'],
+    ['stories.highlights.errors.titleEmpty', 'Dê um nome para o destaque.'],
+    ['stories.highlights.errors.generic', 'Não foi possível salvar. Tente novamente.'],
+    [
+      'stories.highlights.errors.archived',
+      'Esta comunidade foi arquivada. Não é possível adicionar stories aos destaques dela.',
+    ],
+    [
+      'stories.highlights.errors.full',
+      'Este destaque chegou ao limite de {limit} stories. Remova um para adicionar outro.',
+    ],
+    ['stories.highlights.toasts.added', 'Story adicionado ao destaque.'],
+    ['stories.highlights.toasts.removed', 'Story removido do destaque.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['stories.highlights.sheet.row', '{title}'],
+    ['stories.highlights.sheet.row', '{place}'],
+    ['stories.highlights.select.row', '{title}'],
+    ['stories.highlights.select.row', '{place}'],
+    ['stories.highlights.create.place', '{place}'],
+    ['stories.highlights.create.counter', '{count}'],
+    ['stories.highlights.create.counter', '{limit}'],
+    ['stories.highlights.errors.full', '{limit}'],
+  ])('%s carries the %s placeholder', (key, placeholder) => {
+    expect(String(lookup(key))).toContain(placeholder);
+  });
+
+  it('no limit is typed into copy — 15 and 100 arrive from the contracts', () => {
+    expect(String(lookup('stories.highlights.create.counter'))).not.toMatch(/\d/);
+    expect(String(lookup('stories.highlights.errors.full'))).not.toMatch(/\d/);
+  });
+});
+
 describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   function run(files: Record<string, string>): { status: number | null; out: string } {
     const dir = mkdtempSync(path.join(tmpdir(), 'tria-literals-'));
