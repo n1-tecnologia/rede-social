@@ -32,6 +32,7 @@ import { loadCommunityHighlights } from '@/lib/stories';
 import { storyViewerItem, storyViewerLabels } from '@/lib/story-view';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 import { CommunityPosts } from './CommunityPosts';
+import { ReactivateCommunity } from './ReactivateCommunity';
 
 /**
  * `/comunidades/[communityId]` (COMM-03, UI-D-43, UI-D-37) — the screen a member lands on when they
@@ -198,9 +199,9 @@ export default async function CommunityPage({
         coverVariantWidths={community.coverVariantWidths}
         coverAlt={tc('card.cover', { community: community.name })}
         // COMM-01's edit entry, mirroring the back control on the other side of the cover. A LINK,
-        // not a button: the form is a full-screen route (the `ComposeFab` rule). It is also how an
-        // ARCHIVED community is reactivated, which is what makes "archive is reversible" reachable
-        // from a phone rather than only from the API (UI-D-37).
+        // not a button: the form is a full-screen route (the `ComposeFab` rule). Its reactivate
+        // control stays as the SECOND route back from archive (D-90); the first is the Reativar
+        // island in the archived note below.
         action={
           canManage ? (
             <a
@@ -216,7 +217,20 @@ export default async function CommunityPage({
         statusPill={
           archived ? <StatusPill tone="neutral">{tc('archived.pill')}</StatusPill> : undefined
         }
-        note={archived ? tc('archived.note') : undefined}
+        // D-90 / UI-D-52: a manager's archived note carries the one-tap Reativar island under the
+        // unchanged text; a member's is exactly today's string, with no button.
+        note={
+          archived ? (
+            canManage ? (
+              <>
+                {tc('archived.note')}
+                <ReactivateCommunity communityId={community.id} />
+              </>
+            ) : (
+              tc('archived.note')
+            )
+          ) : undefined
+        }
       />
 
       {highlights ? (
