@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "05.1"
-current_phase_name: Community Authoring Entry Points
-status: verifying
-stopped_at: Completed 05.1-05-PLAN.md
-last_updated: "2026-09-25T15:33:40.418Z"
+current_phase: "05.2"
+current_phase_name: Story Highlights
+status: planning
+stopped_at: Phase 05.1 complete, ready to discuss Phase 05.2
+last_updated: "2026-09-25T15:40:17.732Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.1-05 (Reativar from the archived page, the Destaques + into the composer, the phase gate)
-state_head: c3315a081ba129d97e159549aea020e39cb975f6
+last_activity_desc: Phase 05.1 complete (UAT 9/9, security 27/27, Nyquist compliant), transitioned to Phase 05.2
+state_head: 1e80dae573b5e4a9ccd59334596a71be8315a40a
 progress:
   total_phases: 14
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 67
   completed_plans: 64
-  percent: 0
+  percent: 7
 ---
 
 # Project State
@@ -23,22 +23,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 05.1 — Community Authoring Entry Points
+**Current focus:** Phase 05.2 — Story Highlights
 
 ## Current Position
 
-Phase: 05.1 (Community Authoring Entry Points) — EXECUTING
-Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-09-25 — Completed 05.1-05 (one-tap Reativar under the archived note, the Destaques + for the attach permission on active communities, the 05.1 catalog pins, the three Phase 5 UAT reports replayed in a browser; phase gate green)
+Phase: 05.2 — Story Highlights
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-25 — Phase 05.1 complete (UAT 9/9, security 27/27, Nyquist compliant), transitioned to Phase 05.2
 
-Progress: [███████████████████░] 59/62 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 59/62 plans ([█░░░░░░░░░] 7%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 21
+- Total plans completed: 26
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -48,6 +48,7 @@ Progress: [███████████████████░] 59/62 p
 |-------|-------|-------|----------|
 | 01 | 9 | - | - |
 | 05 | 12 | - | - |
+| 05.1 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -370,6 +371,7 @@ Recent decisions affecting current work:
 - [Phase 05.1]: 05.1-04: PickerDefaultRow (apps/web/components/communities) is the one leading no-community row for both the post and story pickers (UI-D-55, extracted not forked)
 - [Phase 05.1]: 05.1-05: the Reativar island lives in CommunityHeader's note slot (unchanged note text + island, manager only) and ends in router.refresh(), not a navigation; the Destaques + is the strip's own circle gated on stories.story.publish AND stories.story.manage AND an active community, with no viewer when there are no pins — One door per concept: the + reuses the home strip's own-circle geometry and 'Seu story' label; the gate is the exact pair the API requires to attach, so it never opens onto a composer that cannot attach
 - [Phase 05.1]: 05.1-05: e2e that needs the new catalog keys runs against a production next start on :3100 through a scratchpad config overriding baseURL only (PLAYWRIGHT_BASE_URL would mark the run remote and skip phase5-smoke); e2e needing seeded image bytes must re-seed after test:integration — The developer's long-running next dev memoizes the catalog; media-sweeper.test.ts empties the seeded media bucket
+- [Phase 05.1]: Phase 05.2 goes next, not 01.1 — `phase.complete` picked 01.1 numerically again; pointer moved by hand (cloud work stays deferred to the end)
 
 ### Pending Todos
 
@@ -383,6 +385,7 @@ None yet.
 - [Phase 8]: LGPD legal review is out of research scope; flag to user before pilot go-live.
 - [Phase 5]: Resolved 2026-09-25 — the 22 flagged prohibitions were ruled on in UAT test 11 (P-05-03 accepted without its token diff) and H-05-02 closed on real Mux; WINDOWS.md entries 42/43 can be closed against 05-UAT.md.
 - [Phase 5 → 05.1/backlog]: Residual R-1 in 05-SECURITY.md — a well-formed cursor with a non-date `n` makes list routes answer 500 instead of falling back to page 1 (Postgres 22007). Not injectable; fix by validating `n` as an ISO datetime in the shared cursor schema.
+- [Phase 05.1]: Residual R-1 in 05.1-SECURITY.md (WR-01) — `resolvePublishCommunity`, `pinStory` and feed `createPost` read community status without `FOR SHARE`; an archive committing mid-write can still land a pin/post in an archived community. Medium, below threshold.
 - [Phase 5]: `.planning/REQUIREMENTS.md` traceability still shows 16 "Gaps Found" rows (05-SECURITY.md R-5) — documentation lag to clear.
 
 ### Quick Tasks Completed
@@ -418,6 +421,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T14:43:55.815Z
-Stopped at: Completed 05.1-05-PLAN.md
+Last session: 2026-09-25T15:40:35.000Z
+Stopped at: Phase 05.1 complete, ready to discuss Phase 05.2
 Resume file: None

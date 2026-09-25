@@ -28,11 +28,11 @@ Validated in Phase 1: Foundation (2026-09-14, local stack; hosted evidence lands
 - Public per-tenant sign-up with two recorded consents, login, persistent session, password recovery by e-mail, logout, blocked-member revocation on the next request — AUTH-01..AUTH-06
 
 Validated in Phase 5: Communities & Stories (2026-09-25, local stack; UAT 12/12, verification 15/15, security 82/82 closed):
-- `admin_tenant` creates and edits communities (name, description, cover) and archives/reactivates them — no destructive delete — COMM-01 (reachability of create/reactivate re-opened in Phase 05.1)
+- `admin_tenant` creates and edits communities (name, description, cover) and archives/reactivates them — no destructive delete — COMM-01 (create/reactivate reachability closed in Phase 05.1: title-row create control, Ativas/Arquivadas chips, Reativar on the page)
 - `admin_tenant` posts directly into a community from its page; a community post shows its origin in the merged feed — COMM-04
 - Every member sees every community in V1 (`community_members` exists for V2) and browses them, opening each one's posts and pinned stories ("Destaques"); only `admin_tenant` creates communities — COMM-02, COMM-03
 - Stories strip visible for 24 h with a full-screen viewer (image and video, segment progress, tap/hold/drag gestures); expiry is a predicate, never a delete — STORY-01, STORY-02, STORY-03
-- `admin_tenant` pins a story to communities, where it outlives the 24 h window — STORY-04
+- `admin_tenant` pins a story to communities, where it outlives the 24 h window — STORY-04 (Phase 05.1: a story can be born attached from the composer's "Publicar em" row or a community's Destaques +)
 - Members like and comment on stories; story comments cannot be liked or replied to, enforced by the database, not the UI — STORY-05
 - Real video playback proven end to end on a Mux Development environment (direct upload, signed webhook, worker, signed playback)
 
@@ -178,4 +178,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-25 after Phase 5 completion (Communities & Stories; Phase 05.1 inserted for community authoring entry points)*
+*Last updated: 2026-09-25 after Phase 05.1 completion (Community Authoring Entry Points)*
