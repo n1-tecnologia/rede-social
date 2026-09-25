@@ -582,3 +582,168 @@ declare module '@tria/contracts' {
     'story.unpinned': StoryUnpinned;
   }
 }
+
+/* ── Highlights (05.2) ─────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A highlight title's cap, in UTF-16 code units — the unit the input's `maxLength` and the Zod
+ * `.max()` both count, so a title the field accepts is never refused by the API. The 64 px circle
+ * truncates visually anyway; the cap is Instagram parity (R-D-B). The database backstop
+ * (`story_highlights_title_chk`) counts code points, which is never MORE than UTF-16 units, so it
+ * can never refuse a title this schema accepted.
+ */
+export const STORY_HIGHLIGHT_MAX_TITLE = 15;
+
+/** How many stories one highlight may hold; the items read is `limit`ed to the same number. */
+export const STORY_HIGHLIGHT_MAX_ITEMS = 100;
+
+/** How many highlights one place (Início, or one community) may hold. */
+export const STORY_HIGHLIGHT_MAX_PER_PLACE = 50;
+
+/**
+ * The closed refusal vocabulary a highlight WRITE can answer with, as `details.highlight`. MACHINE
+ * codes; the pt-BR copy lives in the catalog.
+ *
+ * - `archived` — an archived community takes no new content, and a highlight or an item is new
+ *   content (the pins' and the composer's own word, not a second spelling of it).
+ * - `title_invalid` — empty after trimming, or longer than `STORY_HIGHLIGHT_MAX_TITLE`.
+ * - `order_stale` — a reorder named a set of highlights that is not exactly the place's current set.
+ * - `full` — the place already holds `STORY_HIGHLIGHT_MAX_PER_PLACE` highlights, or the highlight
+ *   already holds `STORY_HIGHLIGHT_MAX_ITEMS` stories.
+ *
+ * A MISS — an unknown highlight, story or community, or another tenant's — is deliberately NOT in
+ * this vocabulary: it is a BARE 404 with no `details`, because a per-cause code over an enumerable
+ * uuid space would be an existence oracle (D-23).
+ */
+export const STORY_HIGHLIGHT_ISSUES = ['archived', 'title_invalid', 'order_stale', 'full'] as const;
+export type StoryHighlightIssue = (typeof STORY_HIGHLIGHT_ISSUES)[number];
+
+/** The route `defaultHook`'s and the web tier's lookup over that closed vocabulary. */
+export const STORY_HIGHLIGHT_ISSUE_SET: ReadonlySet<string> = new Set(STORY_HIGHLIGHT_ISSUES);
+
+/**
+ * A highlight title: trimmed, then 1..15 UTF-16 units. The issue MESSAGE is the machine code, so the
+ * route's `defaultHook` lifts both refusals into `details.highlight: 'title_invalid'`.
+ */
+export const storyHighlightTitleSchema = z
+  .string()
+  .trim()
+  .min(1, 'title_invalid')
+  .max(STORY_HIGHLIGHT_MAX_TITLE, 'title_invalid');
+
+/**
+ * `POST /v1/stories/highlights` — a new highlight in one place. "Início" is the ABSENCE of
+ * `communityId`, never a null or a sentinel (the `createPostSchema.communityId` rule). The new
+ * highlight lands at the END of its place's row.
+ */
+export const createStoryHighlightSchema = z
+  .object({
+    communityId: z.uuid().optional(),
+    title: storyHighlightTitleSchema,
+  })
+  .strict();
+export type CreateStoryHighlight = z.infer<typeof createStoryHighlightSchema>;
+
+/**
+ * `GET /v1/stories/highlights?communityId=&scope=` — one place's row. No `communityId` means Início.
+ *
+ * `scope=all` is the CURATOR's read: it includes EMPTY highlights (D-102), which members never see.
+ * A caller without `stories.story.manage` asking for it is refused 403 — the flag cannot widen a
+ * member's read. There is no paging: a place holds at most `STORY_HIGHLIGHT_MAX_PER_PLACE`.
+ */
+export const highlightListQuerySchema = z
+  .object({
+    communityId: z.uuid().optional(),
+    scope: z.enum(['all']).optional(),
+  })
+  .strict();
+export type HighlightListQuery = z.infer<typeof highlightListQuerySchema>;
+
+/**
+ * One highlight as the row draws it.
+ *
+ * - `communityId` null means Início.
+ * - `coverAssetId` / `coverVariantWidths` are the RESOLVED cover (R-D-D), computed by the server in
+ *   the same statement as the row: the uploaded cover image, else the chosen story's image, else the
+ *   most recently ADDED live image item, else null (the circle's brand-gradient fallback). Covers are
+ *   image-only in 05.2 (D-101): a highlight whose items are all videos resolves no automatic cover.
+ * - `coverStoryId` is the chosen story when one is set; `coverChosen` is true exactly when the cover
+ *   came from an explicit choice (an uploaded image or a chosen story) rather than the default rule.
+ * - `itemCount` counts MEMBER-VISIBLE items only (story not removed, asset `ready`) — the same
+ *   predicate the items read uses, so "empty" means the same thing on both reads.
+ */
+export const highlightSummarySchema = z
+  .object({
+    id: z.uuid(),
+    communityId: z.uuid().nullable(),
+    title: z.string(),
+    position: z.number().int(),
+    coverAssetId: z.uuid().nullable(),
+    coverVariantWidths: z.array(z.number().int()),
+    coverStoryId: z.uuid().nullable(),
+    coverChosen: z.boolean(),
+    itemCount: z.number().int(),
+  })
+  .strict();
+export type HighlightSummary = z.infer<typeof highlightSummarySchema>;
+
+/** A place's row, in `position` order (ties broken by id — a total order). */
+export const highlightListSchema = z.object({ items: z.array(highlightSummarySchema) }).strict();
+export type HighlightList = z.infer<typeof highlightListSchema>;
+
+/**
+ * `GET /v1/stories/highlights/{highlightId}` — the highlight and its stories, OLDEST first by
+ * PUBLISH time (D-103), EXPIRED ones included: the item row is the expiry override, so each story
+ * carries its server-computed `isActive` and the viewer plays it either way.
+ */
+export const highlightDetailSchema = z
+  .object({
+    highlight: highlightSummarySchema,
+    items: z.array(storySummarySchema),
+  })
+  .strict();
+export type HighlightDetail = z.infer<typeof highlightDetailSchema>;
+
+/**
+ * `PUT` (and plan 03's `DELETE`) `/v1/stories/highlights/{highlightId}/stories/{storyId}` — the
+ * toggle's answer. `highlightCount` is how many highlights the STORY is in after the write, read back
+ * from the rows inside the writing transaction. A repeat returns the identical body; there is no
+ * conflict status anywhere in this vocabulary.
+ */
+export const highlightMembershipResultSchema = z
+  .object({
+    highlighted: z.boolean(),
+    highlightCount: z.number().int().min(0),
+  })
+  .strict();
+export type HighlightMembershipResult = z.infer<typeof highlightMembershipResultSchema>;
+
+/**
+ * A highlight was created. **Ids only** — never the title (T-05-29/T-05-06): the manifest's own
+ * subscriber logs payloads verbatim, and curator-written text has no business in a log line.
+ * `communityId` is null for Início.
+ */
+export interface HighlightCreated {
+  tenantId: string;
+  highlightId: string;
+  communityId: string | null;
+  actorUserId: string;
+}
+
+/**
+ * A story was added to a highlight. Emitted only when a row was really created — a repeat add is
+ * absorbed by `story_highlight_items_uq` and announces nothing (transitions, not requests).
+ */
+export interface StoryHighlighted {
+  tenantId: string;
+  storyId: string;
+  highlightId: string;
+  actorUserId: string;
+}
+
+declare module '@tria/contracts' {
+  interface EventMap {
+    'highlight.created': HighlightCreated;
+    'story.highlighted': StoryHighlighted;
+  }
+}

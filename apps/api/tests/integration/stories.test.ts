@@ -7,6 +7,11 @@ import type { VideoProviderEvent } from '@tria/core/server/media/video/types';
 import { moduleFlags } from '@tria/core/server/modules/flags-cache';
 import { setPermissionResolver } from '@tria/core/server/rbac/permissions';
 import {
+  type HighlightSummary,
+  highlightDetailSchema,
+  highlightListSchema,
+  highlightMembershipResultSchema,
+  highlightSummarySchema,
   STORY_EXPIRY_HOURS,
   STORY_MAX_CAPTION,
   STORY_MAX_PAGE_SIZE,
@@ -1882,6 +1887,173 @@ describe('05.1 — a story born attached to a community (STORY-04 authoring half
     );
     expect(strip).toContain(a.id);
     expect(strip).toContain(b.id);
+  });
+});
+
+describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () => {
+  /**
+   * THE PHASE'S TRACER at the HTTP tier: an admin creates a named Início highlight, keeps an EXPIRED
+   * story in it, and a member reads the row and plays the story back while the strip refuses it.
+   *
+   * This block's OWN fixture: every highlight it creates has a title starting `Teste ` (≤ 15 units)
+   * and is deleted in `afterAll` by id AND by that prefix, so a crashed run cannot leak one into the
+   * seeded rows later plans read. Its stories carry `TEST_CAPTION_PREFIX`, so the file's sweep
+   * removes them and their items go with them (`story_highlight_items` cascades on the story).
+   */
+  const createdHighlights: string[] = [];
+
+  const hlRequest = (
+    token: string,
+    path: string,
+    init: RequestInit = {},
+    host: string = HOSTS.demo,
+  ) =>
+    request(`/v1/stories/highlights${path}`, token, {
+      ...init,
+      headers: { 'x-tenant-host': host, ...((init.headers as Record<string, string>) ?? {}) },
+    });
+
+  const createHighlight = (token: string, body: Record<string, unknown>, host = HOSTS.demo) =>
+    hlRequest(token, '', { method: 'POST', body: JSON.stringify(body) }, host);
+
+  const addItem = (token: string, highlightId: string, storyId: string, host = HOSTS.demo) =>
+    hlRequest(token, `/${highlightId}/stories/${storyId}`, { method: 'PUT' }, host);
+
+  /** One place's row, parsed; fails loudly on a non-200 so a refusal never reads as an empty row. */
+  async function row(token: string, query = ''): Promise<HighlightSummary[]> {
+    const res = await hlRequest(token, query);
+    expect(res.status, `GET /v1/stories/highlights${query}`).toBe(200);
+    return highlightListSchema.parse(await res.json()).items;
+  }
+
+  /** A created highlight, parsed, and remembered for cleanup. */
+  async function create(token: string, body: Record<string, unknown>): Promise<HighlightSummary> {
+    const res = await createHighlight(token, body);
+    expect(res.status, `POST /v1/stories/highlights ${JSON.stringify(body)}`).toBe(201);
+    const summary = highlightSummarySchema.parse(await res.json());
+    createdHighlights.push(summary.id);
+    return summary;
+  }
+
+  /** A ready image story of the demo tenant, published through the API. */
+  async function publishImage(label: string): Promise<{ storyId: string; assetId: string }> {
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const res = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — ${label}`,
+    });
+    expect(res.status).toBe(201);
+    const storyId = ((await res.json()) as StorySummary).id;
+    created.push(storyId);
+    return { storyId, assetId };
+  }
+
+  async function itemRows(highlightId: string, storyId: string): Promise<number> {
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_highlight_items
+       where highlight_id = ${highlightId}::uuid and story_id = ${storyId}::uuid`;
+    return rows[0]?.n ?? 0;
+  }
+
+  afterAll(async () => {
+    if (createdHighlights.length > 0) {
+      await adminSql`delete from public.story_highlights where id = any(${createdHighlights}::uuid[])`;
+    }
+    // Crash sweep: nothing seeded or migrated starts with `Teste `.
+    await adminSql`delete from public.story_highlights where title like 'Teste %'`;
+  });
+
+  it('05.2-1 an admin keeps an EXPIRED story in an Início highlight and a member plays it from there', async () => {
+    const before = await adminSql<{ max: number | null }[]>`
+      select max(position)::int as max from public.story_highlights
+       where tenant_id = ${tenantIds.demo}::uuid and community_id is null`;
+    const expectedPosition = (before[0]?.max ?? -1) + 1;
+
+    const highlight = await create(tokens.demoAdmin, { title: '  Teste Bastidor  ' });
+    expect(highlight.communityId).toBeNull();
+    expect(highlight.title).toBe('Teste Bastidor');
+    expect(highlight.itemCount).toBe(0);
+    // R-D-C: a new highlight lands at the END of its place's row.
+    expect(highlight.position).toBe(expectedPosition);
+
+    const { storyId, assetId } = await publishImage('destaque expirado');
+    // Into the past: a story cannot be PUBLISHED expired (the window is a column default).
+    await adminSql`
+      update public.stories
+         set published_at = now() - interval '30 hours', expires_at = now() - interval '6 hours'
+       where id = ${storyId}::uuid`;
+
+    const first = await addItem(tokens.demoAdmin, highlight.id, storyId);
+    expect(first.status).toBe(200);
+    const firstBody = highlightMembershipResultSchema.parse(await first.json());
+    expect(firstBody).toEqual({ highlighted: true, highlightCount: 1 });
+
+    // D-100's arbiter: a repeat add is a 200 with the identical body and no second row — never 409.
+    const repeat = await addItem(tokens.demoAdmin, highlight.id, storyId);
+    expect(repeat.status).toBe(200);
+    expect(await repeat.json()).toEqual(firstBody);
+    expect(await itemRows(highlight.id, storyId)).toBe(1);
+
+    // The MEMBER's Início row lists it, with the image story as its automatic cover (R-D-D rule 3).
+    const listed = (await row(tokens.demoMember)).find((item) => item.id === highlight.id);
+    expect(listed?.itemCount).toBe(1);
+    expect(listed?.coverAssetId).toBe(assetId);
+    expect(listed?.coverChosen).toBe(false);
+
+    // …and plays the story from it: the item row is the expiry override (STORY-04 re-delivered).
+    const detailRes = await hlRequest(tokens.demoMember, `/${highlight.id}`);
+    expect(detailRes.status).toBe(200);
+    const detail = highlightDetailSchema.parse(await detailRes.json());
+    const item = detail.items.find((story) => story.id === storyId);
+    expect(item?.isActive).toBe(false);
+
+    // The same story, the same instant, the STRIP: absent. The two reads disagree deliberately.
+    const strip = await walk(tokens.demoMember, '/v1/stories', STORY_MAX_PAGE_SIZE);
+    expect(strip.some((story) => story.id === storyId)).toBe(false);
+  });
+
+  it('05.2-2 an EMPTY highlight is kept for the curator and invisible to members (D-102)', async () => {
+    const empty = await create(tokens.demoAdmin, { title: 'Teste Vazio' });
+
+    expect((await row(tokens.demoMember)).some((item) => item.id === empty.id)).toBe(false);
+
+    // A member asking for it by id gets the SAME bare 404 an unknown id gets — no details.
+    const detail = await hlRequest(tokens.demoMember, `/${empty.id}`);
+    expect(detail.status).toBe(404);
+    expect((await envelope(detail)).error.details).toBeUndefined();
+
+    // `scope=all` is the curator's read; a member cannot widen theirs with it.
+    const widened = await hlRequest(tokens.demoMember, '?scope=all');
+    expect(widened.status).toBe(403);
+
+    const curated = (await row(tokens.demoAdmin, '?scope=all')).find(
+      (item) => item.id === empty.id,
+    );
+    expect(curated?.itemCount).toBe(0);
+    expect((await row(tokens.demoAdmin)).some((item) => item.id === empty.id)).toBe(false);
+  });
+
+  it('05.2-3 a highlight plays OLDEST first by publish time, never by when a story was added (D-103)', async () => {
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Ordem' });
+    const older = await publishImage('ordem mais antiga');
+    const newer = await publishImage('ordem mais nova');
+    await adminSql`
+      update public.stories set published_at = now() - interval '2 minutes'
+       where id = ${older.storyId}::uuid`;
+    await adminSql`
+      update public.stories set published_at = now() - interval '1 minute'
+       where id = ${newer.storyId}::uuid`;
+
+    // Added NEWEST first…
+    expect((await addItem(tokens.demoAdmin, highlight.id, newer.storyId)).status).toBe(200);
+    expect((await addItem(tokens.demoAdmin, highlight.id, older.storyId)).status).toBe(200);
+
+    // …played OLDEST first.
+    const res = await hlRequest(tokens.demoMember, `/${highlight.id}`);
+    expect(res.status).toBe(200);
+    const detail = highlightDetailSchema.parse(await res.json());
+    expect(detail.items.map((story) => story.id)).toEqual([older.storyId, newer.storyId]);
   });
 });
 
