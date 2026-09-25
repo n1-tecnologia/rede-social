@@ -16,8 +16,43 @@
       "place": {
         "home": "Início"
       },
+      "sheet": {
+        "title": "Destacar story",
+        "helper": "Um story em um destaque continua visível depois das 24 h.",
+        "row": "Destacar em {title}, {place}",
+        "emptyTitle": "Nenhum destaque ainda.",
+        "emptyBody": "Crie um destaque no início ou em uma comunidade para guardar este story.",
+        "emptyCta": "Criar destaque"
+      },
+      "select": {
+        "title": "Destaque",
+        "helper": "O story aparece no início por 24 h e continua no destaque escolhido.",
+        "none": "Nenhum",
+        "create": "Novo destaque",
+        "row": "Publicar no destaque {title}, {place}",
+        "selected": "Selecionado"
+      },
+      "create": {
+        "title": "Novo destaque",
+        "place": "Em {place}",
+        "label": "Nome",
+        "placeholder": "Ex.: Bastidores",
+        "counter": "{count}/{limit}",
+        "back": "Voltar",
+        "composerHelper": "O destaque é criado junto com o story, quando você publicar.",
+        "submit": "Criar destaque",
+        "submitting": "Criando…"
+      },
+      "toasts": {
+        "added": "Story adicionado ao destaque.",
+        "removed": "Story removido do destaque."
+      },
       "errors": {
-        "load": "Não foi possível carregar este destaque."
+        "load": "Não foi possível carregar este destaque.",
+        "titleEmpty": "Dê um nome para o destaque.",
+        "generic": "Não foi possível salvar. Tente novamente.",
+        "archived": "Esta comunidade foi arquivada. Não é possível adicionar stories aos destaques dela.",
+        "full": "Este destaque chegou ao limite de {limit} stories. Remova um para adicionar outro."
       }
     },
     "viewer": {
@@ -33,6 +68,7 @@
       "like": "Curtir",
       "unlike": "Descurtir",
       "comment": "Comentar",
+      "highlight": "Destacar",
       "likes": {
         "one": "{count} curtida",
         "other": "{count} curtidas"

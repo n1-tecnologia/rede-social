@@ -1,11 +1,21 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import { getHighlight } from '@/lib/stories';
+import { listAllCommunities } from '@/lib/communities';
+import {
+  getHighlight,
+  getHighlightCatalog,
+  getStoryHighlightIds,
+  highlightWriteIssue,
+  setHighlightMembership,
+} from '@/lib/stories';
 import {
   type HighlightPlaceView,
+  highlightPlacesView,
   type StoryViewerItemView,
   storyViewerItem,
 } from '@/lib/story-view';
@@ -51,36 +61,132 @@ export async function loadHighlightItemsAction(highlightId: string): Promise<Hig
   return result;
 }
 
-/*
- * RED STUBS (05.2-06 Task 2) — deliberately inert: every answer is the refusal, and nothing is
- * requested. The GREEN commit replaces all three with the sheet's real plumbing.
+/* ── The highlight sheet (05.2-06, D-110, HIGHLIGHT-02) ─────────────────────────────────────── */
+
+/**
+ * The sheet's ONE opening read (05.2-06 planning decision 1): the catalogue, the story's memberships
+ * and the active communities list, **in parallel**, composed on the SERVER into place groups with
+ * their labels — so the client never assembles a place name, and the sheet never opens on a state
+ * nobody verified (UI E09 loading).
+ *
+ * The same three conventions as above: the id is untrusted and uuid-checked before any request;
+ * every miss or refusal is ONE `{ ok: false }` (a member's 403 on the manage-only catalogue included,
+ * T-05.2-26 — the host then fires the generic toast and opens nothing); a bootstrap refusal is a
+ * navigation taken OUTSIDE the try/catch. `listAllCommunities` never throws — with the communities
+ * module off it answers `[]`, and the catalogue already carries only Início then.
  */
 export type HighlightSheetResult =
   | { ok: true; places: HighlightPlaceView[]; selectedIds: string[] }
   | { ok: false };
 
+export async function loadHighlightSheetAction(storyId: string): Promise<HighlightSheetResult> {
+  const id = z.uuid().safeParse(storyId);
+  if (!id.success) return { ok: false };
+
+  let refusal: string | null = null;
+  let result: HighlightSheetResult = { ok: false };
+  try {
+    const [catalog, memberships, communities, t] = await Promise.all([
+      getHighlightCatalog(),
+      getStoryHighlightIds(id.data),
+      listAllCommunities(),
+      getTranslations('stories'),
+    ]);
+    result = {
+      ok: true,
+      places: highlightPlacesView(catalog.items, communities, {
+        homeLabel: t('highlights.place.home'),
+      }),
+      selectedIds: memberships.highlightIds,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    // Shape only: highlight titles and community names never reach a log line (T-05.2-28).
+    if (!refusal) console.error('stories.highlight_sheet_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * Where the toggled highlight lives, and whether the caller wants that place re-rendered.
+ *
+ * `revalidate` is the caller's (planning decision 2): the VIEWER passes `false` — re-rendering
+ * `/inicio` behind an open viewer would rebuild the row under the curator's finger, the like-action
+ * rule — while "Seus stories" (plan 07) passes `true`. `communityId` only ever picks WHICH path to
+ * revalidate; it authorises nothing (the API resolves the highlight's real place itself, T-05.2-27).
+ */
 export type HighlightTogglePlace = { communityId: string | null; revalidate: boolean };
 
+/**
+ * The closed answer of one toggle. `highlightCount` is how many highlights the story is in AFTER the
+ * write ("Seus stories" draws it, UI-D-77). `archived` and `full` have their own toasts; every other
+ * refusal — the bare 404, a member's 403, `order_stale`, a transport failure — is `generic`.
+ */
 export type HighlightToggleResult =
   | { ok: true; highlightCount: number }
   | { ok: false; code: 'archived' | 'full' | 'generic' };
 
-export async function loadHighlightSheetAction(_storyId: string): Promise<HighlightSheetResult> {
-  return { ok: false };
-}
-
+/** Put a story into a highlight — `PUT /v1/stories/highlights/{h}/stories/{s}`. */
 export async function addStoryToHighlightAction(
-  _storyId: string,
-  _highlightId: string,
-  _place: HighlightTogglePlace,
+  storyId: string,
+  highlightId: string,
+  place: HighlightTogglePlace,
 ): Promise<HighlightToggleResult> {
-  return { ok: false, code: 'generic' };
+  return toggleHighlightMembership(storyId, highlightId, place, true);
 }
 
+/** Take a story out of a highlight — `DELETE /v1/stories/highlights/{h}/stories/{s}`. */
 export async function removeStoryFromHighlightAction(
-  _storyId: string,
-  _highlightId: string,
-  _place: HighlightTogglePlace,
+  storyId: string,
+  highlightId: string,
+  place: HighlightTogglePlace,
 ): Promise<HighlightToggleResult> {
-  return { ok: false, code: 'generic' };
+  return toggleHighlightMembership(storyId, highlightId, place, false);
+}
+
+const toggleArgs = z.object({
+  storyId: z.uuid(),
+  highlightId: z.uuid(),
+  place: z.object({ communityId: z.uuid().nullable(), revalidate: z.boolean() }).strict(),
+});
+
+async function toggleHighlightMembership(
+  storyId: string,
+  highlightId: string,
+  place: HighlightTogglePlace,
+  next: boolean,
+): Promise<HighlightToggleResult> {
+  // T-05.2-27: every id and the place are untrusted — refused here, before any request.
+  const args = toggleArgs.safeParse({ storyId, highlightId, place });
+  if (!args.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: HighlightToggleResult = { ok: false, code: 'generic' };
+  try {
+    const written = await setHighlightMembership(args.data.highlightId, args.data.storyId, next);
+    result = { ok: true, highlightCount: written.highlightCount };
+  } catch (error) {
+    const issue = highlightWriteIssue(error);
+    if (issue === 'archived' || issue === 'full') result = { ok: false, code: issue };
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    // Ids and the issue code only — never a title or a caption (T-05.2-28).
+    if (!refusal) {
+      console.error('stories.highlight_toggle_failed', {
+        storyId: args.data.storyId,
+        highlightId: args.data.highlightId,
+        issue,
+        next,
+        error: String(error),
+      });
+    }
+  }
+
+  if (result.ok && args.data.place.revalidate) {
+    const { communityId } = args.data.place;
+    revalidatePath(communityId === null ? '/inicio' : `/comunidades/${communityId}`);
+  }
+  if (refusal) redirect(refusal);
+  return result;
 }

@@ -1,17 +1,22 @@
 import {
   type HighlightDetail,
   type HighlightList,
+  type HighlightMembershipResult,
   highlightDetailSchema,
   highlightListSchema,
+  highlightMembershipResultSchema,
   type PublishStory,
   STORY_COMMENT_ISSUE_SET,
   STORY_COMMENTS_PAGE_SIZE,
+  STORY_HIGHLIGHT_ISSUE_SET,
   STORY_ISSUE_SET,
   STORY_PAGE_SIZE,
   STORY_PIN_ISSUE_SET,
   type StoryComment,
   type StoryCommentIssue,
   type StoryCommentPage,
+  type StoryHighlightIds,
+  type StoryHighlightIssue,
   type StoryIssue,
   type StoryLikeResult,
   type StoryPage,
@@ -21,6 +26,7 @@ import {
   type StorySummary,
   storyCommentPageSchema,
   storyCommentSchema,
+  storyHighlightIdsSchema,
   storyLikeResultSchema,
   storyPageSchema,
   storyPinResultSchema,
@@ -461,4 +467,60 @@ export async function getHighlight(highlightId: string): Promise<HighlightDetail
   const res = await apiFetch(`/v1/stories/highlights/${encodeURIComponent(highlightId)}`);
   if (!res.ok) throw await apiError(res);
   return highlightDetailSchema.parse(await res.json());
+}
+
+/* ── The highlight sheet (05.2-06, D-110) ─────────────────────────────────────────────────────── */
+
+/**
+ * `GET /v1/stories/highlights/catalog` — EVERY highlight a curator can act on, in one statement:
+ * Início's first, then each ACTIVE community's in position order (never an archived one, and none at
+ * all while the communities module is off). Manage-only: a member is refused 403 (T-05.2-26).
+ */
+export async function getHighlightCatalog(): Promise<HighlightList> {
+  const res = await apiFetch('/v1/stories/highlights/catalog');
+  if (!res.ok) throw await apiError(res);
+  return highlightListSchema.parse(await res.json());
+}
+
+/** `GET /v1/stories/{storyId}/highlights` — the ids of the highlights one story is in. Manage-only. */
+export async function getStoryHighlightIds(storyId: string): Promise<StoryHighlightIds> {
+  const res = await apiFetch(`/v1/stories/${encodeURIComponent(storyId)}/highlights`);
+  if (!res.ok) throw await apiError(res);
+  return storyHighlightIdsSchema.parse(await res.json());
+}
+
+/**
+ * `PUT` / `DELETE /v1/stories/highlights/{highlightId}/stories/{storyId}` — ONE toggle, ONE request.
+ *
+ * The answer is the AUTHORITATIVE `{ highlighted, highlightCount }` read back inside the API's
+ * transaction (`highlightCount` is how many highlights the STORY is in now). Both writes are
+ * idempotent at the API, so a retried toggle never double-counts. It neither revalidates nor
+ * redirects: those are the calling action's decisions.
+ */
+export async function setHighlightMembership(
+  highlightId: string,
+  storyId: string,
+  next: boolean,
+): Promise<HighlightMembershipResult> {
+  const res = await apiFetch(
+    `/v1/stories/highlights/${encodeURIComponent(highlightId)}/stories/${encodeURIComponent(storyId)}`,
+    { method: next ? 'PUT' : 'DELETE' },
+  );
+  if (!res.ok) throw await apiError(res);
+  return highlightMembershipResultSchema.parse(await res.json());
+}
+
+/**
+ * Reads the refusal a highlight WRITE put in `details.highlight`, and nothing else from the envelope
+ * — accepted ONLY when it belongs to `STORY_HIGHLIGHT_ISSUE_SET`, so an unrecognised value is null
+ * (the generic failure), never a string passed through to the screen. A 404 is the API's ONE bare
+ * miss (unknown, deleted or another tenant's highlight or story) and reads as `not_found`.
+ */
+export function highlightWriteIssue(error: unknown): StoryHighlightIssue | 'not_found' | null {
+  if (!(error instanceof ApiClientError)) return null;
+  if (error.status === 404) return 'not_found';
+  const issue = (error.details as { highlight?: unknown } | undefined)?.highlight;
+  return typeof issue === 'string' && STORY_HIGHLIGHT_ISSUE_SET.has(issue)
+    ? (issue as StoryHighlightIssue)
+    : null;
 }

@@ -533,11 +533,59 @@ export type HighlightPlaceView = {
   rows: { id: string; title: string; cover: { assetId: string; variantWidths: number[] } | null }[];
 };
 
-/** RED STUB (05.2-06 Task 2) — deliberately inert; the GREEN commit groups the catalogue by place. */
+/**
+ * The catalogue as the sheet draws it (D-110, UI-D-67): **grouped by PLACE**, Início first under the
+ * caller's label, then one group per community in the order of `communities` — the ACTIVE list the
+ * member sees everywhere else — labelled with the community's name. Rows keep the catalogue's own
+ * order inside a place (`position, id`), and EMPTY highlights stay (a curator is filling them, UI E09
+ * partial).
+ *
+ * What it drops, deliberately:
+ * - a highlight whose community is not in `communities` — archived, removed, or the communities
+ *   module off (R-D-F, HIGHLIGHT-04): the curator cannot add to it, so a switch would only fail;
+ * - a place with no highlight — no empty group (UI E09) — unless `includeEmptyPlaces` asks for every
+ *   place, which is the composer's single-select sheet (plan 08): there each place ends with its own
+ *   "Novo destaque", so an empty community is still somewhere to publish.
+ *
+ * Plain data out, like every builder here: the result crosses into a client component. The cover is
+ * the server-resolved one (R-D-D), by asset id — no URL is built from tenant content (T-05.2-21).
+ */
 export function highlightPlacesView(
-  _catalog: readonly HighlightSummary[],
-  _communities: readonly { id: string; name: string }[],
-  _labels: { homeLabel: string; includeEmptyPlaces?: boolean },
+  catalog: readonly HighlightSummary[],
+  communities: readonly { id: string; name: string }[],
+  labels: { homeLabel: string; includeEmptyPlaces?: boolean },
 ): HighlightPlaceView[] {
-  return [];
+  const rowOf = (summary: HighlightSummary): HighlightPlaceView['rows'][number] => ({
+    id: summary.id,
+    title: summary.title,
+    cover:
+      summary.coverAssetId !== null
+        ? { assetId: summary.coverAssetId, variantWidths: [...summary.coverVariantWidths] }
+        : null,
+  });
+
+  const byCommunity = new Map<string, HighlightPlaceView['rows']>();
+  const home: HighlightPlaceView['rows'] = [];
+  for (const summary of catalog) {
+    if (summary.communityId === null) {
+      home.push(rowOf(summary));
+      continue;
+    }
+    const rows = byCommunity.get(summary.communityId) ?? [];
+    rows.push(rowOf(summary));
+    byCommunity.set(summary.communityId, rows);
+  }
+
+  const keep = (rows: HighlightPlaceView['rows']) => labels.includeEmptyPlaces || rows.length > 0;
+  const places: HighlightPlaceView[] = [];
+  if (keep(home)) {
+    places.push({ key: 'home', label: labels.homeLabel, communityId: null, rows: home });
+  }
+  // Iterating the ACTIVE list is what drops an orphan: a community absent from it is never visited.
+  for (const community of communities) {
+    const rows = byCommunity.get(community.id) ?? [];
+    if (!keep(rows)) continue;
+    places.push({ key: community.id, label: community.name, communityId: community.id, rows });
+  }
+  return places;
 }
