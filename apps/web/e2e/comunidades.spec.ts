@@ -76,9 +76,14 @@ function list(page: Page): Locator {
   return page.getByRole('region', { name: new RegExp(C.list.region.replace('{tenant}', '.*')) });
 }
 
-/** Every community card is ONE link to `/comunidades/{id}` (the whole card is the target). */
+/**
+ * Every community card is ONE link to `/comunidades/{id}` (the whole card is the target), located by
+ * the card's OWN anchor. Not by the `/comunidades/` href prefix: since 05.1 a manager's title row
+ * carries the create link to `/comunidades/nova`, which starts with the same prefix and would be
+ * counted as a card on every admin screen.
+ */
 function cards(page: Page): Locator {
-  return page.locator('main a[href^="/comunidades/"]');
+  return page.locator('main a[data-testid="community-card"]');
 }
 
 function cardWith(page: Page, name: string): Locator {
@@ -632,5 +637,190 @@ test.describe('Destaques — the pinned circles, and the expiry they outlive (D-
     await page.goto(`${hosts.demo}/stories/${storyId}`);
     await expect(page.getByRole('dialog', { name: ST.viewer.dialog })).toBeVisible();
     await expect(page.getByText(SEEDED.pinnedExpiredCaption)).toBeVisible();
+  });
+});
+
+/**
+ * 05.1-03 — COMM-01 reachability on the list itself: ROADMAP criterion 1 (an admin who ALREADY has
+ * communities reaches the create form) and the finding half of criterion 2 (an admin finds an
+ * archived community without knowing its id).
+ *
+ * The create control is ONE anchor in the title row (D-86, UI-D-48): an icon-only 44×44 square
+ * below `sm` and a labelled control from `sm`, with the same accessible name at every width. The
+ * `Ativas` / `Arquivadas` chips are manager-only links read on the server (D-88, UI-D-49), and a
+ * member who types `?status=arquivadas` lands on today's list (D-89's web half; the API's 403 is the
+ * real control, 05.1-02 case 34).
+ *
+ * The one writing case creates a community and archives it again, so `SEEDED.total` holds for every
+ * case after it; every case here runs on both `mobile-chromium` and `desktop-chromium`.
+ */
+test.describe('05.1 — the create control and the archived filter (COMM-01 reachability)', () => {
+  function createLink(page: Page): Locator {
+    return page.locator('main').getByRole('link', { name: C.actions.create, exact: true });
+  }
+
+  function filterNav(page: Page): Locator {
+    return page.getByRole('navigation', { name: C.list.filter.label });
+  }
+
+  /** Horizontal overflow of the DOCUMENT and of the shell's scroll root, which is where the list lives. */
+  async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+    const overflow = await page.evaluate(() => {
+      const root = document.querySelector('main.app-scroll');
+      return {
+        document: document.documentElement.scrollWidth - window.innerWidth,
+        main: root ? root.scrollWidth - root.clientWidth : 0,
+      };
+    });
+    expect(overflow.document, 'the page scrolls sideways').toBeLessThanOrEqual(0);
+    expect(overflow.main, 'the scroll root scrolls sideways').toBeLessThanOrEqual(0);
+  }
+
+  /**
+   * Pages the list until `target` renders. The archived list is ordered by the server (most recently
+   * archived first, D-91), so on a database that earlier runs have archived into, the seeded row can
+   * sit past page 1. The sentinel observes the shell's scroll root, never the window (the
+   * `feed.spec.ts` lesson).
+   */
+  async function scrollUntilPresent(page: Page, target: Locator): Promise<void> {
+    for (let attempt = 0; attempt < 10 && (await target.count()) === 0; attempt += 1) {
+      const before = await cards(page).count();
+      await page.locator('main.app-scroll').evaluate((el) => {
+        el.scrollTo(0, el.scrollHeight);
+      });
+      const grew = await expect
+        .poll(async () => (await cards(page).count()) > before || (await target.count()) > 0, {
+          timeout: 5_000,
+        })
+        .toBe(true)
+        .then(
+          () => true,
+          () => false,
+        );
+      if (!grew) break;
+    }
+  }
+
+  test('an admin reaches the create form from a NON-empty list, with one accessible name at 320px and at 640px', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(cards(page).first()).toBeVisible();
+
+    // D-86: exactly ONE create link on a populated list — the empty state's own CTA (D-87) only
+    // exists when there is nothing to list.
+    await expect(createLink(page)).toHaveCount(1);
+    await expect(createLink(page)).toHaveAttribute('href', '/comunidades/nova');
+
+    // UI-D-48 below `sm`: an icon-only 44×44 brand square, still named by the catalog string.
+    await page.setViewportSize({ width: 320, height: 740 });
+    await expect(createLink(page)).toBeVisible();
+    const narrow = await createLink(page).boundingBox();
+    expect(narrow).not.toBeNull();
+    expect(narrow?.width ?? 0).toBeLessThanOrEqual(48);
+    expect(narrow?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expectNoHorizontalOverflow(page);
+
+    // …and from `sm` the SAME node widens into "+ Criar comunidade", with the same name.
+    await page.setViewportSize({ width: 640, height: 800 });
+    await expect(createLink(page)).toBeVisible();
+    const wide = await createLink(page).boundingBox();
+    expect(wide?.width ?? 0).toBeGreaterThan(100);
+    await expect(createLink(page)).toHaveAccessibleName(C.actions.create);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test('UAT replay: an admin creates a SECOND community from a non-empty list and lands on it', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+
+    // ROADMAP criterion 1, the report that re-opened COMM-01: the form is reachable from the list
+    // itself, not only from the zero-communities empty state.
+    await page.locator('main a[data-communities-create]').click();
+    await page.waitForURL(/\/comunidades\/nova$/);
+    await expect(page.getByRole('heading', { name: C.form.createTitle })).toBeVisible();
+
+    const name = `${E2E_COMMUNITY_PREFIX} segunda ${Date.now()}`;
+    await page.getByLabel(C.form.name.label).fill(name);
+    await page.getByRole('button', { name: C.actions.create }).click();
+    await page.waitForURL(/\/comunidades\/[0-9a-f-]{36}$/);
+    const communityId = page.url().split('/').pop() ?? '';
+    await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+
+    // Leave the shared seed as found: archive it through the edit form, behind its confirmation.
+    await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+    await page.locator('[data-community-archive]').click();
+    await page.getByRole('dialog').getByRole('button', { name: C.confirm.archive.confirm }).click();
+    await page.waitForURL(/\/comunidades$/);
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+  });
+
+  test('a manager filters Ativas and Arquivadas; archived cards carry the pill and open read-only', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+
+    // UI-D-49: two chip LINKS under the heading, the default one current.
+    const nav = filterNav(page);
+    await expect(nav).toBeVisible();
+    await expect(nav.getByRole('link')).toHaveCount(2);
+    const active = nav.getByRole('link', { name: C.list.filter.active, exact: true });
+    const archived = nav.getByRole('link', { name: C.list.filter.archived, exact: true });
+    await expect(active).toHaveAttribute('aria-current', 'page');
+    await expect(archived).not.toHaveAttribute('aria-current', 'page');
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+
+    // D-88: Arquivadas is a navigation the server renders, carried in a shareable URL.
+    await archived.click();
+    await expect(page).toHaveURL(/\/comunidades\?status=arquivadas$/);
+    await expect(
+      filterNav(page).getByRole('link', { name: C.list.filter.archived, exact: true }),
+    ).toHaveAttribute('aria-current', 'page');
+    await expect(
+      page.getByRole('region', {
+        name: new RegExp(C.list.regionArchived.replace('{tenant}', '.*')),
+      }),
+    ).toBeVisible();
+
+    // UI-D-50: the seeded archived community is here, with its pill — and so is EVERY other card.
+    const seededArchived = cardWith(page, SEEDED.archived);
+    await scrollUntilPresent(page, seededArchived);
+    await expect(seededArchived).toBeVisible();
+    await expect(seededArchived).toContainText(C.archived.pill);
+    const total = await cards(page).count();
+    expect(total).toBeGreaterThan(0);
+    for (let index = 0; index < total; index += 1) {
+      await expect(cards(page).nth(index)).toContainText(C.archived.pill);
+    }
+    // No active row leaks in, and the create control stays in the title row under either filter.
+    await expect(cardWith(page, SEEDED.first)).toHaveCount(0);
+    await expect(createLink(page)).toHaveCount(1);
+
+    // The card opens the community's page, read-only, by the id the admin never had to know.
+    await seededArchived.click();
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${SEEDED.archivedId}$`));
+    await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
+    await expect(page.getByText(C.archived.pill, { exact: true })).toBeVisible();
+    await expect(page.getByText(C.archived.note)).toBeVisible();
+  });
+
+  test('a member sees no chips and no create control, and ?status=arquivadas lands on today’s list', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades?status=arquivadas`);
+
+    // D-89, web half: no error and no archived row — the ACTIVE list, exactly as a member sees it.
+    await expect(list(page)).toBeVisible();
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+    await expect(cardWith(page, SEEDED.archived)).toHaveCount(0);
+    await expect(filterNav(page)).toHaveCount(0);
+    await expect(page.locator('main a[data-communities-create]')).toHaveCount(0);
+    await expect(createLink(page)).toHaveCount(0);
   });
 });
