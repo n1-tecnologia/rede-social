@@ -1,6 +1,7 @@
 import { sqlClient } from '@tria/core/db';
 import { subscribe } from '@tria/core/server/events/bus';
 import { moduleFlags } from '@tria/core/server/modules/flags-cache';
+import { encodeCursor } from '@tria/core/server/paging';
 import {
   COMMUNITY_MAX_PAGE_SIZE,
   type CommunityArchived,
@@ -92,14 +93,24 @@ async function page(token: string, query = '', host = HOSTS.demo): Promise<Commu
   return (await res.json()) as CommunityPage;
 }
 
-/** Walk every page with the returned cursors; returns the concatenation in the server's order. */
-async function walk(token: string, limit: number, host = HOSTS.demo): Promise<CommunitySummary[]> {
+/**
+ * Walk every page with the returned cursors; returns the concatenation in the server's order.
+ *
+ * `suffix` is appended to every page's query string verbatim (05.1: `&status=archived`), so the same
+ * walker pages either status's keyset — the cursor is never rewritten, only handed back.
+ */
+async function walk(
+  token: string,
+  limit: number,
+  host = HOSTS.demo,
+  suffix = '',
+): Promise<CommunitySummary[]> {
   const seen: CommunitySummary[] = [];
   let cursor: string | null = null;
-  for (let guard = 0; guard < 30; guard++) {
+  for (let guard = 0; guard < 60; guard++) {
     const query = cursor
-      ? `?limit=${limit}&cursor=${encodeURIComponent(cursor)}`
-      : `?limit=${limit}`;
+      ? `?limit=${limit}${suffix}&cursor=${encodeURIComponent(cursor)}`
+      : `?limit=${limit}${suffix}`;
     const body = await page(token, query, host);
     seen.push(...body.items);
     cursor = body.nextCursor;
@@ -1185,5 +1196,256 @@ describe('POST/PATCH /v1/communities — the cover asset contract (COMM-01, 05-0
     expect(
       (await patch(community.id, { name: `${TEST_NAME_PREFIX} capa aposentada renomeada` })).status,
     ).toBe(200);
+  });
+});
+
+/**
+ * 05.1-02 — COMM-01's REACHABILITY half at the API: `GET /v1/communities?status=archived`.
+ *
+ * Before this block an archived community left every list and could only be reached by typing its
+ * uuid. The filter is closed (`active` | `archived`, exact and case-sensitive), `active` is the
+ * default and is today's statement byte for byte, and `archived` is answered ONLY to a caller holding
+ * `communities.community.manage` — anybody else is REFUSED 403, never served and never silently
+ * coerced at the API (D-89; the web tier is where the coercion lives, 05.1-03).
+ *
+ * The archived keyset is its own statement ordered `updated_at desc, id desc` (D-91): most recently
+ * archived first, and an archived community edited afterwards moves back to the top — accepted, and
+ * pinned here (case 36) so it is never a surprise. The cursor never spans two statuses (D-88).
+ *
+ * Ground truth for every "exactly once" below is read straight from Postgres through `adminSql`
+ * with the same predicate and ordering the service uses, so a walk is compared against the table,
+ * never against another API answer. Every row this block writes is one it created (the sweep's name
+ * prefix); the seeded archived community is only ever READ.
+ */
+describe('05.1 — the archived filter (COMM-01 reachability, D-88, D-89, D-91)', () => {
+  const ARCHIVED = '&status=archived';
+  const SEED_ARCHIVED_NAME = 'Mutirao de 2025 (encerrado)';
+
+  const patch = (id: string, body: unknown, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request(`/v1/communities/${id}`, token, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      headers: { 'x-tenant-host': host },
+    });
+
+  async function makeCommunity(suffix: string): Promise<CommunitySummary> {
+    const res = await request('/v1/communities', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ name: `${TEST_NAME_PREFIX} ${suffix}`, description: 'arquivo' }),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status, `POST /v1/communities (${suffix})`).toBe(201);
+    const community = (await res.json()) as CommunitySummary;
+    created.push(community.id);
+    return community;
+  }
+
+  async function archive(id: string): Promise<void> {
+    const res = await patch(id, { status: 'archived' });
+    expect(res.status, `archive ${id}`).toBe(200);
+  }
+
+  /** The archived set of a tenant, in the archived branch's own order, read from the table. */
+  async function archivedIdsInDb(tenantId: string): Promise<string[]> {
+    const rows = await adminSql<{ id: string }[]>`
+      select c.id::text as id
+        from public.communities c
+       where c.tenant_id = ${tenantId}::uuid
+         and c.deleted_at is null
+         and c.status = 'archived'
+       order by c.updated_at desc, c.id desc`;
+    return rows.map((row) => row.id);
+  }
+
+  const ids = (items: CommunitySummary[]) => items.map((item) => item.id);
+
+  it('34. a member asking for ?status=archived is refused 403; the admin gets 200 with archived rows only (D-89, T-05.1-10)', async () => {
+    const refused = await request(`/v1/communities?limit=10${ARCHIVED}`, tokens.demoMember, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(refused.status).toBe(403);
+    expect(await code(refused)).toBe('FORBIDDEN');
+
+    // Positive control IN THE SAME TEST: the same query, by a manager, is served.
+    const served = await walk(tokens.demoAdmin, COMMUNITY_MAX_PAGE_SIZE, HOSTS.demo, ARCHIVED);
+    expect(served.length).toBeGreaterThan(0);
+    for (const item of served) expect(item.status, item.id).toBe('archived');
+    expect(served.map((item) => item.name)).toContain(SEED_ARCHIVED_NAME);
+    expect(ids(served)).toEqual(await archivedIdsInDb(tenantIds.demo));
+  });
+
+  it("35. a member's list is unchanged: absent status and status=active answer the identical body", async () => {
+    for (const limit of [COMMUNITY_MAX_PAGE_SIZE, 2]) {
+      const absent = await page(tokens.demoMember, `?limit=${limit}`);
+      const active = await page(tokens.demoMember, `?limit=${limit}&status=active`);
+      expect(ids(active.items), `limit=${limit}`).toEqual(ids(absent.items));
+      expect(active.nextCursor, `limit=${limit}`).toBe(absent.nextCursor);
+      expect(active).toEqual(absent);
+      for (const item of absent.items) expect(item.status).toBe('active');
+    }
+    // limit=2 is the page that carries a real cursor, so "identical nextCursor" is not null === null.
+    expect((await page(tokens.demoMember, '?limit=2')).nextCursor).not.toBeNull();
+  });
+
+  it('36. most recently archived first; an archived community edited afterwards moves to the head (D-91, accepted)', async () => {
+    const a = await makeCommunity('arquivo A');
+    const b = await makeCommunity('arquivo B');
+    const c = await makeCommunity('arquivo C');
+    await archive(a.id);
+    await archive(b.id);
+    await archive(c.id);
+
+    const all = await walk(tokens.demoAdmin, COMMUNITY_MAX_PAGE_SIZE, HOSTS.demo, ARCHIVED);
+    // C, B, A ahead of every older archived row.
+    expect(ids(all).slice(0, 3)).toEqual([c.id, b.id, a.id]);
+    expect(ids(all).slice(3)).not.toContain(a.id);
+
+    // D-91's accepted re-ordering, pinned: an edit moves `updated_at`, so A jumps to the top.
+    const edited = await patch(a.id, { description: 'editada depois de arquivada' });
+    expect(edited.status).toBe(200);
+    const head = await page(tokens.demoAdmin, `?limit=3${ARCHIVED}`);
+    expect(ids(head.items)).toEqual([a.id, c.id, b.id]);
+  });
+
+  it('37. an archived walk at limit=1 visits every archived row exactly once, including an updated_at TIE broken by id desc', async () => {
+    const x = await makeCommunity('empate X');
+    const y = await makeCommunity('empate Y');
+    await archive(x.id);
+    await archive(y.id);
+    // The tie is FORCED, on two rows this test owns and on nothing else. Microseconds included, so
+    // a cursor that lost precision in JavaScript would skip or repeat one of them.
+    await adminSql`
+      update public.communities
+         set updated_at = '2026-01-02 03:04:05.123456+00'
+       where id = any(${[x.id, y.id]}::uuid[])`;
+
+    const walked = ids(await walk(tokens.demoAdmin, 1, HOSTS.demo, ARCHIVED));
+    expect(new Set(walked).size, 'no row repeats').toBe(walked.length);
+    expect(walked).toEqual(await archivedIdsInDb(tenantIds.demo));
+
+    // Both tied rows are visited, adjacent, the larger id first.
+    const [high, low] = [x.id, y.id].sort().reverse();
+    const at = walked.indexOf(high as string);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(walked[at + 1]).toBe(low);
+  });
+
+  it('38. archive moves a community from the active list to the head of the archived list; reactivate moves it back', async () => {
+    const community = await makeCommunity('ida e volta');
+    expect(ids(await walk(tokens.demoMember, COMMUNITY_MAX_PAGE_SIZE))).toContain(community.id);
+
+    await archive(community.id);
+    expect(ids(await walk(tokens.demoMember, COMMUNITY_MAX_PAGE_SIZE))).not.toContain(community.id);
+    const head = await page(tokens.demoAdmin, `?limit=1${ARCHIVED}`);
+    expect(ids(head.items)).toEqual([community.id]);
+
+    const back = await patch(community.id, { status: 'active' });
+    expect(back.status).toBe(200);
+    const archivedAfter = await walk(
+      tokens.demoAdmin,
+      COMMUNITY_MAX_PAGE_SIZE,
+      HOSTS.demo,
+      ARCHIVED,
+    );
+    expect(ids(archivedAfter)).not.toContain(community.id);
+    expect(ids(await walk(tokens.demoMember, COMMUNITY_MAX_PAGE_SIZE))).toContain(community.id);
+  });
+
+  it('39. status is a closed, case-sensitive enum: ARCHIVED and deleted are 400 VALIDATION_FAILED, never 500 (T-05.1-11)', async () => {
+    for (const value of ['ARCHIVED', 'deleted', 'Active']) {
+      const res = await request(`/v1/communities?status=${value}`, tokens.demoAdmin, {
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      expect(res.status, value).toBe(400);
+      expect(await code(res), value).toBe('VALIDATION_FAILED');
+    }
+  });
+
+  it("40. cross-tenant: the demo admin's archived walk carries no lab row; the lab admin's carries the lab's (T-05.1-13)", async () => {
+    const labRows = await adminSql<{ id: string }[]>`
+      select id::text as id from public.communities where tenant_id = ${tenantIds.lab}::uuid`;
+    const labIds = labRows.map((row) => row.id);
+    expect(labIds.length).toBeGreaterThan(0);
+
+    const demoArchived = ids(
+      await walk(tokens.demoAdmin, COMMUNITY_MAX_PAGE_SIZE, HOSTS.demo, ARCHIVED),
+    );
+    for (const id of labIds) expect(demoArchived).not.toContain(id);
+
+    // Positive control IN THE SAME TEST: the lab's archived community is real, and its own admin
+    // sees it — so the absence above cannot pass on an empty lab.
+    const [labArchived] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.communities
+       where tenant_id = ${tenantIds.lab}::uuid and status = 'archived' and deleted_at is null
+         and name = ${SEED_ARCHIVED_NAME}`;
+    expect(labArchived?.id).toBeDefined();
+    const labWalk = ids(await walk(tokens.labAdmin, COMMUNITY_MAX_PAGE_SIZE, HOSTS.lab, ARCHIVED));
+    expect(labWalk).toContain(labArchived?.id);
+    expect(labWalk).toEqual(await archivedIdsInDb(tenantIds.lab));
+  });
+
+  it('41. edges: past the end is 200 empty, one page has a null cursor, a repeat read is identical and writes nothing, and a concurrent re-archive is visited at most once', async () => {
+    // Empty: a cursor older than every archived row answers an empty page, never a 404.
+    const pastTheEnd = encodeCursor({
+      n: '1970-01-01T00:00:00.000000Z',
+      id: '00000000-0000-0000-0000-000000000000',
+    });
+    const empty = await page(
+      tokens.demoAdmin,
+      `?limit=10${ARCHIVED}&cursor=${encodeURIComponent(pastTheEnd)}`,
+    );
+    expect(empty).toEqual({ items: [], nextCursor: null });
+
+    // One page: every archived row fits in 25, so there is no next page to announce.
+    const expected = await archivedIdsInDb(tenantIds.demo);
+    expect(expected.length).toBeLessThanOrEqual(COMMUNITY_MAX_PAGE_SIZE);
+    const whole = await page(tokens.demoAdmin, `?limit=${COMMUNITY_MAX_PAGE_SIZE}${ARCHIVED}`);
+    expect(ids(whole.items)).toEqual(expected);
+    expect(whole.nextCursor).toBeNull();
+
+    // Idempotency, list half: two identical reads, identical bodies — and the read wrote nothing.
+    const eventsBefore = [events.length, updatedEvents.length, archivedEvents.length];
+    const [stampBefore] = await adminSql<{ stamp: string }[]>`
+      select coalesce(max(updated_at)::text, '') as stamp
+        from public.communities where tenant_id = ${tenantIds.demo}::uuid`;
+    const first = await page(tokens.demoAdmin, `?limit=2${ARCHIVED}`);
+    const second = await page(tokens.demoAdmin, `?limit=2${ARCHIVED}`);
+    expect(second).toEqual(first);
+    const [stampAfter] = await adminSql<{ stamp: string }[]>`
+      select coalesce(max(updated_at)::text, '') as stamp
+        from public.communities where tenant_id = ${tenantIds.demo}::uuid`;
+    expect(stampAfter?.stamp).toBe(stampBefore?.stamp);
+    expect([events.length, updatedEvents.length, archivedEvents.length]).toEqual(eventsBefore);
+
+    // Concurrency: a community archived at the TAIL of the keyset, reactivated and re-archived
+    // after page 1 was handed out. Its new `updated_at` lands ABOVE the cursor already given, so the
+    // rest of the walk never reaches it again — at most once — and every untouched row stays exact.
+    const moved = await makeCommunity('rearquivada no meio da leitura');
+    await archive(moved.id);
+    await adminSql`
+      update public.communities
+         set updated_at = '2020-01-01 00:00:00.000001+00'
+       where id = ${moved.id}::uuid`;
+    const untouched = (await archivedIdsInDb(tenantIds.demo)).filter((id) => id !== moved.id);
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 60; guard++) {
+      const query: string = cursor
+        ? `?limit=1${ARCHIVED}&cursor=${encodeURIComponent(cursor)}`
+        : `?limit=1${ARCHIVED}`;
+      const body = await page(tokens.demoAdmin, query);
+      seen.push(...ids(body.items));
+      cursor = body.nextCursor;
+      if (guard === 0) {
+        expect(seen).not.toContain(moved.id);
+        expect((await patch(moved.id, { status: 'active' })).status).toBe(200);
+        await archive(moved.id);
+      }
+      if (cursor === null) break;
+    }
+    expect(cursor, 'the walk terminated').toBeNull();
+    expect(seen.filter((id) => id === moved.id).length).toBeLessThanOrEqual(1);
+    expect(seen.filter((id) => id !== moved.id)).toEqual(untouched);
   });
 });
