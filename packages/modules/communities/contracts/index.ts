@@ -66,7 +66,7 @@ export const COMMUNITY_MEMBER_ROLES = ['member', 'moderator'] as const;
 export type CommunityMemberRole = (typeof COMMUNITY_MEMBER_ROLES)[number];
 
 /**
- * `GET /v1/communities?limit=&cursor=`. `.strict()`: an unknown query key fails loudly (the 03-03
+ * `GET /v1/communities?limit=&cursor=&status=`. `.strict()`: an unknown query key fails loudly (the 03-03
  * rule).
  *
  * **`limit` CLAMPS rather than refuses**, which is the one deliberate departure from
@@ -75,6 +75,18 @@ export type CommunityMemberRole = (typeof COMMUNITY_MEMBER_ROLES)[number];
  * screen; the feed's stricter posture belongs to an endpoint only its own client calls. The clamp is
  * what T-05-04 asks for either way — no client value can widen the page — and `.catch()` makes the
  * whole field TOTAL, so `limit=abc` degrades to the default instead of 400ing.
+ *
+ * **`status` is the list's status filter (05.1, D-88/D-89).** ABSENT means `active`, which is today's
+ * list byte for byte: every member keeps receiving exactly the page they received before this field
+ * existed. `archived` pages the archived set instead — most recently archived first (D-91) — and is
+ * answered ONLY to a caller holding `communities.community.manage`; the route refuses anybody else
+ * with 403 rather than serving or coercing (D-89). Each value is its own keyset, so a cursor never
+ * spans two statuses.
+ *
+ * Unlike `limit`, `status` does NOT clamp or catch. No navigation tab ever sends it — the web
+ * translates its own pt-BR URL value and sends `archived` only for a manager — so a bad value can
+ * only come from a crafted call, and an explicit 400 is the honest answer. The comparison is the
+ * closed enum, exact and case-sensitive: `ARCHIVED` and `deleted` are 400, never a widened read.
  */
 export const communityQuerySchema = z
   .object({
@@ -85,6 +97,7 @@ export const communityQuerySchema = z
       .catch(COMMUNITY_PAGE_SIZE)
       .transform((value) => Math.min(Math.max(value, 1), COMMUNITY_MAX_PAGE_SIZE))
       .default(COMMUNITY_PAGE_SIZE),
+    status: z.enum(COMMUNITY_STATUSES).default('active'),
   })
   .strict();
 export type CommunityQuery = z.infer<typeof communityQuerySchema>;

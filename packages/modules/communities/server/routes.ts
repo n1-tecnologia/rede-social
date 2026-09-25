@@ -3,7 +3,7 @@ import type { AppEnv } from '@tria/core/server/auth/context';
 import { requireAuth } from '@tria/core/server/auth/require-auth';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { requireModule } from '@tria/core/server/modules/require-module';
-import { requirePermission } from '@tria/core/server/rbac/permissions';
+import { permissionsForRequest, requirePermission } from '@tria/core/server/rbac/permissions';
 import {
   COMMUNITY_ISSUE_SET,
   communityPageSchema,
@@ -52,6 +52,10 @@ const communities = new OpenAPIHono<AppEnv>({
 
 communities.use('*', requireAuth, requireModule('communities'));
 
+/**
+ * The list route carries NO permission middleware: every member lists (COMM-02). The ONE guarded
+ * value is `status=archived`, checked inside the handler (D-89) — see `communitiesRoutes` below.
+ */
 const listRoute = createRoute({
   method: 'get',
   path: '/',
@@ -59,8 +63,16 @@ const listRoute = createRoute({
   responses: {
     200: {
       description:
-        "One keyset page of the tenant's ACTIVE communities, most recent activity first. Every member of the tenant receives the same set regardless of role (COMM-02). `nextCursor` is non-null exactly when another community exists; it is OPAQUE and must be passed back untouched.",
+        "One keyset page of the tenant's communities. By default (`status` absent or `active`) the ACTIVE communities, most recent activity first; every member of the tenant receives the same set regardless of role (COMM-02). With `status=archived`, for managers only, the ARCHIVED communities, most recently archived first (`updated_at desc`, so an archived community edited afterwards moves to the top). `nextCursor` is non-null exactly when another community exists; it is OPAQUE, belongs to the status it was issued for, and must be passed back untouched.",
       content: { 'application/json': { schema: communityPageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: an unknown `status` value. The filter is the closed enum `active` | `archived`, exact and case-sensitive.',
+    },
+    403: {
+      description:
+        '`status=archived` requested by a caller without `communities.community.manage` in this tenant',
     },
   },
 });
@@ -151,9 +163,20 @@ const updateCommunityRoute = createRoute({
 });
 
 export const communitiesRoutes = communities
-  .openapi(listRoute, async (c) =>
-    c.json(await listCommunities(c.get('ctx'), c.req.valid('query')), 200),
-  )
+  .openapi(listRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const query = c.req.valid('query');
+    // D-89: the archived list is a MANAGER read. The API REFUSES a caller without the permission —
+    // it never serves the rows and never silently answers the active list instead (the web tier is
+    // where the coercion lives, 05.1-03). `permissionsForRequest` is the same resolver
+    // `requirePermission` evaluates, and the literal is the string a reviewer greps for — the same
+    // reason the write routes spell it out rather than going through `COMMUNITY_PERMISSIONS.manage`.
+    if (query.status === 'archived') {
+      const granted = await permissionsForRequest(ctx);
+      if (!granted.includes('communities.community.manage')) throw new ApiError(403, 'FORBIDDEN');
+    }
+    return c.json(await listCommunities(ctx, query), 200);
+  })
   .openapi(getCommunityRoute, async (c) => {
     const { communityId } = c.req.valid('param');
     return c.json(await getCommunity(c.get('ctx'), communityId), 200);

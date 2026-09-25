@@ -4,7 +4,7 @@ import { emit } from '@tria/core/server/events/bus';
 import { ApiError } from '@tria/core/server/http/api-error';
 import { moduleLogger } from '@tria/core/server/logging';
 import { decodeCursor, encodeCursor } from '@tria/core/server/paging';
-import { sql } from 'drizzle-orm';
+import { type SQL, sql } from 'drizzle-orm';
 import type {
   CommunityPage,
   CommunityQuery,
@@ -44,6 +44,12 @@ type CommunityRow = {
   post_count: number;
   status: CommunityStatus;
   last_activity_at: string;
+  /**
+   * The ARCHIVED list's cursor key only (05.1, D-91): `updated_at` formatted to microseconds by the
+   * statement, selected through `communityProjection`'s `extra` column. `toCommunity` never reads it,
+   * so it can never reach the wire (`communitySummarySchema` is `.strict()` and unchanged).
+   */
+  cursor_at?: string;
 };
 
 /**
@@ -72,8 +78,14 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  *
  * `created_by_user_id` is deliberately ABSENT from the select list (D-67): the container has no
  * human byline, and a column that never leaves the database cannot leak into a payload by accident.
+ *
+ * `extra` (05.1) is how the ARCHIVED list adds the one column its cursor is built from without
+ * duplicating this column list — the `storyProjection(viewerUserId, extra)` precedent. Every other
+ * call site passes nothing and renders exactly the column list it always did. An extra column is a
+ * CURSOR key, never a payload field: `toCommunity` does not read it.
  */
-const communityProjection = sql`
+function communityProjection(extra: SQL | null = null) {
+  return sql`
     select c.id,
            c.name,
            c.slug,
@@ -83,8 +95,10 @@ const communityProjection = sql`
            c.post_count,
            c.status,
            to_char(c.last_activity_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_activity_at
+           ${extra ?? sql``}
       from communities c
       left join media_assets a on a.id = c.cover_asset_id`;
+}
 
 /** Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`. */
 const toCommunity = (row: CommunityRow): CommunitySummary => ({
@@ -102,8 +116,9 @@ const toCommunity = (row: CommunityRow): CommunitySummary => ({
 });
 
 /**
- * `GET /v1/communities?limit=&cursor=` (COMM-02, COMM-03, D-76) — one keyset page of the tenant's
- * ACTIVE communities, most recent activity first.
+ * `GET /v1/communities?limit=&cursor=&status=` (COMM-02, COMM-03, D-76) — one keyset page of the
+ * tenant's ACTIVE communities, most recent activity first (or, with `status=archived`, its archived
+ * ones — see the two branches below).
  *
  * **COMM-02 is a POLICY value, expressed as an absence.** This statement never joins
  * `community_members`: every member of the tenant therefore receives the identical item-id set
@@ -119,6 +134,24 @@ const toCommunity = (row: CommunityRow): CommunitySummary => ({
  * `decodeCursor` is TOTAL (see its docblock): a tampered, truncated or stale envelope degrades to
  * page 1 instead of raising, and nothing from the string reaches SQL before `cursorSchema` accepted
  * it (T-05-05).
+ *
+ * **Two branches, two COMPLETE literal statements (05.1, D-88/D-91).** `query.status` picks one in
+ * TypeScript; it is never a bound SQL parameter. The ACTIVE statement is the one above, verbatim:
+ * a literal `c.status = 'active'` is provably implied by `communities_tenant_activity_idx`'s partial
+ * predicate whatever plan the server caches, which is what pgTAP cases 15, 17 and 18 describe. A
+ * bound `status` would make that implication a question of custom-vs-generic planning instead.
+ *
+ * The ARCHIVED statement (managers only — the route enforces D-89) orders `updated_at desc, id desc`:
+ * most recently archived first, because there is no `archived_at` and none is added (D-91). The
+ * accepted consequence, pinned by a test: an archived community EDITED afterwards moves to the top.
+ * Its cursor `n` is `updated_at` formatted to microseconds by the statement (`cursor_at`, the
+ * `ISO_MICROSECONDS` rule above) and never reaches the payload. NO index serves this branch, by
+ * decision: the archived set of a tenant is small and only managers read it, and the budget test
+ * pins it to ONE statement with the covers hydrated. A later index is a purely additive migration.
+ *
+ * Each branch is its own keyset, so a cursor never spans two statuses. A cursor carries no status:
+ * an active cursor replayed on the archived branch simply pages the archived set from that
+ * timestamp, and only a caller already allowed to read that set can send it.
  */
 export async function listCommunities(
   ctx: RequestContext,
@@ -129,9 +162,25 @@ export async function listCommunities(
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
 
+  const archived = query.status === 'archived';
+
   const rows = await withTenantTx(ctx, (tx) =>
-    tx.execute<CommunityRow>(sql`
-      ${communityProjection}
+    archived
+      ? tx.execute<CommunityRow>(sql`
+      ${communityProjection(
+        sql`, to_char(c.updated_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at`,
+      )}
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.deleted_at is null
+         and c.status = 'archived'
+         and (
+           ${afterAt}::timestamptz is null
+           or (c.updated_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by c.updated_at desc, c.id desc
+       limit ${limit + 1}`)
+      : tx.execute<CommunityRow>(sql`
+      ${communityProjection()}
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'active'
@@ -144,11 +193,13 @@ export async function listCommunities(
   );
 
   // Over-fetch by one: `nextCursor` is non-null EXACTLY when another row exists, so the sentinel
-  // never fires a "load more" that comes back empty.
+  // never fires a "load more" that comes back empty. Each branch's `n` is its OWN ordering key, read
+  // back from the statement that ordered by it.
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
+  const lastKey = last ? (archived ? last.cursor_at : last.last_activity_at) : undefined;
   const nextCursor =
-    rows.length > limit && last ? encodeCursor({ n: last.last_activity_at, id: last.id }) : null;
+    rows.length > limit && last && lastKey ? encodeCursor({ n: lastKey, id: last.id }) : null;
 
   // The SHAPE of the read — counts, ids and flags. A community NAME is member-facing content and
   // never reaches a log line, an error `details` payload or an OpenAPI example (T-05-06).
@@ -158,6 +209,8 @@ export async function listCommunities(
       tenantId: ctx.tenantId,
       userId: ctx.userId,
       requestId: ctx.requestId,
+      // A closed enum value — the shape of the read, never its content.
+      status: query.status,
       limit,
       returned: page.length,
       hasNext: nextCursor !== null,
@@ -184,7 +237,7 @@ export async function getCommunity(
 ): Promise<CommunitySummary> {
   const row = await withTenantTx(ctx, async (tx) => {
     const rows = await tx.execute<CommunityRow>(sql`
-      ${communityProjection}
+      ${communityProjection()}
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.id = ${communityId}::uuid
          and c.deleted_at is null
@@ -433,7 +486,7 @@ async function insertCommunity(
   if (!id) throw new ApiError(500, 'INTERNAL');
 
   const rows = await tx.execute<CommunityRow>(sql`
-    ${communityProjection}
+    ${communityProjection()}
      where c.id = ${id}::uuid
      limit 1`);
   const row = rows[0];
@@ -486,7 +539,7 @@ export async function updateCommunity(
     // depend on what it was: the 404, whether anything actually changed, and whether this write is
     // the transition into `archived` rather than a repeat of it.
     const current = await tx.execute<CommunityRow>(sql`
-      ${communityProjection}
+      ${communityProjection()}
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.id = ${communityId}::uuid
          and c.deleted_at is null
@@ -548,7 +601,7 @@ export async function updateCommunity(
          and deleted_at is null`);
 
     const rows = await tx.execute<CommunityRow>(sql`
-      ${communityProjection}
+      ${communityProjection()}
        where c.id = ${communityId}::uuid
        limit 1`);
     const after = rows[0];
