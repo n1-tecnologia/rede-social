@@ -88,6 +88,12 @@ const COMMUNITY_TABLES_PATTERN = 'communit(ies|y_members)';
 const STORY_TABLES_PATTERN = 'stories';
 
 let token = '';
+/**
+ * The demo ADMIN (05.1-02): the archived community list is a manager read (D-89), so its budget is
+ * measured with a session that holds `communities.community.manage`. Every other case keeps the
+ * member token — the budgets that matter most are the ones every member pays.
+ */
+let adminToken = '';
 let tenantId = '';
 const created: string[] = [];
 /** The post the detail/comments budget is measured against, plus its root comment. */
@@ -97,6 +103,7 @@ let detailRootId = '';
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   token = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+  adminToken = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
 
   const [tenant] = await adminSql<{ id: string }[]>`
     select id from public.tenants where slug = 'tria-demo'`;
@@ -268,6 +275,30 @@ describe('GET /v1/communities — the community list query budget (05-01)', () =
     // BIDIRECTIONAL, for the same reason the feed budgets are: a zero here would mean the regex
     // matched nothing (a table renamed, pg_stat_statements not loaded), not that the page got
     // cheaper. The floor is what stops an empty measurement passing at zero.
+    const calls = await communityCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(COMMUNITY_LIST_STATEMENT_BUDGET);
+  });
+
+  it(`05.1 / D-91: the ARCHIVED list (status=archived) also costs at most ${COMMUNITY_LIST_STATEMENT_BUDGET} statement, covers hydrated`, async () => {
+    // The archived branch has NO dedicated index, by decision (D-91): the set is small and only
+    // managers read it. What it may not do is cost more than one statement — its cover ladder comes
+    // from the same `communityProjection` join, and its cursor key rides the same row.
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const res = await api.request('/v1/communities?status=archived&limit=10', {
+      headers: { authorization: `Bearer ${adminToken}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { coverAssetId: string | null; status: string }[];
+    };
+    // The seed's archived community carries a cover (`scripts/seed.ts`, `coverIndex: 0`), so this
+    // page is non-empty AND runs the hydration join — the budget cannot pass vacuously.
+    expect(body.items.length).toBeGreaterThan(0);
+    expect(body.items.every((item) => item.status === 'archived')).toBe(true);
+    expect(body.items.some((item) => item.coverAssetId !== null)).toBe(true);
+
     const calls = await communityCalls();
     expect(calls).toBeGreaterThan(0);
     expect(calls).toBeLessThanOrEqual(COMMUNITY_LIST_STATEMENT_BUDGET);

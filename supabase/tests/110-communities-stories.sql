@@ -76,7 +76,7 @@ begin;
 -- because with five rows the planner always chooses a sequential scan and the assertion would prove
 -- nothing. Like its siblings, this file ROLLS BACK, so it re-runs identically against a seeded or an
 -- empty database, twice in a row, in any order.
-select plan(58);
+select plan(59);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-comm', 'Comunidade Phase 5', '0f000000-0000-4000-8000-000000000001');
@@ -254,6 +254,20 @@ select results_eq(
         and c.deleted_at is null $$,
   ARRAY['archived'],
   'archive is NOT a read gate: the community still resolves by id, which is what keeps links alive'
+);
+
+-- 16b. (05.1-02, D-88/D-91) The ARCHIVED LIST predicate and ordering, verbatim from
+-- `listCommunities`' archived branch, with its positive control in the same statement: the archived
+-- container is present and the active one is absent. Case 15 above is the mirror image — together
+-- they prove each status is its own keyset and neither leaks into the other.
+select results_eq(
+  $$ select c.id::text from public.communities c
+      where c.tenant_id = '0f000000-0000-4000-8000-000000000001'
+        and c.deleted_at is null
+        and c.status = 'archived'
+      order by c.updated_at desc, c.id desc $$,
+  ARRAY['0f000000-0000-4000-8000-0000000000a2'],
+  'the archived list: the archived community is present and the active one is its positive control by absence'
 );
 
 -- ── 17-18. D-76's keyset is an index scan on communities_tenant_activity_idx ───────────────────
