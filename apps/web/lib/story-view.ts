@@ -594,3 +594,62 @@ export function highlightPlacesView(
   }
   return places;
 }
+
+/* ── 05.2-09: the manage screen's views — RED STUB ─────────────────────────────────────────── */
+
+/**
+ * RED STUB (05.2-09 Task 2) — deliberately inert placeholders so the view cases fail on their
+ * assertions. The GREEN commit replaces this block.
+ */
+export type HighlightManageRowView = {
+  id: string;
+  communityId: string | null;
+  title: string;
+  meta: string;
+  cover: { assetId: string; variantWidths: number[] } | null;
+  coverChosen: boolean;
+  itemCount: number;
+  editLabel: string;
+};
+
+export type HighlightEditStoryView = {
+  id: string;
+  thumb: { assetId: string; variantWidths: number[] };
+  mediaKind: 'image' | 'video';
+  dateLabel: string;
+  status?: { tone: 'warning' | 'danger'; label: string };
+  isCover: boolean;
+  removeLabel: string;
+};
+
+export function highlightManageRowView(
+  summary: HighlightSummary,
+  _t: RowLabelReader,
+): HighlightManageRowView {
+  return {
+    id: summary.id,
+    communityId: summary.communityId,
+    title: '',
+    meta: '',
+    cover: null,
+    coverChosen: false,
+    itemCount: 0,
+    editLabel: '',
+  };
+}
+
+export function highlightEditStoryView(
+  story: StorySummary,
+  _coverAssetId: string | null,
+  _t: RowLabelReader,
+  _tm: RowLabelReader,
+): HighlightEditStoryView {
+  return {
+    id: story.id,
+    thumb: { assetId: story.mediaAssetId, variantWidths: [] },
+    mediaKind: story.mediaKind,
+    dateLabel: '',
+    isCover: false,
+    removeLabel: '',
+  };
+}

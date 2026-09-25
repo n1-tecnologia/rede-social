@@ -3,9 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import {
   addStoryToHighlightAction,
+  createHighlightAction,
+  deleteHighlightAction,
+  loadHighlightEditAction,
   loadHighlightItemsAction,
   loadHighlightSheetAction,
   removeStoryFromHighlightAction,
+  renameHighlightAction,
+  reorderHighlightsAction,
+  setHighlightCoverAction,
 } from './highlight-actions';
 
 /**
@@ -41,11 +47,17 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
 // The sheet's place label ("Início") is read from the catalog on the server; the stub answers the
 // one key the action reads and echoes any other, so a wrong key shows up as a wrong label.
-vi.mock('next-intl/server', () => ({
-  getTranslations: vi.fn(
-    async () => (key: string) => (key === 'highlights.place.home' ? 'Início' : key),
-  ),
-}));
+vi.mock('next-intl/server', async () => {
+  const { createTranslator } = await import('next-intl');
+  const { loadMessages } = await import('@/i18n/messages');
+  const messages = loadMessages();
+  return {
+    // The REAL pt-BR catalog: a wrong key or a reworded string turns the view assertions red.
+    getTranslations: vi.fn(async (namespace: string) =>
+      createTranslator({ locale: 'pt-BR', messages, namespace } as never),
+    ),
+  };
+});
 
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((path: string) => {
@@ -354,5 +366,262 @@ describe('add/removeStoryToHighlightAction — one toggle, one validated write (
     await expect(addStoryToHighlightAction(STORY, H_A, HOME_QUIET)).rejects.toThrow(
       'redirect:/entrar',
     );
+  });
+});
+
+/* ── 05.2-09: the manage screen's curation actions (HIGHLIGHT-01, T-05.2-39..43) ───────────── */
+
+describe('createHighlightAction — a new highlight at the END of its place (UI-D-72)', () => {
+  it('14. Início: the TRIMMED title is POSTed with no communityId, the row view answers, /inicio revalidates', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(201, summary(H_HOME, null, 'Teste', 2)));
+
+    const result = await createHighlightAction({ communityId: null }, '  Teste ');
+
+    expect(apiFetch).toHaveBeenCalledWith('/v1/stories/highlights', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Teste' }),
+    });
+    expect(result).toEqual({
+      ok: true,
+      highlight: {
+        id: H_HOME,
+        communityId: null,
+        title: 'Teste',
+        meta: 'Vazio · só você vê',
+        cover: null,
+        coverChosen: false,
+        itemCount: 0,
+        editLabel: 'Editar destaque Teste',
+      },
+    });
+    expect(revalidatePath).toHaveBeenCalledWith('/inicio');
+  });
+
+  it('15. a community place POSTs its communityId and revalidates that community page', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(201, summary(H_A, COMMUNITY_A, 'Atas', 0)));
+
+    await createHighlightAction({ communityId: COMMUNITY_A }, 'Atas');
+
+    expect(apiFetch).toHaveBeenCalledWith('/v1/stories/highlights', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ communityId: COMMUNITY_A, title: 'Atas' }),
+    });
+    expect(revalidatePath).toHaveBeenCalledWith(`/comunidades/${COMMUNITY_A}`);
+  });
+
+  it('16. a blank title is title_invalid WITHOUT a request; a forged place is generic without one', async () => {
+    await expect(createHighlightAction({ communityId: null }, '   ')).resolves.toEqual({
+      ok: false,
+      code: 'title_invalid',
+    });
+    await expect(
+      createHighlightAction({ communityId: '../inicio' } as never, 'Teste'),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      { error: { code: 'VALIDATION_FAILED', details: { highlight: 'title_invalid' } } },
+      400,
+      'title_invalid',
+    ],
+    [{ error: { code: 'VALIDATION_FAILED', details: { highlight: 'archived' } } }, 400, 'archived'],
+    [{ error: { code: 'VALIDATION_FAILED', details: { highlight: 'full' } } }, 400, 'full'],
+    [{ error: { code: 'NOT_FOUND' } }, 404, 'generic'],
+    [{ error: { code: 'FORBIDDEN' } }, 403, 'generic'],
+  ])(
+    '17. a refusal %j (%i) is the closed code %s, and nothing is revalidated',
+    async (body, status, code) => {
+      vi.mocked(apiFetch).mockResolvedValue(json(status, body));
+      await expect(createHighlightAction({ communityId: null }, 'Teste')).resolves.toEqual({
+        ok: false,
+        code,
+      });
+      expect(revalidatePath).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('reorderHighlightsAction — ONE full permutation per gesture (UI-D-73, R-D-C)', () => {
+  it('18. PUTs the permutation (no communityId for Início) and answers the new row views', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(200, {
+        items: [
+          summary(H_B, null, 'Aulas', 0),
+          { ...summary(H_HOME, null, 'Bastidores', 1), itemCount: 3 },
+        ],
+      }),
+    );
+
+    const result = await reorderHighlightsAction({ communityId: null }, [H_B, H_HOME]);
+
+    expect(apiFetch).toHaveBeenCalledWith('/v1/stories/highlights/order', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ highlightIds: [H_B, H_HOME] }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.items.map((item) => [item.id, item.meta])).toEqual([
+      [H_B, 'Vazio · só você vê'],
+      [H_HOME, '3 stories'],
+    ]);
+    expect(revalidatePath).toHaveBeenCalledWith('/inicio');
+  });
+
+  it('19. a 400 order_stale is { ok: false, code: order_stale } and nothing is revalidated', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(400, { error: { code: 'VALIDATION_FAILED', details: { highlight: 'order_stale' } } }),
+    );
+    await expect(
+      reorderHighlightsAction({ communityId: COMMUNITY_A }, [H_A, H_B]),
+    ).resolves.toEqual({ ok: false, code: 'order_stale' });
+    expect(apiFetch).toHaveBeenCalledWith('/v1/stories/highlights/order', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ communityId: COMMUNITY_A, highlightIds: [H_A, H_B] }),
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('20. a non-uuid id in the permutation is generic WITHOUT a request (T-05.2-43)', async () => {
+    await expect(reorderHighlightsAction({ communityId: null }, [H_A, 'x'])).resolves.toEqual({
+      ok: false,
+      code: 'generic',
+    });
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('rename / cover / delete — one validated PATCH or DELETE each (UI-D-74, UI-D-75)', () => {
+  it('21. rename PATCHes the TRIMMED title and answers the row view; the place revalidates', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, summary(H_A, COMMUNITY_A, 'Novo', 0)));
+
+    const result = await renameHighlightAction(H_A, ' Novo ', { communityId: COMMUNITY_A });
+
+    expect(apiFetch).toHaveBeenCalledWith(`/v1/stories/highlights/${H_A}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Novo' }),
+    });
+    expect(result).toMatchObject({ ok: true, highlight: { id: H_A, title: 'Novo' } });
+    expect(revalidatePath).toHaveBeenCalledWith(`/comunidades/${COMMUNITY_A}`);
+  });
+
+  it('22. a cover by upload sends { cover: { assetId } }; automatic sends { cover: null }; a frame { storyId }', async () => {
+    const ASSET = '0b000000-0000-4000-8000-0000000000c1';
+    vi.mocked(apiFetch).mockImplementation(async () =>
+      json(200, { ...summary(H_HOME, null, 'Bastidores', 0), coverChosen: true }),
+    );
+
+    await setHighlightCoverAction(H_HOME, { assetId: ASSET }, { communityId: null });
+    await setHighlightCoverAction(H_HOME, null, { communityId: null });
+    await setHighlightCoverAction(H_HOME, { storyId: STORY }, { communityId: null });
+
+    const bodies = vi.mocked(apiFetch).mock.calls.map(([, init]) => init?.body);
+    expect(bodies).toEqual([
+      JSON.stringify({ cover: { assetId: ASSET } }),
+      JSON.stringify({ cover: null }),
+      JSON.stringify({ cover: { storyId: STORY } }),
+    ]);
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(`/v1/stories/highlights/${H_HOME}`);
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[1]?.method).toBe('PATCH');
+  });
+
+  it('23. a cover whose asset is not ready yet (the bare 404) is generic — the admin retries', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(404, { error: { code: 'NOT_FOUND' } }));
+    await expect(
+      setHighlightCoverAction(H_HOME, { assetId: STORY }, { communityId: null }),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+    await expect(
+      setHighlightCoverAction(H_HOME, { assetId: 'x' } as never, { communityId: null }),
+    ).resolves.toEqual({ ok: false, code: 'generic' });
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('24. delete is a DELETE; a 204 is { ok: true } and the place revalidates; archived is not refused', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+    await expect(deleteHighlightAction(H_A, { communityId: COMMUNITY_A })).resolves.toEqual({
+      ok: true,
+    });
+    expect(apiFetch).toHaveBeenCalledWith(`/v1/stories/highlights/${H_A}`, { method: 'DELETE' });
+    expect(revalidatePath).toHaveBeenCalledWith(`/comunidades/${COMMUNITY_A}`);
+  });
+
+  it('25. a 401 on any curation write is a NAVIGATION to /entrar, taken outside the try/catch', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(401, { error: { code: 'UNAUTHENTICATED' } }));
+    await expect(deleteHighlightAction(H_A, { communityId: null })).rejects.toThrow(
+      'redirect:/entrar',
+    );
+  });
+});
+
+describe('loadHighlightEditAction — the edit sheet’s ONE read (UI-D-74)', () => {
+  it('26. answers the row view and the stories with server dates, media pills and the resolved cover', async () => {
+    const COVER_ASSET = '0b000000-0000-4000-8000-0000000000c2';
+    const base = detail();
+    const story = base.items[0] as (typeof base.items)[number];
+    vi.mocked(apiFetch).mockResolvedValue(
+      json(200, {
+        highlight: {
+          ...base.highlight,
+          coverAssetId: COVER_ASSET,
+          coverVariantWidths: [640],
+          itemCount: 1,
+        },
+        items: [
+          {
+            ...story,
+            id: STORY,
+            mediaAssetId: COVER_ASSET,
+            publishedAt: '2026-09-20T12:00:00.000Z',
+          },
+          {
+            ...story,
+            id: '0d000000-0000-4000-8000-0000000000d5',
+            mediaKind: 'video',
+            mediaStatus: 'processing',
+            publishedAt: '2026-09-21T12:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    const result = await loadHighlightEditAction(HIGHLIGHT);
+
+    expect(apiFetch).toHaveBeenCalledWith(`/v1/stories/highlights/${HIGHLIGHT}`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.highlight).toMatchObject({ id: HIGHLIGHT, title: 'Bastidores', meta: '1 story' });
+    expect(result.items).toHaveLength(2);
+    const [first, second] = result.items;
+    expect(first).toMatchObject({ id: STORY, mediaKind: 'image', isCover: true });
+    expect(first?.status).toBeUndefined();
+    expect(first?.dateLabel).toBe(
+      new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(
+        new Date('2026-09-20T12:00:00.000Z'),
+      ),
+    );
+    expect(first?.removeLabel).toBe(`Remover do destaque o story de ${first?.dateLabel}`);
+    expect(second).toMatchObject({
+      mediaKind: 'video',
+      isCover: false,
+      status: { tone: 'warning', label: 'Processando' },
+    });
+  });
+
+  it('27. a non-uuid id is { ok: false } WITHOUT a request; the bare 404 is { ok: false }; a 401 navigates', async () => {
+    await expect(loadHighlightEditAction('x')).resolves.toEqual({ ok: false });
+    expect(apiFetch).not.toHaveBeenCalled();
+
+    vi.mocked(apiFetch).mockResolvedValue(json(404, { error: { code: 'NOT_FOUND' } }));
+    await expect(loadHighlightEditAction(HIGHLIGHT)).resolves.toEqual({ ok: false });
+
+    vi.mocked(apiFetch).mockResolvedValue(json(401, { error: { code: 'UNAUTHENTICATED' } }));
+    await expect(loadHighlightEditAction(HIGHLIGHT)).rejects.toThrow('redirect:/entrar');
   });
 });

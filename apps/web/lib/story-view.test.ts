@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import {
   highlightCircleView,
+  highlightEditStoryView,
   highlightGroupView,
+  highlightManageRowView,
   highlightPlacesView,
   inicioGroups,
   inicioRow,
@@ -450,5 +452,94 @@ describe('05.2-07 — storyHistoryView carries the highlight indicator (UI-D-77,
     const view = storyHistoryView(story({ highlightCount: 0, pinnedCommunityCount: 3 }), t, tm);
     expect('highlighted' in view).toBe(false);
     expect('pinned' in view).toBe(false);
+  });
+});
+
+/* ── 05.2-09: the manage screen's views (UI-D-72, UI-D-74) ──────────────────────────────────── */
+
+describe('05.2-09 — highlightManageRowView and highlightEditStoryView', () => {
+  const tm = createTranslator({
+    locale: 'pt-BR',
+    messages: loadMessages(),
+    namespace: 'media',
+  } as never) as unknown as (key: string, values?: Record<string, string | number>) => string;
+
+  function story(overrides: Partial<StorySummary> = {}): StorySummary {
+    return {
+      id: '0000000c-1111-4111-8111-111111111111',
+      authorUserId: '0000000d-1111-4111-8111-111111111111',
+      mediaAssetId: '0000000e-1111-4111-8111-111111111111',
+      mediaKind: 'image',
+      mediaVariantWidths: [640, 1080],
+      mediaStatus: 'ready',
+      mediaFailureReason: null,
+      caption: 'Ensaio geral',
+      publishedAt: '2026-09-20T12:00:00.000Z',
+      expiresAt: '2026-09-21T12:00:00.000Z',
+      isActive: false,
+      durationSeconds: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewerLiked: false,
+      pinnedCommunityCount: 0,
+      highlightCount: 1,
+      ...overrides,
+    };
+  }
+
+  it('26. the row meta is the ICU plural of itemCount, or "Vazio · só você vê" for an empty highlight', () => {
+    expect(highlightManageRowView(highlight({ itemCount: 3 }), t)).toEqual({
+      id: '0000000a-1111-4111-8111-111111111111',
+      communityId: null,
+      title: 'Bastidores',
+      meta: '3 stories',
+      cover: { assetId: '0000000b-1111-4111-8111-111111111111', variantWidths: [640, 1080] },
+      coverChosen: false,
+      itemCount: 3,
+      editLabel: 'Editar destaque Bastidores',
+    });
+    expect(highlightManageRowView(highlight({ itemCount: 1 }), t).meta).toBe('1 story');
+    const empty = highlightManageRowView(highlight({ itemCount: 0, coverAssetId: null }), t);
+    expect(empty.meta).toBe('Vazio · só você vê');
+    // No resolvable cover → null, and the card draws the 48px monogram at identical geometry.
+    expect(empty.cover).toBeNull();
+  });
+
+  it('27. an edit story row: the history date, the media pill when not ready, isCover by the resolved asset', () => {
+    const date = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(
+      new Date('2026-09-20T12:00:00.000Z'),
+    );
+    const cover = highlightEditStoryView(story(), '0000000e-1111-4111-8111-111111111111', t, tm);
+    expect(cover).toEqual({
+      id: '0000000c-1111-4111-8111-111111111111',
+      thumb: { assetId: '0000000e-1111-4111-8111-111111111111', variantWidths: [640, 1080] },
+      mediaKind: 'image',
+      dateLabel: date,
+      isCover: true,
+      removeLabel: `Remover do destaque o story de ${date}`,
+    });
+    // The automatic rule and a chosen frame both resolve to the story's own asset; another asset
+    // (an uploaded cover, or another story) is not this row.
+    expect(highlightEditStoryView(story(), null, t, tm).isCover).toBe(false);
+    expect(
+      highlightEditStoryView(story(), '0000000f-1111-4111-8111-111111111111', t, tm).isCover,
+    ).toBe(false);
+
+    const processing = highlightEditStoryView(
+      story({ mediaKind: 'video', mediaStatus: 'processing' }),
+      null,
+      t,
+      tm,
+    );
+    expect(processing.status).toEqual({ tone: 'warning', label: 'Processando' });
+    const rejected = highlightEditStoryView(story({ mediaStatus: 'rejected' }), null, t, tm);
+    expect(rejected.status).toEqual({ tone: 'danger', label: 'Recusado' });
+  });
+
+  it('28. the history view carries the bare date for the picker row (UI-D-76)', () => {
+    const date = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(
+      new Date('2026-09-20T12:00:00.000Z'),
+    );
+    expect(storyHistoryView(story(), t, tm).date).toBe(date);
   });
 });

@@ -483,6 +483,134 @@ describe('05.2-08 — the composer "Destaque" strings, and the "Publicar em" wor
   });
 });
 
+/**
+ * 05.2-09 — the manage screen, the edit sheet, the cover step, the picker, the delete confirm, the
+ * curation toasts and errors, and the admin circles (UI-SPEC Copywriting Contract). Every
+ * placeholder is pinned, so a missing brace fails here rather than rendering a raw `{title}`.
+ */
+describe('05.2-09 — the manage screen strings and their placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['stories.highlights.manage.create', 'Novo destaque'],
+    ['stories.highlights.manage.titleHome', 'Destaques do início'],
+    ['stories.highlights.manage.titleCommunity', 'Destaques de {community}'],
+    ['stories.highlights.manage.back', 'Voltar'],
+    ['stories.highlights.manage.region', 'Destaques em ordem'],
+    ['stories.highlights.manage.helper', 'Arraste para mudar a ordem. É a mesma ordem da fileira.'],
+    ['stories.highlights.manage.count', '{count, plural, one {# story} other {# stories}}'],
+    ['stories.highlights.manage.emptyItem', 'Vazio · só você vê'],
+    ['stories.highlights.manage.edit', 'Editar destaque {title}'],
+    ['stories.highlights.manage.drag', 'Mover {title}'],
+    [
+      'stories.highlights.manage.dragHint',
+      'Use as setas para cima e para baixo para mudar a posição.',
+    ],
+    ['stories.highlights.manage.moved', '{title} agora está na posição {position} de {total}.'],
+    [
+      'stories.highlights.manage.archivedNote',
+      'Esta comunidade foi arquivada. Você ainda pode remover stories e excluir destaques.',
+    ],
+    ['stories.highlights.empty.title', 'Nenhum destaque ainda'],
+    [
+      'stories.highlights.empty.bodyHome',
+      'Crie um destaque para manter stories no início depois das 24 h.',
+    ],
+    [
+      'stories.highlights.empty.bodyCommunity',
+      'Crie um destaque para manter stories nesta comunidade depois das 24 h.',
+    ],
+    ['stories.highlights.edit.title', 'Editar destaque'],
+    ['stories.highlights.edit.cover', 'Capa'],
+    ['stories.highlights.edit.changeCover', 'Trocar capa'],
+    ['stories.highlights.edit.name', 'Nome'],
+    ['stories.highlights.edit.position', 'Posição {position} de {total}'],
+    ['stories.highlights.edit.moveUp', 'Mover para cima'],
+    ['stories.highlights.edit.moveDown', 'Mover para baixo'],
+    ['stories.highlights.edit.stories', 'Stories neste destaque'],
+    ['stories.highlights.edit.coverPill', 'Capa'],
+    ['stories.highlights.edit.remove', 'Remover do destaque o story de {date}'],
+    ['stories.highlights.edit.addStories', 'Adicionar stories'],
+    ['stories.highlights.edit.delete', 'Excluir destaque'],
+    ['stories.highlights.edit.emptyTitle', 'Nenhum story neste destaque'],
+    [
+      'stories.highlights.edit.emptyBody',
+      'Só você vê este destaque. Ele aparece para os membros quando tiver um story.',
+    ],
+    [
+      'stories.highlights.edit.archivedNote',
+      'Esta comunidade foi arquivada. Não é possível mudar a capa, o nome ou adicionar stories.',
+    ],
+    ['stories.highlights.edit.saveName', 'Salvar nome'],
+    ['stories.highlights.edit.savingName', 'Salvando…'],
+    ['stories.highlights.cover.title', 'Escolher capa'],
+    ['stories.highlights.cover.upload', 'Enviar imagem'],
+    ['stories.highlights.cover.option', 'Usar o story de {date} como capa'],
+    ['stories.highlights.cover.current', 'Capa atual'],
+    ['stories.highlights.cover.auto', 'Usar capa automática'],
+    [
+      'stories.highlights.cover.autoHelper',
+      'Sem uma capa escolhida, usamos o story adicionado por último.',
+    ],
+    [
+      'stories.highlights.cover.noImages',
+      'Este destaque ainda não tem stories com foto. Envie uma imagem para a capa.',
+    ],
+    ['stories.highlights.picker.title', 'Adicionar stories'],
+    ['stories.highlights.picker.helper', 'Stories expirados também podem entrar em um destaque.'],
+    ['stories.highlights.picker.row', 'Adicionar ao destaque o story de {date}'],
+    ['stories.highlights.picker.empty', 'Você ainda não publicou nenhum story.'],
+    ['stories.highlights.confirmDelete.title', 'Excluir destaque?'],
+    [
+      'stories.highlights.confirmDelete.body',
+      'O destaque {title} sai da fileira para todos. Os stories continuam em Seus stories.',
+    ],
+    ['stories.highlights.confirmDelete.confirm', 'Excluir destaque'],
+    ['stories.highlights.confirmDelete.cancel', 'Manter destaque'],
+    ['stories.highlights.toasts.created', 'Destaque criado.'],
+    ['stories.highlights.toasts.renamed', 'Nome salvo.'],
+    ['stories.highlights.toasts.coverChanged', 'Capa atualizada.'],
+    ['stories.highlights.toasts.deleted', 'Destaque excluído.'],
+    ['stories.highlights.errors.order', 'Não foi possível salvar a nova ordem. Tente novamente.'],
+    [
+      'stories.highlights.errors.orderStale',
+      'A lista de destaques mudou. Confira a ordem e tente de novo.',
+    ],
+    ['stories.highlights.circle.label', 'Gerenciar'],
+    ['stories.highlights.circle.actionHome', 'Gerenciar destaques do início'],
+    ['stories.highlights.circle.actionCommunity', 'Gerenciar destaques de {community}'],
+    ['stories.circle.highlightEmpty', 'Editar destaque {title}. Vazio, só você vê.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['stories.highlights.manage.titleCommunity', '{community}'],
+    ['stories.highlights.manage.count', '{count, plural,'],
+    ['stories.highlights.manage.edit', '{title}'],
+    ['stories.highlights.manage.drag', '{title}'],
+    ['stories.highlights.manage.moved', '{title}'],
+    ['stories.highlights.manage.moved', '{position}'],
+    ['stories.highlights.manage.moved', '{total}'],
+    ['stories.highlights.edit.position', '{position}'],
+    ['stories.highlights.edit.position', '{total}'],
+    ['stories.highlights.edit.remove', '{date}'],
+    ['stories.highlights.cover.option', '{date}'],
+    ['stories.highlights.picker.row', '{date}'],
+    ['stories.highlights.confirmDelete.body', '{title}'],
+    ['stories.highlights.circle.actionCommunity', '{community}'],
+    ['stories.circle.highlightEmpty', '{title}'],
+  ])('%s carries the %s placeholder', (key, placeholder) => {
+    expect(String(lookup(key))).toContain(placeholder);
+  });
+});
+
 describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   function run(files: Record<string, string>): { status: number | null; out: string } {
     const dir = mkdtempSync(path.join(tmpdir(), 'tria-literals-'));

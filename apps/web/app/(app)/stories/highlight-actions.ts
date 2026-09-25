@@ -14,6 +14,8 @@ import {
   setHighlightMembership,
 } from '@/lib/stories';
 import {
+  type HighlightEditStoryView,
+  type HighlightManageRowView,
   type HighlightPlaceView,
   highlightPlacesView,
   type StoryViewerItemView,
@@ -189,4 +191,63 @@ async function toggleHighlightMembership(
   }
   if (refusal) redirect(refusal);
   return result;
+}
+
+/* ── 05.2-09: the manage screen's curation actions — RED STUB ───────────────────────────────── */
+
+/**
+ * RED STUB (05.2-09 Task 2) — deliberately inert: every action answers the generic refusal with no
+ * request, so the new cases fail on their assertions. The GREEN commit replaces this block.
+ */
+export type HighlightPlace = { communityId: string | null };
+
+export type HighlightCurationCode = 'archived' | 'title_invalid' | 'order_stale' | 'full' | 'generic';
+
+export type HighlightCurationResult<T extends object = object> =
+  | ({ ok: true } & T)
+  | { ok: false; code: HighlightCurationCode };
+
+export async function createHighlightAction(
+  _place: HighlightPlace,
+  _title: string,
+): Promise<HighlightCurationResult<{ highlight: HighlightManageRowView }>> {
+  return { ok: false, code: 'generic' };
+}
+
+export async function renameHighlightAction(
+  _highlightId: string,
+  _title: string,
+  _place: HighlightPlace,
+): Promise<HighlightCurationResult<{ highlight: HighlightManageRowView }>> {
+  return { ok: false, code: 'generic' };
+}
+
+export async function setHighlightCoverAction(
+  _highlightId: string,
+  _cover: { storyId: string } | { assetId: string } | null,
+  _place: HighlightPlace,
+): Promise<HighlightCurationResult<{ highlight: HighlightManageRowView }>> {
+  return { ok: false, code: 'generic' };
+}
+
+export async function deleteHighlightAction(
+  _highlightId: string,
+  _place: HighlightPlace,
+): Promise<HighlightCurationResult> {
+  return { ok: false, code: 'generic' };
+}
+
+export async function reorderHighlightsAction(
+  _place: HighlightPlace,
+  _highlightIds: string[],
+): Promise<HighlightCurationResult<{ items: HighlightManageRowView[] }>> {
+  return { ok: false, code: 'generic' };
+}
+
+export type HighlightEditResult =
+  | { ok: true; highlight: HighlightManageRowView; items: HighlightEditStoryView[] }
+  | { ok: false };
+
+export async function loadHighlightEditAction(_highlightId: string): Promise<HighlightEditResult> {
+  return { ok: false };
 }
