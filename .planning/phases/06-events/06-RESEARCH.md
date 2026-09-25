@@ -896,16 +896,19 @@ const eventsHome: HomeSlotRenderer = async ({ bootstrap }) => {
 | A5 | Counting staff answers and removed members in "N confirmados" is acceptable (D-219) | Pattern 3 | A number slightly different from the organiser's expectation; one predicate to change |
 | A6 | Allowing an admin to create or edit an event whose start is already past (no refusal) is acceptable | Pattern 6 | A past event appears directly in Passados; add `starts_in_past` to `EVENT_ISSUES` if the pilot objects |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `support_tenant` see the code at the door?**
    - What we know: CONTEXT defaults to `admin_tenant` only; widening is one manifest line plus `app.events_staff()`.
    - Recommendation: ship `admin_tenant` only; list it in the UAT as a question for the pilot organiser.
+   - RESOLVED: `admin_tenant` only in Phase 6, the CONTEXT default. 06-01 (planning decision 1) grants `events.attendance.read` to `admin_tenant` alone and puts `event_secrets` behind an inline role-claim policy (`app.tenant_role() = 'admin_tenant'`) instead of an `app.events_staff()` helper. 06-07's `must_haves` state that `support_tenant` sees neither the code nor the list. Widening later is one manifest line plus one generated `ALTER POLICY` on `event_secrets_staff_all`. 06-09's phone UAT (item 9) asks the pilot organiser whether door staff need the code, and 06-07's SUMMARY records it under "UAT questions". The pilot's answer can only widen access with that two-line change. It cannot reopen this phase's design.
 2. **Phase 7's reminder text needs the event title, which no payload carries.**
    - What we know: payloads are ids and instants (logging rule), and modules cannot import each other.
    - Recommendation: Phase 7 resolves it (e.g. a kernel-level read contract, or a notification rendered from a published events read). Not a Phase 6 blocker; record it in the Phase 7 notes.
+   - RESOLVED: out of Phase 6 scope, and handed to Phase 7. Phase 6 payloads stay ids and instants (06-01 planning decision 8), and no title is added to any payload. `event.updated` carries `startsAt`, `endsAt` and `timesChanged` (06-04), so reminders can be re-armed from the payload alone. 06-01's SUMMARY records the title gap under "Notes for Phase 7": reminder copy reads the title through a published events contract. Phase 7 chooses that read path. No Phase 6 task depends on the choice.
 3. **Should the meeting URL be re-validated against a host allow-list (Zoom/Meet/Teams)?**
    - Recommendation: no. `https:` only is the locked rule; the admin is trusted, and the URL is never fetched server-side (no SSRF surface).
+   - RESOLVED: no host allow-list. The URL is checked for `https:` three times: Zod `z.url({ protocol: /^https$/ })` and the `event_secrets_https_chk` CHECK (06-01), then a re-check before the redirect (06-06). 06-04's `must_haves` record this decision, and threat T-06-24 covers it. It follows CONTEXT's locked rule "the meeting URL is validated as `https:` only".
 
 ## Environment Availability
 
