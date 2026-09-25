@@ -173,6 +173,25 @@ async function seedCover(tenantId: string, email: string, filename: string): Pro
 }
 
 /**
+ * A READY STORY image, written directly in the `seedCover` shape (05.1-01): the exact tuple
+ * `publishStory` accepts — `kind = 'image'`, `purpose = 'story'`, `status = 'ready'` — so a refused
+ * publish can only be about the community it names, never about the asset.
+ */
+async function seedStoryImage(tenantId: string, email: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+       variant_widths, filename, ready_at)
+    select ${tenantId}::uuid, u.id, 'image', 'story', 'ready', 'supabase',
+           'image/webp', 262144, 1080, 1920, '{640,1080}'::int[], 'story.webp', now()
+      from public.users u where u.email = ${email}
+    returning id`;
+  if (!row) throw new Error(`could not seed a story image for ${email}`);
+  mediaAssetIds.push(row.id);
+  return row.id;
+}
+
+/**
  * Service-key Storage client for fixture cleanup only (direct deletes from `storage.objects` are
  * refused — the 02-13 finding). Built here like `authAdmin()` rather than importing
  * `@tria/core/server/supabase-admin`, which Biome confines to the kernel's admin lane.
@@ -664,6 +683,84 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     const controlBody = (await control.json()) as { id: string; coverAssetId: string | null };
     coverCommunityIds.push(controlBody.id);
     expect(controlBody.coverAssetId).toBe(assets.demoCover);
+  });
+
+  it("b6. born attached: a demo admin cannot publish a story into the lab's community (05.1-01, D-99)", async () => {
+    // `POST /v1/stories` now takes a client-supplied `communityId` and writes a pin row in the SAME
+    // transaction as the story. A foreign id must neither persist nor be distinguishable from an id
+    // that names nothing: the demo lane's lookup carries the tenant predicate, so a lab community
+    // produces no row to refuse — the same bare 404 an unknown uuid gets (D-23, T-05.1-02).
+    //
+    // The lab's communities exist in the seed even though its `stories` flag is off; what is under
+    // test is the DEMO lane's lookup, not anything the lab can do.
+    const [labRow] = await adminSql<{ id: string }[]>`
+      select id from public.communities
+       where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null
+       limit 1`;
+    const [demoRow] = await adminSql<{ id: string }[]>`
+      select id from public.communities
+       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and status = 'active'
+       limit 1`;
+    const labCommunity = labRow?.id ?? '';
+    const demoCommunity = demoRow?.id ?? '';
+    expect([labCommunity, demoCommunity].every(Boolean)).toBe(true);
+
+    const assetId = await seedStoryImage(tenantIds.demo, 'admin@tria-demo.local');
+    const caption = `Isolamento 05.1 ${RUN}`;
+    const controlCaption = `Isolamento 05.1 controle ${RUN}`;
+    const publish = (communityId: string, text: string) =>
+      api.request('/v1/stories', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.demoAdmin}`,
+          'content-type': 'application/json',
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+        },
+        body: JSON.stringify({
+          mediaAssetId: assetId,
+          mediaKind: 'image',
+          caption: text,
+          communityId,
+        }),
+      });
+    const labPins = async () => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.story_community_pins
+         where community_id = ${labCommunity}::uuid`;
+      return row?.n ?? 0;
+    };
+
+    try {
+      const pinsBefore = await labPins();
+
+      const res = await publish(labCommunity, caption);
+      expect(res.status).toBe(404);
+      const text = await res.text();
+      const body = JSON.parse(text) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      // No `details` key at all — the absence IS the existence-oracle control.
+      expect(Object.hasOwn(body.error, 'details')).toBe(false);
+      for (const needle of ['tria-lab', tenantIds.lab, labCommunity]) {
+        expect(text).not.toContain(needle);
+      }
+
+      // Nothing was written on either side: no demo story with that caption, no new lab pin.
+      const [written] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.stories where caption = ${caption}`;
+      expect(written?.n).toBe(0);
+      expect(await labPins()).toBe(pinsBefore);
+
+      // Positive control (T-03-56) IN THE SAME TEST: the identical publish naming a community this
+      // lane CAN see succeeds, so the 404 above is isolation rather than a broken route.
+      const control = await publish(demoCommunity, controlCaption);
+      expect(control.status).toBe(201);
+      const story = (await control.json()) as { id: string; pinnedCommunityCount: number };
+      expect(story.pinnedCommunityCount).toBe(1);
+    } finally {
+      // The stories go before the asset they point at; their pin rows cascade with them.
+      await adminSql`
+        delete from public.stories where caption in (${caption}, ${controlCaption})`;
+    }
   });
 
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {

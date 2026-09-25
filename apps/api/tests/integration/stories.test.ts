@@ -5,6 +5,7 @@ import { subscribe } from '@tria/core/server/events/bus';
 import { mediaProviderEventJob } from '@tria/core/server/media/video/event-job';
 import type { VideoProviderEvent } from '@tria/core/server/media/video/types';
 import { moduleFlags } from '@tria/core/server/modules/flags-cache';
+import { setPermissionResolver } from '@tria/core/server/rbac/permissions';
 import {
   STORY_EXPIRY_HOURS,
   STORY_MAX_CAPTION,
@@ -20,6 +21,7 @@ import {
   type StorySummary,
 } from '@tria/module-stories/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { permissionsFor } from '../../src/modules/registry';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
@@ -1527,6 +1529,30 @@ describe('05.1 — a story born attached to a community (STORY-04 authoring half
   const destaques = (communityId: string) =>
     page(tokens.demoMember, '/v1/stories/pinned', `?communityId=${communityId}`);
 
+  /** Every pin row of one community — the "nothing was pinned" half of a refusal. */
+  async function bornPinRowsForCommunity(communityId: string): Promise<number> {
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_community_pins
+       where community_id = ${communityId}::uuid`;
+    return rows[0]?.n ?? 0;
+  }
+
+  /**
+   * "No story row" is measured against THIS case's caption (unique per case), never the whole
+   * table: other blocks in this file write stories too.
+   */
+  async function storiesWithCaption(caption: string): Promise<number> {
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.stories where caption = ${caption}`;
+    return rows[0]?.n ?? 0;
+  }
+
+  /** `requestId` identifies the CALL, not the row — strip it before comparing two refusals. */
+  const withoutRequestId = (raw: string) => {
+    const { requestId: _requestId, ...error } = (JSON.parse(raw) as Envelope).error;
+    return JSON.stringify({ error });
+  };
+
   beforeAll(async () => {
     const rows = await adminSql<{ id: string }[]>`
       select id::text from public.users where email = 'admin@tria-demo.local' limit 1`;
@@ -1595,6 +1621,267 @@ describe('05.1 — a story born attached to a community (STORY-04 authoring half
     ]);
     expect(pinned[0]?.payload.communityId).toBe(community);
     expect(pinned[0]?.payload.storyId).toBe(story.id);
+  });
+
+  it('05.1-2. an ARCHIVED community refuses the publish with the pin refusal — and writes NOTHING', async () => {
+    const archived = await makeBornCommunity('Nasce arquivada', 'archived');
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const caption = `${TEST_CAPTION_PREFIX} — comunidade arquivada ${randomUUID()}`;
+
+    const publishedBefore = events.length;
+    const pinnedBefore = pinEvents.length;
+    const res = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption,
+      communityId: archived,
+    });
+
+    // The SAME refusal `PUT /{storyId}/pins/{communityId}` answers (case 33), through the shared
+    // `assertCommunityPinnable`, so the two write paths cannot describe one rule differently.
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.details).toEqual({ pin: 'archived' });
+
+    // Atomicity (T-05.1-04): the refusal rolled the whole publish back, not just the pin.
+    expect(await storiesWithCaption(caption)).toBe(0);
+    expect(events.slice(publishedBefore)).toHaveLength(0);
+    expect(pinEvents.slice(pinnedBefore)).toHaveLength(0);
+  });
+
+  it('05.1-3. an unknown and a REMOVED community are ONE bare 404 — and an active one publishes', async () => {
+    const removed = await makeBornCommunity('Nasce removida');
+    await adminSql`update public.communities set deleted_at = now() where id = ${removed}::uuid`;
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+
+    const bodies: string[] = [];
+    for (const [label, communityId] of [
+      ['unknown', randomUUID()],
+      ['removed', removed],
+    ] as const) {
+      const caption = `${TEST_CAPTION_PREFIX} — destino ${label} ${randomUUID()}`;
+      const res = await publish(tokens.demoAdmin, {
+        mediaAssetId: assetId,
+        mediaKind: 'image',
+        caption,
+        communityId,
+      });
+      expect(res.status, label).toBe(404);
+      const raw = await res.text();
+      const body = JSON.parse(raw) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      // No `details` key at all — the absence IS the existence-oracle control (D-23, T-05-49).
+      expect(Object.hasOwn(body.error, 'details'), label).toBe(false);
+      bodies.push(withoutRequestId(raw));
+      expect(await storiesWithCaption(caption), label).toBe(0);
+    }
+    // Byte-identical once the per-request id is stripped: a different message, an extra key or even
+    // a different key ORDER is exactly the change that would turn this 404 into an oracle.
+    expect(bodies[1]).toEqual(bodies[0]);
+
+    // Positive control IN THE SAME TEST: an active community of this tenant publishes, so the 404s
+    // above are about visibility and not about the route being broken.
+    const active = await makeBornCommunity('Nasce ativa (controle)');
+    const control = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — destino visivel`,
+      communityId: active,
+    });
+    expect(control.status).toBe(201);
+    created.push(((await control.json()) as StorySummary).id);
+  });
+
+  it('05.1-4. a publish-ONLY caller cannot pin through publish (403), and still publishes without one', async () => {
+    const community = await makeBornCommunity('Nasce sem permissao');
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const refusedCaption = `${TEST_CAPTION_PREFIX} — sem manage ${randomUUID()}`;
+
+    // The V2 shape of the product in one line: `admin_tenant` keeps `stories.story.publish` and
+    // loses ONLY the manage half. The wrapper goes through the kernel's own seam ("last registration
+    // wins (tests)"), so the route under test is exactly the production route.
+    setPermissionResolver((role, enabled, settings) => {
+      const granted = permissionsFor(role, enabled, settings);
+      return role === 'admin_tenant'
+        ? granted.filter((permission) => permission !== 'stories.story.manage')
+        : granted;
+    });
+    try {
+      const refused = await publish(tokens.demoAdmin, {
+        mediaAssetId: assetId,
+        mediaKind: 'image',
+        caption: refusedCaption,
+        communityId: community,
+      });
+      expect(refused.status).toBe(403);
+      expect((await envelope(refused)).error.code).toBe('FORBIDDEN');
+      expect(await storiesWithCaption(refusedCaption)).toBe(0);
+      expect(await bornPinRowsForCommunity(community)).toBe(0);
+
+      // Positive control under the SAME resolver: publish itself is untouched by the rule.
+      const plain = await publish(tokens.demoAdmin, {
+        mediaAssetId: assetId,
+        mediaKind: 'image',
+        caption: `${TEST_CAPTION_PREFIX} — sem manage, sem destino`,
+      });
+      expect(plain.status).toBe(201);
+      created.push(((await plain.json()) as StorySummary).id);
+    } finally {
+      // Restored whatever happened above, so a failing assertion cannot leak the wrapper.
+      setPermissionResolver(permissionsFor);
+    }
+  });
+
+  it('05.1-5. WITHOUT a community the publish is exactly today’s — no pin row, no pin event', async () => {
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+
+    const publishedBefore = events.length;
+    const pinnedBefore = pinEvents.length;
+    const res = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — sem comunidade`,
+    });
+    expect(res.status).toBe(201);
+    const story = (await res.json()) as StorySummary;
+    created.push(story.id);
+
+    expect(story.pinnedCommunityCount).toBe(0);
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_community_pins where story_id = ${story.id}::uuid`;
+    expect(rows[0]?.n).toBe(0);
+    expect(pinEvents.slice(pinnedBefore)).toHaveLength(0);
+
+    const published = events.slice(publishedBefore);
+    expect(published).toHaveLength(1);
+    expect(Object.keys(published[0] ?? {}).sort()).toEqual([
+      'authorUserId',
+      'expiresAt',
+      'mediaKind',
+      'storyId',
+      'tenantId',
+    ]);
+  });
+
+  it('05.1-6. a null and a malformed communityId are a 400 the contract raises — never a 500', async () => {
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+
+    for (const [label, communityId] of [
+      ['null', null],
+      ['not-a-uuid', 'not-a-uuid'],
+    ] as const) {
+      const caption = `${TEST_CAPTION_PREFIX} — contrato ${label} ${randomUUID()}`;
+      const res = await publish(tokens.demoAdmin, {
+        mediaAssetId: assetId,
+        mediaKind: 'image',
+        caption,
+        communityId,
+      });
+      // "No destination" is the ABSENCE of the key (D-95), so `null` is not a spelling of it.
+      expect(res.status, label).toBe(400);
+      expect((await envelope(res)).error.code, label).toBe('VALIDATION_FAILED');
+      expect(await storiesWithCaption(caption), label).toBe(0);
+    }
+  });
+
+  it('05.1-7. THE INVARIANT: born attached ≡ pinned later — same row, same count, same Destaques, same event', async () => {
+    const community = await makeBornCommunity('Nasce ou fixa depois');
+    const pinnedBefore = pinEvents.length;
+
+    // A: born attached.
+    const assetA = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const bornRes = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetA,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — invariante nasce fixada`,
+      communityId: community,
+    });
+    expect(bornRes.status).toBe(201);
+    const born = (await bornRes.json()) as StorySummary;
+    created.push(born.id);
+    const bornEvents = pinEvents.slice(pinnedBefore);
+
+    // B: published plain, then pinned through the post-hoc route.
+    const assetB = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const laterRes = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetB,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — invariante fixada depois`,
+    });
+    expect(laterRes.status).toBe(201);
+    const later = (await laterRes.json()) as StorySummary;
+    created.push(later.id);
+    const laterBefore = pinEvents.length;
+    const pinRes = await request(`/v1/stories/${later.id}/pins/${community}`, tokens.demoAdmin, {
+      method: 'PUT',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(pinRes.status).toBe(200);
+    const laterEvents = pinEvents.slice(laterBefore);
+
+    // Same pin-row columns.
+    const bornRows = await bornPinRows(born.id, community);
+    const laterRows = await bornPinRows(later.id, community);
+    expect(bornRows).toHaveLength(1);
+    expect(laterRows).toHaveLength(1);
+    expect(laterRows[0]).toEqual(bornRows[0]);
+    expect(bornRows[0]?.tenant_id).toBe(tenantIds.demo);
+    expect(bornRows[0]?.pinned_by_user_id).toBe(demoAdminUserId);
+
+    // Same count on the admin history payload.
+    const mine = await walk(tokens.demoAdmin, '/v1/stories/mine', STORY_MAX_PAGE_SIZE);
+    const count = (id: string) => mine.find((item) => item.id === id)?.pinnedCommunityCount;
+    expect(count(born.id)).toBe(1);
+    expect(count(later.id)).toBe(1);
+
+    // Same Destaques membership.
+    const ids = (await destaques(community)).items.map((item) => item.id);
+    expect(ids).toContain(born.id);
+    expect(ids).toContain(later.id);
+
+    // Same single event, same key set.
+    expect(bornEvents.map((entry) => entry.name)).toEqual(['story.pinned']);
+    expect(laterEvents.map((entry) => entry.name)).toEqual(['story.pinned']);
+    expect(Object.keys(bornEvents[0]?.payload ?? {}).sort()).toEqual(
+      Object.keys(laterEvents[0]?.payload ?? {}).sort(),
+    );
+  });
+
+  it('05.1-8. D-96 and no idempotency: two identical publishes are two stories, in Destaques AND the strip', async () => {
+    const community = await makeBornCommunity('Nasce duas vezes');
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const body = {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — publicada duas vezes`,
+      communityId: community,
+    };
+
+    // Publish is deliberately NOT idempotent (STORY-01): the same body twice is two stories.
+    const first = await publish(tokens.demoAdmin, body);
+    const second = await publish(tokens.demoAdmin, body);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    const a = (await first.json()) as StorySummary;
+    const b = (await second.json()) as StorySummary;
+    created.push(a.id, b.id);
+    expect(a.id).not.toBe(b.id);
+    expect(await bornPinRows(a.id, community)).toHaveLength(1);
+    expect(await bornPinRows(b.id, community)).toHaveLength(1);
+
+    // The community is where the story ALSO stays…
+    const highlighted = (await destaques(community)).items.map((item) => item.id);
+    expect(highlighted).toContain(a.id);
+    expect(highlighted).toContain(b.id);
+
+    // …never where it is hidden (D-96): the member's tenant-wide strip carries both, because their
+    // asset is ready and the strip predicate does not look at pins at all.
+    const strip = (await walk(tokens.demoMember, '/v1/stories', STORY_MAX_PAGE_SIZE)).map(
+      (item) => item.id,
+    );
+    expect(strip).toContain(a.id);
+    expect(strip).toContain(b.id);
   });
 });
 
