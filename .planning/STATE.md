@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-01-PLAN.md
-last_updated: "2026-09-25T19:46:56.441Z"
+stopped_at: Completed 05.2-03-PLAN.md
+last_updated: "2026-09-25T20:13:59.437Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.2-01 (highlights tracer — tables, migration file 1, routes, pgTAP 120, isolation b7, seeded highlights)
-state_head: 38f7eb99e4239820b581d6f8e7e23eb32a82bee3
+last_activity_desc: Completed 05.2-03 (highlight curation API — rename, re-cover, reorder, delete, remove, catalogue, memberships, highlightCount, communities-off)
+state_head: 8171e77c43005f03b3f62ee496657a97719f11c2
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 66
+  completed_plans: 67
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 3 of 12
-Status: Executing Phase 05.2 — next is 05.2-03
-Last activity: 2026-09-25 — Completed 05.2-01 (highlights tracer: tables, migration file 1 with the no-loss backfill guard, four routes, pgTAP 120, isolation b7, seeded Bastidores/Aulas/Destaques; local DB reset on the developer's consent)
+Plan: 4 of 12
+Status: Executing Phase 05.2 — next is 05.2-04
+Last activity: 2026-09-25 — Completed 05.2-03 (highlight curation API: PATCH/DELETE highlight, remove item, PUT order, catalog and membership reads, highlightCount, communities-off bare 404, six ids-only event handlers, row-read budget 1)
 
-Progress: [███████████████████░] 59/62 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████░░░░░] 67/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -126,6 +126,7 @@ Progress: [███████████████████░] 59/62 p
 | Phase 05.1 P05 | 33 min | 3 tasks | 8 files |
 | Phase 05.2 P02 | 10 min | 2 tasks | 3 files |
 | Phase 05.2 P01 | 36min | 3 tasks | 13 files |
+| Phase 05.2 P03 | 21 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -379,6 +380,9 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-01: highlight services read the communities module flag BEFORE withTenantTx (PlaceGate) so one request never holds two pooled connections
 - [Phase 05.2]: 05.2-01: seeded Destaques mirrors the seeded pins row for row (pinner, pinned_at); Bastidores holds an active + the expired image; Aulas is the empty curator-only highlight
 - [Phase 05.2]: 05.2-01: the API isolation case for highlights is b7 (05.1-01 owns b6)
+- [Phase 05.2]: 05.2-03: every highlight write enters through resolveHighlight (in-lane, for update) then resolveHighlightPlace; take-downs (delete, remove) use the takedown intent and stay allowed on archived communities
+- [Phase 05.2]: 05.2-03: reorder locks the place rows, compares the locked id set (order_stale on any mismatch) and renumbers in ONE unnest-with-ordinality statement; uuid arrays cross drizzle as one Postgres array literal
+- [Phase 05.2]: 05.2-03: getHighlight keeps its single projection read as its in-lane resolve; listStoryHighlightIds hides community highlights while the communities module is off, like the catalogue
 
 ### Pending Todos
 
@@ -432,6 +436,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T19:46:46.557Z
-Stopped at: Completed 05.2-01-PLAN.md
+Last session: 2026-09-25T20:13:47.503Z
+Stopped at: Completed 05.2-03-PLAN.md
 Resume file: None
