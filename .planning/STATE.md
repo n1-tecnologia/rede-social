@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "05.1"
 current_phase_name: Community Authoring Entry Points
-status: executing
-stopped_at: Completed 05.1-03-PLAN.md
-last_updated: "2026-09-25T14:07:20.153Z"
+status: verifying
+stopped_at: Completed 05.1-05-PLAN.md
+last_updated: "2026-09-25T14:44:03.328Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.1-03 (/comunidades create control in the title row, Ativas/Arquivadas chips)
-state_head: 6a265f1d676d0d17ae909ecf1bbd42e2ddfbbd76
+last_activity_desc: Completed 05.1-05 (Reativar from the archived page, the Destaques + into the composer, the phase gate)
+state_head: d3bd95d3540ed0558c2851ded48f2aeaf05bed3a
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 67
-  completed_plans: 63
+  completed_plans: 64
   percent: 0
 ---
 
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 Phase: 05.1 (Community Authoring Entry Points) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-09-25 — Completed 05.1-03 (/comunidades title-row create control, manager-only Ativas/Arquivadas chips, archived pill and empty state, status-aware refresh and load-more)
+Status: Phase complete — ready for verification
+Last activity: 2026-09-25 — Completed 05.1-05 (one-tap Reativar under the archived note, the Destaques + for the attach permission on active communities, the 05.1 catalog pins, the three Phase 5 UAT reports replayed in a browser; phase gate green)
 
 Progress: [███████████████████░] 59/62 plans ([░░░░░░░░░░] 0%)
 
@@ -122,6 +122,7 @@ Progress: [███████████████████░] 59/62 p
 | Phase 05.1 P02 | 9 min | 2 tasks | 6 files |
 | Phase 05.1 P04 | 7 min | 2 tasks | 9 files |
 | Phase 05.1 P03 | 16 min | 3 tasks | 10 files |
+| Phase 05.1 P05 | 33 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -367,6 +368,8 @@ Recent decisions affecting current work:
 - [Phase 05.1]: 05.1-04: /stories/publicar resolves ?comunidade= on the server against the active list only for publish+manage viewers; the composer sends communityId only when chosen (one write) and lands on the community, close/discard return to origin
 - [Phase 05.1]: 05.1-04: UI-D-58 archived refusal resets the row to Nenhuma comunidade, names the community and drops it from the sheet; the row renders on the original communities prop and shows the same derived value the publish sends
 - [Phase 05.1]: 05.1-04: PickerDefaultRow (apps/web/components/communities) is the one leading no-community row for both the post and story pickers (UI-D-55, extracted not forked)
+- [Phase 05.1]: 05.1-05: the Reativar island lives in CommunityHeader's note slot (unchanged note text + island, manager only) and ends in router.refresh(), not a navigation; the Destaques + is the strip's own circle gated on stories.story.publish AND stories.story.manage AND an active community, with no viewer when there are no pins — One door per concept: the + reuses the home strip's own-circle geometry and 'Seu story' label; the gate is the exact pair the API requires to attach, so it never opens onto a composer that cannot attach
+- [Phase 05.1]: 05.1-05: e2e that needs the new catalog keys runs against a production next start on :3100 through a scratchpad config overriding baseURL only (PLAYWRIGHT_BASE_URL would mark the run remote and skip phase5-smoke); e2e needing seeded image bytes must re-seed after test:integration — The developer's long-running next dev memoizes the catalog; media-sweeper.test.ts empties the seeded media bucket
 
 ### Pending Todos
 
@@ -405,6 +408,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T14:07:20.032Z
-Stopped at: Completed 05.1-03-PLAN.md
+Last session: 2026-09-25T14:43:55.815Z
+Stopped at: Completed 05.1-05-PLAN.md
 Resume file: None
