@@ -1,7 +1,7 @@
 'use client';
 
 import { IconButton, useFocusTrap, useMediaQuery } from '@tria/ui';
-import { Play, Volume2, VolumeX, X } from 'lucide-react';
+import { Loader2, Play, Volume2, VolumeX, X } from 'lucide-react';
 import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
@@ -17,12 +17,33 @@ import { useStoryClock } from './useStoryClock';
 
 /**
  * The full-screen story viewer (STORY-02, UI-D-30..UI-D-34) — surface 2 of the five the design
- * prototype does not have, drawn by sketch 003 and approved before this file was written.
+ * prototype does not have, drawn by sketch 003 and approved before this file was written. Since
+ * 05.2-05 it plays a ROW of circles (D-107, UI-D-65, sketch 004).
  *
  * It is the prototype's own reels pager with the AXIS FLIPPED: a story sequence runs horizontally
  * and a dismiss runs downward, so `LIMIAR = 60`, the `0.35` rubber band, the easing curve and the
  * `|k − i| ≤ 1` neighbour window are ported as VALUES (Pitfall 12 — never as imports; that
  * directory is gitignored and is not a package).
+ *
+ * **The row (UI-D-65, R-D-M).** `groups` are the openable circles of the row, in row order, and the
+ * position is the PAIR `(g, i)`:
+ *
+ * - a TAP moves one story inside the group. At a group's last story, next enters the NEXT group's
+ *   first story; at a group's first story, previous enters the PREVIOUS group's LAST story — the
+ *   exact mirror, so the state machine is symmetric (R A2);
+ * - previous on the very first story of the row restarts that story's clock (there is nothing
+ *   before it), and next after the row's last story closes the viewer (D-107 — a row on a loop
+ *   would trap the member);
+ * - a horizontal SWIPE skips a whole group (left = the next group's first story, right = the
+ *   previous group's first story); ArrowLeft/ArrowRight keep tap semantics; swipe-down and Escape
+ *   close from anywhere;
+ * - a group whose items are `[]` is skipped in both directions; a group whose items are `null` has
+ *   not been fetched yet and shows a LOADING frame while `onNeedGroup` asks the host for it; a
+ *   group marked `failed` shows the group error with a retry (`onRetryGroup`).
+ *
+ * **Pitfall 4: every per-segment key is `${group.key}:${item.id}`.** The same story can sit in the
+ * tenant group and in a highlight (D-111), or in two highlights (D-100). Keyed by the story id
+ * alone, the two copies would share media, blocked and progress state and collide as React keys.
  *
  * **THREE THINGS A REVIEWER MUST NOT "FIX":**
  *
@@ -40,7 +61,7 @@ import { useStoryClock } from './useStoryClock';
  * **It ships no words (PWA-03) and resolves no route (MOD-02).** Every string is a `labels` prop,
  * the media is a node the HOST builds — the shipped video player binds an app-scoped server action
  * for its per-request playback token, which a module may not import — and the action row is handed
- * over whole.
+ * over whole. It fetches nothing either: a group's items arrive from the host.
  */
 
 /** What the viewer hands the host's media renderer. The host reports; the viewer decides. */
@@ -82,6 +103,22 @@ export interface StoryViewerItem {
   onRequestPlay?: () => void;
 }
 
+/**
+ * One circle of the row (UI-D-65, R-P6).
+ *
+ * - `items === null` means NOT LOADED: the loading frame shows and `onNeedGroup` fires. `[]` means
+ *   loaded and EMPTY: the group is skipped in both directions. Both are the host's to decide.
+ * - `failed` (with `items === null`) is a failed load: the group error and its retry render.
+ * - `header` is read ONLY while the group has no story to show (loading, error); once it has one,
+ *   the current story's own `avatar` / `authorName` / `timeLabel` are the header, as before.
+ */
+export interface StoryViewerGroup {
+  key: string;
+  items: readonly StoryViewerItem[] | null;
+  failed?: boolean;
+  header: { name: string; avatar: ReactNode };
+}
+
 export interface StoryViewerLabels {
   dialog: string;
   close: string;
@@ -92,35 +129,40 @@ export interface StoryViewerLabels {
   play: string;
   mediaError: string;
   retry: string;
+  /** Announced while a group's items are being fetched (UI-D-65 loading, screen-reader only). */
   loadingGroup: string;
+  /** The group-load failure sentence, above the shared retry (UI-D-65 error). */
   groupError: string;
-  /** Generated, bounded by the count, never member content (long-text/E04). */
+  /**
+   * `{group}: story {current} de {total}` — generated, bounded by the count, never member content
+   * beyond the group's own name (long-text/E04).
+   */
   position: (group: string, current: number, total: number) => string;
-}
-
-/**
- * 05.2-05 RED SHIM — deliberately INERT. The grouped props are accepted so the rewritten tests can
- * render, but only `groups[initialGroup]` is played and no group behaviour exists yet. The GREEN
- * commit replaces this whole block.
- */
-export interface StoryViewerGroup {
-  key: string;
-  items: readonly StoryViewerItem[] | null;
-  failed?: boolean;
-  header: { name: string; avatar: ReactNode };
 }
 
 export interface StoryViewerProps {
   /**
-   * FROZEN for the life of the viewing session. A story that expires — or that an admin deletes —
-   * mid-view plays out its own segment and is absent only from the NEXT strip read; nothing is ever
-   * removed under the member's finger (UI partial/E04).
+   * FROZEN for the life of the viewing session, group by group: a loaded group's items never change
+   * under the member's finger. A story that expires — or that an admin deletes — mid-view plays out
+   * its own segment and is absent only from the NEXT strip read (UI partial/E04). The only change
+   * the viewer expects is a `null` group becoming loaded (or failed) when the host answers.
    */
   groups: readonly StoryViewerGroup[];
   initialGroup?: number;
   initialIndex?: number;
+  /**
+   * The host fetches group `g`'s items. Called when the member ENTERS a `null` group and — the
+   * prefetch — when the current story is the last of its group and the next group is `null`. It
+   * may be called more than once for the same group; the host dedupes.
+   */
   onNeedGroup?: (group: number) => void;
+  /** The retry in a failed group's error frame. */
   onRetryGroup?: (group: number) => void;
+  /**
+   * Fired ONCE each time a segment becomes the current one and its media is ready (image `onLoad`,
+   * video `onCanPlay`) — never on mount and never for a pre-mounted neighbour. Plan 05.2-10's seen
+   * state consumes it.
+   */
   onSegmentShown?: (storyId: string) => void;
   labels: StoryViewerLabels;
   onClose: () => void;
@@ -178,10 +220,47 @@ const VIEWER_Z = 'z-[52]';
 
 type MediaState = 'loading' | 'ready' | 'error';
 
+type MediaHandlers = Omit<StoryMediaControls, 'active' | 'paused' | 'muted'>;
+
+/**
+ * The viewer's position. `landLast` is the pending "land on the LAST story" of a previous group
+ * that was entered before its items arrived (the mirror of next, R A2). `dir` is the direction of
+ * the move that got here, so an empty group can be skipped the way the member was going. `serial`
+ * counts navigations: it is what makes a revisit of the same segment a new showing (G9).
+ */
+type Position = { g: number; i: number; landLast: boolean; dir: 1 | -1; serial: number };
+
+/** Pitfall 4's composite key — the ONE place a per-segment key is built. */
+function segmentKey(group: { key: string }, item: { id: string }): string {
+  return `${group.key}:${item.id}`;
+}
+
+/** A group the member can land on: not loaded yet (it will load), failed (it offers a retry) or non-empty. */
+function enterable(group: StoryViewerGroup | undefined): boolean {
+  return group !== undefined && (group.items === null || group.items.length > 0);
+}
+
+function nextEnterable(groups: readonly StoryViewerGroup[], from: number): number {
+  for (let h = from + 1; h < groups.length; h += 1) if (enterable(groups[h])) return h;
+  return -1;
+}
+
+function previousEnterable(groups: readonly StoryViewerGroup[], from: number): number {
+  for (let h = Math.min(from, groups.length) - 1; h >= 0; h -= 1)
+    if (enterable(groups[h])) return h;
+  return -1;
+}
+
+/** One mounted pager slot: a story of the neighbour window and where it sits relative to the current. */
+type Slot = { key: string; item: StoryViewerItem; rel: -1 | 0 | 1 };
+
 export function StoryViewer({
   groups,
   initialGroup = 0,
   initialIndex = 0,
+  onNeedGroup,
+  onRetryGroup,
+  onSegmentShown,
   labels,
   onClose,
   externallyPaused = false,
@@ -191,17 +270,19 @@ export function StoryViewer({
   cancelFrame,
   autoplayCheckMs = 400,
 }: StoryViewerProps) {
-  // RED SHIM: the initial group alone, as a flat sequence.
-  const items = groups[initialGroup]?.items ?? [];
-  const [index, setIndex] = useState(() =>
-    Math.min(Math.max(initialIndex, 0), Math.max(items.length - 1, 0)),
-  );
+  const [pos, setPos] = useState<Position>(() => {
+    const g = Math.min(Math.max(initialGroup, 0), Math.max(groups.length - 1, 0));
+    const length = groups[g]?.items?.length ?? 0;
+    const i = Math.min(Math.max(initialIndex, 0), Math.max(length - 1, 0));
+    return { g, i, landLast: false, dir: 1, serial: 0 };
+  });
   const [drag, setDrag] = useState({ active: false, dx: 0, dy: 0 });
   const [holding, setHolding] = useState(false);
   const [keyboardPaused, setKeyboardPaused] = useState(false);
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const [documentHidden, setDocumentHidden] = useState(false);
   const [muted, setMuted] = useState(true);
+  // Every map below is keyed by `segmentKey(group, item)` — never by the story id (Pitfall 4).
   const [mediaState, setMediaState] = useState<Record<string, MediaState>>({});
   const [canPlay, setCanPlay] = useState<Record<string, boolean>>({});
   const [playing, setPlaying] = useState<Record<string, boolean>>({});
@@ -214,11 +295,39 @@ export function StoryViewer({
   const stageRef = useRef<HTMLDivElement>(null);
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
-  const current = items[index];
-  const currentId = current?.id ?? '';
+  /** A navigation: a new position AND a new showing of whatever lands in front of the member. */
+  const move = useCallback((g: number, i: number, dir: 1 | -1, landLast = false) => {
+    setPos((prev) => ({ g, i, landLast, dir, serial: prev.serial + 1 }));
+  }, []);
+
+  /* ── Where the member is ─────────────────────────────────────────────────────────────────────── */
+
+  const group = groups[pos.g];
+  const groupItems = group?.items && group.items.length > 0 ? group.items : null;
+  // A pending "land on the last story" resolves the moment the items arrive — derived here, so the
+  // first frame with items is already the right one; the effect below only tidies the state.
+  const index = groupItems
+    ? pos.landLast
+      ? groupItems.length - 1
+      : Math.min(pos.i, groupItems.length - 1)
+    : 0;
+  const current = groupItems?.[index] ?? null;
+  /** What fills the screen: a story, or one of the three frames a group without one shows. */
+  const frame: 'story' | 'loading' | 'error' | 'empty' =
+    group === undefined
+      ? 'empty'
+      : group.items === null
+        ? group.failed
+          ? 'error'
+          : 'loading'
+        : group.items.length === 0
+          ? 'empty'
+          : 'story';
+  const currentKey =
+    current && group ? segmentKey(group, current) : `${group?.key ?? ''}:#${frame}`;
   const isVideo = current?.mediaKind === 'video';
-  const currentState: MediaState = mediaState[currentId] ?? 'loading';
-  const autoplayBlocked = blocked[currentId] === true;
+  const currentState: MediaState = current ? (mediaState[currentKey] ?? 'loading') : 'loading';
+  const autoplayBlocked = current !== null && blocked[currentKey] === true;
 
   /**
    * ONE boolean, three sources plus the two the surface owns: the hold gesture, the host's external
@@ -234,37 +343,151 @@ export function StoryViewer({
     captionExpanded ||
     autoplayBlocked;
 
-  const goTo = useCallback((next: number) => setIndex(next), []);
-
+  /**
+   * NEXT (UI-D-65): the next story of the group; at the group's last story (or from a loading or
+   * error frame) the next enterable group's FIRST story; after the row's last story the viewer
+   * CLOSES (D-107) — a row on a loop traps the member.
+   */
   const goNext = useCallback(() => {
-    // D-78: the END CLOSES. A single-publisher strip on a loop traps the member in three stories.
-    if (index >= items.length - 1) {
+    if (groupItems && index < groupItems.length - 1) {
+      move(pos.g, index + 1, 1);
+      return;
+    }
+    const target = nextEnterable(groups, pos.g);
+    if (target < 0) {
       onClose();
       return;
     }
-    goTo(index + 1);
-  }, [goTo, index, items.length, onClose]);
+    move(target, 0, 1);
+  }, [groupItems, index, groups, pos.g, move, onClose]);
 
   const clock = useStoryClock({
     durationMs: STORY_DURATION_MS,
-    // The clock waits for the media (a slow image must not burn five seconds invisibly), and never
-    // drives a VIDEO — a video's own time does, so a stall desynchronises nothing.
-    paused: paused || currentState !== 'ready' || isVideo,
-    itemKey: currentId,
+    // The clock waits for the media (a slow image must not burn five seconds invisibly), never
+    // drives a VIDEO — a video's own time does, so a stall desynchronises nothing — and never runs
+    // over a frame with no story in it (a group loading, failed or empty).
+    paused: paused || current === null || currentState !== 'ready' || isVideo,
+    itemKey: currentKey,
     onComplete: goNext,
     now,
     requestFrame,
     cancelFrame,
   });
 
+  /**
+   * PREVIOUS, the exact mirror of next (R A2): the previous story of the group; at the group's
+   * first story the previous enterable group's LAST story (landing on it once its items arrive, if
+   * they have not yet); on the row's very first story there is nothing before it, so its clock
+   * restarts instead.
+   */
   const goPrevious = useCallback(() => {
-    // …and the START RESTARTS. There is nothing before the first story to go back to.
-    if (index === 0) {
+    if (groupItems && index > 0) {
+      move(pos.g, index - 1, -1);
+      return;
+    }
+    const target = previousEnterable(groups, pos.g);
+    if (target < 0) {
       clock.restart();
       return;
     }
-    goTo(index - 1);
-  }, [clock, goTo, index]);
+    const items = groups[target]?.items ?? null;
+    move(target, items ? items.length - 1 : 0, -1, items === null);
+  }, [groupItems, index, groups, pos.g, move, clock]);
+
+  /** A left swipe (R-D-M): the next group's FIRST story, or close after the row's last group. */
+  const skipNext = useCallback(() => {
+    const target = nextEnterable(groups, pos.g);
+    if (target < 0) {
+      onClose();
+      return;
+    }
+    move(target, 0, 1);
+  }, [groups, pos.g, move, onClose]);
+
+  /**
+   * A right swipe (R-D-M): the previous group's FIRST story. In the row's first group there is no
+   * previous group, so the swipe returns to that group's first story (restarting it if already
+   * there) — the start of the row, as far back as a swipe can go.
+   */
+  const skipPrevious = useCallback(() => {
+    const target = previousEnterable(groups, pos.g);
+    if (target >= 0) {
+      move(target, 0, -1);
+      return;
+    }
+    if (index > 0) move(pos.g, 0, -1);
+    else clock.restart();
+  }, [groups, pos.g, index, move, clock]);
+
+  /** Swipes and the X close through the latest `onClose` without re-arming the effects below. */
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onNeedGroupRef = useRef(onNeedGroup);
+  onNeedGroupRef.current = onNeedGroup;
+  const onSegmentShownRef = useRef(onSegmentShown);
+  onSegmentShownRef.current = onSegmentShown;
+
+  /**
+   * Tidies the two derived resolutions into state: a pending "land last" whose items arrived, and a
+   * group that turned out EMPTY — skipped the way the member was going. Past the row's last group
+   * that is a close (D-107); before the row's first, the nearest group ahead instead.
+   */
+  useEffect(() => {
+    if (frame === 'story' && pos.landLast && groupItems) {
+      setPos((prev) => ({ ...prev, i: groupItems.length - 1, landLast: false }));
+      return;
+    }
+    if (frame !== 'empty') return;
+    const target = pos.dir === 1 ? nextEnterable(groups, pos.g) : previousEnterable(groups, pos.g);
+    if (target >= 0) {
+      const items = groups[target]?.items ?? null;
+      const last = pos.dir === -1;
+      setPos((prev) => ({
+        g: target,
+        i: last && items ? items.length - 1 : 0,
+        landLast: last && items === null,
+        dir: prev.dir,
+        serial: prev.serial + 1,
+      }));
+      return;
+    }
+    const ahead = pos.dir === -1 ? nextEnterable(groups, pos.g) : -1;
+    if (ahead >= 0)
+      setPos((prev) => ({ g: ahead, i: 0, landLast: false, dir: 1, serial: prev.serial + 1 }));
+    else onCloseRef.current();
+  }, [frame, pos.landLast, pos.dir, pos.g, groupItems, groups]);
+
+  /** Entering a group that has not loaded asks the host for it (UI-D-65 loading). */
+  useEffect(() => {
+    if (frame === 'loading') onNeedGroupRef.current?.(pos.g);
+  }, [frame, pos.g]);
+
+  /**
+   * The PREFETCH: while the member watches a group's last story, the next group's items are
+   * requested, so crossing the boundary lands on a story rather than on a spinner.
+   */
+  const prefetch = (() => {
+    if (!groupItems || index < groupItems.length - 1) return -1;
+    const target = nextEnterable(groups, pos.g);
+    const next = groups[target];
+    return next && next.items === null && !next.failed ? target : -1;
+  })();
+  useEffect(() => {
+    if (prefetch >= 0) onNeedGroupRef.current?.(prefetch);
+  }, [prefetch]);
+
+  /**
+   * "Segment shown" (plan 05.2-10's seen state): ONE report per showing — the segment is the
+   * current one AND its media is ready. A neighbour decoding in the pre-buffer is not shown; an
+   * unrelated re-render is not a new showing; coming back to it after a move is.
+   */
+  const showing = `${pos.serial}|${currentKey}`;
+  const shownRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!current || currentState !== 'ready' || shownRef.current === showing) return;
+    shownRef.current = showing;
+    onSegmentShownRef.current?.(current.id);
+  }, [showing, current, currentState]);
 
   /** White status-bar ink over the media, REMOVED on unmount — the prototype's own hook. */
   useEffect(() => {
@@ -286,10 +509,10 @@ export function StoryViewer({
   }, []);
 
   /** A skip closes an expanded caption; otherwise the next story would open already paused. */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the reset is keyed on the INDEX change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the reset is keyed on the SEGMENT change
   useEffect(() => {
     setCaptionExpanded(false);
-  }, [index]);
+  }, [currentKey]);
 
   useFocusTrap(rootRef, true, onClose);
 
@@ -309,14 +532,57 @@ export function StoryViewer({
    * begun by then the clock STAYS PAUSED and the badge renders. One tap starts both.
    */
   useEffect(() => {
-    const video = current?.mediaKind === 'video' ? current : null;
-    if (!video) return;
-    if (!canPlay[video.id] || playing[video.id]) return;
+    if (current?.mediaKind !== 'video') return;
+    if (!canPlay[currentKey] || playing[currentKey]) return;
+    const key = currentKey;
     const timer = setTimeout(() => {
-      setBlocked((state) => ({ ...state, [video.id]: true }));
+      setBlocked((state) => ({ ...state, [key]: true }));
     }, autoplayCheckMs);
     return () => clearTimeout(timer);
-  }, [current, canPlay, playing, autoplayCheckMs]);
+  }, [current, currentKey, canPlay, playing, autoplayCheckMs]);
+
+  /* ── The neighbour window ──────────────────────────────────────────────────────────────────────
+   *
+   * `i ± 1` inside the group, plus — at the group's edges — the next group's FIRST story (the
+   * pre-buffer for the boundary, R-P6) and the previous group's LAST story (so a story leaving
+   * across a boundary slides out instead of vanishing). Each slot sits at `rel` ∈ {-1, 0, 1} from
+   * the current story and is keyed by its composite key, so a move REUSES the mounted node: the
+   * decoded image in the pre-buffer is the one that slides in.
+   */
+  const slots = useMemo<Slot[]>(() => {
+    const list: Slot[] = [];
+    if (!group) return list;
+    const lastOfPrevious = (): Slot | null => {
+      const previous = groups[previousEnterable(groups, pos.g)];
+      const items = previous?.items;
+      const last = items?.[items.length - 1];
+      return previous && last ? { key: segmentKey(previous, last), item: last, rel: -1 } : null;
+    };
+    const firstOfNext = (): Slot | null => {
+      const next = groups[nextEnterable(groups, pos.g)];
+      const first = next?.items?.[0];
+      return next && first ? { key: segmentKey(next, first), item: first, rel: 1 } : null;
+    };
+
+    if (!groupItems) {
+      const before = lastOfPrevious();
+      if (before) list.push(before);
+      return list;
+    }
+    const before = groupItems[index - 1];
+    const here = groupItems[index];
+    const after = groupItems[index + 1];
+    const previousSlot = before
+      ? ({ key: segmentKey(group, before), item: before, rel: -1 } as const)
+      : lastOfPrevious();
+    if (previousSlot) list.push(previousSlot);
+    if (here) list.push({ key: segmentKey(group, here), item: here, rel: 0 });
+    const nextSlot = after
+      ? ({ key: segmentKey(group, after), item: after, rel: 1 } as const)
+      : firstOfNext();
+    if (nextSlot) list.push(nextSlot);
+    return list;
+  }, [group, groups, groupItems, index, pos.g]);
 
   /* ── The media controls ────────────────────────────────────────────────────────────────────────
    *
@@ -327,59 +593,54 @@ export function StoryViewer({
    * fixed at its own end too, but a component that destabilises its children is a defect waiting
    * for the next consumer to rediscover, so it is fixed at BOTH ends.
    *
-   * The structure is two memos over a live ref:
-   *   1. the ref carries the only two VOLATILE things the handlers need (the current index and the
-   *      current `goNext`), so no handler has to close over them;
-   *   2. the handler map is memoised over `[items]` alone — each handler closes over its own story
-   *      id and its own position, both fixed for a given array, and every state write is already a
-   *      functional updater, so nothing else needs capturing. The identities therefore live as long
-   *      as the sequence does;
+   * The structure is a per-segment cache over a live ref:
+   *   1. the ref carries the only two VOLATILE things the handlers need (the current segment's key
+   *      and the current `goNext`), so no handler has to close over them;
+   *   2. the handlers are cached per COMPOSITE segment key for the viewer's life — each closes over
+   *      its own key alone, and every state write is a functional updater, so nothing else needs
+   *      capturing. A segment keeps the same handler identities however the row changes around it
+   *      (a group loading, a move, a mute toggle);
    *   3. the control-object map is memoised over the four things that legitimately change it. A
    *      mute toggle SHOULD hand the video bridge a new object; a keystroke should not.
    */
-  const liveRef = useRef({ index, goNext });
-  liveRef.current = { index, goNext };
+  const liveRef = useRef({ currentKey, goNext });
+  liveRef.current = { currentKey, goNext };
 
-  const mediaHandlers = useMemo(() => {
-    const map = new Map<string, Omit<StoryMediaControls, 'active' | 'paused' | 'muted'>>();
-    items.forEach((item, k) => {
-      map.set(item.id, {
-        onLoad: () => setMediaState((state) => ({ ...state, [item.id]: 'ready' })),
-        onError: () => setMediaState((state) => ({ ...state, [item.id]: 'error' })),
-        onCanPlay: () => {
-          setMediaState((state) => ({ ...state, [item.id]: 'ready' }));
-          setCanPlay((state) => ({ ...state, [item.id]: true }));
-        },
-        onPlaying: () => {
-          setPlaying((state) => ({ ...state, [item.id]: true }));
-          setBlocked((state) => ({ ...state, [item.id]: false }));
-        },
-        onTimeUpdate: (currentSeconds: number, durationSeconds: number) => {
-          if (durationSeconds <= 0) return;
-          const ratio = currentSeconds / durationSeconds;
-          setVideoProgress((state) => ({ ...state, [item.id]: ratio }));
-          // The live ref rather than a render closure: same rule, read at call time.
-          if (ratio >= 1 && k === liveRef.current.index) liveRef.current.goNext();
-        },
-      });
-    });
-    return map;
-  }, [items]);
+  const handlerCache = useRef(new Map<string, MediaHandlers>());
+  const handlersFor = useCallback((key: string): MediaHandlers => {
+    const cached = handlerCache.current.get(key);
+    if (cached) return cached;
+    const created: MediaHandlers = {
+      onLoad: () => setMediaState((state) => ({ ...state, [key]: 'ready' })),
+      onError: () => setMediaState((state) => ({ ...state, [key]: 'error' })),
+      onCanPlay: () => {
+        setMediaState((state) => ({ ...state, [key]: 'ready' }));
+        setCanPlay((state) => ({ ...state, [key]: true }));
+      },
+      onPlaying: () => {
+        setPlaying((state) => ({ ...state, [key]: true }));
+        setBlocked((state) => ({ ...state, [key]: false }));
+      },
+      onTimeUpdate: (currentSeconds: number, durationSeconds: number) => {
+        if (durationSeconds <= 0) return;
+        const ratio = currentSeconds / durationSeconds;
+        setVideoProgress((state) => ({ ...state, [key]: ratio }));
+        // The live ref rather than a render closure: same rule, read at call time.
+        if (ratio >= 1 && key === liveRef.current.currentKey) liveRef.current.goNext();
+      },
+    };
+    handlerCache.current.set(key, created);
+    return created;
+  }, []);
 
   const mediaControls = useMemo(() => {
     const map = new Map<string, StoryMediaControls>();
-    items.forEach((item, k) => {
-      const handlers = mediaHandlers.get(item.id);
-      if (!handlers) return;
-      map.set(item.id, {
-        active: k === index,
-        paused: paused || k !== index,
-        muted,
-        ...handlers,
-      });
-    });
+    for (const slot of slots) {
+      const active = slot.key === currentKey;
+      map.set(slot.key, { active, paused: paused || !active, muted, ...handlersFor(slot.key) });
+    }
     return map;
-  }, [items, index, paused, muted, mediaHandlers]);
+  }, [slots, currentKey, paused, muted, handlersFor]);
 
   /* ── Gestures ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -432,13 +693,14 @@ export function StoryViewer({
       return;
     }
 
-    // The DOMINANT AXIS decides, so one gesture never both moves through the sequence AND dismisses.
+    // The DOMINANT AXIS decides, so one gesture never both moves through the row AND dismisses.
+    // Horizontal is a GROUP skip (R-D-M): Instagram's "swipe between accounts".
     if (Math.abs(dx) > Math.abs(dy)) {
-      if (dx <= -DRAG_THRESHOLD_PX) goNext();
-      else if (dx >= DRAG_THRESHOLD_PX) goPrevious();
+      if (dx <= -DRAG_THRESHOLD_PX) skipNext();
+      else if (dx >= DRAG_THRESHOLD_PX) skipPrevious();
       return;
     }
-    // Down dismisses; UP is deliberately inert — there is nothing above a story.
+    // Down dismisses — from ANY frame, loading and error included; UP is deliberately inert.
     if (dy >= DRAG_THRESHOLD_PX) onClose();
   };
 
@@ -449,6 +711,7 @@ export function StoryViewer({
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // The arrows keep TAP semantics (one story), not the swipe's group skip.
     if (event.key === 'ArrowRight') {
       event.preventDefault();
       goNext();
@@ -474,12 +737,17 @@ export function StoryViewer({
   const horizontal = Math.abs(drag.dx) > Math.abs(drag.dy);
   const offsetX = drag.active && horizontal ? drag.dx * RUBBER_BAND : 0;
   const offsetY = drag.active && !horizontal && drag.dy > 0 ? drag.dy * RUBBER_BAND : 0;
+  const slideTransition = reduceMotion ? 'none' : PAGER_TRANSITION;
 
-  const progress = isVideo ? (videoProgress[currentId] ?? 0) : clock.progress;
-  const positionLabel = useMemo(
-    () => labels.position(groups[initialGroup]?.header.name ?? '', index + 1, items.length),
-    [labels, index, items.length, groups, initialGroup],
-  );
+  const progress = current ? (isVideo ? (videoProgress[currentKey] ?? 0) : clock.progress) : 0;
+  /** A frame with no story still draws ONE empty segment (UI-D-65 loading). */
+  const barItems = useMemo(() => groupItems ?? [{ id: `#${frame}` }], [groupItems, frame]);
+  const positionLabel = useMemo(() => {
+    if (frame === 'loading') return labels.loadingGroup;
+    if (frame === 'error') return labels.groupError;
+    if (!groupItems || !group) return '';
+    return labels.position(group.header.name, index + 1, groupItems.length);
+  }, [labels, frame, group, groupItems, index]);
 
   return (
     // `touchAction: 'none'` is what stops the browser stealing the drag and turning a swipe into a
@@ -490,6 +758,7 @@ export function StoryViewer({
       aria-modal="true"
       aria-label={labels.dialog}
       tabIndex={-1}
+      data-story-group={pos.g}
       data-story-index={index}
       data-paused={paused ? 'true' : 'false'}
       onKeyDown={onKeyDown}
@@ -509,29 +778,30 @@ export function StoryViewer({
           data-testid="story-pager"
           className="absolute inset-0"
           style={{
-            transform: `translate(calc(${-index * 100}% + ${offsetX}px), ${offsetY}px)`,
+            // The pager follows the finger and settles back; each SLOT carries its own place in
+            // the row, so a move slides the slots rather than the whole track.
+            transform: `translate(${offsetX}px, ${offsetY}px)`,
             transition: drag.active || reduceMotion ? 'none' : PAGER_TRANSITION,
           }}
         >
-          {items.map((item, k) => (
+          {slots.map((slot) => (
+            // The neighbour window IS the pre-buffer: the next story has already decoded when the
+            // move lands, so a pager frame is never an empty box — across a group boundary too.
             <div
-              key={item.id}
-              className="absolute inset-y-0 w-full"
-              style={{ left: `${k * 100}%` }}
+              key={slot.key}
+              data-segment-key={slot.key}
+              className="absolute inset-0"
+              style={{ transform: `translateX(${slot.rel * 100}%)`, transition: slideTransition }}
             >
-              {/* The neighbour window IS the pre-buffer: the next story has already decoded when
-                  the swipe lands, so a pager frame is never an empty box. */}
-              {Math.abs(k - index) <= 1 ? (
-                <div
-                  className="absolute inset-0 grid place-items-center"
-                  key={attempt[item.id] ?? 0}
-                >
-                  {(() => {
-                    const controls = mediaControls.get(item.id);
-                    return controls ? item.media(controls) : null;
-                  })()}
-                </div>
-              ) : null}
+              <div
+                className="absolute inset-0 grid place-items-center"
+                key={attempt[slot.key] ?? 0}
+              >
+                {(() => {
+                  const controls = mediaControls.get(slot.key);
+                  return controls ? slot.item.media(controls) : null;
+                })()}
+              </div>
             </div>
           ))}
         </div>
@@ -562,8 +832,8 @@ export function StoryViewer({
       </div>
 
       {/* ── OUTSIDE the stage, deliberately (CR-04) ─────────────────────────────────────────────
-          Both controls below used to live INSIDE the div above, the one that owns
-          `onPointerDown`/`onPointerMove`/`onPointerUp`. A tap on either therefore also ran the
+          Every control below used to live INSIDE the div above, the one that owns
+          `onPointerDown`/`onPointerMove`/`onPointerUp`. A tap on one therefore also ran the
           stage's tap-zone maths and advanced the story: the member pressed "play" and lost the
           story instead. The viewer must not mount two different meanings on the same tap.
 
@@ -579,6 +849,38 @@ export function StoryViewer({
           no browser-level spec in this repo drives these controls. It is carried as an open human
           check in the phase's verification pack (WR-09). */}
 
+      {frame === 'loading' ? (
+        // UI-D-65 loading: the black frame IS the root; the spinner is decoration (the live region
+        // below carries the words), and it is transparent to taps so the row stays navigable.
+        <div className="pointer-events-none absolute inset-0 z-[2] grid place-items-center">
+          <Loader2
+            data-testid="story-group-loading"
+            size={24}
+            aria-hidden
+            className="animate-spin text-white/70"
+          />
+        </div>
+      ) : null}
+
+      {frame === 'error' ? (
+        // UI-D-65 error: the shipped media-error block with the GROUP's sentence. The same two-part
+        // idiom as below — the container ignores taps, only the retry takes one — so close and
+        // swipe stay live over a group that could not load.
+        <div
+          data-testid="story-group-error"
+          className="pointer-events-none absolute inset-0 z-[4] flex flex-col items-center justify-center gap-3 px-8 text-center"
+        >
+          <p className="text-sm">{labels.groupError}</p>
+          <button
+            type="button"
+            onClick={() => onRetryGroup?.(pos.g)}
+            className="pointer-events-auto text-sm font-bold underline"
+          >
+            {labels.retry}
+          </button>
+        </div>
+      ) : null}
+
       {isVideo && autoplayBlocked ? (
         // The badge occupies only its own box, so the area around it stays tappable by the stage.
         <button
@@ -586,7 +888,7 @@ export function StoryViewer({
           data-testid="story-autoplay-badge"
           aria-label={labels.play}
           onClick={() => {
-            setBlocked((state) => ({ ...state, [currentId]: false }));
+            setBlocked((state) => ({ ...state, [currentKey]: false }));
             setPlayAttempt((value) => value + 1);
             // Synchronously inside the gesture: iOS grants playback to the handler, not to a
             // later effect.
@@ -599,7 +901,7 @@ export function StoryViewer({
         </button>
       ) : null}
 
-      {currentState === 'error' ? (
+      {current && currentState === 'error' ? (
         // `absolute inset-0` as a SIBLING of the stage would swallow every tap on the whole screen,
         // and the member could no longer advance past a failed story. So: the container is
         // transparent to hit-testing and only the control that needs a tap of its own takes one —
@@ -613,8 +915,8 @@ export function StoryViewer({
             type="button"
             onClick={() =>
               setAttempt((state) => {
-                setMediaState((media) => ({ ...media, [currentId]: 'loading' }));
-                return { ...state, [currentId]: (state[currentId] ?? 0) + 1 };
+                setMediaState((media) => ({ ...media, [currentKey]: 'loading' }));
+                return { ...state, [currentKey]: (state[currentKey] ?? 0) + 1 };
               })
             }
             className="pointer-events-auto text-sm font-bold underline"
@@ -624,7 +926,14 @@ export function StoryViewer({
         </div>
       ) : null}
 
-      <StoryProgressBars items={items} index={index} progress={progress} />
+      {/* The CURRENT group's bars only, reset on a group change (UI-D-65) — keyed by the group so
+          crossing from N bars to M never reuses a stale segment. */}
+      <StoryProgressBars
+        items={barItems}
+        index={index}
+        progress={progress}
+        groupKey={group?.key ?? ''}
+      />
 
       {/* Exactly ONE polite region for the whole viewer: the bars are silent, so the position is
           announced once per story rather than sixty times a second. */}
@@ -636,10 +945,14 @@ export function StoryViewer({
         className="absolute right-0 left-0 z-[3] flex items-center gap-2.5 px-4"
         style={{ top: 'calc(var(--safe-top) + 24px)' }}
       >
-        {current?.avatar}
+        {current ? current.avatar : group?.header.avatar}
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-bold">{current?.authorName}</span>
-          <span className="block text-xs text-white/75">{current?.timeLabel}</span>
+          <span className="block truncate text-sm font-bold">
+            {current ? current.authorName : group?.header.name}
+          </span>
+          {current ? (
+            <span className="block text-xs text-white/75">{current.timeLabel}</span>
+          ) : null}
         </span>
         <IconButton
           icon={muted ? VolumeX : Volume2}

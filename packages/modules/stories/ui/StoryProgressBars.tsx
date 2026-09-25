@@ -3,10 +3,14 @@
 /**
  * The segmented progress row at the top of the viewer (UI-D-30).
  *
- * **It renders from the SAME array the pager renders from.** The count is `items.length`, never a
- * number computed beside it — so the bars and the sequence cannot disagree about how many stories
- * there are, and "zero bars" is unreachable for exactly the reason an empty sequence is (the viewer
- * is only ever entered from a circle).
+ * **It renders from the SAME array the pager renders from** — the CURRENT group's (UI-D-65). The
+ * count is `items.length`, never a number computed beside it — so the bars and the group cannot
+ * disagree about how many stories there are. A group with no story to show yet (loading, error)
+ * hands in ONE placeholder, so "zero bars" stays unreachable.
+ *
+ * **Every segment is keyed by its GROUP as well as its story** (Pitfall 4): the same story can open
+ * one group and sit in the next (D-111), and crossing from N bars to M must re-render the row for M
+ * rather than reuse a segment that belonged to another group.
  *
  * **It is DECORATIVE and it must stay that way.** `aria-hidden`, no text node, no `aria-label`, no
  * `role="progressbar"`. A screen reader hears the position ONCE, from the viewer's single polite
@@ -25,6 +29,8 @@ export interface StoryProgressBarsProps {
   index: number;
   /** `0..1` for the ACTIVE segment only. */
   progress: number;
+  /** The group these items belong to — the first half of every segment's key (Pitfall 4). */
+  groupKey?: string;
 }
 
 /** `0..1` -> a CSS width. Clamped, so a video reporting a time past its own duration cannot overflow. */
@@ -32,7 +38,12 @@ function widthOf(value: number): string {
   return `${Math.min(100, Math.max(0, value * 100))}%`;
 }
 
-export function StoryProgressBars({ items, index, progress }: StoryProgressBarsProps) {
+export function StoryProgressBars({
+  items,
+  index,
+  progress,
+  groupKey = '',
+}: StoryProgressBarsProps) {
   return (
     // `flex-nowrap` is load-bearing rather than default-restating: 25 segments at 320px must share
     // ONE row (the overflow backstop). `gap-1` + `px-2` is the sketch's geometry verbatim.
@@ -48,7 +59,7 @@ export function StoryProgressBars({ items, index, progress }: StoryProgressBarsP
     >
       {items.map((item, k) => (
         <span
-          key={item.id}
+          key={`${groupKey}:${item.id}`}
           data-testid={`story-segment-${k}`}
           // `h-0.5` = 2px, the hairline the sketch draws, over `bg-white/35`. `flex-1` with
           // `min-w-0` is what keeps 25 of them legible instead of letting one push the row wide.

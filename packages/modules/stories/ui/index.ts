@@ -30,6 +30,7 @@ export {
 export {
   type StoryMediaControls,
   StoryViewer,
+  type StoryViewerGroup,
   type StoryViewerItem,
   type StoryViewerLabels,
   type StoryViewerProps,

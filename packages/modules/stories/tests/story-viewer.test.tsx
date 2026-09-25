@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { STORY_DURATION_MS } from '../contracts/index';
@@ -668,8 +668,10 @@ describe('StoryViewer — a row of groups (D-107, UI-D-65, R-D-M)', () => {
       onClose,
     });
 
-    expect(screen.getByTestId('story-group-error')).toBeInTheDocument();
-    expect(screen.getByText(LABELS.groupError)).toBeInTheDocument();
+    const error = screen.getByTestId('story-group-error');
+    expect(within(error).getByText(LABELS.groupError)).toBeInTheDocument();
+    // The one polite region announces the failure too, in place of the position.
+    expect(screen.getByTestId('story-position')).toHaveTextContent(LABELS.groupError);
     expect(screen.queryByTestId('story-group-loading')).toBeNull();
     // A failed group is not re-requested behind the member's back; only the retry asks again.
     expect(onNeedGroup).not.toHaveBeenCalled();

@@ -10,6 +10,7 @@ import {
 import {
   type StoryMediaControls,
   StoryViewer,
+  type StoryViewerGroup,
   type StoryViewerItem,
 } from '@tria/module-stories/ui';
 import { Avatar, IconButton, useToast } from '@tria/ui';
@@ -215,9 +216,24 @@ export function StoryViewerHost({
     [items, author, labels, onLike, onUnlike, toast, bindPlay, comments, bindCountBump],
   );
 
+  /**
+   * The viewer plays a ROW of groups (05.2-05); this host still hands it ONE sequence, so it is one
+   * group whose header is the author — every caller behaves exactly as before.
+   */
+  const groups = useMemo<StoryViewerGroup[]>(
+    () => [
+      {
+        key: 'sequence',
+        items: viewerItems,
+        header: { name: author.name, avatar: <Avatar src={author.avatarUrl} alt="" size="sm" /> },
+      },
+    ],
+    [viewerItems, author],
+  );
+
   return (
     <StoryViewer
-      items={viewerItems}
+      groups={groups}
       initialIndex={initialIndex}
       onClose={close}
       // The third source of the viewer's single pause boolean, beside the hold gesture and document
@@ -250,7 +266,11 @@ export function StoryViewerHost({
         play: labels.play,
         mediaError: labels.mediaError,
         retry: labels.retry,
-        position: (current, total) => fill(labels.position, { current, total }),
+        // One LOADED group: the loading and group-error frames are unreachable from this host, so
+        // these two borrow the nearest existing copy until the host passes real groups.
+        loadingGroup: labels.dialog,
+        groupError: labels.mediaError,
+        position: (_group, current, total) => fill(labels.position, { current, total }),
       }}
     />
   );
