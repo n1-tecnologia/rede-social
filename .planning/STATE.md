@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-05-PLAN.md
-last_updated: "2026-09-25T22:32:57.197Z"
+stopped_at: Completed 05.2-06-PLAN.md
+last_updated: "2026-09-25T22:55:05.187Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.2-05 (grouped story viewer — every Início circle plays its own group; highlights loaded lazily with prefetch and retry; composite per-segment keys; onSegmentShown)
-state_head: ee308343f11468e6724861986579ff1cf2be3e98
+last_activity_desc: Completed 05.2-06 (the shared highlight sheet — HighlightSheet checklist/single on the HighlightMembershipList toggle machine, HighlightTitleStep; loadHighlightSheetAction + add/remove toggle actions; the curator-only Destacar pill in the viewer with the clock paused)
+state_head: 96af90285086992cb311c06667c315fef7766f9e
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 69
+  completed_plans: 70
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 6 of 12
-Status: Executing Phase 05.2 — next is 05.2-06
-Last activity: 2026-09-25 — Completed 05.2-05 (the grouped story viewer: UI-D-65 row boundaries, swipe-skip, loading/failed group frames and prefetch; loadHighlightItemsAction; every Início highlight circle opens its own group; e2e on :3100)
+Plan: 7 of 12
+Status: Executing Phase 05.2 — next is 05.2-07
+Last activity: 2026-09-25 — Completed 05.2-06 (D-110's one highlight sheet in both modes and the shared title step; the sheet's composed read and one validated action per toggle; "Destacar" in the viewer for curators, clock paused from the tap; smoke on :3100)
 
-Progress: [████████████████░░░░] 69/88 plans ([░░░░░░░░░░] 0%)
+Progress: [████████████████░░░░] 70/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -129,6 +129,7 @@ Progress: [████████████████░░░░] 69/88 p
 | Phase 05.2 P03 | 21 min | 2 tasks | 7 files |
 | Phase 05.2 P04 | 44 min | 3 tasks | 13 files |
 | Phase 05.2 P05 | 30 min | 3 tasks | 19 files |
+| Phase 05.2 P06 | 18 min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -391,6 +392,8 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-05: a horizontal swipe skips a whole group for every viewer caller; on the single-group deep link and community pinned row a left swipe closes and a right swipe returns to the first story
 - [Phase 05.2]: 05.2-05: highlight groups load lazily through loadHighlightItemsAction (uuid guard, bare 404 -> ok:false, never revalidates); StoriesSurface keeps loaded groups for the page's life with in-flight dedupe; highlight groups never change the URL
 - [Phase 05.2]: 05.2-05: every per-segment key, state map and host registry is ${group.key}:${item.id} (Pitfall 4); onSegmentShown fires once per showing of a ready current segment, ready for plan 10
+- [Phase 05.2]: 05.2-06: the viewer pauses from the Destacar tap until the sheet closes (the read included), so the sheet always describes the story on screen at the tap
+- [Phase 05.2]: 05.2-06: HighlightSheet is D-110's one membership sheet (checklist + single modes on HighlightMembershipList); curation toggles take a caller-owned revalidate flag: the viewer passes false, list screens true
 
 ### Pending Todos
 
@@ -444,6 +447,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T22:32:57.104Z
-Stopped at: Completed 05.2-05-PLAN.md
+Last session: 2026-09-25T22:54:59.449Z
+Stopped at: Completed 05.2-06-PLAN.md
 Resume file: None
