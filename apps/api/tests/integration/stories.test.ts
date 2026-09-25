@@ -1902,6 +1902,11 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
    */
   const createdHighlights: string[] = [];
 
+  /** Every curation event this block's requests produced, by name — the transitions-only checks. */
+  const curationEvents: { name: string; payload: Record<string, unknown> }[] = [];
+  const curationOffs: (() => void)[] = [];
+  const eventsNamed = (name: string) => curationEvents.filter((event) => event.name === name);
+
   const hlRequest = (
     token: string,
     path: string,
@@ -1987,6 +1992,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
   };
 
   afterAll(async () => {
+    for (const off of curationOffs) off();
     if (createdHighlights.length > 0) {
       await adminSql`delete from public.story_highlights where id = any(${createdHighlights}::uuid[])`;
     }
@@ -2231,6 +2237,323 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     expect(detail.items.map((story) => story.id).sort()).toEqual(
       pins.map((pin) => pin.story_id).sort(),
     );
+  });
+  /* ── 05.2-03: rename, re-cover, delete, remove (HIGHLIGHT-01/02, D-101, R-D-F, R-D-L) ─────────── */
+
+  beforeAll(() => {
+    for (const name of [
+      'highlight.updated',
+      'highlight.deleted',
+      'highlight.reordered',
+      'story.unhighlighted',
+    ] as const) {
+      curationOffs.push(
+        subscribe(name, async (payload) => {
+          curationEvents.push({ name, payload: payload as unknown as Record<string, unknown> });
+        }),
+      );
+    }
+  });
+
+  const patchHighlight = (token: string, highlightId: string, body: unknown) =>
+    hlRequest(token, `/${highlightId}`, { method: 'PATCH', body: JSON.stringify(body) });
+
+  const deleteHighlightReq = (token: string, highlightId: string) =>
+    hlRequest(token, `/${highlightId}`, { method: 'DELETE' });
+
+  const removeItem = (token: string, highlightId: string, storyId: string) =>
+    hlRequest(token, `/${highlightId}/stories/${storyId}`, { method: 'DELETE' });
+
+  /** The CURATOR's view of one highlight in its place's row (`scope=all` includes empty ones). */
+  async function curated(highlightId: string, communityId?: string): Promise<HighlightSummary> {
+    const query = communityId ? `?scope=all&communityId=${communityId}` : '?scope=all';
+    const found = (await row(tokens.demoAdmin, query)).find((item) => item.id === highlightId);
+    expect(found, `highlight ${highlightId} in the curator row`).toBeDefined();
+    return found as HighlightSummary;
+  }
+
+  /** A ready VIDEO story of the demo tenant, published through the API. */
+  async function publishVideo(label: string): Promise<{ storyId: string; assetId: string }> {
+    const assetId = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+      kind: 'video',
+      providerAssetId: `fake-${randomUUID()}`,
+    });
+    const res = await publish(tokens.demoAdmin, {
+      mediaAssetId: assetId,
+      mediaKind: 'video',
+      caption: `${TEST_CAPTION_PREFIX} — ${label}`,
+    });
+    expect(res.status).toBe(201);
+    const storyId = ((await res.json()) as StorySummary).id;
+    created.push(storyId);
+    return { storyId, assetId };
+  }
+
+  /** The stored cover columns, read past the API — what the read-time rule is computed FROM. */
+  async function storedCover(highlightId: string) {
+    const [stored] = await adminSql<
+      { cover_story_id: string | null; cover_asset_id: string | null }[]
+    >`
+      select cover_story_id::text, cover_asset_id::text from public.story_highlights
+       where id = ${highlightId}::uuid`;
+    return stored;
+  }
+
+  /** Every bare-404 body must be identical once the per-call `requestId` is stripped (D-23). */
+  async function expectBare404s(responses: Response[]): Promise<void> {
+    const texts: string[] = [];
+    for (const res of responses) {
+      expect(res.status).toBe(404);
+      const text = await res.text();
+      const body = JSON.parse(text) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(Object.hasOwn(body.error, 'details')).toBe(false);
+      texts.push(withoutRequestId(text));
+    }
+    expect(new Set(texts).size).toBe(1);
+  }
+
+  it('05.2-8 rename: a PATCH title answers the new summary; empty is `title_invalid`, `{}` is VALIDATION_FAILED', async () => {
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Renomear' });
+    const before = eventsNamed('highlight.updated').length;
+
+    const res = await patchHighlight(tokens.demoAdmin, highlight.id, {
+      title: ' Teste Novo nome ',
+    });
+    expect(res.status).toBe(200);
+    const summary = highlightSummarySchema.parse(await res.json());
+    expect(summary.id).toBe(highlight.id);
+    expect(summary.title).toBe('Teste Novo nome');
+    expect(summary.position).toBe(highlight.position);
+    expect(eventsNamed('highlight.updated')).toHaveLength(before + 1);
+    expect(Object.keys(eventsNamed('highlight.updated').at(-1)?.payload ?? {}).sort()).toEqual([
+      'actorUserId',
+      'highlightId',
+      'tenantId',
+    ]);
+
+    // The SAME title again: a 200 with the same summary, and no second announcement.
+    const repeat = await patchHighlight(tokens.demoAdmin, highlight.id, {
+      title: 'Teste Novo nome',
+    });
+    expect(repeat.status).toBe(200);
+    expect(highlightSummarySchema.parse(await repeat.json()).title).toBe('Teste Novo nome');
+    expect(eventsNamed('highlight.updated')).toHaveLength(before + 1);
+
+    const empty = await patchHighlight(tokens.demoAdmin, highlight.id, { title: '   ' });
+    expect(empty.status).toBe(400);
+    expect((await envelope(empty)).error.details).toEqual({ highlight: 'title_invalid' });
+
+    const nothing = await patchHighlight(tokens.demoAdmin, highlight.id, {});
+    expect(nothing.status).toBe(400);
+    const nothingBody = await envelope(nothing);
+    expect(nothingBody.error.code).toBe('VALIDATION_FAILED');
+    expect(nothingBody.error.details).not.toHaveProperty('highlight');
+
+    // Refusals wrote nothing: the stored title is the renamed one.
+    expect((await curated(highlight.id)).title).toBe('Teste Novo nome');
+  });
+
+  it('05.2-9 cover by story: image-only (D-101), a video or a foreign story is the bare 404, removing the chosen story clears it', async () => {
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Capa' });
+    const video = await publishVideo('capa em video');
+    expect((await addItem(tokens.demoAdmin, highlight.id, video.storyId)).status).toBe(200);
+
+    // The recorded image-only scope: an all-video highlight resolves NO automatic cover.
+    const allVideo = await curated(highlight.id);
+    expect(allVideo.itemCount).toBe(1);
+    expect(allVideo.coverAssetId).toBeNull();
+    expect(allVideo.coverChosen).toBe(false);
+
+    const image = await publishImage('capa escolhida');
+    expect((await addItem(tokens.demoAdmin, highlight.id, image.storyId)).status).toBe(200);
+
+    const chosen = await patchHighlight(tokens.demoAdmin, highlight.id, {
+      cover: { storyId: image.storyId },
+    });
+    expect(chosen.status).toBe(200);
+    const chosenBody = highlightSummarySchema.parse(await chosen.json());
+    expect(chosenBody.coverChosen).toBe(true);
+    expect(chosenBody.coverStoryId).toBe(image.storyId);
+    expect(chosenBody.coverAssetId).toBe(image.assetId);
+
+    // A VIDEO item of this highlight, and an image story that is NOT in it: one bare 404 each.
+    const outsider = await publishImage('capa de fora');
+    await expectBare404s([
+      await patchHighlight(tokens.demoAdmin, highlight.id, { cover: { storyId: video.storyId } }),
+      await patchHighlight(tokens.demoAdmin, highlight.id, {
+        cover: { storyId: outsider.storyId },
+      }),
+    ]);
+    expect((await storedCover(highlight.id))?.cover_story_id).toBe(image.storyId);
+
+    // Removing the chosen story clears the pointer IN THE SAME TRANSACTION (no stale resurrect).
+    const removed = await removeItem(tokens.demoAdmin, highlight.id, image.storyId);
+    expect(removed.status).toBe(200);
+    expect(highlightMembershipResultSchema.parse(await removed.json())).toEqual({
+      highlighted: false,
+      highlightCount: 0,
+    });
+    const after = await curated(highlight.id);
+    expect(after.coverChosen).toBe(false);
+    expect(after.coverStoryId).toBeNull();
+    expect((await storedCover(highlight.id))?.cover_story_id).toBeNull();
+  });
+
+  it('05.2-10 cover by upload: only a ready cover image of THIS tenant; every other asset is the same bare 404; the old asset survives', async () => {
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Upload' });
+    const cover = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+      purpose: 'cover',
+    });
+
+    const set = await patchHighlight(tokens.demoAdmin, highlight.id, { cover: { assetId: cover } });
+    expect(set.status).toBe(200);
+    const setBody = highlightSummarySchema.parse(await set.json());
+    expect(setBody.coverChosen).toBe(true);
+    expect(setBody.coverAssetId).toBe(cover);
+    expect(setBody.coverStoryId).toBeNull();
+
+    // T-05.2-12: a story-purpose asset, a processing cover and ANOTHER tenant's cover — one answer.
+    const storyPurpose = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+    });
+    const processing = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+      purpose: 'cover',
+      status: 'processing',
+    });
+    const foreign = await makeAsset({
+      tenantId: tenantIds.lab,
+      email: 'admin@tria-lab.local',
+      purpose: 'cover',
+    });
+    await expectBare404s([
+      await patchHighlight(tokens.demoAdmin, highlight.id, { cover: { assetId: storyPurpose } }),
+      await patchHighlight(tokens.demoAdmin, highlight.id, { cover: { assetId: processing } }),
+      await patchHighlight(tokens.demoAdmin, highlight.id, { cover: { assetId: foreign } }),
+    ]);
+    expect((await storedCover(highlight.id))?.cover_asset_id).toBe(cover);
+
+    // Replacing the cover never retires the old asset.
+    const replacement = await makeAsset({
+      tenantId: tenantIds.demo,
+      email: 'admin@tria-demo.local',
+      purpose: 'cover',
+    });
+    const replaced = await patchHighlight(tokens.demoAdmin, highlight.id, {
+      cover: { assetId: replacement },
+    });
+    expect(replaced.status).toBe(200);
+    expect(highlightSummarySchema.parse(await replaced.json()).coverAssetId).toBe(replacement);
+    const [old] = await adminSql<{ status: string; deleted_at: string | null }[]>`
+      select status, deleted_at::text from public.media_assets where id = ${cover}::uuid`;
+    expect(old).toEqual({ status: 'ready', deleted_at: null });
+
+    // `null` returns the highlight to the automatic rule (no items here, so no cover at all).
+    const cleared = await patchHighlight(tokens.demoAdmin, highlight.id, { cover: null });
+    expect(cleared.status).toBe(200);
+    const clearedBody = highlightSummarySchema.parse(await cleared.json());
+    expect(clearedBody.coverChosen).toBe(false);
+    expect(clearedBody.coverAssetId).toBeNull();
+    expect(await storedCover(highlight.id)).toEqual({ cover_story_id: null, cover_asset_id: null });
+  });
+
+  it('05.2-11 delete: 204, the items go, the STORY and its likes survive (R-D-F); a second delete is the bare 404', async () => {
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Apagar' });
+    const { storyId } = await publishImage('apagar destaque');
+    expect((await addItem(tokens.demoAdmin, highlight.id, storyId)).status).toBe(200);
+    const liked = await request(`/v1/stories/${storyId}/likes`, tokens.demoMember, {
+      method: 'POST',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(liked.status).toBe(200);
+    const deletedBefore = eventsNamed('highlight.deleted').length;
+
+    const res = await deleteHighlightReq(tokens.demoAdmin, highlight.id);
+    expect(res.status).toBe(204);
+    expect(await itemRows(highlight.id, storyId)).toBe(0);
+    expect(eventsNamed('highlight.deleted')).toHaveLength(deletedBefore + 1);
+    expect(eventsNamed('highlight.deleted').at(-1)?.payload).toMatchObject({
+      highlightId: highlight.id,
+      communityId: null,
+    });
+
+    const [story] = await adminSql<{ deleted_at: string | null; like_count: number }[]>`
+      select deleted_at::text, like_count from public.stories where id = ${storyId}::uuid`;
+    expect(story).toEqual({ deleted_at: null, like_count: 1 });
+    const [likes] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes where story_id = ${storyId}::uuid`;
+    expect(likes?.n).toBe(1);
+
+    // Idempotent-by-404 (the `deleteStory` rule): "already deleted" never confirms an id existed.
+    const again = await deleteHighlightReq(tokens.demoAdmin, highlight.id);
+    expect(again.status).toBe(404);
+    expect((await envelope(again)).error.details).toBeUndefined();
+    expect(eventsNamed('highlight.deleted')).toHaveLength(deletedBefore + 1);
+  });
+
+  it('05.2-12 an ARCHIVED community refuses rename and re-cover with `archived` but still allows take-downs', async () => {
+    const community = await makeHighlightCommunity('Destaque arquivavel');
+    const highlight = await create(tokens.demoAdmin, {
+      communityId: community,
+      title: 'Teste Arquivar',
+    });
+    const { storyId } = await publishImage('arquivar destaque');
+    expect((await addItem(tokens.demoAdmin, highlight.id, storyId)).status).toBe(200);
+
+    await adminSql`update public.communities set status = 'archived' where id = ${community}::uuid`;
+
+    for (const body of [{ title: 'Teste Outro' }, { cover: { storyId } }]) {
+      const res = await patchHighlight(tokens.demoAdmin, highlight.id, body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect((await envelope(res)).error.details).toEqual({ highlight: 'archived' });
+    }
+    expect((await storedCover(highlight.id))?.cover_story_id).toBeNull();
+
+    const unhighlightedBefore = eventsNamed('story.unhighlighted').length;
+    const removed = await removeItem(tokens.demoAdmin, highlight.id, storyId);
+    expect(removed.status).toBe(200);
+    expect(highlightMembershipResultSchema.parse(await removed.json())).toEqual({
+      highlighted: false,
+      highlightCount: 0,
+    });
+    expect(eventsNamed('story.unhighlighted')).toHaveLength(unhighlightedBefore + 1);
+
+    // A repeat removal: the same 200 body, and no second announcement (transitions, not requests).
+    const repeat = await removeItem(tokens.demoAdmin, highlight.id, storyId);
+    expect(repeat.status).toBe(200);
+    expect(await repeat.json()).toEqual({ highlighted: false, highlightCount: 0 });
+    expect(eventsNamed('story.unhighlighted')).toHaveLength(unhighlightedBefore + 1);
+
+    // The highlight is KEPT with no stories (D-102) until the admin deletes it — which is allowed.
+    expect(
+      (await adminSql`select 1 from public.story_highlights where id = ${highlight.id}::uuid`)
+        .length,
+    ).toBe(1);
+    expect((await deleteHighlightReq(tokens.demoAdmin, highlight.id)).status).toBe(204);
+  });
+
+  it('05.2-13 a member is refused 403 on PATCH, DELETE and remove — and nothing moves', async () => {
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Proibido' });
+    const { storyId } = await publishImage('membro proibido');
+    expect((await addItem(tokens.demoAdmin, highlight.id, storyId)).status).toBe(200);
+
+    for (const res of [
+      await patchHighlight(tokens.demoMember, highlight.id, { title: 'Teste Membro' }),
+      await deleteHighlightReq(tokens.demoMember, highlight.id),
+      await removeItem(tokens.demoMember, highlight.id, storyId),
+    ]) {
+      expect(res.status).toBe(403);
+    }
+
+    expect(await itemRows(highlight.id, storyId)).toBe(1);
+    expect((await curated(highlight.id)).title).toBe('Teste Proibido');
   });
 });
 

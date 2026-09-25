@@ -26,6 +26,7 @@ import {
   type StoryPins,
   type StoryQuery,
   type StorySummary,
+  type UpdateHighlight,
 } from '../contracts/index';
 
 const log = moduleLogger('module-stories');
@@ -1777,4 +1778,26 @@ export async function getHighlight(
   );
 
   return { highlight: toHighlight(detail.highlight), items: detail.items.map(toStory) };
+}
+
+/*
+ * RED STUBS (05.2-03 Task 1). Deliberately INERT so the new unit and integration cases fail on
+ * their ASSERTIONS rather than on a missing export. The GREEN commit replaces all three.
+ */
+export async function updateHighlight(
+  _ctx: RequestContext,
+  _highlightId: string,
+  _input: UpdateHighlight,
+): Promise<HighlightSummary> {
+  throw new ApiError(500, 'INTERNAL');
+}
+
+export async function deleteHighlight(_ctx: RequestContext, _highlightId: string): Promise<void> {}
+
+export async function removeStoryFromHighlight(
+  _ctx: RequestContext,
+  _highlightId: string,
+  _storyId: string,
+): Promise<HighlightMembershipResult> {
+  return { highlighted: true, highlightCount: 0 };
 }

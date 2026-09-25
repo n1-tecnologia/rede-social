@@ -719,6 +719,44 @@ export const highlightMembershipResultSchema = z
 export type HighlightMembershipResult = z.infer<typeof highlightMembershipResultSchema>;
 
 /**
+ * A highlight's CHOSEN cover (D-101), one of exactly two shapes:
+ *
+ * - `{ storyId }` — one of THIS highlight's own live IMAGE stories. Covers are image-only in 05.2
+ *   (the developer's plan-time decision, 2026-09-25): a video story, a removed one, or a story that
+ *   is not in this highlight is the bare 404 — the UI never offers anything else, so a separate code
+ *   would be vocabulary only a crafted client could reach.
+ * - `{ assetId }` — an UPLOADED image: an asset of this tenant with purpose `cover`, kind `image`,
+ *   status `ready`, not removed (the 05-09 community-cover tuple). Every miss is the same bare 404.
+ *
+ * Choosing one kind clears the other (`story_highlights_cover_chk` allows at most one), and `null`
+ * clears both, returning the highlight to the automatic rule. Replacing or clearing an uploaded cover
+ * never deletes the old asset.
+ */
+export const highlightCoverSchema = z.union([
+  z.object({ storyId: z.uuid() }).strict(),
+  z.object({ assetId: z.uuid() }).strict(),
+]);
+export type HighlightCover = z.infer<typeof highlightCoverSchema>;
+
+/**
+ * `PATCH /v1/stories/highlights/{highlightId}` — rename and/or re-cover (HIGHLIGHT-01). At least one
+ * key is required: an empty body is a `VALIDATION_FAILED` with `issues`, never a silent 200.
+ *
+ * The response is the highlight's summary AFTER the write. A PATCH identical to the stored row
+ * changes nothing and announces nothing (`highlight.updated` counts transitions, not requests).
+ */
+export const updateHighlightSchema = z
+  .object({
+    title: storyHighlightTitleSchema.optional(),
+    cover: highlightCoverSchema.nullable().optional(),
+  })
+  .strict()
+  .refine((value) => value.title !== undefined || value.cover !== undefined, {
+    message: 'Informe title ou cover.',
+  });
+export type UpdateHighlight = z.infer<typeof updateHighlightSchema>;
+
+/**
  * A highlight was created. **Ids only** — never the title (T-05-29/T-05-06): the manifest's own
  * subscriber logs payloads verbatim, and curator-written text has no business in a log line.
  * `communityId` is null for Início.
@@ -741,9 +779,52 @@ export interface StoryHighlighted {
   actorUserId: string;
 }
 
+/**
+ * A story was removed from a highlight (HIGHLIGHT-02) — `StoryHighlighted`'s shape. Transitions,
+ * not requests: emitted only when a row was really removed; removing a pair that is not there
+ * answers 200 and announces nothing. The STORY itself is never touched by the removal.
+ */
+export type StoryUnhighlighted = StoryHighlighted;
+
+/**
+ * A highlight's title or cover really changed. Transitions, not requests: a PATCH identical to the
+ * stored row announces nothing. **Ids only** — never the title, which is curator-written text.
+ */
+export interface HighlightUpdated {
+  tenantId: string;
+  highlightId: string;
+  actorUserId: string;
+}
+
+/**
+ * A place's highlights were reordered (R-D-C) and at least one position really moved. Transitions,
+ * not requests: a permutation equal to the current order announces nothing. `communityId` is null
+ * for Início. Ids only.
+ */
+export interface HighlightReordered {
+  tenantId: string;
+  communityId: string | null;
+  actorUserId: string;
+}
+
+/**
+ * A highlight was deleted — its items with it, never its stories. Emitted on a real delete only (a
+ * second delete is the bare 404 and announces nothing). `communityId` is null for Início. Ids only.
+ */
+export interface HighlightDeleted {
+  tenantId: string;
+  highlightId: string;
+  communityId: string | null;
+  actorUserId: string;
+}
+
 declare module '@tria/contracts' {
   interface EventMap {
     'highlight.created': HighlightCreated;
+    'highlight.updated': HighlightUpdated;
+    'highlight.reordered': HighlightReordered;
+    'highlight.deleted': HighlightDeleted;
     'story.highlighted': StoryHighlighted;
+    'story.unhighlighted': StoryUnhighlighted;
   }
 }
