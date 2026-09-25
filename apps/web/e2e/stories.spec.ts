@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
-import { STORY_PAGE_SIZE } from '@tria/module-stories/contracts';
+import { STORY_MAX_PAGE_SIZE } from '@tria/module-stories/contracts';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
@@ -26,8 +26,9 @@ const S = storyMessages.stories;
 const F = feedMessages.feed;
 
 /**
- * STORY-01 / STORY-03 / D-78 / D-80 (plan 05-05): the `/inicio` stories strip and the full-screen
- * `/stories/publicar` route, on the phone (`mobile-chromium`, an iPhone 14 preset) and on desktop.
+ * STORY-01 / STORY-03 / D-80 (plan 05-05), D-104 / D-106 (05.2-04): the `/inicio` stories row and the
+ * full-screen `/stories/publicar` route, on the phone (`mobile-chromium`, an iPhone 14 preset) and on
+ * desktop.
  *
  * Everything that WRITES a story cleans up after itself through the UI it is testing, so the shared
  * seed stays exactly as it was and the file is re-runnable in any order. Everything else reads the
@@ -60,6 +61,16 @@ const SEEDED = {
    */
   pinnedCommunityName: 'Avisos da diretoria',
   unpinnedCommunityName: 'Eventos e encontros',
+  /** `SEED_TENANTS['tria-demo'].displayName` — the tenant circle's label and accessible name. */
+  tenantName: 'TRIA Demo',
+  /**
+   * `SEED_STORY_IDS['tria-demo'][2]`: the OLDEST active, ready story (an image published 18 h ago).
+   * The tenant circle plays oldest → newest (D-106), so this is the story it opens on.
+   */
+  oldestActiveStoryId: '0d000000-0000-4000-8000-0000000000d3',
+  /** `SEED_HIGHLIGHT_TITLES`: `home` has items; `homeEmpty` is curator-only and never on a member row. */
+  homeHighlight: 'Bastidores',
+  homeEmptyHighlight: 'Aulas',
 } as const;
 
 /** The tenant's live strip size, read once per file from the database (see the note above). */
@@ -77,6 +88,29 @@ test.afterAll(async () => {
 });
 
 const strip = (page: Page) => page.getByRole('list', { name: S.region });
+
+/**
+ * D-104: the ONE tenant circle, found by its catalog accessible name (UI-D-61) — "Abrir stories de
+ * TRIA Demo" for the seed tenant, resolved from `stories.circle.tenant` rather than typed here.
+ */
+const tenantCircle = (page: Page) =>
+  strip(page).getByRole('button', {
+    name: S.circle.tenant.replace('{tenant}', SEEDED.tenantName),
+  });
+
+/**
+ * The length of the tenant circle's sequence, read where a member meets it: the viewer's segment
+ * count after a tap on the tenant circle (D-106 caps it at `STORY_MAX_PAGE_SIZE`). The row itself
+ * no longer grows with the number of stories — it is ONE circle whatever that number is.
+ */
+async function expectTenantSequence(page: Page, count: number): Promise<void> {
+  await page.goto('/inicio');
+  await tenantCircle(page).click();
+  await expect(page.getByTestId('story-progress-bars')).toHaveAttribute(
+    'data-story-count',
+    String(Math.min(count, STORY_MAX_PAGE_SIZE)),
+  );
+}
 
 /**
  * A REAL photo, the same fixture `feed-composer.spec.ts` uploads. Not a synthesised 1x1 PNG: the
@@ -117,14 +151,25 @@ function storiesApi(token: string, path: string, init: RequestInit = {}): Promis
   });
 }
 
-test.describe('the /inicio strip — one circle per active story, newest first (D-78, UI-D-26)', () => {
-  test('a MEMBER sees the tenant’s active stories and NO publish door', async ({ page }) => {
+test.describe('the /inicio row — one tenant circle plus Início’s highlights (D-104, UI-D-59)', () => {
+  test('a MEMBER sees the tenant circle and the non-empty highlight, and NO publish door', async ({
+    page,
+  }) => {
     await login(page, users.demoMember, SEED_PASSWORD);
 
     const row = strip(page);
     await expect(row).toBeVisible();
-    // D-78: one circle per active STORY. Per-publisher grouping would collapse this to one.
-    await expect(row.getByRole('listitem')).toHaveCount(activeStories);
+    // D-104: ONE tenant circle whatever the number of live stories, named for the tenant (UI-D-61).
+    await expect(tenantCircle(page)).toHaveCount(1);
+    await expect(row.getByRole('listitem').first()).toContainText(SEEDED.tenantName);
+    // UI-D-59 (3): Início's highlights follow, one circle each. `Bastidores` has items; `Aulas` is
+    // EMPTY, and the member-scope read leaves an empty highlight off a member's row (T-05.2-20).
+    await expect(row.getByRole('listitem').nth(1)).toContainText(SEEDED.homeHighlight);
+    await expect(row.getByText(SEEDED.homeEmptyHighlight, { exact: true })).toHaveCount(0);
+    // Tenant circle + one highlight: the row does not grow with the number of stories.
+    await expect(row.getByRole('listitem')).toHaveCount(2);
+    // The highlight circle is inert until the viewer learns groups (plan 05): no button for it.
+    await expect(row.getByRole('button')).toHaveCount(1);
 
     // D-80 / UI-D-28: the own-circle is the ONLY publish entry point, and a member has none.
     await expect(row.getByRole('link', { name: S.own.action })).toHaveCount(0);
@@ -133,7 +178,7 @@ test.describe('the /inicio strip — one circle per active story, newest first (
     // STORY-03 at the surface a member actually looks at: the expired story is simply not there.
     await expect(page.getByText(SEEDED.expiredCaption)).toHaveCount(0);
 
-    // UI-D-25: the strip sits ABOVE the feed and BELOW the welcome heading.
+    // UI-D-25: the row sits ABOVE the feed and BELOW the welcome heading.
     const stripBox = await row.boundingBox();
     const heading = page.getByRole('heading', { level: 1 }).first();
     const headingBox = await heading.boundingBox();
@@ -147,16 +192,19 @@ test.describe('the /inicio strip — one circle per active story, newest first (
 
     const row = strip(page);
     const items = row.getByRole('listitem');
-    await expect(items).toHaveCount(activeStories + 1);
+    // D-108: `+` first, then the tenant circle, then the highlight.
+    await expect(items).toHaveCount(3);
 
     // UI-D-28: rendered FIRST, and an anchor rather than a button — `/stories/publicar` is a
     // full-screen route that must not live in a dismissible layer.
     await expect(items.first()).toContainText(S.own.label);
     const own = row.getByRole('link', { name: S.own.action });
     await expect(own).toHaveAttribute('href', '/stories/publicar');
+    await expect(items.nth(1)).toContainText(SEEDED.tenantName);
+    await expect(tenantCircle(page)).toHaveCount(1);
   });
 
-  test('the strip keeps IDENTICAL geometry on desktop — no arrows, no fade mask (UI-D-47)', async ({
+  test('the row keeps IDENTICAL geometry on desktop — no arrows, no fade mask (UI-D-47)', async ({
     page,
     isMobile,
   }) => {
@@ -165,13 +213,53 @@ test.describe('the /inicio strip — one circle per active story, newest first (
 
     const row = strip(page);
     await expect(row).toBeVisible();
-    await expect(row.getByRole('listitem')).toHaveCount(activeStories + 1);
+    await expect(row.getByRole('listitem')).toHaveCount(3);
     // The row is the only horizontal scroller, and its overscroll is contained so a trackpad swipe
     // never triggers the browser back-gesture.
     const overflow = await row.evaluate((node) => getComputedStyle(node).overflowX);
     expect(overflow).toBe('auto');
     const overscroll = await row.evaluate((node) => getComputedStyle(node).overscrollBehaviorX);
     expect(overscroll).toBe('contain');
+    // Every circle is the same 64px disc column: the tenant circle included (UI-D-60).
+    const widths = await row
+      .getByRole('listitem')
+      .evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().width)));
+    expect(new Set(widths).size).toBe(1);
+  });
+
+  test('the tenant circle opens on the OLDEST live story, and a tap on the right plays the next-newer one (D-106)', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    test.skip(activeStories < 2, 'advancing needs a sequence of at least two');
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    // The expected sequence, read from the API's own newest-first page and reversed — the same
+    // bounded page the home slot reverses.
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, `/v1/stories?limit=${STORY_MAX_PAGE_SIZE}`);
+    const { items } = (await list.json()) as { items: { id: string; caption: string }[] };
+    const sequence = [...items].reverse();
+    expect(sequence[0]?.id, 'the seeded 18 h image is the oldest live story').toBe(
+      SEEDED.oldestActiveStoryId,
+    );
+
+    await tenantCircle(page).click();
+    const dialog = page.getByRole('dialog', { name: S.viewer.dialog });
+    await expect(dialog).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/stories/${SEEDED.oldestActiveStoryId}$`));
+    await expect(page.getByTestId('story-progress-bars')).toHaveAttribute(
+      'data-story-count',
+      String(activeStories),
+    );
+
+    const size = page.viewportSize() ?? { width: 390, height: 844 };
+    await page.mouse.click(Math.round(size.width * 0.8), Math.round(size.height * 0.5));
+    await expect(dialog).toHaveAttribute('data-story-index', '1');
+    // The next-NEWER story: the second element of the oldest-first sequence.
+    const next = sequence[1];
+    if (next?.caption) await expect(dialog).toContainText(next.caption.slice(0, 20));
   });
 });
 
@@ -203,7 +291,7 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     await expect(page).toHaveURL(/\/inicio$/);
   });
 
-  test('an admin taps the own-circle, publishes a photo, and sees it at the head of the strip', async ({
+  test('an admin taps the own-circle, publishes a photo, and it joins the tenant circle as its newest story', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD);
@@ -230,19 +318,17 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     await page.getByRole('button', { name: S.publish.submit, exact: true }).click();
     await expect(page).toHaveURL(/\/inicio$/);
 
-    // The new circle heads the strip, one slot after the admin's own circle. The wait is the
-    // WORKER's: the asset is `processing` until variant derivation lands, and R-P8 keeps a
-    // non-ready story out of the strip — so the poll is measuring the real pipeline, not a race.
-    const items = strip(page).getByRole('listitem');
+    // D-104: the new story joins the ONE tenant circle (its sequence grows by one) rather than
+    // adding a circle of its own. The wait is the WORKER's: the asset is `processing` until variant
+    // derivation lands, and R-P8 keeps a non-ready story out of the row — so the poll is measuring
+    // the real pipeline, not a race.
     await expect(async () => {
-      await page.reload();
-      await expect(items).toHaveCount(activeStories + 2);
+      await expectTenantSequence(page, activeStories + 1);
     }).toPass({ timeout: 60_000 });
 
     // Clean up through the product's own surface, so the shared seed is exactly as it was found.
     await removeNewestStory();
-    await page.goto('/inicio');
-    await expect(strip(page).getByRole('listitem')).toHaveCount(activeStories + 1);
+    await expectTenantSequence(page, activeStories);
   });
 
   test('submitting with no media is refused client-side, and no story is created', async ({
@@ -262,8 +348,7 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
       S.publish.errors.noMedia,
     );
 
-    await page.goto('/inicio');
-    await expect(strip(page).getByRole('listitem')).toHaveCount(activeStories + 1);
+    await expectTenantSequence(page, activeStories);
   });
 });
 
@@ -309,25 +394,25 @@ test.describe('the story viewer — tap, hold, swipe (STORY-02, UI-D-30, mobile)
     return box?.width ?? -1;
   }
 
-  /** Opens the viewer on the FIRST circle of the member's strip, and waits for the clock to start. */
+  /** Opens the viewer on the member's TENANT circle (D-104), and waits for the clock to start. */
   async function openViewer(page: Page) {
     await login(page, users.demoMember, SEED_PASSWORD);
-    await strip(page).getByRole('button').first().click();
+    await tenantCircle(page).click();
     await expect(page.getByRole('dialog', { name: V.dialog })).toBeVisible();
     // The clock does not start until the media reports it is loaded (UI loading/E03), so the first
     // non-zero width is ALSO the proof that the image decoded.
     await expect.poll(() => fillWidth(page, 0), { timeout: 15_000 }).toBeGreaterThan(0);
   }
 
-  test('a circle opens the viewer, the URL becomes /stories/{id}, and the first bar fills', async ({
+  test('the tenant circle opens the viewer on the OLDEST story, and the first bar fills', async ({
     page,
     isMobile,
   }) => {
     test.skip(!isMobile, 'the gesture model is the phone’s');
     await openViewer(page);
 
-    // The strip's circles were inert until this plan (05-05 left `onOpen` unbound on purpose).
-    await expect(page).toHaveURL(/\/stories\/[0-9a-f-]{36}$/);
+    // D-106: the tenant circle plays oldest → newest, so it opens on the oldest live story.
+    await expect(page).toHaveURL(new RegExp(`/stories/${SEEDED.oldestActiveStoryId}$`));
     // One segment per ACTIVE story, from the SAME array the pager renders — never a second count.
     await expect(page.getByTestId('story-progress-bars')).toHaveAttribute(
       'data-story-count',
@@ -523,25 +608,23 @@ test.describe('the story viewer — tap, hold, swipe (STORY-02, UI-D-30, mobile)
 });
 
 /**
- * The overflow BACKSTOP (UI overflow/E03, E04): a FULL strip at 320px keeps every progress segment
- * at least 2px wide and does not wrap the bar row.
+ * The overflow BACKSTOP (UI overflow/E03, E04): a FULL tenant sequence at 320px keeps every progress
+ * segment at least 2px wide and does not wrap the bar row.
  *
- * **The UI-SPEC states this backstop at 25 stories, and 25 is not reachable through the product.**
- * The viewer's sequence IS the strip's page, and `STORY_PAGE_SIZE = 10` caps that page — so the
- * most segments a member can ever see is ten, and a 25-row fixture would only prove that the strip
- * paginates. This test therefore measures the REAL ceiling, and the 25-segment DOM shape is pinned
- * where it is actually reachable: `story-viewer.test.tsx` renders `StoryProgressBars` with 25 items
- * and asserts one non-wrapping row. The arithmetic between them closes the gap — at 320px the row
- * has 304px of content width and 24 four-pixel gaps, leaving 208px over 25 segments, or 8.3px each.
+ * **Since 05.2-04 the UI-SPEC's 25 IS reachable through the product.** The tenant circle's sequence
+ * is ONE page of `STORY_MAX_PAGE_SIZE` (25) live stories, reversed to play oldest first (D-106) —
+ * so this test fills the tenant to exactly that ceiling and measures the real worst case in the
+ * browser (at 320px the row has 304px of content width and 24 four-pixel gaps, leaving 208px over
+ * 25 segments, or 8.3px each). `story-viewer.test.tsx` still pins the same DOM shape in isolation.
  *
  * It runs LAST and cleans up after itself, because it adds rows to the shared strip — and the whole
  * file measures the strip. `fullyParallel: false` and `workers: 1` make the declaration order the
  * execution order, which is what makes that safe rather than lucky.
  */
-test.describe('the viewer at a FULL strip on a 320px screen (overflow backstop)', () => {
+test.describe('the viewer at a FULL tenant sequence on a 320px screen (overflow backstop)', () => {
   const BACKSTOP_PREFIX = 'Story do backstop e2e';
-  /** The strip renders ONE page, and the page size is the contract's. */
-  const TARGET = STORY_PAGE_SIZE;
+  /** The tenant circle plays ONE page, and its cap is the contract's (D-106). */
+  const TARGET = STORY_MAX_PAGE_SIZE;
   let created = 0;
 
   test.beforeAll(async () => {
@@ -562,7 +645,7 @@ test.describe('the viewer at a FULL strip on a 320px screen (overflow backstop)'
     // 320px is the narrowest screen the product supports — narrower than every device preset.
     await page.setViewportSize({ width: 320, height: 640 });
     await login(page, users.demoMember, SEED_PASSWORD);
-    await strip(page).getByRole('button').first().click();
+    await tenantCircle(page).click();
     await expect(page.getByRole('dialog', { name: S.viewer.dialog })).toBeVisible();
 
     const bars = page.getByTestId('story-progress-bars');
@@ -891,18 +974,15 @@ test.describe('05.1 — a story from a community page (criteria 3-5)', () => {
     ).toBeVisible();
     await expect(destaques(page).getByRole('button')).not.toHaveCount(0);
 
-    // D-96: the SAME story heads the tenant-wide strip once the worker has readied its asset. The
-    // wait is the worker's, exactly as in the publish walk above.
-    await page.goto(`${hosts.demo}/inicio`);
-    const items = strip(page).getByRole('listitem');
+    // D-96: the SAME story joins the tenant circle on `/inicio` once the worker has readied its
+    // asset (D-104: one circle, whose sequence grows by one). The wait is the worker's, exactly as
+    // in the publish walk above. (Login ran on `hosts.demo`, the file's `baseURL`.)
     await expect(async () => {
-      await page.reload();
-      await expect(items).toHaveCount(activeStories + 2);
+      await expectTenantSequence(page, activeStories + 1);
     }).toPass({ timeout: 60_000 });
 
     await removeNewestStory();
-    await page.goto(`${hosts.demo}/inicio`);
-    await expect(strip(page).getByRole('listitem')).toHaveCount(activeStories + 1);
+    await expectTenantSequence(page, activeStories);
   });
 
   test('an archived or unknown `?comunidade=` falls back to "Nenhuma comunidade"', async ({
