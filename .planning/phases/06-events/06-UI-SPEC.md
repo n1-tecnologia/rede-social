@@ -1,10 +1,11 @@
 ---
 phase: "06"
 slug: "events"
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: "2026-09-25"
+reviewed_at: "2026-09-25"
 ---
 
 # Phase 06 — UI Design Contract
@@ -425,7 +426,7 @@ The calendar pair (UI-D-210) follows the zone in P0–P2 when not cancelled. **A
 > Empty-state and error-state COPY live in `## Copywriting Contract` above — this section covers
 > state coverage and REFERENCES those rows rather than restating the copy (de-dup).
 
-Applicable state considerations resolved: **68 covered rows, 6 backstop rows, 0 unresolved** (element kinds authored explicitly below; the probe re-run should reproduce this set).
+Applicable state considerations resolved: **65 covered rows, 6 backstop rows, 0 unresolved** (71 rows). The element kinds are authored explicitly below and were confirmed by the user on 2026-09-25. The Step 9.5 probe engine (`ui-consideration-probe.cjs`) ran over E01–E12 with these kinds and raised **66 applicable (element, category) considerations**. All 66 are resolved here. The engine run found two gaps, E05 overflow and E08 overflow, and the user resolved both as *Specify* on 2026-09-25. The rows beyond the engine's set are extra coverage: E01 empty, E09 partial, the second E11 long-text row, and the E05+E09 cross-surface rows.
 
 **Element inventory** (ids scoped to this document):
 
@@ -474,6 +475,7 @@ Applicable state considerations resolved: **68 covered rows, 6 backstop rows, 0 
 | error | E05 | ✅ covered | RSVP failure → revert + error toast. `rsvp_closed` → revert + the "encerraram" toast + refresh into the P2 zone. Cancelled race → the "foi cancelado" toast + refresh (Copywriting error rows). |
 | partial | E05 | ✅ covered | Every (format × phase × answer × checked-in × cancelled) combination is enumerated in §Action zone contract, with at most one brand fill. |
 | long-text | E05 | ✅ covered | Every label and hint is a fixed catalog string. Hints wrap under the control, and segment labels ("Vou" / "Não vou") fit a half-width segment at 320px. |
+| overflow | E05 | ✅ covered | At 320px the RSVP `SegmentedControl` stays `grid-cols-2`, and each segment label is `whitespace-nowrap` on one line. The read-only answer line, the hints (including the `Lock` hint) and the banner text wrap inside the card body and never truncate. The full-width CTAs and the `grid-cols-2` calendar pair never cause horizontal scroll. |
 | loading | E06 | ✅ covered | Both are anchors: Google opens in a new tab, and the `.ics` is a browser download with no in-page state. |
 | error | E06 | ✅ covered | Hidden for cancelled and past events (UI-D-210), so it never offers an export of an event that will not happen. A failed `.ics` response is the browser's own download error. |
 | long-text | E06 | ✅ covered | "Google Agenda" / "Arquivo .ics" are fixed and fit a half-width outline button at 320px. |
@@ -488,6 +490,7 @@ Applicable state considerations resolved: **68 covered rows, 6 backstop rows, 0 
 | partial | E08 | ✅ covered | Not open yet / closed / cancelled / done each replace the code section with one state. There is never a form and a state message at once. |
 | empty | E08 | ✅ covered | No cover → the ticket geometry's gradient fallback in on-primary ink (the same `EventCover` branch). |
 | long-text | E08 | 🧪 backstop | A 60-character venue in the ticket's 3-column `Local` cell at 320px truncates to one line without widening the column, and the `Data` / `Horário` cells keep their width. Verify in the check-in e2e on the mobile project. |
+| overflow | E08 | ✅ covered | At 320px the ticket stays inside its `mx-4` gutters. Each `Data` / `Horário` / `Local` cell is `min-w-0` and its value is `truncate`d, so no value widens the `grid-cols-3` row. The code `Input` is full width with `maxLength` set to the code length, so the uppercase `tracking-[0.3em]` code always fits on one line. The state sentences wrap and stay centred. |
 | empty | E09 | ✅ covered | No upcoming non-cancelled event → the slot renders `null` and `/inicio` closes up (UI-D-214). No cover → the thumb gradient. |
 | loading | E09 | ✅ covered | Server-rendered with `/inicio`; no independent skeleton. The boundary refresh switches it into check-in mode at the window's opening. |
 | error | E09 | ✅ covered | A failed read renders nothing and logs `home-slot.failed`. The feed below is unaffected (the strip's rule). |
@@ -536,12 +539,12 @@ Applicable state considerations resolved: **68 covered rows, 6 backstop rows, 0 
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: FLAG (non-blocking). The discard confirm is the one-word "Descartar" (`events.confirm.discard.confirm`). Consider "Descartar evento" (create) and "Descartar alterações" (edit).
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: FLAG (non-blocking). Every value is a multiple of 4. The 12px `md-s` token and the 20px ticket padding sit outside the standard set; they are declared and justified. Revision 1 normalised the 14px and 6px values.
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-09-25 by gsd-ui-checker after 1 revision. Two points for the planner: the spec formats dates with `Intl` instead of the `date-fns` library listed in CLAUDE.md (`date-fns` is not installed), and it uses `SegmentedControl` plus a check-in route where CONTEXT had suggested `Switch` plus `BottomSheet` (both were Claude's Discretion).
