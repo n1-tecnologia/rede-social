@@ -92,8 +92,22 @@ export interface StoryViewerLabels {
   play: string;
   mediaError: string;
   retry: string;
+  loadingGroup: string;
+  groupError: string;
   /** Generated, bounded by the count, never member content (long-text/E04). */
-  position: (current: number, total: number) => string;
+  position: (group: string, current: number, total: number) => string;
+}
+
+/**
+ * 05.2-05 RED SHIM — deliberately INERT. The grouped props are accepted so the rewritten tests can
+ * render, but only `groups[initialGroup]` is played and no group behaviour exists yet. The GREEN
+ * commit replaces this whole block.
+ */
+export interface StoryViewerGroup {
+  key: string;
+  items: readonly StoryViewerItem[] | null;
+  failed?: boolean;
+  header: { name: string; avatar: ReactNode };
 }
 
 export interface StoryViewerProps {
@@ -102,8 +116,12 @@ export interface StoryViewerProps {
    * mid-view plays out its own segment and is absent only from the NEXT strip read; nothing is ever
    * removed under the member's finger (UI partial/E04).
    */
-  items: readonly StoryViewerItem[];
+  groups: readonly StoryViewerGroup[];
+  initialGroup?: number;
   initialIndex?: number;
+  onNeedGroup?: (group: number) => void;
+  onRetryGroup?: (group: number) => void;
+  onSegmentShown?: (storyId: string) => void;
   labels: StoryViewerLabels;
   onClose: () => void;
   /**
@@ -161,7 +179,8 @@ const VIEWER_Z = 'z-[52]';
 type MediaState = 'loading' | 'ready' | 'error';
 
 export function StoryViewer({
-  items,
+  groups,
+  initialGroup = 0,
   initialIndex = 0,
   labels,
   onClose,
@@ -172,6 +191,8 @@ export function StoryViewer({
   cancelFrame,
   autoplayCheckMs = 400,
 }: StoryViewerProps) {
+  // RED SHIM: the initial group alone, as a flat sequence.
+  const items = groups[initialGroup]?.items ?? [];
   const [index, setIndex] = useState(() =>
     Math.min(Math.max(initialIndex, 0), Math.max(items.length - 1, 0)),
   );
@@ -456,8 +477,8 @@ export function StoryViewer({
 
   const progress = isVideo ? (videoProgress[currentId] ?? 0) : clock.progress;
   const positionLabel = useMemo(
-    () => labels.position(index + 1, items.length),
-    [labels, index, items.length],
+    () => labels.position(groups[initialGroup]?.header.name ?? '', index + 1, items.length),
+    [labels, index, items.length, groups, initialGroup],
   );
 
   return (

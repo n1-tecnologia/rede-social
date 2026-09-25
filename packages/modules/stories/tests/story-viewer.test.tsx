@@ -8,28 +8,31 @@ import { StoryProgressBars } from '../ui/StoryProgressBars';
 import {
   type StoryMediaControls,
   StoryViewer,
+  type StoryViewerGroup,
   type StoryViewerItem,
   type StoryViewerLabels,
 } from '../ui/StoryViewer';
 
 /**
- * STORY-02's surface, asserted as behaviour rather than as pixels (UI-D-30..UI-D-34).
+ * STORY-02's surface, asserted as behaviour rather than as pixels (UI-D-30..UI-D-34), and since
+ * 05.2-05 the GROUPED viewer that plays a row of circles (D-107, UI-D-65, R-D-M).
  *
  * The claims worth a test are the ones a later edit could break silently, and every one of them is
- * a decision the approved sketch fixes:
+ * a decision the approved sketches fix:
  *
- *  1. **One gesture never does two things.** A tap advances, a hold pauses, a horizontal drag moves
- *     through the sequence and a downward drag dismisses — under a dominant-axis lock, so a diagonal
- *     swipe can never both change story and close the viewer.
- *  2. **The boundaries do not loop** (D-78). Next at the last story CLOSES; previous at the first
- *     restarts the current clock. A single-publisher strip on a loop traps the member.
- *  3. **Only the neighbours are mounted.** `|k − i| ≤ 1` is both the render window and the
- *     pre-buffer for the next story's decode.
- *  4. **UI-D-31: there is no double-tap.** A tap already means advance; the like control is the
- *     explicit heart the host puts in the action row.
- *  5. **UI-D-34: "did not start" is a STATE.** A video that reports it can play and then does not
- *     play leaves the clock PAUSED and renders the play badge — the bar never fills over a frozen
- *     video.
+ *  1. **One gesture never does two things.** A tap moves one story, a hold pauses, a horizontal drag
+ *     skips a whole GROUP and a downward drag dismisses — under a dominant-axis lock, so a diagonal
+ *     swipe can never both move and close the viewer.
+ *  2. **The row's boundaries (UI-D-65).** Next at a group's last story enters the next group's
+ *     first; previous at a group's first story enters the previous group's LAST (the exact mirror);
+ *     previous on the row's very first story restarts its clock; next after the row's last story
+ *     closes. An empty group is skipped both ways; a not-yet-loaded group shows a loading frame.
+ *  3. **Only the neighbours are mounted.** `|k − i| ≤ 1` inside the group, plus the next group's first
+ *     story at a group's last index, is both the render window and the pre-buffer.
+ *  4. **Pitfall 4: every per-segment key is `${group.key}:${item.id}`.** The same story in two groups
+ *     never shares media, blocked or progress state and never collides as a React key.
+ *  5. **UI-D-31: there is no double-tap.** A tap already means advance.
+ *  6. **UI-D-34: "did not start" is a STATE.** The bar never fills over a frozen video.
  *
  * Every string is sentinel ASCII: the module ships no words (PWA-03), so a copy change in the
  * catalog cannot turn this file red.
@@ -37,6 +40,8 @@ import {
 
 afterEach(() => {
   cleanup();
+  controls.clear();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -51,7 +56,9 @@ const LABELS: StoryViewerLabels = {
   play: 'play-label',
   mediaError: 'media-error-label',
   retry: 'retry-label',
-  position: (current, total) => `position-${current}-of-${total}`,
+  loadingGroup: 'loading-group-label',
+  groupError: 'group-error-label',
+  position: (group, current, total) => `position-${group}-${current}-of-${total}`,
 };
 
 /** The injected clock, identical in shape to `story-clock.test.ts`'s — time only moves by hand. */
@@ -92,8 +99,9 @@ const controls = new Map<string, StoryMediaControls>();
 
 /**
  * The `media` renderer below is a LIGHT STAND-IN on purpose, not an oversight. Every case in this
- * file is about the POINTER PIPELINE — which tap advances, which hold pauses, which control is
- * isolated from the stage — and a real decoder in the tree would add nothing to any of them.
+ * file is about the POINTER PIPELINE and the row's STATE MACHINE — which tap advances, which group
+ * a boundary enters, which control is isolated from the stage — and a real decoder in the tree
+ * would add nothing to any of them.
  *
  * The REAL media integration (the real `MediaImage` under the real `StoryViewer`, with a bounded
  * render count and the empty-ladder error path) is asserted in **`story-viewer-media.test.tsx`**,
@@ -122,24 +130,51 @@ function item(n: number, overrides: Partial<StoryViewerItem> = {}): StoryViewerI
   };
 }
 
-function viewer(
-  count: number,
-  overrides: Partial<React.ComponentProps<typeof StoryViewer>> = {},
+/** One circle of the row. `items: null` is "not loaded yet"; `[]` is "loaded and empty". */
+function group(
+  key: string,
+  items: readonly StoryViewerItem[] | null,
+  extra: Partial<StoryViewerGroup> = {},
+): StoryViewerGroup {
+  return { key, items, header: { name: `group-${key}`, avatar: null }, ...extra };
+}
+
+type ViewerProps = React.ComponentProps<typeof StoryViewer>;
+
+/** A ROW of groups, with the injected clock. `rerenderGroups` swaps the row in place. */
+function row(
+  groups: readonly StoryViewerGroup[],
+  overrides: Partial<ViewerProps> = {},
   clock: Clock = manualClock(),
 ) {
   const onClose = overrides.onClose ?? vi.fn();
-  const result = render(
-    <StoryViewer
-      items={Array.from({ length: count }, (_, k) => item(k))}
-      labels={LABELS}
-      now={clock.now}
-      requestFrame={clock.requestFrame}
-      cancelFrame={clock.cancelFrame}
-      {...overrides}
-      onClose={onClose}
-    />,
+  const props = (next: readonly StoryViewerGroup[]): ViewerProps => ({
+    labels: LABELS,
+    now: clock.now,
+    requestFrame: clock.requestFrame,
+    cancelFrame: clock.cancelFrame,
+    ...overrides,
+    groups: next,
+    onClose,
+  });
+  const result = render(<StoryViewer {...props(groups)} />);
+  const rerenderGroups = (next: readonly StoryViewerGroup[]) =>
+    result.rerender(<StoryViewer {...props(next)} />);
+  return { ...result, onClose, clock, rerenderGroups };
+}
+
+/** A SINGLE sequence — how every pre-05.2 caller (deep link, community row) uses the viewer. */
+function viewer(count: number, overrides: Partial<ViewerProps> = {}, clock: Clock = manualClock()) {
+  return row(
+    [
+      group(
+        'A',
+        Array.from({ length: count }, (_, k) => item(k)),
+      ),
+    ],
+    overrides,
+    clock,
   );
-  return { ...result, onClose, clock };
 }
 
 const stage = () => screen.getByTestId('story-stage');
@@ -187,6 +222,17 @@ function dragBy(dx: number, dy: number) {
 
 function currentIndex(): number {
   return Number(dialog().getAttribute('data-story-index'));
+}
+
+/** `[group, index]` — the viewer's whole position, as it publishes it on the dialog. */
+function position(): [number, number] {
+  return [Number(dialog().getAttribute('data-story-group')), currentIndex()];
+}
+
+/** React's duplicate-key warning, read from the console spy a case installs. */
+function keyWarnings(spy: { mock: { calls: unknown[][] } }): number {
+  return spy.mock.calls.filter((call) => call.some((part) => String(part).includes('same key')))
+    .length;
 }
 
 /**
@@ -250,31 +296,31 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     expect(currentIndex()).toBe(0);
   });
 
-  it('4. the dominant axis decides: horizontal moves, DOWN dismisses, up does nothing', () => {
+  it('4. the dominant axis decides: horizontal skips a group, DOWN dismisses, up does nothing', () => {
     const onClose = vi.fn();
-    viewer(3, { onClose });
+    row([group('A', [item(0), item(1)]), group('B', [item(10), item(11)])], { onClose });
 
     dragBy(-120, 0);
-    expect(currentIndex()).toBe(1);
+    expect(position()).toEqual([1, 0]);
 
     dragBy(120, 0);
-    expect(currentIndex()).toBe(0);
+    expect(position()).toEqual([0, 0]);
 
     // Up is deliberately inert — there is nothing above a story.
     dragBy(0, -140);
     expect(onClose).not.toHaveBeenCalled();
-    expect(currentIndex()).toBe(0);
+    expect(position()).toEqual([0, 0]);
 
     // More horizontal than vertical: one gesture never both moves AND dismisses.
     dragBy(-140, 90);
     expect(onClose).not.toHaveBeenCalled();
-    expect(currentIndex()).toBe(1);
+    expect(position()).toEqual([1, 0]);
 
     dragBy(0, 140);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('5. NEXT at the last story closes the viewer and never loops (D-78)', () => {
+  it('5. NEXT at the row’s last story closes the viewer and never loops (D-107)', () => {
     const onClose = vi.fn();
     viewer(1, { onClose });
 
@@ -282,7 +328,7 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('6. PREVIOUS at the first story restarts the current clock instead of closing', () => {
+  it('6. PREVIOUS at the row’s first story restarts the current clock instead of closing', () => {
     const clock = manualClock();
     const onClose = vi.fn();
     viewer(3, { onClose }, clock);
@@ -336,7 +382,7 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     // One polite region, one generated string, bounded by the count — never member content.
     const announcements = screen.getAllByTestId('story-position');
     expect(announcements).toHaveLength(1);
-    expect(announcements[0]).toHaveTextContent('position-3-of-4');
+    expect(announcements[0]).toHaveTextContent('position-group-A-3-of-4');
     expect(announcements[0]).toHaveAttribute('aria-live', 'polite');
 
     fireEvent.keyDown(node, { key: 'Escape' });
@@ -362,7 +408,7 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
   it('11. UI-D-34: canplay without playback leaves the clock PAUSED and renders the play badge', () => {
     vi.useFakeTimers();
     const clock = manualClock();
-    viewer(2, { items: [item(0, { mediaKind: 'video' }), item(1)] }, clock);
+    row([group('A', [item(0, { mediaKind: 'video' }), item(1)])], {}, clock);
 
     act(() => controls.get('story-0')?.onCanPlay());
     expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
@@ -422,7 +468,7 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     vi.useFakeTimers();
     const clock = manualClock();
     const onRequestPlay = vi.fn();
-    viewer(2, { items: [item(0, { mediaKind: 'video', onRequestPlay }), item(1)] }, clock);
+    row([group('A', [item(0, { mediaKind: 'video', onRequestPlay }), item(1)])], {}, clock);
 
     act(() => controls.get('story-0')?.onCanPlay());
     act(() => {
@@ -446,7 +492,7 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
   it('12b. CR-04: tapping the media-error retry re-mounts the media and does NOT advance', () => {
     const clock = manualClock();
     const mounted = { count: 0 };
-    viewer(3, { items: [item(0, { media: countingMedia(0, mounted) }), item(1), item(2)] }, clock);
+    row([group('A', [item(0, { media: countingMedia(0, mounted) }), item(1), item(2)])], {}, clock);
 
     expect(mounted.count).toBe(1);
     act(() => controls.get('story-0')?.onError());
@@ -487,8 +533,268 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
   });
 
   it('14. a story with no caption renders no caption node at all', () => {
-    viewer(2, { items: [item(0, { caption: '' }), item(1)] });
+    row([group('A', [item(0, { caption: '' }), item(1)])]);
     expect(screen.queryByTestId('story-caption')).toBeNull();
+  });
+});
+
+/* ── The grouped viewer (05.2-05: D-107, UI-D-65, R-D-M, Pitfall 4) ─────────────────────────────
+ *
+ * The position is the PAIR `(group, index)`, published on the dialog as `data-story-group` and
+ * `data-story-index`. Group keys are sentinel ASCII and the header name is `group-{key}`.
+ */
+describe('StoryViewer — a row of groups (D-107, UI-D-65, R-D-M)', () => {
+  it('G1. next at a group’s last story enters the next group’s FIRST; next after the row’s last closes', () => {
+    const onClose = vi.fn();
+    row([group('A', [item(0), item(1)]), group('B', [item(10)])], { onClose, initialIndex: 1 });
+    expect(position()).toEqual([0, 1]);
+
+    tapAt(RIGHT_TWO_THIRDS());
+    expect(position()).toEqual([1, 0]);
+    expect(screen.getByTestId('media-10')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // B's only story is the row's last: the viewer closes rather than looping (D-107).
+    tapAt(RIGHT_TWO_THIRDS());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('G2. previous at a group’s first story enters the previous group’s LAST; at the row’s very first it restarts', () => {
+    const clock = manualClock();
+    const onClose = vi.fn();
+    row(
+      [group('A', [item(0), item(1)]), group('B', [item(10)])],
+      { onClose, initialGroup: 1 },
+      clock,
+    );
+    expect(position()).toEqual([1, 0]);
+
+    // The exact mirror of next (R A2): A's LAST story, not its first.
+    tapAt(LEFT_THIRD());
+    expect(position()).toEqual([0, 1]);
+
+    tapAt(LEFT_THIRD());
+    expect(position()).toEqual([0, 0]);
+
+    act(() => controls.get('story-0')?.onLoad());
+    clock.advance(STORY_DURATION_MS / 2);
+    expect(fillOf(0)).toBe('50%');
+
+    // Nothing precedes the row's first story: its clock restarts and nothing closes.
+    tapAt(LEFT_THIRD());
+    expect(position()).toEqual([0, 0]);
+    expect(fillOf(0)).toBe('0%');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('G3. a horizontal swipe skips a WHOLE group: left to the next group’s first, right to the previous group’s first', () => {
+    row([group('A', [item(0), item(1)]), group('B', [item(10), item(11)])]);
+
+    dragBy(-120, 0);
+    expect(position()).toEqual([1, 0]);
+
+    tapAt(RIGHT_TWO_THIRDS());
+    expect(position()).toEqual([1, 1]);
+
+    // Right lands on the previous group's FIRST story — a swipe is a group skip, not a tap.
+    dragBy(120, 0);
+    expect(position()).toEqual([0, 0]);
+
+    // ArrowRight keeps TAP semantics: one story, not one group.
+    fireEvent.keyDown(dialog(), { key: 'ArrowRight' });
+    expect(position()).toEqual([0, 1]);
+  });
+
+  it('G4. an EMPTY group is skipped in both directions', () => {
+    row([group('A', [item(0), item(1)]), group('E', []), group('B', [item(10)])], {
+      initialIndex: 1,
+    });
+
+    tapAt(RIGHT_TWO_THIRDS());
+    expect(position()).toEqual([2, 0]);
+
+    tapAt(LEFT_THIRD());
+    expect(position()).toEqual([0, 1]);
+  });
+
+  it('G5. a group not loaded yet shows the loading frame with the clock paused, then plays when its items arrive', () => {
+    const clock = manualClock();
+    const onNeedGroup = vi.fn();
+    const { rerenderGroups } = row(
+      [group('A', [item(0)]), group('B', null)],
+      { onNeedGroup },
+      clock,
+    );
+
+    act(() => controls.get('story-0')?.onLoad());
+    clock.advance(STORY_DURATION_MS / 5);
+    expect(clock.running).toBe(true);
+
+    tapAt(RIGHT_TWO_THIRDS());
+    expect(position()).toEqual([1, 0]);
+
+    // The loading frame: the spinner, the group's own header, ONE empty segment.
+    expect(screen.getByTestId('story-group-loading')).toBeInTheDocument();
+    expect(screen.getByText('group-B')).toBeInTheDocument();
+    expect(screen.getByTestId('story-progress-bars')).toHaveAttribute('data-story-count', '1');
+    expect(fillOf(0)).toBe('0%');
+    expect(onNeedGroup).toHaveBeenCalledWith(1);
+
+    // The clock is paused: time passing moves nothing and closes nothing.
+    expect(clock.running).toBe(false);
+    clock.advance(STORY_DURATION_MS * 2);
+    expect(position()).toEqual([1, 0]);
+
+    rerenderGroups([group('A', [item(0)]), group('B', [item(10), item(11)])]);
+
+    expect(screen.queryByTestId('story-group-loading')).toBeNull();
+    expect(screen.getByTestId('media-10')).toBeInTheDocument();
+    expect(position()).toEqual([1, 0]);
+    expect(screen.getByTestId('story-progress-bars')).toHaveAttribute('data-story-count', '2');
+
+    act(() => controls.get('story-10')?.onLoad());
+    clock.advance(STORY_DURATION_MS / 2);
+    expect(fillOf(0)).toBe('50%');
+  });
+
+  it('G6. a group whose load FAILED shows the group error with a retry, and close and swipe stay live', () => {
+    const onRetryGroup = vi.fn();
+    const onNeedGroup = vi.fn();
+    const onClose = vi.fn();
+    row([group('A', [item(0)]), group('B', null, { failed: true })], {
+      initialGroup: 1,
+      onRetryGroup,
+      onNeedGroup,
+      onClose,
+    });
+
+    expect(screen.getByTestId('story-group-error')).toBeInTheDocument();
+    expect(screen.getByText(LABELS.groupError)).toBeInTheDocument();
+    expect(screen.queryByTestId('story-group-loading')).toBeNull();
+    // A failed group is not re-requested behind the member's back; only the retry asks again.
+    expect(onNeedGroup).not.toHaveBeenCalled();
+
+    tapOn(screen.getByRole('button', { name: LABELS.retry }));
+    expect(onRetryGroup).toHaveBeenCalledWith(1);
+    expect(position()).toEqual([1, 0]);
+
+    // The swipe is live over the error frame…
+    dragBy(120, 0);
+    expect(position()).toEqual([0, 0]);
+    dragBy(-120, 0);
+    expect(position()).toEqual([1, 0]);
+
+    // …and so is the close control: the viewer never traps a member.
+    fireEvent.click(screen.getByRole('button', { name: LABELS.close }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('G7. at a group’s last story the next group’s items are PREFETCHED before any tap', () => {
+    const onNeedGroup = vi.fn();
+    row([group('A', [item(0), item(1)]), group('B', null)], { onNeedGroup });
+
+    // Not at the last index yet: nothing is fetched early.
+    expect(onNeedGroup).not.toHaveBeenCalled();
+
+    tapAt(RIGHT_TWO_THIRDS());
+    // Still inside A — the request goes out while the member watches A's last story.
+    expect(position()).toEqual([0, 1]);
+    expect(onNeedGroup).toHaveBeenCalledWith(1);
+    expect(screen.queryByTestId('story-group-loading')).toBeNull();
+  });
+
+  it('G8. Pitfall 4: the SAME story in two groups shares no state and no React key', () => {
+    vi.useFakeTimers();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const dup = (groupKey: string) =>
+      item(0, {
+        id: 'dup',
+        mediaKind: 'video',
+        media: (c) => {
+          controls.set(`${groupKey}:dup`, c);
+          return <div data-testid={`media-${groupKey}-dup`} />;
+        },
+      });
+    row([group('A', [dup('A')]), group('B', [dup('B')])]);
+
+    // A's only story is its last, so B's first is pre-mounted beside it — two copies, two keys.
+    const keys = [...dialog().querySelectorAll('[data-segment-key]')].map((node) =>
+      node.getAttribute('data-segment-key'),
+    );
+    expect(keys).toEqual(['A:dup', 'B:dup']);
+
+    // A's copy is autoplay-blocked…
+    act(() => controls.get('A:dup')?.onCanPlay());
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(screen.getByTestId('story-autoplay-badge')).toBeInTheDocument();
+
+    // …and B's copy, a different segment of the same story, is not.
+    fireEvent.keyDown(dialog(), { key: 'ArrowRight' });
+    expect(position()).toEqual([1, 0]);
+    expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
+
+    expect(keyWarnings(errors)).toBe(0);
+  });
+
+  it('G9. onSegmentShown fires once per time a segment is CURRENT and ready — never on mount, never for a neighbour', () => {
+    const onSegmentShown = vi.fn();
+    row([group('A', [item(0), item(1)]), group('B', [item(10)])], { onSegmentShown });
+
+    expect(onSegmentShown).not.toHaveBeenCalled();
+
+    // The pre-mounted neighbour decodes first: it is not being shown, so it is not reported.
+    act(() => controls.get('story-1')?.onLoad());
+    expect(onSegmentShown).not.toHaveBeenCalled();
+
+    act(() => controls.get('story-0')?.onLoad());
+    expect(onSegmentShown).toHaveBeenCalledTimes(1);
+    expect(onSegmentShown).toHaveBeenLastCalledWith('story-0');
+
+    // An unrelated re-render (a mute toggle) reports nothing new.
+    fireEvent.click(screen.getByRole('button', { name: LABELS.unmute }));
+    expect(onSegmentShown).toHaveBeenCalledTimes(1);
+
+    // Story 1 is already decoded: it is reported the moment it BECOMES current.
+    tapAt(RIGHT_TWO_THIRDS());
+    expect(onSegmentShown).toHaveBeenCalledTimes(2);
+    expect(onSegmentShown).toHaveBeenLastCalledWith('story-1');
+
+    // Revisiting story 0 is a new showing, and it is reported again.
+    tapAt(LEFT_THIRD());
+    expect(onSegmentShown).toHaveBeenCalledTimes(3);
+    expect(onSegmentShown).toHaveBeenLastCalledWith('story-0');
+  });
+
+  it('G10. the bars show the CURRENT group only and reset on a group change; the live region names the group', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // `story-1` is in BOTH groups (D-111): the tenant group and a highlight.
+    row([group('A', [item(0), item(1)]), group('B', [item(1), item(10), item(11)])], {
+      initialIndex: 1,
+    });
+
+    const bars = () => screen.getByTestId('story-progress-bars');
+    expect(bars()).toHaveAttribute('data-story-count', '2');
+    expect(fillOf(0)).toBe('100%');
+    expect(screen.getByTestId('story-position')).toHaveTextContent('position-group-A-2-of-2');
+
+    tapAt(RIGHT_TWO_THIRDS());
+
+    expect(position()).toEqual([1, 0]);
+    expect(bars()).toHaveAttribute('data-story-count', '3');
+    expect(bars().children).toHaveLength(3);
+    // The row RESET: the first segment of the new group is empty, not A's full one.
+    expect(fillOf(0)).toBe('0%');
+    expect(fillOf(1)).toBe('0%');
+    expect(screen.getByTestId('story-position')).toHaveTextContent('position-group-B-1-of-3');
+    expect(screen.getAllByTestId('story-position')).toHaveLength(1);
+
+    expect(keyWarnings(errors)).toBe(0);
   });
 });
 

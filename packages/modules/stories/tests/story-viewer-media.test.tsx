@@ -102,7 +102,9 @@ const LABELS: StoryViewerLabels = {
   play: 'play-label',
   mediaError: 'media-error-label',
   retry: 'retry-label',
-  position: (current, total) => `position-${current}-of-${total}`,
+  loadingGroup: 'loading-group-label',
+  groupError: 'group-error-label',
+  position: (group, current, total) => `position-${group}-${current}-of-${total}`,
 };
 
 function mediaItem(n: number, widths: readonly number[] = WIDTHS): StoryViewerItem {
@@ -161,7 +163,8 @@ function viewer(
   const onClose = overrides.onClose ?? vi.fn();
   const result = render(
     <StoryViewer
-      items={items}
+      // A single sequence — ONE group, the shape every pre-05.2 caller passes.
+      groups={[{ key: 'A', items, header: { name: 'group-A', avatar: null } }]}
       labels={LABELS}
       now={clock.now}
       requestFrame={clock.requestFrame}
