@@ -34,7 +34,14 @@ import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { loadFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
 import { loadHighlights, loadStories } from '@/lib/stories';
-import { inicioRow, storyViewerItem, storyViewerLabels, tenantSequence } from '@/lib/story-view';
+import {
+  highlightGroupView,
+  inicioGroups,
+  inicioRow,
+  storyViewerItem,
+  storyViewerLabels,
+  tenantSequence,
+} from '@/lib/story-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -328,8 +335,10 @@ export function storyCommentsProps(
  * name — holding every active, ready story of the tenant, played OLDEST → NEWEST over the newest
  * `STORY_MAX_PAGE_SIZE` (the API's newest-first page, reversed here by `tenantSequence`), followed by
  * Início's highlights, one circle each, in `position, id` order (UI-D-59, built by `inicioRow`).
- * The viewer still opens the tenant sequence at index 0 — the single-sequence viewer, which plan 05
- * turns into group 0 and plan 10 gives a resume index. Highlight circles are inert until plan 05.
+ * Since 05.2-05 every circle OPENS: the viewer plays the row's groups (`inicioGroups`, D-107) — the
+ * tenant sequence as group 0, then one group per highlight whose items are read lazily when the
+ * member reaches it (`loadHighlightItemsAction`), so this render never carries a highlight's items.
+ * Plan 10 gives the tenant circle a resume index.
  *
  * **The `+` circle's visibility is a PERMISSION, never a role** (UI-D-28, T-05-25). It renders
  * exactly when the bootstrap carries `stories.story.publish` — the same composed value the API's
@@ -364,6 +373,11 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
   };
   // D-106: one bounded page, played oldest first.
   const sequence = tenantSequence(page);
+  const groups = inicioGroups({
+    tenant,
+    sequence: sequence.map((story) => storyViewerItem(story, now)),
+    highlightGroups: (highlights?.items ?? []).map(highlightGroupView),
+  });
 
   return (
     <StoriesSurface
@@ -377,19 +391,16 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
         },
         tf,
       )}
-      // STORY-02: the viewer opens on the tenant circle's OWN ordered sequence, built from the same
-      // page in the same request — so the circle and the segments can never disagree, and opening
-      // the viewer costs no second round trip. No live story means no `viewer` prop at all.
+      // D-107 / UI-D-65: the viewer plays the row — one group per openable circle, in the same
+      // order `inicioRow` numbers them. The tenant group carries its sequence, built from the same
+      // page in the same request (no second round trip); each highlight group carries NO items
+      // (`null`): they are read lazily when the member reaches that circle, never in this render.
+      // Nothing to open means no `viewer` prop at all.
       viewer={
-        sequence.length === 0
+        groups.length === 0
           ? undefined
           : {
-              items: sequence.map((story) => storyViewerItem(story, now)),
-              author: {
-                // V1's single publisher IS the tenant; see the note in `StoryViewerHost`.
-                name: tenant.displayName,
-                avatarUrl: tenant.logoUrl,
-              },
+              groups,
               labels: storyViewerLabels(tf),
               onLike: likeStoryAction,
               onUnlike: unlikeStoryAction,

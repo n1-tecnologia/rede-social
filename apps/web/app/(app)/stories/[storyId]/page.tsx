@@ -5,7 +5,7 @@ import { StoryViewerHost } from '@/components/stories/StoryViewerHost';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { storyCommentsProps } from '@/lib/registry';
 import { loadStory } from '@/lib/stories';
-import { storyViewerItem, storyViewerLabels } from '@/lib/story-view';
+import { storyGroupView, storyViewerItem, storyViewerLabels } from '@/lib/story-view';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /**
@@ -69,12 +69,17 @@ export default async function StoryPage({ params }: { params: Promise<{ storyId:
 
   return (
     <StoryViewerHost
-      items={[storyViewerItem(result.story, now)]}
-      author={{
-        // V1's single publisher IS the tenant; see the note in `StoryViewerHost`.
-        name: bootstrap.tenant.displayName,
-        avatarUrl: bootstrap.tenant.branding.logoUrl,
-      }}
+      // ONE group holding the one story the link names, headed by the tenant (V1's single
+      // publisher; see the note in `StoryViewerHost`): it closes when that story ends.
+      groups={[
+        storyGroupView(
+          {
+            displayName: bootstrap.tenant.displayName,
+            logoUrl: bootstrap.tenant.branding.logoUrl,
+          },
+          storyViewerItem(result.story, now),
+        ),
+      ]}
       labels={storyViewerLabels(tf)}
       onLike={likeStoryAction}
       onUnlike={unlikeStoryAction}

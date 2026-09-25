@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -735,7 +735,8 @@ function deferred<T>() {
 describe('StoryViewerHost — a highlight group (05.2-05, UI-D-65)', () => {
   it('15. a highlight group’s TITLE heads the viewer while it loads and after its items arrive', () => {
     const onNeedGroup = vi.fn();
-    const loading = [highlightGroupView(summary(H1, 'Bastidores'))];
+    const bastidores = highlightGroupView(summary(H1, 'Bastidores'));
+    const loading = [bastidores];
     const props = {
       labels: LABELS,
       onLike: like as never,
@@ -751,7 +752,7 @@ describe('StoryViewerHost — a highlight group (05.2-05, UI-D-65)', () => {
     expect(screen.getByTestId('story-position').textContent).toBe('Carregando destaque…');
     expect(onNeedGroup).toHaveBeenCalledWith(0);
 
-    rerender(<StoryViewerHost groups={[{ ...loading[0], items: [item()] }]} {...props} />);
+    rerender(<StoryViewerHost groups={[{ ...bastidores, items: [item()] }]} {...props} />);
 
     expect(screen.queryByTestId('story-group-loading')).toBeNull();
     // Every story in the group is headed by the group's title, not the tenant's name.
@@ -806,7 +807,11 @@ describe('StoriesSurface — every Início circle opens its own group (05.2-05, 
           lookup,
         )}
         viewer={{
-          groups: inicioGroups({ tenant, sequence, highlights }),
+          groups: inicioGroups({
+            tenant,
+            sequence,
+            highlightGroups: highlights.map(highlightGroupView),
+          }),
           labels: LABELS,
           onLike: like as never,
           onUnlike: unlike as never,
@@ -845,7 +850,8 @@ describe('StoriesSurface — every Início circle opens its own group (05.2-05, 
     const dialog = await openCircle('Abrir destaque Segundo');
     expect(dialog.getAttribute('data-story-group')).toBe('2');
     expect(screen.getByTestId('story-group-loading')).toBeTruthy();
-    expect(screen.getByText('Segundo')).toBeTruthy();
+    // The header names the group (the strip's own circle label also reads "Segundo").
+    expect(within(dialog).getByText('Segundo')).toBeTruthy();
 
     await act(async () => {
       answer.resolve({

@@ -124,7 +124,7 @@ describe('tenantCircleView — the tenant circle (D-104, UI-D-60, UI-D-61)', () 
 
 describe('highlightCircleView — one highlight circle (UI-D-61, UI-D-62)', () => {
   it('10. with a resolved cover: an asset disc, the title as label, "Abrir destaque {title}", neutral', () => {
-    const circle = highlightCircleView(highlight(), t);
+    const circle = highlightCircleView(highlight(), t, 1);
     expect(circle).toMatchObject({
       key: '0000000a-1111-4111-8111-111111111111',
       label: 'Bastidores',
@@ -139,7 +139,7 @@ describe('highlightCircleView — one highlight circle (UI-D-61, UI-D-62)', () =
   });
 
   it('11. with no resolvable cover (video-only, cover deleted): the monogram of the title', () => {
-    const circle = highlightCircleView(highlight({ coverAssetId: null, title: 'aulas' }), t);
+    const circle = highlightCircleView(highlight({ coverAssetId: null, title: 'aulas' }), t, 1);
     expect(circle.disc).toEqual({ kind: 'monogram', text: 'A' });
     expect(circle.ring).toBe('neutral');
   });
@@ -261,7 +261,7 @@ describe('the viewer groups — one per openable circle, in row order (05.2-05)'
     const groups = inicioGroups({
       tenant,
       sequence: [viewerItem('a')],
-      highlights: [highlight(), second],
+      highlightGroups: [highlight(), second].map(highlightGroupView),
     });
     expect(groups.map((g) => [g.kind, g.name, g.items === null])).toEqual([
       ['tenant', 'Demo', false],
@@ -291,7 +291,7 @@ describe('the viewer groups — one per openable circle, in row order (05.2-05)'
     const groups = inicioGroups({
       tenant: { displayName: 'Demo', logoUrl: null },
       sequence: [],
-      highlights: [highlight()],
+      highlightGroups: [highlight()].map(highlightGroupView),
     });
     expect(groups.map((g) => g.kind)).toEqual(['highlight']);
   });

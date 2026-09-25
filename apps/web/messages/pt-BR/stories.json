@@ -15,6 +15,9 @@
       "coverAlt": "Capa do destaque {title}",
       "place": {
         "home": "Início"
+      },
+      "errors": {
+        "load": "Não foi possível carregar este destaque."
       }
     },
     "viewer": {
@@ -25,7 +28,8 @@
       "previous": "Story anterior",
       "next": "Próximo story",
       "play": "Reproduzir",
-      "position": "Story {current} de {total}",
+      "positionGroup": "{group}: story {current} de {total}",
+      "loadingGroup": "Carregando destaque…",
       "like": "Curtir",
       "unlike": "Descurtir",
       "comment": "Comentar",

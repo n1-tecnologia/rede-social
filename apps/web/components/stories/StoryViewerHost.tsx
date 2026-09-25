@@ -9,20 +9,16 @@ import {
 } from '@tria/module-feed/ui';
 import {
   type StoryMediaControls,
+  StoryMonogram,
   StoryViewer,
   type StoryViewerGroup,
   type StoryViewerItem,
 } from '@tria/module-stories/ui';
 import { Avatar, IconButton, useToast } from '@tria/ui';
 import { MessageCircle } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
-import type {
-  StoryGroupView,
-  StoryViewerAuthorView,
-  StoryViewerItemView,
-  StoryViewerLabelsView,
-} from '@/lib/story-view';
+import type { StoryGroupView, StoryViewerItemView, StoryViewerLabelsView } from '@/lib/story-view';
 import { StoryVideo } from './StoryVideo';
 
 /**
@@ -35,10 +31,16 @@ import { StoryVideo } from './StoryVideo';
  * and the action row as NODES and this file builds them. Every decision that can be made on the
  * server still is: the sequence, the labels and the relative times all arrive as props.
  *
- * **The author row is the TENANT, and that is deliberate for V1.** `storySummarySchema` carries an
- * `authorUserId` and no profile — the strip never needed one — and in V1 only the tenant's admin
- * publishes, so the identity a member should read on a story is their organisation's. When V2 hands
- * publishing to members this becomes a per-story field on the payload rather than a prop here.
+ * **The header is the GROUP's identity** (05.2-05, UI-D-65). The viewer plays a row of groups, and
+ * every story in a group is headed by that group's name and disc: the TENANT (display name over its
+ * logo) for Início's tenant circle, the community pinned row and a deep link — deliberate for V1,
+ * where only the tenant's admin publishes and `storySummarySchema` carries no author profile — and
+ * the highlight's TITLE over its cover for a highlight. When V2 hands publishing to members this
+ * becomes a per-story field on the payload.
+ *
+ * **Every per-segment registry is keyed `${group.key}:${story.id}`** (Pitfall 4): the same story can
+ * be mounted twice at a group boundary (the tenant group's last story and a highlight's first), and
+ * a registry keyed by story id alone would let one copy's unmount clear the other's play callback.
  *
  * **The playback token is never cached.** There is no `"use cache"`, no `unstable_cache` and no
  * `revalidate` in this file or in `StoryVideo`: the credential is minted when the viewer opens, for
@@ -72,14 +74,20 @@ export type StoryCommentsBinding = Omit<
   onDeleteComment: (storyId: string, commentId: string) => Promise<{ ok: boolean }>;
 };
 
+/** A group as the host receives it: the server's view plus the client's own "the read failed". */
+export type StoryGroupState = StoryGroupView & { failed?: boolean };
+
 export type StoryViewerHostProps = {
-  items?: readonly StoryViewerItemView[];
-  initialIndex?: number;
-  author?: StoryViewerAuthorView;
-  /** 05.2-05 RED STUB — accepted but flattened: only `groups[initialGroup]` plays. */
-  groups?: readonly (StoryGroupView & { failed?: boolean })[];
+  /**
+   * The row, in circle order. A single-sequence caller (a deep link, the community pinned row)
+   * passes ONE group; Início passes its tenant group and one lazily-loaded group per highlight.
+   */
+  groups: readonly StoryGroupState[];
   initialGroup?: number;
+  initialIndex?: number;
+  /** The viewer needs group `g`'s items (entering it, or the prefetch). The caller dedupes. */
   onNeedGroup?: (group: number) => void;
+  /** The retry in a failed group's error frame. */
   onRetryGroup?: (group: number) => void;
   labels: StoryViewerLabelsView;
   onLike: typeof likeStoryAction;
@@ -95,17 +103,45 @@ export type StoryViewerHostProps = {
   closeHref?: string;
 };
 
-/** `Story {current} de {total}` and the two plural templates, resolved on the client. */
-function fill(template: string, values: Record<string, number>): string {
+/** `{group}: story {current} de {total}` and the two plural templates, resolved on the client. */
+function fill(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, name: string) => String(values[name] ?? ''));
 }
 
+/**
+ * A group's header disc at the viewer's avatar slot (32px): the shipped `Avatar` for the tenant
+ * (unchanged since 05-06), the highlight's cover through `MediaImage` BY ASSET ID (no URL is built
+ * from tenant content, T-05.2-21), or the one monogram shape (UI-D-62).
+ */
+function groupAvatar(avatar: StoryGroupView['avatar']): ReactNode {
+  switch (avatar.kind) {
+    case 'avatar':
+    case 'logo':
+      return <Avatar src={avatar.src} alt="" size="sm" />;
+    case 'monogram':
+      return <StoryMonogram text={avatar.text} size={32} />;
+    case 'asset':
+      return (
+        <span className="block h-8 w-8 shrink-0 overflow-hidden rounded-full bg-bg-tertiary">
+          <MediaImage
+            assetId={avatar.assetId}
+            widths={avatar.variantWidths}
+            alt=""
+            sizes="32px"
+            ratio="aspect-square"
+            className="h-8 w-8 rounded-full object-cover"
+          />
+        </span>
+      );
+  }
+}
+
 export function StoryViewerHost({
-  items: itemsProp,
-  initialIndex = 0,
-  author: authorProp,
-  groups: groupsProp,
+  groups,
   initialGroup = 0,
+  initialIndex = 0,
+  onNeedGroup,
+  onRetryGroup,
   labels,
   onLike,
   onUnlike,
@@ -114,16 +150,14 @@ export function StoryViewerHost({
   closeHref = '/inicio',
 }: StoryViewerHostProps) {
   const toast = useToast();
-  // RED STUB: the initial group alone, as the old single sequence.
-  const items = itemsProp ?? groupsProp?.[initialGroup]?.items ?? [];
-  const author = authorProp ?? { name: groupsProp?.[initialGroup]?.name ?? '', avatarUrl: null };
 
   /**
-   * THE story whose comments are open, or null. It is the story ID rather than a boolean because
-   * the sheet reads and writes THAT story's comments — and because `externallyPaused` is then
-   * derived from it rather than tracked separately, which is one fewer thing to keep in step.
+   * THE story whose comments are open, or null. It names the story rather than being a boolean
+   * because the sheet reads and writes THAT story's comments — and because `externallyPaused` is
+   * then derived from it rather than tracked separately, which is one fewer thing to keep in step.
+   * The SEGMENT rides along so the count bump reaches the copy the member is looking at.
    */
-  const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  const [commentsFor, setCommentsFor] = useState<{ storyId: string; segment: string } | null>(null);
 
   /**
    * Per-story comment-count bumpers, registered by the action rows that own them.
@@ -134,9 +168,9 @@ export function StoryViewerHost({
    * is the same shape `bindPlay` uses for the video's `play()` — neither is the other's exception.
    */
   const countBumpRef = useRef<Record<string, (delta: number) => void>>({});
-  const bindCountBump = useCallback((storyId: string, bump: ((delta: number) => void) | null) => {
-    if (bump) countBumpRef.current[storyId] = bump;
-    else delete countBumpRef.current[storyId];
+  const bindCountBump = useCallback((segment: string, bump: ((delta: number) => void) | null) => {
+    if (bump) countBumpRef.current[segment] = bump;
+    else delete countBumpRef.current[segment];
   }, []);
 
   /**
@@ -158,11 +192,30 @@ export function StoryViewerHost({
    * a fresh inline callback per render would be an unbounded attach/detach loop.
    */
   const playRefs = useRef<Record<string, () => void>>({});
-  const bindPlay = useCallback((storyId: string, play: (() => void) | null) => {
-    if (play) playRefs.current[storyId] = play;
+  const bindPlay = useCallback((segment: string, play: (() => void) | null) => {
+    if (play) playRefs.current[segment] = play;
     // Only the OWNER clears its own slot: a neighbour unmounting must not silence the active story.
-    else delete playRefs.current[storyId];
+    else delete playRefs.current[segment];
   }, []);
+
+  /**
+   * `StoryVideo` registers under its STORY id; the registry is keyed by SEGMENT (Pitfall 4). One
+   * binder per segment bridges the two, cached for the host's life so its identity is as stable as
+   * `bindPlay`'s — `StoryVideo`'s listener effect takes it as a dependency (WR-01).
+   */
+  const segmentBinders = useRef(
+    new Map<string, (storyId: string, play: (() => void) | null) => void>(),
+  );
+  const bindPlayFor = useCallback(
+    (segment: string) => {
+      const cached = segmentBinders.current.get(segment);
+      if (cached) return cached;
+      const binder = (_storyId: string, play: (() => void) | null) => bindPlay(segment, play);
+      segmentBinders.current.set(segment, binder);
+      return binder;
+    },
+    [bindPlay],
+  );
 
   const close = useCallback(() => {
     if (onClose) {
@@ -175,23 +228,25 @@ export function StoryViewerHost({
     window.location.assign(closeHref);
   }, [onClose, closeHref]);
 
-  const viewerItems = useMemo<StoryViewerItem[]>(
-    () =>
-      items.map((item) => ({
+  /** One story of one group, as the viewer plays it. Every registry key is the SEGMENT's. */
+  const buildItem = useCallback(
+    (group: StoryGroupState, header: ReactNode, item: StoryViewerItemView): StoryViewerItem => {
+      const segment = `${group.key}:${item.id}`;
+      return {
         id: item.id,
         mediaKind: item.mediaKind,
         caption: item.caption,
-        authorName: author.name,
+        authorName: group.name,
         timeLabel: item.timeLabel,
-        avatar: <Avatar src={author.avatarUrl} alt="" size="sm" />,
-        onRequestPlay: () => playRefs.current[item.id]?.(),
+        avatar: header,
+        onRequestPlay: () => playRefs.current[segment]?.(),
         media: (controls: StoryMediaControls) =>
           item.mediaKind === 'video' ? (
             <StoryVideo
               assetId={item.mediaAssetId}
               storyId={item.id}
               controls={controls}
-              onPlayRef={bindPlay}
+              onPlayRef={bindPlayFor(segment)}
             />
           ) : (
             <MediaImage
@@ -213,39 +268,56 @@ export function StoryViewerHost({
         actions: (
           <StoryActions
             item={item}
+            segment={segment}
             labels={labels}
             onLike={onLike}
             onUnlike={onUnlike}
             onError={() => toast.show({ message: labels.genericError, tone: 'error' })}
             // Absent keeps the affordance INERT rather than giving it a handler that does nothing
             // — the posture 05-06 shipped it with, now with a destination.
-            onOpenComments={comments ? () => setCommentsFor(item.id) : undefined}
+            onOpenComments={
+              comments ? () => setCommentsFor({ storyId: item.id, segment }) : undefined
+            }
             bindCountBump={bindCountBump}
           />
         ),
-      })),
-    [items, author, labels, onLike, onUnlike, toast, bindPlay, comments, bindCountBump],
+      };
+    },
+    [labels, onLike, onUnlike, toast, bindPlayFor, comments, bindCountBump],
   );
 
   /**
-   * The viewer plays a ROW of groups (05.2-05); this host still hands it ONE sequence, so it is one
-   * group whose header is the author — every caller behaves exactly as before.
+   * The viewer's groups, built ONCE per group object: a group that did not change keeps its item
+   * array, so a highlight loading elsewhere in the row never re-creates the media functions of the
+   * story the member is watching. The cache resets when the builder does.
    */
-  const groups = useMemo<StoryViewerGroup[]>(
-    () => [
-      {
-        key: 'sequence',
-        items: viewerItems,
-        header: { name: author.name, avatar: <Avatar src={author.avatarUrl} alt="" size="sm" /> },
-      },
-    ],
-    [viewerItems, author],
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `buildItem` is the cache's KEY, not an input — a new builder must start a new cache
+  const built = useMemo(() => new WeakMap<StoryGroupState, StoryViewerGroup>(), [buildItem]);
+  const viewerGroups = useMemo<StoryViewerGroup[]>(
+    () =>
+      groups.map((group) => {
+        const cached = built.get(group);
+        if (cached) return cached;
+        const header = groupAvatar(group.avatar);
+        const next: StoryViewerGroup = {
+          key: group.key,
+          items: group.items ? group.items.map((item) => buildItem(group, header, item)) : null,
+          failed: group.failed === true,
+          header: { name: group.name, avatar: header },
+        };
+        built.set(group, next);
+        return next;
+      }),
+    [groups, built, buildItem],
   );
 
   return (
     <StoryViewer
-      groups={groups}
+      groups={viewerGroups}
+      initialGroup={initialGroup}
       initialIndex={initialIndex}
+      onNeedGroup={onNeedGroup}
+      onRetryGroup={onRetryGroup}
       onClose={close}
       // The third source of the viewer's single pause boolean, beside the hold gesture and document
       // visibility. Closing it resumes from the STORED elapsed, because the clock never restarted.
@@ -257,12 +329,14 @@ export function StoryViewerHost({
             variant="flat"
             open={commentsFor !== null}
             onClose={() => setCommentsFor(null)}
-            onDeleteComment={(commentId) => comments.onDeleteComment(commentsFor ?? '', commentId)}
+            onDeleteComment={(commentId) =>
+              comments.onDeleteComment(commentsFor?.storyId ?? '', commentId)
+            }
             // `''` is only ever read while the sheet is closed, and `BottomSheet` renders nothing
             // then — the list never mounts with an empty target.
-            targetId={commentsFor ?? ''}
+            targetId={commentsFor?.storyId ?? ''}
             onCountChange={(delta) => {
-              if (commentsFor) countBumpRef.current[commentsFor]?.(delta);
+              if (commentsFor) countBumpRef.current[commentsFor.segment]?.(delta);
             }}
           />
         ) : null
@@ -277,11 +351,9 @@ export function StoryViewerHost({
         play: labels.play,
         mediaError: labels.mediaError,
         retry: labels.retry,
-        // One LOADED group: the loading and group-error frames are unreachable from this host, so
-        // these two borrow the nearest existing copy until the host passes real groups.
-        loadingGroup: labels.dialog,
-        groupError: labels.mediaError,
-        position: (_group, current, total) => fill(labels.position, { current, total }),
+        loadingGroup: labels.loadingGroup,
+        groupError: labels.groupError,
+        position: (group, current, total) => fill(labels.positionGroup, { group, current, total }),
       }}
     />
   );
@@ -301,6 +373,7 @@ export function StoryViewerHost({
  */
 function StoryActions({
   item,
+  segment,
   labels,
   onLike,
   onUnlike,
@@ -309,21 +382,23 @@ function StoryActions({
   bindCountBump,
 }: {
   item: StoryViewerItemView;
+  /** `${group.key}:${story.id}` — the count bump is registered per segment (Pitfall 4). */
+  segment: string;
   labels: StoryViewerLabelsView;
   onLike: typeof likeStoryAction;
   onUnlike: typeof unlikeStoryAction;
   onError: () => void;
   onOpenComments?: () => void;
-  bindCountBump: (storyId: string, bump: ((delta: number) => void) | null) => void;
+  bindCountBump: (segment: string, bump: ((delta: number) => void) | null) => void;
 }) {
   // The SERVER's count plus whatever this session has added or removed through the sheet. It is a
   // delta rather than an absolute so the count never claims to be authoritative: the next strip
   // read replaces it with the trigger-maintained column.
   const [commentDelta, setCommentDelta] = useState(0);
   useEffect(() => {
-    bindCountBump(item.id, (delta) => setCommentDelta((value) => value + delta));
-    return () => bindCountBump(item.id, null);
-  }, [bindCountBump, item.id]);
+    bindCountBump(segment, (delta) => setCommentDelta((value) => value + delta));
+    return () => bindCountBump(segment, null);
+  }, [bindCountBump, segment]);
   const { state, toggle, pulseKey } = useOptimisticLike({
     liked: item.viewerLiked,
     likeCount: item.likeCount,

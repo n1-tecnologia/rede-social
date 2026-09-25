@@ -65,20 +65,18 @@ export type StoryViewerLabelsView = {
   like: string;
   unlike: string;
   comment: string;
-  /** `Story {current} de {total}` */
-  position: string;
+  /** `{group}: story {current} de {total}` — the ONE live-region template (UI-D-65). */
+  positionGroup: string;
+  /** Screen-reader line while a highlight group's items load (UI-D-65 loading). */
+  loadingGroup: string;
+  /** A highlight group that could not be read (UI-D-65 error), above the shared retry. */
+  groupError: string;
   likesOne: string;
   likesOther: string;
   commentsOne: string;
   commentsOther: string;
   genericError: string;
-  loadingGroup: string;
-  groupError: string;
-  positionGroup: string;
 };
-
-/** Who the sequence is FROM. V1 has a single publisher, so it is the tenant (see the host's note). */
-export type StoryViewerAuthorView = { name: string; avatarUrl: string | null };
 
 export function storyViewerItem(story: StorySummary, now: number): StoryViewerItemView {
   return {
@@ -95,10 +93,11 @@ export function storyViewerItem(story: StorySummary, now: number): StoryViewerIt
 }
 
 /**
- * The whole label block, read once from the `stories.viewer` catalog namespace.
+ * The whole label block, read once from the `stories.viewer` catalog namespace (plus the one
+ * highlight sentence the grouped viewer shows when a group cannot load).
  *
  * **The five templated strings are read with `.raw`, and that is not optional.** `next-intl`
- * FORMATS on read: asking for `viewer.position` through `t()` without a `{current}` raises
+ * FORMATS on read: asking for `viewer.positionGroup` through `t()` without a `{group}` raises
  * `FORMATTING_ERROR` and takes the whole home slot down with it. `.raw` returns the pattern
  * untouched, which is exactly what has to cross to the client — the same reason the feed's plural
  * pairs are read that way.
@@ -119,16 +118,14 @@ export function storyViewerLabels(tf: StoryLabelReader): StoryViewerLabelsView {
     like: tf('viewer.like'),
     unlike: tf('viewer.unlike'),
     comment: tf('viewer.comment'),
-    position: String(tf.raw('viewer.position')),
+    positionGroup: String(tf.raw('viewer.positionGroup')),
+    loadingGroup: tf('viewer.loadingGroup'),
+    groupError: tf('highlights.errors.load'),
     likesOne: String(tf.raw('viewer.likes.one')),
     likesOther: String(tf.raw('viewer.likes.other')),
     commentsOne: String(tf.raw('viewer.comments.one')),
     commentsOther: String(tf.raw('viewer.comments.other')),
     genericError: tf('viewer.errors.generic'),
-    // 05.2-05 RED STUB — inert; GREEN reads the catalog.
-    loadingGroup: '',
-    groupError: '',
-    positionGroup: '',
   };
 }
 
@@ -342,16 +339,16 @@ export function tenantCircleView(
  * (UI-D-61). The cover goes through `MediaImage` BY ASSET ID — no URL is ever built from tenant
  * content (T-05.2-21).
  *
- * `static` in this plan: a highlight has nowhere to open yet, so it renders as an inert span rather
- * than as a button that does nothing. Plan 05 makes the viewer group-aware and turns it into `open`.
+ * It OPENS its own viewer group at its first story (05.2-05, D-107): `group` is the circle's place
+ * among the row's openable circles, the same index `inicioGroups` gives the group it opens.
  */
 export function highlightCircleView(
   summary: HighlightSummary,
   t: RowLabelReader,
-  _group = 0,
-): StoryStripCircle {
+  group: number,
+): Extract<StoryStripCircle, { kind: 'open' }> {
   return {
-    kind: 'static',
+    kind: 'open',
     key: summary.id,
     label: summary.title,
     actionLabel: t('circle.highlight', { title: summary.title }),
@@ -364,6 +361,8 @@ export function highlightCircleView(
             variantWidths: summary.coverVariantWidths,
           }
         : { kind: 'monogram', text: monogramOf(summary.title) },
+    group,
+    index: 0,
   };
 }
 
@@ -373,7 +372,8 @@ export function highlightCircleView(
  * 1. the admin's `+ Seu story` link — ONLY with `stories.story.publish` (the caller passes the
  *    permission check's result, never a role, UI-D-28);
  * 2. the tenant circle — iff the tenant sequence is non-empty (a circle means something to watch);
- * 3. Início's highlights, one circle each, in the order the API returned (`position, id`).
+ * 3. Início's highlights, one circle each, in the order the API returned (`position, id`), each
+ *    opening its own viewer group (05.2-05).
  *
  * A member with nothing gets `[]`, and `StoriesStrip` then renders NO node (UI-D-26). The three
  * parts are independent (UI E01 partial): highlights render without the tenant circle and vice
@@ -401,13 +401,29 @@ export function inicioRow(
       disc: { kind: 'own', avatarUrl: input.own.avatarUrl },
     });
   }
+  // The openable circles ARE the viewer's groups, in the same order (`inicioGroups`): the tenant's
+  // is group 0 when it exists, and each highlight takes the next index.
+  const first = input.sequenceLength > 0 ? 1 : 0;
   if (input.sequenceLength > 0) row.push(tenantCircleView(input.tenant, t));
-  for (const summary of input.highlights) row.push(highlightCircleView(summary, t));
+  input.highlights.forEach((summary, k) => {
+    row.push(highlightCircleView(summary, t, first + k));
+  });
   return row;
 }
 
-/* ── 05.2-05 RED STUB — deliberately INERT; the GREEN commit replaces this block. ────────────── */
+/* ── The viewer's groups (05.2-05: D-107, UI-D-65, R-P6) ──────────────────────────────────────── */
 
+/**
+ * One group of the grouped viewer, composed on the SERVER — plain data, like everything above.
+ *
+ * - `kind` says where it came from: the Início tenant circle, an Início highlight, the community
+ *   page's pinned row (until plan 08 replaces it with highlights) or a deep link's single story.
+ * - `highlightId` is what the lazy read asks for; null for every kind but `highlight`.
+ * - `name` and `avatar` head the viewer for the whole group (UI-D-65): the tenant's display name and
+ *   logo, or the highlight's title and cover — the same identity the circle showed.
+ * - `items` null means NOT LOADED: a highlight's stories are fetched when the member enters its
+ *   group (or prefetched just before), never carried by `/inicio`'s SSR, which would be N×M.
+ */
 export type StoryGroupView = {
   key: string;
   kind: 'tenant' | 'highlight' | 'pins' | 'story';
@@ -421,30 +437,88 @@ export type StoryGroupView = {
   items: StoryViewerItemView[] | null;
 };
 
-const INERT_GROUP: StoryGroupView = {
-  key: '',
-  kind: 'story',
-  highlightId: null,
-  name: '',
-  avatar: { kind: 'avatar', src: null },
-  items: [],
-};
-
-export function tenantGroupView(
-  _tenant: { displayName: string; logoUrl: string | null },
-  _items: StoryViewerItemView[],
+/**
+ * A group whose stories are the TENANT's — Início's tenant circle, the community pinned row and a
+ * deep link alike. V1's single publisher is the tenant, so the header is its display name over its
+ * logo in the shipped `Avatar` (unchanged from 05-06; see the host's note).
+ */
+function tenantHeadedGroup(
+  key: string,
+  kind: 'tenant' | 'pins' | 'story',
+  tenant: { displayName: string; logoUrl: string | null },
+  items: StoryViewerItemView[],
 ): StoryGroupView {
-  return INERT_GROUP;
+  return {
+    key,
+    kind,
+    highlightId: null,
+    name: tenant.displayName,
+    avatar: { kind: 'avatar', src: tenant.logoUrl },
+    items,
+  };
 }
 
-export function highlightGroupView(_summary: HighlightSummary): StoryGroupView {
-  return INERT_GROUP;
+/** Início's tenant circle as a group: group 0, carrying the D-106 sequence it plays. */
+export function tenantGroupView(
+  tenant: { displayName: string; logoUrl: string | null },
+  items: StoryViewerItemView[],
+): StoryGroupView {
+  return tenantHeadedGroup('tenant', 'tenant', tenant, items);
 }
 
-export function inicioGroups(_input: {
+/** The community page's pinned row as ONE group (unchanged behaviour until plan 08). */
+export function pinsGroupView(
+  tenant: { displayName: string; logoUrl: string | null },
+  items: StoryViewerItemView[],
+): StoryGroupView {
+  return tenantHeadedGroup('pins', 'pins', tenant, items);
+}
+
+/** A deep link's single story as ONE group: it opens what the link names and closes at its end. */
+export function storyGroupView(
+  tenant: { displayName: string; logoUrl: string | null },
+  item: StoryViewerItemView,
+): StoryGroupView {
+  return tenantHeadedGroup('story', 'story', tenant, [item]);
+}
+
+/**
+ * A highlight as a group: its title and resolved cover (or the title's monogram) head it, exactly
+ * as its circle draws them (UI-D-62), and its items are NOT loaded — `null` until the member enters
+ * it. The key is the highlight id, so two highlights can never share a group key (Pitfall 4).
+ */
+export function highlightGroupView(summary: HighlightSummary): StoryGroupView {
+  return {
+    key: summary.id,
+    kind: 'highlight',
+    highlightId: summary.id,
+    name: summary.title,
+    avatar:
+      summary.coverAssetId !== null
+        ? {
+            kind: 'asset',
+            assetId: summary.coverAssetId,
+            variantWidths: summary.coverVariantWidths,
+          }
+        : { kind: 'monogram', text: monogramOf(summary.title) },
+    items: null,
+  };
+}
+
+/**
+ * Início's viewer groups, in the order `inicioRow` numbers its openable circles: the tenant group
+ * iff the sequence is non-empty (a group means something to watch), then the highlight groups
+ * (`highlightGroupView`, items not loaded) in the API's order. Circle `(g, 0)` opens `groups[g]` —
+ * the two builders are the two halves of one composition and `story-view.test.ts` case 20 holds
+ * them together.
+ */
+export function inicioGroups(input: {
   tenant: { displayName: string; logoUrl: string | null };
   sequence: StoryViewerItemView[];
-  highlights: readonly HighlightSummary[];
+  highlightGroups: readonly StoryGroupView[];
 }): StoryGroupView[] {
-  return [];
+  const groups: StoryGroupView[] = [];
+  if (input.sequence.length > 0) groups.push(tenantGroupView(input.tenant, input.sequence));
+  groups.push(...input.highlightGroups);
+  return groups;
 }

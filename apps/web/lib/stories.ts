@@ -1,5 +1,7 @@
 import {
+  type HighlightDetail,
   type HighlightList,
+  highlightDetailSchema,
   highlightListSchema,
   type PublishStory,
   STORY_COMMENT_ISSUE_SET,
@@ -446,4 +448,17 @@ export async function loadHighlights(
     console.error('stories.highlights_list_failed', { error: String(error) });
     return null;
   }
+}
+
+/**
+ * `GET /v1/stories/highlights/{highlightId}` (HIGHLIGHT-02) — ONE highlight and its stories, oldest
+ * first by publish time (D-103), EXPIRED ones included: the item row is the expiry override. The
+ * API re-authorises every read and answers the same bare 404 for another tenant's highlight, a
+ * deleted one, and an EMPTY one a member may not open (T-05.2-23). Throws `ApiClientError` like its
+ * siblings; the grouped viewer's lazy read (`loadHighlightItemsAction`) decides what a miss means.
+ */
+export async function getHighlight(highlightId: string): Promise<HighlightDetail> {
+  const res = await apiFetch(`/v1/stories/highlights/${encodeURIComponent(highlightId)}`);
+  if (!res.ok) throw await apiError(res);
+  return highlightDetailSchema.parse(await res.json());
 }

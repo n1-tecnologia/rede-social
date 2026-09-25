@@ -30,7 +30,7 @@ import {
 } from '@/lib/registry';
 import { relativeFrom } from '@/lib/relative-time';
 import { loadCommunityHighlights } from '@/lib/stories';
-import { storyViewerItem, storyViewerLabels } from '@/lib/story-view';
+import { pinsGroupView, storyViewerItem, storyViewerLabels } from '@/lib/story-view';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 import { CommunityPosts } from './CommunityPosts';
 import { ReactivateCommunity } from './ReactivateCommunity';
@@ -225,12 +225,18 @@ export default async function CommunityPage({
           highlightItems.length === 0
             ? undefined
             : {
-                items: highlightItems.map((story) => storyViewerItem(story, now)),
-                author: {
-                  // V1's single publisher IS the tenant; see the note in `StoryViewerHost`.
-                  name: bootstrap.tenant.displayName,
-                  avatarUrl: bootstrap.tenant.branding.logoUrl,
-                },
+                // ONE group: the pinned sequence, headed by the tenant (V1's single publisher; see
+                // the note in `StoryViewerHost`) — unchanged behaviour until plan 08 replaces this
+                // row with the community's highlights.
+                groups: [
+                  pinsGroupView(
+                    {
+                      displayName: bootstrap.tenant.displayName,
+                      logoUrl: bootstrap.tenant.branding.logoUrl,
+                    },
+                    highlightItems.map((story) => storyViewerItem(story, now)),
+                  ),
+                ],
                 labels: storyViewerLabels(ts),
                 onLike: likeStoryAction,
                 onUnlike: unlikeStoryAction,
