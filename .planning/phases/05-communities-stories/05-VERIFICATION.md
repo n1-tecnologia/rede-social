@@ -1,9 +1,10 @@
 ---
 phase: 05-communities-stories
 verified: 2026-09-24T16:05:00Z
-status: human_needed
+status: passed
 score: 15/15 must-haves verified
 covered_files:
+
   - ".planning/REQUIREMENTS.md"
   - ".planning/ROADMAP.md"
   - ".planning/WINDOWS.md"
@@ -55,7 +56,12 @@ covered_files:
   - "packages/modules/stories/tests/story-viewer.test.tsx"
   - "packages/modules/stories/ui/StoryViewer.tsx"
   - "scripts/check-static-routes.sh"
-covered_digest: "v1:sha256:61adb732c7de9146e5743061ebf73f794d4adee6ee0dc8dcdaaf252eca258275"
+
+covered_digest: "v1:sha256:b8de0e1838cdf49d5fa76ac8c104bf43bdcad51b331947b4494888c39c49cf7a"
+reattested:
+  at: 2026-09-25
+  previous_digest: "v1:sha256:61adb732c7de9146e5743061ebf73f794d4adee6ee0dc8dcdaaf252eca258275"
+  basis: "Digest refreshed, verification NOT re-run. The only covered file changed since b0f8d76 is .planning/ROADMAP.md, and that diff is purely additive (0 lines removed, 14 added) — the Phase 05.1 insertion. No line of the Phase 5 section or of any other covered file changed. Chosen by the user over a full gsd-verifier re-run."
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
@@ -70,6 +76,7 @@ re_verification:
 gaps: []
 deferred: []
 advisory:
+
   - finding: "WR-03 — `MediaImage`'s `failedId` latch is only ever set, never cleared, so an asset that arrives with an empty variant ladder and later gains variants stays on the fallback forever"
     category: other
     reason: "Carried unchanged from the previous report. `MediaImage.tsx` was NOT modified by the quick task (`git diff 6e42242..HEAD` does not list it), so under the evidence gate this is now new-scope for this round; the reachable trigger (a still-transcoding pinned asset whose worker finishes while the viewer is open on it) still could not be reproduced without a real transcode. Recorded, NOT cleared."
@@ -89,6 +96,7 @@ advisory:
 behavior_unverified_items: []
 coincidental_reliance_items: []
 human_verification:
+
   - test: "Publish a VIDEO story as `admin_tenant`, wait for it to become ready, then open it from the `/inicio` strip and watch it end to end"
     expected: "The segment fills from the video's own time and auto-advances (or closes) when the video ends"
     why_human: "H-05-02 / WINDOWS entry 42, still OPEN and NOT discharged by this re-verification. The local video provider is `fake` with no HLS stream (the browser console shows `[mux-player] The playback-token provided is invalid or malformed` for every seeded video) and the seed fixture is image-only, so no e2e can assert over a player that cannot play. 05-11 proved the component chain and carried this forward rather than absorbing it; the quick task changed nothing about it"
@@ -463,3 +471,11 @@ any command here can settle. `pnpm verify` — the phase exit gate — is also s
 
 _Verified: 2026-09-24T16:05:00Z_
 _Verifier: Claude (gsd-verifier)_
+
+## Re-attestation — 2026-09-25
+
+The covered digest was refreshed after this report went stale. **The verification itself was not re-run**; nothing above this section was re-derived.
+
+Why that is sound here: of the 51 covered files, exactly one changed since this report's commit (`b0f8d76`) — `.planning/ROADMAP.md` — and the change is purely additive: 0 lines removed, 14 added, all inside the new `Phase 05.1: Community Authoring Entry Points (INSERTED)` section. No Phase 5 goal, success criterion, plan list or requirement line moved, and no implementation file changed. The new digest was computed with `computeCoveredDigest` (the function `readVerificationStatus` uses), not the CLI verb.
+
+Human UAT closed alongside it: `05-UAT.md` is `complete`, 12/12 passed, 0 issues. Test 1 (real video playback) passed on a Mux Development environment; incidental gap G-05-OBS-01 was confirmed a fake-provider artifact and resolved with no code change.
