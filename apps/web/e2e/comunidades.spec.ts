@@ -824,3 +824,154 @@ test.describe('05.1 — the create control and the archived filter (COMM-01 reac
     await expect(createLink(page)).toHaveCount(0);
   });
 });
+
+/**
+ * 05.1-05 — the last two entry points on the community page itself: ROADMAP criterion 2's
+ * reactivation half (D-90, UI-D-52) and criterion 3's door (D-92, D-93, UI-D-53).
+ *
+ * Reactivation is ONE tap plus an explained confirm, from the archived community's own page, for a
+ * manager only; the page refreshes itself into the active state (Pitfall 8). The Destaques `+` is
+ * the strip's own circle restated for this row, drawn only for the attach permission pair on an
+ * ACTIVE community — never for a member, never on an archived one.
+ *
+ * The one writing case creates a community, archives it, reactivates it from its page and archives
+ * it again, so `SEEDED.total` holds for every case after it. Every case runs on both
+ * `mobile-chromium` and `desktop-chromium`.
+ */
+test.describe('05.1 — reactivate from the page, and the Destaques `+` (D-90, D-92, D-93)', () => {
+  const ST = storyMessages.stories;
+
+  /** The Destaques row, named by the catalog label the page passes as its `aria-label`. */
+  function destaques(page: Page): Locator {
+    return page.getByRole('list', { name: C.page.highlights });
+  }
+
+  /** Every community-scoped story door on the page, whatever its label. */
+  function storyDoors(page: Page): Locator {
+    return page.locator('a[href^="/stories/publicar?comunidade="]');
+  }
+
+  async function heading(page: Page): Promise<string> {
+    return ((await page.locator('[data-community-name]').textContent()) ?? '').trim();
+  }
+
+  async function archiveThroughTheForm(page: Page, communityId: string): Promise<void> {
+    await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+    await page.locator('[data-community-archive]').click();
+    await page.getByRole('dialog').getByRole('button', { name: C.confirm.archive.confirm }).click();
+    await page.waitForURL(/\/comunidades$/);
+  }
+
+  test('UAT replay: archive one, find it under Arquivadas, reactivate it from its page', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/nova`);
+
+    const name = `${E2E_COMMUNITY_PREFIX} reativada ${Date.now()}`;
+    await page.getByLabel(C.form.name.label).fill(name);
+    await page.getByRole('button', { name: C.actions.create }).click();
+    await page.waitForURL(/\/comunidades\/[0-9a-f-]{36}$/);
+    const communityId = page.url().split('/').pop() ?? '';
+
+    // Archive it, landing on the list — where it is now absent.
+    await archiveThroughTheForm(page, communityId);
+    await expect(cardWith(page, name)).toHaveCount(0);
+
+    // Find it under Arquivadas (05.1-03): the most recently archived heads the list.
+    await page
+      .getByRole('navigation', { name: C.list.filter.label })
+      .getByRole('link', { name: C.list.filter.archived, exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/comunidades\?status=arquivadas$/);
+    const card = cardWith(page, name);
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(C.archived.pill);
+    await card.click();
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${communityId}$`));
+
+    // D-90 / UI-D-52: the one-tap Reativar under the archived note, behind the explained confirm.
+    await expect(page.getByText(C.archived.pill, { exact: true })).toBeVisible();
+    const reactivate = page.locator('[data-community-page-reactivate]');
+    await expect(reactivate).toBeVisible();
+    await expect(reactivate).toHaveText(C.archived.reactivate);
+    // An archived community offers no story door (D-93) — the `+` appears only after the refresh.
+    await expect(storyDoors(page)).toHaveCount(0);
+    await reactivate.click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText(C.confirm.reactivate.title);
+    await expect(dialog).toContainText(C.confirm.reactivate.body);
+    await dialog.getByRole('button', { name: C.confirm.reactivate.confirm, exact: true }).click();
+
+    // The page refreshes itself into the active state, in place (Pitfall 8): the pill, the note and
+    // the button are gone, and the Destaques `+` is there.
+    await expect(page.getByText(C.toasts.reactivated, { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${communityId}$`));
+    await expect(page.getByText(C.archived.pill, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(C.archived.note)).toHaveCount(0);
+    await expect(page.locator('[data-community-page-reactivate]')).toHaveCount(0);
+    await expect(
+      destaques(page).getByRole('link', {
+        name: ST.own.actionCommunity.replace('{community}', name),
+      }),
+    ).toBeVisible();
+
+    // …and it is back in Ativas.
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(cardWith(page, name)).toHaveCount(1);
+
+    // Leave the shared seed exactly as it was found.
+    await archiveThroughTheForm(page, communityId);
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+  });
+
+  test('a member sees the archived note and no Reativar', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
+
+    await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
+    await expect(page.getByText(C.archived.note)).toBeVisible();
+    await expect(page.locator('[data-community-page-reactivate]')).toHaveCount(0);
+  });
+
+  test('the `+` belongs to the admin, on active communities only', async ({ page }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+
+    // Zero pins + the attach permission: the section renders with the `+` ALONE (UI-D-53).
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.unpinnedId}`);
+    const unpinnedName = await heading(page);
+    expect(unpinnedName.length).toBeGreaterThan(0);
+    await expect(destaques(page)).toBeVisible();
+    await expect(destaques(page).getByRole('listitem')).toHaveCount(1);
+    const door = destaques(page).getByRole('link', {
+      name: ST.own.actionCommunity.replace('{community}', unpinnedName),
+    });
+    await expect(door).toBeVisible();
+    await expect(door).toHaveAttribute('href', `/stories/publicar?comunidade=${SEEDED.unpinnedId}`);
+    // "Seu story" is the circle's visible caption, a sibling of the link (the link's name is the
+    // community-scoped action label).
+    await expect(destaques(page).getByRole('listitem').first()).toContainText(ST.own.label);
+
+    // Pins + the permission: the `+` FIRST, then the pinned circles.
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.pinnedId}`);
+    const pinnedName = await heading(page);
+    const first = destaques(page).getByRole('listitem').first();
+    await expect(
+      first.getByRole('link', { name: ST.own.actionCommunity.replace('{community}', pinnedName) }),
+    ).toHaveAttribute('href', `/stories/publicar?comunidade=${SEEDED.pinnedId}`);
+    await expect(destaques(page).getByRole('button')).not.toHaveCount(0);
+
+    // D-93: an archived community offers no story entry at all — not a disabled one.
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
+    await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
+    await expect(storyDoors(page)).toHaveCount(0);
+
+    // A member holds neither permission: no `+`, and with no pins no section at all.
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.unpinnedId}`);
+    await expect(page.locator('[data-community-name]')).toBeVisible();
+    await expect(destaques(page)).toHaveCount(0);
+    await expect(storyDoors(page)).toHaveCount(0);
+  });
+});
