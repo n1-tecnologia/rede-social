@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '@/lib/bootstrap';
-import { createCommunity, loadCommunity, updateCommunity } from '@/lib/communities';
-import { archiveCommunityAction, createCommunityAction, updateCommunityAction } from './actions';
+import { createCommunity, getCommunities, loadCommunity, updateCommunity } from '@/lib/communities';
+import {
+  archiveCommunityAction,
+  createCommunityAction,
+  loadMoreCommunitiesAction,
+  refreshCommunitiesAction,
+  updateCommunityAction,
+} from './actions';
 
 /**
  * 05-09 — where the TWO bare 404s are told apart, and why it is safe to tell them apart HERE.
@@ -59,6 +65,7 @@ beforeEach(() => {
   vi.mocked(createCommunity).mockReset();
   vi.mocked(updateCommunity).mockReset();
   vi.mocked(loadCommunity).mockReset();
+  vi.mocked(getCommunities).mockReset();
 });
 
 describe('createCommunityAction — a 404 on a create can only be the cover (05-09)', () => {
@@ -175,5 +182,41 @@ describe('updateCommunityAction — a 404 on an edit is settled by a RE-READ (05
 
     expect(archived).toEqual({ ok: true, communityId: COMMUNITY });
     expect(loadCommunity).not.toHaveBeenCalled();
+  });
+});
+
+describe('05.1 — the list status is carried through refresh and load-more (Pitfall 9)', () => {
+  // A pull or a scroll on `Arquivadas` must never swap the active list in. The status is part of
+  // the request the action makes, validated by the SAME schema the API uses.
+  const emptyPage = { items: [], nextCursor: null };
+
+  it('load-more carries the archived status beside the cursor, and defaults to active', async () => {
+    vi.mocked(getCommunities).mockResolvedValue(emptyPage);
+
+    await loadMoreCommunitiesAction('c', 'archived');
+    expect(getCommunities).toHaveBeenLastCalledWith({ cursor: 'c', limit: 10, status: 'archived' });
+
+    await loadMoreCommunitiesAction('c');
+    expect(getCommunities).toHaveBeenLastCalledWith({ cursor: 'c', limit: 10, status: 'active' });
+  });
+
+  it('refresh carries the archived status, and defaults to active', async () => {
+    vi.mocked(getCommunities).mockResolvedValue(emptyPage);
+
+    await refreshCommunitiesAction('archived');
+    expect(getCommunities).toHaveBeenLastCalledWith({ status: 'archived' });
+
+    await refreshCommunitiesAction();
+    expect(getCommunities).toHaveBeenLastCalledWith({ status: 'active' });
+  });
+
+  it('a status outside the enum is refused with generic and never reaches the API', async () => {
+    vi.mocked(getCommunities).mockResolvedValue(emptyPage);
+
+    // A server action is a public endpoint: a crafted argument bypasses the type system.
+    const forced = 'deleted' as unknown as 'active';
+    expect(await refreshCommunitiesAction(forced)).toEqual({ ok: false, code: 'generic' });
+    expect(await loadMoreCommunitiesAction('c', forced)).toEqual({ ok: false, code: 'generic' });
+    expect(getCommunities).not.toHaveBeenCalled();
   });
 });

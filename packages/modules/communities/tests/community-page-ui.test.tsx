@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { CommunityCard } from '../ui/CommunityCard';
 import { CommunityCover } from '../ui/CommunityCover';
 import { CommunityHeader } from '../ui/CommunityHeader';
 
@@ -180,5 +181,54 @@ describe('CommunityHeader — UI-D-43 without D-67’s owner block', () => {
 
     expect(screen.getByRole('heading', { name: 'community-name' })).toBeInTheDocument();
     expect(screen.queryByTestId('community-description')).toBeNull();
+  });
+});
+
+function card(overrides: Record<string, unknown> = {}) {
+  const props = {
+    href: '/comunidades/c1',
+    name: 'card-name',
+    description: 'card-description',
+    // Cover-less, so the gradient branch renders and no media request is involved.
+    coverAssetId: null,
+    coverVariantWidths: [],
+    postCountLabel: 'post-count-label',
+    coverAlt: 'cover-alt',
+    ...overrides,
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: the fixture spreads a partial prop bag on purpose
+  return render(<CommunityCard {...(props as any)} />);
+}
+
+describe('CommunityCard — the archived pill slot (UI-D-50, 05.1)', () => {
+  it('9. a host-supplied statusPill renders INSIDE the single anchor, between the post count and the chevron', () => {
+    const { container } = card({ statusPill: <span>pill-node</span> });
+
+    // D-90's rejection: the card stays ONE tap target — one anchor, no button.
+    expect(container.querySelectorAll('a')).toHaveLength(1);
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+
+    const anchor = screen.getByTestId('community-card');
+    const pill = screen.getByText('pill-node');
+    expect(anchor).toContainElement(pill);
+
+    // Its order in the counts row: after the post-count label, before the chevron.
+    const label = screen.getByText('post-count-label');
+    const row = label.parentElement as HTMLElement;
+    const children = Array.from(row.children);
+    const labelIndex = children.indexOf(label);
+    const pillIndex = children.findIndex((child) => child.contains(pill));
+    expect(pillIndex).toBe(labelIndex + 1);
+    expect(pillIndex).toBe(children.length - 2);
+    // The pill never gives up its width to a long count label.
+    expect(children[pillIndex]?.className).toContain('shrink-0');
+  });
+
+  it('10. without a statusPill the counts row keeps exactly its three children — today’s markup', () => {
+    card();
+
+    const row = screen.getByText('post-count-label').parentElement as HTMLElement;
+    expect(row.children).toHaveLength(3);
+    expect(screen.queryByText('pill-node')).toBeNull();
   });
 });
