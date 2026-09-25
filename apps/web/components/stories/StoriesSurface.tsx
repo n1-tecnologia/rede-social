@@ -81,6 +81,13 @@ export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
     [viewer],
   );
 
+  /**
+   * The strip speaks `(group, index)` (UI-D-59); this viewer still plays ONE sequence, so every
+   * openable circle the host hands over belongs to group 0 and only its index matters. Plan 05
+   * makes the viewer group-aware and this adapter disappears.
+   */
+  const openCircle = useCallback((_group: number, index: number) => open(index), [open]);
+
   useEffect(() => {
     const onPopState = () => {
       pushedRef.current = false;
@@ -95,7 +102,7 @@ export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
 
   return (
     <>
-      <StoriesStrip {...strip} onOpen={viewer ? open : undefined} />
+      <StoriesStrip {...strip} onOpen={viewer ? openCircle : undefined} />
       {viewer && openIndex !== null ? (
         <StoryViewerHost
           items={viewer.items}

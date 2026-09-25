@@ -9,13 +9,15 @@ export {
 export {
   StoriesStrip,
   type StoriesStripProps,
-  type StoryCircleItem,
-  type StoryStripOwnCircle,
+  type StoryStripCircle,
 } from './StoriesStrip';
 export {
   StoryCircle,
+  type StoryCircleDisc,
   type StoryCircleProps,
-  type StoryCircleVariant,
+  type StoryCircleRing,
+  StoryMonogram,
+  type StoryMonogramProps,
 } from './StoryCircle';
 export {
   StoryHistoryRow,

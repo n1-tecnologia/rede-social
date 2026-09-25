@@ -351,16 +351,38 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
 
   return (
     <StoriesSurface
-      items={stories.map((story) => {
-        const time = relativeFrom(story.publishedAt, now);
-        return {
-          id: story.id,
-          label: time,
-          actionLabel: tf('circle.action', { time }),
-          assetId: story.mediaAssetId,
-          variantWidths: story.mediaVariantWidths,
-        };
-      })}
+      circles={[
+        ...(canPublish
+          ? [
+              {
+                kind: 'link' as const,
+                key: 'own',
+                href: '/stories/publicar',
+                label: tf('own.label'),
+                actionLabel: tf('own.action'),
+                ring: 'neutral' as const,
+                disc: { kind: 'own' as const, avatarUrl: bootstrap.membership.profile.avatarUrl },
+              },
+            ]
+          : []),
+        ...stories.map((story, index) => {
+          const time = relativeFrom(story.publishedAt, now);
+          return {
+            kind: 'open' as const,
+            key: story.id,
+            label: time,
+            actionLabel: tf('circle.action', { time }),
+            ring: 'brand' as const,
+            disc: {
+              kind: 'asset' as const,
+              assetId: story.mediaAssetId,
+              variantWidths: story.mediaVariantWidths,
+            },
+            group: 0,
+            index,
+          };
+        }),
+      ]}
       // STORY-02: the viewer opens on the STRIP'S OWN ordered sequence, built from the same page in
       // the same request — so the Nth circle and the Nth segment can never disagree, and opening
       // the viewer costs no second round trip. No stories means no `viewer` prop at all, which is
@@ -381,18 +403,7 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
               comments: storyCommentsProps(locale, tfeed, tf, bootstrap),
             }
       }
-      ringVariant="brand"
       regionLabel={tf('region')}
-      own={
-        canPublish
-          ? {
-              href: '/stories/publicar',
-              label: tf('own.label'),
-              actionLabel: tf('own.action'),
-              avatarUrl: bootstrap.membership.profile.avatarUrl,
-            }
-          : undefined
-      }
     />
   );
 };

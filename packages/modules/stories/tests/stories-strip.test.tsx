@@ -30,7 +30,7 @@ afterEach(cleanup);
 
 const LADDER = [640, 1080] as const;
 
-function asset(n: number): StoryStripCircle {
+function asset(n: number): Extract<StoryStripCircle, { kind: 'open' }> {
   return {
     kind: 'open',
     key: `s${n}`,
@@ -127,11 +127,32 @@ describe('StoriesStrip — the ordered row of circle descriptors (UI-D-59, UI-D-
   });
 
   it('8. only the first three discs of the row load eagerly', () => {
-    const { container } = strip({ circles: [asset(1), asset(2), asset(3), asset(4)] });
-    const loading = Array.from(container.querySelectorAll('img')).map((img) =>
-      img.getAttribute('loading'),
+    // happy-dom reports every `<img>` as `complete` with a zero `naturalWidth`, so `MediaImage`
+    // would take its degraded branch and drop the `<img>`; a decoded image is forced for this case
+    // (the `media-image.test.tsx` idiom), with happy-dom's own accessors restored afterwards.
+    const saved = ['complete', 'naturalWidth'].map(
+      (key) => [key, Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, key)] as const,
     );
-    expect(loading).toEqual(['eager', 'eager', 'eager', 'lazy']);
+    Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+      configurable: true,
+      get: () => true,
+    });
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+      configurable: true,
+      get: () => 640,
+    });
+    try {
+      const { container } = strip({ circles: [asset(1), asset(2), asset(3), asset(4)] });
+      const loading = Array.from(container.querySelectorAll('img')).map((img) =>
+        img.getAttribute('loading'),
+      );
+      expect(loading).toEqual(['eager', 'eager', 'eager', 'lazy']);
+    } finally {
+      for (const [key, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(HTMLImageElement.prototype, key, descriptor);
+        else delete (HTMLImageElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    }
   });
 });
 
@@ -265,7 +286,9 @@ describe('StoryCircle — 64x64, every disc and ring, one geometry (UI-D-60..UI-
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByRole('link')).toBeNull();
 
-    rerender(<StoryCircle ring="brand" disc={disc} label="l" actionLabel="open-me" onOpen={() => {}} />);
+    rerender(
+      <StoryCircle ring="brand" disc={disc} label="l" actionLabel="open-me" onOpen={() => {}} />,
+    );
     expect(screen.getAllByRole('button')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'open-me' })).toBeInTheDocument();
   });

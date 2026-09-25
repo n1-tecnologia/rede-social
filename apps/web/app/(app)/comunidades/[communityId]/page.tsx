@@ -151,7 +151,7 @@ export default async function CommunityPage({
    * because the viewer needs it for the expired-mid-view case.
    *
    * **The leading `+` is the D-80 door restated for this row (D-92, UI-D-53).** It is the strip's
-   * own `own` circle — "Seu story", in the same geometry and position the admin already uses on
+   * `link` circle with the `own` disc — "Seu story", in the same geometry and position the admin already uses on
    * `/inicio` — pointed at `/stories/publicar?comunidade={id}`, so the composer opens already
    * addressed to this community and the story is born attached in the one publish transaction
    * (05.1-01). It sits exactly where the result will appear.
@@ -177,16 +177,45 @@ export default async function CommunityPage({
   const highlights: ReactNode =
     highlightItems.length === 0 && !canPublishHere ? null : (
       <StoriesSurface
-        items={highlightItems.map((story) => {
-          const time = relativeFrom(story.publishedAt, now);
-          return {
-            id: story.id,
-            label: time,
-            actionLabel: ts('circle.action', { time }),
-            assetId: story.mediaAssetId,
-            variantWidths: story.mediaVariantWidths,
-          };
-        })}
+        circles={[
+          // The D-80 door restated for this row (D-92, UI-D-53): the leading `+` link circle.
+          ...(canPublishHere
+            ? [
+                {
+                  kind: 'link' as const,
+                  key: 'own',
+                  href: `/stories/publicar?comunidade=${community.id}`,
+                  label: ts('own.label'),
+                  actionLabel: ts('own.actionCommunity', { community: community.name }),
+                  ring: 'neutral' as const,
+                  disc: {
+                    kind: 'own' as const,
+                    avatarUrl: bootstrap.membership.profile.avatarUrl,
+                  },
+                },
+              ]
+            : []),
+          // UI-D-27: the neutral ring. The brand ring belongs to Início's tenant circle alone;
+          // Destaques is the community's editorial archive. One circle per pinned story, opening
+          // the pinned sequence at its own index, until plan 08 replaces the row with highlights.
+          ...highlightItems.map((story, index) => {
+            const time = relativeFrom(story.publishedAt, now);
+            return {
+              kind: 'open' as const,
+              key: story.id,
+              label: time,
+              actionLabel: ts('circle.action', { time }),
+              ring: 'neutral' as const,
+              disc: {
+                kind: 'asset' as const,
+                assetId: story.mediaAssetId,
+                variantWidths: story.mediaVariantWidths,
+              },
+              group: 0,
+              index,
+            };
+          }),
+        ]}
         // STORY-02's rule, restated for this row: the viewer opens on the ROW'S OWN ordered
         // sequence, built from the same read in the same request — so the Nth circle and the Nth
         // segment can never disagree, and opening the viewer costs no second round trip.
@@ -208,20 +237,7 @@ export default async function CommunityPage({
                 comments: storyCommentsProps(locale, tf, ts, bootstrap),
               }
         }
-        // UI-D-27: the neutral ring. The brand ring means "live now, tap me" and belongs to the
-        // strip alone; Destaques is the community's editorial archive.
-        ringVariant="neutral"
         regionLabel={tc('page.highlights')}
-        own={
-          canPublishHere
-            ? {
-                href: `/stories/publicar?comunidade=${community.id}`,
-                label: ts('own.label'),
-                actionLabel: ts('own.actionCommunity', { community: community.name }),
-                avatarUrl: bootstrap.membership.profile.avatarUrl,
-              }
-            : undefined
-        }
       />
     );
 
