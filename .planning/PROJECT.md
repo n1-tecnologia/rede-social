@@ -27,6 +27,15 @@ Validated in Phase 1: Foundation (2026-09-14, local stack; hosted evidence lands
 - `super_admin` platform lane, `admin_tenant`/`member` roles, `requireRole`/`requireModule` guards — ROLE-01, ROLE-02, ROLE-06
 - Public per-tenant sign-up with two recorded consents, login, persistent session, password recovery by e-mail, logout, blocked-member revocation on the next request — AUTH-01..AUTH-06
 
+Validated in Phase 5: Communities & Stories (2026-09-25, local stack; UAT 12/12, verification 15/15, security 82/82 closed):
+- `admin_tenant` creates and edits communities (name, description, cover) and archives/reactivates them — no destructive delete — COMM-01 (reachability of create/reactivate re-opened in Phase 05.1)
+- `admin_tenant` posts directly into a community from its page; a community post shows its origin in the merged feed — COMM-04
+- Every member sees every community in V1 (`community_members` exists for V2) and browses them, opening each one's posts and pinned stories ("Destaques"); only `admin_tenant` creates communities — COMM-02, COMM-03
+- Stories strip visible for 24 h with a full-screen viewer (image and video, segment progress, tap/hold/drag gestures); expiry is a predicate, never a delete — STORY-01, STORY-02, STORY-03
+- `admin_tenant` pins a story to communities, where it outlives the 24 h window — STORY-04
+- Members like and comment on stories; story comments cannot be liked or replied to, enforced by the database, not the UI — STORY-05
+- Real video playback proven end to end on a Mux Development environment (direct upload, signed webhook, worker, signed playback)
+
 ### Active
 
 **Tenancy & branding**
@@ -53,21 +62,15 @@ Validated in Phase 1: Foundation (2026-09-14, local stack; hosted evidence lands
 
 **Feed**
 - [ ] `admin_tenant` creates posts with text plus media: images (one or many), video, links/embeds (YouTube/Vimeo, link preview), file attachments (PDF etc.)
-- [ ] A post may optionally belong to a community
 - [ ] Members can like a post, comment on a post, and reply to a comment (one level of replies only)
 - [ ] Members can like comments and replies
 - [ ] Share button produces an internal deep link (native share sheet / copy) that opens the post inside the app after login
 
-**Communities**
-- [ ] `admin_tenant` creates communities and posts content scoped to a community
-- [ ] Members browse communities and see the posts and pinned stories of each community
-- [ ] Only `admin_tenant` can create communities in V1 (members in V2)
 
-**Stories**
-- [ ] `admin_tenant` publishes stories shown in a horizontally scrollable strip, visible for 24 h
-- [ ] Expired stories are kept in the database (hidden, not deleted)
-- [ ] `admin_tenant` can pin a story to a community so it also appears there
-- [ ] Members can like and comment on a story; story comments cannot be liked or replied to
+**Community authoring (emerged in Phase 5 UAT → Phase 05.1)**
+- [ ] `admin_tenant` reaches the create-community form from `/comunidades` when communities already exist (today the CTA renders only in the empty state)
+- [ ] Archived communities stay findable (e.g. an "Arquivada" tag/filter) so they can be reactivated without knowing an id
+- [ ] A story can be published from inside a community, born attached to it, and the story composer asks up front whether the story goes to a community or to none
 
 **Events**
 - [ ] `admin_tenant` publishes upcoming events, in-person (location) or online (link)
@@ -138,21 +141,24 @@ Validated in Phase 1: Foundation (2026-09-14, local stack; hosted evidence lands
 | Next.js + Node/TS backend | Single language, shared types between frontend and API | — Pending |
 | Support is a dedicated tenant role (`support_tenant`) | Support may be someone other than the admin | — Pending |
 | Chat schema is generic (conversations + participants) | V2 member-to-member chat must not require a redesign | — Pending |
-| Stories are soft-expired (hidden after 24 h, never deleted) | Admin may want history; pinned stories in communities need the record | — Pending |
-| Comments allow one reply level on posts, none on stories | User-specified interaction depth | — Pending |
+| Stories are soft-expired (hidden after 24 h, never deleted) | Admin may want history; pinned stories in communities need the record | ✓ Good — Phase 5: expiry is a read predicate, no sweeper; retention proven by pgTAP |
+| Comments allow one reply level on posts, none on stories | User-specified interaction depth | ✓ Good — Phase 5: story-comment rules are composite FKs + guarded CHECKs in the database |
 | Share = internal deep link requiring login | Content stays private to the tenant; no public pages in V1 | — Pending |
 | Plain "like" only, pt-BR only, no billing in V1 | Assumed simplest option where user did not specify; revisit if pilot demands | ⚠️ Revisit |
 | Notifications: in-app bell + Web Push (PWA) | User choice; email/WhatsApp deferred | — Pending |
 | Realtime via Supabase Broadcast (read-only frontend subscription) | Cloud Run WebSockets: 60-min cap, Redis, always-on billing; Broadcast scales and keeps data authority in the API | — Pending |
 | Supabase Auth via `@supabase/ssr` in Next.js; API verifies JWT (JWKS) | Official pattern, less code; API resolves tenant/role per request from DB | — Pending |
 | Identity ≠ membership (`memberships` table, not `profiles.tenant_id`) | Supabase Auth has global email uniqueness; multi-tenant users in V2 become a constraint change | — Pending |
-| Video through a streaming vendor (Mux or Cloudflare Stream) | Supabase Storage does not transcode; iPhone HEVC fails on Android | — Pending |
-| Pinned stories outlive the 24 h expiry in their community | Instagram Highlights model; user confirmed | — Pending |
+| Video through a streaming vendor (Mux or Cloudflare Stream) | Supabase Storage does not transcode; iPhone HEVC fails on Android | ✓ Good — Mux chosen; proven end to end on a Development environment in Phase 5 UAT (2026-09-25). Production environment still pending in Phase 01.1 |
+| Pinned stories outlive the 24 h expiry in their community | Instagram Highlights model; user confirmed | ✓ Good — Phase 5 (STORY-04); admin unpin is the control |
 | Supabase Free plan for the pilot | User choice to control cost; image resize in worker, 50 MB cap accepted | ⚠️ Revisit |
-| Communities: all members see all communities in V1 | Simplest for pilot; `community_members` table exists for V2 private communities | — Pending |
+| Communities: all members see all communities in V1 | Simplest for pilot; `community_members` table exists for V2 private communities | ✓ Good — Phase 5; `community_members` born unused (accepted risk AR-01) |
 | Design prototype is UI source of truth; port, don't refactor | Prototype is mocked and non-modular; presentational components port cleanly, containers/data/theme must be rewritten | — Pending |
 | Structure: vertical MVP slices | Each phase delivers an end-to-end capability; earliest working app for the pilot | — Pending |
 | Events: RSVP before + check-in on the day, admin sees attendance | User choice; gives attendance list without QR hardware | — Pending |
+| Archive, never delete, a community (Phase 5) | Archive is reversible; a delete would cascade over members' posts, comments and likes | ✓ Good |
+| An expired, unpinned story stays readable by id inside its tenant (Phase 5, AR-09) | The admin history and community pins both need by-id reads of expired stories; exposure is same-tenant only | ✓ Accepted risk 2026-09-25 |
+| Phase 05.1 inserted before Phase 6 (2026-09-24) | UAT showed working routes with no control linking to them (create community, reactivate) and no way to publish a story into a community | — Pending |
 
 ## Evolution
 
@@ -172,4 +178,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-14 after Phase 1 completion (cloud provisioning split into Phase 01.1; Phases 2-8 proceed on the local stack)*
+*Last updated: 2026-09-25 after Phase 5 completion (Communities & Stories; Phase 05.1 inserted for community authoring entry points)*

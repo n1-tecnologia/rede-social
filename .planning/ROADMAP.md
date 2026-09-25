@@ -29,7 +29,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 2: Tenant Shell, Branding & Platform Panel** - Ported design system + responsive app shell rendering the tenant's brand server-side, flag-driven navigation, per-tenant PWA install, pt-BR catalog, branded auth e-mails, super_admin platform panel to provision tenants
 - [ ] **Phase 3: Media Pipeline & Member Profiles** - Signed direct-to-Storage uploads under tenant paths, worker image resizing, streaming-vendor video, member profile (photo, name, bio), other members' profiles and searchable directory
 - [ ] **Phase 4: Feed** - Admin rich-post composer (images, video, embeds, files), member feed with likes / comments / one-level replies / comment likes, edit + soft delete, share deep links, domain event bus
-- [ ] **Phase 5: Communities & Stories** - Admin-created communities with scoped posts, community pages with pinned stories, 24 h stories strip + full-screen viewer, story likes and flat comments
+- [x] **Phase 5: Communities & Stories** - Admin-created communities with scoped posts, community pages with pinned stories, 24 h stories strip + full-screen viewer, story likes and flat comments (completed 2026-09-25)
+- [ ] **Phase 05.1: Community Authoring Entry Points (INSERTED)** - Reachable create-community CTA, archived communities findable and reactivatable without a UUID, stories publishable from inside a community and a community choice in the story composer (born attached, one mechanism)
 - [ ] **Phase 6: Events** - In-person / online events, upcoming + past lists, RSVP and self check-in window, admin attendance list, calendar export
 - [ ] **Phase 7: Notifications, Web Push & Support Chat** - Realtime infrastructure (Supabase Broadcast on private topics), event-driven notification center with live unread count, Web Push with iOS install flow, event reminders, 1:1 member <-> support chat with support inbox
 - [ ] **Phase 8: Moderation, Tenant Admin Panel & Pilot Hardening** - Delete any comment, block/unblock with immediate revocation, moderation log, branding editor with live preview, member/role management, rules editor, mobile admin flows, per-module READMEs, pilot go-live gate
@@ -430,7 +431,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 | 2. Tenant Shell, Branding & Platform Panel | 20/20 | In Progress|  |
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
 | 4. Feed | 10/10 | In Progress|  |
-| 5. Communities & Stories | 12/12 | In Progress|  |
+| 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 0/TBD | Not started | - |
 | 7. Notifications, Web Push & Support Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |

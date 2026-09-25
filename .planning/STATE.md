@@ -1,44 +1,44 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 05
-current_phase_name: Communities & Stories
-status: Phase 05 UAT partial — 11/12 passed, test 1 blocked on the absent video provider (Mux). Next actionable work is Phase 05.1.
-stopped_at: Completed 05-12-PLAN.md
-last_updated: "2026-09-24T17:44:39.699Z"
-last_activity: 2026-09-24
-last_activity_desc: "Phase 05 UAT session: 11 passed, 1 blocked, 1 incidental gap deferred with the Mux work; Phase 05.1 inserted for three user-reported authoring gaps"
-state_head: c0c1acde60fa09c6ac29055bfd23ee2b6c7a7eaf
+current_phase: "05.1"
+current_phase_name: Community Authoring Entry Points
+status: planning
+stopped_at: Phase 05 complete, ready to plan Phase 05.1
+last_updated: "2026-09-25T08:33:49.077Z"
+last_activity: 2026-09-25
+last_activity_desc: Phase 05 complete (UAT 12/12, verification passed, security 82/82); next is Phase 05.1 by user decision — Phase 01.1 stays deferred to the end
+state_head: ec7ad64a302b80b317efa42f49229369ef9b7e23
 progress:
   total_phases: 10
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 62
   completed_plans: 59
-  percent: 0
+  percent: 10
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-11)
+See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 05 — Communities & Stories
+**Current focus:** Phase 05.1 — Community Authoring Entry Points
 
 ## Current Position
 
-Phase: 05 (Communities & Stories) — EXECUTING
-Plan: 12 of 12
-Status: Phase 05 UAT partial — 11/12 passed, test 1 blocked on the absent video provider (Mux). Next actionable work is Phase 05.1.
-Last activity: 2026-09-24 — Phase 05 UAT session: 11 passed, 1 blocked, 1 incidental gap deferred with the Mux work; Phase 05.1 inserted for three user-reported authoring gaps
+Phase: 05.1 — Community Authoring Entry Points
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-25 — Phase 05 complete (UAT 12/12, verification passed, security 82/82); next is Phase 05.1 by user decision — Phase 01.1 stays deferred to the end
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███████████████████░] 59/62 plans (95%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 9
+- Total plans completed: 21
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -47,6 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 9 | - | - |
+| 05 | 12 | - | - |
 
 **Recent Trend:**
 
@@ -349,6 +350,10 @@ Recent decisions affecting current work:
 - [Phase 05]: STORY-02 marked complete: both media paths in the viewer now have executable evidence and the browser-level gesture gate is green; the missing VIDEO-playback e2e is carried as a named limitation into 05-12's human pack
 - [Phase 05]: Phase 5 drops `mode: mvp` rather than acquire a User Story goal after the fact — the phase is already executed, verified once and gap-closed, so a story written now would be written backwards from the code (05-12 Task 2, developer's answer)
 - [Phase 05]: REQUIREMENTS.md confirmed against disk and deliberately NOT edited; COMM-01 and STORY-02 stay open until Phase 5 re-verification (05-12 Task 1)
+- [Phase 05]: UAT closed 12/12 (2026-09-25). Test 1 (real video end to end) passed on a Mux Development environment; G-05-OBS-01 (stacked error dialogs) was a fake-provider artifact, resolved with no code change
+- [Phase 05]: VERIFICATION.md digest re-attested, not re-run: the only changed covered file was ROADMAP.md, purely additive (the 05.1 insertion); status promoted human_needed → passed after the clean UAT
+- [Phase 05]: Security 82/82 closed (05-SECURITY.md). T-05-30@05-05 accepted as AR-09: an expired, unpinned story stays readable by id within its own tenant, because the admin history and community pins need by-id reads
+- [Phase 05]: Phase 05.1 goes next, not 01.1 — `phase.complete` picked 01.1 numerically; the pointer was moved by hand because cloud work stays deferred to the end
 
 ### Pending Todos
 
@@ -360,7 +365,9 @@ None yet.
 - [Phase 3]: Video vendor (Mux vs Cloudflare Stream) pricing is LOW confidence; verify at phase start, decide whether the pilot can defer video.
 - [Phase 7]: Realtime connection quota on the Free plan (200) and "new post to every member" fan-out strategy need pilot member count.
 - [Phase 8]: LGPD legal review is out of research scope; flag to user before pilot go-live.
-- Phase 5 carries 22 unresolved fail-closed verification items (.planning/phases/05-communities-stories/05-VERIFICATION-DEBT.md, WINDOWS.md entry 43) plus H-05-02 (entry 42, a VIDEO story end to end, not closable locally). Phase 5 is NOT verified complete.
+- [Phase 5]: Resolved 2026-09-25 — the 22 flagged prohibitions were ruled on in UAT test 11 (P-05-03 accepted without its token diff) and H-05-02 closed on real Mux; WINDOWS.md entries 42/43 can be closed against 05-UAT.md.
+- [Phase 5 → 05.1/backlog]: Residual R-1 in 05-SECURITY.md — a well-formed cursor with a non-date `n` makes list routes answer 500 instead of falling back to page 1 (Postgres 22007). Not injectable; fix by validating `n` as an ISO datetime in the shared cursor schema.
+- [Phase 5]: `.planning/REQUIREMENTS.md` traceability still shows 16 "Gaps Found" rows (05-SECURITY.md R-5) — documentation lag to clear.
 
 ### Quick Tasks Completed
 
@@ -385,6 +392,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T12:53:51.690Z
-Stopped at: Completed 05-12-PLAN.md
+Last session: 2026-09-25T08:40:00.000Z
+Stopped at: Phase 05 complete, ready to plan Phase 05.1
 Resume file: None
