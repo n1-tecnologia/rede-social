@@ -1,24 +1,31 @@
 ---
-status: partial
+status: complete
 phase: 05-communities-stories
 source: [05-VERIFICATION.md]
 started: 2026-09-24T15:40:00Z
-updated: 2026-09-24T18:18:00Z
+updated: 2026-09-25T02:25:00Z
 ---
 
 ## Current Test
 
-[testing paused — 1 item outstanding: test 1 blocked on the deferred video provider]
+[testing complete]
 
 ## Tests
 
 ### 1. Publish a VIDEO story as `admin_tenant`, wait for it to become ready, then open it from the `/inicio` strip and watch it end to end
 expected: The segment fills from the video's own time and auto-advances (or closes) when the video ends
 why_human: H-05-02 / WINDOWS entry 42, still OPEN. The local video provider is `fake` with no HLS stream (console shows `[mux-player] The playback-token provided is invalid or malformed` for every seeded video) and the seed fixture is image-only, so no e2e can assert over a player that cannot play.
-result: blocked
-blocked_by: third-party
-reason: "User attempted the publish on the real app and hit the predicted provider wall: `fui postar o video e deu o seguinte erro` — hls.js `manifestLoadError` / `networkError`, HTTP 400 from `https://stream.mux.com/fake-playback-0d000000-0000-4000-8000-0000000000a4.m3u8?token=fake-playback-token...`, then `[mux-player 3.13.4] The playback-token provided is invalid or malformed`. Cause is environmental, not a Phase 5 defect: docs/DEPLOY.md:177 pins `VIDEO_PROVIDER=fake` as the default everywhere and the only value permitted outside production, and flipping to `mux` needs five Secret Manager entries (MUX_TOKEN_ID, MUX_TOKEN_SECRET, MUX_SIGNING_KEY_ID, MUX_SIGNING_KEY_PRIVATE, MUX_WEBHOOK_SECRET) plus a runbook item. The assertion (segment fills from the video's own time, auto-advances at video end) is unobservable until a real video provider exists."
-
+result: pass
+previously: "blocked (third-party) on 2026-09-24 — VIDEO_PROVIDER=fake, no HLS stream"
+unblocked_by: "Mux Development environment wired into the local stack on 2026-09-24/25 (VIDEO_PROVIDER=mux, five MUX_* values, cloudflared quick tunnel -> API webhook, worker on ROLE=worker PORT=8788)"
+evidence: |
+  Real ingest proven in the database before the tester answered: media_assets e75468f9-c01d-493c-94f5-40fbf34f45be
+  and 4111fa06-ebc0-443b-adc8-0857cbca524d reached status=ready with real Mux playback ids and duration 4 s;
+  media_provider_events holds the full real delivery chain (video.upload.created, video.upload.asset_created,
+  video.asset.created, video.asset.ready). The tester then opened a real-Mux video story from the /inicio strip,
+  watched it to the end and reported it working ("abri vi e funcionou"), having been told beforehand the two
+  things to watch: the segment filling at the video's own pace, and the auto-advance (or close) at its end.
+caveat: "Non-production Mux assets are TEST assets (watermarked, capped at 10 s). Verified on a 4 s clip on desktop Chrome. Real iOS Safari / Android Chrome playback remains the separate DEPLOY.md Phase 01.1 runbook item 7(b), not claimed here."
 
 ### 2. Open the story viewer on a phone (or a mobile emulation profile) on a story whose image is already decoded, and watch CPU and memory for 30 s
 expected: The bar fills smoothly and the tab stays idle between frames
@@ -146,11 +153,11 @@ residual: "The admin is still not told when a dangling cover is dropped. The rul
 ## Summary
 
 total: 12
-passed: 11
+passed: 12
 issues: 1
 pending: 0
 skipped: 0
-blocked: 1
+blocked: 0
 
 ## Deferred Follow-Ups
 
