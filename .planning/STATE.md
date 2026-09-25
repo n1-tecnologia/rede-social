@@ -4,12 +4,12 @@ current_phase: "05.1"
 current_phase_name: Community Authoring Entry Points
 status: verifying
 stopped_at: Completed 05.1-05-PLAN.md
-last_updated: "2026-09-25T14:44:03.328Z"
+last_updated: "2026-09-25T15:33:40.418Z"
 last_activity: 2026-09-25
 last_activity_desc: Completed 05.1-05 (Reativar from the archived page, the Destaques + into the composer, the phase gate)
-state_head: d3bd95d3540ed0558c2851ded48f2aeaf05bed3a
+state_head: c3315a081ba129d97e159549aea020e39cb975f6
 progress:
-  total_phases: 10
+  total_phases: 14
   completed_phases: 0
   total_plans: 67
   completed_plans: 64
@@ -397,6 +397,16 @@ None yet.
 - Phase 01.1 inserted after Phase 1: Cloud Provisioning & First Release: plans 01-10/01-11/01-12 moved out of Phase 1 as 01.1-01..03 because the cloud accounts do not exist yet; Phase 1 closes on the local stack and Phases 2-8 proceed locally. PWA-04 moved to 01.1.
 - Phase 05.1 inserted after Phase 5: Community Authoring Entry Points — create-community CTA unreachable once a community exists, archived communities unreachable without a UUID, and stories cannot be created from inside a community. All three user-reported in Phase 5 UAT; must ship before Phase 6. (URGENT)
 - Phase 05.1 edited: added success criterion 5 — the story composer itself asks whether the story goes to a community, with 'no community' a first-class answer; criteria 3 and 5 flagged as one mechanism
+- Phase 05.2 inserted after Phase 05.1: Reels and Explorar: full-screen video Reels tab, Início limited to admin posts, toggleable Explorar tab of followed members' posts (new follow model)
+- Phase 05.2 edited: added criterion 5: Instagram-style story highlights (community + Início) replacing loose story_community_pins
+- Phase 05.2 edited: added criterion 6: Início = one grouped active-stories circle + highlight circles beside it (reverses D-78); community page = highlights only
+- Phase 7 edited: added CHAT-06: member-to-member direct messages (no follow required), promoted from V2-CHAT-01; phase renamed to Notifications, Web Push & Chat
+- Phase 05.2 edited: non-admin posts appear only in Explorar (no profile feed); follow graph pulled in from prototype extras
+- Phase 05.2 edited: added criteria 7-8: toggleable 'Rede social' module (key social) for member posts/stories/communities, superseding postingPolicy; only a community's creator publishes in it
+- Phase 05.2 edited: split into 05.2 Story Highlights, 05.3 Rede Social (follow, member posts, Explorar), 05.4 Rede Social (member stories and communities), 05.5 Reels; Explorar folded into the social module
+- Phase 05.3 edited: added criteria 5-6: member profile with follow + counts (conditional reversal of D-45, social on only), member upload limits; terms-of-use pending
+- Phase 7 edited: CHAT-06 gated by social module + message button on profile; added CHAT-07 member-to-member block; notification rules for member posts, new follower, new DM
+- Phase 8 edited: added MODER-04 moderation of member posts/stories/communities and MODER-05 member reports queue (promoted V2-MODER-01), both social-gated
 
 ## Deferred Items
 
