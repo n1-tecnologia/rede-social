@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.1"
 current_phase_name: Community Authoring Entry Points
 status: executing
-stopped_at: Phase 05.1 UI-SPEC approved
-last_updated: "2026-09-25T12:28:40.374Z"
+stopped_at: Completed 05.1-01-PLAN.md
+last_updated: "2026-09-25T13:26:35.443Z"
 last_activity: 2026-09-25
-last_activity_desc: Phase 05 complete (UAT 12/12, verification passed, security 82/82); next is Phase 05.1 by user decision — Phase 01.1 stays deferred to the end
-state_head: 62de8656f97f7549b6297f97b28a40ee688759c7
+last_activity_desc: Completed 05.1-01 (story born attached to a community)
+state_head: 050eef0b3bfab94f0622cf57f35b87d9f7e61e60
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 67
-  completed_plans: 59
+  completed_plans: 60
   percent: 0
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 ## Current Position
 
-Phase: 05.1 (Community Authoring Entry Points) — READY TO EXECUTE
-Plan: Not started
+Phase: 05.1 (Community Authoring Entry Points) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-09-25 — Phase 05 complete (UAT 12/12, verification passed, security 82/82); next is Phase 05.1 by user decision — Phase 01.1 stays deferred to the end
+Last activity: 2026-09-25 — Completed 05.1-01 (story born attached to a community; local DB backed up and reset)
 
 Progress: [███████████████████░] 59/62 plans ([░░░░░░░░░░] 0%)
 
@@ -118,6 +118,7 @@ Progress: [███████████████████░] 59/62 p
 | Phase 05 P10 | 42min | 3 tasks | 5 files |
 | Phase 05 P11 | 13min | 3 tasks | 4 files |
 | Phase 05 P12 | 15 | 2 tasks | 3 files |
+| Phase 05.1 P01 | 12min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -354,6 +355,9 @@ Recent decisions affecting current work:
 - [Phase 05]: VERIFICATION.md digest re-attested, not re-run: the only changed covered file was ROADMAP.md, purely additive (the 05.1 insertion); status promoted human_needed → passed after the clean UAT
 - [Phase 05]: Security 82/82 closed (05-SECURITY.md). T-05-30@05-05 accepted as AR-09: an expired, unpinned story stays readable by id within its own tenant, because the admin history and community pins need by-id reads
 - [Phase 05]: Phase 05.1 goes next, not 01.1 — `phase.complete` picked 01.1 numerically; the pointer was moved by hand because cloud work stays deferred to the end
+- [Phase 05.1]: 05.1-01: developer chose backup-then-reset; data-only dump at ~/tria-local-backups/pre-05.1-reset.sql (251,640 bytes, outside the repo) before db:reset + db:seed
+- [Phase 05.1]: 05.1-01: attaching a community at publish needs stories.story.publish AND stories.story.manage (OQ-1); story + pin row in one withTenantTx (D-99)
+- [Phase 05.1]: 05.1-01: born-attached story emits story.published then one story.pinned; Phase 7 notification consumer must dedupe by storyId
 
 ### Pending Todos
 
@@ -392,6 +396,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T11:43:52.939Z
-Stopped at: Phase 05.1 UI-SPEC approved
-Resume file: .planning/phases/05.1-community-authoring-entry-points/05.1-UI-SPEC.md
+Last session: 2026-09-25T13:26:35.336Z
+Stopped at: Completed 05.1-01-PLAN.md
+Resume file: None
