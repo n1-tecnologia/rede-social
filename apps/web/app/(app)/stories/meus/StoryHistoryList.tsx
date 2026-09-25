@@ -1,7 +1,7 @@
 'use client';
 
-import { CommunityPickerSheet } from '@tria/module-communities/ui';
-import { type PinStoryCommunityRow, PinStorySheet, StoryHistoryRow } from '@tria/module-stories/ui';
+import { STORY_HIGHLIGHT_MAX_ITEMS } from '@tria/module-stories/contracts';
+import { HighlightSheet, type HighlightSheetPlace, StoryHistoryRow } from '@tria/module-stories/ui';
 import {
   BottomSheet,
   Button,
@@ -12,28 +12,25 @@ import {
   Skeleton,
   useToast,
 } from '@tria/ui';
-import { CircleAlert, Eye, Pin, Sparkles, Trash2 } from 'lucide-react';
+import { Bookmark, CircleAlert, Eye, Sparkles, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, useCallback, useState, useTransition } from 'react';
+import { type ReactNode, useCallback, useRef, useState, useTransition } from 'react';
 import {
-  deleteStoryAction,
-  loadMoreOwnStoriesAction,
-  loadStoryPinsAction,
-  pinStoryAction,
-  unpinStoryAction,
-} from '@/app/(app)/stories/story-actions';
-import type { StoryHistoryItemView } from '@/lib/story-view';
+  addStoryToHighlightAction,
+  loadHighlightSheetAction,
+  removeStoryFromHighlightAction,
+} from '@/app/(app)/stories/highlight-actions';
+import { deleteStoryAction, loadMoreOwnStoriesAction } from '@/app/(app)/stories/story-actions';
+import type { HighlightPlaceView, StoryHistoryItemView } from '@/lib/story-view';
 
 /**
- * The body of "Seus stories" (D-84, UI-D-40, UI-D-41) — the list, the row menu, the delete
- * confirmation and the pin sheet.
+ * The body of "Seus stories" (D-84, UI-D-40, UI-D-77) — the list, the row menu, the delete
+ * confirmation and the highlight sheet (D-110 route 2).
  *
- * **This file is where the two modules meet, and it is the only place they may.** `turbo boundaries`
- * denies a `module -> module` package edge (MOD-02), so `PinStorySheet` (stories) cannot import
- * `CommunityPickerSheet` (communities). `apps/web` may reach both, so the composition happens here:
- * the picker's list body is passed into the pin sheet as `renderList`, and the mapping from
- * `CommunitySummary` onto `PinStoryCommunityRow` happens once, on the page above. The identical
- * resolution `StoryViewerHost` reached for the comment sheet in 05-07.
+ * **"Destacar" opens the SAME sheet the viewer opens** (plan 06): `HighlightSheet` in checklist mode,
+ * fed by the same `loadHighlightSheetAction`, toggled by the same two actions. It works on ANY story
+ * in the history, an expired one included — that is what replaced "Fixar em comunidades": an admin
+ * keeps an expired story visible by putting it into a highlight from here.
  *
  * **Pagination is APPEND-NEVER-REPLACE** (the `MembersList` / `CommunityPosts` state machine): a
  * page that arrives never re-orders or replaces what is already rendered, and a failed page leaves
@@ -45,21 +42,36 @@ import type { StoryHistoryItemView } from '@/lib/story-view';
  * row until a refresh lands would read as a failure. It is removed only on a CONFIRMED success —
  * never optimistically — because a refusal that had already removed the row would be a lie.
  *
- * **The pin sheet's state is read when it OPENS, not with the page.** A story's pin set is small
- * and specific; fetching it for every row up front would be one request per story for a sheet the
- * admin opens on one of them. While it is in flight the sheet is not yet rendered, so there is no
- * state to be wrong about (UI loading/E09: the sheet opens with its list already rendered).
+ * **The sheet's state is read when it OPENS, not with the page** (UI E12 loading). A story's
+ * memberships are small and specific; fetching them for every row up front would be one request per
+ * story for a sheet the admin opens on one of them. While the read is in flight nothing is rendered,
+ * so there is no state to be wrong about; a failed read opens nothing and fires the generic toast.
+ *
+ * **The row's "Em # destaques" follows each CONFIRMED toggle** (UI-D-77): the toggle's answer
+ * carries the story's `highlightCount` after the write, and the row is replaced from THAT number —
+ * never a local +1/−1 — so it cannot drift from the server. A reverted toggle changes nothing;
+ * reaching 0 removes the indicator. Toggles pass `revalidate: true`: this is a list screen, not an
+ * open viewer, so the place the highlight lives (`/inicio` or `/comunidades/{id}`) is re-rendered for
+ * the admin's next visit.
  */
 export interface StoryHistoryListProps {
   initialItems: StoryHistoryItemView[];
   initialCursor: string | null;
   /** `true` when the server could not read the first page at all (UI E08/error). */
   initialError?: boolean;
-  /** Every ACTIVE community, from the page's own read (UI partial/E09). */
-  communities: PinStoryCommunityRow[];
-  createCommunityHref: string;
   publishHref: string;
 }
+
+/**
+ * The sheet's target and its server-composed read. It OUTLIVES the close (`open: false`) so the
+ * sheet's exit animation keeps its rows instead of flashing the empty state — the viewer's rule.
+ */
+type HighlightSheetState = {
+  storyId: string;
+  places: HighlightPlaceView[];
+  selectedIds: string[];
+  open: boolean;
+};
 
 /** Six rows at the REAL 48×64 thumbnail geometry, so nothing jumps when content replaces them. */
 const SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
@@ -88,7 +100,7 @@ function MenuRow({
   onClick,
   href,
 }: {
-  icon: typeof Pin;
+  icon: typeof Bookmark;
   label: string;
   destructive?: boolean;
   onClick?: () => void;
@@ -126,8 +138,6 @@ export function StoryHistoryList({
   initialItems,
   initialCursor,
   initialError,
-  communities,
-  createCommunityHref,
   publishHref,
 }: StoryHistoryListProps) {
   const t = useTranslations('stories');
@@ -141,8 +151,10 @@ export function StoryHistoryList({
   /** Which story the row menu is open on. Null closes it; the sheet stays mounted to animate out. */
   const [menuStory, setMenuStory] = useState<StoryHistoryItemView | null>(null);
   const [confirmStory, setConfirmStory] = useState<StoryHistoryItemView | null>(null);
-  /** The pin sheet's target and its server-read initial state, resolved together when it opens. */
-  const [pinTarget, setPinTarget] = useState<{ id: string; pinned: string[] } | null>(null);
+  /** The highlight sheet (D-110 route 2); null until the first "Destacar" read resolves. */
+  const [sheet, setSheet] = useState<HighlightSheetState | null>(null);
+  /** A second "Destacar" while a read is in flight is a no-op. */
+  const sheetReading = useRef(false);
 
   const loadMore = useCallback(() => {
     if (!cursor) return;
@@ -169,40 +181,97 @@ export function StoryHistoryList({
     toast.show({ tone: 'error', message: t('history.errors.generic') });
   }, [toast, t]);
 
-  const openPinSheet = useCallback(
+  const openHighlightSheet = useCallback(
     async (story: StoryHistoryItemView) => {
       setMenuStory(null);
-      const pinned = await loadStoryPinsAction(story.id);
-      if (pinned === null) {
-        // Nothing opens: a sheet whose switches described a state nobody verified would be worse
-        // than the toast, because the admin would act on it.
-        failToast();
-        return;
+      if (sheetReading.current) return;
+      sheetReading.current = true;
+      let opened = false;
+      try {
+        const result = await loadHighlightSheetAction(story.id);
+        if (result.ok) {
+          setSheet({
+            storyId: story.id,
+            places: result.places,
+            selectedIds: result.selectedIds,
+            open: true,
+          });
+          opened = true;
+        }
+      } catch {
+        // The same answer as `{ ok: false }`.
+      } finally {
+        sheetReading.current = false;
       }
-      setPinTarget({ id: story.id, pinned });
+      // Nothing opens: a sheet whose switches described a state nobody verified would be worse
+      // than the toast, because the admin would act on it (UI E12 error).
+      if (!opened) failToast();
     },
     [failToast],
   );
 
+  // STABLE: `BottomSheet`'s focus trap re-arms (and refocuses) whenever its `onClose` identity changes.
+  const closeHighlightSheet = useCallback(() => {
+    setSheet((current) => (current ? { ...current, open: false } : current));
+  }, []);
+
+  /** The row's indicator from the SERVER's count after a confirmed write (UI-D-77); 0 removes it. */
+  const applyHighlightCount = useCallback(
+    (storyId: string, count: number) => {
+      setItems((previous) =>
+        previous.map((entry) => {
+          if (entry.id !== storyId) return entry;
+          const { highlighted: _dropped, ...rest } = entry;
+          return count > 0
+            ? { ...rest, highlighted: { count, label: t('history.highlighted', { count }) } }
+            : rest;
+        }),
+      );
+    },
+    [t],
+  );
+
+  const sheetStoryId = sheet?.storyId ?? null;
+
   /**
-   * ONE toggle, ONE request (UI-D-41). It resolves `true`/`false` rather than throwing, because
-   * `PinStorySheet` reverts its switch on `false` — and the toast is fired HERE, where the words
+   * ONE toggle, ONE request (UI-D-67). It resolves `true`/`false` rather than throwing, because the
+   * sheet's machine reverts its switch on `false` — and the toast is fired HERE, where the words
    * live, rather than inside a module that ships none.
    */
-  const togglePin = useCallback(
-    async (communityId: string, next: boolean): Promise<boolean> => {
-      if (!pinTarget) return false;
-      const ok = next
-        ? await pinStoryAction(pinTarget.id, communityId)
-        : await unpinStoryAction(pinTarget.id, communityId);
-      if (!ok) {
-        failToast();
-        return false;
+  const toggleHighlight = useCallback(
+    async (highlightId: string, next: boolean, place: HighlightSheetPlace): Promise<boolean> => {
+      if (sheetStoryId === null) return false;
+      const write = next ? addStoryToHighlightAction : removeStoryFromHighlightAction;
+      let result: Awaited<ReturnType<typeof write>>;
+      try {
+        result = await write(sheetStoryId, highlightId, {
+          communityId: place.communityId,
+          revalidate: true,
+        });
+      } catch {
+        result = { ok: false, code: 'generic' };
       }
-      toast.show({ tone: 'success', message: t(next ? 'pin.pinned' : 'pin.unpinned') });
-      return true;
+      if (result.ok) {
+        applyHighlightCount(sheetStoryId, result.highlightCount);
+        toast.show({
+          tone: 'success',
+          message: t(next ? 'highlights.toasts.added' : 'highlights.toasts.removed'),
+        });
+        return true;
+      }
+      toast.show({
+        tone: 'error',
+        message:
+          result.code === 'archived'
+            ? t('highlights.errors.archived')
+            : result.code === 'full'
+              ? t('highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS })
+              : t('highlights.errors.generic'),
+      });
+      // `false` is what makes the sheet's machine REVERT the switch; the row's count is untouched.
+      return false;
     },
-    [pinTarget, failToast, toast, t],
+    [sheetStoryId, applyHighlightCount, toast, t],
   );
 
   const confirmDelete = useCallback(async () => {
@@ -282,7 +351,7 @@ export function StoryHistoryList({
                   meta={story.meta}
                   note={story.note}
                   status={story.status}
-                  pinned={story.pinned}
+                  highlighted={story.highlighted}
                   actionLabel={story.actionLabel}
                   onOpen={() => setMenuStory(story)}
                 />
@@ -308,7 +377,7 @@ export function StoryHistoryList({
     <div className="flex flex-col pb-6">
       {body}
 
-      {/* UI-D-40's row menu: three actions, the destructive one last. */}
+      {/* UI-D-77's row menu: "Destacar" · "Ver story" · "Excluir story", the destructive one last. */}
       <BottomSheet
         open={menuStory !== null}
         onClose={() => setMenuStory(null)}
@@ -316,10 +385,10 @@ export function StoryHistoryList({
       >
         <div className="flex flex-col gap-1">
           <MenuRow
-            icon={Pin}
-            label={t('history.menu.pin')}
+            icon={Bookmark}
+            label={t('history.menu.highlight')}
             onClick={() => {
-              if (menuStory) void openPinSheet(menuStory);
+              if (menuStory) void openHighlightSheet(menuStory);
             }}
           />
           <MenuRow
@@ -353,27 +422,40 @@ export function StoryHistoryList({
         onError={failToast}
       />
 
-      {/* UI-D-41. The picker's list body is INJECTED here because this is the one tier that may
-          import both modules — see this file's docblock. */}
-      <PinStorySheet
-        open={pinTarget !== null}
-        onClose={() => setPinTarget(null)}
-        title={t('pin.title')}
-        helper={t('pin.helper')}
-        rows={communities}
-        pinnedCommunityIds={pinTarget?.pinned ?? []}
-        rowLabel={(row) => t('pin.row', { community: row.name })}
-        onToggle={togglePin}
-        empty={
-          <div className="flex flex-col items-center gap-2 px-6 py-8 text-center">
-            <p className="text-sm font-normal text-text-secondary">{t('pin.empty')}</p>
-            <a href={createCommunityHref} className="text-sm font-bold text-brand">
-              {t('pin.create')}
-            </a>
-          </div>
-        }
-        renderList={CommunityPickerSheet}
-      />
+      {/* UI-D-67's checklist, the SAME component and read the viewer uses (D-110 route 2). */}
+      {sheet ? (
+        <HighlightSheet
+          mode="checklist"
+          open={sheet.open}
+          onClose={closeHighlightSheet}
+          title={t('highlights.sheet.title')}
+          helper={t('highlights.sheet.helper')}
+          places={sheet.places}
+          selectedIds={sheet.selectedIds}
+          rowLabel={(row, place) =>
+            t('highlights.sheet.row', { title: row.title, place: place.label })
+          }
+          onToggle={toggleHighlight}
+          empty={
+            // UI-D-67 empty: no highlight anywhere. Curation has ONE door (D-109), so the CTA
+            // leaves for the manage screen rather than creating inline.
+            <div className="flex flex-col items-start gap-2 py-4">
+              <p className="text-sm font-normal text-text-secondary">
+                {t('highlights.sheet.emptyTitle')}
+              </p>
+              <p className="text-sm font-normal text-text-tertiary">
+                {t('highlights.sheet.emptyBody')}
+              </p>
+              <a
+                href="/stories/destaques"
+                className="rounded text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              >
+                {t('highlights.sheet.emptyCta')}
+              </a>
+            </div>
+          }
+        />
+      ) : null}
     </div>
   );
 }

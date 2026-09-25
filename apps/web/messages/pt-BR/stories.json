@@ -123,19 +123,19 @@
       "row": "Opções do story de {date}",
       "noCaption": "Sem legenda",
       "meta": "{date} · {likes} curtidas · {comments} comentários",
-      "pinned": "{count, plural, one {Fixado em # comunidade} other {Fixado em # comunidades}}",
+      "highlighted": "{count, plural, one {Em # destaque} other {Em # destaques}}",
       "processingNote": "Seu story aparece no início assim que o vídeo terminar de processar.",
       "menu": {
         "title": "Opções do story",
-        "pin": "Fixar em comunidades",
+        "highlight": "Destacar",
         "view": "Ver story",
         "delete": "Excluir story"
       },
       "confirmDelete": {
         "title": "Excluir story?",
-        "body": "Ele sai do início e das comunidades onde está fixado.",
-        "confirm": "Excluir",
-        "cancel": "Cancelar"
+        "body": "Ele sai do início e de todos os destaques onde está.",
+        "confirm": "Excluir story",
+        "cancel": "Manter story"
       },
       "empty": {
         "title": "Nenhum story ainda",
@@ -153,16 +153,6 @@
       },
       "loadMore": "Carregar mais",
       "loadingMore": "Carregando…"
-    },
-    "pin": {
-      "title": "Fixar em comunidades",
-      "helper": "Um story fixado continua visível na comunidade depois das 24 h.",
-      "row": "Fixar em {community}",
-      "cover": "Capa da comunidade {community}",
-      "empty": "Nenhuma comunidade ainda.",
-      "create": "Criar comunidade",
-      "pinned": "Story fixado.",
-      "unpinned": "Story desafixado."
     }
   }
 }

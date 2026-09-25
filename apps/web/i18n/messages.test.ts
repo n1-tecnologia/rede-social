@@ -403,10 +403,7 @@ describe('05.2-07 — the "Seus stories" strings, and the pin vocabulary retired
   }
 
   it.each([
-    [
-      'stories.history.highlighted',
-      '{count, plural, one {Em # destaque} other {Em # destaques}}',
-    ],
+    ['stories.history.highlighted', '{count, plural, one {Em # destaque} other {Em # destaques}}'],
     ['stories.history.menu.highlight', 'Destacar'],
     ['stories.history.confirmDelete.title', 'Excluir story?'],
     ['stories.history.confirmDelete.body', 'Ele sai do início e de todos os destaques onde está.'],
@@ -420,13 +417,12 @@ describe('05.2-07 — the "Seus stories" strings, and the pin vocabulary retired
     expect(String(lookup('stories.history.highlighted'))).toContain('{count, plural,');
   });
 
-  it.each([
-    'stories.pin',
-    'stories.history.pinned',
-    'stories.history.menu.pin',
-  ])('%s is gone — "fixar" is retired (UI-D-79)', (key) => {
-    expect(lookup(key)).toBeUndefined();
-  });
+  it.each(['stories.pin', 'stories.history.pinned', 'stories.history.menu.pin'])(
+    '%s is gone — "fixar" is retired (UI-D-79)',
+    (key) => {
+      expect(lookup(key)).toBeUndefined();
+    },
+  );
 
   it('no string under stories.history says "Fixar" or "fixado"', () => {
     expect(JSON.stringify(lookup('stories.history'))).not.toMatch(/[Ff]ixa/);

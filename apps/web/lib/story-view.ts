@@ -183,7 +183,7 @@ export function storyCommentView(
  * **Nothing here is a function and nothing is a template.** Every value that crosses into
  * `StoryHistoryList` is a plain string, number or boolean, because the boundary only carries
  * serialisable props. The two strings that need NUMBERS in them — the meta line and the
- * plural-aware pin indicator — are interpolated HERE with the page's own translator, which is also
+ * plural-aware highlight indicator (UI-D-77) — are interpolated HERE with the page's own translator, which is also
  * what keeps the pt-BR plural rules on the server where `next-intl` can apply them.
  */
 export type StoryHistoryItemView = {
@@ -196,7 +196,11 @@ export type StoryHistoryItemView = {
   meta: string;
   note?: string;
   status?: { tone: 'warning' | 'danger'; label: string };
-  pinned?: { count: number; label: string };
+  /**
+   * UI-D-77: "Em # destaque(s)", present ONLY when the story is in at least one highlight. The
+   * client replaces it from each confirmed toggle's `highlightCount` (and drops it at 0).
+   */
+  highlighted?: { count: number; label: string };
   actionLabel: string;
   /** `/stories/{id}` — "Ver story" opens the viewer as a SINGLE-item sequence (05-06's route). */
   viewHref: string;
@@ -252,13 +256,14 @@ export function storyHistoryView(
     }),
     ...(note ? { note } : {}),
     ...(status ? { status } : {}),
-    // UI zero-one-many/E08: pinned NOWHERE renders no indicator at all, so the key is absent
-    // rather than carrying a zero. `StoryHistoryRow` checks the count too — belt and braces.
-    ...(story.pinnedCommunityCount > 0
+    // UI-D-77 / UI E12 zero-one-many: in NO highlight renders no indicator at all, so the key is
+    // absent rather than carrying a zero. `StoryHistoryRow` checks the count too — belt and braces.
+    // `pinnedCommunityCount` is no longer read: the pin model is retired on the web (UI-D-79).
+    ...(story.highlightCount > 0
       ? {
-          pinned: {
-            count: story.pinnedCommunityCount,
-            label: ts('history.pinned', { count: story.pinnedCommunityCount }),
+          highlighted: {
+            count: story.highlightCount,
+            label: ts('history.highlighted', { count: story.highlightCount }),
           },
         }
       : {}),

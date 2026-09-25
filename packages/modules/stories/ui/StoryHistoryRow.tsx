@@ -2,28 +2,30 @@
 
 import { MediaImage } from '@tria/core/ui';
 import { cn, StatusPill } from '@tria/ui';
-import { Pin } from 'lucide-react';
+import { Bookmark } from 'lucide-react';
 
 /**
- * UI-D-40 — one row of "Seus stories" (D-84), the admin's own history.
+ * UI-D-40 / UI-D-77 — one row of "Seus stories" (D-84), the admin's own history.
  *
  * **Why a ROW and not a grid cell**, stated here because the tempting "improvement" is to make this
  * screen a 9:16 grid like every other story history: a grid of crops would hide exactly the two
- * things this screen exists for — the COUNTS and the PINNED STATE — and would have nowhere to put
+ * things this screen exists for — the COUNTS and the HIGHLIGHTED STATE — and would have nowhere to put
  * the `Processando` / `Recusado` pill (Pitfall 5). D-45 already rejected a story grid on `/perfil`
  * for the same reason.
  *
  * Presentational and props-only, the `StoryCircle` posture: it fetches nothing, formats no date,
  * resolves no route and **ships no words** (PWA-03). The meta line arrives fully composed
  * ("{date} · {n} curtidas · {n} comentários") because only the host knows the locale and the
- * plural rules, and the pin indicator's label arrives plural-aware for the same reason.
+ * plural rules, and the highlight indicator's label ("Em # destaque(s)") arrives plural-aware for
+ * the same reason.
  *
  * **THREE THINGS A REVIEWER MUST NOT "FIX":**
  *
- * 1. **The COUNT is the presence test for the pin indicator, never a null check.** A story pinned
- *    nowhere renders no indicator at all — not a `0`, not a hollow glyph (UI zero-one-many/E08).
- *    `pinnedCommunityCount` is always a number on the payload, so `pinned?.count > 0` is the only
- *    honest condition; a `pinned !== undefined` test would draw a zero.
+ * 1. **The COUNT is the presence test for the highlight indicator, never a null check.** A story
+ *    in no highlight renders no indicator at all — not "Em 0 destaques", not a hollow glyph (UI-D-77,
+ *    UI E12 zero-one-many). `highlightCount` is always a number on the payload, and the host updates
+ *    it live after each confirmed toggle, so reaching 0 must remove the node: `highlighted?.count > 0`
+ *    is the only honest condition; a `highlighted !== undefined` test would draw a zero.
  * 2. **The geometry is fixed by the THUMBNAIL, not by the body.** A row may carry a pill, an
  *    indicator, both or neither, and its caption may be the absent-caption fallback — and none of
  *    those combinations may reflow the list (UI partial/E08). The thumbnail is a fixed 48×64 and
@@ -50,8 +52,8 @@ export interface StoryHistoryRowProps {
   note?: string;
   /** Phase 3's media vocabulary: `warning` = Processando, `danger` = Recusado. */
   status?: { tone: 'warning' | 'danger'; label: string };
-  /** The pinned-community count and its plural-aware label. `count === 0` renders NOTHING. */
-  pinned?: { count: number; label: string };
+  /** How many highlights the story is in, and its plural-aware label. `count === 0` renders NOTHING. */
+  highlighted?: { count: number; label: string };
   /** Accessible name of the row control ("Opções do story …"). */
   actionLabel: string;
   /** The whole row is the control — it opens the host's row menu. */
@@ -70,11 +72,11 @@ export function StoryHistoryRow({
   meta,
   note,
   status,
-  pinned,
+  highlighted,
   actionLabel,
   onOpen,
 }: StoryHistoryRowProps) {
-  const showPin = pinned !== undefined && pinned.count > 0;
+  const showHighlighted = highlighted !== undefined && highlighted.count > 0;
 
   return (
     <button
@@ -132,13 +134,13 @@ export function StoryHistoryRow({
             {status.label}
           </StatusPill>
         ) : null}
-        {showPin ? (
+        {showHighlighted ? (
           <span
-            data-testid="story-history-pin"
-            className="flex items-center gap-1 text-xs font-normal text-text-secondary tabular-nums"
+            data-testid="story-history-highlighted"
+            className="flex items-center gap-1 whitespace-nowrap text-xs font-normal text-text-secondary tabular-nums"
           >
-            <Pin aria-hidden size={16} />
-            {pinned.label}
+            <Bookmark aria-hidden size={16} />
+            {highlighted.label}
           </span>
         ) : null}
       </span>
