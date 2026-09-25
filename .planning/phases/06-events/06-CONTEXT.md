@@ -3,7 +3,9 @@
 **Gathered:** 2026-09-25
 **Status:** Ready for planning
 
-> **Decision numbering.** Phase 6 was discussed while phases 05.2–05.5 are still open. 05.2's context claims the running sequence from **D-100 onward**, and 05.3–05.5 will continue it. To stop the two runs colliding, this phase owns the separate block **D-200..D-219**. Its UI-SPEC follows the same rule and starts at **UI-D-200**, because 05.2's UI-SPEC continues from UI-D-59.
+> **Decision numbering.** Phase 6 was discussed while 05.2 (Story Highlights) and 05.3 (Reels) were still open; both execute before this phase. 05.2's context claims the running sequence from **D-100 onward**, and 05.3 will continue it. To stop the two runs colliding, this phase owns the separate block **D-200..D-219**. Its UI-SPEC follows the same rule and starts at **UI-D-200**, because 05.2's UI-SPEC continues from UI-D-59.
+>
+> **Roadmap cut (2026-09-25, after this discussion).** The MVP is Phases 1–8 plus 01.1 and 05.1–05.3. The "Rede social" module (follow graph, member authoring, Explorar, direct messages) moved to post-MVP Phases 9–11. Nothing in this phase may depend on it.
 
 <domain>
 ## Phase Boundary
@@ -184,7 +186,7 @@ Nothing below was selected for discussion. Decide it in research or planning, re
 - Cover image: recommended **optional** with the brand-gradient fallback D-69 gave communities.
 - The form's date/time inputs on mobile Safari and Chrome in the tenant's timezone, and the online/in-person switch.
 - Empty states and skeletons for both chips, the Início card and the three attendance chips. pt-BR copy lives in a new `events` catalog namespace (`scripts/check-ui-literals.sh`).
-- **Nav order and tab budget.** The prototype ran five tabs (Home, Comunidade, Vídeos, Membros, Eventos). 05.3 adds `Explorar` and 05.5 adds a Reels tab, both likely before this phase executes. Check the BottomNav's capacity and pick `nav.order` (after Comunidades' 20). Flag to the user if the budget overflows; do not silently move a tab to a menu.
+- **Nav order and tab budget.** The prototype ran five tabs (Home, Comunidade, Vídeos, Membros, Eventos). `packages/core/ui/nav.ts` renders kernel Início first, module tabs by `order`, and kernel Perfil last. With 05.3's Reels tab landing before this phase, Eventos makes five: Início, Comunidades, Reels, Eventos, Perfil. Pick `nav.order` after Comunidades' 20 and Reels' value. Phase 9's `Explorar` (post-MVP) would be a sixth tab. That is Phase 9's problem, not this phase's, but do not pick an order that assumes it.
 - Home-slot `order` for D-202: after the stories strip (5), before the feed (10). Re-check against 05.2's reshaped highlights row.
 - Desktop composition under D-39 (rail plus centred column) for the list, the detail and `Participantes`.
 
@@ -321,13 +323,13 @@ Nothing below was selected for discussion. Decide it in research or planning, re
 <deferred>
 ## Deferred Ideas
 
-- **Seeing who's going (avatar stack, "Ana, João e mais 21")**, rejected by D-206. Revisit with Phase 05.3's follow graph ("people I follow are going") if the pilot asks.
+- **Seeing who's going (avatar stack, "Ana, João e mais 21")**, rejected by D-206. Revisit with Phase 9's follow graph (post-MVP: "people I follow are going") if the pilot asks.
 - **An embedded map** (the prototype's `EventMap`), rejected by D-203 for CSP and LGPD reasons. A keyed static map would be the version to revisit.
 - **A per-event check-in window** (form fields for open/close offsets), rejected by D-209 in favour of the fixed rule.
 - **Deleting an event** (e.g. a test or a duplicate with no answers), rejected by D-214. Cancel is the only way out in V1.
 - **A "require code" switch per event**, rejected by D-208.
 - **A "Meus eventos" view** (the prototype's `/my-events`: registered and participated cards, stats, certificates). The state pill on each card (D-200) covers V1. A `Você vai` filter chip is the cheap version to revisit.
-- **Events inside a community** (a `community_id` on events, events on a community page). Surfaced during analysis, not discussed; not in the requirements. Relevant once 05.4's member-created communities exist.
+- **Events inside a community** (a `community_id` on events, events on a community page). Surfaced during analysis, not discussed; not in the requirements. Relevant once Phase 10's member-created communities exist (post-MVP).
 - Already V2 in REQUIREMENTS.md, restated so nobody pulls them in:
   - QR / geofence check-in and admin manual check-in (V2-EVENT-01);
   - update and cancel notifications (V2-EVENT-02);
