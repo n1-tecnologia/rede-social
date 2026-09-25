@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-06-PLAN.md
-last_updated: "2026-09-25T22:55:05.187Z"
+stopped_at: Completed 05.2-07-PLAN.md
+last_updated: "2026-09-25T23:11:54.801Z"
 last_activity: 2026-09-25
-last_activity_desc: Completed 05.2-06 (the shared highlight sheet — HighlightSheet checklist/single on the HighlightMembershipList toggle machine, HighlightTitleStep; loadHighlightSheetAction + add/remove toggle actions; the curator-only Destacar pill in the viewer with the clock paused)
-state_head: 96af90285086992cb311c06667c315fef7766f9e
+last_activity_desc: Completed 05.2-07 ("Seus stories" curates highlights — Destacar opens the shared HighlightSheet on any story, expired included; the row's "Em # destaques" follows each confirmed toggle from the server count; delete dialog reworded; PinStorySheet, the pin catalog keys, pin actions and web pin fetchers retired)
+state_head: 54d05e29bbd6a15eba4ed51c5087d753a34d4c5f
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 70
+  completed_plans: 71
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 7 of 12
-Status: Executing Phase 05.2 — next is 05.2-07
-Last activity: 2026-09-25 — Completed 05.2-06 (D-110's one highlight sheet in both modes and the shared title step; the sheet's composed read and one validated action per toggle; "Destacar" in the viewer for curators, clock paused from the tap; smoke on :3100)
+Plan: 8 of 12
+Status: Executing Phase 05.2 — next is 05.2-08
+Last activity: 2026-09-25 — Completed 05.2-07 (D-110 route 2 in "Seus stories" with the live Bookmark indicator; the web pin model retired (UI-D-79); both Destacar doors proven in the browser on :3100)
 
-Progress: [████████████████░░░░] 70/88 plans ([░░░░░░░░░░] 0%)
+Progress: [████████████████░░░░] 71/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -130,6 +130,7 @@ Progress: [████████████████░░░░] 70/88 p
 | Phase 05.2 P04 | 44 min | 3 tasks | 13 files |
 | Phase 05.2 P05 | 30 min | 3 tasks | 19 files |
 | Phase 05.2 P06 | 18 min | 3 tasks | 17 files |
+| Phase 05.2 P07 | 12 min | 2 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -394,6 +395,8 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-05: every per-segment key, state map and host registry is ${group.key}:${item.id} (Pitfall 4); onSegmentShown fires once per showing of a ready current segment, ready for plan 10
 - [Phase 05.2]: 05.2-06: the viewer pauses from the Destacar tap until the sheet closes (the read included), so the sheet always describes the story on screen at the tap
 - [Phase 05.2]: 05.2-06: HighlightSheet is D-110's one membership sheet (checklist + single modes on HighlightMembershipList); curation toggles take a caller-owned revalidate flag: the viewer passes false, list screens true
+- [Phase 05.2]: 05.2-07: the Seus stories row count is replaced from the toggle answer's server highlightCount, never incremented locally; a reverted toggle leaves it unchanged and 0 removes the indicator
+- [Phase 05.2]: 05.2-07: before PinStorySheet was deleted, its three invariants with no HighlightSheet case (optimistic flip, OFF revert, closed renders nothing) were ported as M5, M6, C3
 
 ### Pending Todos
 
@@ -447,6 +450,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T22:54:59.449Z
-Stopped at: Completed 05.2-06-PLAN.md
+Last session: 2026-09-25T23:11:48.424Z
+Stopped at: Completed 05.2-07-PLAN.md
 Resume file: None

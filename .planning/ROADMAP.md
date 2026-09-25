@@ -408,7 +408,7 @@ Plans:
 **Research needed**: Yes — the migration from `story_community_pins`, and the Instagram grouped-viewer behaviour (resume from the first unseen story).
 **Notes**: Publishing is still admin-only in this phase; member authoring arrives in Phases 9/10 (post-MVP) and must fit this model, not reshape it. Open questions for discuss-phase: (a) can one story sit in several highlights (Instagram: yes); (b) cover = uploaded image or a frame of one of its stories; (c) where the admin's publish door lives once the own-circle (D-80) becomes the grouped circle; (d) how the grouped circle shows seen vs unseen (V2-CONT-05 "seen/unseen ring" may need pulling in). There is NO feed-level pin today, so the Início half is new. Source: user requests 2026-09-25; 05.2 was split into 05.2-05.5 the same day for vertical, independently shippable slices, and later that day the MVP cut made Reels 05.3 and moved the two "Rede social" phases to 9-10.
 
-**Plans**: 6/12 plans executed
+**Plans**: 7/12 plans executed
 
 Plans:
 
@@ -435,7 +435,7 @@ Plans:
 
 **Wave 6**
 
-- [ ] 05.2-07-PLAN.md — "Seus stories" curates highlights; the pin sheet and the web's pin calls are deleted
+- [x] 05.2-07-PLAN.md — "Seus stories" curates highlights; the pin sheet and the web's pin calls are deleted
 
 **Wave 7**
 
