@@ -32,22 +32,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *     over to the next story when the asset ends.
  */
 
-const { catalog, feedCatalog, toast, like, unlike, playbackToken, loadHighlight } =
-  await vi.hoisted(async () => {
-    const { readFileSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const read = (name: string) =>
-      JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
-    return {
-      catalog: read('stories').stories as Record<string, unknown>,
-      feedCatalog: read('feed').feed as Record<string, unknown>,
-      toast: { show: vi.fn(), dismiss: vi.fn() },
-      like: vi.fn(),
-      unlike: vi.fn(),
-      playbackToken: vi.fn(),
-      loadHighlight: vi.fn(),
-    };
-  });
+const {
+  catalog,
+  feedCatalog,
+  toast,
+  like,
+  unlike,
+  playbackToken,
+  loadHighlight,
+  loadSheet,
+  addToHighlight,
+  removeFromHighlight,
+} = await vi.hoisted(async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const read = (name: string) =>
+    JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
+  return {
+    catalog: read('stories').stories as Record<string, unknown>,
+    feedCatalog: read('feed').feed as Record<string, unknown>,
+    toast: { show: vi.fn(), dismiss: vi.fn() },
+    like: vi.fn(),
+    unlike: vi.fn(),
+    playbackToken: vi.fn(),
+    loadHighlight: vi.fn(),
+    loadSheet: vi.fn(),
+    addToHighlight: vi.fn(),
+    removeFromHighlight: vi.fn(),
+  };
+});
 
 const lookup = (key: string, values?: Record<string, unknown>) => {
   const raw = key
@@ -158,7 +171,18 @@ vi.mock('@mux/mux-player-react', async () => {
  */
 vi.mock('@/app/(app)/stories/highlight-actions', () => ({
   loadHighlightItemsAction: loadHighlight,
+  loadHighlightSheetAction: loadSheet,
+  addStoryToHighlightAction: addToHighlight,
+  removeStoryFromHighlightAction: removeFromHighlight,
 }));
+
+/**
+ * 05.2-06: the host reads the highlight sheet's words with `useTranslations('stories')` on the
+ * client (the composer's precedent). The stand-in answers from the SAME real catalog `lookup` reads,
+ * and returns ONE stable reader, as next-intl's memoised hook does.
+ */
+const translate = (key: string, values?: Record<string, unknown>) => lookup(key, values);
+vi.mock('next-intl', () => ({ useTranslations: () => translate }));
 
 const { highlightGroupView, inicioGroups, inicioRow, storyViewerLabels } = await import(
   '@/lib/story-view'
@@ -899,5 +923,191 @@ describe('StoriesSurface — every Início circle opens its own group (05.2-05, 
     expect(loadHighlight.mock.calls.filter(([id]) => id === H2)).toHaveLength(2);
     expect(screen.queryByTestId('story-group-error')).toBeNull();
     expect(screen.getByTestId('story-caption').textContent).toBe('Depois do erro.');
+  });
+});
+
+/* ── 05.2-06: "Destacar" in the viewer (UI-D-66, UI-D-67, D-110 route 1, D-82) ─────────────────── */
+
+const COMMUNITY = '0c000000-0000-4000-8000-00000000000a';
+const H3 = '0000000a-1111-4111-8111-000000000003';
+
+/** The sheet's opening read: Início with two highlights (one holding the story), one community. */
+function sheetResult() {
+  return {
+    ok: true as const,
+    selectedIds: [H1],
+    places: [
+      {
+        key: 'home',
+        label: 'Início',
+        communityId: null,
+        rows: [
+          { id: H1, title: 'Bastidores', cover: null },
+          { id: H2, title: 'Aulas', cover: null },
+        ],
+      },
+      {
+        key: COMMUNITY,
+        label: 'Coral TRIA',
+        communityId: COMMUNITY,
+        rows: [{ id: H3, title: 'Ensaios', cover: null }],
+      },
+    ],
+  };
+}
+
+describe('StoryViewerHost — "Destacar" (05.2-06, UI-D-66, D-110 route 1)', () => {
+  const STORY_ID = '0d000000-0000-4000-8000-0000000000d1';
+
+  const openHighlightSheet = async () => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Destacar' }));
+    });
+  };
+
+  it('21. members get NO "Destacar"; a curator gets ONE, after the like and comment controls', () => {
+    host({ canCurate: false });
+    expect(screen.queryByRole('button', { name: 'Destacar' })).toBeNull();
+    cleanup();
+
+    host({ canCurate: true });
+    const pill = screen.getByRole('button', { name: 'Destacar' });
+    expect(screen.getAllByRole('button', { name: 'Destacar' })).toHaveLength(1);
+    // It sits at the END of the action row: after the like and after the comment control.
+    const row = [...(pill.parentElement?.querySelectorAll('button') ?? [])];
+    const at = (node: Element) => row.indexOf(node as HTMLButtonElement);
+    expect(at(pill)).toBeGreaterThan(at(screen.getByRole('button', { name: 'Curtir' })));
+    expect(at(pill)).toBeGreaterThan(at(screen.getByRole('button', { name: 'Comentar' })));
+    expect(pill.className).toContain('ml-auto');
+  });
+
+  it('22. the pill reads the CURRENT story’s sheet, opens the checklist, and the clock is paused while it is open', async () => {
+    loadSheet.mockResolvedValue(sheetResult());
+    host({ canCurate: true });
+    const viewer = screen.getByRole('dialog', { name: 'Story' });
+    expect(viewer.getAttribute('data-paused')).toBe('false');
+
+    await openHighlightSheet();
+
+    expect(loadSheet).toHaveBeenCalledWith(STORY_ID);
+    const sheet = screen.getByRole('dialog', { name: 'Destacar story' });
+    expect(within(sheet).getByText('Início')).toBeTruthy();
+    expect(within(sheet).getByText('Coral TRIA')).toBeTruthy();
+    expect(
+      within(sheet)
+        .getByRole('switch', { name: 'Destacar em Bastidores, Início' })
+        .getAttribute('aria-checked'),
+    ).toBe('true');
+    expect(
+      within(sheet)
+        .getByRole('switch', { name: 'Destacar em Ensaios, Coral TRIA' })
+        .getAttribute('aria-checked'),
+    ).toBe('false');
+    expect(viewer.getAttribute('data-paused')).toBe('true');
+
+    await act(async () => {
+      fireEvent.keyDown(sheet, { key: 'Escape' });
+    });
+    expect(screen.queryByRole('dialog', { name: 'Destacar story' })).toBeNull();
+    expect(viewer.getAttribute('data-paused')).toBe('false');
+  });
+
+  it('23. a failed read opens NOTHING and raises the generic error toast', async () => {
+    loadSheet.mockResolvedValue({ ok: false });
+    host({ canCurate: true });
+
+    await openHighlightSheet();
+
+    expect(screen.queryByRole('dialog', { name: 'Destacar story' })).toBeNull();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: lookup('viewer.errors.generic'),
+    });
+    expect(screen.getByRole('dialog', { name: 'Story' }).getAttribute('data-paused')).toBe('false');
+  });
+
+  it('24. toggles write with revalidate:false; archived and full revert with their own toasts, success confirms', async () => {
+    loadSheet.mockResolvedValue(sheetResult());
+    host({ canCurate: true });
+    await openHighlightSheet();
+    const switchNamed = (name: string) =>
+      within(screen.getByRole('dialog', { name: 'Destacar story' })).getByRole('switch', { name });
+
+    // archived → the switch reverts and the archived toast fires.
+    addToHighlight.mockResolvedValueOnce({ ok: false, code: 'archived' });
+    await act(async () => {
+      fireEvent.click(switchNamed('Destacar em Ensaios, Coral TRIA'));
+    });
+    expect(addToHighlight).toHaveBeenCalledWith(STORY_ID, H3, {
+      communityId: COMMUNITY,
+      revalidate: false,
+    });
+    expect(switchNamed('Destacar em Ensaios, Coral TRIA').getAttribute('aria-checked')).toBe(
+      'false',
+    );
+    expect(toast.show).toHaveBeenLastCalledWith({
+      tone: 'error',
+      message: lookup('highlights.errors.archived'),
+    });
+
+    // full → reverts, and the toast names the limit from the contracts (100), never a typed number.
+    addToHighlight.mockResolvedValueOnce({ ok: false, code: 'full' });
+    await act(async () => {
+      fireEvent.click(switchNamed('Destacar em Aulas, Início'));
+    });
+    expect(switchNamed('Destacar em Aulas, Início').getAttribute('aria-checked')).toBe('false');
+    expect(toast.show).toHaveBeenLastCalledWith({
+      tone: 'error',
+      message: lookup('highlights.errors.full', { limit: 100 }),
+    });
+
+    // success → stays on, "Story adicionado ao destaque."
+    addToHighlight.mockResolvedValueOnce({ ok: true, highlightCount: 2 });
+    await act(async () => {
+      fireEvent.click(switchNamed('Destacar em Aulas, Início'));
+    });
+    expect(addToHighlight).toHaveBeenLastCalledWith(STORY_ID, H2, {
+      communityId: null,
+      revalidate: false,
+    });
+    expect(switchNamed('Destacar em Aulas, Início').getAttribute('aria-checked')).toBe('true');
+    expect(toast.show).toHaveBeenLastCalledWith({
+      tone: 'success',
+      message: 'Story adicionado ao destaque.',
+    });
+
+    // removal → "Story removido do destaque."; a generic failure elsewhere keeps its generic copy.
+    removeFromHighlight.mockResolvedValueOnce({ ok: true, highlightCount: 1 });
+    await act(async () => {
+      fireEvent.click(switchNamed('Destacar em Bastidores, Início'));
+    });
+    expect(removeFromHighlight).toHaveBeenCalledWith(STORY_ID, H1, {
+      communityId: null,
+      revalidate: false,
+    });
+    expect(toast.show).toHaveBeenLastCalledWith({
+      tone: 'success',
+      message: 'Story removido do destaque.',
+    });
+
+    removeFromHighlight.mockResolvedValueOnce({ ok: false, code: 'generic' });
+    await act(async () => {
+      fireEvent.click(switchNamed('Destacar em Aulas, Início'));
+    });
+    expect(switchNamed('Destacar em Aulas, Início').getAttribute('aria-checked')).toBe('true');
+    expect(toast.show).toHaveBeenLastCalledWith({
+      tone: 'error',
+      message: lookup('highlights.errors.generic'),
+    });
+  });
+
+  it('25. the comment sheet still works beside it: opening comments pauses on its own', async () => {
+    loadSheet.mockResolvedValue(sheetResult());
+    host({ canCurate: true, comments: commentsBinding() });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Comentar' }));
+    });
+    expect(screen.getByRole('dialog', { name: 'Comentários' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Story' }).getAttribute('data-paused')).toBe('true');
   });
 });
