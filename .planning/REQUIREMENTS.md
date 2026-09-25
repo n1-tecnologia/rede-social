@@ -144,8 +144,8 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ### Content & Social
 
-- ~~**V2-CONT-01**: Members can create posts (per-tenant policy flip on FEED-08)~~ — promoted to Phase 05.3 via the `social` module, 2026-09-25
-- ~~**V2-CONT-02**: Members can create communities~~ — promoted to Phase 05.4 via the `social` module (only the creator publishes in it), 2026-09-25; private/opt-in communities using COMM-02's membership table remain V2
+- ~~**V2-CONT-01**: Members can create posts (per-tenant policy flip on FEED-08)~~ — promoted to Phase 9 (post-MVP) via the `social` module, 2026-09-25
+- ~~**V2-CONT-02**: Members can create communities~~ — promoted to Phase 10 (post-MVP) via the `social` module (only the creator publishes in it), 2026-09-25; private/opt-in communities using COMM-02's membership table remain V2
 - **V2-CONT-03**: Pin post to top of feed/community
 - **V2-CONT-04**: Scheduled publishing of posts
 - **V2-CONT-05**: Story seen/unseen ring and admin "who viewed" list
@@ -153,7 +153,7 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ### Chat & Notifications
 
-- ~~**V2-CHAT-01**: Member-to-member chat on the same conversation schema~~ — promoted to V1 as CHAT-06 (Phase 7), 2026-09-25
+- ~~**V2-CHAT-01**: Member-to-member chat on the same conversation schema~~ — promoted to V1 as CHAT-06 (Phase 11, post-MVP), 2026-09-25
 - **V2-CHAT-02**: Attachments, read receipts, typing indicator, canned replies
 - **V2-NOTIF-01**: Per-category × per-channel notification preferences with quiet defaults
 - **V2-NOTIF-02**: Grouped notifications ("Ana e mais 3 curtiram")
@@ -169,7 +169,7 @@ Deferred to future release. Tracked but not in current roadmap.
 
 - **V2-PROF-01**: Hide-me option for the member directory
 - **V2-PROF-02**: Self-service account deletion / data export (LGPD Art. 18)
-- ~~**V2-MODER-01**: Member reports content with reason; admin reports queue~~ — promoted to V1 as MODER-05 (Phase 8), 2026-09-25
+- ~~**V2-MODER-01**: Member reports content with reason; admin reports queue~~ — promoted to V1 as MODER-05 (Phase 11, post-MVP), 2026-09-25
 - **V2-MODER-02**: Keyword blocklist per tenant
 
 ### Platform
@@ -202,7 +202,7 @@ Explicitly excluded. Documented to prevent scope creep.
 | AI moderation / summaries | No member-generated volume in V1 to justify cost |
 | Exposing 12+ theme tokens | Tenants produce unreadable palettes; 2-3 brand colors, derive the rest |
 | Multi-language UI | pt-BR only; strings centralized for later |
-| Prototype extras (follow/followers and a following-only Explorar were pulled into Phase 05.3, reels into Phase 05.5, on 2026-09-25): LMS "membros" area (courses, lessons, tracks, lives, progress), forum, explore/search/trending, reputation, saved posts, event ticketing/QR/certificates/photos | Present in the design prototype but not in the V1 product definition; not ported |
+| Prototype extras (follow/followers and a following-only Explorar were pulled into Phase 9, reels into Phase 05.3, on 2026-09-25): LMS "membros" area (courses, lessons, tracks, lives, progress), forum, explore/search/trending, reputation, saved posts, event ticketing/QR/certificates/photos | Present in the design prototype but not in the V1 product definition; not ported |
 
 ## Traceability
 
@@ -266,8 +266,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CHAT-03 | Phase 7 | Pending |
 | CHAT-04 | Phase 7 | Pending |
 | CHAT-05 | Phase 7 | Pending |
-| CHAT-06 | Phase 7 | Pending |
-| CHAT-07 | Phase 7 | Pending |
+| CHAT-06 | Phase 11 | Pending |
+| CHAT-07 | Phase 11 | Pending |
 | NOTIF-01 | Phase 7 | Pending |
 | NOTIF-02 | Phase 7 | Pending |
 | NOTIF-03 | Phase 7 | Pending |
@@ -275,8 +275,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MODER-01 | Phase 8 | Pending |
 | MODER-02 | Phase 8 | Pending |
 | MODER-03 | Phase 8 | Pending |
-| MODER-04 | Phase 8 | Pending |
-| MODER-05 | Phase 8 | Pending |
+| MODER-04 | Phase 11 | Pending |
+| MODER-05 | Phase 11 | Pending |
 | ADMIN-01 | Phase 8 | Pending |
 | ADMIN-02 | Phase 8 | Pending |
 | ADMIN-03 | Phase 8 | Pending |

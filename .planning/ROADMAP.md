@@ -32,12 +32,15 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Communities & Stories** - Admin-created communities with scoped posts, community pages with pinned stories, 24 h stories strip + full-screen viewer, story likes and flat comments (completed 2026-09-25)
 - [x] **Phase 05.1: Community Authoring Entry Points (INSERTED)** - Reachable create-community CTA, archived communities findable and reactivatable without a UUID, stories publishable from inside a community and a community choice in the story composer (born attached, one mechanism) (completed 2026-09-25)
 - [ ] **Phase 05.2: Story Highlights (INSERTED)** - Instagram-style stories: one grouped circle of active stories on Início plus highlight circles beside it, highlights-only on communities, replacing loose community pins
-- [ ] **Phase 05.3: Rede Social - Follow, Member Posts and Explorar (INSERTED)** - Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts
-- [ ] **Phase 05.4: Rede Social - Member Stories and Communities (INSERTED)** - Members publish stories and create communities; only a community's creator publishes in it
-- [ ] **Phase 05.5: Reels (INSERTED)** - Full-screen vertical video pager over feed video posts, per the design print
+- [ ] **Phase 05.3: Reels (INSERTED)** - Full-screen vertical video pager over the feed's video posts, per the design print: a new tab that filters the feed to video, part of the MVP
 - [ ] **Phase 6: Events** - In-person / online events, upcoming + past lists, RSVP and self check-in window, admin attendance list, calendar export
-- [ ] **Phase 7: Notifications, Web Push & Chat** - Realtime infrastructure (Supabase Broadcast on private topics), event-driven notification center with live unread count, Web Push with iOS install flow, event reminders, 1:1 member <-> support chat with support inbox, and 1:1 direct messages between members
+- [ ] **Phase 7: Notifications, Web Push & Chat** - Realtime infrastructure (Supabase Broadcast on private topics), event-driven notification center with live unread count, Web Push with iOS install flow, event reminders, 1:1 member <-> support chat with support inbox
 - [ ] **Phase 8: Moderation, Tenant Admin Panel & Pilot Hardening** - Delete any comment, block/unblock with immediate revocation, moderation log, branding editor with live preview, member/role management, rules editor, mobile admin flows, per-module READMEs, pilot go-live gate
+- [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
+- [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
+- [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
+
+**MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the Phase 8 go-live gate. It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
 
 ## Phase Details
 
@@ -403,72 +406,30 @@ Plans:
 
 **UI hint**: yes — highlight circles on Início and on the community page, create/edit highlight sheet, "add to highlight" sheet.
 **Research needed**: Yes — the migration from `story_community_pins`, and the Instagram grouped-viewer behaviour (resume from the first unseen story).
-**Notes**: Publishing is still admin-only in this phase; member authoring arrives in 05.3/05.4 and must fit this model, not reshape it. Open questions for discuss-phase: (a) can one story sit in several highlights (Instagram: yes); (b) cover = uploaded image or a frame of one of its stories; (c) where the admin's publish door lives once the own-circle (D-80) becomes the grouped circle; (d) how the grouped circle shows seen vs unseen (V2-CONT-05 "seen/unseen ring" may need pulling in). There is NO feed-level pin today, so the Início half is new. Source: user requests 2026-09-25; 05.2 was split into 05.2-05.5 the same day for vertical, independently shippable slices.
+**Notes**: Publishing is still admin-only in this phase; member authoring arrives in Phases 9/10 (post-MVP) and must fit this model, not reshape it. Open questions for discuss-phase: (a) can one story sit in several highlights (Instagram: yes); (b) cover = uploaded image or a frame of one of its stories; (c) where the admin's publish door lives once the own-circle (D-80) becomes the grouped circle; (d) how the grouped circle shows seen vs unseen (V2-CONT-05 "seen/unseen ring" may need pulling in). There is NO feed-level pin today, so the Início half is new. Source: user requests 2026-09-25; 05.2 was split into 05.2-05.5 the same day for vertical, independently shippable slices, and later that day the MVP cut made Reels 05.3 and moved the two "Rede social" phases to 9-10.
 
 Plans:
 
 - [ ] TBD (run /gsd-plan-phase 05.2 to break down)
 
-### Phase 05.3: Rede Social - Follow, Member Posts and Explorar (INSERTED)
+### Phase 05.3: Reels (INSERTED)
 
-**Goal**: A tenant can open up member authoring. With the new "Rede social" module on, members follow each other and publish feed posts, and the new "Explorar" tab shows only posts from people they follow, while Início stays the organization's voice (admin posts only).
-**Depends on**: Phase 05.2
-**Requirements**: TBD (new SOCIAL-*, FOLLOW-*, EXPL-*); promotes V2-CONT-01
-**Success Criteria** (what must be TRUE):
-
-  1. A new toggleable module **"Rede social"** (key `social` in `TOGGLEABLE_MODULES`) is turned on or off per tenant by the `super_admin` like every other module. Off (the default) is exactly today's product. It is the single switch for member authoring and supersedes the feed's `settings.postingPolicy` flag (FEED-08) instead of living beside it. The Explorar tab and the follow graph belong to this module, not to a separate "Explorar" key: without member authoring Explorar would have nothing to show. Turning it off hides Explorar, removes member publish controls and makes those routes 404, without deleting anything already published.
-  2. With `social` on, a member can follow and unfollow another member of the same tenant (one-directional, Instagram-style) and see follower/following counts. Following never crosses tenants (RLS + pgTAP cross-tenant negative tests).
-  3. With `social` on, a member can publish a feed post. Início shows ONLY posts authored by `admin_tenant`; a post by anyone else appears ONLY in the Explorar tab of the people who follow its author. There is no personal/profile feed (explicitly out of scope, user decision 2026-09-25).
-  4. Explorar lists posts from followed people, keyset-paginated, newest first, with the same likes and comments as the feed, and an empty state that says so when the member follows nobody, pointing to the member directory (`/membros`, PROF-03) to find people.
-  5. Member profile (only with `social` on): another member's profile shows a follow/unfollow button and follower/following counts. This REVERSES D-45 ("photo, display name and bio ONLY; no counts, no follow/message affordance", enforced by `memberProfileSchema.strict()` in `packages/contracts/src/profiles.ts:150`) conditionally: with `social` off the profile is exactly D-45's. The directory `/membros` links to these profiles.
-  6. Member uploads are bounded: the module defines limits for member media (file size, video duration, and whether members may upload video at all, set per tenant by the `super_admin`), because Mux bills per minute stored/delivered and the Supabase Free plan has 1 GB of storage.
-
-**UI hint**: yes — follow button and counts on the member profile/author, Explorar tab reusing the feed list, member composer.
-**Research needed**: Yes — the permission model becomes module-conditional (today permissions are a static role map in each `module.ts`); the Explorar query and its index (`follows` join vs. denormalised fan-out) under the feed-query budget.
-**Notes**: Open questions for discuss-phase: where else the follow button lives (post author header?); who may see someone's follower/following lists. Pending, not code: with `social` on, the tenant and TRIA host third-party content, so the terms of use / community rules accepted at sign-up (AUTH-01) may need new wording (LGPD, liability) — flag to the user before go-live. Source: user requests 2026-09-25.
-
-Plans:
-
-- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
-
-### Phase 05.4: Rede Social - Member Stories and Communities (INSERTED)
-
-**Goal**: With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from whoever created it.
-**Depends on**: Phase 05.3
-**Requirements**: TBD; promotes V2-CONT-02 and lifts the "member-created stories" exclusion (user decision 2026-09-25)
-**Success Criteria** (what must be TRUE):
-
-  1. With `social` on, a member can publish stories. Início's grouped circle stays admin-only (the organization's voice); a member's active stories show in Explorar for their followers, one circle per author (Instagram model), built on 05.2's grouped viewer.
-  2. With `social` on, a member can create a community (and its highlights, per 05.2).
-  3. Only a community's creator (`communities.created_by_user_id`) can publish in it: posts, stories and highlights. Other members see and interact (like, comment) but get no publish control there and a 403 from the API if they try. This holds for communities created by `admin_tenant` and by members alike.
-  4. Turning `social` off stops new member stories and communities; existing member communities stay readable.
-
-**UI hint**: yes — member story composer and create-community entry points, gated by the module; Explorar story row.
-**Research needed**: Light — reuse 05.1's composer and community form; the change is the permission seam (creator-scoped publishing).
-**Notes**: Open question for discuss-phase: does `admin_tenant` keep moderation powers (archive, delete content) over member-created communities even though it cannot publish in them? Recommended: yes, moderation stays with the tenant (Phase 8). Source: user requests 2026-09-25.
-
-Plans:
-
-- [ ] TBD (run /gsd-plan-phase 05.4 to break down)
-
-### Phase 05.5: Reels (INSERTED)
-
-**Goal**: A full-screen "Reels" tab plays the feed's video posts in a vertical pager, following the design team's print (`.planning/phases/05.5-reels/reels-design.png`) and the prototype's `reference/frontend-design/app/(app)/reels/page.tsx`.
-**Depends on**: Phase 05.3 (the source set of videos depends on whether member posts exist)
+**Goal**: A full-screen "Reels" tab plays the feed's video posts in a vertical pager, following the design team's print (`.planning/phases/05.3-reels/reels-design.png`) and the prototype's `reference/frontend-design/app/(app)/reels/page.tsx`.
+**Depends on**: Phase 4 (feed video posts, their likes and comments)
 **Requirements**: TBD (new REELS-*)
 **Success Criteria** (what must be TRUE):
 
   1. A member opens Reels from the bottom navigation and sees video posts only (feed data filtered to `media_kind = 'video'`), full-screen, one per page: swipe up/down changes video, muted by default with a mute toggle, author name, community chip, caption, and a right rail with author avatar, like (with count) and comment (with count, opening the comment sheet).
-  2. Likes and comments are the feed's own, not a parallel system: a like in Reels shows on the same post in Início/Explorar.
-  3. Reels respects the same visibility as the feed: admin videos for everyone; with `social` on, member videos only for that author's followers.
+  2. Likes and comments are the feed's own, not a parallel system: a like in Reels shows on the same post in Início.
+  3. Reels shows the videos Início shows: in the MVP these are `admin_tenant` video posts, visible to every member. Member videos (followers only) arrive with the "Rede social" module, which extends Reels in Phase 9; nothing here may assume they exist.
 
 **UI hint**: yes — ported from the prototype's reels page (index pager, not scroll-snap).
 **Research needed**: Light — Mux autoplay/mute policy on iOS, and preloading the next video.
-**Notes**: Open questions for discuss-phase: (a) the prototype's lanes "Para você / Resultados / Bastidores" have no data model — fixed lanes, tags, or communities? (b) whether Reels is its own toggleable module or rides on `feed`. Placed last so it is built once over the final set of video sources. Source: user request 2026-09-25.
+**Notes**: Part of the MVP (user decision 2026-09-25): Reels is a new tab that filters the feed to video posts, so it moved ahead of the "Rede social" phases. It was 05.5 and "placed last so it is built once over the final set of video sources"; adding member videos is now Phase 9's job. Open questions for discuss-phase: (a) the prototype's lanes "Para você / Resultados / Bastidores" have no data model — fixed lanes, tags, or communities? (b) whether Reels is its own toggleable module or rides on `feed`; the user's framing ("a new tab that filters the feed by video") points to riding on `feed`. Source: user request 2026-09-25.
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 05.5 to break down)
+- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
 
 ### Phase 6: Events
 
@@ -490,49 +451,111 @@ Plans:
 
 ### Phase 7: Notifications, Web Push & Chat
 
-**Goal**: Members are reached in real time - a notification bell with live unread count, Web Push in the installed PWA, a live 1:1 support conversation and 1:1 direct messages between members - all fed by domain events over one shared realtime infrastructure (Supabase Broadcast on private topics, ids only, data always through the API).
+**Goal**: Members are reached in real time - a notification bell with live unread count, Web Push in the installed PWA and a live 1:1 support conversation - all fed by domain events over one shared realtime infrastructure (Supabase Broadcast on private topics, ids only, data always through the API).
 **Mode:** mvp
 **Depends on**: Phase 4, Phase 5, Phase 6 (event producers), Phase 2 (PWA shell and iOS install hint)
-**Requirements**: NOTIF-01, NOTIF-02, NOTIF-03, NOTIF-04, EVENT-07, PWA-02, CHAT-01, CHAT-02, CHAT-03, CHAT-04, CHAT-05, CHAT-06, CHAT-07
+**Requirements**: NOTIF-01, NOTIF-02, NOTIF-03, NOTIF-04, EVENT-07, PWA-02, CHAT-01, CHAT-02, CHAT-03, CHAT-04, CHAT-05
 **Success Criteria** (what must be TRUE):
 
   1. Member receives in-app notifications, produced by the worker from domain events, for likes on their comments, comments/replies on their comments, new posts, new events, event reminders (24 h and 1 h before, from a scheduled job, only to members who confirmed) and support replies; the bell's unread count updates in real time without refresh, the list opens the target screen on tap, and mark-as-read works.
   2. Member in the installed PWA can enable Web Push (on iOS the "Adicionar a Tela de Inicio" hint is shown first and the permission prompt is gesture-triggered in standalone mode); push messages carry the tenant's name and icon and open the relevant screen; expired subscriptions (404/410) are removed; delivery goes through a channel abstraction (in-app, push) that later accepts e-mail/WhatsApp adapters.
   3. Member can open their single support conversation and send text messages; `support_tenant` sees an inbox of member conversations ordered by last activity with unread indicators and can open and reply to any of them; new messages appear in real time on both sides in per-conversation sequence order (catch-up after reconnect loses nothing), and the member sees an unread badge on the chat entry when support replied.
   4. Realtime signals reach only their audience: a browser subscribing to another tenant's user topic, another user's conversation topic or the support inbox without the role is rejected by RLS on `realtime.messages` (covered by the isolation suite); payloads carry ids only and the client refetches through the API; blocking a member drops their Realtime access and push subscriptions.
-  5. With the "Rede social" module (`social`, Phase 05.3) on, a member can start a 1:1 direct conversation with any other member of the same tenant from that member's profile ("Enviar mensagem") and exchange text messages — following is NOT required (user decision 2026-09-25). With `social` off, members talk only to support, as before. It reuses the same conversation schema (`kind = 'direct'`), realtime topics, unread badge and push as the support chat; there is at most one direct conversation per pair of members; the other tenant's members are never reachable (RLS + isolation-suite negative test).
-  6. With `social` on, a member can block another member: the blocked member can no longer message them, follow them, or see a message button on their profile, and an existing direct conversation stops accepting messages from them; unblocking restores it. This is distinct from the admin's tenant-level block (Phase 8).
-  7. Notification rules account for member authoring: `admin_tenant` posts notify every member as before; a member's post notifies only that author's followers (or nobody — decide in discuss-phase), never the whole tenant; "started following you" and "new direct message" are new notification types (both only with `social` on).
 
 **Plans**: TBD
 **UI hint**: yes
 **Research needed**: Shape and cost of RLS policies on `realtime.messages` (membership join vs claim) and `realtime.send` vs `broadcast_changes` trigger choice; Realtime connection quota sizing on the Free plan; "new post to every member" fan-out strategy (eager rows vs hourly collapse) decided with pilot member count; iOS 16.4+ standalone push gating, Badging API support, push handlers in the Serwist service worker; per-conversation `seq` generation under concurrent inserts and catch-up cursor semantics; private-channel authorization tests for non-participants.
-**Notes**: Build order inside the phase: notifications + Realtime provider first (lowest-risk realtime consumer), then push (real-iPhone and Android test plan is a deliverable), then chat reusing topics, worker, push and unread patterns. Chat schema (`conversations` with `kind`, `participants` with `role`/`last_read_at`, `messages` with `seq`) is generic so V2 member-to-member chat is a `kind` value, not a migration; one open support conversation per member enforced by a partial unique index. Notification fan-out is idempotent on `(event_id, user_id)` and never runs inside the producing request.
+**Notes**: Build order inside the phase: notifications + Realtime provider first (lowest-risk realtime consumer), then push (real-iPhone and Android test plan is a deliverable), then chat reusing topics, worker, push and unread patterns. Chat schema (`conversations` with `kind`, `participants` with `role`/`last_read_at`, `messages` with `seq`) is generic so V2 member-to-member chat is a `kind` value, not a migration; one open support conversation per member enforced by a partial unique index. Notification fan-out is idempotent on `(event_id, user_id)` and never runs inside the producing request. Member-to-member direct messages (CHAT-06), member blocking (CHAT-07) and the follower-scoped notification rules moved to Phase 11 (post-MVP) on 2026-09-25; they reuse this phase's conversations, topics, unread badge and push.
 
 ### Phase 8: Moderation, Tenant Admin Panel & Pilot Hardening
 
 **Goal**: `admin_tenant` can run their community from a phone - brand, members and roles, moderation, community rules - with every action taking effect immediately and being logged; the platform passes the pilot go-live gate (isolation, i18n, real-device PWA, module reuse docs).
 **Mode:** mvp
-**Depends on**: Phase 7 (blocking must revoke Realtime and push); all content modules
-**Requirements**: MODER-01, MODER-02, MODER-03, MODER-04, MODER-05, ADMIN-01, ADMIN-02, ADMIN-03, ADMIN-04, MOD-05
+**Depends on**: Phase 7 (blocking must revoke Realtime and push); all MVP content modules
+**Requirements**: MODER-01, MODER-02, MODER-03, ADMIN-01, ADMIN-02, ADMIN-03, ADMIN-04, MOD-05
 **Success Criteria** (what must be TRUE):
 
   1. `admin_tenant` can delete any comment or reply in their tenant (soft-delete with `deleted_by`, replies and related notifications cascade), block a member (their session is revoked immediately, they cannot log in to the tenant, and cannot re-register with the same e-mail through the sign-up link) and unblock them; every delete/block/unblock appears in an append-only moderation log with actor, target, timestamp and optional reason that the admin can view.
   2. `admin_tenant` can edit the tenant's branding (logo, colors, favicon, display name) with a live preview of the app shell and contrast validation, list and search members, change a member's role (member / support_tenant / admin_tenant), and edit the community rules text shown at sign-up.
   3. Every admin creation flow - post, story, community, event - plus branding, member management and moderation is usable end-to-end from a phone inside the same app (verified on a real device).
-  5. With the "Rede social" module on, `admin_tenant` moderates member content: soft-deletes any member post or story and archives or removes any member-created community (even though it cannot publish in one, Phase 05.4), every action written to the moderation log.
-  6. With `social` on, a member can report a post, story, community, comment or direct message with a reason, and `admin_tenant` works a reports queue (dismiss / remove content / block author). Promotes V2-MODER-01 (user decision 2026-09-25).
   4. Each module package ships a README documenting its public interface (contracts, emitted/consumed events, flag key, kernel dependencies) and one module can be copied into a fresh app that provides only the kernel contracts; the pilot go-live gate passes: full two-tenant isolation suite across every endpoint, storage URL and Realtime topic, pt-BR catalog audit with zero UI literals, and PWA install + push smoke tests on a real iPhone and Android.
 
 **Plans**: TBD
 **UI hint**: yes
 **Research needed**: None (thin screens over columns that exist since Foundation/Feed; hardening is checklist-driven). Flag LGPD legal review to the user before go-live (research covered mechanics only).
-**Notes**: Hardening items without a requirement of their own but expected here: `EXPLAIN` checks on feed/notification/chat queries with a 10k-row seed, Sentry + structured logging with `tenant_id`/`request_id`, Cloud Run config in git (`min-instances=1`, cpu-boost, timeouts), backups/rollback rehearsal, CORS locked to the single origin in production, a11y pass, build-output check for static routes under `(app)`.
+**Notes**: Hardening items without a requirement of their own but expected here: `EXPLAIN` checks on feed/notification/chat queries with a 10k-row seed, Sentry + structured logging with `tenant_id`/`request_id`, Cloud Run config in git (`min-instances=1`, cpu-boost, timeouts), backups/rollback rehearsal, CORS locked to the single origin in production, a11y pass, build-output check for static routes under `(app)`. Moderation of member content (MODER-04) and the reports queue (MODER-05) moved to Phase 11 (post-MVP) on 2026-09-25; this phase's go-live gate closes the MVP.
+
+### Phase 9: Rede Social - Follow, Member Posts and Explorar
+
+**Goal**: A tenant can open up member authoring. With the new "Rede social" module on, members follow each other and publish feed posts, and the new "Explorar" tab shows only posts from people they follow, while Início stays the organization's voice (admin posts only).
+**Scope**: Post-MVP (user decision 2026-09-25); starts after the Phase 8 go-live gate.
+**Depends on**: Phase 8 (MVP complete), Phase 05.2 (the highlights model member authoring must fit), Phase 05.3 (Reels, extended here to member videos)
+**Requirements**: TBD (new SOCIAL-*, FOLLOW-*, EXPL-*); promotes V2-CONT-01
+**Success Criteria** (what must be TRUE):
+
+  1. A new toggleable module **"Rede social"** (key `social` in `TOGGLEABLE_MODULES`) is turned on or off per tenant by the `super_admin` like every other module. Off (the default) is exactly today's product. It is the single switch for member authoring and supersedes the feed's `settings.postingPolicy` flag (FEED-08) instead of living beside it. The Explorar tab and the follow graph belong to this module, not to a separate "Explorar" key: without member authoring Explorar would have nothing to show. Turning it off hides Explorar, removes member publish controls and makes those routes 404, without deleting anything already published.
+  2. With `social` on, a member can follow and unfollow another member of the same tenant (one-directional, Instagram-style) and see follower/following counts. Following never crosses tenants (RLS + pgTAP cross-tenant negative tests).
+  3. With `social` on, a member can publish a feed post. Início shows ONLY posts authored by `admin_tenant`; a post by anyone else appears ONLY in the Explorar tab of the people who follow its author. There is no personal/profile feed (explicitly out of scope, user decision 2026-09-25).
+  4. Explorar lists posts from followed people, keyset-paginated, newest first, with the same likes and comments as the feed, and an empty state that says so when the member follows nobody, pointing to the member directory (`/membros`, PROF-03) to find people.
+  5. Member profile (only with `social` on): another member's profile shows a follow/unfollow button and follower/following counts. This REVERSES D-45 ("photo, display name and bio ONLY; no counts, no follow/message affordance", enforced by `memberProfileSchema.strict()` in `packages/contracts/src/profiles.ts:150`) conditionally: with `social` off the profile is exactly D-45's. The directory `/membros` links to these profiles.
+  6. Member uploads are bounded: the module defines limits for member media (file size, video duration, and whether members may upload video at all, set per tenant by the `super_admin`), because Mux bills per minute stored/delivered and the Supabase Free plan has 1 GB of storage.
+  7. Reels (Phase 05.3) follows the same visibility as the feed: admin videos stay visible to everyone, and a member's video posts appear only for that author's followers; a like or comment in Reels shows on the same post in Início or Explorar.
+
+**UI hint**: yes — follow button and counts on the member profile/author, Explorar tab reusing the feed list, member composer.
+**Research needed**: Yes — the permission model becomes module-conditional (today permissions are a static role map in each `module.ts`); the Explorar query and its index (`follows` join vs. denormalised fan-out) under the feed-query budget.
+**Notes**: Open questions for discuss-phase: where else the follow button lives (post author header?); who may see someone's follower/following lists. Pending, not code: with `social` on, the tenant and TRIA host third-party content, so the terms of use / community rules accepted at sign-up (AUTH-01) may need new wording (LGPD, liability) — flag to the user before `social` is turned on for any tenant. Source: user requests 2026-09-25; numbered 05.3 until the MVP cut the same day moved the "Rede social" module after Phase 8.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 9 to break down)
+
+### Phase 10: Rede Social - Member Stories and Communities
+
+**Goal**: With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from whoever created it.
+**Scope**: Post-MVP (user decision 2026-09-25).
+**Depends on**: Phase 9
+**Requirements**: TBD; promotes V2-CONT-02 and lifts the "member-created stories" exclusion (user decision 2026-09-25)
+**Success Criteria** (what must be TRUE):
+
+  1. With `social` on, a member can publish stories. Início's grouped circle stays admin-only (the organization's voice); a member's active stories show in Explorar for their followers, one circle per author (Instagram model), built on 05.2's grouped viewer.
+  2. With `social` on, a member can create a community (and its highlights, per 05.2).
+  3. Only a community's creator (`communities.created_by_user_id`) can publish in it: posts, stories and highlights. Other members see and interact (like, comment) but get no publish control there and a 403 from the API if they try. This holds for communities created by `admin_tenant` and by members alike.
+  4. Turning `social` off stops new member stories and communities; existing member communities stay readable.
+
+**UI hint**: yes — member story composer and create-community entry points, gated by the module; Explorar story row.
+**Research needed**: Light — reuse 05.1's composer and community form; the change is the permission seam (creator-scoped publishing).
+**Notes**: Open question for discuss-phase: does `admin_tenant` keep moderation powers (archive, delete content) over member-created communities even though it cannot publish in them? Recommended: yes, moderation stays with the tenant (MODER-04, Phase 11). Source: user requests 2026-09-25; numbered 05.4 until the MVP cut the same day.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 10 to break down)
+
+### Phase 11: Rede Social - Direct Messages, Member Blocking and Reports
+
+**Goal**: With "Rede social" on, members message each other 1:1, block people they don't want to hear from, and are notified about the social activity that concerns them; members can report content and `admin_tenant` moderates member content through a reports queue.
+**Scope**: Post-MVP (user decision 2026-09-25); split out of Phases 7 and 8 so the MVP ships without the "Rede social" module.
+**Depends on**: Phase 7 (conversations, realtime topics, unread badge, push), Phase 8 (moderation log, tenant-level block), Phase 9 (follow graph, member posts), Phase 10 (member stories and communities)
+**Requirements**: CHAT-06, CHAT-07, MODER-04, MODER-05
+**Success Criteria** (what must be TRUE):
+
+  1. With the "Rede social" module (`social`, Phase 9) on, a member can start a 1:1 direct conversation with any other member of the same tenant from that member's profile ("Enviar mensagem") and exchange text messages — following is NOT required (user decision 2026-09-25). With `social` off, members talk only to support, as before. It reuses the same conversation schema (`kind = 'direct'`), realtime topics, unread badge and push as the support chat; there is at most one direct conversation per pair of members; the other tenant's members are never reachable (RLS + isolation-suite negative test).
+  2. With `social` on, a member can block another member: the blocked member can no longer message them, follow them, or see a message button on their profile, and an existing direct conversation stops accepting messages from them; unblocking restores it. This is distinct from the admin's tenant-level block (Phase 8).
+  3. Notification rules account for member authoring: `admin_tenant` posts notify every member as before; a member's post notifies only that author's followers (or nobody — decide in discuss-phase), never the whole tenant; "started following you" and "new direct message" are new notification types (both only with `social` on).
+  4. With `social` on, `admin_tenant` moderates member content: soft-deletes any member post or story and archives or removes any member-created community (even though it cannot publish in one, Phase 10), every action written to the moderation log.
+  5. With `social` on, a member can report a post, story, community, comment or direct message with a reason, and `admin_tenant` works a reports queue (dismiss / remove content / block author). Promotes V2-MODER-01 (user decision 2026-09-25).
+
+**UI hint**: yes — "Enviar mensagem" on the member profile, direct conversations in the chat list, block/unblock controls, report sheet, admin reports queue.
+**Research needed**: Light — reuses Phase 7's chat and notification infrastructure and Phase 8's moderation log; the new parts are one direct conversation per pair of members, member-block enforcement across messaging, follow and profile, and follower fan-out for member-post notifications.
+**Notes**: Split out on 2026-09-25 from Phase 7 (criteria 5-7: CHAT-06, CHAT-07, the follower-scoped notification rules) and Phase 8 (criteria 5-6: MODER-04, MODER-05) when the "Rede social" module moved after the MVP. Phase 7's chat schema keeps `kind`, so direct conversations need no migration.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 11 to break down)
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 depends only on Phase 4 and may be planned in parallel with Phase 5). Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then the post-MVP "Rede social" phases 9 -> 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -545,6 +568,9 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 (Phase 6 d
 | 6. Events | 0/TBD | Not started | - |
 | 7. Notifications, Web Push & Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
+| 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
+| 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
+| 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-09-11*

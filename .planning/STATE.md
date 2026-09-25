@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: planning
-stopped_at: Phase 05.2 context gathered
-last_updated: "2026-09-25T16:07:46.028Z"
+stopped_at: Phase 06 UI-SPEC approved
+last_updated: "2026-09-25T16:53:12.108Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 05.1 complete (UAT 9/9, security 27/27, Nyquist compliant), transitioned to Phase 05.2
-state_head: c48f1929cd03e63f378d8ebd1b13c6c0dd7c0474
+state_head: f923acd662a18f61d82486428efc3904655e11c3
 progress:
-  total_phases: 14
-  completed_phases: 1
+  total_phases: 15
+  completed_phases: 0
   total_plans: 67
   completed_plans: 64
-  percent: 7
+  percent: 0
 ---
 
 # Project State
@@ -32,7 +32,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-09-25 — Phase 05.1 complete (UAT 9/9, security 27/27, Nyquist compliant), transitioned to Phase 05.2
 
-Progress: [███████████████████░] 59/62 plans ([█░░░░░░░░░] 7%)
+Progress: [███████████████████░] 59/62 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -410,6 +410,10 @@ None yet.
 - Phase 05.3 edited: added criteria 5-6: member profile with follow + counts (conditional reversal of D-45, social on only), member upload limits; terms-of-use pending
 - Phase 7 edited: CHAT-06 gated by social module + message button on profile; added CHAT-07 member-to-member block; notification rules for member posts, new follower, new DM
 - Phase 8 edited: added MODER-04 moderation of member posts/stories/communities and MODER-05 member reports queue (promoted V2-MODER-01), both social-gated
+- Phase 05.3 moved: Reels (was 05.5) moved ahead of the Rede social phases and renumbered 05.3; now MVP scope (user: a new tab that filters the feed by video)
+- Phase 9 moved: Rede Social - Follow, Member Posts and Explorar (was 05.3) moved after Phase 8 as post-MVP; gains the Reels member-video visibility criterion. MVP = Phases 1-8 + 01.1, 05.1-05.3 (user decision)
+- Phase 10 moved: Rede Social - Member Stories and Communities (was 05.4) moved after Phase 8 as post-MVP
+- Phase 11 added: Rede Social - Direct Messages, Member Blocking and Reports, post-MVP: split out of Phase 7 (CHAT-06, CHAT-07, follower-scoped notification rules) and Phase 8 (MODER-04, MODER-05)
 
 ## Deferred Items
 
@@ -421,6 +425,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T16:07:45.857Z
-Stopped at: Phase 05.2 context gathered
-Resume file: .planning/phases/05.2-story-highlights/05.2-CONTEXT.md
+Last session: 2026-09-25T16:53:11.856Z
+Stopped at: Phase 06 UI-SPEC approved
+Resume file: .planning/phases/06-events/06-UI-SPEC.md
