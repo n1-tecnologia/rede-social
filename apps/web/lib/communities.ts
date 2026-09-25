@@ -2,6 +2,7 @@ import {
   COMMUNITY_MAX_PAGE_SIZE,
   COMMUNITY_PAGE_SIZE,
   type CommunityPage,
+  type CommunityStatus,
   type CommunitySummary,
   type CreateCommunity,
   communityPageSchema,
@@ -37,13 +38,17 @@ async function apiError(res: Response): Promise<ApiClientError> {
   return new ApiClientError(res.status, code, details);
 }
 
-/** The query the page and the load-more action send; `cursor` is OPAQUE and forwarded verbatim. */
-export type CommunityQueryInput = { cursor?: string; limit?: number };
+/**
+ * The query the page and the load-more action send; `cursor` is OPAQUE and forwarded verbatim.
+ * `status` selects the `Arquivadas` list (05.1, D-88); absent or `active` is today's list.
+ */
+export type CommunityQueryInput = { cursor?: string; limit?: number; status?: CommunityStatus };
 
 /**
  * `GET /v1/communities` (COMM-02, COMM-03).
  *
- * `limit` defaults to `COMMUNITY_PAGE_SIZE`; the API clamps it anyway. The cursor is passed through
+ * `limit` defaults to `COMMUNITY_PAGE_SIZE`; the API clamps it anyway. `status` is sent only for the
+ * archived list (05.1). The cursor is passed through
  * untouched: its encoding is an implementation detail of the API, and nothing on the web side
  * parses, rebuilds or validates it.
  */
@@ -51,6 +56,9 @@ export async function getCommunities(query: CommunityQueryInput = {}): Promise<C
   const search = new URLSearchParams();
   if (query.cursor) search.set('cursor', query.cursor);
   search.set('limit', String(query.limit ?? COMMUNITY_PAGE_SIZE));
+  // Only the archived list names a status, so the active request stays exactly today's string. The
+  // API refuses `archived` to a non-manager (D-89); the page asks for it only for a manager.
+  if (query.status === 'archived') search.set('status', 'archived');
 
   const res = await apiFetch(`/v1/communities?${search.toString()}`);
   if (!res.ok) throw await apiError(res);

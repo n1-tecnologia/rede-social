@@ -3,6 +3,7 @@
 import {
   COMMUNITY_ISSUE_SET,
   type CommunityIssue,
+  type CommunityStatus,
   type CommunitySummary,
   communityQuerySchema,
   createCommunitySchema,
@@ -46,17 +47,26 @@ export type LoadMoreCommunitiesResult =
  * parsed, decoded or rebuilt here (T-05-05) — its encoding belongs to
  * `packages/core/server/paging.ts`, and the API degrades a stale or tampered value to the first page
  * on its own rather than raising.
+ *
+ * The list's `status` is carried too (05.1, Pitfall 9): a scroll on `Arquivadas` must page the
+ * archived keyset, never append active rows to it. It is validated by the same schema, and the API
+ * enforces D-89 whatever a crafted argument says.
  */
 export async function loadMoreCommunitiesAction(
   cursor: string,
+  status: CommunityStatus = 'active',
 ): Promise<LoadMoreCommunitiesResult> {
-  const query = communityQuerySchema.safeParse({ cursor });
+  const query = communityQuerySchema.safeParse({ cursor, status });
   if (!query.success) return { ok: false, code: 'generic' };
 
   let refusal: string | null = null;
   let result: LoadMoreCommunitiesResult = { ok: false, code: 'generic' };
   try {
-    const page = await getCommunities({ cursor: query.data.cursor, limit: query.data.limit });
+    const page = await getCommunities({
+      cursor: query.data.cursor,
+      limit: query.data.limit,
+      status: query.data.status,
+    });
     result = { ok: true, items: page.items, nextCursor: page.nextCursor };
   } catch (error) {
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
@@ -70,12 +80,20 @@ export async function loadMoreCommunitiesAction(
 /**
  * Page 1 again — what `PullToRefresh` calls. It is the SAME `getCommunities` the RSC page called, so
  * a refresh and a first paint can never return differently shaped pages.
+ *
+ * It carries the list's `status` (05.1, Pitfall 9): a pull on `Arquivadas` must never swap the
+ * active list in. The status is validated before any request; the API enforces D-89 regardless.
  */
-export async function refreshCommunitiesAction(): Promise<LoadMoreCommunitiesResult> {
+export async function refreshCommunitiesAction(
+  status: CommunityStatus = 'active',
+): Promise<LoadMoreCommunitiesResult> {
+  const query = communityQuerySchema.safeParse({ status });
+  if (!query.success) return { ok: false, code: 'generic' };
+
   let refusal: string | null = null;
   let result: LoadMoreCommunitiesResult = { ok: false, code: 'generic' };
   try {
-    const page = await getCommunities();
+    const page = await getCommunities({ status: query.data.status });
     result = { ok: true, items: page.items, nextCursor: page.nextCursor };
   } catch (error) {
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);

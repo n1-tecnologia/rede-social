@@ -2,6 +2,7 @@
 
 import { Card } from '@tria/ui';
 import { ChevronRight, MessageCircle } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { CommunityCover } from './CommunityCover';
 
 /**
@@ -39,6 +40,13 @@ export interface CommunityCardProps {
   postCountLabel: string;
   /** `alt` of the cover image, composed by the host from its own catalog. */
   coverAlt: string;
+  /**
+   * Optional slot in the counts row, between the post count and the chevron — host-supplied exactly
+   * like `CommunityHeader`'s, so the module still ships no words. Today it carries the neutral
+   * "Arquivada" pill on the `Arquivadas` list (D-88, UI-D-50). It lives INSIDE the card's one anchor:
+   * the card stays a single tap target (D-90), and nothing about an archived card is dimmed.
+   */
+  statusPill?: ReactNode;
 }
 
 export function CommunityCard({
@@ -49,6 +57,7 @@ export function CommunityCard({
   coverVariantWidths,
   postCountLabel,
   coverAlt,
+  statusPill,
 }: CommunityCardProps) {
   /**
    * The name and description over a PHOTOGRAPH: white ink over the veil, the established over-media
@@ -103,6 +112,9 @@ export function CommunityCard({
           <span className="min-w-0 flex-1 truncate text-xs font-normal text-text-tertiary tabular-nums">
             {postCountLabel}
           </span>
+          {/* `shrink-0` beside the label's `min-w-0 flex-1 truncate`: a long count truncates, the
+              pill and the chevron keep their width, and the row never wraps (UI-D-50). */}
+          {statusPill ? <span className="shrink-0">{statusPill}</span> : null}
           <ChevronRight size={18} aria-hidden className="shrink-0 text-text-tertiary" />
         </div>
       </a>
