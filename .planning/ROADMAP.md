@@ -472,7 +472,7 @@ Plans:
 **Research needed**: Light — Mux autoplay/mute policy on iOS, and preloading the next video.
 **Notes**: Part of the MVP (user decision 2026-09-25): Reels is a new tab that filters the feed to video posts, so it moved ahead of the "Rede social" phases. It was 05.5 and "placed last so it is built once over the final set of video sources"; adding member videos is now Phase 9's job. Open questions for discuss-phase: (a) the prototype's lanes "Para você / Resultados / Bastidores" have no data model — fixed lanes, tags, or communities? (b) whether Reels is its own toggleable module or rides on `feed`; the user's framing ("a new tab that filters the feed by video") points to riding on `feed`. Source: user request 2026-09-25.
 
-**Plans**: 6/9 plans executed
+**Plans**: 7/9 plans executed
 
 Plans:
 
@@ -490,7 +490,7 @@ Plans:
 **Wave 3**
 
 - [x] 05.3-06-PLAN.md — The lane tablist, the rail with share, the two-line caption over the veil, compact counts, and `LikeButton`'s over-media tone
-- [ ] 05.3-07-PLAN.md — `ReelVideo` (muted start, loop, fit, muted-pref opt-outs, refusal fallback), the batched token mint and the web data path
+- [x] 05.3-07-PLAN.md — `ReelVideo` (muted start, loop, fit, muted-pref opt-outs, refusal fallback), the batched token mint and the web data path
 
 **Wave 4**
 

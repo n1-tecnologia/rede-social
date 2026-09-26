@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.3"
 current_phase_name: Reels
 status: executing
-stopped_at: Completed 05.3-06-PLAN.md
-last_updated: "2026-09-26T20:51:39.723Z"
+stopped_at: Completed 05.3-07-PLAN.md
+last_updated: "2026-09-26T21:06:12.621Z"
 last_activity: 2026-09-26
-last_activity_desc: "Completed 05.3-06 (lanes, rail and caption: ReelsLanes tablist, ReelRail, ReelCaption, compactCount, LikeButton over-media tone)"
-state_head: 9b12192036c04528808b8ac86669af520f1434ef
+last_activity_desc: "Completed 05.3-07 (playback and data: ReelVideo with its controller, batched mintReelPlaybackAction, loadReelsPageAction, lib/reels, getFeed media)"
+state_head: be2f191b746520e618279bbbf42ea4d74e062201
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 97
-  completed_plans: 82
+  completed_plans: 83
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.3 (Reels) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
-Last activity: 2026-09-26 — Completed 05.3-06 (`ReelsLanes` ARIA tablist hidden below two lanes, `ReelRail` with reserved `h-5` count slots and share last, `ReelCaption` with the measured two-line clamp, '… mais'/'menos' and the veil, `compactCount`, `LikeButton` `tone="overMedia"`/`glyphSize` with the default tone unchanged; 45 new reels cases + 7 like-button cases); next 05.3-07
+Last activity: 2026-09-26 — Completed 05.3-07 (`ReelVideo`: full-bleed Mux element, muted at mount, `loop`, `nohotkeys`, `noMutedPref`/`noVolumePref`, no `autoPlay`, fit via `--media-object-fit`, a start/pause/resume/setMuted controller with the AbortError/NotAllowedError handling and the 400 ms autoplay check; `mintReelPlaybackAction` mints ≤ 3 ids with `Promise.allSettled` in one action; `loadReelsPageAction`, `lib/reels` (`reelView` over `postCardView`, `loadReelsPage`, `loadVideoCommunities`), client-safe `announcedCount` in `lib/reels-count`, `getFeed` `media`; 55 new web cases); next 05.3-08
 
-Progress: [██████████████████░░] 82/88 plans ([░░░░░░░░░░] 0%)
+Progress: [██████████████████░░] 83/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -142,6 +142,7 @@ Progress: [██████████████████░░] 82/88 p
 | Phase 05.3 P03 | 39 min | 2 tasks | 13 files |
 | Phase 05.3 P05 | 11 min | 2 tasks | 10 files |
 | Phase 05.3 P06 | 9min | 2 tasks | 10 files |
+| Phase 05.3 P07 | 11 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -439,6 +440,9 @@ Recent decisions affecting current work:
 - [Phase 05.3]: 05.3-05: a pointer travelling past tapSlopPx cancels the pending single tap too; held arrow keys (event.repeat) never navigate; a wheel over a natively scrollable element (expanded caption) scrolls it instead of paging
 - [Phase 05.3]: 05.3-06: LikeButton gains an opt-in tone ('default' | 'overMedia') and glyphSize; overMedia sets white idle / like-colour liked on the button itself (no descendant white override), a translucent white press and the white focus ring; the default tone's class list is unchanged so feed cards and stories render as before
 - [Phase 05.3]: 05.3-06: ReelsLanes ignores re-selecting the active lane and held-key repeats (each selection makes the host load a lane); ReelCaption measures overflow only while collapsed (layout effect + ResizeObserver, re-run on new children) and a tap on unclamped, unexpanded text does nothing
+- [Phase 05.3]: 05.3-07: announcedCount lives in the client-safe apps/web/lib/reels-count.ts and is re-exported from lib/reels.ts; client components (plan 08's ReelOverlay) must import it from @/lib/reels-count because lib/reels reaches lib/api and next/headers
+- [Phase 05.3]: 05.3-07: ReelVideo's autoplay check arms only on the current page, when not host-paused and not yet playing since the last start/resume, after canplay; start/resume also arm it once canplay was seen. A derived poster that fails to load is dropped with poster='' (probed once at attach)
+- [Phase 05.3]: 05.3-07: mintReelPlaybackAction answers per asset (409 notReady, other generic with an asset-id-only log) and redirects once after Promise.allSettled when any mint hit a bootstrap refusal
 
 ### Pending Todos
 
@@ -494,6 +498,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T20:51:13.793Z
-Stopped at: Completed 05.3-06-PLAN.md
+Last session: 2026-09-26T21:05:46.839Z
+Stopped at: Completed 05.3-07-PLAN.md
 Resume file: None
