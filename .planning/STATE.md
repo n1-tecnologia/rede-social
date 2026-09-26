@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 05.2 (Story Highlights) — READY FOR VERIFICATION
 Plan: 12 of 12
 Status: Phase complete — ready for verification
-Last activity: 2026-09-26 — Completed 05.2-12 (the phase exit gate: phase52-smoke.spec.ts replays the six-step UAT, cross-device seen ring as a second browser context, 12/12 on :3100; full suite green on a fresh reset+seed: lint, typecheck, unit 1042, boundaries, pgTAP 331, integration 506, build, static routes, e2e 139 passed / 0 failed / 0 flaky); all 12 plans done, ready for code review and phase verification
+Last activity: 2026-09-26 - Completed quick task 260926-d8f: fix 05.2 follow-ups WR-01 WR-04 WR-03 WR-07 and the Criar destaque link
 
 Progress: [█████████████████░░░] 76/88 plans ([░░░░░░░░░░] 0%)
 
@@ -440,6 +440,7 @@ None yet.
 |---|-------------|------|--------|--------|-----------|
 | 260914-mfk | Route bootstrap 401/403 to redirects through one requireBootstrap()/requirePlatformTenants() helper so concurrently rendered segments no longer log a false ApiClientError | 2026-09-14 | 43db3cd | — | [260914-mfk-move-the-bootstrap-error-to-redirect-map](./quick/260914-mfk-move-the-bootstrap-error-to-redirect-map/) |
 | 260924-fwv | Corrigir os dois defeitos introduzidos pela gap closure da Fase 5: CR-01 (updateCommunity revalida a capa armazenada em todo PATCH) e CR-02 (bindPlay nao chaveado por story id) | 2026-09-24 | e1631da | Verified | [260924-fwv-corrigir-os-dois-defeitos-introduzidos-p](./quick/260924-fwv-corrigir-os-dois-defeitos-introduzidos-p/) |
+| 260926-d8f | Fix 05.2 follow-ups WR-01 (item cap counts live stories only; ghost items removable), WR-04 (seen action bounded to one API call), WR-07 (page-hide seen flush via sendBeacon to POST /api/stories/views), WR-03 (place-cap and item-cap copy for `full`) and the Criar destaque link (next/link to the origin place) | 2026-09-26 | 1a23355 | — | [260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr](./quick/260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr/) |
 
 ### Roadmap Evolution
 
