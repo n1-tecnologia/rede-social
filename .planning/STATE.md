@@ -4,10 +4,10 @@ current_phase: "05.3"
 current_phase_name: Reels
 status: executing
 stopped_at: Completed 05.3-01-PLAN.md
-last_updated: "2026-09-26T19:02:52.398Z"
+last_updated: "2026-09-26T19:03:21.327Z"
 last_activity: 2026-09-26
 last_activity_desc: Completed 05.3-01 (Reels API tracer)
-state_head: 507cc73ccead262834b4c0708cf5e1d6c989432d
+state_head: f665170a70e96bef361c0c81c0a75ff397c3e760
 progress:
   total_phases: 15
   completed_phases: 0
@@ -419,6 +419,9 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-11: pgTAP assertions that need the seed use skip() when it is absent (120 #41), because CI runs supabase test db before db:seed — Keeps one plan count for seeded local runs and unseeded CI runs; proven both ways (331 PASS each)
 - [Phase 05.2]: 05.2-12: the phase exit gate's e2e stage runs on a :3100 production build; next dev's overlay (nextjs-portal) intercepts the Publicar click (evidence in 05.2-12-SUMMARY)
 - [Phase 05.2]: 05.2-12: the UAT replay's step 6 watches two IMAGE stories with everything else pinned seen (the fake video provider never shows a video segment); the second device is browser.newContext() with the project's device options
+- [Phase 05.3]: 05.3-01: module requires is enforced by effectiveKeys() (a fixed point) at BOTH bootstrap and permission composition, not in requireModule; Reels owns no routes (D-121, planning decision 7)
+- [Phase 05.3]: 05.3-01: pgTAP 130 pins the Reels Todos plan on feed_posts_tenant_video_created_idx with a 5,000-post fixture; with the READY_VIDEO_POST exists the planner seq-scans below about 4,000 posts (measured), so the planned 400 was false
+- [Phase 05.3]: 05.3-01: GET /v1/feed?media=video stays reachable with reels off (T-05.3-01 accepted); it only narrows what Início already shows
 
 ### Pending Todos
 
