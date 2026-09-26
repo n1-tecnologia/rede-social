@@ -433,6 +433,7 @@ describe('05.2-07 — storyHistoryView carries the highlight indicator (UI-D-77,
       viewerLiked: false,
       pinnedCommunityCount: 0,
       highlightCount: 0,
+      viewerSeen: false,
       ...overrides,
     };
   }
@@ -483,6 +484,7 @@ describe('05.2-09 — highlightManageRowView and highlightEditStoryView', () => 
       viewerLiked: false,
       pinnedCommunityCount: 0,
       highlightCount: 1,
+      viewerSeen: false,
       ...overrides,
     };
   }

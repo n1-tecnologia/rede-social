@@ -182,6 +182,9 @@ const toStory = (row: StoryRow): StorySummary => ({
   viewerLiked: row.viewer_liked,
   pinnedCommunityCount: row.pinned_community_count ?? 0,
   highlightCount: row.highlight_count ?? 0,
+  // TDD RED STUB (05.2-10 Task 1): deliberately inert — every story reads "not seen" until the
+  // GREEN commit adds `story_views` and the projection's `viewer_seen` column. Replaced in GREEN.
+  viewerSeen: false,
 });
 
 /** The over-fetch page split, shared by both list reads so the two cannot disagree about `nextCursor`. */

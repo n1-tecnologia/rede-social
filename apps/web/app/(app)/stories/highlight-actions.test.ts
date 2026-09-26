@@ -109,6 +109,7 @@ function detail() {
         viewerLiked: true,
         pinnedCommunityCount: 0,
         highlightCount: 1,
+        viewerSeen: false,
       },
     ],
   };

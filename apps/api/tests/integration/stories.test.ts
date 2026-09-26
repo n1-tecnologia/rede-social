@@ -3049,6 +3049,156 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
       Object.keys(highlightedEvents[1]?.payload ?? {}).sort(),
     );
   });
+
+  /* ── 05.2-10: the seen state (HIGHLIGHT-06, D-105, R-D-I, R-D-J) ─────────────────────────── */
+
+  /** `POST /v1/stories/views` with the given body (or none), on the demo host. */
+  const markSeen = (token: string | undefined, body: unknown) =>
+    request('/v1/stories/views', token, {
+      method: 'POST',
+      headers: { 'x-tenant-host': HOSTS.demo },
+      body: JSON.stringify(body),
+    });
+
+  /** `story_views` rows of one tenant — optionally for one user and a set of stories. */
+  async function viewRows(
+    tenantId: string,
+    opts: { userId?: string; storyIds?: string[] } = {},
+  ): Promise<number> {
+    const rows = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.story_views
+       where tenant_id = ${tenantId}::uuid
+         and (${opts.userId ?? null}::uuid is null or user_id = ${opts.userId ?? null}::uuid)
+         and (${opts.storyIds ?? null}::uuid[] is null or story_id = any(${opts.storyIds ?? null}::uuid[]))`;
+    return rows[0]?.n ?? 0;
+  }
+
+  async function userIdOf(email: string): Promise<string> {
+    const rows = await adminSql<{ id: string }[]>`
+      select id::text from public.users where email = ${email} limit 1`;
+    const id = rows[0]?.id ?? '';
+    expect(id, email).not.toBe('');
+    return id;
+  }
+
+  it('05.2-24 a member records two SHOWN stories: 204, two rows, a repeat writes none, and only THEIR read flips', async () => {
+    const memberId = await userIdOf('member@tria-demo.local');
+    const a = await publishImage('visto a');
+    const b = await publishImage('visto b');
+    const c = await publishImage('nao visto c');
+    const pair = [a.storyId, b.storyId];
+
+    const first = await markSeen(tokens.demoMember, { storyIds: pair });
+    expect(first.status).toBe(204);
+    expect(await viewRows(tenantIds.demo, { userId: memberId, storyIds: pair })).toBe(2);
+
+    // The arbiter `story_views_uq` absorbs the repeat: still 204, still exactly two rows.
+    const repeat = await markSeen(tokens.demoMember, { storyIds: pair });
+    expect(repeat.status).toBe(204);
+    expect(await viewRows(tenantIds.demo, { userId: memberId, storyIds: pair })).toBe(2);
+
+    // The member's strip reports their own flag on every story: true for the pair, false for c.
+    const strip = await walk(tokens.demoMember, '/v1/stories', STORY_MAX_PAGE_SIZE);
+    const seenOf = (id: string) => strip.find((story) => story.id === id)?.viewerSeen;
+    expect(seenOf(a.storyId)).toBe(true);
+    expect(seenOf(b.storyId)).toBe(true);
+    expect(seenOf(c.storyId)).toBe(false);
+    expect(strip.every((story) => typeof story.viewerSeen === 'boolean')).toBe(true);
+
+    // The ADMIN's read of the same stories is untouched by the member's views (V8: own flag only).
+    const adminStrip = await walk(tokens.demoAdmin, '/v1/stories', STORY_MAX_PAGE_SIZE);
+    for (const id of pair) {
+      expect(adminStrip.find((story) => story.id === id)?.viewerSeen).toBe(false);
+    }
+  });
+
+  it('05.2-25 an unknown id and the LAB tenant’s story write NOTHING in either tenant — and a demo id beside them writes one row', async () => {
+    const memberId = await userIdOf('member@tria-demo.local');
+    const labStories = await adminSql<{ id: string }[]>`
+      select id::text from public.stories
+       where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null
+       order by published_at desc limit 1`;
+    const labStory = labStories[0]?.id ?? '';
+    expect(labStory, 'seeded lab story').not.toBe('');
+
+    const demoBefore = await viewRows(tenantIds.demo);
+    const labBefore = await viewRows(tenantIds.lab);
+
+    // Foreign and unknown only: the answer is the same 204 a valid id gets (no existence oracle).
+    const foreign = await markSeen(tokens.demoMember, { storyIds: [randomUUID(), labStory] });
+    expect(foreign.status).toBe(204);
+    expect(await viewRows(tenantIds.demo)).toBe(demoBefore);
+    expect(await viewRows(tenantIds.lab)).toBe(labBefore);
+
+    // Positive control in the same test: one demo id among the foreign ones writes exactly one row.
+    const { storyId } = await publishImage('controle positivo');
+    const mixed = await markSeen(tokens.demoMember, {
+      storyIds: [randomUUID(), labStory, storyId],
+    });
+    expect(mixed.status).toBe(204);
+    expect(await viewRows(tenantIds.demo)).toBe(demoBefore + 1);
+    expect(await viewRows(tenantIds.demo, { userId: memberId, storyIds: [storyId] })).toBe(1);
+    expect(await viewRows(tenantIds.lab)).toBe(labBefore);
+  });
+
+  it('05.2-26 an empty list, 51 ids and a non-uuid are VALIDATION_FAILED; no permission is needed; no session is 401', async () => {
+    for (const body of [
+      { storyIds: [] },
+      { storyIds: Array.from({ length: 51 }, () => randomUUID()) },
+      { storyIds: ['nao-e-um-uuid'] },
+      { storyIds: [randomUUID()], extra: true },
+    ]) {
+      const res = await markSeen(tokens.demoMember, body);
+      expect(res.status, JSON.stringify(body).slice(0, 60)).toBe(400);
+      expect((await envelope(res)).error.code).toBe('VALIDATION_FAILED');
+    }
+
+    // Exactly the cap is accepted — by a MEMBER, who holds no stories permission at all.
+    const atCap = await markSeen(tokens.demoMember, {
+      storyIds: Array.from({ length: 50 }, () => randomUUID()),
+    });
+    expect(atCap.status).toBe(204);
+
+    const anonymous = await markSeen(undefined, { storyIds: [randomUUID()] });
+    expect(anonymous.status).toBe(401);
+  });
+
+  it('05.2-27 an EXPIRED story is recorded, and a story seen inside a highlight reads seen in the strip too (R-D-I)', async () => {
+    const memberId = await userIdOf('member@tria-demo.local');
+    const highlight = await create(tokens.demoAdmin, { title: 'Teste Visto' });
+
+    const expired = await publishImage('visto expirado');
+    await adminSql`
+      update public.stories
+         set published_at = now() - interval '30 hours', expires_at = now() - interval '6 hours'
+       where id = ${expired.storyId}::uuid`;
+    const live = await publishImage('visto no destaque');
+    expect((await addItem(tokens.demoAdmin, highlight.id, expired.storyId)).status).toBe(200);
+    expect((await addItem(tokens.demoAdmin, highlight.id, live.storyId)).status).toBe(200);
+
+    // Before: the highlight's items read unseen for the member.
+    const before = highlightDetailSchema.parse(
+      await (await hlRequest(tokens.demoMember, `/${highlight.id}`)).json(),
+    );
+    expect(before.items.map((item) => item.viewerSeen)).toEqual([false, false]);
+
+    // The viewer shows both segments inside the highlight: the SAME story ids are recorded.
+    const res = await markSeen(tokens.demoMember, { storyIds: [expired.storyId, live.storyId] });
+    expect(res.status).toBe(204);
+    expect(await viewRows(tenantIds.demo, { userId: memberId, storyIds: [expired.storyId] })).toBe(
+      1,
+    );
+
+    const after = highlightDetailSchema.parse(
+      await (await hlRequest(tokens.demoMember, `/${highlight.id}`)).json(),
+    );
+    expect(after.items.map((item) => item.viewerSeen)).toEqual([true, true]);
+
+    // …and the live one reads seen in the STRIP as well, which is what greys the tenant ring.
+    const strip = await walk(tokens.demoMember, '/v1/stories', STORY_MAX_PAGE_SIZE);
+    expect(strip.find((story) => story.id === live.storyId)?.viewerSeen).toBe(true);
+    expect(strip.some((story) => story.id === expired.storyId)).toBe(false);
+  });
 });
 
 describe('MOD-04 / UI-D-25 — the module flag governs the routes in both directions', () => {

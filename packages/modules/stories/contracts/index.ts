@@ -153,9 +153,36 @@ export const storySummarySchema = z
      * so no web read changes shape before the web is ready for it.
      */
     highlightCount: z.number().int(),
+    /**
+     * 05.2 (HIGHLIGHT-06, D-105): whether THE CALLER has seen this story — their own flag, and
+     * nobody else's. It is one `exists` over `story_views` restricted to the caller's own user id,
+     * computed in the SAME statement as the rest of the projection, so the tenant circle's ring
+     * costs no extra request. No field anywhere says which member saw a story, or how many did:
+     * the admin's "quem viu" list is V2, on the same table.
+     */
+    viewerSeen: z.boolean(),
   })
   .strict();
 export type StorySummary = z.infer<typeof storySummarySchema>;
+
+/**
+ * `POST /v1/stories/views` (HIGHLIGHT-06, D-105) — the stories the caller has just SEEN, batched.
+ *
+ * The web flushes its buffer at 10 ids (and on close, on a group change and when the page hides),
+ * so 50 is headroom rather than a target; the cap exists so one request cannot ask the insert to
+ * select an unbounded id list (T-05.2-48). `.strict()`: an unknown key fails loudly.
+ *
+ * The answer is 204 for EVERY accepted body — a foreign, unknown or removed id simply writes
+ * nothing — so the endpoint cannot be used to learn whether an id exists (T-05.2-47).
+ */
+export const STORY_SEEN_BATCH_MAX = 50;
+
+export const markStoriesSeenSchema = z
+  .object({
+    storyIds: z.array(z.uuid()).min(1).max(STORY_SEEN_BATCH_MAX),
+  })
+  .strict();
+export type MarkStoriesSeen = z.infer<typeof markStoriesSeenSchema>;
 
 /** One keyset page. `nextCursor` is non-null EXACTLY when another row exists (the over-fetch rule). */
 export const storyPageSchema = z
