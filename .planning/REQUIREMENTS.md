@@ -84,6 +84,17 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [x] **HIGHLIGHT-05**: Every existing community pin is migrated into highlights without loss (one "Destaques" highlight per community that had pins, each pin's author and time carried over), and the pin model — its table, routes, events and the publish `communityId` — is retired
 - [x] **HIGHLIGHT-06**: Members get a server-side, cross-device seen state for active stories: the grouped circle's ring is brand-coloured while any active story is unseen and neutral once all are seen, and opening it resumes at the first unseen story (the seen-ring half of V2-CONT-05; the admin's "quem viu" list stays V2)
 
+### Reels
+
+- [ ] **REELS-01**: A `reels` feature module (its own package, a registry entry, a `tenant_modules` key) can be toggled per tenant by `super_admin`; it is on by default for existing tenants (backfilled by migration) and for new tenants, and while `feed` is off it contributes nothing — no bootstrap entry, no tab, no page
+- [ ] **REELS-02**: A "Reels" tab (catalog `reels.nav`, film icon, nav `order: 30`) sits between Comunidades and Eventos and is driven by the module flag, never by data; on `/reels` the mobile TopBar is hidden and the BottomNav floats in dark media chrome declared by the tab's nav entry, and on desktop the video is a centred 9:16 column on a black ground with the desktop rail visible
+- [ ] **REELS-03**: Reels lists only feed posts with `media_kind = 'video'` whose video asset is `ready`, newest first, on the feed's keyset cursor, through the feed's published contract (`GET /v1/feed?media=video`); "Todos" holds exactly the ready videos Início holds (communities on and off), a community lane holds that community's ready videos, and no other tenant's post is ever returned
+- [ ] **REELS-04**: The lane row shows "Todos" plus one lane per active community with at least one ready video post, in the Comunidades list order, and is hidden when only "Todos" exists (including when `communities` is off); a tap, a horizontal swipe or ←/→ in the row changes lane and starts at that lane's newest video
+- [ ] **REELS-05**: One post per full-screen page in an index pager: swipe up/down (dominant axis, 60 px) or, on desktop, the ↑/↓ buttons, arrow keys and a locked mouse wheel change video; videos loop and never auto-advance; the ±1 neighbours stay mounted with their playback tokens pre-minted in one batched request; the next page loads two pages before the end; the position indicator is windowed to 7 ticks
+- [ ] **REELS-06**: Each visit starts muted; once turned on, sound stays on for the rest of the visit (never persisted), and a refused unmuted play falls back to muted with the icon flipped; a single tap or Space pauses and resumes, an autoplay-blocked video shows the play badge, and the video pauses while the comment sheet is open or the app is hidden
+- [ ] **REELS-07**: The rail and caption reuse the feed's own actions: avatar and name open the author's profile and the chip the community; like (with count) is the feed's like, so a like in Reels shows on the same post in Início; a double tap only ever likes; comment opens the feed's threaded comment sheet; share produces the FEED-07 link; the caption clamps to 2 lines with "… mais"/"menos" and its links stay clickable
+- [ ] **REELS-08**: The empty state (with the `/criar` CTA only for `feed.post.create` holders), the stage load error, the next-page error, the per-video playback error with a retry that mints a fresh token, and like/share failures follow the UI-SPEC, and no raw player or provider error text ever reaches the screen
+
 ### Events
 
 - [ ] **EVENT-01**: `admin_tenant` can create, edit and cancel events with title, description, cover image, start/end datetime (timezone-aware), and either a physical location or an online link
@@ -269,6 +280,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HIGHLIGHT-04 | Phase 05.2 | Complete |
 | HIGHLIGHT-05 | Phase 05.2 | Complete |
 | HIGHLIGHT-06 | Phase 05.2 | Complete |
+| REELS-01 | Phase 05.3 | Pending |
+| REELS-02 | Phase 05.3 | Pending |
+| REELS-03 | Phase 05.3 | Pending |
+| REELS-04 | Phase 05.3 | Pending |
+| REELS-05 | Phase 05.3 | Pending |
+| REELS-06 | Phase 05.3 | Pending |
+| REELS-07 | Phase 05.3 | Pending |
+| REELS-08 | Phase 05.3 | Pending |
 | EVENT-01 | Phase 6 | Pending |
 | EVENT-02 | Phase 6 | Pending |
 | EVENT-03 | Phase 6 | Pending |
@@ -311,10 +330,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 89 total (recounted from the traceability table on 2026-09-25: 83 before Phase 05.2 — the earlier "78" predated the 2026-09-25 promotions — plus HIGHLIGHT-01..06)
-- Mapped to phases: 89
+- v1 requirements: 97 total (89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26)
+- Mapped to phases: 97
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-11*
-*Last updated: 2026-09-25 — Phase 05.2 planning added HIGHLIGHT-01..06, reworded STORY-04 (re-delivered through highlights, kept `[x]` per the 05.1 re-open precedent) and promoted V2-CONT-05's seen ring*
+*Last updated: 2026-09-26 — Phase 05.3 planning added REELS-01..08 (the Reels tab over the feed's video posts)*

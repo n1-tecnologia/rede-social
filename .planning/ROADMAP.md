@@ -461,7 +461,7 @@ Plans:
 
 **Goal**: A full-screen "Reels" tab plays the feed's video posts in a vertical pager, following the design team's print (`.planning/phases/05.3-reels/reels-design.png`) and the prototype's `reference/frontend-design/app/(app)/reels/page.tsx`.
 **Depends on**: Phase 4 (feed video posts, their likes and comments)
-**Requirements**: TBD (new REELS-*)
+**Requirements**: REELS-01, REELS-02, REELS-03, REELS-04, REELS-05, REELS-06, REELS-07, REELS-08
 **Success Criteria** (what must be TRUE):
 
   1. A member opens Reels from the bottom navigation and sees video posts only (feed data filtered to `media_kind = 'video'`), full-screen, one per page: swipe up/down changes video, muted by default with a mute toggle, author name, community chip, caption, and a right rail with author avatar, like (with count) and comment (with count, opening the comment sheet).
@@ -472,9 +472,33 @@ Plans:
 **Research needed**: Light — Mux autoplay/mute policy on iOS, and preloading the next video.
 **Notes**: Part of the MVP (user decision 2026-09-25): Reels is a new tab that filters the feed to video posts, so it moved ahead of the "Rede social" phases. It was 05.5 and "placed last so it is built once over the final set of video sources"; adding member videos is now Phase 9's job. Open questions for discuss-phase: (a) the prototype's lanes "Para você / Resultados / Bastidores" have no data model — fixed lanes, tags, or communities? (b) whether Reels is its own toggleable module or rides on `feed`; the user's framing ("a new tab that filters the feed by video") points to riding on `feed`. Source: user request 2026-09-25.
 
+**Plans**: 9 plans
+
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
+**Wave 1**
+
+- [ ] 05.3-01-PLAN.md — Tracer: Reels at the API end to end (the `reels` key and its backfill with a live replay after a backup, `requires: ['feed']` through `effectiveKeys`, the reels manifest package, feed's `?media=video` filter and partial index), the reset consent, pgTAP 130 and every API pin for the seventh key
+- [ ] 05.3-04-PLAN.md — The D-33 design gate: sketch 005 for the six prototype-less Reels surfaces, the user records the approval
+
+**Wave 2** *(blocked on Wave 1; plan 05 also on the sketch approval)*
+
+- [ ] 05.3-02-PLAN.md — The lanes read (`GET /v1/feed/video-communities`) and the REELS-03/04 API battery: equality with Início, isolation b9, one-statement budgets, the lanes EXPLAIN pin
+- [ ] 05.3-03-PLAN.md — Declarative media chrome in the kernel shell (TopBar hidden, dark BottomNav) and every e2e nav and module-switch pin for the new tab
+- [ ] 05.3-05-PLAN.md — The props-only pager: `DoubleTapHeart`'s opt-in single tap and slop, windowed ticks, the stage, the playback-error block, gestures, keyboard, wheel and the desktop column
+
+**Wave 3**
+
+- [ ] 05.3-06-PLAN.md — The lane tablist, the rail with share, the two-line caption over the veil, compact counts, and `LikeButton`'s over-media tone
+- [ ] 05.3-07-PLAN.md — `ReelVideo` (muted start, loop, fit, muted-pref opt-outs, refusal fallback), the batched token mint and the web data path
+
+**Wave 4**
+
+- [ ] 05.3-08-PLAN.md — The `/reels` route and its host: lanes, paging, sound for the visit, pause sources, token preloading, the feed's like, comments and share, empty/loading/error states, the catalog, the first e2e case
+
+**Wave 5**
+
+- [ ] 05.3-09-PLAN.md — The Reels browser battery (lanes, paging, sound, like parity, comments, share, empty state, requires-feed, error states, long-text backstops) and the phase exit gate
 
 ### Phase 6: Events
 
