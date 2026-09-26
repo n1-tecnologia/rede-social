@@ -100,7 +100,10 @@ async function answer(api: ApiFetch, path: string, host: string) {
 /** Every route of each module a member could reach, so the 404 claim covers the whole surface. */
 const ROUTES = {
   communities: ['/v1/communities'],
-  stories: ['/v1/stories', '/v1/stories/pinned?communityId=00000000-0000-4000-8000-000000000000'],
+  stories: [
+    '/v1/stories',
+    '/v1/stories/highlights?communityId=00000000-0000-4000-8000-000000000000',
+  ],
 } as const;
 
 test.beforeAll(async ({ browser: _browser }, testInfo) => {

@@ -59,19 +59,17 @@ const row = {
 let executeCall = 0;
 
 /**
- * 05.1 (D-99): `'plain'` is every case above — a publish with no community, three statements. In
- * `'community'` a publish that names a community issues FIVE, destination first: 1 = the community
- * row, 2 = the asset, 3 = the insert id, 4 = the pin insert (`returning id`), 5 = the projection.
+ * `'plain'` is every case in the first block — a publish with no destination, three statements.
+ * (05.1's `'community'` mode, a publish that wrote a community pin, retired with the pin model in
+ * 05.2-11.)
  */
-let mode: 'plain' | 'community' | 'highlight' | 'inline' = 'plain';
-/** What the community lookup answers in `'community'` mode: a visible row, or nothing at all. */
-let community: { status: string } | null = { status: 'active' };
+let mode: 'plain' | 'highlight' | 'inline' = 'plain';
 
 /**
  * 05.2 (D-113/D-114): `'highlight'` and `'inline'` publish INTO a highlight. Those two modes answer
  * by the statement's TEXT (rendered through drizzle's own `PgDialect`, `story-highlights.test.ts`'s
  * script) rather than by its index, so each case can assert the ORDER the statements ran in by name.
- * The four cases above never enter this branch and keep their index-based answers unchanged.
+ * The plain cases never enter this branch and keep their index-based answers unchanged.
  */
 const dialect = new PgDialect();
 const HIGHLIGHT_ID = '66666666-6666-4666-8666-666666666666';
@@ -135,7 +133,7 @@ function scripted(query: SQL): unknown[] {
     case 'item':
       return [{ id: 'item-row' }];
     case 'projection':
-      return [{ ...row, pinned_community_count: 0, highlight_count: 1 }];
+      return [{ ...row, highlight_count: 1 }];
     default:
       return [];
   }
@@ -145,13 +143,6 @@ const tx = {
   execute: async (query: SQL) => {
     executeCall += 1;
     if (mode === 'highlight' || mode === 'inline') return scripted(query);
-    if (mode === 'community') {
-      if (executeCall === 1) return community === null ? [] : [community];
-      if (executeCall === 2) return asset === null ? [] : [asset];
-      if (executeCall === 3) return [{ id: STORY_ID }];
-      if (executeCall === 4) return [{ id: 'pin-row' }];
-      return [{ ...row, pinned_community_count: 1 }];
-    }
     if (executeCall === 1) return asset === null ? [] : [asset];
     if (transaction === 'throw') throw new Error('insert refused by the database');
     return executeCall === 2 ? [{ id: STORY_ID }] : [row];
@@ -190,7 +181,6 @@ let unsubscribe: () => void = () => {};
 
 beforeEach(() => {
   mode = 'plain';
-  community = { status: 'active' };
   highlightPlace = null;
   placeStatus = 'active';
   heldItems = 0;
@@ -335,109 +325,6 @@ describe('story.published — after commit, exactly once, never on failure', () 
       unsubscribeBroken();
       unsubscribeHealthy();
     }
-  });
-});
-
-describe('05.1 — a publish that names a community: destination first, both events after commit', () => {
-  const COMMUNITY_ID = '55555555-5555-4555-8555-555555555555';
-  const withCommunity = { ...input, communityId: COMMUNITY_ID };
-
-  let pinned: Record<string, unknown>[] = [];
-  let unsubscribePinned: () => void = () => {};
-
-  beforeEach(() => {
-    mode = 'community';
-    pinned = [];
-    unsubscribePinned = subscribe('story.pinned', async (payload) => {
-      pinned.push(payload as unknown as Record<string, unknown>);
-    });
-  });
-
-  afterEach(() => {
-    unsubscribePinned();
-  });
-
-  it('8. a committed publish into a community runs FIVE statements and queues published, then pinned', async () => {
-    const ctx = context();
-    const story = await publishStory(ctx, withCommunity);
-
-    expect(executeCall).toBe(5);
-    expect(story.pinnedCommunityCount).toBe(1);
-    // Queued in order, and NOT delivered yet (MOD-03).
-    expect(ctx.events.map((event) => event.name)).toEqual(['story.published', 'story.pinned']);
-    expect(received).toHaveLength(0);
-    expect(pinned).toHaveLength(0);
-
-    await flush(ctx);
-
-    // Ids only on both — no caption, no community name (T-05.1-06).
-    expect(Object.keys(received[0] ?? {}).sort()).toEqual([
-      'authorUserId',
-      'expiresAt',
-      'mediaKind',
-      'storyId',
-      'tenantId',
-    ]);
-    expect(pinned).toHaveLength(1);
-    expect(Object.keys(pinned[0] ?? {}).sort()).toEqual([
-      'actorUserId',
-      'communityId',
-      'storyId',
-      'tenantId',
-    ]);
-    expect(pinned[0]).toMatchObject({
-      tenantId: TENANT_ID,
-      storyId: STORY_ID,
-      communityId: COMMUNITY_ID,
-      actorUserId: USER_ID,
-    });
-    expect(JSON.stringify(pinned[0])).not.toContain('legenda');
-  });
-
-  it('9. an ARCHIVED community is the pin refusal after exactly ONE statement, and queues nothing', async () => {
-    community = { status: 'archived' };
-    const ctx = context();
-
-    await expect(publishStory(ctx, withCommunity)).rejects.toMatchObject({
-      status: 400,
-      code: 'VALIDATION_FAILED',
-      details: { pin: 'archived' },
-    });
-
-    // Destination first: no asset lookup, no insert.
-    expect(executeCall).toBe(1);
-    expect(ctx.events).toHaveLength(0);
-    await flush(ctx);
-    expect(received).toHaveLength(0);
-    expect(pinned).toHaveLength(0);
-  });
-
-  it('10. a community this lane cannot see is a BARE 404 after exactly ONE statement', async () => {
-    community = null;
-    const ctx = context();
-
-    const thrown = await publishStory(ctx, withCommunity).catch((error: unknown) => error);
-    expect(thrown).toMatchObject({ status: 404, code: 'NOT_FOUND' });
-    expect((thrown as { details?: unknown }).details).toBeUndefined();
-
-    expect(executeCall).toBe(1);
-    expect(ctx.events).toHaveLength(0);
-    await flush(ctx);
-    expect(received).toHaveLength(0);
-    expect(pinned).toHaveLength(0);
-  });
-
-  it('11. WITHOUT a community exactly THREE statements run and no pin event is queued', async () => {
-    mode = 'plain';
-    const ctx = context();
-
-    await publishStory(ctx, input);
-
-    expect(executeCall).toBe(3);
-    expect(ctx.events.map((event) => event.name)).toEqual(['story.published']);
-    await flush(ctx);
-    expect(received).toHaveLength(1);
-    expect(pinned).toHaveLength(0);
   });
 });
 

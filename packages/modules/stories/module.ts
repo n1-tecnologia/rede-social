@@ -83,24 +83,6 @@ export const storiesModule = defineModule({
         log.info({ event: 'story.comment_deleted', ...payload }, 'story comment soft-deleted');
       },
     },
-    {
-      // STORY-04. Both payloads are IDS ONLY — neither a story caption nor a community name may
-      // reach a log line (T-05-29, T-05-06), and this handler logging the payload verbatim is
-      // exactly why the key set is asserted in `story-pins.test.ts` rather than trusted.
-      //
-      // They count TRANSITIONS, not requests: a repeat pin and an unpin of something never pinned
-      // both answer 200 and announce nothing at all.
-      event: 'story.pinned',
-      handler: async (payload) => {
-        log.info({ event: 'story.pinned', ...payload }, 'story pinned to a community');
-      },
-    },
-    {
-      event: 'story.unpinned',
-      handler: async (payload) => {
-        log.info({ event: 'story.unpinned', ...payload }, 'story unpinned from a community');
-      },
-    },
     // 05.2 highlights (R-D-L). They count TRANSITIONS, not requests: a repeat add, a PATCH identical
     // to the stored row, a reorder equal to the current order and a removal of a pair that is not
     // there all answer 200 and announce nothing.

@@ -441,7 +441,6 @@ describe('05.2-07 — storyHistoryView carries the highlight indicator (UI-D-77,
       likeCount: 0,
       commentCount: 0,
       viewerLiked: false,
-      pinnedCommunityCount: 0,
       highlightCount: 0,
       viewerSeen: false,
       ...overrides,
@@ -459,8 +458,8 @@ describe('05.2-07 — storyHistoryView carries the highlight indicator (UI-D-77,
     });
   });
 
-  it('V1. highlightCount 0 → the key is ABSENT (never "Em 0 destaques"), and pins no longer count', () => {
-    const view = storyHistoryView(story({ highlightCount: 0, pinnedCommunityCount: 3 }), t, tm);
+  it('V1. highlightCount 0 → the key is ABSENT (never "Em 0 destaques"), and no pin indicator exists', () => {
+    const view = storyHistoryView(story({ highlightCount: 0 }), t, tm);
     expect('highlighted' in view).toBe(false);
     expect('pinned' in view).toBe(false);
   });
@@ -492,7 +491,6 @@ describe('05.2-09 — highlightManageRowView and highlightEditStoryView', () => 
       likeCount: 0,
       commentCount: 0,
       viewerLiked: false,
-      pinnedCommunityCount: 0,
       highlightCount: 1,
       viewerSeen: false,
       ...overrides,
@@ -579,7 +577,6 @@ describe('the tenant circle’s seen state (05.2-10)', () => {
       likeCount: 0,
       commentCount: 0,
       viewerLiked: false,
-      pinnedCommunityCount: 0,
       highlightCount: 0,
       viewerSeen: true,
     };

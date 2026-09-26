@@ -504,83 +504,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it("b4. pins: a demo admin cannot pin into the lab's community, and its Destaques never leak (05-08)", async () => {
-    // STORY-04 creates the longest-lived cross-tenant exposure this phase could: a pin makes a
-    // story outlive its own expiry on a community page, so a leak here would be permanent rather
-    // than a day long. Both directions are probed from the DEMO session, which is the one that
-    // could plausibly succeed by accident: the pin routes resolve BOTH ids inside the tenant
-    // transaction, so a foreign id produces no row to insert rather than a refused one.
-    const labCommunities = await adminSql<{ id: string }[]>`
-      select id from public.communities where tenant_id = ${tenantIds.lab}::uuid limit 1`;
-    const labStories = await adminSql<{ id: string }[]>`
-      select id from public.stories where tenant_id = ${tenantIds.lab}::uuid limit 1`;
-    const demoStories = await adminSql<{ id: string }[]>`
-      select id from public.stories where tenant_id = ${tenantIds.demo}::uuid limit 1`;
-    // The demo community the SEED pinned to, not just any of them: the positive control below
-    // asserts that the demo lane reads an EXPIRED pinned story back, and `limit 1` over every
-    // community would pick a different one on any run whose row order happened to differ.
-    const demoCommunities = await adminSql<{ id: string }[]>`
-      select distinct p.community_id as id
-        from public.story_community_pins p
-       where p.tenant_id = ${tenantIds.demo}::uuid
-       limit 1`;
-    const labCommunity = labCommunities[0]?.id ?? '';
-    const labStory = labStories[0]?.id ?? '';
-    const demoStory = demoStories[0]?.id ?? '';
-    const demoCommunity = demoCommunities[0]?.id ?? '';
-    expect([labCommunity, labStory, demoStory, demoCommunity].every(Boolean)).toBe(true);
-
-    // Three crossings, one answer: own story into a foreign community, foreign story into an own
-    // community, and both foreign. A 403 anywhere here would confirm the row exists somewhere.
-    for (const [storyId, communityId] of [
-      [demoStory, labCommunity],
-      [labStory, demoCommunity],
-      [labStory, labCommunity],
-    ]) {
-      for (const method of ['PUT', 'DELETE']) {
-        // `request` above only carries headers; a pin is a PUT/DELETE, so this one call goes
-        // through `api.request` directly rather than growing a method parameter no other case uses.
-        const res = await api.request(`/v1/stories/${storyId}/pins/${communityId}`, {
-          method,
-          headers: {
-            authorization: `Bearer ${tokens.demoAdmin}`,
-            [TENANT_HOST_HEADER]: HOSTS.demo,
-          },
-        });
-        expect(res.status, `${method} ${storyId}/${communityId}`).toBe(404);
-        const body = (await res.json()) as Envelope;
-        expect(body.error.code).toBe('NOT_FOUND');
-        expect(Object.hasOwn(body.error, 'details')).toBe(false);
-      }
-    }
-
-    // The READ half: the lab's own community id, asked for from the demo lane, answers an EMPTY
-    // Destaques row rather than the lab's pinned stories. The lab seed pins one story to its first
-    // community, so this is a read that WOULD return rows if the tenant predicate were missing.
-    const foreign = await request(
-      `/v1/stories/pinned?communityId=${labCommunity}`,
-      tokens.demoMember,
-      {
-        [TENANT_HOST_HEADER]: HOSTS.demo,
-      },
-    );
-    expect(foreign.status).toBe(200);
-    expect(((await foreign.json()) as { items: unknown[] }).items).toEqual([]);
-
-    // Positive control IN THE SAME TEST: the demo lane really does read its OWN community's pins,
-    // and the seed pinned an EXPIRED story there — so the empty answer above is isolation, not a
-    // read that returns nothing for everybody.
-    const own = await request(
-      `/v1/stories/pinned?communityId=${demoCommunity}`,
-      tokens.demoMember,
-      { [TENANT_HOST_HEADER]: HOSTS.demo },
-    );
-    expect(own.status).toBe(200);
-    const items = ((await own.json()) as { items: { id: string; isActive: boolean }[] }).items;
-    expect(items.length).toBeGreaterThan(0);
-    expect(items.some((item) => item.isActive === false)).toBe(true);
-    for (const item of items) expect(item.id).not.toBe(labStory);
-  });
+  // b4 (05-08's community pins) retired with the pin model in 05.2-11 (HIGHLIGHT-05, D-116). Its
+  // crossings — a foreign story into an own place, an own story into a foreign place, and the
+  // foreign place's read — are b7's highlight crossings now, and the letter stays unused.
 
   it("b5. covers: a demo admin cannot point a community at the lab's asset, and learns nothing by trying (05-09)", async () => {
     // GAP 1 of 05-VERIFICATION.md. `cover_asset_id` is the one Phase 5 write that took a
@@ -769,7 +695,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // service resolves each id in-lane with an explicit tenant predicate under RLS and inserts by
     // insert-select, so a foreign id produces no row to act on rather than a refused one.
     //
-    // Named b7 because 05.1-01 already took b6 for the born-attached publish.
+    // Named b7 because b6 was taken (05.1-01's born-attached publish, now the highlight publish).
     const [labHighlight] = await adminSql<{ id: string }[]>`
       select id from public.story_highlights
        where tenant_id = ${tenantIds.lab}::uuid and community_id is null and title = 'Bastidores'`;
@@ -1066,7 +992,6 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       // 05-08: the Destaques read joins the loop for the SCHEMA-CONVENTIONS §(j) rule 2 reason —
       // every new endpoint adds a cross-tenant case here. It takes a query parameter, which is
       // exactly why it is worth including: the host check must fire before the parameter is read.
-      '/v1/stories/pinned?communityId=00000000-0000-4000-8000-000000000000',
       // 05.2-01: the highlight row read joins the loop — SCHEMA-CONVENTIONS §(j) rule 2, every new
       // endpoint adds a cross-tenant case here. It resolves a place before it reads anything, and
       // the host check must refuse the session before that resolution ever runs.

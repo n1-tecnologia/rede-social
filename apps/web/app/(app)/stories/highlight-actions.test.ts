@@ -107,7 +107,6 @@ function detail() {
         likeCount: 2,
         commentCount: 1,
         viewerLiked: true,
-        pinnedCommunityCount: 0,
         highlightCount: 1,
         viewerSeen: false,
       },

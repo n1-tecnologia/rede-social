@@ -139,18 +139,11 @@ export const storySummarySchema = z
     commentCount: z.number().int(),
     viewerLiked: z.boolean(),
     /**
-     * STORY-04: how many communities this story is pinned to, counted in the SAME statement the
-     * story row came from. It is what UI-D-40's trailing pin indicator renders, and `0` is what
-     * makes "a story pinned nowhere renders no indicator at all" a comparison rather than a null
-     * check. The strip carries it too, unread, because one projection serving three reads is what
-     * stops the three disagreeing about what a story looks like.
-     */
-    pinnedCommunityCount: z.number().int(),
-    /**
      * 05.2: how many highlights this story is in (D-100 — one story may sit in several), counted in
-     * the SAME statement as every story projection, never per row. It is what "Seus stories" will
-     * render beside the pin indicator. `pinnedCommunityCount` stays until plan 11 retires the pins,
-     * so no web read changes shape before the web is ready for it.
+     * the SAME statement as every story projection, never per row. It is what "Seus stories" renders
+     * as its trailing indicator, and `0` is what makes "a story in no highlight renders no indicator"
+     * a comparison rather than a null check. It replaced the per-community pin count when 05.2
+     * retired the pin model (HIGHLIGHT-05, D-116).
      */
     highlightCount: z.number().int(),
     /**
@@ -217,7 +210,7 @@ export type StoryLikeResult = z.infer<typeof storyLikeResultSchema>;
 /**
  * The permission STRINGS, exported so the manifest and the web tier never retype them.
  *
- * `manage` covers deleting a story and pinning/unpinning it to a community (D-84); `publish` is the
+ * `manage` covers deleting a story and curating highlights (D-84, 05.2); `publish` is the
  * one the `/inicio` own-circle's visibility is read from. They are SEPARATE because V2 hands
  * `publish` to members without handing them the moderation half — the FEED-08 shape, reused.
  */
@@ -456,132 +449,6 @@ export interface StoryCommentDeleted {
   actorUserId: string;
 }
 
-/* ── Community pins (STORY-04, D-68, D-84) ─────────────────────────────────────────────────────── */
-
-/**
- * `PUT` / `DELETE /v1/stories/{storyId}/pins/{communityId}` — the toggle's answer.
- *
- * The SAME `{ state, count }` pair shape the like toggle answers with, for the same reason: the
- * count is the AUTHORITATIVE number read back from the rows inside the writing transaction, never a
- * number the client incremented. `pinnedCommunityCount` is how many communities the STORY is pinned
- * to — not how many pins the community has — because that is what the history row's indicator
- * renders and what the sheet's state is reconciled against.
- *
- * There is no conflict status anywhere in this vocabulary. Re-pinning the same pair returns the
- * identical body, and unpinning something that was never pinned does too.
- */
-export const storyPinResultSchema = z
-  .object({
-    pinned: z.boolean(),
-    pinnedCommunityCount: z.number().int().min(0),
-  })
-  .strict();
-export type StoryPinResult = z.infer<typeof storyPinResultSchema>;
-
-/**
- * The closed refusal vocabulary a pin WRITE can answer with, as `details.pin`.
- *
- * ONE code, and it is 05-03's own word: pinning into an ARCHIVED community is refused with the
- * same `archived` the composer already answers, because it is the same rule — an archived container
- * takes no new content. Inventing a second spelling for it here would give the web two switches to
- * keep in step for one product fact.
- *
- * A MISS — an unknown story, an unknown community, another tenant's of either — is deliberately NOT
- * in this vocabulary: it is a BARE 404 with no `details` at all, because a per-cause code over an
- * enumerable uuid space would be an existence oracle (D-23, T-05-49).
- */
-export const STORY_PIN_ISSUES = ['archived'] as const;
-export type StoryPinIssue = (typeof STORY_PIN_ISSUES)[number];
-
-/** The web tier's lookup over that closed vocabulary. */
-export const STORY_PIN_ISSUE_SET: ReadonlySet<string> = new Set(STORY_PIN_ISSUES);
-
-/**
- * `GET /v1/stories/{storyId}/pins` — the community ids a story is currently pinned to, which is the
- * pin sheet's initial state.
- *
- * Ids only. The sheet already holds the community NAMES from the page's own read, so sending them
- * again would be a second source of the same words that could disagree with the first.
- */
-export const storyPinsSchema = z.object({ communityIds: z.array(z.uuid()) }).strict();
-export type StoryPins = z.infer<typeof storyPinsSchema>;
-
-/**
- * `GET /v1/stories/pinned?communityId=&limit=&cursor=` (STORY-04, D-68) — one community's Destaques.
- *
- * `communityId` is REQUIRED: there is no "all pinned stories of the tenant" read, because no screen
- * asks that question and an endpoint nobody calls is a payload shape frozen for free.
- *
- * `limit` CLAMPS rather than refuses, for the reason `storyQuerySchema`'s does: the row renders on
- * the community page, a screen reachable from a shared link, and a hand-edited `?limit=` must never
- * be the reason it shows an error. The clamp is what T-05-53 asks for either way.
- */
-export const storyHighlightsQuerySchema = z
-  .object({
-    communityId: z.uuid(),
-    cursor: z.string().max(STORY_MAX_CURSOR_LENGTH).optional(),
-    limit: z.coerce
-      .number()
-      .int()
-      .catch(STORY_PAGE_SIZE)
-      .transform((value) => Math.min(Math.max(value, 1), STORY_MAX_PAGE_SIZE))
-      .default(STORY_PAGE_SIZE),
-  })
-  .strict();
-export type StoryHighlightsQuery = z.infer<typeof storyHighlightsQuerySchema>;
-
-/**
- * The community row the pin sheet drew, declared HERE rather than imported from
- * `@tria/module-communities/contracts`. **Retired on the web in 05.2-07** (the pin sheet was deleted
- * with the pin vocabulary, UI-D-79); the type stays until plan 11 retires the pin contracts.
- *
- * **This was not a preference.** `turbo boundaries` denies a `module -> module` package edge
- * (MOD-02), and the pin sheet lived in this module — so the shape the sheet consumed is declared
- * in the module that consumes it, exactly as `storyLikeResultSchema` and `STORY_MAX_COMMENT`
- * restate the feed's. The host (`apps/web`, which may reach both) maps `CommunitySummary` onto this
- * in one place, so the four fields below are the whole contract between the two modules and they
- * are structurally checked at that call site.
- */
-export interface StoryPinCommunity {
-  id: string;
-  name: string;
-  /** Null takes the `--brand-gradient` branch (D-69/UI-D-35), exactly as the list card's cover does. */
-  coverAssetId: string | null;
-  coverVariantWidths: readonly number[];
-}
-
-/**
- * A story was pinned to a community (STORY-04) — an EDITORIAL act, announced exactly once.
- *
- * **Ids only**, for the reason every other payload in this file is: the manifest's own subscriber
- * logs the payload verbatim, and neither a story caption nor a community name has any business in a
- * log line (T-05-29, T-05-06).
- *
- * It is emitted only when a row was really created. Re-pinning the same pair inserts nothing and
- * announces nothing: a subscriber counting these is counting transitions, and a second
- * announcement of a state that never changed would be a lie it cannot detect — the `story.unliked`
- * rule, applied to both halves of this toggle rather than only to the removal.
- *
- * `POST /v1/stories` emits it too when a story is born attached (05.1, D-99) — one event per pin row,
- * whichever path wrote it, so a subscriber tracking pins sees every pin through this one name.
- */
-export interface StoryPinned {
-  tenantId: string;
-  storyId: string;
-  communityId: string;
-  actorUserId: string;
-}
-
-/** The same shape for the other half, emitted only when a row was really removed. */
-export type StoryUnpinned = StoryPinned;
-
-declare module '@tria/contracts' {
-  interface EventMap {
-    'story.pinned': StoryPinned;
-    'story.unpinned': StoryUnpinned;
-  }
-}
-
 /* ── Highlights (05.2) ─────────────────────────────────────────────────────────────────────────── */
 
 /**
@@ -604,7 +471,7 @@ export const STORY_HIGHLIGHT_MAX_PER_PLACE = 50;
  * codes; the pt-BR copy lives in the catalog.
  *
  * - `archived` — an archived community takes no new content, and a highlight or an item is new
- *   content (the pins' and the composer's own word, not a second spelling of it).
+ *   content (the composer's own word, not a second spelling of it).
  * - `title_invalid` — empty after trimming, or longer than `STORY_HIGHLIGHT_MAX_TITLE`.
  * - `order_stale` — a reorder named a set of highlights that is not exactly the place's current set.
  * - `full` — the place already holds `STORY_HIGHLIGHT_MAX_PER_PLACE` highlights, or the highlight
@@ -657,10 +524,9 @@ export type CreateStoryHighlight = z.infer<typeof createStoryHighlightSchema>;
  *  - `newHighlight: { communityId, title }` (D-114) — the story is born inside a highlight created
  *    by the SAME request, appended at the END of its place (`communityId: null` is Início here: the
  *    object always names its place explicitly, so there is no absent-key ambiguity inside it).
- *  - `communityId` (05.1, D-95) — the retiring pin destination. Still accepted, still writing a
- *    `story_community_pins` row, until plan 05.2-11 retires the pin model; nothing in the web sends
- *    it any more.
- * The refinement allows at most ONE of the three.
+ * The refinement allows at most ONE of the two. 05.1's `communityId` destination (a community pin)
+ * was retired with the pin model in 05.2-11 (HIGHLIGHT-05, D-116): the schema is `.strict()`, so a
+ * stale client still sending it gets a plain `VALIDATION_FAILED` and no story is written.
  *
  * **One write (D-99, carried).** Whichever destination is named, the destination lookup, the story,
  * any new highlight and the item row are ONE `withTenantTx`: a refusal rolls the whole publish back,
@@ -682,7 +548,6 @@ export const publishStorySchema = z
     mediaAssetId: z.uuid().nullable().default(null),
     mediaKind: z.enum(STORY_MEDIA_KINDS),
     caption: z.string().trim().max(STORY_MAX_CAPTION).default(''),
-    communityId: z.uuid().optional(),
     highlightId: z.uuid().optional(),
     newHighlight: z
       .object({ communityId: z.uuid().nullable(), title: storyHighlightTitleSchema })
@@ -698,14 +563,11 @@ export const publishStorySchema = z
       ctx.addIssue({ code: 'custom', path: ['mediaAssetId'], message: 'media_required' });
     }
     // D-113: ONE destination or none — never two, so the service never has to pick one.
-    const destinations = [value.communityId, value.highlightId, value.newHighlight].filter(
-      (destination) => destination !== undefined,
-    );
-    if (destinations.length > 1) {
+    if (value.highlightId !== undefined && value.newHighlight !== undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['highlightId'],
-        message: 'At most one destination: communityId, highlightId or newHighlight.',
+        message: 'At most one destination: highlightId or newHighlight.',
       });
     }
   });

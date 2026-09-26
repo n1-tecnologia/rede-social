@@ -21,11 +21,8 @@ import {
   storyCommentSchema,
   storyCommentsQuerySchema,
   storyHighlightIdsSchema,
-  storyHighlightsQuerySchema,
   storyLikeResultSchema,
   storyPageSchema,
-  storyPinResultSchema,
-  storyPinsSchema,
   storyQuerySchema,
   storySummarySchema,
   updateHighlightSchema,
@@ -41,20 +38,16 @@ import {
   getStory,
   likeStory,
   listActiveStories,
-  listCommunityHighlights,
   listHighlightCatalog,
   listHighlights,
   listOwnStories,
   listStoryComments,
   listStoryHighlightIds,
-  listStoryPins,
   markStoriesSeen,
-  pinStory,
   publishStory,
   removeStoryFromHighlight,
   reorderHighlights,
   unlikeStory,
-  unpinStory,
   updateHighlight,
 } from './service';
 
@@ -82,10 +75,16 @@ import {
  * 05.2: a highlight title's refusal rides the same way — `storyHighlightTitleSchema`'s issue message
  * IS `title_invalid`, lifted here to `details.highlight`, the key the service's own refusals
  * (`archived`, `full`) use, so the web has one switch over `STORY_HIGHLIGHT_ISSUES`.
+ *
+ * 05.2-11: a PATH segment that is not an id names nothing, so it is the SAME bare 404 an unknown id
+ * gets (D-23) rather than a 400 describing the malformed segment. This is also what a stale client
+ * calling the retired `…/pinned` read now meets: the literal segment falls through to `/{storyId}`,
+ * and "no such route" and "no such story" must not be told apart.
  */
 const stories = new OpenAPIHono<AppEnv>({
   defaultHook: (result) => {
     if (!result.success) {
+      if (result.target === 'param') throw new ApiError(404, 'NOT_FOUND');
       const highlight = result.error.issues
         .map((issue) => issue.message)
         .find((message) => STORY_HIGHLIGHT_ISSUE_SET.has(message));
@@ -139,26 +138,6 @@ const listOwnRoute = createRoute({
       content: { 'application/json': { schema: storyPageSchema } },
     },
     403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
-  },
-});
-
-/**
- * D-68's community Destaques (STORY-04). Declared BEFORE `/{storyId}` so the literal segment wins
- * the match: `pinned` is not a uuid, so the param route would 400 on it rather than falling through.
- *
- * **No `requirePermission`, and that is deliberate**: every member of the tenant sees a community's
- * highlights, exactly as every member sees its posts. The write half is the guarded one.
- */
-const highlightsRoute = createRoute({
-  method: 'get',
-  path: '/pinned',
-  request: { query: storyHighlightsQuerySchema },
-  responses: {
-    200: {
-      description:
-        "One keyset page of the community's PINNED stories, newest pin first — EXPIRED ones included. The query carries no expiry predicate at all: the pin row IS the override (STORY-04). A community with no pins answers an empty `items` and a null `nextCursor`, never a 404.",
-      content: { 'application/json': { schema: storyPageSchema } },
-    },
   },
 });
 
@@ -435,7 +414,7 @@ const getStoryRoute = createRoute({
   responses: {
     200: {
       description:
-        'One story, ACTIVE OR NOT — the viewer opens an expired story from the history and 05-08 pins one to a community. The strip is what filters; this read never does.',
+        'One story, ACTIVE OR NOT — the viewer opens an expired story from the history, and a highlight keeps one on Início or a community page. The strip is what filters; this read never does.',
       content: { 'application/json': { schema: storySummarySchema } },
     },
     404: {
@@ -461,15 +440,15 @@ const publishStoryRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.story` carrying exactly one machine code: `media_required` (a story with no media has nothing to show) or `media_invalid` (an asset of this tenant whose purpose is not `story`, or whose kind does not match). With a highlight destination, `details.highlight` carries `archived` (the destination community is archived), `title_invalid` (`newHighlight.title` is empty after trimming or longer than 15) or `full` (the highlight or the place is at its cap). The retiring `communityId` answers `details.pin` = `archived` until plan 05.2-11. Naming more than one destination is a plain `VALIDATION_FAILED`. In every case NO story, highlight or item is written.',
+        '`VALIDATION_FAILED` with `details.story` carrying exactly one machine code: `media_required` (a story with no media has nothing to show) or `media_invalid` (an asset of this tenant whose purpose is not `story`, or whose kind does not match). With a highlight destination, `details.highlight` carries `archived` (the destination community is archived), `title_invalid` (`newHighlight.title` is empty after trimming or longer than 15) or `full` (the highlight or the place is at its cap). Naming both destinations, or any unknown key (05.1’s retired `communityId` included), is a plain `VALIDATION_FAILED`. In every case NO story, highlight or item is written.',
     },
     403: {
       description:
-        'The caller does not hold `stories.story.publish` in this tenant — or the body names a destination (`highlightId`, `newHighlight` or `communityId`) and the caller does not also hold `stories.story.manage` (curating at publish is the manage half). Checked before any lookup.',
+        'The caller does not hold `stories.story.publish` in this tenant — or the body names a destination (`highlightId` or `newHighlight`) and the caller does not also hold `stories.story.manage` (curating at publish is the manage half). Checked before any lookup.',
     },
     404: {
       description:
-        'The media asset — or the chosen highlight, `newHighlight.communityId` or `communityId` — is unknown, another tenant’s, or removed (or the communities module is off). One bare code, no details, byte-identical for every miss (T-05-26, D-23).',
+        'The media asset — or the chosen highlight or `newHighlight.communityId` — is unknown, another tenant’s, or removed (or the communities module is off). One bare code, no details, byte-identical for every miss (T-05-26, D-23).',
     },
   },
 });
@@ -507,7 +486,7 @@ const deleteStoryRoute = createRoute({
  *  - a miss is a BARE 404 with no `details` — unknown id, another tenant's, or removed (D-23).
  *
  * **An EXPIRED story is likeable and that is not an oversight** (A-4). Expiry gates the strip's
- * read; 05-08 pins expired stories to communities, and an affordance that answered 400 there would
+ * read; highlights keep expired stories on Início and community pages, and an affordance that answered 400 there would
  * be a second copy of the 24 h window living in two more places.
  */
 const storyLikeResponses = {
@@ -551,7 +530,7 @@ const unlikeStoryRoute = createRoute({
  * important of the three layers (STORY-05, T-05-40).
  *
  * An EXPIRED story is commentable, and that is not an oversight (A-4): expiry gates the STRIP's
- * read and nothing else, and 05-08 pins expired stories to communities.
+ * read and nothing else, and highlights keep expired stories on Início and community pages.
  */
 const listCommentsRoute = createRoute({
   method: 'get',
@@ -610,36 +589,7 @@ const deleteCommentRoute = createRoute({
   },
 });
 
-/* ── Community pins (STORY-04, D-68) ──────────────────────────────────────────────────────────── */
-
-/**
- * **The two WRITE routes carry `requirePermission('stories.story.manage')` and the READ carries
- * none, and the asymmetry is the product rule** (T-05-48): pinning is an EDITORIAL act reserved to
- * whoever moderates the tenant's stories, while a community's Destaques is something every member
- * of the tenant sees — exactly as every member sees the community's posts.
- *
- * The literal is spelled out at each call site rather than read from `STORY_PERMISSIONS`, for the
- * reason the chain note at the top of this file gives: it is the one string a reviewer greps for
- * when asking "what guards pinning a story?".
- *
- * **There is no conflict status in this block.** A repeat pin answers 200 with the identical body
- * and an unpin of something never pinned does too; the unique pair is the arbiter, not a check in
- * the service and not an error code here.
- */
-const pinParams = storyIdParam.extend({ communityId: z.uuid() });
-
-const storyPinResponses = {
-  200: {
-    description:
-      'The CURRENT state after the toggle, read back from the rows in the same transaction. `pinnedCommunityCount` is how many communities the STORY is pinned to. Idempotent: a repeat creates no second row, removes nothing a second time, and never answers 409.',
-    content: { 'application/json': { schema: storyPinResultSchema } },
-  },
-  403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
-  404: {
-    description:
-      'The story or the community is unknown, another tenant’s, or removed — ONE bare code for all of them, no details (D-23, T-05-49).',
-  },
-} as const;
+/* ── Highlight memberships (05.2, D-110) ─────────────────────────────────────────────────────── */
 
 const storyHighlightIdsRoute = createRoute({
   method: 'get',
@@ -658,60 +608,10 @@ const storyHighlightIdsRoute = createRoute({
   },
 });
 
-const pinStoryRoute = createRoute({
-  method: 'put',
-  path: '/{storyId}/pins/{communityId}',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
-  request: { params: pinParams },
-  responses: {
-    ...storyPinResponses,
-    400: {
-      description:
-        "`VALIDATION_FAILED` with `details.pin = 'archived'` — an archived community takes no new content, and a pin is new content. 05-03's own code, not a second spelling of it.",
-    },
-  },
-});
-
-const unpinStoryRoute = createRoute({
-  method: 'delete',
-  path: '/{storyId}/pins/{communityId}',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
-  request: { params: pinParams },
-  responses: {
-    ...storyPinResponses,
-    // Deliberately NO 400 here: an ARCHIVED community can still be unpinned. Archiving gates new
-    // content; if it gated removal too, a story pinned before the archive would stay highlighted
-    // on that page forever with no affordance to take it down.
-  },
-});
-
-const listStoryPinsRoute = createRoute({
-  method: 'get',
-  path: '/{storyId}/pins',
-  // The literal, not `STORY_PERMISSIONS.manage` — see the chain note above.
-  middleware: [requirePermission('stories.story.manage')] as const,
-  request: { params: storyIdParam },
-  responses: {
-    200: {
-      description:
-        "The community ids this story is pinned to — the pin sheet's initial state. Ids only: the sheet already holds the names from the page's own read.",
-      content: { 'application/json': { schema: storyPinsSchema } },
-    },
-    403: { description: 'The caller does not hold `stories.story.manage` in this tenant' },
-    404: { description: 'No story with that id is visible to this tenant (D-23).' },
-  },
-});
-
 export const storiesRoutes = stories
   .openapi(listOwnRoute, async (c) =>
     c.json(await listOwnStories(c.get('ctx'), c.req.valid('query')), 200),
   )
-  .openapi(highlightsRoute, async (c) => {
-    const { communityId, ...query } = c.req.valid('query');
-    return c.json(await listCommunityHighlights(c.get('ctx'), communityId, query), 200);
-  })
   .openapi(listHighlightsRoute, async (c) => {
     const ctx = c.get('ctx');
     const { communityId, scope } = c.req.valid('query');
@@ -771,15 +671,11 @@ export const storiesRoutes = stories
   .openapi(publishStoryRoute, async (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');
-    // 05.1 (OQ-1) / 05.2 (D-113): putting a story somewhere AT PUBLISH — a highlight, a highlight
-    // created inline, or the retiring pin — is curation, the manage half. The middleware keeps the
-    // publish literal; this second check runs whenever ANY destination key is present, BEFORE any
-    // lookup, so a publish-only caller learns nothing about the id it sent (T-05.1-05, T-05.2-32).
-    if (
-      body.communityId !== undefined ||
-      body.highlightId !== undefined ||
-      body.newHighlight !== undefined
-    ) {
+    // 05.1 (OQ-1) / 05.2 (D-113): putting a story somewhere AT PUBLISH — a highlight, or a highlight
+    // created inline — is curation, the manage half. The middleware keeps the publish literal; this
+    // second check runs whenever EITHER destination key is present, BEFORE any lookup, so a
+    // publish-only caller learns nothing about the id it sent (T-05.1-05, T-05.2-32).
+    if (body.highlightId !== undefined || body.newHighlight !== undefined) {
       const granted = await permissionsForRequest(ctx);
       if (!granted.includes('stories.story.manage')) throw new ApiError(403, 'FORBIDDEN');
     }
@@ -814,16 +710,4 @@ export const storiesRoutes = stories
   .openapi(storyHighlightIdsRoute, async (c) => {
     const { storyId } = c.req.valid('param');
     return c.json(await listStoryHighlightIds(c.get('ctx'), storyId), 200);
-  })
-  .openapi(listStoryPinsRoute, async (c) => {
-    const { storyId } = c.req.valid('param');
-    return c.json(await listStoryPins(c.get('ctx'), storyId), 200);
-  })
-  .openapi(pinStoryRoute, async (c) => {
-    const { storyId, communityId } = c.req.valid('param');
-    return c.json(await pinStory(c.get('ctx'), storyId, communityId), 200);
-  })
-  .openapi(unpinStoryRoute, async (c) => {
-    const { storyId, communityId } = c.req.valid('param');
-    return c.json(await unpinStory(c.get('ctx'), storyId, communityId), 200);
   });

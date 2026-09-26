@@ -134,7 +134,7 @@ describe('MediaImage — the reporting contract (R-05, CR-03)', () => {
   it('2. an EMPTY variant ladder reports FAILURE exactly once and renders the fallback (CR-03)', () => {
     forceImageState(true, 800);
 
-    // `listCommunityHighlights` deliberately omits the `status = 'ready'` filter, so a pinned,
+    // The admin history (`listOwnStories`) omits the `status = 'ready'` filter, so a
     // still-transcoding asset reaches the viewer with no variants published yet.
     render(<ReportingParent assetId="asset-empty" widths={[]} />);
 

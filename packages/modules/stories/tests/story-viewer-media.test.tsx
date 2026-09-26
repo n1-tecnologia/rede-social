@@ -289,7 +289,7 @@ describe('StoryViewer over the REAL MediaImage — the image path settles (STORY
 
   it('4. CR-03: a story with an EMPTY variant ladder reaches the error state and is not consumed', () => {
     const clock = manualClock();
-    // `listCommunityHighlights` omits the `status = 'ready'` filter on purpose, so a pinned,
+    // The admin history (`listOwnStories`) omits the `status = 'ready'` filter on purpose, so a
     // still-transcoding asset reaches the viewer with no variants published yet.
     viewer([mediaItem(0, []), mediaItem(1)], {}, clock);
 

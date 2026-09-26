@@ -110,8 +110,8 @@ export function MediaImage({
   useEffect(() => {
     // An EMPTY variant ladder is not a quieter kind of success (CR-03). There is nothing to render
     // and no `<img>` to fire an event, so this branch is the ONLY place the outcome can be
-    // reported — and it is reachable in production: `listCommunityHighlights` deliberately omits
-    // the `status = 'ready'` filter, so a pinned, still-transcoding asset arrives with no variants.
+    // reported — and it is reachable in production: the admin history (`listOwnStories`) omits
+    // the `status = 'ready'` filter, so a still-transcoding asset arrives with no variants.
     // Returning the fallback while reporting nothing is what froze the story viewer in `loading`
     // with no progress, no auto-advance, no error copy and no retry. `src` is already a dependency,
     // so this runs once per asset; both the state write and the report happen in an effect rather

@@ -46,41 +46,36 @@ import {
  * 4. **There is NO SCHEDULED JOB of any kind, and adding one would break STORY-03.** Expiry is a
  *    read predicate: no sweeper, no cron entry, no status transition, no cascade. A story leaves the
  *    strip because `now()` moved, and the ROW IS RETAINED FOREVER — which is what makes the admin's
- *    history screen (D-84) and 05-08's pins possible with no extra state, and what stops a member's
+ *    history screen (D-84) and highlights (05.2) possible with no extra state, and what stops a member's
  *    comment vanishing because a clock passed.
  *
- * 5. **UNPIN IS A HARD DELETE, and this is deliberate.** It is the one place Phase 5 departs from
- *    the soft-delete convention, so say it here rather than let a reviewer "fix" it: a pin carries
- *    NO AUTHORED CONTENT and NO MODERATION EVIDENCE — it is a pair of ids and a timestamp recording
- *    an editorial act that has since been undone. The unique pair on `story_community_pins` is the
- *    idempotency arbiter, and a soft-deleted pin would need an extra `deleted_at is null` predicate
- *    threaded through every join that reads it, plus a decision about what re-pinning a
- *    soft-deleted pair means. `story.unpinned` is the record that it happened.
+ * 5. **REMOVING A STORY FROM A HIGHLIGHT IS A HARD DELETE, and this is deliberate.** It is the one
+ *    place this module departs from the soft-delete convention, so say it here rather than let a
+ *    reviewer "fix" it: a `story_highlight_items` row carries NO AUTHORED CONTENT and NO MODERATION
+ *    EVIDENCE — it is a pair of ids, a curator and a timestamp recording an editorial act. Its unique
+ *    (highlight, story) pair is the idempotency arbiter, so a repeat add is absorbed and a removal has
+ *    at most one row to remove; a soft-deleted item would need an extra `deleted_at is null`
+ *    predicate threaded through every join that reads it. Deleting a highlight deletes its row, and
+ *    its items go with it through `on delete cascade`. `story.unhighlighted` / `highlight.deleted`
+ *    are the record that it happened. The STORY row is never touched by either — a highlight is an
+ *    editorial pointer, not a copy. (Phase 5's community pin carried the same rule; the pin model
+ *    retired in 05.2, D-116.)
  *
- *    **05.2 carries the same rule to highlights.** Removing a story from a highlight deletes its
- *    `story_highlight_items` row, and deleting a highlight deletes the highlight row (its items go
- *    with it through `on delete cascade`). Both are HARD deletes for the pin's reasons: neither row
- *    carries authored content or moderation evidence, and the item's unique (highlight, story) pair
- *    is the idempotency arbiter, so a repeat add is absorbed and a removal has at most one row to
- *    remove.
- *    The STORY row is never touched by either — a highlight is an editorial pointer, not a copy.
+ * 6. **THE ITEM ROW IS THE EXPIRY OVERRIDE.** A story in a highlight is playable from it for every
+ *    value of `now()`: the highlight items read (`getHighlight`) carries NO expiry predicate — only
+ *    `s.deleted_at is null` — and that ABSENCE is the mechanism, not an oversight;
+ *    `120-story-highlights.sql` asserts it under a controlled clock beside the strip predicate
+ *    refusing the same row. There is deliberately no column on `stories` recording that it is kept:
+ *    one story may sit in several highlights (D-100), which a boolean cannot represent, and a
+ *    denormalised count would be a second writer of a fact the join already holds. An item is a
+ *    story's membership in a NAMED highlight that belongs to exactly one PLACE (Início, or one
+ *    community).
  *
- * 6. **THE PIN ROW IS THE EXPIRY OVERRIDE.** `listCommunityHighlights` carries NO expiry predicate
- *    at all — that ABSENCE is the mechanism, not an oversight, and it is asserted under a clock the
- *    test controls in `110-communities-stories.sql`. There is deliberately no column on `stories`
- *    recording that it is pinned: STORY-04 says "one or more communities", which a boolean cannot
- *    represent, and a denormalised count would be a second writer of a fact the join already holds.
- *
- *    **05.2: THE ITEM ROW IS THE EXPIRY OVERRIDE TOO.** A story in a highlight is playable from it
- *    for every value of `now()`: the highlight items read (`getHighlight`) carries NO expiry
- *    predicate — only `s.deleted_at is null` — and `120-story-highlights.sql` asserts it under a
- *    controlled clock beside the strip predicate refusing the same row. An item is a story's
- *    membership in a NAMED highlight that belongs to exactly one PLACE (Início, or one community).
- *
- * **Highlights replace pins (05.2, D-116).** `story_highlights` / `story_highlight_items` generalise
- * `story_community_pins`: migration file 1 (`*_story_highlights.sql`) copies every pin into a
- * `Destaques` highlight of its own community under a no-loss guard, and plan 11 drops the pins table,
- * its routes and its events. Until then both exist, so nothing that still reads pins goes red.
+ * **Highlights replaced pins (05.2, D-116).** `story_highlights` / `story_highlight_items` generalise
+ * Phase 5's per-community pin: migration file 1 (`*_story_highlights.sql`) copied every pin into a
+ * `Destaques` highlight of its own community under a no-loss guard, and migration file 2
+ * (`*_drop_story_community_pins.sql`) dropped the pin table once its routes and events were gone
+ * (05.2-11). One representation of a curated story remains.
  *
  * Authorship is the generic `author_user_id -> users.id` (SCHEMA-CONVENTIONS §(c).1), so V2 member
  * stories are rows rather than a migration.

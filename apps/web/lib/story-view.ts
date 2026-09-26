@@ -264,7 +264,6 @@ export function storyHistoryView(
     ...(status ? { status } : {}),
     // UI-D-77 / UI E12 zero-one-many: in NO highlight renders no indicator at all, so the key is
     // absent rather than carrying a zero. `StoryHistoryRow` checks the count too — belt and braces.
-    // `pinnedCommunityCount` is no longer read: the pin model is retired on the web (UI-D-79).
     ...(story.highlightCount > 0
       ? {
           highlighted: {
@@ -587,8 +586,8 @@ export function inicioRow(
 /**
  * One group of the grouped viewer, composed on the SERVER — plain data, like everything above.
  *
- * - `kind` says where it came from: the Início tenant circle, an Início highlight, the community
- *   page's pinned row (until plan 08 replaces it with highlights) or a deep link's single story.
+ * - `kind` says where it came from: the Início tenant circle, a highlight (Início's or a community
+ *   page's) or a deep link's single story.
  * - `highlightId` is what the lazy read asks for; null for every kind but `highlight`.
  * - `name` and `avatar` head the viewer for the whole group (UI-D-65): the tenant's display name and
  *   logo, or the highlight's title and cover — the same identity the circle showed.
@@ -597,7 +596,7 @@ export function inicioRow(
  */
 export type StoryGroupView = {
   key: string;
-  kind: 'tenant' | 'highlight' | 'pins' | 'story';
+  kind: 'tenant' | 'highlight' | 'story';
   highlightId: string | null;
   name: string;
   avatar:
@@ -609,13 +608,12 @@ export type StoryGroupView = {
 };
 
 /**
- * A group whose stories are the TENANT's — Início's tenant circle, the community pinned row and a
- * deep link alike. V1's single publisher is the tenant, so the header is its display name over its
+ * A group whose stories are the TENANT's — Início's tenant circle and a deep link alike. V1's single publisher is the tenant, so the header is its display name over its
  * logo in the shipped `Avatar` (unchanged from 05-06; see the host's note).
  */
 function tenantHeadedGroup(
   key: string,
-  kind: 'tenant' | 'pins' | 'story',
+  kind: 'tenant' | 'story',
   tenant: { displayName: string; logoUrl: string | null },
   items: StoryViewerItemView[],
 ): StoryGroupView {
@@ -635,14 +633,6 @@ export function tenantGroupView(
   items: StoryViewerItemView[],
 ): StoryGroupView {
   return tenantHeadedGroup('tenant', 'tenant', tenant, items);
-}
-
-/** The community page's pinned row as ONE group (unchanged behaviour until plan 08). */
-export function pinsGroupView(
-  tenant: { displayName: string; logoUrl: string | null },
-  items: StoryViewerItemView[],
-): StoryGroupView {
-  return tenantHeadedGroup('pins', 'pins', tenant, items);
 }
 
 /** A deep link's single story as ONE group: it opens what the link names and closes at its end. */
