@@ -37,10 +37,12 @@ import { ensureWorker } from './worker';
  * flipped by a spec-only SQL helper. 04-10 deleted that module (D-19) and REPLACED the witness with
  * the feed, which is what 02-16 recorded Phase 4 would do: the whole chain — panel switch → flag →
  * member bootstrap within the flags TTL → `/v1/feed` 200/404 → the home slot appearing and
- * disappearing — now runs through the PANEL on a real module, with no SQL shortcut. The nav stays
- * ['Início', 'Comunidades', 'Perfil'] throughout because the FEED ships a home slot and no tab
- * (D-55) while `communities` ships a tab (D-40, 05-01) and a provisioned tenant gets every default
- * module — which is an assertion rather than an absence.
+ * disappearing — now runs through the PANEL on a real module, with no SQL shortcut. A provisioned
+ * tenant gets every default module, so the nav reads ['Início', 'Comunidades', 'Reels', 'Perfil']:
+ * the FEED ships a home slot and no tab (D-55), `communities` ships a tab (D-40, 05-01) and `reels`
+ * a tab that REQUIRES the feed (D-121/D-123, 05.3-01). With the feed off the Reels tab therefore
+ * leaves too while its own flag stays on, and it returns with the feed — an assertion, not an
+ * absence.
  *
  * Hosts are `<slug>.localhost`: the BROWSER resolves them to loopback (RFC 6761) and GoTrue honours
  * their `redirectTo` locally; NODE does not resolve them, so every Node-side call (API, Mailpit,
@@ -608,9 +610,10 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     await expect(
       page.locator(mobile ? '[data-shell-nav="bottom"]' : '[data-shell-nav="rail"]'),
     ).toBeVisible();
-    // D-19 (reference module off) + D-40: the two kernel tabs plus the `communities` manifest's own
-    // entry, which every newly provisioned tenant gets with the default module set (05-01).
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Perfil']);
+    // D-19 (reference module off) + D-40: the two kernel tabs plus the `communities` and `reels`
+    // manifests' own entries, which every newly provisioned tenant gets with the default module set
+    // (05-01, 05.3-01).
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
     // RENDERED brand colour on the active item (02-14 alias scoping inside [data-brand-root]).
     await expect.poll(() => activeNavColor(page)).toBe(hexToRgb(PRIMARY_2));
 
@@ -765,16 +768,17 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect(feedRegion(memberPage)).toBeVisible();
       expect(await modulesOf()).toContain('feed');
       expect((await feedApi()).status).toBe(200);
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Perfil']);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
 
       // (b) Panel path: Feed off → the stored flag, the member's bootstrap, the API and the home
-      // slot all follow, within the flags TTL and with no redeploy. The nav is unchanged in BOTH
-      // directions because the FEED ships a home slot and no tab (D-55) — asserted, not assumed.
-      // The `Comunidades` entry belongs to another module whose flag this test never touches, so
-      // it is present in all three readings and is precisely what "unchanged" has to mean.
+      // slot all follow, within the flags TTL and with no redeploy. The FEED itself ships a home
+      // slot and no tab (D-55), so no "Feed" link ever appears — asserted, not assumed. The
+      // `Comunidades` entry belongs to another module whose flag this test never touches, so it is
+      // present in all three readings. `Reels` REQUIRES the feed (D-121, 05.3-01): with the feed
+      // off it leaves the nav although its own flag stays on, and it returns with the feed.
       await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
       await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/modulos`);
-      await expect(page.locator('main').getByRole('switch')).toHaveCount(6);
+      await expect(page.locator('main').getByRole('switch')).toHaveCount(7);
       const feed = page.getByRole('switch', { name: /Feed/ });
       await feed.click();
       await expect(feed).toHaveAttribute('aria-checked', 'false');
@@ -785,7 +789,9 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect.poll(async () => (await feedApi()).status, { timeout: 35_000 }).toBe(404);
       expect((await feedApi()).code).toBe('MODULE_DISABLED');
       await memberPage.goto(`${origin}/inicio`);
+      // D-121: the feed-requiring Reels tab left with the feed; its own flag was never touched.
       expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Perfil']);
+      expect(await getTenantModuleFlag(slug, 'reels')).toBe(true);
       await expect(visibleNav(memberPage).getByRole('link', { name: 'Feed' })).toHaveCount(0);
       await expect(feedRegion(memberPage)).toHaveCount(0); // the slot is gone, no redeploy
 
@@ -800,7 +806,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect.poll(async () => (await feedApi()).status, { timeout: 35_000 }).toBe(200);
       await memberPage.goto(`${origin}/inicio`);
       await expect(feedRegion(memberPage)).toBeVisible();
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Perfil']);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
     } finally {
       await setTenantModuleFlag(slug, 'feed', true);
       await memberContext.close();

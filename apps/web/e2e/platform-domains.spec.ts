@@ -120,7 +120,8 @@ test.beforeAll(async ({ browser }) => {
       displayName: `E2E Domínios ${rand}`,
       slug,
       colors: { primary: '#2e6fd0', secondary: '#5b9cf8' },
-      modules: ['feed', 'communities', 'stories', 'events', 'chat', 'notifications'],
+      // Every real module (D-17 defaults), so test 6's seven switches all start on.
+      modules: ['feed', 'communities', 'stories', 'events', 'chat', 'notifications', 'reels'],
       adminEmail,
     }),
   });
@@ -368,7 +369,7 @@ test.describe('02-15 — Domínios tab', () => {
 });
 
 test.describe('02-15 — Módulos tab', () => {
-  test('6. six switches → disable feed → DB flag false + member bootstrap drops feed → re-enable', async () => {
+  test('6. seven switches → disable feed → DB flag false + member bootstrap drops feed → re-enable', async () => {
     // The member calls the API on the tenant's verified host (host2, primary since test 2).
     await createMember(memberEmail, SEED_PASSWORD, slug);
     const memberApi = await apiSession(memberEmail, SEED_PASSWORD);
@@ -384,8 +385,8 @@ test.describe('02-15 — Módulos tab', () => {
     ).toBeVisible();
     // Scoped to the tab column: the desktop rail carries the "Tema" switch (02-16 theme row).
     const switches = page.locator('main').getByRole('switch');
-    await expect(switches).toHaveCount(6);
-    for (let i = 0; i < 6; i += 1) {
+    await expect(switches).toHaveCount(7);
+    for (let i = 0; i < 7; i += 1) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'true'); // D-17 defaults
     }
     for (const name of [
@@ -395,13 +396,15 @@ test.describe('02-15 — Módulos tab', () => {
       /Eventos/,
       /Chat de suporte/,
       /Notificações/,
+      /Reels/,
     ]) {
       await expect(page.getByRole('switch', { name })).toBeVisible();
     }
-    // The panel lists exactly the key vocabulary — six switches, no seventh. 04-10 deleted the
-    // reference module (D-19), so what makes a stray key impossible is now the vocabulary itself.
-    await expect(page.locator('main').getByRole('switch')).toHaveCount(6);
-    expect(await page.getByText('Ativado', { exact: true }).count()).toBe(6);
+    // The panel lists exactly the key vocabulary — seven switches (05.3-01 added `reels`), no
+    // eighth. 04-10 deleted the reference module (D-19), so what makes a stray key impossible is
+    // now the vocabulary itself.
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(7);
+    expect(await page.getByText('Ativado', { exact: true }).count()).toBe(7);
 
     if (test.info().project.name === 'mobile-chromium') {
       // `has:` inner locators are relative to the outer element — a root-scoped locator never matches.
@@ -424,7 +427,7 @@ test.describe('02-15 — Módulos tab', () => {
     await expect.poll(() => getTenantModuleFlag(slug, 'feed'), { timeout: 10_000 }).toBe(false);
     // ROLE-04 without a redeploy: immediate on the instance that served the PUT, ≤ 30 s anywhere.
     await expect.poll(modulesOf, { timeout: 35_000 }).not.toContain('feed');
-    // Only the key that was toggled moved: the other five flags are untouched by the write.
+    // Only the key that was toggled moved: the other six flags are untouched by the write.
     expect(await getTenantModuleFlag(slug, 'events')).toBe(true);
 
     // The server, not client memory, renders the new state after a reload.
@@ -433,7 +436,7 @@ test.describe('02-15 — Módulos tab', () => {
       'aria-checked',
       'false',
     );
-    await expect(page.locator('main').getByRole('switch')).toHaveCount(6);
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(7);
 
     await page.getByRole('switch', { name: /Feed/ }).click();
     await expect(page.getByRole('switch', { name: /Feed/ })).toHaveAttribute(

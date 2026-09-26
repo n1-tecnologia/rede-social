@@ -175,7 +175,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await page.getByRole('button', { name: 'Reativar tenant' }).click();
     await expect(page.getByTestId('tenant-status-pill')).toHaveText('Ativo');
 
-    // D-17 wiring: the six real modules are on for a panel-created tenant.
+    // D-17 wiring: the seven real modules are on for a panel-created tenant.
     expect(await getTenantModuleFlag(slug, 'events')).toBe(true);
     expect(await getTenantModuleFlag(slug, 'feed')).toBe(true);
 
@@ -258,10 +258,10 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await confirm.check();
     await expect(submit).toBeEnabled();
 
-    // Six switches, all on by default (D-17) — exactly the key vocabulary and nothing else.
+    // Seven switches, all on by default (D-17) — exactly the key vocabulary and nothing else.
     // Scoped to the form column: the desktop rail carries the "Tema" switch (02-16 theme row).
     const switches = page.locator('main').getByRole('switch');
-    await expect(switches).toHaveCount(6);
+    await expect(switches).toHaveCount(7);
     for (const sw of await switches.all()) await expect(sw).toBeChecked();
     await page.getByRole('switch', { name: 'Stories' }).click();
     await expect(page.getByRole('switch', { name: 'Stories' })).not.toBeChecked();

@@ -136,7 +136,7 @@ test.describe('Phase 5 smoke — communities and stories, each in both direction
     // contributes a TAB and no home slot (D-55's budget). Asserting both in one place is what keeps
     // the distinction visible.
     await expect(strip(page)).toBeVisible();
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Perfil']);
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
     await expect(visibleNav(page).getByRole('link', { name: 'Stories', exact: true })).toHaveCount(
       0,
     );
@@ -232,6 +232,6 @@ test.describe('Phase 5 smoke — communities and stories, each in both direction
     // touch is the control that shows the flips were scoped to their own tenant.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await expect(strip(page)).toBeVisible();
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Perfil']);
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
   });
 });

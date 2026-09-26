@@ -133,10 +133,10 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
     await expect(region.getByRole('article').first()).toBeVisible();
 
     // D-55, asserted rather than assumed: the FEED contributes a HOME SLOT and no navigation entry.
-    // The `Comunidades` entry beside the two kernel tabs is 05-01's `communities` manifest, not the
-    // feed's — which is exactly the distinction this assertion exists to keep visible, and the
-    // explicit `name: 'Feed'` count below is what pins it.
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Perfil']);
+    // The `Comunidades` and `Reels` entries beside the two kernel tabs are 05-01's `communities` and
+    // 05.3-01's `reels` manifests, not the feed's — which is exactly the distinction this assertion
+    // exists to keep visible, and the explicit `name: 'Feed'` count below is what pins it.
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
     await expect(visibleNav(page).getByRole('link', { name: 'Feed', exact: true })).toHaveCount(0);
 
     // FEED-07: the deep link a member would receive resolves to the post's own page.
@@ -164,6 +164,8 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
     await expect(page.getByText(APP.error.title, { exact: true })).toHaveCount(0);
     // With no module slot registered, the kernel's own "Em breve" card is what fills the page.
     await expect(page.getByText(APP.home.soonTitle, { exact: true })).toBeVisible();
+    // This throwaway tenant has no `reels` row at all, so D-121's `requires` is not what keeps the
+    // Reels tab away here (05.3-09 proves that on its own tenant).
     expect(await navLabels(page)).toEqual(['Início', 'Perfil']);
 
     // The module-disabled rule, across the routes a member could reach: 404 MODULE_DISABLED on all
@@ -208,7 +210,8 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
     // kernel's "Em breve" — which is how the two absences stay distinguishable (UI-D-20).
     await expect(region.getByText(F.empty.title, { exact: true })).toBeVisible();
     await expect(page.getByText(APP.home.soonTitle, { exact: true })).toHaveCount(0);
-    // Still no tab: turning the module on adds a slot, never a navigation entry (D-55).
+    // Still no tab: turning the module on adds a slot, never a navigation entry (D-55). The
+    // throwaway tenant has no `reels` row, so no Reels tab either (not D-121's doing).
     expect(await navLabels(page)).toEqual(['Início', 'Perfil']);
   });
 
@@ -225,10 +228,11 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
 
     // …and the shell offers neither a tab nor a widget for it, on a tenant that used to have both.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    // `Comunidades` is 05-01's `communities` manifest and is exactly what the absent reference
-    // module's own entry would have looked like — its presence is what makes this an assertion
-    // about the DELETED module rather than about a nav that happens to be kernel-only.
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Perfil']);
+    // `Comunidades` (05-01) and `Reels` (05.3-01) are module manifests and are exactly what the
+    // absent reference module's own entry would have looked like — their presence is what makes
+    // this an assertion about the DELETED module rather than about a nav that happens to be
+    // kernel-only.
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
     await expect(page.locator('#exemplo')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Exemplo', exact: true })).toHaveCount(0);
   });

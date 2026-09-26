@@ -20,10 +20,11 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
  *
  * **The nav is the REGISTRY's, and since 05-01 it is no longer kernel-only.** `feed` deliberately
  * contributes a home slot and no tab (D-55); `communities` contributes a TAB at `nav.order: 20`
- * (D-40), so a tenant with that module on shows `['Início', 'Comunidades', 'Perfil']` and a tenant
- * with it off shows `['Início', 'Perfil']`. The two seed tenants therefore differ HERE as well now
- * — tria-demo has the module, tria-lab does not — which makes this assertion a second witness for
- * the module flag rather than the sameness it used to be. What still separates the two tenants in
+ * (D-40) and, since 05.3-01, `reels` a TAB at `nav.order: 30` (D-123, it requires `feed`). So
+ * tria-demo (both modules on) shows Início · Comunidades · Reels · Perfil and tria-lab (reels on,
+ * communities off) shows Início · Reels · Perfil. The two seed tenants therefore
+ * differ HERE as well — which makes this assertion a second witness for the module flag rather
+ * than the sameness it used to be. What still separates the two tenants in
  * every other respect is what the rest of this file measures: the brand token, the logo, the
  * display name, and the fact that neither tenant's brand ever appears in the other's HTML
  * (TENANT-02 adjacency).
@@ -85,10 +86,10 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     }
 
     const nav = visibleNav(page, mobile);
-    // 05-01: tria-demo has the `communities` module, so its manifest's tab sits between the two
-    // kernel entries at `nav.order: 20`. The lab case below still reads ['Início', 'Perfil'] —
-    // the pair is the module flag, rendered.
-    expect(await navLinkNames(nav)).toEqual(['Início', 'Comunidades', 'Perfil']);
+    // 05-01 / 05.3-01: tria-demo has the `communities` (order 20) and `reels` (order 30) modules, so
+    // their manifests' tabs sit between the two kernel entries. The lab case below reads
+    // Início · Reels · Perfil — the pair is the communities flag, rendered.
+    expect(await navLinkNames(nav)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
     await expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page');
 
     // D-42: the enabled module's home slot renders; the "Em breve" card does not. Since 04-10 that
@@ -126,7 +127,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     const nav = visibleNav(page, mobile);
     // Scoped to the NAV: the lab feed carries 04-05's seeded link posts, whose auto-linked URLs are
     // links too — a page-wide count would read those as tabs and fail for the wrong reason.
-    expect(await navLinkNames(nav)).toEqual(['Início', 'Perfil']);
+    expect(await navLinkNames(nav)).toEqual(['Início', 'Reels', 'Perfil']);
     // UI-D-20: a module DID contribute a slot here, so the kernel placeholder must be absent and
     // the feed widget must be what fills the home column instead.
     await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);
