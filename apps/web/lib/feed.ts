@@ -52,8 +52,17 @@ async function apiError(res: Response): Promise<ApiClientError> {
  * projection, the same cursor envelope, the same page size. It is a parameter rather than a second
  * fetch function precisely so the merged feed and a community's own list cannot drift on any of the
  * three.
+ *
+ * `media: 'video'` (05.3-07, REELS-03) narrows the SAME endpoint to posts whose video is ready: it
+ * is how Reels reads its pages. The same one-endpoint rule as `communityId` applies, so Reels and
+ * Início share one projection, one cursor envelope and one fetch implementation.
  */
-export type FeedQueryInput = { cursor?: string; limit?: number; communityId?: string };
+export type FeedQueryInput = {
+  cursor?: string;
+  limit?: number;
+  communityId?: string;
+  media?: 'video';
+};
 
 /**
  * `GET /v1/feed` (FEED-02) and, with `communityId`, `GET /v1/feed?communityId=` (COMM-03).
@@ -67,6 +76,7 @@ export async function getFeed(query: FeedQueryInput = {}): Promise<FeedPage> {
   if (query.cursor) search.set('cursor', query.cursor);
   search.set('limit', String(query.limit ?? FEED_PAGE_SIZE));
   if (query.communityId) search.set('communityId', query.communityId);
+  if (query.media) search.set('media', query.media);
 
   const res = await apiFetch(`/v1/feed?${search.toString()}`);
   if (!res.ok) throw await apiError(res);
