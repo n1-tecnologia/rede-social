@@ -45,10 +45,10 @@ describe('createTenantBodySchema (POST /v1/platform/tenants, ROLE-03)', () => {
     expect(parsed.adminEmail).toBe('admin@cliente.com.br');
   });
 
-  it('defaults modules to the six real modules when omitted', () => {
+  it('defaults modules to the seven real modules when omitted', () => {
     const { modules: _omit, ...body } = valid;
     expect(createTenantBodySchema.parse(body).modules).toEqual([...REAL_TENANT_DEFAULT_MODULES]);
-    expect(createTenantBodySchema.parse(body).modules).toHaveLength(6);
+    expect(createTenantBodySchema.parse(body).modules).toHaveLength(7);
   });
 
   it('rejects a slug with spaces or accents (ASCII regex, tenants_slug_chk)', () => {

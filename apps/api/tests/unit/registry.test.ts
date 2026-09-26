@@ -7,6 +7,7 @@ import {
 import { defineModule, type ModuleManifest } from '@tria/core/server/modules/manifest';
 import { describe, expect, it } from 'vitest';
 import {
+  effectiveKeys,
   enabledModulesForBootstrap,
   MODULE_REGISTRY,
   permissionsFor,
@@ -37,6 +38,19 @@ function bootstrapWith(
   }
 }
 
+/** Runs `fn` against a swapped registry, the same save/restore `bootstrapWith` does. */
+function withRegistry<T>(registry: Partial<Record<ModuleKey, ModuleManifest>>, fn: () => T): T {
+  const saved = { ...MODULE_REGISTRY };
+  for (const key of Object.keys(MODULE_REGISTRY) as ModuleKey[]) delete MODULE_REGISTRY[key];
+  Object.assign(MODULE_REGISTRY, registry);
+  try {
+    return fn();
+  } finally {
+    for (const key of Object.keys(MODULE_REGISTRY) as ModuleKey[]) delete MODULE_REGISTRY[key];
+    Object.assign(MODULE_REGISTRY, saved);
+  }
+}
+
 describe('MODULE_REGISTRY — the kernel/module contract composed in the app tier', () => {
   it('1. every registered key equals its manifest key and is a known module key (MOD-01 adjacency)', () => {
     const keys = Object.keys(MODULE_REGISTRY) as ModuleKey[];
@@ -47,10 +61,10 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       expect(TOGGLEABLE_MODULES).toContain(key);
     }
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
-    // — the first REAL module — as the only registration; 05-01 added `communities` and 05-05 added
-    // `stories`. The list is sorted so a new entry is one line, and this assertion is what makes a
-    // silently-dropped registration fail rather than pass.
-    expect(keys.sort()).toEqual(['communities', 'feed', 'stories']);
+    // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
+    // `stories` and 05.3-01 added `reels`. The list is sorted so a new entry is one line, and this
+    // assertion is what makes a silently-dropped registration fail rather than pass.
+    expect(keys.sort()).toEqual(['communities', 'feed', 'reels', 'stories']);
     // D-55 (amends D-40): the feed contributes a HOME SLOT and no navigation tab, so Phases 5 and 6
     // keep the tab budget they are planning against. A nav entry here is a regression, not a feature.
     expect(MODULE_REGISTRY.feed?.nav).toBeUndefined();
@@ -60,6 +74,16 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // publish door, so a nav entry here would be a regression as well.
     expect(MODULE_REGISTRY.stories?.nav).toBeUndefined();
     expect(MODULE_REGISTRY.stories?.home).toEqual([{ order: 5 }]);
+    // D-121 / D-123 / UI-D-81: `reels` spends a TAB at order 30 (between Comunidades' 20 and Phase
+    // 6's Eventos at 40), declares the media chrome, and contributes nothing while `feed` is off.
+    expect(MODULE_REGISTRY.reels?.nav).toMatchObject({
+      placement: 'tab',
+      href: '/reels',
+      order: 30,
+      icon: 'film',
+      chrome: 'media',
+    });
+    expect(MODULE_REGISTRY.reels?.requires).toEqual(['feed']);
   });
 
   it('2. defineModule accepts a manifest with only a key, and it lists without nav (MOD-01 empty)', () => {
@@ -102,14 +126,15 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     ).toEqual(['communities', 'feed', 'notifications', 'stories']);
   });
 
-  it('4. the key VOCABULARY is the six real modules, and it is what refuses an unknown key', () => {
-    expect(REAL_TENANT_DEFAULT_MODULES).toHaveLength(6);
+  it('4. the key VOCABULARY is the seven real modules, and it is what refuses an unknown key', () => {
+    expect(REAL_TENANT_DEFAULT_MODULES).toHaveLength(7);
     expect([...REAL_TENANT_DEFAULT_MODULES].sort()).toEqual([
       'chat',
       'communities',
       'events',
       'feed',
       'notifications',
+      'reels',
       'stories',
     ]);
     // 04-10 closed D-19: the reference module's key is gone from the vocabulary itself, so nothing
@@ -251,6 +276,62 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       order: 5,
       placement: 'topbar',
       badge: 'unreadNotifications',
+    });
+  });
+
+  it('10. D-121 requires: a module whose required key is off contributes no bootstrap entry', () => {
+    const registry = {
+      feed: defineModule({ key: 'feed', home: [{ order: 10 }] }),
+      reels: defineModule({
+        key: 'reels',
+        nav: { placement: 'tab', label: 'Reels', icon: 'film', href: '/reels', order: 30 },
+        requires: ['feed'],
+      }),
+    };
+    // `reels` on, `feed` off: the flag is on, yet the entry is absent (Pitfall 6).
+    expect(bootstrapWith(registry, ['reels']).map((m) => m.key)).toEqual([]);
+    // Positive control: with `feed` on the entry comes back, nav and all.
+    const both = bootstrapWith(registry, ['reels', 'feed']);
+    expect(both.map((m) => m.key)).toEqual(['reels', 'feed']);
+    expect(both[0]?.nav).toMatchObject({ href: '/reels', order: 30 });
+  });
+
+  it('11. D-121 requires: a module whose required key is off contributes no permission', () => {
+    const registry = {
+      feed: defineModule({ key: 'feed' }),
+      reels: defineModule({
+        key: 'reels',
+        requires: ['feed'],
+        defaultRolePermissions: { member: ['reels.fixture'] },
+      }),
+    };
+    withRegistry(registry, () => {
+      expect(permissionsFor('member', new Set<ModuleKey>(['reels']))).not.toContain(
+        'reels.fixture',
+      );
+      expect(permissionsFor('member', new Set<ModuleKey>(['reels', 'feed']))).toContain(
+        'reels.fixture',
+      );
+    });
+  });
+
+  it('12. effectiveKeys resolves a chain until a pass drops nothing', () => {
+    // A requires B, B requires C. With C off, B drops on the first pass and A on the second.
+    const registry = {
+      reels: defineModule({ key: 'reels', requires: ['events'] }),
+      events: defineModule({ key: 'events', requires: ['chat'] }),
+      chat: defineModule({ key: 'chat' }),
+    };
+    withRegistry(registry, () => {
+      expect([...effectiveKeys(new Set<ModuleKey>(['reels', 'events', 'feed']))]).toEqual(['feed']);
+      // Positive control: with C on, the whole chain survives.
+      expect([...effectiveKeys(new Set<ModuleKey>(['reels', 'events', 'chat']))].sort()).toEqual([
+        'chat',
+        'events',
+        'reels',
+      ]);
+      // A key with no manifest (or no `requires`) is never dropped.
+      expect([...effectiveKeys(new Set<ModuleKey>(['notifications']))]).toEqual(['notifications']);
     });
   });
 });

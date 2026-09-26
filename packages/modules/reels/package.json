@@ -1,0 +1,41 @@
+{
+  "name": "@tria/module-reels",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reels module (REELS-01..08, D-121): the full-screen vertical video tab. Owns a manifest, constants and props-only UI; it has NO server routes and NO tables and reads posts only through feed's published HTTP contract (GET /v1/feed?media=video).",
+  "exports": {
+    "./module": "./module.ts",
+    "./contracts": "./contracts/index.ts",
+    "./ui": "./ui/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tria/contracts": "workspace:*",
+    "@tria/core": "workspace:*",
+    "@tria/ui": "workspace:*",
+    "lucide-react": "1.46.0"
+  },
+  "peerDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@tria/config": "workspace:*",
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "happy-dom": "20.14.5",
+    "motion": "13.3.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "vitest": "5.0.0"
+  }
+}
