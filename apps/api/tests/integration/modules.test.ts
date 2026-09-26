@@ -137,7 +137,7 @@ afterAll(async () => {
 });
 
 describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () => {
-  it('1. tria-demo lists the six seeded keys; tria-lab only feed + events', async () => {
+  it('1. tria-demo lists the seven seeded keys; tria-lab only reels + events + feed', async () => {
     const demo = await bootstrap(tokens.demoMember);
     expect(demo.status).toBe(200);
     const demoBody = (await demo.json()) as BootstrapBody;
@@ -146,9 +146,11 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     // key in the fallback bucket, so this list was purely alphabetical until 05-01 — which is when
     // `communities` declared `nav.order: 20` (D-40: the tab the feed deliberately left unspent) and
     // moved to the HEAD of the list. That move is the ordering rule working, not a regression: a key
-    // with a nav entry sorts ahead of every key without one, whatever its letter.
+    // with a nav entry sorts ahead of every key without one, whatever its letter. 05.3-01 added
+    // `reels` with `nav.order: 30` (D-123), so it sorts right after `communities` for the same reason.
     expect(demoBody.modules.map((m) => m.key)).toEqual([
       'communities',
+      'reels',
       'chat',
       'events',
       'feed',
@@ -162,6 +164,20 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
         expect(m.nav).toMatchObject({ placement: 'tab', href: '/comunidades', order: 20 });
         continue;
       }
+      if (m.key === 'reels') {
+        // 05.3-01 (D-121, D-123, UI-D-81): the manifest's tab entry verbatim, `chrome` included —
+        // the bootstrap contract would strip an unknown key, so this proves the field survives.
+        expect(m.nav).toEqual({
+          placement: 'tab',
+          label: 'Reels',
+          icon: 'film',
+          href: '/reels',
+          order: 30,
+          chrome: 'media',
+        });
+        expect(m.home).toBeUndefined();
+        continue;
+      }
       // A key enabled for the tenant but not yet implemented appears WITHOUT nav — that is what
       // makes /me/bootstrap honest about what the tenant bought. `feed` has a manifest but declares
       // a HOME SLOT and no tab (D-55), so it too arrives without nav.
@@ -170,10 +186,12 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
       expect(m.settings).toEqual({});
     }
 
-    // D-17 pins tria-lab to exactly ['events','feed'] — the disabled-module 404 below depends on it.
+    // D-17 pins tria-lab to exactly feed + events plus `reels`, which is on by default (D-122) —
+    // the disabled-module 404 below depends on chat, communities and notifications staying off.
     const lab = await bootstrap(tokens.labMember);
     expect(lab.status).toBe(200);
     expect(((await lab.json()) as BootstrapBody).modules.map((m) => m.key)).toEqual([
+      'reels',
       'events',
       'feed',
     ]);
@@ -267,7 +285,7 @@ describe('requireModule — 404 MODULE_DISABLED, and the fixed middleware order'
     moduleFlags.invalidate(labId);
     expect((await testRoute('chat', tokens.labMember)).status).toBe(200);
 
-    // Restore the seeded state (D-17: tria-lab has feed + events only).
+    // Restore the seeded state (D-17: tria-lab has feed + events, plus reels by default — no chat).
     await adminSql`update public.tenant_modules set enabled = false
                    where tenant_id = ${labId}::uuid and module_key = 'chat'`;
     moduleFlags.invalidate(labId);
@@ -293,9 +311,14 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
       'events',
       'feed',
       'notifications',
+      'reels',
       'stories',
     ]);
-    expect([...(bySlug.get('tria-lab')?.enabledModules ?? [])].sort()).toEqual(['events', 'feed']);
+    expect([...(bySlug.get('tria-lab')?.enabledModules ?? [])].sort()).toEqual([
+      'events',
+      'feed',
+      'reels',
+    ]);
     expect(bySlug.get('tria-demo')?.status).toBe('active');
   });
 
@@ -373,7 +396,7 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
     expect(enabled.status).toBe(200);
     expect(await enabled.json()).toEqual({ ok: true });
     const lab = (await (await bootstrap(tokens.labMember)).json()) as BootstrapBody;
-    expect(lab.modules.map((m) => m.key)).toEqual(['chat', 'events', 'feed']);
+    expect(lab.modules.map((m) => m.key)).toEqual(['reels', 'chat', 'events', 'feed']);
 
     // Back off: the very next request is refused again.
     const off = await putModule(labId, 'chat', false);
@@ -385,7 +408,7 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
       ((await (await bootstrap(tokens.labMember)).json()) as BootstrapBody).modules.map(
         (m) => m.key,
       ),
-    ).toEqual(['events', 'feed']);
+    ).toEqual(['reels', 'events', 'feed']);
 
     // Writes are row upserts, never read-modify-write on a set: still exactly one row.
     const [row] = await adminSql<{ n: string }[]>`
@@ -408,5 +431,39 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
     expect(member.status).toBe(403);
     expect(await code(member)).toBe('FORBIDDEN');
     expect((await testRoute('chat', tokens.labMember)).status).toBe(404);
+  });
+
+  it('14. D-121: feed OFF removes reels from the bootstrap although the reels flag stays on', async () => {
+    const labId = tenantIds.lab;
+    const keys = async () =>
+      ((await (await bootstrap(tokens.labMember)).json()) as BootstrapBody).modules.map(
+        (m) => m.key,
+      );
+
+    // Positive control first: with the seeded flags the lab member DOES get the reels entry.
+    expect(await keys()).toEqual(['reels', 'events', 'feed']);
+
+    try {
+      const off = await putModule(labId, 'feed', false);
+      expect(off.status).toBe(200);
+      const offBody = (await off.json()) as { modules: { key: string; enabled: boolean }[] };
+      // The RAW flag is untouched: the platform panel still shows reels switched on (planning
+      // decision 2) — it simply contributes nothing while its required module is off.
+      expect(offBody.modules.find((m) => m.key === 'reels')?.enabled).toBe(true);
+      expect(offBody.modules.find((m) => m.key === 'feed')?.enabled).toBe(false);
+
+      // `effectiveKeys` drops reels because feed is off: no reels AND no feed entry.
+      const withoutFeed = await keys();
+      expect(withoutFeed).not.toContain('reels');
+      expect(withoutFeed).not.toContain('feed');
+      expect(withoutFeed).toEqual(['events']);
+    } finally {
+      // Restore the seeded flag whatever happened above, so later suites see D-17's lab.
+      const on = await putModule(labId, 'feed', true);
+      expect(on.status).toBe(200);
+    }
+
+    // Turning feed back on restores reels on the very next request.
+    expect(await keys()).toEqual(['reels', 'events', 'feed']);
   });
 });

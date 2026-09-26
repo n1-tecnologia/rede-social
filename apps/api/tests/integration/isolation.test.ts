@@ -1033,14 +1033,16 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
   });
 
-  it('h. bootstrap is scoped to the tenant: tria-lab sees exactly [events, feed]', async () => {
+  it('h. bootstrap is scoped to the tenant: tria-lab sees exactly [reels, events, feed]', async () => {
     const res = await request('/v1/me/bootstrap', tokens.labMember, {
       [TENANT_HOST_HEADER]: HOSTS.lab,
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as BootstrapBody;
-    // D-17 pins tria-lab to exactly ['events','feed'] — case (c)'s MODULE_DISABLED depends on it.
-    expect(body.modules.map((m) => m.key)).toEqual(['events', 'feed']);
+    // D-17 pins tria-lab to feed + events, and 05.3-01 adds `reels`, on by default (D-122), sorted
+    // first by its nav order 30. Lab keeps `communities`, `chat` and `notifications` OFF: that is
+    // its disabled-module role (modules.test cases 4-8, 13). Case (c) uses its own no-feed tenant.
+    expect(body.modules.map((m) => m.key)).toEqual(['reels', 'events', 'feed']);
     expect(body.tenant.id).toBe(tenantIds.lab);
   });
 

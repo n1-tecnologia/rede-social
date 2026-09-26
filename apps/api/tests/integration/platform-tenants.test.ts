@@ -75,7 +75,8 @@ const newTenantBody = (slug: string, overrides: Record<string, unknown> = {}) =>
   displayName: 'Comunidade Teste',
   slug,
   colors: { primary: '#7c3aed', secondary: '#a78bfa' },
-  modules: ['feed', 'communities', 'stories', 'events', 'chat', 'notifications'],
+  // Every real module, 05.3-01's `reels` included (D-122), so "created with all" stays all-enabled.
+  modules: ['feed', 'communities', 'stories', 'events', 'chat', 'notifications', 'reels'],
   adminEmail: `admin-${slug}@tria-test.local`,
   ...overrides,
 });
@@ -187,7 +188,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
       order by module_key`;
     // One row per key in the vocabulary, enabled or not, so a later toggle is an UPDATE and never a
     // "does this tenant have a row yet?" branch.
-    expect(modules).toHaveLength(6);
+    expect(modules).toHaveLength(7);
     expect(modules.map((m) => m.module_key)).toEqual([...TOGGLEABLE_MODULES].sort());
     const enabled = modules.filter((m) => m.enabled).map((m) => m.module_key);
     expect(enabled.sort()).toEqual(['events', 'feed']);
@@ -255,7 +256,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     for (const row of [...page1.rows, ...page2.rows]) expect(row).toHaveProperty('primaryHost');
   });
 
-  it('4. getTenantDetail answers the strict detail (6 real modules, verified domains, invites, admins) and null for an unknown id', async () => {
+  it('4. getTenantDetail answers the strict detail (7 real modules, verified domains, invites, admins) and null for an unknown id', async () => {
     expect(await getTenantDetail('00000000-0000-4000-8000-000000000000')).toBeNull();
 
     const demo = await getTenantDetail(ids.demo);
@@ -263,7 +264,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     const parsed = platformTenantDetailSchema.parse(demo);
     expect(parsed.tenant.slug).toBe('tria-demo');
     expect(parsed.modules.map((m) => m.key).sort()).toEqual(
-      ['chat', 'communities', 'events', 'feed', 'notifications', 'stories'].sort(),
+      ['chat', 'communities', 'events', 'feed', 'notifications', 'reels', 'stories'].sort(),
     );
     expect(parsed.modules.every((m) => m.enabled)).toBe(true);
     expect(parsed.domains.length).toBeGreaterThanOrEqual(1);
@@ -427,7 +428,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
   let tenantId = '';
   let inviteEmail = '';
 
-  it('10. POST creates the tenant: 201 with the strict detail, 6 module rows, one pending invite', async () => {
+  it('10. POST creates the tenant: 201 with the strict detail, 7 module rows, one pending invite', async () => {
     const res = await platform('/tenants', {
       method: 'POST',
       token: tokens.superAdmin,
@@ -444,7 +445,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(Object.keys(body.tenant.branding.colors).sort()).toEqual(
       ['onPrimary', 'onPrimaryDark', 'primary', 'primaryDark', 'secondary'].sort(),
     );
-    expect(body.modules).toHaveLength(6);
+    expect(body.modules).toHaveLength(7);
     expect(body.modules.every((m) => m.enabled)).toBe(true);
     expect(body.invites).toHaveLength(1);
     expect(body.invites[0]).toMatchObject({ email: inviteEmail, status: 'pending', sentAt: null });
@@ -453,7 +454,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
 
     const rows = await adminSql<{ module_key: string; enabled: boolean }[]>`
       select module_key, enabled from public.tenant_modules where tenant_id = ${tenantId}::uuid`;
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(7);
     expect(rows.every((r) => r.enabled)).toBe(true);
   });
 
@@ -488,7 +489,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
       select count(*)::text as n from public.tenant_modules tm
         join public.tenants t on t.id = tm.tenant_id where t.slug = ${slug}`;
     // One row per key in the vocabulary, written once — the loser rolled back entirely.
-    expect(modules?.n).toBe('6');
+    expect(modules?.n).toBe('7');
   });
 
   it('13. empty: modules [] creates an empty community; an empty displayName is 400 with the field path', async () => {
@@ -500,11 +501,11 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     });
     expect(empty.status).toBe(201);
     const body = platformTenantDetailSchema.parse(await empty.json());
-    expect(body.modules).toHaveLength(6);
+    expect(body.modules).toHaveLength(7);
     expect(body.modules.every((m) => m.enabled === false)).toBe(true);
     const rows = await adminSql<{ enabled: boolean }[]>`
       select enabled from public.tenant_modules where tenant_id = ${body.tenant.id}::uuid`;
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(7);
     expect(rows.every((r) => r.enabled === false)).toBe(true);
 
     const invalid = await platform('/tenants', {
@@ -623,7 +624,8 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     const after = (await (await bootstrap(tokens.labMember)).json()) as {
       modules: { key: string }[];
     };
-    expect(after.modules.map((m) => m.key)).toEqual(['feed']);
+    // `reels` (on by default, D-122) sorts ahead of feed by its nav order 30.
+    expect(after.modules.map((m) => m.key)).toEqual(['reels', 'feed']);
 
     // Idempotent: the same value again is 200 and still one row.
     const again = await platform(`/tenants/${ids.lab}/modules/events`, {
@@ -637,7 +639,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
        where tenant_id = ${ids.lab}::uuid and module_key = 'events'`;
     expect(rows?.n).toBe('1');
 
-    // Restore D-17 (tria-lab = feed + events).
+    // Restore D-17 (tria-lab = feed + events, plus reels by default).
     const on = await platform(`/tenants/${ids.lab}/modules/events`, {
       method: 'PUT',
       token: tokens.superAdmin,
@@ -647,7 +649,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     const restored = (await (await bootstrap(tokens.labMember)).json()) as {
       modules: { key: string }[];
     };
-    expect(restored.modules.map((m) => m.key)).toEqual(['events', 'feed']);
+    expect(restored.modules.map((m) => m.key)).toEqual(['reels', 'events', 'feed']);
 
     // A key outside the vocabulary is refused at validation on any tenant. This is the rule that
     // SURVIVED 04-10: the route's `z.enum(REAL_TENANT_DEFAULT_MODULES)` refuses it, and no per-key
