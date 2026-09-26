@@ -261,7 +261,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORY-01 | Phase 5 | Complete |
 | STORY-02 | Phase 5 | Complete |
 | STORY-03 | Phase 5 | Complete |
-| STORY-04 | Phase 5 (re-delivered by Phase 05.2) | Complete (re-delivery through highlights pending in Phase 05.2) |
+| STORY-04 | Phase 5 (re-delivered by Phase 05.2) | Complete (re-delivered through highlights by Phase 05.2) |
 | STORY-05 | Phase 5 | Complete |
 | HIGHLIGHT-01 | Phase 05.2 | Complete |
 | HIGHLIGHT-02 | Phase 05.2 | Complete |
