@@ -41,6 +41,12 @@ export interface ReelVideoProps {
   onSoundRefused(): void;
 }
 
+/**
+ * How many times one start/resume re-issues a `play()` that a SOURCE LOAD aborted (see `play`). The
+ * vendor sets its source at most twice on mount, so two is enough and a looping source still ends.
+ */
+const PLAY_ABORT_RETRIES = 2;
+
 /** The standard media-element surface this element uses on the vendor node. */
 type PlayableElement = HTMLElement & {
   play?: () => Promise<void> | void;
@@ -85,7 +91,8 @@ function errorName(error: unknown): string | undefined {
  *
  * **Play is imperative, from the gesture** (RESEARCH Pattern 4). There is no `autoPlay`: the host
  * calls `start` inside the pager's `onActivate`, which runs synchronously in the swipe, key or click
- * handler. An `AbortError` is a fast swipe interrupting the play and is ignored. A `NotAllowedError`
+ * handler. An `AbortError` after the host paused (a fast swipe) is ignored; one caused by the
+ * vendor attaching its source is re-issued (see `play`). A `NotAllowedError`
  * with sound falls back to muted, reports `onSoundRefused` and plays again, reporting `onBlocked`
  * only if that also fails. Anything else is `onBlocked`. Low Power Mode can leave `play()` pending
  * rather than rejecting, so a second detector runs: after `canplay` on the current page, no
@@ -159,8 +166,21 @@ export function ReelVideo(props: ReelVideoProps) {
       }, REELS_AUTOPLAY_CHECK_MS);
     };
 
-    /** `play()` with RESEARCH Pattern 4's rejection handling, on the element it was asked of. */
-    const play = (target: PlayableElement, wantSound: boolean) => {
+    /**
+     * `play()` with RESEARCH Pattern 4's rejection handling, on the element it was asked of.
+     *
+     * **Two kinds of `AbortError`** (05.3-09, found in the browser). A `pause()` interrupting the
+     * play — a swipe leaving the page, the viewer's tap, the comment sheet — is final: the host
+     * paused, so nothing is retried. A SOURCE LOAD interrupting it is not. The host starts a page
+     * the moment its element appears (the first video of a visit, a lane's first video, a retried
+     * video), and the vendor attaches its media source a moment later; the media load algorithm
+     * then resets `paused` and rejects the pending play with `AbortError`. Ignoring that left the
+     * first video of every visit paused, and on a real stream the autoplay check would then have
+     * shown "tap to play" instead of the muted autoplay UI E04 promises. So while the host still
+     * wants the page playing, the play is re-issued (bounded), with the element's CURRENT mute
+     * state so a `setMuted` in between is kept.
+     */
+    const play = (target: PlayableElement, wantSound: boolean, aborted = 0) => {
       hostPaused = false;
       // An element that is ALREADY playing (the host's sound toggle resumes it to catch a refusal)
       // fires no second `playing`, so resetting here would arm a check that can only report a
@@ -173,7 +193,12 @@ export function ReelVideo(props: ReelVideoProps) {
       attempt.catch((error: unknown) => {
         if (element !== target) return;
         const name = errorName(error);
-        if (name === 'AbortError') return;
+        if (name === 'AbortError') {
+          if (!hostPaused && aborted < PLAY_ABORT_RETRIES) {
+            play(target, target.muted === false, aborted + 1);
+          }
+          return;
+        }
         if (name === 'NotAllowedError' && !target.muted) {
           target.muted = true;
           propsRef.current.onSoundRefused();

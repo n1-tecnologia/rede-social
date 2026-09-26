@@ -302,19 +302,54 @@ describe('ReelVideo — the controller the gesture calls (UI-D-85, RESEARCH Patt
     expect(handlers.onBlocked).toHaveBeenCalledWith(POST_ID);
   });
 
-  it('an AbortError (a fast swipe interrupting play) is neither blocked nor a sound refusal', async () => {
+  it('an AbortError after the host paused (a fast swipe interrupting play) is final: not blocked, not a sound refusal, not retried', async () => {
     play.mockRejectedValueOnce(refusal('AbortError'));
     const handlers = makeHandlers();
     renderReel(handlers);
     await mountedPlayer();
     await flush();
 
-    controllerOf(handlers).start(true);
+    const controller = controllerOf(handlers);
+    controller.start(true);
+    // The swipe leaves the page in the same gesture: the host pauses before the rejection lands.
+    controller.pause();
     await flush();
 
     expect(handlers.onBlocked).not.toHaveBeenCalled();
     expect(handlers.onSoundRefused).not.toHaveBeenCalled();
     expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('05.3-09: an AbortError from the vendor attaching its source re-issues play with the element’s current sound state', async () => {
+    // The browser's order on a page's first mount: play() with no source, the vendor sets its
+    // source, the media load algorithm rejects the pending play with AbortError.
+    play.mockRejectedValueOnce(refusal('AbortError'));
+    const handlers = makeHandlers();
+    renderReel(handlers);
+    const element = await mountedPlayer();
+    await flush();
+
+    controllerOf(handlers).start(false);
+    await flush();
+
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(element.muted).toBe(true);
+    expect(handlers.onBlocked).not.toHaveBeenCalled();
+    expect(handlers.onSoundRefused).not.toHaveBeenCalled();
+  });
+
+  it('05.3-09: a source that keeps aborting is retried at most twice, then left alone', async () => {
+    play.mockRejectedValue(refusal('AbortError'));
+    const handlers = makeHandlers();
+    renderReel(handlers);
+    await mountedPlayer();
+    await flush();
+
+    controllerOf(handlers).start(false);
+    await flush(12);
+
+    expect(play).toHaveBeenCalledTimes(3);
+    expect(handlers.onBlocked).not.toHaveBeenCalled();
   });
 
   it('any other rejection reports blocked', async () => {
