@@ -128,7 +128,13 @@ select is_empty(
         -- and they matter more than most: a highlight item is the row that lets a story OUTLIVE its
         -- 24 h, so a leak would be permanent rather than a day long. `story_highlights`' community
         -- foreign key is hand-written SQL (MOD-02), so nothing in the TS schema would notice either.
-        ('story_highlights'), ('story_highlight_items')
+        ('story_highlights'), ('story_highlight_items'),
+        -- Phase 05.2 (05.2-10). `story_views` is BEHAVIOURAL data about members — who saw which
+        -- story — carrying `tenant_id` and the standard isolation policy. Listed for the same reason
+        -- as its siblings, and it matters for a second one: in 05.2 the API reads only the caller's
+        -- own rows, and the policy is what keeps every other path (a worker, a psql session, V2's
+        -- "quem viu") inside one tenant.
+        ('story_views')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,

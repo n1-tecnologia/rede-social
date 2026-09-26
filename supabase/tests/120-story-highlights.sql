@@ -49,9 +49,21 @@ begin;
 --    STRIP predicate refuses the same row in the same transaction. The two surfaces disagree on
 --    purpose; a future liveness predicate on the items read turns the first assertion red.
 --
+-- 9. `story_views` (05.2-10: HIGHLIGHT-06, D-105) — the caller's server-side seen state:
+--    - `story_views_uq` is `(tenant_id, user_id, story_id)`, IN THAT ORDER (the catalogue);
+--    - it is THE ARBITER: a plain duplicate is refused 23505 and the service's `on conflict … do
+--      nothing` leaves exactly one row;
+--    - a view for a user that does not exist is refused 23503 (positive control: a real user);
+--    - hard-deleting a story removes its views, and another tenant's view survives;
+--    - THE RING'S PLAN: on a volume fixture (400 stories, 20,000 views over 50 users, analyzed), the
+--      strip statement with the projection's CONSTANT-tenant `exists` names
+--      `stories_tenant_expires_idx` AND `story_views_uq`, and has NO `Seq Scan on story_views`. The
+--      plan is captured in TEXT format, where that phrase is literally what a sequential scan prints
+--      (the JSON format splits it into two keys, which would make a `like` check vacuous).
+--
 -- Like its siblings this file ROLLS BACK, so it re-runs identically against a seeded or an empty
 -- database, twice in a row, in any order.
-select plan(28);
+select plan(39);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 -- Two tenants, each with one user, one community and one ready image asset. Tenant A also gets an
@@ -346,6 +358,142 @@ select results_eq(
       where story_id = '12000000-0000-4000-8000-0000000000e1' $$,
   ARRAY[0],
   '…and a hard-deleted story leaves no item behind (story_highlight_items cascades on the story)'
+);
+
+-- ══ 29. story_views: the catalogue — the arbiter's column ORDER is the measured one ══════════════
+select matches(
+  (select indexdef from pg_indexes where schemaname = 'public' and indexname = 'story_views_uq'),
+  'CREATE UNIQUE INDEX story_views_uq ON public\.story_views USING btree \(tenant_id, user_id, story_id\)',
+  'story_views_uq exists, unique, on (tenant_id, user_id, story_id) in that order (tenant first, then the ring''s probe)'
+);
+
+-- ══ 30-32. story_views_uq IS THE ARBITER ══════════════════════════════════════════════════════════
+-- The expired story e2 is the one left in tenant A: a view of an EXPIRED story is recorded (R-D-I).
+select lives_ok(
+  $$ insert into public.story_views (tenant_id, user_id, story_id)
+     values ('12000000-0000-4000-8000-000000000001', '12000000-0000-4000-8000-000000000002',
+             '12000000-0000-4000-8000-0000000000e2') $$,
+  'a view of an EXPIRED story is accepted (expiry gates the strip, never a view)'
+);
+select throws_ok(
+  $$ insert into public.story_views (tenant_id, user_id, story_id)
+     values ('12000000-0000-4000-8000-000000000001', '12000000-0000-4000-8000-000000000002',
+             '12000000-0000-4000-8000-0000000000e2') $$,
+  '23505',
+  'duplicate key value violates unique constraint "story_views_uq"',
+  'story_views_uq refuses a second row for the same (tenant, user, story)'
+);
+insert into public.story_views (tenant_id, user_id, story_id)
+values ('12000000-0000-4000-8000-000000000001', '12000000-0000-4000-8000-000000000002',
+        '12000000-0000-4000-8000-0000000000e2')
+on conflict (tenant_id, user_id, story_id) do nothing;
+select results_eq(
+  $$ select count(*)::int from public.story_views
+      where user_id = '12000000-0000-4000-8000-000000000002'
+        and story_id = '12000000-0000-4000-8000-0000000000e2' $$,
+  ARRAY[1],
+  'the service''s on conflict (tenant_id, user_id, story_id) do nothing leaves exactly ONE row'
+);
+
+-- ══ 33-34. the user is a real FK ═════════════════════════════════════════════════════════════════
+select throws_ok(
+  $$ insert into public.story_views (tenant_id, user_id, story_id)
+     values ('12000000-0000-4000-8000-000000000001', gen_random_uuid(),
+             '12000000-0000-4000-8000-0000000000e2') $$,
+  '23503',
+  'insert or update on table "story_views" violates foreign key constraint "story_views_user_id_users_id_fk"',
+  'a view for a user that does not exist is refused by story_views_user_id_users_id_fk'
+);
+select lives_ok(
+  $$ insert into public.story_views (tenant_id, user_id, story_id)
+     values ('12000000-0000-4000-8000-000000000011', '12000000-0000-4000-8000-000000000012',
+             '12000000-0000-4000-8000-0000000000e3') $$,
+  'positive control: tenant B''s REAL user viewing tenant B''s story is accepted'
+);
+
+-- ══ 35-36. deleting a story removes its views — and only its views ══════════════════════════════
+delete from public.stories where id = '12000000-0000-4000-8000-0000000000e2';
+select is_empty(
+  $$ select id from public.story_views where story_id = '12000000-0000-4000-8000-0000000000e2' $$,
+  'hard-deleting a story removes its views (story_views cascades on the story)'
+);
+select results_eq(
+  $$ select count(*)::int from public.story_views
+      where tenant_id = '12000000-0000-4000-8000-000000000011' $$,
+  ARRAY[1],
+  'positive control: tenant B''s view of its own story survives tenant A''s delete'
+);
+
+-- ══ 37-39. THE RING'S PLAN: the constant-tenant exists rides story_views_uq ═════════════════════
+-- Volume, or the planner proves nothing: 50 users, 400 live stories of tenant A (windows spread so
+-- the order is the index's to deliver), and every user has seen every story — 20,000 views. Then
+-- `analyze` both tables, as the seed does for the feed tables.
+select tests.auth_user(
+  'views-' || g || '@120.local',
+  ('1200e000-0000-4000-8000-' || lpad(to_hex(g), 12, '0'))::uuid
+) from generate_series(1, 50) g;
+
+insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind,
+                            caption, published_at, expires_at)
+select ('12005000-0000-4000-8000-' || lpad(to_hex(g), 12, '0'))::uuid,
+       '12000000-0000-4000-8000-000000000001',
+       '12000000-0000-4000-8000-000000000002',
+       '12000000-0000-4000-8000-0000000000a1',
+       'image',
+       'volume ' || g,
+       now() - (g || ' minutes')::interval,
+       now() + interval '24 hours' - (g || ' minutes')::interval
+  from generate_series(1, 400) g;
+
+insert into public.story_views (tenant_id, user_id, story_id)
+select '12000000-0000-4000-8000-000000000001',
+       ('1200e000-0000-4000-8000-' || lpad(to_hex(u), 12, '0'))::uuid,
+       ('12005000-0000-4000-8000-' || lpad(to_hex(g), 12, '0'))::uuid
+  from generate_series(1, 50) u
+ cross join generate_series(1, 400) g;
+
+analyze public.stories;
+analyze public.story_views;
+
+create temporary table view_plans (name text primary key, plan text);
+
+do $$
+declare
+  r record;
+  v_plan text := '';
+begin
+  -- `storyProjection`'s viewer_seen column over the strip's own predicate and order, verbatim in
+  -- shape: the tenant predicate on the views is a CONSTANT (never the story's tenant column).
+  for r in execute
+    'explain select s.id,
+            exists (select 1 from public.story_views v
+                     where v.tenant_id = ''12000000-0000-4000-8000-000000000001''
+                       and v.user_id = ''1200e000-0000-4000-8000-000000000001''
+                       and v.story_id = s.id) as viewer_seen
+       from public.stories s
+      where s.tenant_id = ''12000000-0000-4000-8000-000000000001''
+        and s.deleted_at is null and s.expires_at > now()
+      order by s.expires_at desc, s.id desc limit 26'
+  loop
+    v_plan := v_plan || r."QUERY PLAN" || E'\n';
+  end loop;
+  insert into view_plans values ('ring', v_plan);
+end
+$$;
+
+select matches(
+  (select plan from view_plans where name = 'ring'),
+  'stories_tenant_expires_idx',
+  'the strip with viewer_seen still ranges and orders on stories_tenant_expires_idx BY NAME'
+);
+select matches(
+  (select plan from view_plans where name = 'ring'),
+  'story_views_uq',
+  'the viewer_seen subplan probes story_views_uq BY NAME (constant tenant + user, then story)'
+);
+select ok(
+  (select plan from view_plans where name = 'ring') not like '%Seq Scan on story_views%',
+  'the viewer_seen subplan is NEVER a Seq Scan on story_views (the correlated form measured as one)'
 );
 
 select * from finish();

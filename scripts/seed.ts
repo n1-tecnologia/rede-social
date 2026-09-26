@@ -820,6 +820,44 @@ export const SEED_HIGHLIGHT_TITLES = {
 const SEED_HIGHLIGHT_HOME_STORY_INDEXES = [2, 3] as const;
 
 /**
+ * 05.2-10 (HIGHLIGHT-06, D-105) — the seeded SEEN state, so both ring states exist on a fresh seed:
+ *
+ *  - the MEMBER (`member@<slug>.local`, the e2e member login) has seen ONLY `SEED_STORIES[2]`, the
+ *    OLDEST active ready story. Their tenant circle wears the BRAND ring ("… Há stories novos.") and
+ *    resumes at index 1 of the oldest-first sequence — `SEED_STORIES[1]`, the first unseen;
+ *  - the ADMIN has seen every active ready story (`[0]`, `[1]`, `[2]`): their ring is NEUTRAL, the
+ *    plain name, and the circle opens at index 0 (a re-watch starts from the beginning).
+ *
+ * `[3]` (expired) and `[4]` (processing) are not in the strip, so nobody has "seen" them here. Fixed
+ * ids, `on conflict (id) do nothing`, identical-looking in both tenants (§(j)). Nothing reads anyone
+ * else's rows: the API's only read is the caller's own `viewer_seen` flag.
+ */
+const SEED_STORY_VIEW_IDS: Record<
+  string,
+  { member: readonly [string]; admin: readonly [string, string, string] }
+> = {
+  'tria-demo': {
+    member: ['0d000000-0000-4000-8000-0000000002c1'],
+    admin: [
+      '0d000000-0000-4000-8000-0000000002c2',
+      '0d000000-0000-4000-8000-0000000002c3',
+      '0d000000-0000-4000-8000-0000000002c4',
+    ],
+  },
+  'tria-lab': {
+    member: ['0e000000-0000-4000-8000-0000000002c1'],
+    admin: [
+      '0e000000-0000-4000-8000-0000000002c2',
+      '0e000000-0000-4000-8000-0000000002c3',
+      '0e000000-0000-4000-8000-0000000002c4',
+    ],
+  },
+};
+
+/** Which `SEED_STORIES` index each seeded view names, per viewer (see `SEED_STORY_VIEW_IDS`). */
+const SEED_STORY_VIEW_STORY_INDEXES = { member: [2], admin: [0, 1, 2] } as const;
+
+/**
  * Exported so `apps/web/e2e` and the integration suite assert against the FIXTURE rather than
  * against a literal that could drift from the seed on the next edit (the 04-06 rule). Identical in
  * both tenants on purpose: a leak cannot hide behind "the rows look different".
@@ -1856,8 +1894,35 @@ for (const t of SEED_TENANTS) {
           });
         }
 
+        // 05.2-10 (HIGHLIGHT-06): the seeded seen state — see `SEED_STORY_VIEW_IDS`. The member has
+        // seen only the OLDEST active story (brand ring, resumes at the second); the admin has seen
+        // every active one (neutral ring, opens at the first).
+        const viewIds = SEED_STORY_VIEW_IDS[t.slug];
+        const viewerOf = { member: memberUserIds[0], admin: authorUserId };
+        let seededViews = 0;
+        if (viewIds) {
+          await withAdminTx(async (tx) => {
+            for (const who of ['member', 'admin'] as const) {
+              const userId = viewerOf[who];
+              if (!userId) continue;
+              for (const [index, viewId] of viewIds[who].entries()) {
+                const storyId = storyIds[SEED_STORY_VIEW_STORY_INDEXES[who][index] ?? 0];
+                if (!storyId) continue;
+                await tx.execute(sql`
+                  insert into public.story_views (id, tenant_id, user_id, story_id, viewed_at)
+                  values (
+                    ${viewId}::uuid, ${tenantId}::uuid, ${userId}::uuid, ${storyId}::uuid,
+                    ${new Date(storyClock - 5 * 60_000).toISOString()}::timestamptz
+                  )
+                  on conflict (id) do nothing`);
+                seededViews += 1;
+              }
+            }
+          });
+        }
+
         console.log(
-          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest, ${seededPins} community pins (1 on the EXPIRED story), ${seededHighlights} highlights (1 empty) with ${seededHighlightItems} items (Destaques mirrors the pins)`,
+          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest, ${seededPins} community pins (1 on the EXPIRED story), ${seededHighlights} highlights (1 empty) with ${seededHighlightItems} items (Destaques mirrors the pins), ${seededViews} story views (member: the oldest only; admin: every active story)`,
         );
       }
     }

@@ -2,7 +2,12 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
-import { closeAdmin, deleteHighlightsByTitlePrefix, insertHighlightFixture } from './admin';
+import {
+  closeAdmin,
+  deleteHighlightsByTitlePrefix,
+  insertHighlightFixture,
+  setStoryViews,
+} from './admin';
 import { hosts, login, SEED_PASSWORD, seededCommunityFeed, seededFeed, users } from './fixtures';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -625,6 +630,10 @@ test.describe("Destaques — the community's highlights (HIGHLIGHT-04, UI-D-64)"
   test('a member opens Destaques and plays the EXPIRED story first; the same story is not in Início’s tenant circle', async ({
     page,
   }) => {
+    // 05.2-10 (D-105): the tenant circle RESUMES at the member's first unseen story, and the seed
+    // marks the oldest one seen. This walk starts at index 0, so it starts from "nothing seen" —
+    // and `stories.spec.ts`'s `afterAll` puts the seed's seen state back.
+    await setStoryViews(users.demoMember, 'tria-demo', []);
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.withHighlightId}`);
 
@@ -660,6 +669,8 @@ test.describe("Destaques — the community's highlights (HIGHLIGHT-04, UI-D-64)"
       await expect(page.getByText(SEEDED.expiredCaption)).toHaveCount(0);
       if (index < count - 1) await page.keyboard.press('ArrowRight');
     }
+    // Put the seed's seen state back (the member saw only the oldest active story, 05.2-10).
+    await setStoryViews(users.demoMember, 'tria-demo', ['0d000000-0000-4000-8000-0000000000d3']);
   });
 });
 

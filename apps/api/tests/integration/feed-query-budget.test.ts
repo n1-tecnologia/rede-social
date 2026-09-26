@@ -330,7 +330,12 @@ describe('GET /v1/stories — the strip query budget (05-05, Pitfall 11)', () =>
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      items: { mediaAssetId: string; mediaVariantWidths: number[]; viewerLiked: boolean }[];
+      items: {
+        mediaAssetId: string;
+        mediaVariantWidths: number[];
+        viewerLiked: boolean;
+        viewerSeen: boolean;
+      }[];
     };
     // Guard against the budget passing vacuously on an empty strip, and against it passing on a
     // page whose ladders all happened to be empty — the hydration join is the thing under
@@ -340,6 +345,11 @@ describe('GET /v1/stories — the strip query budget (05-05, Pitfall 11)', () =>
     // `viewerLiked` is in the same statement or it is an N+1; a page where the field is missing
     // entirely would satisfy the count while having stopped being answered.
     expect(body.items.every((item) => typeof item.viewerLiked === 'boolean')).toBe(true);
+    // 05.2-10 (HIGHLIGHT-06): `viewer_seen` — the tenant ring — RIDES THE SAME STATEMENT, as one more
+    // `exists` column of `storyProjection` over `story_views_uq`. The ceiling below stays 1, and a
+    // statement that read `story_views` on its own (a second round trip for the ring) is refused
+    // explicitly, because the `stories` regex would not count it.
+    expect(body.items.every((item) => typeof item.viewerSeen === 'boolean')).toBe(true);
 
     // BIDIRECTIONAL, for the same reason every budget above is: a zero here would mean the regex
     // matched nothing (the table renamed, pg_stat_statements not loaded), not that the strip got
@@ -347,6 +357,12 @@ describe('GET /v1/stories — the strip query budget (05-05, Pitfall 11)', () =>
     const calls = await storyCalls();
     expect(calls).toBeGreaterThan(0);
     expect(calls).toBeLessThanOrEqual(STORY_LIST_STATEMENT_BUDGET);
+    // Read AFTER the ceiling, so this measurement can never be counted by it.
+    const [separateViewReads] = await adminSql<{ calls: number }[]>`
+      select coalesce(sum(calls), 0)::int as calls
+        from pg_stat_statements
+       where query ~ 'story_views' and query !~ 'stories'`;
+    expect(separateViewReads?.calls ?? 0).toBe(0);
   });
 });
 

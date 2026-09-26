@@ -12,6 +12,8 @@ import {
   deleteStoriesByCaptionPrefix,
   deleteStoryCommentsByBodyPrefix,
   envValue,
+  hasStoryView,
+  setStoryViews,
 } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 import { ensureWorker } from './worker';
@@ -71,6 +73,10 @@ const SEEDED = {
    * The tenant circle plays oldest → newest (D-106), so this is the story it opens on.
    */
   oldestActiveStoryId: '0d000000-0000-4000-8000-0000000000d3',
+  /** `SEED_STORY_IDS['tria-demo'][1]`: the seeded story VIDEO (`SEED_STORIES[1]`), 6 h old. */
+  videoStoryId: '0d000000-0000-4000-8000-0000000000d2',
+  /** `SEED_STORY_IDS['tria-demo'][0]`: the NEWEST active story, an image published 1 h ago. */
+  newestActiveStoryId: '0d000000-0000-4000-8000-0000000000d1',
   /** `SEED_HIGHLIGHT_TITLES`: `home` has items; `homeEmpty` is curator-only and never on a member row. */
   homeHighlight: 'Bastidores',
   homeEmptyHighlight: 'Aulas',
@@ -92,7 +98,26 @@ test.beforeAll(async () => {
   );
 });
 
+/**
+ * 05.2-10 (HIGHLIGHT-06): VIEWING IS A WRITE now — every case that opens the viewer records what it
+ * showed, and the tenant circle resumes at the first unseen story (D-105). So every case starts from
+ * ONE known state: neither demo login has seen anything, which is exactly the pre-05.2-10 world the
+ * cases above were written for (the circle opens on the oldest story, wearing the brand ring). The
+ * seen-ring describe pins its own states on top of this; `afterAll` puts the SEED's back.
+ */
+const SEED_SEEN = {
+  member: [SEEDED.oldestActiveStoryId],
+  admin: [SEEDED.newestActiveStoryId, SEEDED.videoStoryId, SEEDED.oldestActiveStoryId],
+} as const;
+
+test.beforeEach(async () => {
+  await setStoryViews(users.demoMember, 'tria-demo', []);
+  await setStoryViews(users.demoAdmin, 'tria-demo', []);
+});
+
 test.afterAll(async () => {
+  await setStoryViews(users.demoMember, 'tria-demo', SEED_SEEN.member);
+  await setStoryViews(users.demoAdmin, 'tria-demo', SEED_SEEN.admin);
   await closeAdmin();
 });
 
@@ -1705,5 +1730,124 @@ test.describe('the Início manage screen (D-109, UI-D-72..76)', () => {
         H.manage.edit.replace('{title}', SEEDED.homeHighlight),
         H.manage.edit.replace('{title}', SEEDED.homeEmptyHighlight),
       ]);
+  });
+});
+
+test.describe('the seen ring (D-105, UI-D-61, HIGHLIGHT-06)', () => {
+  const tenantName = (unseen: boolean) =>
+    (unseen ? S.circle.tenantUnseen : S.circle.tenant).replace('{tenant}', SEEDED.tenantName);
+  /** The tenant circle by its EXACT accessible name — the seen state is carried in the name. */
+  const circleNamed = (page: Page, unseen: boolean) =>
+    strip(page).getByRole('button', { name: tenantName(unseen), exact: true });
+
+  test('the SEED: a member who saw only the oldest story gets the brand ring and resumes at the first unseen', async ({
+    page,
+  }) => {
+    await setStoryViews(users.demoMember, 'tria-demo', SEED_SEEN.member);
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    // The sequence the circle plays, with the member's OWN flags, from the API the row reads.
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, `/v1/stories?limit=${STORY_MAX_PAGE_SIZE}`);
+    const { items } = (await list.json()) as { items: { id: string; viewerSeen: boolean }[] };
+    const sequence = [...items].reverse();
+    expect(sequence[0]).toEqual({
+      ...sequence[0],
+      id: SEEDED.oldestActiveStoryId,
+      viewerSeen: true,
+    });
+    const resume = sequence.findIndex((story) => !story.viewerSeen);
+    expect(resume, 'something is still unseen').toBeGreaterThan(0);
+
+    const circle = circleNamed(page, true);
+    await expect(circle).toBeVisible();
+    await expect(circle.getByTestId('story-circle-ring')).toHaveClass(/border-brand/);
+    // The plain name is NOT on the row (WCAG 1.4.1: the state is in the name, not only the colour).
+    await expect(circleNamed(page, false)).toHaveCount(0);
+
+    await circle.click();
+    const viewer = page.getByRole('dialog', { name: S.viewer.dialog });
+    await expect(viewer).toHaveAttribute('data-story-group', '0');
+    await expect(viewer).toHaveAttribute('data-story-index', String(resume));
+    // On a fresh seed that is `SEED_STORIES[1]` (the video) — the first story after the oldest.
+    await expect(page).toHaveURL(new RegExp(`/stories/${sequence[resume]?.id}$`));
+  });
+
+  test('watching the last unseen story greys the ring on close with no reload — and the server kept it', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the gesture model is the phone’s');
+    // Everything but the NEWEST story, an IMAGE (the fake video provider never reports a playable
+    // video, so a video segment can never be SHOWN in this environment — R-D-I).
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, `/v1/stories?limit=${STORY_MAX_PAGE_SIZE}`);
+    const { items } = (await list.json()) as { items: { id: string }[] };
+    const sequence = [...items].reverse();
+    const last = sequence.length - 1;
+    expect(sequence[last]?.id, 'the newest live story is the seeded image').toBe(
+      SEEDED.newestActiveStoryId,
+    );
+    await setStoryViews(
+      users.demoMember,
+      'tria-demo',
+      sequence.slice(0, last).map((story) => story.id),
+    );
+
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await circleNamed(page, true).click();
+    const viewer = page.getByRole('dialog', { name: S.viewer.dialog });
+    // D-105: it resumes AT the one unseen story — the last of the oldest-first sequence.
+    await expect(viewer).toHaveAttribute('data-story-index', String(last));
+    await expect(page).toHaveURL(new RegExp(`/stories/${SEEDED.newestActiveStoryId}$`));
+    // SHOWN = current AND its media ready: the clock starts only once the image decoded.
+    await expect
+      .poll(async () => (await page.getByTestId(`story-fill-${last}`).boundingBox())?.width ?? -1, {
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(0);
+
+    await page.keyboard.press('Escape');
+    await expect(viewer).toHaveCount(0);
+    // Optimistic (R-P5): the session set re-derives the ring on close, before any reload.
+    const seen = circleNamed(page, false);
+    await expect(seen).toBeVisible();
+    await expect(seen.getByTestId('story-circle-ring')).toHaveClass(/border-border/);
+    await expect(seen.getByTestId('story-circle-ring')).not.toHaveClass(/border-brand/);
+
+    // …and the close flushed it to the server, so a reload (another device, same account) agrees.
+    await expect.poll(() => hasStoryView(users.demoMember, SEEDED.newestActiveStoryId)).toBe(true);
+    await page.reload();
+    await expect(circleNamed(page, false)).toBeVisible();
+    await expect(circleNamed(page, true)).toHaveCount(0);
+    // Everything seen: a re-watch starts from the beginning (D-105).
+    await circleNamed(page, false).click();
+    await expect(page.getByRole('dialog', { name: S.viewer.dialog })).toHaveAttribute(
+      'data-story-index',
+      '0',
+    );
+  });
+
+  test('the SEED: an admin who saw every live story gets the neutral ring, the plain name and index 0', async ({
+    page,
+  }) => {
+    await setStoryViews(users.demoAdmin, 'tria-demo', SEED_SEEN.admin);
+    await login(page, users.demoAdmin, SEED_PASSWORD);
+
+    const circle = circleNamed(page, false);
+    await expect(circle).toBeVisible();
+    await expect(circle.getByTestId('story-circle-ring')).toHaveClass(/border-border/);
+    await expect(circleNamed(page, true)).toHaveCount(0);
+    // Highlight circles never wear a seen ring (UI-D-61): Bastidores stays the archive ring.
+    await expect(
+      highlightCircle(page, SEEDED.homeHighlight).getByTestId('story-circle-ring'),
+    ).toHaveClass(/border-border/);
+
+    await circle.click();
+    await expect(page.getByRole('dialog', { name: S.viewer.dialog })).toHaveAttribute(
+      'data-story-index',
+      '0',
+    );
+    await expect(page).toHaveURL(new RegExp(`/stories/${SEEDED.oldestActiveStoryId}$`));
   });
 });

@@ -691,3 +691,45 @@ export async function deleteHighlightsByTitlePrefix(
        and t.slug = ${tenantSlug}
        and h.title like ${`${prefix}%`}`;
 }
+
+/**
+ * 05.2-10 (HIGHLIGHT-06, D-105): sets ONE user's seen state in a tenant to EXACTLY `storyIds` —
+ * every other `story_views` row of that user in that tenant is removed first.
+ *
+ * Viewing is now a WRITE: every spec that opens the viewer records what it showed, so a spec that
+ * asserts where the tenant circle opens (the resume index) or which ring it wears must pin the
+ * state it starts from instead of inheriting whatever the previous test watched. Ids that are not
+ * a live story of that tenant (a video another spec removed) are simply skipped.
+ */
+export async function setStoryViews(
+  email: string,
+  tenantSlug: string,
+  storyIds: readonly string[],
+): Promise<void> {
+  await sql()`
+    delete from public.story_views v
+     using public.users u, public.tenants t
+     where v.user_id = u.id and v.tenant_id = t.id
+       and u.email = ${email} and t.slug = ${tenantSlug}`;
+  if (storyIds.length === 0) return;
+  await sql()`
+    insert into public.story_views (tenant_id, user_id, story_id)
+    select t.id, u.id, s.id
+      from public.tenants t
+      join public.stories s on s.tenant_id = t.id and s.deleted_at is null
+      cross join public.users u
+     where t.slug = ${tenantSlug} and u.email = ${email}
+       and s.id = any(${storyIds as string[]}::uuid[])
+    on conflict (tenant_id, user_id, story_id) do nothing`;
+}
+
+/** 05.2-10: whether the server recorded that `email` saw `storyId` (the flush landed). */
+export async function hasStoryView(email: string, storyId: string): Promise<boolean> {
+  const rows = await sql()<{ seen: boolean }[]>`
+    select exists (
+      select 1 from public.story_views v
+        join public.users u on u.id = v.user_id
+       where u.email = ${email} and v.story_id = ${storyId}::uuid
+    ) as seen`;
+  return rows[0]?.seen === true;
+}

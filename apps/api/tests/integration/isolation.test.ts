@@ -888,6 +888,106 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     for (const item of detail.items) expect(item.id).not.toBe(ids.labStory);
   });
 
+  it("b8. seen state: a demo session posting the lab's story id to /v1/stories/views writes nothing in either tenant, and the lab member's own flag is untouched (05.2-10)", async () => {
+    // `story_views` is behavioural data about members (HIGHLIGHT-06): a crossing here would either
+    // write a row in another organisation's lane or let one member's viewing mark another's ring.
+    // The write inserts by SELECTING the story in the caller's lane, so a foreign id produces no row
+    // — and the answer is the same 204 a valid id gets, so nothing is learned either (T-05.2-46/47).
+    //
+    // Named b8: 05.1-01's born-attached case and 05.2-01's highlight case hold the two letters before it. f2's host-mismatch loop is GET-only, so
+    // the POST route is covered here plus `requireAuth`'s host check.
+    const userId = async (email: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        select id::text from public.users where email = ${email} limit 1`;
+      return row?.id ?? '';
+    };
+    const demoMemberId = await userId('member@tria-demo.local');
+    const labMemberId = await userId('member@tria-lab.local');
+    // A live, ready story of each tenant that its own member has NOT seen yet (the seed marks one).
+    const unseenStory = async (tenantId: string, memberId: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        select s.id::text from public.stories s
+          join public.media_assets a on a.id = s.media_asset_id
+         where s.tenant_id = ${tenantId}::uuid and s.deleted_at is null
+           and s.expires_at > now() and a.status = 'ready'
+           and not exists (select 1 from public.story_views v
+                            where v.story_id = s.id and v.user_id = ${memberId}::uuid)
+         order by s.published_at desc limit 1`;
+      return row?.id ?? '';
+    };
+    const labStory = await unseenStory(tenantIds.lab, labMemberId);
+    const demoStory = await unseenStory(tenantIds.demo, demoMemberId);
+    for (const [name, value] of Object.entries({
+      demoMemberId,
+      labMemberId,
+      labStory,
+      demoStory,
+    })) {
+      expect(value, `seeded ${name}`).not.toBe('');
+    }
+
+    const views = async (tenantId: string) => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.story_views where tenant_id = ${tenantId}::uuid`;
+      return row?.n ?? 0;
+    };
+    const markSeen = (storyIds: string[]) =>
+      api.request('/v1/stories/views', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.demoMember}`,
+          'content-type': 'application/json',
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+        },
+        body: JSON.stringify({ storyIds }),
+      });
+
+    const demoBefore = await views(tenantIds.demo);
+    const labBefore = await views(tenantIds.lab);
+    try {
+      const crossing = await markSeen([labStory]);
+      expect(crossing.status).toBe(204);
+      expect(await crossing.text()).toBe('');
+      expect(await views(tenantIds.demo)).toBe(demoBefore);
+      expect(await views(tenantIds.lab)).toBe(labBefore);
+
+      // Positive control IN THE SAME TEST: the demo member's own story IS recorded — so the silence
+      // above is isolation, not a route that writes nothing for everybody.
+      const own = await markSeen([demoStory]);
+      expect(own.status).toBe(204);
+      expect(await views(tenantIds.demo)).toBe(demoBefore + 1);
+      expect(await views(tenantIds.lab)).toBe(labBefore);
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.story_views
+         where tenant_id = ${tenantIds.demo}::uuid and user_id = ${demoMemberId}::uuid
+           and story_id = ${demoStory}::uuid`;
+      expect(row?.n).toBe(1);
+
+      // The lab member's OWN read still reports the story unseen: the crossing marked nothing for
+      // anyone. The lab ships with stories OFF, so it is switched on for this read only.
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'stories', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+      const strip = await request('/v1/stories?limit=25', tokens.labMember, {
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      });
+      expect(strip.status).toBe(200);
+      const page = (await strip.json()) as { items: { id: string; viewerSeen: boolean }[] };
+      expect(page.items.find((story) => story.id === labStory)?.viewerSeen).toBe(false);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = false
+         where tenant_id = ${tenantIds.lab}::uuid and module_key = 'stories'`;
+      moduleFlags.invalidate(tenantIds.lab);
+      // Leave the seed's seen state exactly as it was (the e2e ring reads it).
+      await adminSql`
+        delete from public.story_views
+         where user_id = ${demoMemberId}::uuid and story_id = ${demoStory}::uuid`;
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,

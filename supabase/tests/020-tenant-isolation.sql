@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(116);
+select plan(124);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -192,6 +192,15 @@ insert into public.story_highlight_items
   ('0b000000-0000-4000-8000-0000000000e7', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-0000000000e6', '0b000000-0000-4000-8000-0000000000d1',
    '0b000000-0000-4000-8000-000000000002');
+
+-- 05.2-10: ONE seen row per tenant, structurally identical on both sides — each tenant's member has
+-- seen their own tenant's first story. `story_views` is behavioural data about members; a lane that
+-- could read another tenant's rows would tell one organisation what another's members watched.
+insert into public.story_views (id, tenant_id, user_id, story_id) values
+  ('0a000000-0000-4000-8000-0000000000e8', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-0000000000d1'),
+  ('0b000000-0000-4000-8000-0000000000e8', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000000d1');
 
 -- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
 -- global) and RLS with ZERO policies, like platform_admins and tenant_invites: one community's
@@ -647,6 +656,52 @@ select results_eq(
   'USING: a removal aimed at B''s items removes nothing'
 );
 
+-- ── story_views: the same five cases, plus its own positive control (05.2-10) ─────────────────
+-- The seen state (HIGHLIGHT-06) is the one table in 05.2 whose rows are ABOUT members rather than
+-- by an admin: which story a person watched. The API only ever reads the caller's own rows, and
+-- this block proves the tenant lane underneath that rule on the same six axes as every sibling.
+select results_eq(
+  $$ select count(*)::int from public.story_views
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own story_views row'
+);
+select results_eq(
+  $$ select count(*)::int from public.story_views $$,
+  ARRAY[1],
+  'adjacency: both tenants'' members saw their own first story, the lane returns exactly one view'
+);
+select results_eq(
+  $$ select tenant_id::text from public.story_views $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the view it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.story_views
+      where id = '0b000000-0000-4000-8000-0000000000e8'
+     union all
+     select v.id from public.story_views v
+      where v.story_id = '0b000000-0000-4000-8000-0000000000d1' $$,
+  'detail by id: B''s view is not found by its id, nor by the ring''s probe aimed at B''s story, through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.story_views (tenant_id, user_id, story_id)
+     values ('0b000000-0000-4000-8000-000000000001',
+             '0a000000-0000-4000-8000-000000000009',
+             '0b000000-0000-4000-8000-0000000000d1') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a view stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with d as (
+       delete from public.story_views
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from d $$,
+  ARRAY[0],
+  'USING: a delete aimed at B''s views removes nothing'
+);
+
 -- ── community_members: the same five cases (05-01). The table is UNUSED in V1 and still proved:
 --    V2-CONT-02 is only a policy change if the policy is already correct today. ─────────────────
 select results_eq(
@@ -937,6 +992,16 @@ select is_empty(
   $$ select id from public.story_highlight_items
       where id = '0a000000-0000-4000-8000-0000000000e7' $$,
   'symmetry: A''s item is not found through B''s lane'
+);
+select results_eq(
+  $$ select tenant_id::text from public.story_views $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s view for the same structurally identical pair'
+);
+select is_empty(
+  $$ select id from public.story_views
+      where id = '0a000000-0000-4000-8000-0000000000e8' $$,
+  'symmetry: A''s view is not found through B''s lane'
 );
 select results_eq(
   $$ select host::text from public.tenant_domains $$,
