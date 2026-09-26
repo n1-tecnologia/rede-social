@@ -1120,4 +1120,24 @@ describe('StoryViewerHost — "Destacar" (05.2-06, UI-D-66, D-110 route 1)', () 
     expect(screen.getByRole('dialog', { name: 'Comentários' })).toBeTruthy();
     expect(screen.getByRole('dialog', { name: 'Story' }).getAttribute('data-paused')).toBe('true');
   });
+
+  it('26. with no highlight anywhere, "Criar destaque" goes to the manage screen of the PLACE the viewer was opened from', async () => {
+    const empty = { ...sheetResult(), selectedIds: [], places: [] };
+    const cta = () =>
+      within(screen.getByRole('dialog', { name: 'Destacar story' })).getByRole('link', {
+        name: lookup('highlights.sheet.emptyCta'),
+      });
+
+    // Opened from a community page: that community's manage screen.
+    loadSheet.mockResolvedValue(empty);
+    host({ canCurate: true, originCommunityId: COMMUNITY });
+    await openHighlightSheet();
+    expect(cta().getAttribute('href')).toBe(`/comunidades/${COMMUNITY}/destaques`);
+    cleanup();
+
+    // Opened from Início or a deep link: the Início manage screen.
+    host({ canCurate: true });
+    await openHighlightSheet();
+    expect(cta().getAttribute('href')).toBe('/stories/destaques');
+  });
 });

@@ -294,7 +294,8 @@ describe('05.2-05 — the grouped viewer strings and their placeholders', () => 
  * "Single-select sheet (UI-D-68)", "Title step", the curation toasts and errors, and the viewer's
  * "Destacar"). Every placeholder is pinned, so a missing brace fails here rather than rendering a
  * raw `{title}` to a curator. `{limit}` is interpolated from `STORY_HIGHLIGHT_MAX_TITLE` /
- * `STORY_HIGHLIGHT_MAX_ITEMS` and never typed into copy.
+ * `STORY_HIGHLIGHT_MAX_ITEMS` / `STORY_HIGHLIGHT_MAX_PER_PLACE` (the place-cap copy, review WR-03)
+ * and never typed into copy.
  */
 describe('05.2-06 — the highlight sheet strings and their placeholders', () => {
   const messages = loadMessages(catalogDir) as Record<string, unknown>;
@@ -350,6 +351,10 @@ describe('05.2-06 — the highlight sheet strings and their placeholders', () =>
       'stories.highlights.errors.full',
       'Este destaque chegou ao limite de {limit} stories. Remova um para adicionar outro.',
     ],
+    [
+      'stories.highlights.errors.placeFull',
+      'Este lugar chegou ao limite de {limit} destaques. Exclua um para criar outro.',
+    ],
     ['stories.highlights.toasts.added', 'Story adicionado ao destaque.'],
     ['stories.highlights.toasts.removed', 'Story removido do destaque.'],
   ])('%s is the UI-SPEC string', (key, expected) => {
@@ -365,13 +370,15 @@ describe('05.2-06 — the highlight sheet strings and their placeholders', () =>
     ['stories.highlights.create.counter', '{count}'],
     ['stories.highlights.create.counter', '{limit}'],
     ['stories.highlights.errors.full', '{limit}'],
+    ['stories.highlights.errors.placeFull', '{limit}'],
   ])('%s carries the %s placeholder', (key, placeholder) => {
     expect(String(lookup(key))).toContain(placeholder);
   });
 
-  it('no limit is typed into copy — 15 and 100 arrive from the contracts', () => {
+  it('no limit is typed into copy — 15, 100 and 50 arrive from the contracts', () => {
     expect(String(lookup('stories.highlights.create.counter'))).not.toMatch(/\d/);
     expect(String(lookup('stories.highlights.errors.full'))).not.toMatch(/\d/);
+    expect(String(lookup('stories.highlights.errors.placeFull'))).not.toMatch(/\d/);
   });
 });
 

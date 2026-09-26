@@ -108,9 +108,12 @@ vi.mock('@/components/media/useSignedUpload', () => ({
 }));
 
 const { MEDIA_LIMITS } = await import('@tria/contracts/media');
-const { STORY_HIGHLIGHT_MAX_TITLE, STORY_MAX_CAPTION } = await import(
-  '@tria/module-stories/contracts'
-);
+const {
+  STORY_HIGHLIGHT_MAX_ITEMS,
+  STORY_HIGHLIGHT_MAX_PER_PLACE,
+  STORY_HIGHLIGHT_MAX_TITLE,
+  STORY_MAX_CAPTION,
+} = await import('@tria/module-stories/contracts');
 const { StoryComposer } = await import('./StoryComposer');
 
 /** Drives the captured `onCompleted` / `onHandedToProvider` seam for one kind. */
@@ -560,6 +563,46 @@ describe('StoryComposer — "Destaque" (05.2-08, D-111..D-115, UI-D-68..UI-D-71)
 
     await publishNow();
     expect(Object.keys(lastPayload())).toStrictEqual(['mediaAssetId', 'mediaKind', 'caption']);
+  });
+
+  it('P9. `full` for a highlightId destination states the ITEM cap from the contracts and keeps the selection (WR-03)', async () => {
+    withPlaces({
+      originCommunityId: A,
+      initialSelection: { kind: 'highlight', highlightId: H_A1 },
+    });
+    await completeUpload('image', IMAGE);
+
+    publish.mockResolvedValueOnce({ ok: false, code: 'full' });
+    await publishNow();
+
+    const alert = screen.getByRole('alert').textContent;
+    expect(alert).toBe(
+      lookup(catalog, 'highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS }),
+    );
+    expect(alert).not.toBe(lookup(catalog, 'publish.errors.failed'));
+    expect(destinationValue()).toBe(value(NAME_A, 'Destaques'));
+    expect(screen.getByTestId('story-preview')).toBeTruthy();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('P10. `full` for a newHighlight destination states the PLACE cap from the contracts and keeps the pending choice (WR-03)', async () => {
+    withPlaces({ originCommunityId: B, initialSelection: { kind: 'choose' } });
+    await completeUpload('image', IMAGE);
+    await publishNow();
+    const dialog = screen.getByRole('dialog');
+    await tap(sheetItem(dialog, `create:${B}`) as HTMLElement);
+    await confirmTitle(dialog, 'Teste Um');
+
+    publish.mockResolvedValueOnce({ ok: false, code: 'full' });
+    await publishNow();
+
+    const alert = screen.getByRole('alert').textContent;
+    expect(alert).toBe(
+      lookup(catalog, 'highlights.errors.placeFull', { limit: STORY_HIGHLIGHT_MAX_PER_PLACE }),
+    );
+    expect(alert).not.toBe(lookup(catalog, 'publish.errors.failed'));
+    expect(destinationValue()).toBe(value(NAME_B, 'Teste Um'));
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('9. close and a confirmed discard return to the ORIGIN: /comunidades/{A} when pre-filled, /inicio otherwise', async () => {
