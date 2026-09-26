@@ -100,6 +100,9 @@ const membershipIds = { demo: '', lab: '' };
 const SHARED_CAPTION = 'Aviso da comunidade sobre o encontro.';
 const postIds = { demo: '', lab: '', demoRemoved: '' };
 
+/** 05.3-02: the Reels lanes read, named once — case b9 probes it and f2's host-mismatch loop walks it. */
+const REELS_LANES_PATH = '/v1/feed/video-communities';
+
 const request = (path: string, token?: string, headers: Record<string, string> = {}) =>
   api.request(path, {
     headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
@@ -913,6 +916,153 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("b9. reels: the lab's community is the bare 404 through the video filter and never a demo lane (05.3-02)", async () => {
+    // REELS-04's lanes read NAMES communities, so a crossing here would print another
+    // organisation's community name in a member's Reels row (T-05.3-06). The fixture is the
+    // strongest one available: a lab community that IS a lane for the lab (it holds a READY video
+    // and the lab has communities on), so its absence from the demo's answer can only be isolation.
+    //
+    // Fresh communities on both sides, never seeded ones: deleting a post recomputes its
+    // container's `last_activity_at`, and the seeded order is pinned by communities.test.
+    const adminOf = async (tenantId: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        select m.user_id::text as id from public.memberships m
+         where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant' limit 1`;
+      return row?.id ?? '';
+    };
+    const freshCommunity = async (tenantId: string, name: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.communities (tenant_id, created_by_user_id, name, slug)
+        values (${tenantId}::uuid, ${await adminOf(tenantId)}::uuid, ${name},
+                ${`reels-isolamento-${crypto.randomUUID().slice(0, 8)}`})
+        returning id::text`;
+      if (!row) throw new Error(`could not create a community in ${tenantId}`);
+      return row.id;
+    };
+    /** A post whose video is READY, inside `communityId` (the ready-video fragment's exact shape). */
+    const readyVideoPost = async (tenantId: string, communityId: string, assetId: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.feed_posts (tenant_id, author_user_id, caption, media_kind, community_id)
+        values (${tenantId}::uuid, ${await adminOf(tenantId)}::uuid, ${SHARED_CAPTION}, 'video',
+                ${communityId}::uuid)
+        returning id::text`;
+      if (!row) throw new Error(`could not seed a video post in ${tenantId}`);
+      await adminSql`
+        insert into public.feed_post_media
+          (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+        values (${tenantId}::uuid, ${row.id}::uuid, 'video', ${assetId}::uuid, 'video', 0)`;
+      return row.id;
+    };
+    const [labFlag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'communities'`;
+
+    const name = `Reels isolamento ${String(RUN).slice(-4)}`;
+    const communities: string[] = [];
+    const posts: string[] = [];
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'communities', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+
+      // The SAME community name on both sides (the adjacency rule): only the id can tell them apart.
+      const labCommunity = await freshCommunity(tenantIds.lab, name);
+      const demoCommunity = await freshCommunity(tenantIds.demo, name);
+      communities.push(labCommunity, demoCommunity);
+      const labAsset = await seedVideo(tenantIds.lab, 'admin@tria-lab.local', 'reel-do-lab.mp4');
+      const demoAsset = await seedVideo(
+        tenantIds.demo,
+        'admin@tria-demo.local',
+        'reel-da-demo.mp4',
+      );
+      const labPost = await readyVideoPost(tenantIds.lab, labCommunity, labAsset);
+      posts.push(labPost, await readyVideoPost(tenantIds.demo, demoCommunity, demoAsset));
+
+      const lanes = async (token: string, host: string) => {
+        const res = await request(REELS_LANES_PATH, token, {
+          [TENANT_HOST_HEADER]: host,
+        });
+        expect(res.status).toBe(200);
+        return {
+          text: await res.clone().text(),
+          ids: ((await res.json()) as { items: { id: string }[] }).items.map((i) => i.id),
+        };
+      };
+
+      // The fixture is real: for the LAB member, the lab community IS a lane.
+      expect((await lanes(tokens.labMember, HOSTS.lab)).ids).toContain(labCommunity);
+
+      // 1. The video filter on the lab's community: the SAME bare 404 an id naming nothing gets.
+      const withoutRequestId = (raw: string) => {
+        const { requestId: _requestId, ...error } = (JSON.parse(raw) as Envelope)
+          .error as Envelope['error'] & { requestId?: string };
+        return JSON.stringify({ error });
+      };
+      const unknown = await request(
+        `/v1/feed?media=video&communityId=${crypto.randomUUID()}`,
+        tokens.demoMember,
+        { [TENANT_HOST_HEADER]: HOSTS.demo },
+      );
+      expect(unknown.status).toBe(404);
+      const unknownText = await unknown.text();
+      const foreign = await request(
+        `/v1/feed?media=video&communityId=${labCommunity}`,
+        tokens.demoMember,
+        { [TENANT_HOST_HEADER]: HOSTS.demo },
+      );
+      expect(foreign.status).toBe(404);
+      const foreignText = await foreign.text();
+      const envelope = JSON.parse(foreignText) as Envelope;
+      expect(envelope.error.code).toBe('NOT_FOUND');
+      expect(Object.hasOwn(envelope.error, 'details')).toBe(false);
+      expect(withoutRequestId(foreignText)).toEqual(withoutRequestId(unknownText));
+      for (const needle of [labCommunity, labPost, tenantIds.lab, 'tria-lab']) {
+        expect(foreignText).not.toContain(needle);
+      }
+
+      // 2. The demo lanes never name a lab community — this one or any other.
+      const labCommunityIds = (
+        await adminSql<{ id: string }[]>`
+          select id::text from public.communities where tenant_id = ${tenantIds.lab}::uuid`
+      ).map((row) => row.id);
+      const demoLanes = await lanes(tokens.demoMember, HOSTS.demo);
+      for (const id of labCommunityIds) expect(demoLanes.ids).not.toContain(id);
+      expect(demoLanes.text).not.toContain(labPost);
+
+      // Positive control IN THE SAME TEST: the demo's own community answers 200 through BOTH reads —
+      // so the answers above are isolation, not routes that are empty or 404 for everybody.
+      expect(demoLanes.ids).toContain(demoCommunity);
+      const own = await request(
+        `/v1/feed?media=video&communityId=${demoCommunity}`,
+        tokens.demoMember,
+        { [TENANT_HOST_HEADER]: HOSTS.demo },
+      );
+      expect(own.status).toBe(200);
+      const ownIds = ((await own.json()) as { items: { id: string }[] }).items.map((i) => i.id);
+      expect(ownIds).toEqual([posts[1]]);
+    } finally {
+      if (posts.length > 0) {
+        await adminSql`delete from public.feed_posts where id = any(${posts}::uuid[])`;
+      }
+      if (communities.length > 0) {
+        await adminSql`delete from public.communities where id = any(${communities}::uuid[])`;
+      }
+      // The lab's row goes back EXACTLY as found: absent stays absent (communities.test deletes it).
+      if (labFlag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${labFlag.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'communities'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'communities'`;
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,
@@ -996,6 +1146,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       // endpoint adds a cross-tenant case here. It resolves a place before it reads anything, and
       // the host check must refuse the session before that resolution ever runs.
       '/v1/stories/highlights',
+      // 05.3-02: the Reels lanes read joins the loop — SCHEMA-CONVENTIONS §(j) rule 2, every new
+      // endpoint adds a cross-tenant case here. It NAMES communities, so the host check must refuse
+      // the session before a single name is read.
+      REELS_LANES_PATH,
     ]) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);

@@ -180,6 +180,9 @@ afterAll(async () => {
     await adminSql`delete from public.feed_posts where id = any(${created}::uuid[])`;
   }
   await adminSql`delete from public.feed_posts where caption like 'Orcamento de consultas %'`;
+  // Crash sweep for the 05.3-02 Reels fixture: its post went with the line above, so its container
+  // can go now (`feed_posts.community_id` has no cascade).
+  await adminSql`delete from public.communities where name = 'Orcamento de consultas reels'`;
   await adminSql`delete from public.feed_comments where body like 'Orcamento %'`;
   await adminSql.end();
   await sqlClient.end();
@@ -435,5 +438,110 @@ describe('the post page — the detail query budget (04-03, criterion 4)', () =>
     const calls = await feedCalls();
     expect(calls).toBeGreaterThan(0);
     expect(calls).toBeLessThanOrEqual(FEED_REPLIES_STATEMENT_BUDGET);
+  });
+});
+
+/**
+ * `GET /v1/feed?media=video` (05.3-02, REELS-03): EXACTLY one statement against the feed tables. The
+ * ready-video narrowing is an `exists` probe appended to the SAME keyset statement Início runs
+ * (`READY_VIDEO_POST`), never a second query that filters the page afterwards — a per-post "is the
+ * video ready?" lookup would be the N+1 the Reels pager pays on every swipe.
+ */
+// biome-ignore lint/suspicious/noExportsInTest: colocated with the only assertion that proves it
+export const REELS_LIST_STATEMENT_BUDGET = 1;
+
+/**
+ * `GET /v1/feed/video-communities` (05.3-02, REELS-04): EXACTLY one statement — the active
+ * communities AND the per-community "holds a ready video" `exists` in the statement the rows come
+ * from. It is counted twice, once over the feed tables and once over the community tables, because
+ * it reads both: a lookup per community on either side would move one of the two numbers.
+ */
+// biome-ignore lint/suspicious/noExportsInTest: colocated with the only assertion that proves it
+export const REELS_LANES_STATEMENT_BUDGET = 1;
+
+describe('Reels — the video list and the lanes query budgets (05.3-02)', () => {
+  /** A fresh demo community holding one READY video post, so neither read is measured empty. */
+  const fixture = { communityId: '', postId: '', assetId: '' };
+
+  beforeAll(async () => {
+    const [author] = await adminSql<{ id: string }[]>`
+      select u.id from public.users u
+        join public.memberships m on m.user_id = u.id
+       where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant' limit 1`;
+    const [community] = await adminSql<{ id: string }[]>`
+      insert into public.communities (tenant_id, created_by_user_id, name, slug)
+      values (${tenantId}::uuid, ${author?.id ?? null}::uuid, 'Orcamento de consultas reels',
+              ${`orcamento-reels-${Date.now()}`})
+      returning id`;
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+         mime, bytes, width, height, duration_seconds, aspect_ratio, filename, ready_at)
+      values (${tenantId}::uuid, ${author?.id ?? null}::uuid, 'video', 'post', 'ready', 'fake',
+              ${`fake-budget-${crypto.randomUUID()}`}, ${`pb-budget-${crypto.randomUUID()}`},
+              'video/mp4', 1048576, 1080, 1920, 15, '9:16', 'orcamento.mp4', now())
+      returning id`;
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, author_user_id, caption, media_kind, community_id)
+      values (${tenantId}::uuid, ${author?.id ?? null}::uuid, 'Orcamento de consultas reels',
+              'video', ${community?.id ?? null}::uuid)
+      returning id`;
+    await adminSql`
+      insert into public.feed_post_media
+        (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+      values (${tenantId}::uuid, ${post?.id ?? null}::uuid, 'video', ${asset?.id ?? null}::uuid,
+              'video', 0)`;
+    fixture.communityId = community?.id ?? '';
+    fixture.postId = post?.id ?? '';
+    fixture.assetId = asset?.id ?? '';
+  });
+
+  afterAll(async () => {
+    // Post first (`feed_posts.community_id` has no cascade), then its container and its asset.
+    if (fixture.postId)
+      await adminSql`delete from public.feed_posts where id = ${fixture.postId}::uuid`;
+    if (fixture.communityId) {
+      await adminSql`delete from public.communities where id = ${fixture.communityId}::uuid`;
+    }
+    if (fixture.assetId) {
+      await adminSql`delete from public.media_assets where id = ${fixture.assetId}::uuid`;
+    }
+  });
+
+  it(`GET /v1/feed?media=video costs exactly ${REELS_LIST_STATEMENT_BUDGET} statement against the feed tables`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const res = await api.request('/v1/feed?media=video&limit=10', {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { id: string; mediaKind: string }[] };
+    // Guard against a vacuous pass: the fixture's ready video is on the page, and only videos are.
+    expect(body.items.map((item) => item.id)).toContain(fixture.postId);
+    expect(body.items.every((item) => item.mediaKind === 'video')).toBe(true);
+
+    // Floor AND exact: a zero would mean the regex matched nothing, not that the page got cheaper.
+    const calls = await feedCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(REELS_LIST_STATEMENT_BUDGET);
+  });
+
+  it(`GET /v1/feed/video-communities costs exactly ${REELS_LANES_STATEMENT_BUDGET} statement, over the feed AND the community tables`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const res = await api.request('/v1/feed/video-communities', {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { id: string }[] };
+    // Guard against a vacuous pass: the fixture community is a lane, so the `exists` really ran.
+    expect(body.items.map((item) => item.id)).toContain(fixture.communityId);
+
+    const feed = await feedCalls();
+    expect(feed).toBeGreaterThan(0);
+    expect(feed).toBe(REELS_LANES_STATEMENT_BUDGET);
+    const community = await communityCalls();
+    expect(community).toBeGreaterThan(0);
+    expect(community).toBe(REELS_LANES_STATEMENT_BUDGET);
   });
 });
