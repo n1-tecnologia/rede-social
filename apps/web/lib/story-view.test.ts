@@ -14,9 +14,11 @@ import {
   monogramOf,
   type StoryViewerItemView,
   storyHistoryView,
+  storyViewerItem,
   storyViewerLabels,
   tenantCircleView,
   tenantGroupView,
+  tenantSeenState,
   tenantSequence,
 } from '@/lib/story-view';
 
@@ -223,6 +225,7 @@ function viewerItem(id: string): StoryViewerItemView {
     likeCount: 0,
     commentCount: 0,
     viewerLiked: false,
+    seen: false,
   };
 }
 
@@ -543,5 +546,91 @@ describe('05.2-09 — highlightManageRowView and highlightEditStoryView', () => 
       new Date('2026-09-20T12:00:00.000Z'),
     );
     expect(storyHistoryView(story(), t, tm).date).toBe(date);
+  });
+});
+
+/* ── 05.2-10: the seen ring and the resume index (HIGHLIGHT-06, D-105, UI-D-61) ─────────────── */
+
+describe('the tenant circle’s seen state (05.2-10)', () => {
+  const seenItems = (flags: boolean[]) =>
+    flags.map((seen, index) => ({ id: `story-${index}`, seen }));
+
+  it('29. storyViewerItem carries the caller’s own viewerSeen as `seen`', () => {
+    const summary: StorySummary = {
+      id: '0000000c-1111-4111-8111-111111111111',
+      authorUserId: '0000000d-1111-4111-8111-111111111111',
+      mediaAssetId: '0000000e-1111-4111-8111-111111111111',
+      mediaKind: 'image',
+      mediaVariantWidths: [640, 1080],
+      mediaStatus: 'ready',
+      mediaFailureReason: null,
+      caption: '',
+      publishedAt: '2026-09-20T12:00:00.000Z',
+      expiresAt: '2026-09-21T12:00:00.000Z',
+      isActive: true,
+      durationSeconds: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewerLiked: false,
+      pinnedCommunityCount: 0,
+      highlightCount: 0,
+      viewerSeen: true,
+    };
+    const now = Date.parse('2026-09-20T13:00:00.000Z');
+    expect(storyViewerItem(summary, now).seen).toBe(true);
+    expect(storyViewerItem({ ...summary, viewerSeen: false }, now).seen).toBe(false);
+  });
+
+  it('30. [seen, unseen, seen] oldest first → something is new, and it resumes at the FIRST unseen (index 1)', () => {
+    expect(tenantSeenState(seenItems([true, false, true]))).toEqual({
+      anyUnseen: true,
+      resumeIndex: 1,
+    });
+    expect(tenantSeenState(seenItems([false, false]))).toEqual({ anyUnseen: true, resumeIndex: 0 });
+  });
+
+  it('31. all seen → nothing new and it resumes at 0; the SESSION set completes the server flags', () => {
+    expect(tenantSeenState(seenItems([true, true]))).toEqual({ anyUnseen: false, resumeIndex: 0 });
+    expect(tenantSeenState(seenItems([true, false, false]), new Set(['story-1']))).toEqual({
+      anyUnseen: true,
+      resumeIndex: 2,
+    });
+    expect(tenantSeenState(seenItems([true, false]), new Set(['story-1']))).toEqual({
+      anyUnseen: false,
+      resumeIndex: 0,
+    });
+    // An empty sequence has nothing new (no tenant circle is drawn for it anyway).
+    expect(tenantSeenState([])).toEqual({ anyUnseen: false, resumeIndex: 0 });
+  });
+
+  it('32. tenantCircleView: brand + "Há stories novos." + the resume index while unseen; neutral + the plain name once seen', () => {
+    const tenant = { displayName: 'Demo', logoUrl: null };
+    expect(tenantCircleView(tenant, t, { anyUnseen: true, resumeIndex: 2 })).toMatchObject({
+      ring: 'brand',
+      actionLabel: 'Abrir stories de Demo. Há stories novos.',
+      group: 0,
+      index: 2,
+    });
+    expect(tenantCircleView(tenant, t, { anyUnseen: false, resumeIndex: 0 })).toMatchObject({
+      ring: 'neutral',
+      actionLabel: 'Abrir stories de Demo',
+      group: 0,
+      index: 0,
+    });
+    // The ring GEOMETRY is the module's; only the ring kind changes (UI-D-61).
+    const row = inicioRow(
+      {
+        canPublish: false,
+        own: { avatarUrl: null },
+        tenant,
+        sequenceLength: 2,
+        highlights: [highlight()],
+        tenantSeen: { anyUnseen: false, resumeIndex: 0 },
+      },
+      t,
+    );
+    expect(row[0]).toMatchObject({ key: 'tenant', ring: 'neutral' });
+    // Highlight circles never wear a seen ring.
+    expect(row[1]).toMatchObject({ ring: 'neutral' });
   });
 });

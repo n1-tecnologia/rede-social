@@ -46,6 +46,8 @@ export type StoryViewerItemView = {
   likeCount: number;
   commentCount: number;
   viewerLiked: boolean;
+  /** 05.2 (HIGHLIGHT-06): the caller's own server-side seen flag (`viewerSeen`). */
+  seen: boolean;
 };
 
 /**
@@ -89,6 +91,8 @@ export function storyViewerItem(story: StorySummary, now: number): StoryViewerIt
     likeCount: story.likeCount,
     commentCount: story.commentCount,
     viewerLiked: story.viewerLiked,
+    // TDD RED STUB (05.2-10 Task 2): inert until GREEN maps `story.viewerSeen`.
+    seen: false,
   };
 }
 
@@ -322,9 +326,21 @@ export function tenantSequence<T>(page: { items: readonly T[] } | null): T[] {
  * header shows, so the circle and the screen it opens agree. No logo → the display name's monogram
  * (UI-D-60). It opens group 0 at index 0; plan 10 adds the resume index and the seen ring.
  */
+/** The tenant circle's seen state (D-105): is anything live unseen, and where does it resume. */
+export type TenantSeenState = { anyUnseen: boolean; resumeIndex: number };
+
+/** TDD RED STUB (05.2-10 Task 2): inert — "everything new, resume at 0" until GREEN. */
+export function tenantSeenState(
+  _items: readonly { id: string; seen: boolean }[],
+  _session?: ReadonlySet<string>,
+): TenantSeenState {
+  return { anyUnseen: true, resumeIndex: 0 };
+}
+
 export function tenantCircleView(
   tenant: { displayName: string; logoUrl: string | null },
   t: RowLabelReader,
+  _seen?: TenantSeenState,
 ): Extract<RowCircleView, { kind: 'open' }> {
   return {
     kind: 'open',
@@ -497,6 +513,8 @@ export function inicioRow(
     sequenceLength: number;
     highlights: readonly HighlightSummary[];
     curator?: CuratorRow;
+    /** TDD RED STUB (05.2-10 Task 2): accepted and ignored until GREEN. */
+    tenantSeen?: TenantSeenState;
   },
   t: RowLabelReader,
 ): RowCircleView[] {

@@ -68,6 +68,8 @@ export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
     comments?: StoryCommentsBinding;
     /** `stories.story.manage` from the bootstrap: the viewer's "Destacar" pill (UI-D-66). */
     canCurate?: boolean;
+    /** TDD RED STUB (05.2-10 Task 2): accepted and ignored until GREEN. */
+    seenRing?: { seenLabel: string; unseenLabel: string };
   };
 };
 

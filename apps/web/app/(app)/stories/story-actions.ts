@@ -371,3 +371,8 @@ export async function loadMoreOwnStoriesAction(cursor?: string): Promise<StoryHi
     nextCursor: page.nextCursor,
   };
 }
+
+/** TDD RED STUB (05.2-10 Task 2): inert — sends nothing and answers false until GREEN. */
+export async function markStoriesSeenAction(_storyIds: string[]): Promise<boolean> {
+  return false;
+}

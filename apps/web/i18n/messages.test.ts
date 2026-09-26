@@ -611,6 +611,32 @@ describe('05.2-09 — the manage screen strings and their placeholders', () => {
   });
 });
 
+/**
+ * 05.2-10 — the tenant circle's seen state carried in its NAME (UI-D-61, WCAG 1.4.1): the ring's
+ * colour is never the only signal. `{tenant}` is pinned so a missing brace fails here rather than
+ * reading a raw placeholder to a screen-reader user.
+ */
+describe('05.2-10 — the seen ring’s accessible names', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['stories.circle.tenant', 'Abrir stories de {tenant}'],
+    ['stories.circle.tenantUnseen', 'Abrir stories de {tenant}. Há stories novos.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('stories.circle.tenantUnseen carries the {tenant} placeholder', () => {
+    expect(String(lookup('stories.circle.tenantUnseen'))).toContain('{tenant}');
+  });
+});
+
 describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   function run(files: Record<string, string>): { status: number | null; out: string } {
     const dir = mkdtempSync(path.join(tmpdir(), 'tria-literals-'));

@@ -293,6 +293,7 @@ function item(overrides: Record<string, unknown> = {}) {
     likeCount: 12,
     commentCount: 3,
     viewerLiked: false,
+    seen: false,
     ...overrides,
   };
 }
