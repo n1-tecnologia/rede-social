@@ -344,7 +344,9 @@ export async function deleteStoryAction(storyId: string): Promise<StoryDeleteRes
  * One more page of the admin history (D-84), mapped into the SERVER-composed row view-model.
  *
  * The cursor is OPAQUE: forwarded exactly as the previous page returned it, never parsed or rebuilt
- * here. The rows are composed with the page's own translators for the reason `storyHistoryView`
+ * here. With NO cursor it reads the FIRST page — the manage screen's "Adicionar stories" picker
+ * (05.2-09, UI-D-76) opens on it, reusing this pager rather than growing a second one.
+ * The rows are composed with the page's own translators for the reason `storyHistoryView`
  * gives — the meta line and the plural-aware pin indicator need numbers interpolated under pt-BR's
  * plural rules, which is a server concern.
  */
@@ -352,7 +354,7 @@ export type StoryHistoryPageResult =
   | { ok: true; items: StoryHistoryItemView[]; nextCursor: string | null }
   | { ok: false };
 
-export async function loadMoreOwnStoriesAction(cursor: string): Promise<StoryHistoryPageResult> {
+export async function loadMoreOwnStoriesAction(cursor?: string): Promise<StoryHistoryPageResult> {
   const query = storyQuerySchema.safeParse({ cursor });
   if (!query.success) return { ok: false };
 

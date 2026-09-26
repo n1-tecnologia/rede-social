@@ -639,3 +639,55 @@ export async function deleteStoryCommentsByBodyPrefix(prefix: string): Promise<v
     delete from public.feed_comments
      where story_id is not null and body like ${`${prefix}%`}`;
 }
+
+/**
+ * 05.2-09 (UI-D-80): writes ONE highlight straight into the table, for the place a spec cannot reach
+ * through the product — an ARCHIVED community, whose create the API refuses with `archived` by
+ * design. Appended after the place's current rows. Returns the new id.
+ *
+ * Remove it with `deleteHighlightsByTitlePrefix`; the title prefix is the only thing that tells a
+ * spec's rows from the seed's.
+ */
+export async function insertHighlightFixture(
+  tenantSlug: string,
+  communityId: string | null,
+  title: string,
+): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.story_highlights
+      (tenant_id, community_id, title, position, created_by_user_id)
+    select t.id,
+           ${communityId}::uuid,
+           ${title},
+           coalesce((
+             select max(h.position) + 1
+               from public.story_highlights h
+              where h.tenant_id = t.id
+                and h.community_id is not distinct from ${communityId}::uuid
+           ), 0),
+           -- The tenant's admin as the creator, the curator a real highlight would name.
+           (select m.user_id
+              from public.memberships m
+             where m.tenant_id = t.id and m.role = 'admin_tenant' and m.deleted_at is null
+             order by m.joined_at
+             limit 1)
+      from public.tenants t
+     where t.slug = ${tenantSlug}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`insertHighlightFixture: tenant ${tenantSlug} not found`);
+  return id;
+}
+
+/** Hard-deletes a tenant's highlights whose title starts with `prefix` (their items cascade). */
+export async function deleteHighlightsByTitlePrefix(
+  tenantSlug: string,
+  prefix: string,
+): Promise<void> {
+  await sql()`
+    delete from public.story_highlights h
+     using public.tenants t
+     where t.id = h.tenant_id
+       and t.slug = ${tenantSlug}
+       and h.title like ${`${prefix}%`}`;
+}

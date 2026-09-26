@@ -1,10 +1,20 @@
 'use client';
 
-import { StoriesStrip, type StoriesStripProps } from '@tria/module-stories/ui';
+import {
+  StoriesStrip,
+  type StoriesStripProps,
+  type StoryStripCircle,
+} from '@tria/module-stories/ui';
+import { Pencil } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadHighlightItemsAction } from '@/app/(app)/stories/highlight-actions';
 import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
-import type { StoryGroupView, StoryViewerItemView, StoryViewerLabelsView } from '@/lib/story-view';
+import type {
+  RowCircleView,
+  StoryGroupView,
+  StoryViewerItemView,
+  StoryViewerLabelsView,
+} from '@/lib/story-view';
 import {
   type StoryCommentsBinding,
   type StoryGroupState,
@@ -37,7 +47,13 @@ import {
  * opening a HIGHLIGHT pushes the current URL unchanged, so back still closes and a refresh never
  * lands on a route that cannot rebuild the row (05.2-05 planning decision 3).
  */
-export type StoriesSurfaceProps = StoriesStripProps & {
+export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
+  /**
+   * The row as the server composed it. A `{ kind: 'manage' }` disc (05.2-09, UI-D-63) is plain data
+   * because a React node cannot cross the server/client boundary; it is drawn HERE as the module's
+   * `glyph` disc with the Pencil — "edit" whether or not highlights exist.
+   */
+  circles: readonly RowCircleView[];
   /**
    * Absent (a place with nothing to open) leaves every circle INERT — `StoryCircle` renders a plain
    * span rather than a button that does nothing, the 04-09 `createHref` posture.
@@ -57,7 +73,14 @@ export type StoriesSurfaceProps = StoriesStripProps & {
 
 type Opened = { group: number; index: number };
 
-export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
+/** The manage circle's glyph (UI-D-63 a): `Pencil` 20, on the module's tertiary disc. */
+function toStripCircle(circle: RowCircleView): StoryStripCircle {
+  if (circle.disc.kind !== 'manage') return circle as StoryStripCircle;
+  return { ...circle, disc: { kind: 'glyph', icon: <Pencil aria-hidden size={20} /> } };
+}
+
+export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: StoriesSurfaceProps) {
+  const circles = useMemo(() => rowCircles.map(toStripCircle), [rowCircles]);
   const [opened, setOpened] = useState<Opened | null>(null);
   /** Highlight items read so far, by group key — kept for the page's life. */
   const [loaded, setLoaded] = useState<Record<string, StoryViewerItemView[]>>({});
@@ -196,7 +219,11 @@ export function StoriesSurface({ viewer, ...strip }: StoriesSurfaceProps) {
 
   return (
     <>
-      <StoriesStrip {...strip} onOpen={viewer && groups.length > 0 ? open : undefined} />
+      <StoriesStrip
+        {...strip}
+        circles={circles}
+        onOpen={viewer && groups.length > 0 ? open : undefined}
+      />
       {viewer && opened !== null ? (
         <StoryViewerHost
           groups={groups}

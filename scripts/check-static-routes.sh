@@ -73,6 +73,12 @@ const REQUIRED_KEYS = [
   '/(app)/stories/publicar/page',
   '/(app)/stories/meus/page',
   '/(app)/stories/[storyId]/page',
+  // Phase 05.2: the two highlight manage screens (D-109, UI-D-72). Both are manage-gated per request
+  // (a caller without `stories.story.manage` gets the not-found screen) and read the session, so
+  // neither may ever be prerendered. `/stories/destaques` is a LITERAL segment beside
+  // `/stories/[storyId]`, and must resolve to its own page, never to the deep link (Pitfall 7).
+  '/(app)/stories/destaques/page',
+  '/(app)/comunidades/[communityId]/destaques/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

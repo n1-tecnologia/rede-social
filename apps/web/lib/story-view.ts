@@ -325,7 +325,7 @@ export function tenantSequence<T>(page: { items: readonly T[] } | null): T[] {
 export function tenantCircleView(
   tenant: { displayName: string; logoUrl: string | null },
   t: RowLabelReader,
-): Extract<StoryStripCircle, { kind: 'open' }> {
+): Extract<RowCircleView, { kind: 'open' }> {
   return {
     kind: 'open',
     key: 'tenant',
@@ -354,7 +354,7 @@ export function highlightCircleView(
   summary: HighlightSummary,
   t: RowLabelReader,
   group: number,
-): Extract<StoryStripCircle, { kind: 'open' }> {
+): Extract<RowCircleView, { kind: 'open' }> {
   return {
     kind: 'open',
     key: summary.id,
@@ -375,17 +375,119 @@ export function highlightCircleView(
 }
 
 /**
+ * A row circle as the WEB composes it: the module's `StoryStripCircle` with one serialisable disc
+ * more — `{ kind: 'manage' }` (05.2-09). The module's `glyph` disc carries a React node (the Pencil
+ * icon), which cannot cross from a server component into `StoriesSurface`; the server says WHICH
+ * glyph with plain data and the client shell draws it (`StoriesSurface` maps it to the Pencil).
+ */
+export type RowCircleDisc =
+  | Exclude<StoryStripCircle['disc'], { kind: 'glyph' }>
+  | { kind: 'manage' };
+type WithRowDisc<C> = C extends unknown ? Omit<C, 'disc'> & { disc: RowCircleDisc } : never;
+export type RowCircleView = WithRowDisc<StoryStripCircle>;
+
+/**
+ * UI-D-63 (a) — the admin-only trailing MANAGE circle (D-109): a `link` to the place's manage screen,
+ * in the dashed "only you see this" ring, with the manage glyph. It is an ANCHOR, never a button:
+ * the manage screen is a full route (the UI-D-28 rule).
+ */
+export function manageCircleView(
+  href: string,
+  actionLabel: string,
+  t: RowLabelReader,
+): RowCircleView {
+  return {
+    kind: 'link',
+    key: 'manage',
+    href,
+    label: t('highlights.circle.label'),
+    actionLabel,
+    ring: 'dashed',
+    disc: { kind: 'manage' },
+  };
+}
+
+/**
+ * UI-D-63 (b) — an EMPTY highlight in a curator's row (D-102): its cover or monogram inside the
+ * dashed ring, as a LINK to the manage screen with `?editar={id}`, which opens its edit sheet on
+ * arrival. It never opens the viewer, and it is never one of the viewer's groups, so "skip empty
+ * groups" is structural (R-D-M).
+ */
+export function emptyHighlightCircleView(
+  summary: HighlightSummary,
+  manageHref: string,
+  t: RowLabelReader,
+): RowCircleView {
+  return {
+    kind: 'link',
+    key: summary.id,
+    href: `${manageHref}?editar=${summary.id}`,
+    label: summary.title,
+    actionLabel: t('circle.highlightEmpty', { title: summary.title }),
+    ring: 'dashed',
+    disc:
+      summary.coverAssetId !== null
+        ? {
+            kind: 'asset',
+            assetId: summary.coverAssetId,
+            variantWidths: summary.coverVariantWidths,
+          }
+        : { kind: 'monogram', text: monogramOf(summary.title) },
+  };
+}
+
+/**
+ * A curator's two row artefacts (D-108, D-109): where the manage screen is, and the manage circle's
+ * accessible name ("Gerenciar destaques do início" / "… de {community}"). Absent for a member.
+ */
+export type CuratorRow = { manageHref: string; manageActionLabel: string };
+
+/**
+ * One place's highlight circles in the API's `position, id` order, followed — for a CURATOR — by the
+ * manage circle. A highlight with a member-visible story OPENS its viewer group (numbered from
+ * `firstGroup`, in the same order `highlightGroupView` builds the groups); an EMPTY one is the
+ * curator's dashed link (UI-D-63b), and it takes NO group number, because the viewer never plays it.
+ * Without `curator`, an empty highlight is dropped (a member's read never carries one anyway).
+ */
+export function highlightRowCircles(
+  highlights: readonly HighlightSummary[],
+  firstGroup: number,
+  t: RowLabelReader,
+  curator?: CuratorRow,
+): RowCircleView[] {
+  const circles: RowCircleView[] = [];
+  let group = firstGroup;
+  for (const summary of highlights) {
+    if (summary.itemCount > 0) {
+      circles.push(highlightCircleView(summary, t, group));
+      group += 1;
+    } else if (curator) {
+      circles.push(emptyHighlightCircleView(summary, curator.manageHref, t));
+    }
+  }
+  if (curator) circles.push(manageCircleView(curator.manageHref, curator.manageActionLabel, t));
+  return circles;
+}
+
+/** The highlights the viewer can PLAY — the ones with a member-visible story — in row order. */
+export function openableHighlights(highlights: readonly HighlightSummary[]): HighlightSummary[] {
+  return highlights.filter((summary) => summary.itemCount > 0);
+}
+
+/**
  * UI-D-59's order and render rule for Início, as one pure function:
  *
  * 1. the admin's `+ Seu story` link — ONLY with `stories.story.publish` (the caller passes the
  *    permission check's result, never a role, UI-D-28);
  * 2. the tenant circle — iff the tenant sequence is non-empty (a circle means something to watch);
  * 3. Início's highlights, one circle each, in the order the API returned (`position, id`), each
- *    opening its own viewer group (05.2-05).
+ *    opening its own viewer group (05.2-05) — and, for a CURATOR (05.2-09), the empty ones as dashed
+ *    links to the manage screen;
+ * 4. for a curator, the trailing manage circle (D-109).
  *
- * A member with nothing gets `[]`, and `StoriesStrip` then renders NO node (UI-D-26). The three
- * parts are independent (UI E01 partial): highlights render without the tenant circle and vice
- * versa, and an admin with nothing still gets the `+` alone (D-108).
+ * A member with nothing gets `[]`, and `StoriesStrip` then renders NO node (UI-D-26). The parts are
+ * independent (UI E01 partial): highlights render without the tenant circle and vice versa, and an
+ * admin with nothing still gets the `+` and the manage circle (D-108).
  */
 export function inicioRow(
   input: {
@@ -394,10 +496,11 @@ export function inicioRow(
     tenant: { displayName: string; logoUrl: string | null };
     sequenceLength: number;
     highlights: readonly HighlightSummary[];
+    curator?: CuratorRow;
   },
   t: RowLabelReader,
-): StoryStripCircle[] {
-  const row: StoryStripCircle[] = [];
+): RowCircleView[] {
+  const row: RowCircleView[] = [];
   if (input.canPublish) {
     row.push({
       kind: 'link',
@@ -410,12 +513,10 @@ export function inicioRow(
     });
   }
   // The openable circles ARE the viewer's groups, in the same order (`inicioGroups`): the tenant's
-  // is group 0 when it exists, and each highlight takes the next index.
+  // is group 0 when it exists, and each playable highlight takes the next index.
   const first = input.sequenceLength > 0 ? 1 : 0;
   if (input.sequenceLength > 0) row.push(tenantCircleView(input.tenant, t));
-  input.highlights.forEach((summary, k) => {
-    row.push(highlightCircleView(summary, t, first + k));
-  });
+  row.push(...highlightRowCircles(input.highlights, first, t, input.curator));
   return row;
 }
 

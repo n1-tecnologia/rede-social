@@ -29,7 +29,12 @@ import {
   storyCommentsProps,
 } from '@/lib/registry';
 import { loadHighlights } from '@/lib/stories';
-import { highlightCircleView, highlightGroupView, storyViewerLabels } from '@/lib/story-view';
+import {
+  highlightGroupView,
+  highlightRowCircles,
+  openableHighlights,
+  storyViewerLabels,
+} from '@/lib/story-view';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 import { CommunityPosts } from './CommunityPosts';
 import { ReactivateCommunity } from './ReactivateCommunity';
@@ -127,12 +132,19 @@ export default async function CommunityPage({
   // The community is readable, so its posts are asked for SECOND rather than in the `Promise.all`
   // above: a miss must not pay for a page of posts nobody will see, and a cross-tenant probe must
   // not cost the API a second query either (the `/post/[postId]` rule).
+  // D-109 / UI-D-63: a curator of an ACTIVE community gets the dashed admin circles — its empty
+  // highlights as links and the trailing "Gerenciar" — so it reads the curator row. An archived
+  // community keeps the member read and gets no manage circle (UI-D-64); its manage screen stays
+  // reachable by direct link for take-downs (UI-D-80).
+  const curates = !archived && bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
   const [page, placed] = await Promise.all([
     loadFeed({ communityId: community.id }),
-    // HIGHLIGHT-04: this community's named highlights, the MEMBER read (never `scope: 'all'`), so an
-    // empty highlight is never drawn here (D-102). `null` is "the tenant has no stories module" or
-    // "we could not read it" — both render NOTHING, which is the same answer an empty row gives.
-    loadHighlights({ communityId: community.id }),
+    // HIGHLIGHT-04: this community's named highlights. A member's read (no `scope`) never carries an
+    // empty highlight (D-102). `null` is "the tenant has no stories module" or "we could not read
+    // it" — both render NOTHING, which is the same answer an empty row gives.
+    loadHighlights(
+      curates ? { communityId: community.id, scope: 'all' } : { communityId: community.id },
+    ),
   ]);
   const now = Date.now();
   const { media, ...card } = postCardLabels(tf);
@@ -159,18 +171,22 @@ export default async function CommunityPage({
    * **An ARCHIVED community shows its non-empty highlights read-only** (UI-D-64, the D-93 analogue):
    * no `+` at all — not a disabled one — while its circles still open.
    *
+   * **A curator of an active community also gets UI-D-63's admin circles** (05.2-09): an EMPTY
+   * highlight as a dashed link to `/comunidades/{id}/destaques?editar={highlightId}` (never a viewer
+   * group) and the trailing "Gerenciar" circle to the manage screen — the ONE curation door (D-109).
+   *
    * `null` means the row AND its `SectionTitle` are both absent with nothing in their place (UI E02
-   * empty, UI-D-53) — never a reserved height. That is the case only with no highlight AND no `+`:
-   * an admin on a community with none sees the `+` alone, and a member sees nothing. The manage
-   * circle joins in plan 05.2-09.
+   * empty, UI-D-53) — never a reserved height. That is the case only with no highlight, no `+` and
+   * no manage circle: a curator always sees "Gerenciar" (D-108), and a member sees nothing.
    */
   const highlightItems = placed?.items ?? [];
+  const playable = openableHighlights(highlightItems);
   const canPublishHere =
     !archived &&
     bootstrap.permissions.includes(STORY_PERMISSIONS.publish) &&
     bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
   const highlights: ReactNode =
-    highlightItems.length === 0 && !canPublishHere ? null : (
+    highlightItems.length === 0 && !canPublishHere && !curates ? null : (
       <StoriesSurface
         circles={[
           // The D-80 door restated for this row (D-92, UI-D-53): the leading `+` link circle.
@@ -190,17 +206,30 @@ export default async function CommunityPage({
                 },
               ]
             : []),
-          // One circle per highlight; circle k opens group k — the two lists below are built from
-          // the same read in the same order, so a circle and its group can never disagree.
-          ...highlightItems.map((summary, index) => highlightCircleView(summary, ts, index)),
+          // One circle per highlight; the k-th PLAYABLE one opens group k — the circles and the
+          // groups below are built from the same read in the same order, so they never disagree.
+          // A curator's empty highlights are dashed links, and "Gerenciar" closes the row.
+          ...highlightRowCircles(
+            highlightItems,
+            0,
+            ts,
+            curates
+              ? {
+                  manageHref: `/comunidades/${community.id}/destaques`,
+                  manageActionLabel: ts('highlights.circle.actionCommunity', {
+                    community: community.name,
+                  }),
+                }
+              : undefined,
+          ),
         ]}
-        // With no highlight (the `+` alone) there is nothing to open, so there is no viewer at all —
-        // the home strip's rule.
+        // With nothing playable (the `+` and the admin circles alone) there is nothing to open, so
+        // there is no viewer at all — the home strip's rule.
         viewer={
-          highlightItems.length === 0
+          playable.length === 0
             ? undefined
             : {
-                groups: highlightItems.map(highlightGroupView),
+                groups: playable.map(highlightGroupView),
                 labels: storyViewerLabels(ts),
                 onLike: likeStoryAction,
                 onUnlike: unlikeStoryAction,

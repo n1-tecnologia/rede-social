@@ -2,6 +2,7 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
+import { closeAdmin, deleteHighlightsByTitlePrefix, insertHighlightFixture } from './admin';
 import { hosts, login, SEED_PASSWORD, seededCommunityFeed, seededFeed, users } from './fixtures';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -960,12 +961,13 @@ test.describe('05.1 — reactivate from the page, and the Destaques `+` (D-90, D
   test('the `+` belongs to the admin, on active communities only', async ({ page }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
 
-    // No highlight + publish AND manage: the section renders with the `+` ALONE (UI-D-53, UI E02).
+    // No highlight + publish AND manage: the section renders with the `+` and the curator's
+    // trailing "Gerenciar" (UI-D-53, UI E02; D-108 / D-109 since 05.2-09) — nothing else.
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.withoutHighlightId}`);
     const plainName = await heading(page);
     expect(plainName.length).toBeGreaterThan(0);
     await expect(destaques(page)).toBeVisible();
-    await expect(destaques(page).getByRole('listitem')).toHaveCount(1);
+    await expect(destaques(page).getByRole('listitem')).toHaveCount(2);
     const door = destaques(page).getByRole('link', {
       name: ST.own.actionCommunity.replace('{community}', plainName),
     });
@@ -1000,5 +1002,141 @@ test.describe('05.1 — reactivate from the page, and the Destaques `+` (D-90, D
     await expect(page.locator('[data-community-name]')).toBeVisible();
     await expect(destaques(page)).toHaveCount(0);
     await expect(storyDoors(page)).toHaveCount(0);
+  });
+});
+
+/**
+ * D-109 / UI-D-72 / UI-D-80 (05.2-09) — a community's highlight MANAGE screen. The admin's row on an
+ * ACTIVE community ends with "Gerenciar", which opens `/comunidades/{id}/destaques`; an ARCHIVED
+ * community's manage screen, reached by direct link, keeps only the take-downs; a member gets the
+ * community's one not-found screen; and the page header of a 60-character community truncates at
+ * 320px without pushing the back control off-screen (the UI E04 long-text backstop).
+ *
+ * The one fixture written — a highlight on the ARCHIVED community, which the API refuses to create —
+ * is named `Teste …` and removed in `afterAll`.
+ */
+test.describe('05.2-09 — the community manage screen (D-109, UI-D-72, UI-D-80)', () => {
+  const ST = storyMessages.stories;
+  const H = ST.highlights;
+  const ARCHIVED_FIXTURE = 'Teste Arquivo';
+  /** `SEED_COMMUNITY_IDS['tria-demo'][3]` — the 60-character `SEED_LONG_COMMUNITY_NAME`. */
+  const LONG_NAME_ID = '0d000000-0000-4000-8000-0000000000c4';
+
+  test.beforeAll(async () => {
+    await deleteHighlightsByTitlePrefix('tria-demo', ARCHIVED_FIXTURE);
+    await insertHighlightFixture('tria-demo', SEEDED.archivedId, ARCHIVED_FIXTURE);
+  });
+
+  test.afterAll(async () => {
+    await deleteHighlightsByTitlePrefix('tria-demo', ARCHIVED_FIXTURE);
+    await closeAdmin();
+  });
+
+  function destaques(page: Page): Locator {
+    return page.getByRole('list', { name: C.page.highlights });
+  }
+
+  test('the admin row of an active community ends with "Gerenciar", which opens its manage screen', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.withHighlightId}`);
+    const name = ((await page.locator('[data-community-name]').textContent()) ?? '').trim();
+
+    const manage = destaques(page).getByRole('link', {
+      name: H.circle.actionCommunity.replace('{community}', name),
+    });
+    await expect(manage).toHaveAttribute(
+      'href',
+      `/comunidades/${SEEDED.withHighlightId}/destaques`,
+    );
+    await expect(destaques(page).getByRole('listitem').last()).toContainText(H.circle.label);
+
+    await manage.click();
+    await expect(
+      page.getByRole('heading', {
+        name: H.manage.titleCommunity.replace('{community}', name),
+        level: 1,
+      }),
+    ).toBeVisible();
+    const list = page.getByRole('list', { name: H.manage.region });
+    await expect(
+      list.getByRole('button', {
+        name: H.manage.edit.replace('{title}', SEEDED.communityHighlight),
+      }),
+    ).toBeVisible();
+    // One highlight: the handle is there, the drag helper is not (UI E04 zero-one-many).
+    await expect(
+      list.getByRole('button', {
+        name: H.manage.drag.replace('{title}', SEEDED.communityHighlight),
+      }),
+    ).toBeVisible();
+    await expect(page.getByText(H.manage.helper)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: H.manage.create })).toBeVisible();
+  });
+
+  test('an ARCHIVED community: no "Gerenciar" on its row; its manage screen keeps only the take-downs', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}`);
+    await expect(page.getByRole('heading', { name: SEEDED.archived, level: 1 })).toBeVisible();
+    await expect(page.locator(`a[href="/comunidades/${SEEDED.archivedId}/destaques"]`)).toHaveCount(
+      0,
+    );
+
+    // UI-D-80: reached by direct link, the note, no "Novo destaque", no handles.
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.archivedId}/destaques`);
+    await expect(page.getByText(H.manage.archivedNote)).toBeVisible();
+    await expect(page.getByRole('button', { name: H.manage.create })).toHaveCount(0);
+    const list = page.getByRole('list', { name: H.manage.region });
+    await expect(
+      list.getByRole('button', { name: H.manage.drag.replace('{title}', ARCHIVED_FIXTURE) }),
+    ).toHaveCount(0);
+
+    // The row still opens the REDUCED edit sheet: only remove and delete remain.
+    await list
+      .getByRole('button', { name: H.manage.edit.replace('{title}', ARCHIVED_FIXTURE) })
+      .click();
+    const sheet = page.getByRole('dialog', { name: H.edit.title });
+    await expect(sheet.getByText(H.edit.archivedNote)).toBeVisible();
+    await expect(sheet.getByRole('button', { name: H.edit.changeCover })).toHaveCount(0);
+    await expect(sheet.getByLabel(H.edit.name)).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: H.edit.moveUp })).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: H.edit.addStories })).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: H.edit.delete })).toBeVisible();
+  });
+
+  test('a MEMBER gets the community not-found screen at the manage route', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${SEEDED.withHighlightId}/destaques`);
+    await expect(page.getByText(C.notFound.title)).toBeVisible();
+    await expect(page.getByRole('button', { name: H.manage.create })).toHaveCount(0);
+  });
+
+  test('UI E04 long-text backstop: a 60-character community title truncates at 320px and the back control stays on screen', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the backstop is a phone-width claim');
+    await page.setViewportSize({ width: 320, height: 640 });
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${LONG_NAME_ID}/destaques`);
+
+    const title = page.getByRole('heading', {
+      name: H.manage.titleCommunity.replace('{community}', SEEDED.longName),
+      level: 1,
+    });
+    await expect(title).toBeVisible();
+    // Truncated in CSS (one line, clipped), never wrapped or cut in the string.
+    const clipped = await title.evaluate((node) => node.scrollWidth > node.clientWidth);
+    expect(clipped).toBe(true);
+    const back = page.getByRole('link', { name: H.manage.back });
+    await expect(back).toBeVisible();
+    const box = await back.boundingBox();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+    const titleBox = await title.boundingBox();
+    expect((titleBox?.x ?? 0) + (titleBox?.width ?? 0)).toBeLessThanOrEqual(320);
   });
 });

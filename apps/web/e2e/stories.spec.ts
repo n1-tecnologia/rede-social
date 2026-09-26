@@ -8,6 +8,7 @@ import {
   activeReadyStoryCount,
   cloneActiveStories,
   closeAdmin,
+  deleteHighlightsByTitlePrefix,
   deleteStoriesByCaptionPrefix,
   deleteStoryCommentsByBodyPrefix,
   envValue,
@@ -216,8 +217,9 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
 
     const row = strip(page);
     const items = row.getByRole('listitem');
-    // D-108: `+` first, then the tenant circle, then the highlight.
-    await expect(items).toHaveCount(3);
+    // D-108 / UI-D-59: `+` first, then the tenant circle, then Início's highlights — for a curator
+    // the EMPTY `Aulas` too, as a dashed link (UI-D-63b) — then the trailing "Gerenciar" (05.2-09).
+    await expect(items).toHaveCount(5);
 
     // UI-D-28: rendered FIRST, and an anchor rather than a button — `/stories/publicar` is a
     // full-screen route that must not live in a dismissible layer.
@@ -237,7 +239,8 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
 
     const row = strip(page);
     await expect(row).toBeVisible();
-    await expect(row.getByRole('listitem')).toHaveCount(3);
+    // `+`, tenant, Bastidores, the dashed `Aulas` and the dashed "Gerenciar" (05.2-09).
+    await expect(row.getByRole('listitem')).toHaveCount(5);
     // The row is the only horizontal scroller, and its overscroll is contained so a trackpad swipe
     // never triggers the browser back-gesture.
     const overflow = await row.evaluate((node) => getComputedStyle(node).overflowX);
@@ -1487,5 +1490,220 @@ test.describe('05.2 — publishing into a highlight (D-111..D-115)', () => {
     } finally {
       await deleteTestHighlights();
     }
+  });
+});
+
+/**
+ * D-109 / UI-D-72..UI-D-76 (05.2-09) — the Início MANAGE screen, the one curation door: the admin
+ * row ends with "Gerenciar", an empty highlight is a dashed link whose `?editar=` opens its edit
+ * sheet on arrival, and on `/stories/destaques` the admin creates, renames, fills, re-covers,
+ * empties, reorders (with the KEYBOARD, UI-D-73) and deletes a highlight. A member gets none of it.
+ *
+ * Everything this describe writes is named `Teste …` and removed in `afterAll` (and before, in case a
+ * previous run crashed), and Início's order is put back dense, so the shared seed is left as found.
+ * Image stories only: the one story added is the seeded EXPIRED image.
+ */
+test.describe('the Início manage screen (D-109, UI-D-72..76)', () => {
+  const H = S.highlights;
+  /** `SEED_HIGHLIGHT_IDS['tria-demo']` — `Bastidores` (items) and `Aulas` (empty). */
+  const HOME_IDS = {
+    bastidores: '0d000000-0000-4000-8000-0000000002a1',
+    aulas: '0d000000-0000-4000-8000-0000000002a2',
+  } as const;
+  const TITLE = 'Teste Nova';
+  const RENAMED = 'Teste Nome';
+
+  /** A name that STARTS with a catalog template's text before its first placeholder. */
+  const startsWith = (template: string) =>
+    new RegExp(`^${(template.split('{')[0] ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+
+  /** Removes this describe's highlights and puts Início's seeded order back dense (0, 1). */
+  async function restoreHome(): Promise<void> {
+    await deleteHighlightsByTitlePrefix('tria-demo', 'Teste ');
+    const token = await adminToken();
+    await storiesApi(token, '/v1/stories/highlights/order', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ highlightIds: [HOME_IDS.bastidores, HOME_IDS.aulas] }),
+    });
+  }
+
+  test.beforeAll(restoreHome);
+  test.afterAll(restoreHome);
+
+  const manageList = (page: Page) => page.getByRole('list', { name: H.manage.region });
+  const editButtonNames = (page: Page) =>
+    manageList(page)
+      .getByRole('button', { name: startsWith(H.manage.edit) })
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') ?? ''));
+  const editSheet = (page: Page) => page.getByRole('dialog', { name: H.edit.title });
+
+  test('the admin row ends with "Gerenciar", and the empty Aulas is a dashed link whose ?editar= opens its sheet', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD);
+    const row = strip(page);
+
+    // D-109: the trailing circle is an ANCHOR to the manage screen (UI-D-63a), dashed.
+    const manage = row.getByRole('link', { name: H.circle.actionHome });
+    await expect(manage).toHaveAttribute('href', '/stories/destaques');
+    await expect(row.getByRole('listitem').last()).toContainText(H.circle.label);
+    await expect(manage.getByTestId('story-circle-ring')).toHaveClass(/border-dashed/);
+
+    // UI-D-63b: the empty highlight is a LINK (never a viewer group) in the same dashed ring.
+    const aulas = row.getByRole('link', {
+      name: S.circle.highlightEmpty.replace('{title}', SEEDED.homeEmptyHighlight),
+    });
+    await expect(aulas).toHaveAttribute('href', `/stories/destaques?editar=${HOME_IDS.aulas}`);
+    await expect(aulas.getByTestId('story-circle-ring')).toHaveClass(/border-dashed/);
+
+    await aulas.click();
+    // Pitfall 7: the literal segment is the manage screen, never the story deep link.
+    await expect(page.getByRole('heading', { name: H.manage.titleHome, level: 1 })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: S.viewer.dialog })).toHaveCount(0);
+    // `?editar=` opened Aulas' edit sheet on arrival, then left the address.
+    await expect(editSheet(page)).toBeVisible();
+    await expect(editSheet(page).getByLabel(H.edit.name)).toHaveValue(SEEDED.homeEmptyHighlight);
+    await expect(editSheet(page).getByText(H.edit.emptyTitle)).toBeVisible();
+    await expect(page).toHaveURL(/\/stories\/destaques$/);
+  });
+
+  test('a MEMBER sees neither admin circle and gets the not-found screen at /stories/destaques', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD);
+    const row = strip(page);
+    await expect(row).toBeVisible();
+    await expect(row.getByRole('link', { name: H.circle.actionHome })).toHaveCount(0);
+    await expect(row.getByText(H.circle.label, { exact: true })).toHaveCount(0);
+    await expect(row.getByText(SEEDED.homeEmptyHighlight, { exact: true })).toHaveCount(0);
+
+    await page.goto('/stories/destaques');
+    // UI-D-72 / T-05.2-39: not a disabled page — no manage screen at all, and no story viewer.
+    await expect(page.getByRole('heading', { name: H.manage.titleHome })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: H.manage.create })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: S.viewer.dialog })).toHaveCount(0);
+  });
+
+  test('create, rename, add the EXPIRED story, pick it as cover, remove it, move up by keyboard, delete', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'one project walks the whole curation flow');
+    await login(page, users.demoAdmin, SEED_PASSWORD);
+    await page.goto('/stories/destaques');
+
+    // UI E04 populated / partial: Bastidores with its count, Aulas with the curator-only meta.
+    await expect(manageList(page)).toBeVisible();
+    await expect(page.getByText(H.manage.helper)).toBeVisible();
+    await expect(manageList(page).getByText(H.manage.emptyItem)).toBeVisible();
+    expect(await editButtonNames(page)).toEqual([
+      H.manage.edit.replace('{title}', SEEDED.homeHighlight),
+      H.manage.edit.replace('{title}', SEEDED.homeEmptyHighlight),
+    ]);
+
+    // ── Create: appended at the END, the toast, and its edit sheet opens (UI-D-72).
+    await page.getByRole('button', { name: H.manage.create }).click();
+    const createSheet = page.getByRole('dialog', { name: H.create.title });
+    await expect(
+      createSheet.getByText(H.create.place.replace('{place}', H.place.home)),
+    ).toBeVisible();
+    await createSheet.getByLabel(H.create.label).fill(TITLE);
+    await createSheet.getByRole('button', { name: H.create.submit }).click();
+    await expect(page.getByText(H.toasts.created)).toBeVisible();
+    const sheet = editSheet(page);
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByLabel(H.edit.name)).toHaveValue(TITLE);
+    await expect(
+      sheet.getByText(H.edit.position.replace('{position}', '3').replace('{total}', '3')),
+    ).toBeVisible();
+
+    // ── Rename: the explicit save (UI-D-74).
+    await sheet.getByLabel(H.edit.name).fill(RENAMED);
+    await sheet.getByRole('button', { name: H.edit.saveName }).click();
+    await expect(page.getByText(H.toasts.renamed)).toBeVisible();
+
+    // ── "Adicionar stories": the history, EXPIRED stories included (D-110 route 3).
+    await sheet.getByRole('button', { name: H.edit.addStories }).click();
+    await expect(sheet.getByRole('heading', { name: H.picker.title })).toBeVisible();
+    await expect(sheet.getByText(H.picker.helper)).toBeVisible();
+    const expiredRow = sheet.locator('li', { hasText: SEEDED.expiredCaption });
+    const expiredSwitch = expiredRow.getByRole('switch');
+    await expect(expiredSwitch).toHaveAttribute('aria-checked', 'false');
+    await expiredSwitch.click();
+    await expect(page.getByText(H.toasts.added)).toBeVisible();
+    await expect(expiredSwitch).toHaveAttribute('aria-checked', 'true');
+    await sheet.getByRole('button', { name: H.create.back }).click();
+
+    // Back on the main step, the story is listed with its remove control.
+    const remove = sheet.getByRole('button', { name: startsWith(H.edit.remove) });
+    await expect(remove).toHaveCount(1);
+
+    // ── Cover: the one image story is the only option; picking it says "Capa atualizada."
+    await sheet.getByRole('button', { name: H.edit.changeCover }).click();
+    await expect(sheet.getByRole('heading', { name: H.cover.title })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: H.cover.upload })).toBeVisible();
+    const option = sheet.getByRole('button', { name: startsWith(H.cover.option) });
+    await expect(option).toHaveCount(1);
+    await option.click();
+    await expect(page.getByText(H.toasts.coverChanged)).toBeVisible();
+    await expect(sheet.getByRole('button', { name: H.edit.changeCover })).toBeVisible();
+
+    // ── Remove: immediate, NO confirm (UI-D-78), and the empty state comes back.
+    await remove.click();
+    await expect(page.getByText(H.toasts.removed)).toBeVisible();
+    await expect(page.getByRole('dialog', { name: H.confirmDelete.title })).toHaveCount(0);
+    await expect(sheet.getByText(H.edit.emptyTitle)).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+
+    // ── Reorder by KEYBOARD (UI-D-73): focus stays on the handle; the live region says where.
+    const handle = manageList(page).getByRole('button', {
+      name: H.manage.drag.replace('{title}', RENAMED),
+    });
+    await handle.focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(
+      page.getByText(
+        H.manage.moved
+          .replace('{title}', RENAMED)
+          .replace('{position}', '2')
+          .replace('{total}', '3'),
+      ),
+    ).toBeAttached();
+    await expect(handle).toBeFocused();
+    await expect
+      .poll(() => editButtonNames(page))
+      .toEqual([
+        H.manage.edit.replace('{title}', SEEDED.homeHighlight),
+        H.manage.edit.replace('{title}', RENAMED),
+        H.manage.edit.replace('{title}', SEEDED.homeEmptyHighlight),
+      ]);
+    // The order was SAVED: a reload reads it back from the server.
+    await page.reload();
+    expect(await editButtonNames(page)).toEqual([
+      H.manage.edit.replace('{title}', SEEDED.homeHighlight),
+      H.manage.edit.replace('{title}', RENAMED),
+      H.manage.edit.replace('{title}', SEEDED.homeEmptyHighlight),
+    ]);
+
+    // ── Delete, behind "Excluir destaque?" (the one irreversible act).
+    await manageList(page)
+      .getByRole('button', { name: H.manage.edit.replace('{title}', RENAMED) })
+      .click();
+    await expect(editSheet(page)).toBeVisible();
+    await editSheet(page).getByRole('button', { name: H.edit.delete }).click();
+    const confirm = page.getByRole('dialog', { name: H.confirmDelete.title });
+    await expect(confirm).toBeVisible();
+    await expect(confirm.getByRole('button', { name: H.confirmDelete.cancel })).toBeVisible();
+    await confirm.getByRole('button', { name: H.confirmDelete.confirm }).click();
+    await expect(page.getByText(H.toasts.deleted)).toBeVisible();
+    await expect
+      .poll(() => editButtonNames(page))
+      .toEqual([
+        H.manage.edit.replace('{title}', SEEDED.homeHighlight),
+        H.manage.edit.replace('{title}', SEEDED.homeEmptyHighlight),
+      ]);
   });
 });

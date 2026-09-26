@@ -517,3 +517,34 @@ export async function reorderHighlights(input: ReorderHighlights): Promise<Highl
   if (!res.ok) throw await apiError(res);
   return highlightListSchema.parse(await res.json());
 }
+
+/**
+ * The manage screens' ONE read (05.2-09, D-109): one place's CURATOR row (`scope: 'all'`, empty
+ * highlights included). Unlike the row's `loadHighlights`, a miss here MATTERS — the list IS the
+ * screen — so the outcome is explicit: the API's bare 404 (a community that is unknown, another
+ * tenant's, removed, or the communities module off) is `not-found`; a session refusal is the
+ * navigation `bootstrapRedirectPath` names; anything else is `error`. The caller decides what each
+ * renders, and calls `redirect()` / `notFound()` itself (both throw in Next 16).
+ */
+export type CuratorHighlightsResult =
+  | { status: 'ok'; list: HighlightList }
+  | { status: 'not-found' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+export async function loadCuratorHighlights(query: {
+  communityId?: string;
+}): Promise<CuratorHighlightsResult> {
+  try {
+    return { status: 'ok', list: await getHighlights({ ...query, scope: 'all' }) };
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      if (error.status === 404) return { status: 'not-found' };
+      const path = bootstrapRedirectPath(error);
+      if (path) return { status: 'redirect', path };
+    }
+    // Shape only: highlight titles are tenant content (T-05.2-28).
+    console.error('stories.curator_highlights_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}

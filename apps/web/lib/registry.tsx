@@ -38,6 +38,7 @@ import {
   highlightGroupView,
   inicioGroups,
   inicioRow,
+  openableHighlights,
   storyViewerItem,
   storyViewerLabels,
   tenantSequence,
@@ -350,16 +351,23 @@ export function storyCommentsProps(
  * drops only the tenant circle and a failed highlights read drops only the highlights. A member
  * with nothing gets an empty `circles` list and `StoriesStrip` collapses to no node. The row must
  * never be the reason `/inicio` shows an error card — which is also why it is NOT allowed to reject
- * into `homeSlotsFor`'s generic error slot the way the feed deliberately is. The member-scope read
- * (`loadHighlights({})`, never `scope: 'all'`) already excludes empty highlights (T-05.2-20).
+ * into `homeSlotsFor`'s generic error slot the way the feed deliberately is. A member's read
+ * (`loadHighlights({})`) already excludes empty highlights (T-05.2-20); only a caller holding
+ * `stories.story.manage` asks for `scope: 'all'` (which the API refuses to anyone else), and gets
+ * the admin circles of UI-D-63 — empty highlights as dashed links and the trailing "Gerenciar"
+ * (D-108, D-109, 05.2-09).
  *
  * Every relative-time label is formatted HERE from the page's single `now` (UI-D-14): the viewer
  * never calls a clock in render, so there is no hydration mismatch and no per-second re-render.
  */
 const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
+  // D-108 / D-109 / UI-D-63: a CURATOR reads the curator row (`scope: 'all'`, empty highlights
+  // included) and gets the dashed admin circles; everyone else keeps the member read, so an empty
+  // highlight never reaches a member's HTML (T-05.2-20).
+  const curates = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
   const [page, highlights, tf, tfeed, locale] = await Promise.all([
     loadStories({ limit: STORY_MAX_PAGE_SIZE }),
-    loadHighlights({}),
+    loadHighlights(curates ? { scope: 'all' } : {}),
     getTranslations('stories'),
     // D-82: the sheet's own copy is the FEED's, read from the feed namespace rather than copied
     // into the stories one.
@@ -373,10 +381,13 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
   };
   // D-106: one bounded page, played oldest first.
   const sequence = tenantSequence(page);
+  const rowHighlights = highlights?.items ?? [];
   const groups = inicioGroups({
     tenant,
     sequence: sequence.map((story) => storyViewerItem(story, now)),
-    highlightGroups: (highlights?.items ?? []).map(highlightGroupView),
+    // Only a highlight with a member-visible story is a viewer group: an empty one is the curator's
+    // dashed LINK to the manage screen and never opens the viewer (UI-D-63b).
+    highlightGroups: openableHighlights(rowHighlights).map(highlightGroupView),
   });
 
   return (
@@ -387,7 +398,17 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
           own: { avatarUrl: bootstrap.membership.profile.avatarUrl },
           tenant,
           sequenceLength: sequence.length,
-          highlights: highlights?.items ?? [],
+          highlights: rowHighlights,
+          // D-109: the ONE curation door for Início — the trailing "Gerenciar" circle. It is there
+          // even when nothing else is (D-108), so the admin can always create the first highlight.
+          ...(curates
+            ? {
+                curator: {
+                  manageHref: '/stories/destaques',
+                  manageActionLabel: tf('highlights.circle.actionHome'),
+                },
+              }
+            : {}),
         },
         tf,
       )}
@@ -408,7 +429,7 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
               // UI-D-66 / D-110 route 1: the viewer's "Destacar" pill, on every Início group —
               // gated on the composed PERMISSION, never a role (the API re-checks it on every read
               // and write the sheet makes, T-05.2-26).
-              canCurate: bootstrap.permissions.includes(STORY_PERMISSIONS.manage),
+              canCurate: curates,
             }
       }
       regionLabel={tf('region')}
