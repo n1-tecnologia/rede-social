@@ -236,6 +236,8 @@ export default async function CommunityPage({
                 comments: storyCommentsProps(locale, tf, ts, bootstrap),
                 // UI-D-66: "Destacar" for a curator on any story, a permission never a role.
                 canCurate: bootstrap.permissions.includes(STORY_PERMISSIONS.manage),
+                // The empty highlight sheet's "Criar destaque" opens THIS community's manage screen.
+                originCommunityId: community.id,
               }
         }
         regionLabel={tc('page.highlights')}

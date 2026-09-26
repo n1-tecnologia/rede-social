@@ -59,6 +59,7 @@
         "generic": "Não foi possível salvar. Tente novamente.",
         "archived": "Esta comunidade foi arquivada. Não é possível adicionar stories aos destaques dela.",
         "full": "Este destaque chegou ao limite de {limit} stories. Remova um para adicionar outro.",
+        "placeFull": "Este lugar chegou ao limite de {limit} destaques. Exclua um para criar outro.",
         "order": "Não foi possível salvar a nova ordem. Tente novamente.",
         "orderStale": "A lista de destaques mudou. Confira a ordem e tente de novo."
       },

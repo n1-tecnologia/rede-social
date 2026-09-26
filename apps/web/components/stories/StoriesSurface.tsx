@@ -93,6 +93,11 @@ export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
     /** `stories.story.manage` from the bootstrap: the viewer's "Destacar" pill (UI-D-66). */
     canCurate?: boolean;
     /**
+     * The community whose page composed this row (absent on Início and the deep link). Only the
+     * empty highlight sheet's "Criar destaque" reads it, to open THAT community's manage screen.
+     */
+    originCommunityId?: string;
+    /**
      * 05.2-10 (UI-D-61): the tenant circle wears the seen ring. Its two accessible names, read from
      * the catalog on the server; present only where a tenant circle exists (Início).
      */
@@ -379,6 +384,7 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
           onUnlike={viewer.onUnlike}
           comments={viewer.comments}
           canCurate={viewer.canCurate}
+          originCommunityId={viewer.originCommunityId ?? null}
           onClose={close}
         />
       ) : null}

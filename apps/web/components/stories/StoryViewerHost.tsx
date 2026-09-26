@@ -19,6 +19,7 @@ import {
 } from '@tria/module-stories/ui';
 import { Avatar, IconButton, useToast } from '@tria/ui';
 import { BookmarkPlus, MessageCircle } from 'lucide-react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -137,6 +138,12 @@ export type StoryViewerHostProps = {
    * its sheet exist only when true (UI-D-66). Absent is false.
    */
   canCurate?: boolean;
+  /**
+   * The community whose page opened this viewer; absent/null = Início or a deep link. It only
+   * chooses where the empty highlight sheet's "Criar destaque" goes (05.2-UI-REVIEW warning 2):
+   * that community's manage screen, else `/stories/destaques`.
+   */
+  originCommunityId?: string | null;
 };
 
 /**
@@ -200,6 +207,7 @@ export function StoryViewerHost({
   onClose,
   closeHref = '/inicio',
   canCurate = false,
+  originCommunityId = null,
 }: StoryViewerHostProps) {
   const toast = useToast();
   const t = useTranslations('stories');
@@ -509,7 +517,9 @@ export function StoryViewerHost({
               onToggle={toggleHighlight}
               empty={
                 // UI-D-67 empty: no highlight anywhere. Curation has ONE door (D-109), so the CTA
-                // leaves for the manage screen rather than creating inline.
+                // leaves for the manage screen rather than creating inline — the one of the PLACE
+                // the viewer was opened from (05.2-UI-REVIEW warning 2): a community page's own
+                // manage screen, else Início's. A client-side `Link`, not a full reload.
                 <div className="flex flex-col items-start gap-2 py-4">
                   <p className="text-sm font-normal text-text-secondary">
                     {t('highlights.sheet.emptyTitle')}
@@ -517,12 +527,16 @@ export function StoryViewerHost({
                   <p className="text-sm font-normal text-text-tertiary">
                     {t('highlights.sheet.emptyBody')}
                   </p>
-                  <a
-                    href="/stories/destaques"
+                  <Link
+                    href={
+                      originCommunityId
+                        ? `/comunidades/${originCommunityId}/destaques`
+                        : '/stories/destaques'
+                    }
                     className="rounded text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                   >
                     {t('highlights.sheet.emptyCta')}
-                  </a>
+                  </Link>
                 </div>
               }
             />

@@ -3,6 +3,7 @@
 import { mediaAcceptFor } from '@tria/contracts/media';
 import {
   STORY_HIGHLIGHT_MAX_ITEMS,
+  STORY_HIGHLIGHT_MAX_PER_PLACE,
   STORY_HIGHLIGHT_MAX_TITLE,
 } from '@tria/module-stories/contracts';
 import {
@@ -537,8 +538,18 @@ export function HighlightManager({
   const create = async (title: string): Promise<boolean> => {
     const result = await createHighlightAction(place, title);
     if (!result.ok) {
-      // UI E05 error: the generic toast (or the archived one); the step stays open, title kept.
-      toastFor(result.code === 'archived' ? 'archived' : 'generic');
+      // UI E05 error: the step stays open, title kept. A place already holding
+      // STORY_HIGHLIGHT_MAX_PER_PLACE is the PLACE-cap copy (review WR-03: "Tente novamente" can never
+      // succeed there); `archived` its own copy; anything else the generic one. `toastFor('full')`
+      // stays the ITEM cap, which is what the add-story paths mean by `full`.
+      if (result.code === 'full') {
+        toast.show({
+          tone: 'error',
+          message: t('highlights.errors.placeFull', { limit: STORY_HIGHLIGHT_MAX_PER_PLACE }),
+        });
+      } else {
+        toastFor(result.code === 'archived' ? 'archived' : 'generic');
+      }
       return false;
     }
     setItems((list) => [...list, result.highlight]);

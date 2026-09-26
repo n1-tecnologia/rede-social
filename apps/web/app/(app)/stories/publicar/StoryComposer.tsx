@@ -2,6 +2,8 @@
 
 import { MEDIA_LIMITS, mediaAcceptFor } from '@tria/contracts/media';
 import {
+  STORY_HIGHLIGHT_MAX_ITEMS,
+  STORY_HIGHLIGHT_MAX_PER_PLACE,
   STORY_HIGHLIGHT_MAX_TITLE,
   STORY_MAX_CAPTION,
   type StoryHighlightIssue,
@@ -267,7 +269,9 @@ export function StoryComposer({
   /**
    * The closed refusal vocabulary, mapped to copy exhaustively — a new code cannot compile silently.
    * `archived` and `title_invalid` land here only when no destination was captured at submit; with
-   * one, the UI-D-71 branches in `submit` answer instead. `full` and `order_stale` keep the generic
+   * one, the UI-D-71 branches in `submit` answer instead. `full` is answered by `submit` from the
+   * captured destination (a `newHighlight` hit the PLACE cap, a `highlightId` the ITEM cap — review
+   * WR-03); here it maps to the item-cap copy, never the retry copy. `order_stale` keeps the generic
    * error: the admin re-picks.
    */
   const refusalCopy = (
@@ -278,7 +282,7 @@ export function StoryComposer({
       media_invalid: t('publish.errors.failed'),
       archived: t('publish.errors.failed'),
       title_invalid: t('publish.errors.titleInvalid', { limit: STORY_HIGHLIGHT_MAX_TITLE }),
-      full: t('publish.errors.failed'),
+      full: t('highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS }),
       order_stale: t('publish.errors.failed'),
       not_found: t('publish.errors.failed'),
       generic: t('publish.errors.failed'),
@@ -332,6 +336,16 @@ export function StoryComposer({
           // UI-D-71: state the rule; a forced origin returns to the gate, anything else to "Nenhum".
           setSelection(forcedByOrigin ? { kind: 'choose' } : NONE);
           setFormError(refusalCopy('title_invalid'));
+          return;
+        }
+        if (result.code === 'full') {
+          // WR-03: say WHICH cap, from the destination captured at the tap; the selection, the
+          // media and the caption all stay, like every other non-archived refusal.
+          setFormError(
+            chosen.kind === 'pending'
+              ? t('highlights.errors.placeFull', { limit: STORY_HIGHLIGHT_MAX_PER_PLACE })
+              : t('highlights.errors.full', { limit: STORY_HIGHLIGHT_MAX_ITEMS }),
+          );
           return;
         }
         // Every other refusal (a bare 404 included) keeps the selection as it is.
