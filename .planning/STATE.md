@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-10-PLAN.md
-last_updated: "2026-09-26T01:25:44.486Z"
+stopped_at: Completed 05.2-11-PLAN.md
+last_updated: "2026-09-26T02:09:48.975Z"
 last_activity: 2026-09-26
-last_activity_desc: "Completed 05.2-10 (the seen ring: story_views + POST /v1/stories/views + viewerSeen in the one strip statement; the tenant circle wears the brand ring and 'Há stories novos.' while anything is unseen, greys on close and resumes at the first unseen story)"
-state_head: c3028d29e728549c26c84e8780b54d3b8d2caa79
+last_activity_desc: "Completed 05.2-11 (the pin model retired on the developer's explicit 'retire': pin API/contract/events, publish communityId and pinnedCommunityCount deleted; story_community_pins dropped by drop-only migration file 2; the file 1 -> file 2 rehearsal proves no pin lost on an edge fixture)"
+state_head: ef3e302722f9b40c4a8d46eed727d6091064f357
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 74
+  completed_plans: 75
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 11 of 12
-Status: Executing Phase 05.2 — next is 05.2-11 (opens with a blocking-human checkpoint)
-Last activity: 2026-09-26 — Completed 05.2-10 (story_views with RLS and story_views_uq; POST /v1/stories/views, 204 always, in-lane insert-select; viewerSeen as a constant-tenant exists in storyProjection; StoriesSurface session seen set and buffered flush; seen ring, accessible name and resume index; pgTAP 349, integration 529, stories e2e 60 + comunidades/smoke 55 passed on :3100)
+Plan: 12 of 12
+Status: Executing Phase 05.2 — next is 05.2-12
+Last activity: 2026-09-26 — Completed 05.2-11 (developer answered `retire` at the blocking-human checkpoint; pin routes/events/contract fields deleted, a stale communityId publish is 400 and every pin route 404; drop-only file 2 20260926015251; rehearsal 6 pins -> 6 items, planted mismatch exits 3; pgTAP 331, integration 506, e2e smoke 12 + stories/comunidades 115 passed on :3100)
 
-Progress: [█████████████████░░░] 74/88 plans ([░░░░░░░░░░] 0%)
+Progress: [█████████████████░░░] 75/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -134,6 +134,7 @@ Progress: [█████████████████░░░] 74/88 p
 | Phase 05.2 P08 | 31 min | 3 tasks | 16 files |
 | Phase 05.2 P09 | 31 min | 3 tasks | 23 files |
 | Phase 05.2 P10 | 58 min | 3 tasks | 32 files |
+| Phase 05.2 P11 | 31min | 3 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -411,6 +412,9 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-10: the seen ring is re-derived from the session set snapshotted at each close; the resume index uses the live session set at each open; both via one pure tenantSeenState shared with the server render
 - [Phase 05.2]: 05.2-10: viewer_seen filters story_views with a CONSTANT tenant predicate (ctx.tenantId) so the planner probes story_views_uq; the pgTAP EXPLAIN pin reads a TEXT plan so the no-Seq-Scan check is falsifiable
 - [Phase 05.2]: 05.2-10: viewing is now a write, so every e2e case that depends on where the tenant circle opens pins the demo logins' seen state first (setStoryViews) and the spec restores the seed's afterwards
+- [Phase 05.2]: 05.2-11: the pin model retired on the developer's explicit 'retire' at the blocking-human checkpoint (D-116) — pin API/contract/events/publish communityId/pinnedCommunityCount deleted, story_community_pins dropped by drop-only migration file 2 (20260926015251) after file 1's guarded backfill — Roadmap criteria 4 and 5: one representation of a curated story (the highlight item); the rehearsal (scripts/rehearse-highlights-migration.sh) proves no pin is lost across file 1 -> story_views -> file 2 and is the proof Phase 01.1 inherits
+- [Phase 05.2]: 05.2-11: in the stories module a non-id path segment is the bare 404 (defaultHook, target param), so a retired GET .../pinned (falling through to /{storyId}) answers 404 and a malformed id reads like an unknown one — D-23: 'no such route' and 'no such row' must not be told apart; avoids a tombstone route keeping the pin name in code
+- [Phase 05.2]: 05.2-11: pgTAP assertions that need the seed use skip() when it is absent (120 #41), because CI runs supabase test db before db:seed — Keeps one plan count for seeded local runs and unseeded CI runs; proven both ways (331 PASS each)
 
 ### Pending Todos
 
@@ -464,6 +468,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T01:25:27.700Z
-Stopped at: Completed 05.2-10-PLAN.md
+Last session: 2026-09-26T02:09:42.554Z
+Stopped at: Completed 05.2-11-PLAN.md
 Resume file: None
