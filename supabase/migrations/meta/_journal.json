@@ -232,6 +232,13 @@
       "when": 1790387571982,
       "tag": "20260926015251_drop_story_community_pins",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790448107060,
+      "tag": "20260926184147_reels_module",
+      "breakpoints": true
     }
   ]
 }

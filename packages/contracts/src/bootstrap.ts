@@ -39,6 +39,10 @@ export const bootstrapSchema = z.object({
           placement: z.enum(['tab', 'topbar']).optional(),
           // D-40: a 'topbar' slot's count badge reads this `counters` key.
           badge: z.enum(['unreadNotifications', 'unreadConversations']).optional(),
+          // UI-D-81: the media chrome (dark floating BottomNav, no mobile TopBar) while this tab is
+          // active. It MUST be declared here: this plain `z.object` STRIPS unknown keys on parse, so
+          // omitting it would silently drop the field between the API and the shell.
+          chrome: z.enum(['media']).optional(),
         })
         .optional(),
       // D-42: home-slot declarations; the web composition point supplies the renderer per key/index.

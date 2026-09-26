@@ -26,6 +26,7 @@
     "@tria/core": "workspace:*",
     "@tria/module-communities": "workspace:*",
     "@tria/module-feed": "workspace:*",
+    "@tria/module-reels": "workspace:*",
     "@tria/module-stories": "workspace:*",
     "@tria/ui": "workspace:*",
     "clsx": "2.1.1",

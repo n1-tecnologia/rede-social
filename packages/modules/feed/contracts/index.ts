@@ -34,7 +34,7 @@ export const FEED_MAX_CAPTION = 2200;
 export const FEED_CAPTION_TRUNCATE_AT = 100;
 
 /**
- * `GET /v1/feed?limit=&cursor=&communityId=`. `.strict()`: an unknown query key fails loudly (the
+ * `GET /v1/feed?limit=&cursor=&communityId=&media=`. `.strict()`: an unknown query key fails loudly (the
  * 03-03 rule).
  *
  * **`communityId` is a FILTER, never an authorisation.** Present, the page is that community's own
@@ -43,12 +43,21 @@ export const FEED_CAPTION_TRUNCATE_AT = 100;
  * would be a second ordering expression waiting to drift, and the two pages must stay
  * interchangeable for the reader. The community's visibility is re-resolved server-side inside the
  * same transaction, so this parameter can only ever narrow what the tenant lane already allows.
+ *
+ * **`media=video` is a FILTER too, never an authorisation (REELS-03, 05.3).** Present, the page is
+ * narrowed to posts whose `mediaKind` is `video` AND whose video asset is `ready` — a post still
+ * transcoding, failed or rejected is absent here while Início still lists it (D-53). It narrows the
+ * SAME endpoint, the same ordering expression and the same cursor envelope, and it combines with
+ * `communityId` (one community's ready videos). Reels (`@tria/module-reels`, D-121) is its reader:
+ * Reels owns no route and reads posts only through this parameter, so it can never list a post the
+ * feed would not show the same member. Any other value is a 400 (`z.enum`).
  */
 export const feedQuerySchema = z
   .object({
     cursor: z.string().max(FEED_MAX_CURSOR_LENGTH).optional(),
     limit: z.coerce.number().int().min(1).max(FEED_MAX_PAGE_SIZE).default(FEED_PAGE_SIZE),
     communityId: z.uuid().optional(),
+    media: z.enum(['video']).optional(),
   })
   .strict();
 export type FeedQuery = z.infer<typeof feedQuerySchema>;

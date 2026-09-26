@@ -12,6 +12,7 @@ import { KERNEL_ROLE_PERMISSIONS } from '@tria/core/server/rbac/require-role';
 import { communitiesModule } from '@tria/module-communities/module';
 import { FEED_PERMISSIONS, feedSettingsSchema } from '@tria/module-feed/contracts';
 import { feedModule } from '@tria/module-feed/module';
+import { reelsModule } from '@tria/module-reels/module';
 import { storiesModule } from '@tria/module-stories/module';
 
 /**
@@ -26,6 +27,7 @@ import { storiesModule } from '@tria/module-stories/module';
 export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
   communities: communitiesModule,
   feed: feedModule,
+  reels: reelsModule,
   stories: storiesModule,
 };
 
@@ -44,6 +46,38 @@ for (const manifest of Object.values(MODULE_REGISTRY)) {
 }
 
 /**
+ * D-121: the enabled keys that actually CONTRIBUTE — every enabled key whose manifest `requires` are
+ * all enabled too. Removal repeats until a pass removes nothing, so a chain resolves fully (A requires
+ * B, B requires C, C off: B drops on the first pass, A on the second). A key with no manifest or no
+ * `requires` is never dropped.
+ *
+ * **Both composition functions below call this first** (05.3-RESEARCH Pitfall 6). Enforcing
+ * `requires` in only one of them would let feed-off + reels-on either show a Reels tab that has
+ * nothing behind it, or grant a permission from a module that contributes nothing.
+ *
+ * **Scope (05.3-01 planning decision 7):** `requires` is enforced in the COMPOSITION, not in
+ * `requireModule`, because the only module declaring it today (`reels`) owns no routes — the
+ * bootstrap and the permission set are its whole surface. A future module with BOTH routes and
+ * `requires` must also teach `requireModule` this rule, through a kernel seam in the
+ * `setPermissionResolver` pattern (the kernel cannot import this registry).
+ */
+export function effectiveKeys(enabled: Set<ModuleKey>): Set<ModuleKey> {
+  const working = new Set(enabled);
+  let dropped = true;
+  while (dropped) {
+    dropped = false;
+    for (const key of working) {
+      const requires = MODULE_REGISTRY[key]?.requires ?? [];
+      if (requires.some((required) => !working.has(required))) {
+        working.delete(key);
+        dropped = true;
+      }
+    }
+  }
+  return working;
+}
+
+/**
  * ROLE-06 ordering: enabled keys sorted by `nav.order` ascending, then key ascending, with
  * manifest-less keys last (`MODULE_KEY_ORDER_FALLBACK`). Deterministic for every tenant, so the
  * shell's navigation never reshuffles between requests.
@@ -56,7 +90,8 @@ export function enabledModulesForBootstrap(
   enabled: Set<ModuleKey>,
   settings: Map<ModuleKey, Record<string, unknown>>,
 ): Bootstrap['modules'] {
-  return [...enabled]
+  // D-121: a module whose required keys are off contributes no entry (see `effectiveKeys`).
+  return [...effectiveKeys(enabled)]
     .map((key) => {
       const manifest = MODULE_REGISTRY[key];
       const nav = manifest?.nav;
@@ -93,14 +128,17 @@ export function permissionsFor(
   enabled: Set<ModuleKey> = new Set(),
   settings: Map<ModuleKey, Record<string, unknown>> = new Map(),
 ): string[] {
+  // D-121: the SAME effective set as the bootstrap, so a module that contributes no entry contributes
+  // no permission either — and the feed posting-policy branch below reads it too.
+  const effective = effectiveKeys(enabled);
   const permissions = new Set<string>(KERNEL_ROLE_PERMISSIONS[role]);
-  for (const key of enabled) {
+  for (const key of effective) {
     for (const permission of MODULE_REGISTRY[key]?.defaultRolePermissions?.[role] ?? []) {
       permissions.add(permission);
     }
   }
 
-  if (enabled.has('feed') && role === 'member') {
+  if (effective.has('feed') && role === 'member') {
     // `safeParse` on purpose: an unknown or malformed settings blob must fall back to the SAFE
     // default (`admins_only`), never throw on a request path and never fail open.
     const parsed = feedSettingsSchema.safeParse(settings.get('feed') ?? {});

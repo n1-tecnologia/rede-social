@@ -229,6 +229,9 @@ importers:
       '@tria/module-feed':
         specifier: workspace:*
         version: link:../../packages/modules/feed
+      '@tria/module-reels':
+        specifier: workspace:*
+        version: link:../../packages/modules/reels
       '@tria/module-stories':
         specifier: workspace:*
         version: link:../../packages/modules/stories
@@ -311,6 +314,9 @@ importers:
       '@tria/module-feed':
         specifier: workspace:*
         version: link:../../packages/modules/feed
+      '@tria/module-reels':
+        specifier: workspace:*
+        version: link:../../packages/modules/reels
       '@tria/module-stories':
         specifier: workspace:*
         version: link:../../packages/modules/stories

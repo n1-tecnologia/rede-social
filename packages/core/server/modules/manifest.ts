@@ -34,6 +34,13 @@ export interface ModuleNav {
   placement?: ModuleNavPlacement;
   /** A `'topbar'` slot's count source: the `bootstrap.counters` key whose value renders as a Badge. */
   badge?: ModuleNavBadge;
+  /**
+   * UI-D-81: `'media'` asks the shell for the dark media chrome while THIS tab is active — the mobile
+   * TopBar hides and the BottomNav floats in dark over the content (Reels). The kernel reads it from
+   * the nav entry and never tests a pathname, so a future media tab gets the chrome by declaring it.
+   * Absent = the normal chrome.
+   */
+  chrome?: 'media';
 }
 
 /**
@@ -84,6 +91,13 @@ export interface ModuleManifest {
   jobs?: AnyJobDefinition[];
   events?: EventSubscription[];
   defaultRolePermissions?: Partial<Record<TenantRole, string[]>>;
+  /**
+   * D-121: module keys this module depends on. A module whose required keys are not ALL enabled for
+   * the tenant contributes NOTHING — no bootstrap entry, no permission — even while its own flag is
+   * on. Enforced by the app tier's composition (`effectiveKeys` in `apps/api/src/modules/registry.ts`),
+   * not by the kernel, which never sees another module's manifest.
+   */
+  requires?: readonly ModuleKey[];
 }
 
 /**

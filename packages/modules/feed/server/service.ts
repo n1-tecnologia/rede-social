@@ -256,18 +256,47 @@ const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
 });
 
 /**
+ * REELS-03 (05.3): "this post is a READY video" — the ONE fragment Reels' list and its lanes read
+ * (plan 05.3-02's `video-communities` read shares it, so a lane can never open empty: Pitfall 7).
+ *
+ * `'video'` and `'ready'` are LITERALS, never bound parameters, on purpose: a bound parameter cannot
+ * prove a partial index's predicate, so `media_kind = $1` could never select
+ * `feed_posts_tenant_video_created_idx` (`where media_kind = 'video'`) — the communities list's own
+ * lesson. The `exists` runs inside the tenant lane: RLS on `feed_post_media` and on `media_assets`
+ * (`media_assets_tenant_select`: own tenant, `deleted_at is null`) keeps the probe in the lane and
+ * hides a soft-deleted asset, so a deleted video drops its post out of Reels. The probe is served by
+ * `feed_post_media_video_uq` (`on (post_id) where kind = 'video'`), and the page stays ONE statement.
+ */
+const READY_VIDEO_POST = sql`
+         and p.media_kind = 'video'
+         and exists (
+           select 1
+             from feed_post_media vm
+             join media_assets va on va.id = vm.media_asset_id
+            where vm.post_id = p.id
+              and vm.kind = 'video'
+              and va.status = 'ready')`;
+
+/** The `media` filter's predicate: the ready-video fragment for `media=video`, else nothing. */
+function mediaPredicate(query: FeedQuery): ReturnType<typeof sql> {
+  return query.media === 'video' ? READY_VIDEO_POST : sql``;
+}
+
+/**
  * ONE keyset page, given the ONE predicate that distinguishes the three feeds (05-03).
  *
  * Everything below the predicate — the projection, the cursor comparison, the ordering expression,
  * the over-fetch and the `encodeCursor` — is written once HERE, so the merged feed, the module-off
  * fallback and a community's own page cannot drift apart on any of them. That is the whole content
  * of D-73's "one query, one ordering expression": the difference between the three is a `where`
- * fragment, never a second query path and never a second route.
+ * fragment, never a second query path and never a second route. 05.3's `media=video` narrowing
+ * (`READY_VIDEO_POST`) is appended to that same fragment by both callers, so Reels is Início's own
+ * predicate plus a video narrowing and nothing else.
  */
 async function feedPage(
   ctx: RequestContext,
   query: FeedQuery,
-  communityPredicate: ReturnType<typeof sql>,
+  predicate: ReturnType<typeof sql>,
 ): Promise<FeedPage> {
   const limit = query.limit;
   const after = decodeCursor(query.cursor);
@@ -278,7 +307,7 @@ async function feedPage(
     tx.execute<FeedRow>(sql`
       ${postProjection(ctx.userId)}
        where p.deleted_at is null
-         ${communityPredicate}
+         ${predicate}
          and (
            ${afterAt}::timestamptz is null
            or (p.created_at, p.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
@@ -336,8 +365,9 @@ export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<F
   const page = await feedPage(
     ctx,
     query,
-    // D-73 enabled: NO filter. D-74 disabled: the Phase 4 predicate, unchanged.
-    communitiesEnabled ? sql`` : sql`and p.community_id is null`,
+    // D-73 enabled: NO filter. D-74 disabled: the Phase 4 predicate, unchanged. Then REELS-03's
+    // ready-video narrowing when `media=video` (Reels' 'Todos').
+    sql`${communitiesEnabled ? sql`` : sql`and p.community_id is null`} ${mediaPredicate(query)}`,
   );
 
   // T-04-05: the SHAPE of the read — counts, ids and flags. A caption is member content and never
@@ -352,6 +382,7 @@ export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<F
       returned: page.items.length,
       hasNext: page.nextCursor !== null,
       communitiesEnabled,
+      media: query.media ?? null,
     },
     'feed listed',
   );
@@ -400,7 +431,12 @@ export async function listCommunityFeed(
   });
   if (!visible) throw new ApiError(404, 'NOT_FOUND');
 
-  const page = await feedPage(ctx, query, sql`and p.community_id = ${communityId}::uuid`);
+  // Then REELS-03's ready-video narrowing when `media=video` (one Reels lane).
+  const page = await feedPage(
+    ctx,
+    query,
+    sql`and p.community_id = ${communityId}::uuid ${mediaPredicate(query)}`,
+  );
 
   // The SHAPE of the read. A community NAME is member-facing content and never reaches a log line
   // (T-05-06) — the id does, exactly as the post id does.
@@ -414,6 +450,7 @@ export async function listCommunityFeed(
       limit: query.limit,
       returned: page.items.length,
       hasNext: page.nextCursor !== null,
+      media: query.media ?? null,
     },
     'community feed listed',
   );

@@ -143,6 +143,8 @@ export const feedPosts = pgTable(
     //   *_tenant_created_all_idx       -> the merged feed, communities module ON (D-73)
     //   *_tenant_created_idx (partial) -> the same feed with the module OFF (D-74)
     //   *_tenant_community_created_idx -> one community's own page (COMM-03)
+    //   *_tenant_video_created_idx (partial, 05.3) -> Reels' 'Todos' list (`media=video`), in BOTH
+    //                                     communities-module states; pinned by name in 130-reels.sql
     //
     // `.desc().nullsFirst()` on both key columns for the reason stated above, and because
     // `supabase/tests/090-feed.sql`'s fourth EXPLAIN assertion is written against this idiom: it
@@ -153,6 +155,16 @@ export const feedPosts = pgTable(
       t.createdAt.desc().nullsFirst(),
       t.id.desc().nullsFirst(),
     ),
+    // REELS-03 (05.3): the 'Todos' list is the merged feed plus `media_kind = 'video'` (and the ready
+    // `exists`). On `*_tenant_created_all_idx` that is "walk the newest posts and discard every
+    // non-video", a cost that grows with the text and gallery posts between videos; this partial
+    // index holds the video posts only. The predicate is the LITERAL `'video'` the service writes
+    // (`READY_VIDEO_POST`), which is what lets the planner prove it. A rolled-back probe on 600 posts
+    // chose it for both the communities-on and the `community_id is null` statements, and
+    // `supabase/tests/130-reels.sql` pins both plans by this name on a volume fixture.
+    index('feed_posts_tenant_video_created_idx')
+      .on(t.tenantId, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst())
+      .where(sql`media_kind = 'video'`),
     // "this member's posts" (a profile tab, Phase 8 moderation) without a sequential scan.
     index('feed_posts_tenant_author_idx').on(t.tenantId, t.authorUserId),
     check('feed_posts_media_kind_chk', sql`${t.mediaKind} in ('none','gallery','video')`),
