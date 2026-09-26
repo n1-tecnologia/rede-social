@@ -79,6 +79,8 @@ type StoryRow = {
   pinned_community_count: number | null;
   /** 05.2: how many highlights the story is in, counted in the SAME statement (D-100). */
   highlight_count: number | null;
+  /** 05.2 (HIGHLIGHT-06): whether THE CALLER has a `story_views` row for it — their own flag only. */
+  viewer_seen: boolean;
 };
 
 /**
@@ -124,10 +126,22 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  * rather than per row. `story_highlight_items_uq` (`highlight_id, story_id`) cannot serve a lookup by
  * story alone; the per-story subquery is bounded by the handful of highlights one story is in.
  *
+ * `viewer_seen` (05.2, HIGHLIGHT-06) is the caller's OWN seen flag — the tenant circle's ring and its
+ * resume point — and it rides the same statement, so the strip stays ONE statement
+ * (`feed-query-budget.test.ts`). Two things about it a reviewer must not "tidy":
+ *  - **the tenant predicate is a CONSTANT, `v.tenant_id = ${ctx.tenantId}`**, never the correlated
+ *    form joining the view's tenant to the story's. With the constant, the planner walks
+ *    `story_views_uq (tenant_id, user_id, story_id)` as an Index Only Scan; the correlated form
+ *    measured as a Seq Scan on the views table (RESEARCH Pattern 5; pinned by the EXPLAIN assertion in
+ *    `120-story-highlights.sql`);
+ *  - **it reads `user_id = ctx.userId` and nothing wider** — the privacy rule of `storyViews`: no
+ *    read in this phase tells anyone which member saw a story, or how many did.
+ * That is why the projection takes the request context rather than a bare user id.
+ *
  * `extra` is how the Destaques read adds the two PIN columns its cursor is built from without
  * either duplicating this column list or pushing pin-specific columns onto the other two reads.
  */
-function storyProjection(viewerUserId: string, extra: SQL | null = null) {
+function storyProjection(ctx: RequestContext, extra: SQL | null = null) {
   return sql`
     select s.id,
            s.author_user_id,
@@ -146,7 +160,7 @@ function storyProjection(viewerUserId: string, extra: SQL | null = null) {
            exists (
              select 1 from feed_likes l
               where l.story_id = s.id
-                and l.user_id = ${viewerUserId}::uuid
+                and l.user_id = ${ctx.userId}::uuid
            ) as viewer_liked,
            (
              select count(*)::int from story_community_pins sp
@@ -155,7 +169,13 @@ function storyProjection(viewerUserId: string, extra: SQL | null = null) {
            (
              select count(*)::int from story_highlight_items hi
               where hi.story_id = s.id
-           ) as highlight_count
+           ) as highlight_count,
+           exists (
+             select 1 from story_views v
+              where v.tenant_id = ${ctx.tenantId}::uuid
+                and v.user_id = ${ctx.userId}::uuid
+                and v.story_id = s.id
+           ) as viewer_seen
            ${extra ?? sql``}
       from stories s
       join media_assets a on a.id = s.media_asset_id`;
@@ -182,9 +202,7 @@ const toStory = (row: StoryRow): StorySummary => ({
   viewerLiked: row.viewer_liked,
   pinnedCommunityCount: row.pinned_community_count ?? 0,
   highlightCount: row.highlight_count ?? 0,
-  // TDD RED STUB (05.2-10 Task 1): deliberately inert — every story reads "not seen" until the
-  // GREEN commit adds `story_views` and the projection's `viewer_seen` column. Replaced in GREEN.
-  viewerSeen: false,
+  viewerSeen: row.viewer_seen,
 });
 
 /** The over-fetch page split, shared by both list reads so the two cannot disagree about `nextCursor`. */
@@ -228,7 +246,7 @@ export async function listActiveStories(
 
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<StoryRow>(sql`
-      ${storyProjection(ctx.userId)}
+      ${storyProjection(ctx)}
        where s.tenant_id = ${ctx.tenantId}::uuid
          and s.deleted_at is null
          and s.expires_at > now()
@@ -282,7 +300,7 @@ export async function listOwnStories(ctx: RequestContext, query: StoryQuery): Pr
 
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<StoryRow>(sql`
-      ${storyProjection(ctx.userId)}
+      ${storyProjection(ctx)}
        where s.tenant_id = ${ctx.tenantId}::uuid
          and s.deleted_at is null
          and (
@@ -322,7 +340,7 @@ export async function listOwnStories(ctx: RequestContext, query: StoryQuery): Pr
 export async function getStory(ctx: RequestContext, storyId: string): Promise<StorySummary> {
   const row = await withTenantTx(ctx, async (tx) => {
     const rows = await tx.execute<StoryRow>(sql`
-      ${storyProjection(ctx.userId)}
+      ${storyProjection(ctx)}
        where s.tenant_id = ${ctx.tenantId}::uuid
          and s.id = ${storyId}::uuid
          and s.deleted_at is null
@@ -465,7 +483,7 @@ export async function publishStory(
     const itemWritten = target !== null ? await insertHighlightItem(tx, ctx, target, id) : false;
 
     const rows = await tx.execute<StoryRow>(sql`
-      ${storyProjection(ctx.userId)}
+      ${storyProjection(ctx)}
        where s.id = ${id}::uuid
        limit 1`);
     const row = rows[0];
@@ -674,6 +692,61 @@ export async function unlikeStory(ctx: RequestContext, storyId: string): Promise
   }
 
   return { liked: false, likeCount };
+}
+
+/* ── Seen state (HIGHLIGHT-06, D-105) ─────────────────────────────────────────────────────────── */
+
+/**
+ * `POST /v1/stories/views` — record that THE CALLER was shown these stories (R-D-I: the segment was
+ * the current one and its media reported ready; the web batches the ids). Every caller's views are
+ * recorded, admins included, and a story shown inside a highlight is the same story id, so it marks
+ * the tenant circle too. An EXPIRED story is recorded like any other: expiry gates the strip, never
+ * an interaction (A-4).
+ *
+ * ONE statement, the `likeStory` shape:
+ *  - **the insert SELECTS the stories in the caller's lane** (`s.tenant_id = ctx.tenantId`, not
+ *    deleted) rather than trusting the ids, so a foreign, unknown or removed id produces no row to
+ *    insert (T-05.2-46). `tenant_id` and `user_id` come from `ctx`, never from the body;
+ *  - **`story_views_uq` is the idempotency arbiter** — a repeat, or two tabs flushing the same id at
+ *    once, writes one row per (tenant, user, story);
+ *  - **nothing is returned to the caller**: the route answers 204 whatever was written, so the
+ *    endpoint cannot be used to learn whether an id exists (T-05.2-47).
+ *
+ * **No event** (R-D-L): a view is a high-volume read of state, not a transition a subscriber acts
+ * on. The log line carries the requested and inserted COUNTS only — never a story id, because a log
+ * of "user U saw story S" is exactly the member-watching record V8 forbids in this phase.
+ */
+export async function markStoriesSeen(ctx: RequestContext, storyIds: string[]): Promise<void> {
+  // `in (…)` over individually-cast ids, the feed's `validateAssets` shape: drizzle's `sql` expands a
+  // JS array into a comma-separated parameter list, so `any(${ids}::uuid[])` is not one array. The
+  // ids are Zod-validated uuids (1..50) before this runs.
+  const idList = sql.join(
+    storyIds.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+  const inserted = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ id: string }>(sql`
+      insert into story_views (tenant_id, user_id, story_id)
+      select ${ctx.tenantId}::uuid, ${ctx.userId}::uuid, s.id
+        from stories s
+       where s.id in (${idList})
+         and s.tenant_id = ${ctx.tenantId}::uuid
+         and s.deleted_at is null
+      on conflict (tenant_id, user_id, story_id) do nothing
+      returning id`),
+  );
+
+  log.info(
+    {
+      event: 'stories.views_recorded',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      requested: storyIds.length,
+      inserted: inserted.length,
+    },
+    'story views recorded',
+  );
 }
 
 /* ── Comments (STORY-05, D-82, D-83) ──────────────────────────────────────────────────────────── */
@@ -1303,7 +1376,7 @@ export async function listCommunityHighlights(
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<HighlightRow>(sql`
       ${storyProjection(
-        ctx.userId,
+        ctx,
         sql`, p.id as pin_id,
            to_char(p.pinned_at at time zone 'utc', ${ISO_MICROSECONDS}) as pinned_at`,
       )}
@@ -1909,7 +1982,7 @@ export async function getHighlight(
 
     const visible = curator ? sql`s.deleted_at is null` : MEMBER_VISIBLE;
     const items = await tx.execute<StoryRow>(sql`
-      ${storyProjection(ctx.userId)}
+      ${storyProjection(ctx)}
       join story_highlight_items i
         on i.story_id = s.id
        and i.tenant_id = s.tenant_id

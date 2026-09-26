@@ -218,6 +218,13 @@
       "when": 1790363516254,
       "tag": "20260925191156_story_highlights",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790382490295,
+      "tag": "20260926002810_story_views",
+      "breakpoints": true
     }
   ]
 }

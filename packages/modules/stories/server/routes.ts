@@ -12,6 +12,7 @@ import {
   highlightListSchema,
   highlightMembershipResultSchema,
   highlightSummarySchema,
+  markStoriesSeenSchema,
   publishStorySchema,
   reorderHighlightsSchema,
   STORY_HIGHLIGHT_ISSUE_SET,
@@ -47,6 +48,7 @@ import {
   listStoryComments,
   listStoryHighlightIds,
   listStoryPins,
+  markStoriesSeen,
   pinStory,
   publishStory,
   removeStoryFromHighlight,
@@ -393,6 +395,36 @@ const removeHighlightItemRoute = createRoute({
   },
 });
 
+/* ── Seen state (HIGHLIGHT-06, D-105) ─────────────────────────────────────────────────────────── */
+
+/**
+ * `POST /v1/stories/views` — the stories the caller was just SHOWN, batched by the web.
+ *
+ * **MEMBER-REACHABLE: `requireAuth` + `requireModule('stories')` and nothing else.** There is
+ * deliberately no `requirePermission` here, and adding one would be the bug — the like routes'
+ * reason restated: the publishing policy gates AUTHORING a story, not watching one, and every
+ * member's ring must grey once they have seen everything. Admins record views too (R-D-I).
+ *
+ * The answer is ALWAYS 204 for an accepted body: a foreign, unknown or removed id writes nothing and
+ * reveals nothing (T-05.2-47). The body is `markStoriesSeenSchema` (1..50 uuids, strict).
+ *
+ * Declared BEFORE the `/{storyId}` routes so the literal segment wins any match, as `/mine` is.
+ */
+const markSeenRoute = createRoute({
+  method: 'post',
+  path: '/views',
+  request: {
+    body: { content: { 'application/json': { schema: markStoriesSeenSchema } }, required: true },
+  },
+  responses: {
+    204: {
+      description:
+        "Recorded — or nothing to record. Only the caller's own (tenant, user, story) rows are written, idempotently; an id this tenant cannot see is silently skipped, so every accepted body answers the same 204.",
+    },
+    400: { description: '`VALIDATION_FAILED`: `storyIds` must be 1..50 uuids, and no other key.' },
+  },
+});
+
 /** The story id every story-scoped route takes; a miss is a bare 404 (D-23). */
 const storyIdParam = z.object({ storyId: z.uuid() });
 
@@ -724,6 +756,10 @@ export const storiesRoutes = stories
   .openapi(removeHighlightItemRoute, async (c) => {
     const { highlightId, storyId } = c.req.valid('param');
     return c.json(await removeStoryFromHighlight(c.get('ctx'), highlightId, storyId), 200);
+  })
+  .openapi(markSeenRoute, async (c) => {
+    await markStoriesSeen(c.get('ctx'), c.req.valid('json').storyIds);
+    return c.body(null, 204);
   })
   .openapi(listRoute, async (c) =>
     c.json(await listActiveStories(c.get('ctx'), c.req.valid('query')), 200),

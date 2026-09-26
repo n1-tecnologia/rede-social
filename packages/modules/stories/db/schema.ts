@@ -305,3 +305,51 @@ export const storyHighlightItems = pgTable(
     tenantIsolationPolicy('story_highlight_items_tenant_isolation'),
   ],
 ).enableRLS();
+
+/**
+ * A member's SEEN state (HIGHLIGHT-06, D-105) — one row per (tenant, user, story), written when the
+ * viewer showed that story as its current segment with its media ready (R-D-I). It is what greys the
+ * tenant circle's ring and what the circle resumes from, identically on every device the member
+ * signs in on. There is deliberately NO device-local copy (D-79's rejection of `localStorage` stands).
+ *
+ * **PRIVACY — the rule a reviewer must not relax.** This table is behavioural data about members.
+ * In 05.2 the API reads ONLY THE CALLER'S OWN rows (`user_id = ctx.userId`, inside the story
+ * projection's `viewer_seen` column). No endpoint, event, payload or log line reveals which member
+ * saw which story, and no view COUNT exists anywhere. The admin's "quem viu" list is V2 and will be
+ * built on this same table, behind its own decision — not by widening a read here.
+ *
+ * - **A row per view, not a job.** A view is a fact written once by `POST /v1/stories/views`
+ *   (`insert … select` from `stories` in the caller's lane, `on conflict do nothing`), batched by the
+ *   client. There is no event for a view (R-D-L): views are high-volume reads of state, not
+ *   transitions a subscriber acts on, and nothing downstream needs them.
+ * - **`story_views_uq (tenant_id, user_id, story_id)` — the order is measured, not cosmetic.** It is
+ *   the idempotency arbiter (a repeat or concurrent batch writes one row per pair), it is tenant-first
+ *   (040's rule), and it is exactly what the ring's `exists` subplan scans: with a CONSTANT tenant
+ *   predicate the planner walks it as an Index Only Scan on `(tenant_id, user_id)` + `story_id`. The
+ *   story-first order `(tenant_id, story_id, user_id)` degraded to a hashed Seq Scan on a 50,000-row
+ *   fixture; `120-story-highlights.sql` pins the plan with an EXPLAIN assertion.
+ * - `story_id` cascades: a story that is hard-deleted takes its views with it. A soft-deleted story
+ *   keeps them (nothing reads them), exactly like its likes.
+ * - `user_id` does not cascade, like every other authored row here (`users` rows are not deleted).
+ */
+export const storyViews = pgTable(
+  'story_views',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    storyId: uuid('story_id')
+      .notNull()
+      .references(() => stories.id, { onDelete: 'cascade' }),
+    viewedAt: timestamp('viewed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Tenant-first AND the idempotency arbiter AND what the ring's exists-subplan scans (measured).
+    uniqueIndex('story_views_uq').on(t.tenantId, t.userId, t.storyId),
+    tenantIsolationPolicy('story_views_tenant_isolation'),
+  ],
+).enableRLS();
