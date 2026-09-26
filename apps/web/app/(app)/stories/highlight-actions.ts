@@ -1,5 +1,10 @@
 'use server';
 
+import {
+  createStoryHighlightSchema,
+  reorderHighlightsSchema,
+  updateHighlightSchema,
+} from '@tria/module-stories/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -7,16 +12,22 @@ import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import { listAllCommunities } from '@/lib/communities';
 import {
+  createHighlight,
+  deleteHighlight,
   getHighlight,
   getHighlightCatalog,
   getStoryHighlightIds,
   highlightWriteIssue,
+  reorderHighlights,
   setHighlightMembership,
+  updateHighlight,
 } from '@/lib/stories';
 import {
   type HighlightEditStoryView,
   type HighlightManageRowView,
   type HighlightPlaceView,
+  highlightEditStoryView,
+  highlightManageRowView,
   highlightPlacesView,
   type StoryViewerItemView,
   storyViewerItem,
@@ -193,61 +204,240 @@ async function toggleHighlightMembership(
   return result;
 }
 
-/* ── 05.2-09: the manage screen's curation actions — RED STUB ───────────────────────────────── */
+/* ── 05.2-09: the manage screen's curation actions (HIGHLIGHT-01, D-109) ──────────────────── */
 
 /**
- * RED STUB (05.2-09 Task 2) — deliberately inert: every action answers the generic refusal with no
- * request, so the new cases fail on their assertions. The GREEN commit replaces this block.
+ * The place a curation write belongs to — `communityId: null` is Início. It picks WHICH path is
+ * revalidated (planning decision 4: the row the admin returns to must show the change) and, for
+ * create and reorder, which place the API writes. It authorises nothing: the API resolves the
+ * highlight's real place itself and re-checks `stories.story.manage` on every call (T-05.2-39).
  */
 export type HighlightPlace = { communityId: string | null };
 
-export type HighlightCurationCode = 'archived' | 'title_invalid' | 'order_stale' | 'full' | 'generic';
+/**
+ * The closed answer of a curation write. `archived`, `title_invalid`, `order_stale` and `full` are
+ * the API's `details.highlight` vocabulary, each with its own copy; everything else — the bare 404
+ * (unknown, another tenant's, a cover asset not `ready` yet), a 403, a transport failure — is
+ * `generic`, and the admin retries.
+ */
+export type HighlightCurationCode =
+  | 'archived'
+  | 'title_invalid'
+  | 'order_stale'
+  | 'full'
+  | 'generic';
 
 export type HighlightCurationResult<T extends object = object> =
   | ({ ok: true } & T)
   | { ok: false; code: HighlightCurationCode };
 
+const placeSchema = z.object({ communityId: z.uuid().nullable() }).strict();
+
+/** `/inicio` or the community page — the place's row is what the admin returns to. */
+function placePath(place: HighlightPlace): string {
+  return place.communityId === null ? '/inicio' : `/comunidades/${place.communityId}`;
+}
+
+/** A Zod refusal of the TITLE is its own code (the step states the rule); any other is generic. */
+function inputRefusal(error: z.ZodError): HighlightCurationCode {
+  return error.issues.some((issue) => issue.message === 'title_invalid')
+    ? 'title_invalid'
+    : 'generic';
+}
+
+/**
+ * Runs ONE curation write with the conventions every action in this file shares:
+ * the refusal is mapped through `highlightWriteIssue` into the closed vocabulary; the place is
+ * revalidated only on success; a bootstrap refusal (401/403 of the session) is a NAVIGATION taken
+ * OUTSIDE the try/catch (`redirect()` throws in Next 16); and the log line carries the action, the
+ * ids and the issue code only — never a title (T-05.2-28).
+ */
+async function curate<T extends object>(
+  action: string,
+  ids: Record<string, string | null>,
+  place: HighlightPlace,
+  write: () => Promise<T>,
+): Promise<HighlightCurationResult<T>> {
+  let refusal: string | null = null;
+  let result: HighlightCurationResult<T> = { ok: false, code: 'generic' };
+  try {
+    result = { ok: true, ...(await write()) };
+  } catch (error) {
+    const issue = highlightWriteIssue(error);
+    if (issue !== null && issue !== 'not_found') result = { ok: false, code: issue };
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) {
+      console.error('stories.highlight_curation_failed', {
+        action,
+        ...ids,
+        issue,
+        error: String(error),
+      });
+    }
+  }
+
+  if (result.ok) revalidatePath(placePath(place));
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * "Criar destaque" (UI-D-72): `POST /v1/stories/highlights`. The title is trimmed and checked by the
+ * contract's own schema BEFORE any request, so a blank title is `title_invalid` with no round trip;
+ * Início is the ABSENCE of `communityId` in the body. The answer is the new row view — appended at
+ * the end of the list, where the API put it (R-D-C).
+ */
 export async function createHighlightAction(
-  _place: HighlightPlace,
-  _title: string,
+  place: HighlightPlace,
+  title: string,
 ): Promise<HighlightCurationResult<{ highlight: HighlightManageRowView }>> {
-  return { ok: false, code: 'generic' };
+  const where = placeSchema.safeParse(place);
+  if (!where.success) return { ok: false, code: 'generic' };
+  const { communityId } = where.data;
+  const input = createStoryHighlightSchema.safeParse(
+    communityId === null ? { title } : { communityId, title },
+  );
+  if (!input.success) return { ok: false, code: inputRefusal(input.error) };
+
+  return curate('create', { communityId }, where.data, async () => {
+    const [summary, t] = await Promise.all([
+      createHighlight(input.data),
+      getTranslations('stories'),
+    ]);
+    return { highlight: highlightManageRowView(summary, t) };
+  });
 }
 
+/** "Salvar nome" (UI-D-74): `PATCH { title }` — trimmed, 1..15, else `title_invalid`. */
 export async function renameHighlightAction(
-  _highlightId: string,
-  _title: string,
-  _place: HighlightPlace,
+  highlightId: string,
+  title: string,
+  place: HighlightPlace,
 ): Promise<HighlightCurationResult<{ highlight: HighlightManageRowView }>> {
-  return { ok: false, code: 'generic' };
+  const id = z.uuid().safeParse(highlightId);
+  const where = placeSchema.safeParse(place);
+  if (!id.success || !where.success) return { ok: false, code: 'generic' };
+  const patch = updateHighlightSchema.safeParse({ title });
+  if (!patch.success) return { ok: false, code: inputRefusal(patch.error) };
+
+  return curate('rename', { highlightId: id.data }, where.data, async () => {
+    const [summary, t] = await Promise.all([
+      updateHighlight(id.data, patch.data),
+      getTranslations('stories'),
+    ]);
+    return { highlight: highlightManageRowView(summary, t) };
+  });
 }
 
+/**
+ * The cover step (UI-D-75): `PATCH { cover }` with a story frame, an UPLOADED image (`assetId`, the
+ * Phase 3 `cover`/`image` tuple — T-05.2-40) or `null` for automatic. An upload whose asset is not
+ * `ready` yet answers the bare 404, which is `generic` here and the admin retries — the
+ * `CommunityForm` cover posture. **Nothing in this path deletes an asset** (R-D-E).
+ */
 export async function setHighlightCoverAction(
-  _highlightId: string,
-  _cover: { storyId: string } | { assetId: string } | null,
-  _place: HighlightPlace,
+  highlightId: string,
+  cover: { storyId: string } | { assetId: string } | null,
+  place: HighlightPlace,
 ): Promise<HighlightCurationResult<{ highlight: HighlightManageRowView }>> {
-  return { ok: false, code: 'generic' };
+  const id = z.uuid().safeParse(highlightId);
+  const where = placeSchema.safeParse(place);
+  const patch = updateHighlightSchema.safeParse({ cover });
+  if (!id.success || !where.success || !patch.success) return { ok: false, code: 'generic' };
+
+  return curate('cover', { highlightId: id.data }, where.data, async () => {
+    const [summary, t] = await Promise.all([
+      updateHighlight(id.data, patch.data),
+      getTranslations('stories'),
+    ]);
+    return { highlight: highlightManageRowView(summary, t) };
+  });
 }
 
+/**
+ * "Excluir destaque" (UI-D-74, behind its confirm): `DELETE` → 204. A take-down, so an archived
+ * community allows it (R-D-F); the stories stay in "Seus stories".
+ */
 export async function deleteHighlightAction(
-  _highlightId: string,
-  _place: HighlightPlace,
+  highlightId: string,
+  place: HighlightPlace,
 ): Promise<HighlightCurationResult> {
-  return { ok: false, code: 'generic' };
+  const id = z.uuid().safeParse(highlightId);
+  const where = placeSchema.safeParse(place);
+  if (!id.success || !where.success) return { ok: false, code: 'generic' };
+
+  return curate('delete', { highlightId: id.data }, where.data, async () => {
+    await deleteHighlight(id.data);
+    return {};
+  });
 }
 
+/**
+ * Reorder (UI-D-73): ONE `PUT …/highlights/order` per drop, keypress or move button, with the
+ * place's FULL permutation. Every id is uuid-checked and the list is capped at the place's own limit
+ * by the contract BEFORE any request (T-05.2-43). `order_stale` — the set changed under the admin —
+ * is its own code: the screen refreshes and says so.
+ */
 export async function reorderHighlightsAction(
-  _place: HighlightPlace,
-  _highlightIds: string[],
+  place: HighlightPlace,
+  highlightIds: string[],
 ): Promise<HighlightCurationResult<{ items: HighlightManageRowView[] }>> {
-  return { ok: false, code: 'generic' };
+  const where = placeSchema.safeParse(place);
+  if (!where.success) return { ok: false, code: 'generic' };
+  const { communityId } = where.data;
+  const input = reorderHighlightsSchema.safeParse(
+    communityId === null ? { highlightIds } : { communityId, highlightIds },
+  );
+  if (!input.success) return { ok: false, code: 'generic' };
+
+  return curate('reorder', { communityId }, where.data, async () => {
+    const [list, t] = await Promise.all([
+      reorderHighlights(input.data),
+      getTranslations('stories'),
+    ]);
+    return { items: list.items.map((summary) => highlightManageRowView(summary, t)) };
+  });
 }
 
+/**
+ * The edit sheet's ONE read (UI-D-74): `GET /v1/stories/highlights/{id}` as a curator — EVERY live
+ * story of the highlight, oldest first by publish time (D-103), with its media status — composed on
+ * the server into the row view and the story rows (dates, pills, `isCover`). A read: it never
+ * revalidates. Every miss is `{ ok: false }` (the bare 404); a bootstrap refusal navigates.
+ */
 export type HighlightEditResult =
   | { ok: true; highlight: HighlightManageRowView; items: HighlightEditStoryView[] }
   | { ok: false };
 
-export async function loadHighlightEditAction(_highlightId: string): Promise<HighlightEditResult> {
-  return { ok: false };
+export async function loadHighlightEditAction(highlightId: string): Promise<HighlightEditResult> {
+  const id = z.uuid().safeParse(highlightId);
+  if (!id.success) return { ok: false };
+
+  let refusal: string | null = null;
+  let result: HighlightEditResult = { ok: false };
+  try {
+    const [detail, t, tm] = await Promise.all([
+      getHighlight(id.data),
+      getTranslations('stories'),
+      getTranslations('media'),
+    ]);
+    const coverAssetId = detail.highlight.coverAssetId;
+    result = {
+      ok: true,
+      highlight: highlightManageRowView(detail.highlight, t),
+      items: detail.items.map((story) => highlightEditStoryView(story, coverAssetId, t, tm)),
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    // Ids only: titles and captions are tenant content (T-05.2-28).
+    if (!refusal) {
+      console.error('stories.highlight_edit_failed', {
+        highlightId: id.data,
+        error: String(error),
+      });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
 }

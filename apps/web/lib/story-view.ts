@@ -188,6 +188,8 @@ export function storyCommentView(
  */
 export type StoryHistoryItemView = {
   id: string;
+  /** The bare short date ("12 mar") — the "Adicionar stories" picker's row line (05.2-09, UI-D-76). */
+  date: string;
   thumbnailAssetId: string;
   thumbnailVariantWidths: readonly number[];
   thumbnailAlt: string;
@@ -244,6 +246,7 @@ export function storyHistoryView(
 
   return {
     id: story.id,
+    date,
     thumbnailAssetId: story.mediaAssetId,
     thumbnailVariantWidths: story.mediaVariantWidths,
     thumbnailAlt: ts('history.row', { date }),
@@ -595,11 +598,16 @@ export function highlightPlacesView(
   return places;
 }
 
-/* ── 05.2-09: the manage screen's views — RED STUB ─────────────────────────────────────────── */
+/* ── 05.2-09: the manage screen's views (UI-D-72, UI-D-74) ──────────────────────────────────── */
 
 /**
- * RED STUB (05.2-09 Task 2) — deliberately inert placeholders so the view cases fail on their
- * assertions. The GREEN commit replaces this block.
+ * One card of the manage list (UI-D-72), composed on the SERVER like every row here: plain data, so
+ * it crosses into `HighlightManager` untouched. `meta` is interpolated HERE under pt-BR's plural
+ * rules ("1 story" / "3 stories"), and an EMPTY highlight says so plainly ("Vazio · só você vê") —
+ * `itemCount` counts member-visible items, so "empty" means exactly what members do not see.
+ *
+ * `coverChosen` rides along so the edit sheet can offer "Usar capa automática" before its own read
+ * lands, and `communityId` is the place a curation write revalidates.
  */
 export type HighlightManageRowView = {
   id: string;
@@ -612,6 +620,40 @@ export type HighlightManageRowView = {
   editLabel: string;
 };
 
+export function highlightManageRowView(
+  summary: HighlightSummary,
+  t: RowLabelReader,
+): HighlightManageRowView {
+  return {
+    id: summary.id,
+    communityId: summary.communityId,
+    title: summary.title,
+    meta:
+      summary.itemCount > 0
+        ? t('highlights.manage.count', { count: summary.itemCount })
+        : t('highlights.manage.emptyItem'),
+    // By asset id, never a URL built from tenant content (T-05.2-21).
+    cover:
+      summary.coverAssetId !== null
+        ? { assetId: summary.coverAssetId, variantWidths: [...summary.coverVariantWidths] }
+        : null,
+    coverChosen: summary.coverChosen,
+    itemCount: summary.itemCount,
+    editLabel: t('highlights.manage.edit', { title: summary.title }),
+  };
+}
+
+/**
+ * One story row of the edit sheet (UI-D-74). The date is the history's own short format, so a story
+ * reads the same in "Seus stories", the edit sheet and the picker. The media pill is Phase 3's
+ * vocabulary VERBATIM (R-D-H: a curator sees every live item, ready or not).
+ *
+ * **`isCover` compares the RESOLVED cover asset, not `coverStoryId`.** The server resolves a chosen
+ * frame and the automatic rule (the most recently added image item) to the story's OWN media asset
+ * (R-D-D), so one comparison marks the right row in both cases — and an uploaded cover, whose asset
+ * belongs to no story, marks none. Reading `coverStoryId` would miss the automatic case and keep
+ * marking a chosen story that is no longer a valid cover.
+ */
 export type HighlightEditStoryView = {
   id: string;
   thumb: { assetId: string; variantWidths: number[] };
@@ -622,34 +664,28 @@ export type HighlightEditStoryView = {
   removeLabel: string;
 };
 
-export function highlightManageRowView(
-  summary: HighlightSummary,
-  _t: RowLabelReader,
-): HighlightManageRowView {
-  return {
-    id: summary.id,
-    communityId: summary.communityId,
-    title: '',
-    meta: '',
-    cover: null,
-    coverChosen: false,
-    itemCount: 0,
-    editLabel: '',
-  };
-}
-
 export function highlightEditStoryView(
   story: StorySummary,
-  _coverAssetId: string | null,
-  _t: RowLabelReader,
-  _tm: RowLabelReader,
+  coverAssetId: string | null,
+  t: RowLabelReader,
+  tm: RowLabelReader,
 ): HighlightEditStoryView {
+  const dateLabel = HISTORY_DATE.format(new Date(story.publishedAt));
+  const status =
+    story.mediaStatus === 'processing'
+      ? ({ tone: 'warning', label: tm('status.processing') } as const)
+      : story.mediaStatus === 'rejected' || story.mediaStatus === 'failed'
+        ? ({ tone: 'danger', label: tm('status.rejected') } as const)
+        : undefined;
+
   return {
     id: story.id,
-    thumb: { assetId: story.mediaAssetId, variantWidths: [] },
+    thumb: { assetId: story.mediaAssetId, variantWidths: [...story.mediaVariantWidths] },
     mediaKind: story.mediaKind,
-    dateLabel: '',
-    isCover: false,
-    removeLabel: '',
+    dateLabel,
+    ...(status ? { status } : {}),
+    isCover:
+      story.mediaKind === 'image' && coverAssetId !== null && story.mediaAssetId === coverAssetId,
+    removeLabel: t('highlights.edit.remove', { date: dateLabel }),
   };
 }

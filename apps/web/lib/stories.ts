@@ -1,11 +1,15 @@
 import {
+  type CreateStoryHighlight,
   type HighlightDetail,
   type HighlightList,
   type HighlightMembershipResult,
+  type HighlightSummary,
   highlightDetailSchema,
   highlightListSchema,
   highlightMembershipResultSchema,
+  highlightSummarySchema,
   type PublishStory,
+  type ReorderHighlights,
   STORY_COMMENT_ISSUE_SET,
   STORY_COMMENTS_PAGE_SIZE,
   STORY_HIGHLIGHT_ISSUE_SET,
@@ -26,6 +30,7 @@ import {
   storyLikeResultSchema,
   storyPageSchema,
   storySummarySchema,
+  type UpdateHighlight,
 } from '@tria/module-stories/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
@@ -450,4 +455,65 @@ export function highlightWriteIssue(error: unknown): StoryHighlightIssue | 'not_
   return typeof issue === 'string' && STORY_HIGHLIGHT_ISSUE_SET.has(issue)
     ? (issue as StoryHighlightIssue)
     : null;
+}
+
+/* ── Curation (05.2-09, HIGHLIGHT-01) ─────────────────────────────────────────────────────────── */
+
+/**
+ * The manage screen's four writes, each against its plan 01/03 route and each parsing its answer
+ * with the published schema. They THROW `ApiClientError` on any refusal and neither revalidate nor
+ * redirect: what a refusal means (a closed code, a toast, a navigation) is the calling action's
+ * decision. Every route is manage-only at the API (the literal `stories.story.manage`, T-05.2-39).
+ */
+
+/** `POST /v1/stories/highlights` — a new highlight, appended at the END of its place (R-D-C). */
+export async function createHighlight(input: CreateStoryHighlight): Promise<HighlightSummary> {
+  const res = await apiFetch('/v1/stories/highlights', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return highlightSummarySchema.parse(await res.json());
+}
+
+/**
+ * `PATCH /v1/stories/highlights/{id}` — rename and/or re-cover. The answer is the summary AFTER the
+ * write, with the cover re-resolved by the server. Replacing or clearing an uploaded cover never
+ * deletes the old asset (R-D-E) — there is no delete anywhere in this path.
+ */
+export async function updateHighlight(
+  highlightId: string,
+  patch: UpdateHighlight,
+): Promise<HighlightSummary> {
+  const res = await apiFetch(`/v1/stories/highlights/${encodeURIComponent(highlightId)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw await apiError(res);
+  return highlightSummarySchema.parse(await res.json());
+}
+
+/** `DELETE /v1/stories/highlights/{id}` — 204; the stories themselves are untouched (R-D-F). */
+export async function deleteHighlight(highlightId: string): Promise<void> {
+  const res = await apiFetch(`/v1/stories/highlights/${encodeURIComponent(highlightId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw await apiError(res);
+}
+
+/**
+ * `PUT /v1/stories/highlights/order` — ONE place's FULL permutation (Início when `communityId` is
+ * absent). A set that is not exactly the place's current one is `order_stale` and writes nothing.
+ * The answer is the place's curator row in the new order.
+ */
+export async function reorderHighlights(input: ReorderHighlights): Promise<HighlightList> {
+  const res = await apiFetch('/v1/stories/highlights/order', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return highlightListSchema.parse(await res.json());
 }

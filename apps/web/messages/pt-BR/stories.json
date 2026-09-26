@@ -9,7 +9,8 @@
     "circle": {
       "action": "Abrir story de {time}",
       "tenant": "Abrir stories de {tenant}",
-      "highlight": "Abrir destaque {title}"
+      "highlight": "Abrir destaque {title}",
+      "highlightEmpty": "Editar destaque {title}. Vazio, só você vê."
     },
     "highlights": {
       "coverAlt": "Capa do destaque {title}",
@@ -45,14 +46,85 @@
       },
       "toasts": {
         "added": "Story adicionado ao destaque.",
-        "removed": "Story removido do destaque."
+        "removed": "Story removido do destaque.",
+        "created": "Destaque criado.",
+        "renamed": "Nome salvo.",
+        "coverChanged": "Capa atualizada.",
+        "deleted": "Destaque excluído."
       },
       "errors": {
         "load": "Não foi possível carregar este destaque.",
         "titleEmpty": "Dê um nome para o destaque.",
         "generic": "Não foi possível salvar. Tente novamente.",
         "archived": "Esta comunidade foi arquivada. Não é possível adicionar stories aos destaques dela.",
-        "full": "Este destaque chegou ao limite de {limit} stories. Remova um para adicionar outro."
+        "full": "Este destaque chegou ao limite de {limit} stories. Remova um para adicionar outro.",
+        "order": "Não foi possível salvar a nova ordem. Tente novamente.",
+        "orderStale": "A lista de destaques mudou. Confira a ordem e tente de novo."
+      },
+      "circle": {
+        "label": "Gerenciar",
+        "actionHome": "Gerenciar destaques do início",
+        "actionCommunity": "Gerenciar destaques de {community}"
+      },
+      "manage": {
+        "create": "Novo destaque",
+        "titleHome": "Destaques do início",
+        "titleCommunity": "Destaques de {community}",
+        "back": "Voltar",
+        "region": "Destaques em ordem",
+        "helper": "Arraste para mudar a ordem. É a mesma ordem da fileira.",
+        "count": "{count, plural, one {# story} other {# stories}}",
+        "emptyItem": "Vazio · só você vê",
+        "edit": "Editar destaque {title}",
+        "drag": "Mover {title}",
+        "dragHint": "Use as setas para cima e para baixo para mudar a posição.",
+        "moved": "{title} agora está na posição {position} de {total}.",
+        "archivedNote": "Esta comunidade foi arquivada. Você ainda pode remover stories e excluir destaques."
+      },
+      "empty": {
+        "title": "Nenhum destaque ainda",
+        "bodyHome": "Crie um destaque para manter stories no início depois das 24 h.",
+        "bodyCommunity": "Crie um destaque para manter stories nesta comunidade depois das 24 h."
+      },
+      "edit": {
+        "title": "Editar destaque",
+        "cover": "Capa",
+        "changeCover": "Trocar capa",
+        "name": "Nome",
+        "position": "Posição {position} de {total}",
+        "moveUp": "Mover para cima",
+        "moveDown": "Mover para baixo",
+        "stories": "Stories neste destaque",
+        "coverPill": "Capa",
+        "remove": "Remover do destaque o story de {date}",
+        "addStories": "Adicionar stories",
+        "delete": "Excluir destaque",
+        "emptyTitle": "Nenhum story neste destaque",
+        "emptyBody": "Só você vê este destaque. Ele aparece para os membros quando tiver um story.",
+        "archivedNote": "Esta comunidade foi arquivada. Não é possível mudar a capa, o nome ou adicionar stories.",
+        "saveName": "Salvar nome",
+        "savingName": "Salvando…"
+      },
+      "cover": {
+        "title": "Escolher capa",
+        "upload": "Enviar imagem",
+        "option": "Usar o story de {date} como capa",
+        "current": "Capa atual",
+        "auto": "Usar capa automática",
+        "autoHelper": "Sem uma capa escolhida, usamos o story adicionado por último.",
+        "noImages": "Este destaque ainda não tem stories com foto. Envie uma imagem para a capa."
+      },
+      "picker": {
+        "title": "Adicionar stories",
+        "helper": "Stories expirados também podem entrar em um destaque.",
+        "row": "Adicionar ao destaque o story de {date}",
+        "empty": "Você ainda não publicou nenhum story."
+      },
+      "confirmDelete": {
+        "title": "Excluir destaque?",
+        "body": "O destaque {title} sai da fileira para todos. Os stories continuam em Seus stories.",
+        "confirm": "Excluir destaque",
+        "cancel": "Manter destaque"
       }
     },
     "viewer": {
