@@ -13,6 +13,8 @@ import {
   highlightMembershipResultSchema,
   highlightSummarySchema,
   STORY_EXPIRY_HOURS,
+  STORY_HIGHLIGHT_MAX_ITEMS,
+  STORY_HIGHLIGHT_MAX_PER_PLACE,
   STORY_MAX_CAPTION,
   STORY_MAX_PAGE_SIZE,
   type StoryComment,
@@ -2606,6 +2608,154 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
       expect(res.status, query).toBe(400);
       expect((await envelope(res)).error.code, query).toBe('VALIDATION_FAILED');
     }
+  });
+
+  /* ── Nyquist: the caps against the REAL count and lock (HIGHLIGHT-01/02, `{ highlight: 'full' }`) ── */
+
+  /**
+   * Seeds `n` demo-tenant stories straight into `highlightId` (one shared asset, captions carrying
+   * `TEST_CAPTION_PREFIX` so the file's sweep removes them and their items cascade). `deletedCount`
+   * of them are soft-deleted. Returns the story ids.
+   */
+  async function seedItems(highlightId: string, n: number, deletedCount = 0): Promise<string[]> {
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const inserted = await adminSql<{ id: string }[]>`
+      insert into public.stories (tenant_id, author_user_id, media_asset_id, media_kind, caption, deleted_at)
+      select ${tenantIds.demo}::uuid, a.author, ${assetId}::uuid, 'image',
+             ${`${TEST_CAPTION_PREFIX} — cap `} || g, case when g <= ${deletedCount} then now() end
+        from generate_series(1, ${n}) g,
+             (select m.user_id as author from public.memberships m
+                join public.users u on u.id = m.user_id
+               where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+               limit 1) a
+      returning id`;
+    const ids = inserted.map((r) => r.id);
+    created.push(...ids);
+    await adminSql`
+      insert into public.story_highlight_items (tenant_id, highlight_id, story_id, added_by_user_id)
+      select s.tenant_id, ${highlightId}::uuid, s.id, s.author_user_id
+        from public.stories s where s.id = any(${ids}::uuid[])`;
+    return ids;
+  }
+
+  /** Fills a community place with `STORY_HIGHLIGHT_MAX_PER_PLACE` highlights (swept by the cascade). */
+  async function fillPlace(communityId: string): Promise<void> {
+    await adminSql`
+      insert into public.story_highlights (tenant_id, community_id, title, position, created_by_user_id)
+      select ${tenantIds.demo}::uuid, ${communityId}::uuid, 'Teste Cheio ' || g, g - 1, m.user_id
+        from generate_series(1, ${STORY_HIGHLIGHT_MAX_PER_PLACE}) g,
+             (select m.user_id from public.memberships m
+                join public.users u on u.id = m.user_id
+               where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+               limit 1) m`;
+  }
+
+  const countItems = async (highlightId: string) =>
+    (
+      await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.story_highlight_items where highlight_id = ${highlightId}::uuid`
+    )[0]?.n ?? -1;
+
+  const countPlace = async (communityId: string) =>
+    (
+      await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.story_highlights where community_id = ${communityId}::uuid`
+    )[0]?.n ?? -1;
+
+  const countCaption = async (caption: string) =>
+    (
+      await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.stories where caption = ${caption}`
+    )[0]?.n ?? -1;
+
+  async function expectFull(res: Response): Promise<void> {
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.details).toEqual({ highlight: 'full' });
+  }
+
+  it('05.2-30 a highlight holding STORY_HIGHLIGHT_MAX_ITEMS refuses a NEW story with `full` and writes nothing; a story already in it is still the idempotent 200', async () => {
+    const full = await create(tokens.demoAdmin, { title: 'Teste Cheio' });
+    const held = await seedItems(full.id, STORY_HIGHLIGHT_MAX_ITEMS);
+    expect(await countItems(full.id)).toBe(STORY_HIGHLIGHT_MAX_ITEMS);
+
+    const { storyId } = await publishImage('cap itens');
+    const before = eventsNamed('story.highlighted').length;
+    await expectFull(await addItem(tokens.demoAdmin, full.id, storyId));
+    expect(await itemRows(full.id, storyId)).toBe(0);
+    expect(await countItems(full.id)).toBe(STORY_HIGHLIGHT_MAX_ITEMS);
+    expect(eventsNamed('story.highlighted').length).toBe(before);
+
+    const repeat = await addItem(tokens.demoAdmin, full.id, held[0] ?? '');
+    expect(repeat.status).toBe(200);
+    expect(highlightMembershipResultSchema.parse(await repeat.json()).highlighted).toBe(true);
+    expect(await countItems(full.id)).toBe(STORY_HIGHLIGHT_MAX_ITEMS);
+
+    // Positive control: one below the cap still accepts the same story.
+    const room = await create(tokens.demoAdmin, { title: 'Teste Quase' });
+    await seedItems(room.id, STORY_HIGHLIGHT_MAX_ITEMS - 1);
+    expect((await addItem(tokens.demoAdmin, room.id, storyId)).status).toBe(200);
+    expect(await countItems(room.id)).toBe(STORY_HIGHLIGHT_MAX_ITEMS);
+  });
+
+  it('05.2-31 a place holding STORY_HIGHLIGHT_MAX_PER_PLACE refuses a 51st highlight with `full` and writes nothing', async () => {
+    const community = await makeHighlightCommunity('Destaque lotada');
+    await fillPlace(community);
+    const before = eventsNamed('highlight.created').length;
+    await expectFull(
+      await createHighlight(tokens.demoAdmin, { communityId: community, title: 'Teste Excesso' }),
+    );
+    expect(await countPlace(community)).toBe(STORY_HIGHLIGHT_MAX_PER_PLACE);
+    expect(eventsNamed('highlight.created').length).toBe(before);
+
+    // Positive control: one below the cap still creates.
+    const spare = await makeHighlightCommunity('Destaque quase');
+    await fillPlace(spare);
+    await adminSql`delete from public.story_highlights
+                    where community_id = ${spare}::uuid and title = 'Teste Cheio 50'`;
+    const placed = await create(tokens.demoAdmin, { communityId: spare, title: 'Teste Ultimo' });
+    expect(placed.communityId).toBe(spare);
+    expect(await countPlace(spare)).toBe(STORY_HIGHLIGHT_MAX_PER_PLACE);
+  });
+
+  it('05.2-32 a publish into a full highlight, or a `newHighlight` into a full place, is `full` and writes NO story', async () => {
+    const full = await create(tokens.demoAdmin, { title: 'Teste Lotado' });
+    await seedItems(full.id, STORY_HIGHLIGHT_MAX_ITEMS);
+    const community = await makeHighlightCommunity('Destaque sem vaga');
+    await fillPlace(community);
+
+    const published = eventsNamed('story.published').length;
+    const highlighted = eventsNamed('story.highlighted').length;
+    const createdEvents = eventsNamed('highlight.created').length;
+    const eventsBefore = events.length;
+
+    for (const destination of [
+      { highlightId: full.id },
+      { newHighlight: { communityId: community, title: 'Teste Nova' } },
+    ]) {
+      const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+      const caption = `${TEST_CAPTION_PREFIX} — cheio ${randomUUID()}`;
+      await expectFull(
+        await publish(tokens.demoAdmin, {
+          mediaAssetId: assetId,
+          mediaKind: 'image',
+          caption,
+          ...destination,
+        }),
+      );
+      expect(await countCaption(caption), JSON.stringify(destination)).toBe(0);
+      const [uses] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.stories where media_asset_id = ${assetId}::uuid`;
+      expect(uses?.n).toBe(0);
+      expect(await assetStatus(assetId)).toMatchObject({ status: 'ready' });
+    }
+    expect(await countItems(full.id)).toBe(STORY_HIGHLIGHT_MAX_ITEMS);
+    expect(await countPlace(community)).toBe(STORY_HIGHLIGHT_MAX_PER_PLACE);
+    expect(eventsNamed('story.published').length).toBe(published);
+    expect(eventsNamed('story.highlighted').length).toBe(highlighted);
+    expect(eventsNamed('highlight.created').length).toBe(createdEvents);
+    expect(events.length).toBe(eventsBefore);
   });
 });
 
