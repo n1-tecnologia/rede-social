@@ -10,6 +10,7 @@ export { DesktopRail, type DesktopRailProps } from './DesktopRail';
 export { type HomeSlot, HomeSlots, type HomeSlotsProps } from './HomeSlots';
 export { MediaImage, type MediaImageProps } from './MediaImage';
 export {
+  activeTabChrome,
   activeTabKey,
   buildNav,
   iconFor,

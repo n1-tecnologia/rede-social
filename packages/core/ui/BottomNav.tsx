@@ -4,7 +4,7 @@ import { cn } from '@tria/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { activeTabKey, iconFor, type NavItem } from './nav';
+import { activeTabChrome, activeTabKey, iconFor, type NavItem } from './nav';
 
 export interface BottomNavProps {
   /** Registry tabs: kernel Início first, enabled module tabs, kernel Perfil last (D-40). */
@@ -23,8 +23,13 @@ const EASE = 'cubic-bezier(0.2, 0.715, 0.205, 0.99)';
  * Scroll reaction (ported in spirit): the scroll event does not bubble, so a capture-phase document
  * listener filters to the shell's `.app-scroll` root; an accumulator gives hysteresis (shrink after
  * 20px down, restore after 10px up, always full above 48px) so micro-movements never flicker the bar;
- * a route change restores it. The collapse-to-single-button and media modes are deliberately NOT
- * ported. Hidden on desktop (`md:hidden`).
+ * a route change restores it. The collapse-to-single-button mode is still not ported. Hidden on
+ * desktop (`md:hidden`).
+ *
+ * Media chrome (UI-D-81): ported as a dark-token scope declared by the active tab. While the active
+ * tab's nav entry declares `chrome: 'media'`, the `<nav>` carries `data-theme="dark"`, so `.glass-bar`,
+ * the active chip and the active icon resolve from the shipped dark theme with no new token; geometry,
+ * scroll hysteresis and `md:hidden` are unchanged. On every other tab the attribute is omitted.
  */
 export function BottomNav({ tabs, label }: BottomNavProps) {
   const pathname = usePathname() ?? '';
@@ -69,11 +74,13 @@ export function BottomNav({ tabs, label }: BottomNavProps) {
   }, [pathname]);
 
   const active = activeTabKey(tabs, pathname);
+  const media = activeTabChrome(tabs, pathname) === 'media';
 
   return (
     <nav
       aria-label={label}
       data-shell-nav="bottom"
+      data-theme={media ? 'dark' : undefined}
       className="glass-bar fixed left-3.5 z-50 flex items-center rounded-full px-1.5 py-1 md:hidden"
       style={{
         right: 'auto',

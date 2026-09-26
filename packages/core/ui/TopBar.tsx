@@ -3,7 +3,7 @@
 import { Avatar, Badge, cn } from '@tria/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { iconFor, isNavItemActive, type NavItem } from './nav';
+import { activeTabChrome, iconFor, isNavItemActive, type NavItem } from './nav';
 import { TenantLogo } from './TenantLogo';
 
 export interface TopBarProps {
@@ -15,6 +15,11 @@ export interface TopBarProps {
   /** Accessible name of the avatar link (`/perfil`). */
   profileLabel: string;
   profileHref?: string;
+  /**
+   * The shell's tab row (`nav.tabs`). When given, the bar is not rendered while the active tab
+   * declares `chrome: 'media'` (UI-D-81).
+   */
+  tabs?: ReadonlyArray<NavItem>;
 }
 
 const slotLinkClasses =
@@ -26,6 +31,11 @@ const slotLinkClasses =
  * the right. The right side's geometry is fixed (gap-3, slots then avatar) so the bar never reflows
  * when later modules declare slots; the display name is the only flexible element and truncates.
  * Hidden on desktop (`md:hidden`) — the rail carries the same information there.
+ *
+ * Media chrome (UI-D-81): while the active tab's nav entry declares `chrome: 'media'` the bar is not
+ * rendered at all, so the video surface owns the top of the screen. The rule is declarative — it reads
+ * the active tab's declaration through `activeTabChrome` — because a pathname check in `@tria/core/ui`
+ * would couple the kernel to a module (MOD-02). The desktop rail keeps the tenant identity there.
  */
 export function TopBar({
   brand,
@@ -34,9 +44,12 @@ export function TopBar({
   avatar,
   profileLabel,
   profileHref = '/perfil',
+  tabs,
 }: TopBarProps) {
   const pathname = usePathname() ?? '';
   const onProfile = isNavItemActive(pathname, profileHref);
+
+  if (tabs && activeTabChrome(tabs, pathname) === 'media') return null;
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-border bg-bg-secondary pt-[var(--safe-top)] md:hidden">

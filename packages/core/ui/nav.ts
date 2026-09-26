@@ -30,6 +30,12 @@ export interface NavItem {
   icon: string;
   label: string;
   badge?: NavBadge;
+  /**
+   * UI-D-81: `'media'` = the dark media chrome (no mobile TopBar, dark BottomNav) while this tab is
+   * active. Declared by the module's manifest nav entry and carried through the bootstrap; absent on
+   * every other entry.
+   */
+  chrome?: 'media';
 }
 
 /** What the shell renders: the tab row (BottomNav / rail nav) and the slot row (TopBar / rail bottom group). */
@@ -63,6 +69,7 @@ function toItem(m: NavEntry, labels: NavLabels): NavItem {
     icon: m.nav.icon,
     label: labels.module(m.key, m.nav.label) ?? m.nav.label,
     ...(m.nav.badge ? { badge: m.nav.badge } : {}),
+    ...(m.nav.chrome ? { chrome: m.nav.chrome } : {}),
   };
 }
 
@@ -119,6 +126,16 @@ export function activeTabKey(tabs: ReadonlyArray<NavItem>, pathname: string): st
     if (!best || length > best.length) best = { key: tab.key, length };
   }
   return best?.key ?? null;
+}
+
+/**
+ * UI-D-81: the chrome the ACTIVE tab declares (`'media'`), or `null` for the normal chrome. The one
+ * rule TopBar and BottomNav share: the kernel reads the declaration from the nav entry and never
+ * tests a module's pathname, so any future media tab gets the chrome by declaring it (MOD-02).
+ */
+export function activeTabChrome(tabs: ReadonlyArray<NavItem>, pathname: string): 'media' | null {
+  const key = activeTabKey(tabs, pathname);
+  return tabs.find((tab) => tab.key === key)?.chrome ?? null;
 }
 
 /**

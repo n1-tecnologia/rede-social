@@ -93,6 +93,7 @@ export function AppShell({
         counters={counters}
         avatar={avatar}
         profileLabel={labels.profile}
+        tabs={nav.tabs}
       />
 
       <ToastProvider>
