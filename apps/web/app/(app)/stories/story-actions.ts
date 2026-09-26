@@ -3,9 +3,7 @@
 import type { CommentView } from '@tria/module-feed/ui';
 import {
   createStoryCommentSchema,
-  markStoriesSeenSchema,
   publishStorySchema,
-  STORY_SEEN_BATCH_MAX,
   storyCommentsQuerySchema,
   storyQuerySchema,
 } from '@tria/module-stories/contracts';
@@ -14,6 +12,7 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import { parseSeenBatch } from '@/lib/seen-batch';
 import {
   asStoryHighlightIssue,
   asStoryIssue,
@@ -377,11 +376,17 @@ export async function loadMoreOwnStoriesAction(cursor?: string): Promise<StoryHi
 
 /**
  * The seen-state write (HIGHLIGHT-06, D-105, R-P5) — what `StoriesSurface` flushes its buffer of
- * shown story ids through, on close, on a group change, at 10 ids and when the page hides.
+ * shown story ids through, on close, on a group change, at 10 ids and on unmount. The page-hide
+ * flush does NOT come here: a server action may be aborted on unload, so that one is sent with
+ * `sendSeenBeacon` to `POST /api/stories/views` (review WR-07).
  *
- * - **The contract's own Zod runs first** (`markStoriesSeenSchema`): the list is untrusted, so an
- *   empty list or a non-uuid sends NO request. A list longer than `STORY_SEEN_BATCH_MAX` is chunked
- *   rather than refused — the surface never sends one, but a batch must not be lost to a cap.
+ * - **`parseSeenBatch` runs first** (`lib/seen-batch.ts`: dedupe, then the contract's own
+ *   `markStoriesSeenSchema`): the list is untrusted, so an empty list, a non-uuid or more than
+ *   `STORY_SEEN_BATCH_MAX` UNIQUE ids sends NO request. An oversized list is REFUSED, not chunked
+ *   (review WR-04, T-05.2-48): the surface never sends more than `SEEN_FLUSH_AT` = 10, so a bigger
+ *   list is not a real client and must not amplify one call into many API calls. An accepted list
+ *   is exactly ONE `POST /v1/stories/views`. The page-hide route (`/api/stories/views`) applies the
+ *   same helper, so the two doors cannot drift apart on the cap.
  * - **It is SILENT (planning decision 4).** A refusal, an expired session or a transport failure
  *   answers `false` and is logged by SHAPE only (status and code, never an id — a log of "who saw
  *   what" is the record V8 forbids). It deliberately does NOT `redirect()`: a background write must
@@ -390,19 +395,11 @@ export async function loadMoreOwnStoriesAction(cursor?: string): Promise<StoryHi
  *   set, and re-rendering `/inicio` on every flush would be the like actions' waste, repeated.
  */
 export async function markStoriesSeenAction(storyIds: string[]): Promise<boolean> {
-  const list = Array.isArray(storyIds) ? storyIds : [];
-  const chunks: string[][] = [];
-  for (let at = 0; at < list.length; at += STORY_SEEN_BATCH_MAX) {
-    chunks.push(list.slice(at, at + STORY_SEEN_BATCH_MAX));
-  }
-  // Every chunk is validated BEFORE any request, so a bad id anywhere sends nothing at all.
-  const parsed = chunks.map((chunk) => markStoriesSeenSchema.safeParse({ storyIds: chunk }));
-  if (parsed.length === 0 || parsed.some((result) => !result.success)) return false;
+  const ids = parseSeenBatch(storyIds);
+  if (ids === null) return false;
 
   try {
-    for (const result of parsed) {
-      if (result.success) await markStoriesSeen(result.data.storyIds);
-    }
+    await markStoriesSeen(ids);
     return true;
   } catch (error) {
     console.error('stories.seen_write_failed', {

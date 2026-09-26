@@ -13,6 +13,7 @@ import {
   markStoriesSeenAction,
   type unlikeStoryAction,
 } from '@/app/(app)/stories/story-actions';
+import { sendSeenBeacon } from '@/lib/seen-batch';
 import {
   type RowCircleView,
   type StoryGroupView,
@@ -61,8 +62,11 @@ import {
  *    unseen story was shown, with no refresh (UI-D-61). Opening the circle resumes at the first
  *    unseen story (D-105), recomputed at every open;
  *  - a BUFFER of ids the server does not know yet, flushed through `markStoriesSeenAction` on close,
- *    on a group change, at `SEEN_FLUSH_AT` ids and when the page hides (`visibilitychange`). An id
- *    the server already reported seen, or one already sent this session, is never sent again.
+ *    on a group change, at `SEEN_FLUSH_AT` ids and on unmount, and through `sendSeenBeacon` (to the
+ *    same-origin `POST /api/stories/views`) when the page hides (`visibilitychange`): a server action
+ *    is a plain fetch the browser may abort on unload, a beacon / keepalive fetch outlives the page
+ *    (review WR-07). An id the server already reported seen, or one already sent this session, is
+ *    never sent again.
  * The write is background work: a failure is logged by shape and swallowed — never a toast, never a
  * navigation — and the session set keeps the ring honest for this page either way. There is NO
  * device-local copy (no browser storage) of any of it: D-79's rejection stands, the server is the truth.
@@ -235,8 +239,9 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
    * Send the buffer. Fire and forget: the viewer never waits on it, and a failure is logged by
    * SHAPE (a count, never an id) and swallowed — no toast, no navigation (planning decision 4). A
    * failed batch is forgotten from `sent`, so a later showing of the same story may try again.
+   * `via: 'beacon'` is the page-hide path only (WR-07); every in-page flush uses the action.
    */
-  const flush = useCallback(() => {
+  const flush = useCallback((via: 'action' | 'beacon' = 'action') => {
     const ids = pending.current;
     if (ids.length === 0) return;
     pending.current = [];
@@ -245,7 +250,8 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
       console.error('stories.seen_flush_failed', { count: ids.length, reason });
       for (const id of ids) sent.current.delete(id);
     };
-    markStoriesSeenAction(ids).then(
+    const send = via === 'beacon' ? sendSeenBeacon(ids) : markStoriesSeenAction(ids);
+    send.then(
       (ok) => {
         if (!ok) failed('refused');
       },
@@ -279,10 +285,13 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
     setSeenAtClose(new Set(sessionSeen.current));
   }, [flush]);
 
-  // The page going to the background (tab switch, app switch, lock) may be the last chance to send.
+  // The page going to the background (tab switch, app switch, lock) may be the last chance to send,
+  // so that flush leaves on the BEACON: a server action is a plain fetch the browser may abort on
+  // unload, a beacon / keepalive fetch is delivered after the page is gone (WR-07). The unmount
+  // flush below is an in-page navigation and keeps the action.
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') flush();
+      if (document.visibilityState === 'hidden') flush('beacon');
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
