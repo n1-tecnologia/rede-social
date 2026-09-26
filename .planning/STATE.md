@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "05.3"
 current_phase_name: Reels
-status: executing
-stopped_at: Completed 05.3-08-PLAN.md
-last_updated: "2026-09-26T21:31:17.885Z"
+status: verifying
+stopped_at: Completed 05.3-09-PLAN.md
+last_updated: "2026-09-26T22:45:13.475Z"
 last_activity: 2026-09-26
-last_activity_desc: "Completed 05.3-08 (the /reels route: reels catalog, gated page + loading, ReelsHost state machine, ReelOverlay with the feed like/comments/share, e2e case e1)"
-state_head: 91138e355c2f354411b46d486fc003bef6015d93
+last_activity_desc: "Completed 05.3-09 (the Reels browser battery e1-e17 on both Playwright projects, the ReelVideo arrival-autoplay fix, and the phase exit gate; phase ready for verification)"
+state_head: 3927cc2bb7db6bcd470925e508f74be665a3dc3e
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 97
-  completed_plans: 84
+  completed_plans: 85
   percent: 0
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 Phase: 05.3 (Reels) — EXECUTING
 Plan: 9 of 9
-Status: Ready to execute
-Last activity: 2026-09-26 — Completed 05.3-08 (`/reels`: `reels.json` catalog; `page.tsx` gated by `bootstrap.modules` with `notFound()` outside any try, first Todos page + lanes in parallel, no token on the server; `loading.tsx`; `ReelsHost` — lanes, visit-scoped sound (`useState(false)` + `soundOnRef`), `onActivate` start inside the gesture + `touchend` resume, OR-ed pause (viewer, sheet, background), one batched mint per window change with in-flight set and generation guard, paging with one toast per failed attempt, empty/error/loading states; `ReelOverlay` — the feed's like engine, like-only double tap, linkified caption, share; the threaded `CommentSheet` outside the dark scope; `ReelVideo` false-blocked fix; 28 host + 1 ReelVideo + 20 catalog cases, e2e e1 green in both projects); next 05.3-09
+Status: Phase complete — ready for verification
+Last activity: 2026-09-26 — Completed 05.3-09 (`admin.ts` Reels fixtures; `reels.spec.ts` e1-e17 — 28 passed + 6 project skips over mobile-chromium/desktop-chromium: lanes, touch and desktop paging, visit-long sound, like parity with Início, the threaded sheet pausing the video, share, links, the E06/E02 long-text backstops, the empty state and requires-feed on throwaway tenants, playback/lane/next-page errors; `ReelVideo` now re-issues a play the vendor's source attach aborted (the first video of a visit never started); exit gate green per stage — unit 1,308, pgTAP 351, integration 525, e2e dev + `stories.spec` on :3100; D-124 check empty; phone-UAT backstops WINDOWS #48-#51); next: code review, regression gate and the phase verifier
 
-Progress: [███████████████████░] 84/88 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 85/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -144,6 +144,7 @@ Progress: [███████████████████░] 84/88 p
 | Phase 05.3 P06 | 9min | 2 tasks | 10 files |
 | Phase 05.3 P07 | 11 min | 2 tasks | 8 files |
 | Phase 05.3 P08 | 21min | 2 tasks | 10 files |
+| Phase 05.3 P09 | 69min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -449,6 +450,9 @@ Recent decisions affecting current work:
 - [Phase 05.3]: 05.3-08: the Reels video retry pill stays until the fresh credential lands, so a double tap is one mint
 - [Phase 05.3]: 05.3-08: sheet close and lane change start or resume the video inside the gesture (WebKit sound rule); suppressResume keeps each gesture to one play()
 - [Phase 05.3]: 05.3-08: REQUIREMENTS.md unchanged — REELS/FEED-04/05/07/UI-01 shared with 05.3-09; UI-03/PWA-01 stay Phase 2 cloud gaps
+- [Phase 05.3]: 05.3-09: ReelVideo re-issues a play() that the vendor's source attach aborted (AbortError while the host has not paused, at most twice); an AbortError after a host pause stays final — the first video of a visit now starts
+- [Phase 05.3]: 05.3-09: e2e fails a server action with a 500, never a network abort — with experimental.useOffline Next 16.3 retries an aborted action until connectivity returns; REELS-08's network-loss posture is left to verification (deferred-items.md)
+- [Phase 05.3]: 05.3-09: REELS-01..05/07/08 marked Complete; REELS-06 stays Pending until the phone UAT (WebKit unmuted play across swipes, arrival autoplay on a real stream)
 
 ### Pending Todos
 
@@ -504,6 +508,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T21:31:17.790Z
-Stopped at: Completed 05.3-08-PLAN.md
+Last session: 2026-09-26T22:45:05.616Z
+Stopped at: Completed 05.3-09-PLAN.md
 Resume file: None
