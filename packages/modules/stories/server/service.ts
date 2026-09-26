@@ -1338,11 +1338,15 @@ async function insertHighlight(
 }
 
 /**
- * Refuse a NEW story for a highlight already holding `STORY_HIGHLIGHT_MAX_ITEMS` with `{ highlight:
- * 'full' }`; a story already in it (`present`) is never refused — the repeat add is the idempotent
- * 200. Shared by `addStoryToHighlight` and a publish into an existing highlight (`storyId` null: a
- * story being born cannot be present). Read under `resolveHighlight`'s `for update`, so the count is
- * exact against a concurrent add.
+ * Refuse a NEW story for a highlight already holding `STORY_HIGHLIGHT_MAX_ITEMS` LIVE stories with
+ * `{ highlight: 'full' }`; a story already in it (`present`) is never refused — the repeat add is
+ * the idempotent 200. Shared by `addStoryToHighlight` and a publish into an existing highlight
+ * (`storyId` null: a story being born cannot be present). Read under `resolveHighlight`'s `for
+ * update`, so the count is exact against a concurrent add.
+ *
+ * The cap counts LIVE stories only (WR-01): items of soft-deleted stories remain as the record of
+ * where a story had been (05.2-29) and no longer consume a slot. `present` stays over ALL rows, so a
+ * repeat add of any story already held is still the idempotent 200.
  */
 async function assertHighlightHasRoom(
   tx: Tx,
@@ -1351,8 +1355,11 @@ async function assertHighlightHasRoom(
   storyId: string | null,
 ): Promise<void> {
   const held = await tx.execute<{ n: number; present: boolean }>(sql`
-    select count(*)::int as n, coalesce(bool_or(i.story_id = ${storyId}::uuid), false) as present
+    select count(*) filter (where s.deleted_at is null)::int as n,
+           coalesce(bool_or(i.story_id = ${storyId}::uuid), false) as present
       from story_highlight_items i
+      join stories s on s.id = i.story_id
+                    and s.tenant_id = ${ctx.tenantId}::uuid
      where i.highlight_id = ${highlightId}::uuid
        and i.tenant_id = ${ctx.tenantId}::uuid`);
   const counted = held[0];
@@ -1822,7 +1829,9 @@ export async function deleteHighlight(ctx: RequestContext, highlightId: string):
  * (HIGHLIGHT-02).
  *
  * - The `takedown` intent: allowed on an ARCHIVED community (take-down must stay possible).
- * - The highlight and the story are both resolved in-lane; every miss is the bare 404.
+ * - The highlight and the story are both resolved in-lane; every miss is the bare 404. The story is
+ *   resolved regardless of its state, so a take-down can remove an item whose story was deleted
+ *   (WR-01) — only an unknown or another tenant's story id is the 404.
  * - The item row is HARD-deleted (the pair arbiter). Removing a pair that is not there
  *   is the idempotent 200 with the current count and NO event (transitions, not requests).
  * - When the removed story was the highlight's CHOSEN cover, `cover_story_id` is cleared in the SAME
@@ -1844,8 +1853,7 @@ export async function removeStoryFromHighlight(
     const stories = await tx.execute<{ id: string }>(sql`
       select s.id from stories s
        where s.id = ${storyId}::uuid
-         and s.tenant_id = ${ctx.tenantId}::uuid
-         and s.deleted_at is null`);
+         and s.tenant_id = ${ctx.tenantId}::uuid`);
     if (!stories[0]) throw new ApiError(404, 'NOT_FOUND');
 
     const deleted = await tx.execute<{ id: string }>(sql`

@@ -90,11 +90,15 @@ let flagReads = 0;
 /** Every statement the scripted modes saw, by the kind the script recognised. */
 let seen: string[] = [];
 
+/** The item-cap read (WR-01): pins that the count filters out soft-deleted stories. */
+const ROOM_COUNT =
+  /^select count\(\*\) filter \(where s\.deleted_at is null\)::int as n, coalesce\(bool_or/;
+
 function classify(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim();
   if (/^select h\.id, h\.community_id/.test(t)) return 'highlight';
   if (/from communities c/.test(t)) return 'place';
-  if (/^select count\(\*\)::int as n, coalesce\(bool_or/.test(t)) return 'room';
+  if (ROOM_COUNT.test(t)) return 'room';
   if (/^select h\.id from story_highlights h .* for update$/.test(t)) return 'lock';
   if (/^select kind, purpose from media_assets/.test(t)) return 'asset';
   if (/^insert into stories /.test(t)) return 'story-insert';
