@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.3"
 current_phase_name: Reels
 status: executing
-stopped_at: Completed 05.3-05-PLAN.md
-last_updated: "2026-09-26T20:37:55.518Z"
+stopped_at: Completed 05.3-06-PLAN.md
+last_updated: "2026-09-26T20:51:39.723Z"
 last_activity: 2026-09-26
-last_activity_desc: Completed 05.3-05 (the Reels pager: ReelsPager, DoubleTapHeart opt-in single tap and tap slop, ticksWindow, ReelsStage, ReelPlaybackError)
-state_head: b10161db4b40cf26b5ab67a5e276c11ade1c7058
+last_activity_desc: "Completed 05.3-06 (lanes, rail and caption: ReelsLanes tablist, ReelRail, ReelCaption, compactCount, LikeButton over-media tone)"
+state_head: 9b12192036c04528808b8ac86669af520f1434ef
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 97
-  completed_plans: 81
+  completed_plans: 82
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.3 (Reels) — EXECUTING
-Plan: 6 of 9
+Plan: 7 of 9
 Status: Ready to execute
-Last activity: 2026-09-26 — Completed 05.3-05 (`ReelsPager` index pager with one `go()` calling `onActivate` before `onIndexChange`, `DoubleTapHeart` opt-in `onSingleTap`/`tapSlopPx`, `ticksWindow`, `ReelsStage`, `ReelPlaybackError`, the `@tria/module-reels/ui` barrel; 58 reels unit cases); next 05.3-06
+Last activity: 2026-09-26 — Completed 05.3-06 (`ReelsLanes` ARIA tablist hidden below two lanes, `ReelRail` with reserved `h-5` count slots and share last, `ReelCaption` with the measured two-line clamp, '… mais'/'menos' and the veil, `compactCount`, `LikeButton` `tone="overMedia"`/`glyphSize` with the default tone unchanged; 45 new reels cases + 7 like-button cases); next 05.3-07
 
-Progress: [██████████████████░░] 81/88 plans ([░░░░░░░░░░] 0%)
+Progress: [██████████████████░░] 82/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -141,6 +141,7 @@ Progress: [██████████████████░░] 81/88 p
 | Phase 05.3 P02 | 17 min | 2 tasks | 7 files |
 | Phase 05.3 P03 | 39 min | 2 tasks | 13 files |
 | Phase 05.3 P05 | 11 min | 2 tasks | 10 files |
+| Phase 05.3 P06 | 9min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -436,6 +437,8 @@ Recent decisions affecting current work:
 - [Phase 05.3]: 05.3-03: the phase2-smoke Feed-off reading asserts Reels leaves with the feed while its flag stays on (D-121 e2e witness), so it is the one list without Reels
 - [Phase 05.3]: 05.3-05: the DoubleTapHeart tap wrapper is rendered for every mounted Reels page with handlers only on the current one, so a pre-mounted neighbour video is never remounted when it becomes current
 - [Phase 05.3]: 05.3-05: a pointer travelling past tapSlopPx cancels the pending single tap too; held arrow keys (event.repeat) never navigate; a wheel over a natively scrollable element (expanded caption) scrolls it instead of paging
+- [Phase 05.3]: 05.3-06: LikeButton gains an opt-in tone ('default' | 'overMedia') and glyphSize; overMedia sets white idle / like-colour liked on the button itself (no descendant white override), a translucent white press and the white focus ring; the default tone's class list is unchanged so feed cards and stories render as before
+- [Phase 05.3]: 05.3-06: ReelsLanes ignores re-selecting the active lane and held-key repeats (each selection makes the host load a lane); ReelCaption measures overflow only while collapsed (layout effect + ResizeObserver, re-run on new children) and a tap on unclamped, unexpanded text does nothing
 
 ### Pending Todos
 
@@ -491,6 +494,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T20:37:55.424Z
-Stopped at: Completed 05.3-05-PLAN.md
+Last session: 2026-09-26T20:51:13.793Z
+Stopped at: Completed 05.3-06-PLAN.md
 Resume file: None
