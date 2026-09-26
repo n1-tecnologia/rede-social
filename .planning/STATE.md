@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.3"
 current_phase_name: Reels
 status: executing
-stopped_at: Completed 05.3-02-PLAN.md
-last_updated: "2026-09-26T19:41:12.918Z"
+stopped_at: Completed 05.3-03-PLAN.md
+last_updated: "2026-09-26T20:23:47.529Z"
 last_activity: 2026-09-26
-last_activity_desc: Completed 05.3-02 (Reels lanes read GET /v1/feed/video-communities, REELS-03/04 API battery)
-state_head: 16cafea48f677d9e5e33166097fbcf0e91653990
+last_activity_desc: Completed 05.3-03 (declarative media chrome in the kernel shell, e2e pins for the Reels tab and seven module switches)
+state_head: 2b8e1fc5406cb74ce7954b40758d7ebd6d68200e
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 97
-  completed_plans: 79
+  completed_plans: 80
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.3 (Reels) — EXECUTING
-Plan: 4 of 9
+Plan: 5 of 9
 Status: Ready to execute
-Last activity: 2026-09-26 — Completed 05.3-02 (the lanes read `GET /v1/feed/video-communities`, list equality with Início, isolation b9, two one-statement budgets, pgTAP 130 plan(20)); next 05.3-03
+Last activity: 2026-09-26 — Completed 05.3-03 (`NavItem.chrome` + `activeTabChrome`: TopBar hidden and BottomNav `data-theme="dark"` on a media-chrome tab, no route literal in the kernel; six e2e specs pinned for the Reels tab and seven switches, 69 passed); next 05.3-05
 
-Progress: [█████████████████░░░] 79/88 plans ([░░░░░░░░░░] 0%)
+Progress: [██████████████████░░] 80/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -139,6 +139,7 @@ Progress: [█████████████████░░░] 79/88 p
 | Phase 05.3 P01 | 25min | 3 tasks | 30 files |
 | Phase 05.3 P04 | 54 min | 3 tasks | 3 files |
 | Phase 05.3 P02 | 17 min | 2 tasks | 7 files |
+| Phase 05.3 P03 | 39 min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -429,6 +430,9 @@ Recent decisions affecting current work:
 - [Phase 05.3]: 05.3-02: the Reels lanes read is a sibling path GET /v1/feed/video-communities (no cursor, own item shape, 200 [] with communities off) sharing READY_VIDEO_POST with the list, so a lane can never open empty
 - [Phase 05.3]: 05.3-02: pgTAP 130's lanes fixture carries 10,000 posts of another tenant; without them fact 14 flipped to a Seq Scan on the third rolled-back run (index bloat). Fact 14 pins no Seq Scan, not an index name
 - [Phase 05.3]: 05.3-02: tests that flip lab's communities flag upsert it and restore the row exactly as found (communities.test deletes it, so an UPDATE-only flip is a no-op)
+- [Phase 05.3]: 05.3-03: media chrome is declarative. NavItem.chrome comes from the manifest nav entry and activeTabChrome (built on activeTabKey) is the one rule TopBar and BottomNav share; the kernel never names /reels (UI-D-81, MOD-02)
+- [Phase 05.3]: 05.3-03: media chrome is a dark-token scope (data-theme=dark on the BottomNav nav only); glass-bar, chip and accent re-resolve from the shipped dark theme with no new token
+- [Phase 05.3]: 05.3-03: the phase2-smoke Feed-off reading asserts Reels leaves with the feed while its flag stays on (D-121 e2e witness), so it is the one list without Reels
 
 ### Pending Todos
 
@@ -484,6 +488,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T19:40:48.761Z
-Stopped at: Completed 05.3-02-PLAN.md
+Last session: 2026-09-26T20:23:41.135Z
+Stopped at: Completed 05.3-03-PLAN.md
 Resume file: None

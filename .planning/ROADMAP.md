@@ -472,7 +472,7 @@ Plans:
 **Research needed**: Light — Mux autoplay/mute policy on iOS, and preloading the next video.
 **Notes**: Part of the MVP (user decision 2026-09-25): Reels is a new tab that filters the feed to video posts, so it moved ahead of the "Rede social" phases. It was 05.5 and "placed last so it is built once over the final set of video sources"; adding member videos is now Phase 9's job. Open questions for discuss-phase: (a) the prototype's lanes "Para você / Resultados / Bastidores" have no data model — fixed lanes, tags, or communities? (b) whether Reels is its own toggleable module or rides on `feed`; the user's framing ("a new tab that filters the feed by video") points to riding on `feed`. Source: user request 2026-09-25.
 
-**Plans**: 3/9 plans executed
+**Plans**: 4/9 plans executed
 
 Plans:
 
@@ -484,7 +484,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1; plan 05 also on the sketch approval)*
 
 - [x] 05.3-02-PLAN.md — The lanes read (`GET /v1/feed/video-communities`) and the REELS-03/04 API battery: equality with Início, isolation b9, one-statement budgets, the lanes EXPLAIN pin
-- [ ] 05.3-03-PLAN.md — Declarative media chrome in the kernel shell (TopBar hidden, dark BottomNav) and every e2e nav and module-switch pin for the new tab
+- [x] 05.3-03-PLAN.md — Declarative media chrome in the kernel shell (TopBar hidden, dark BottomNav) and every e2e nav and module-switch pin for the new tab
 - [ ] 05.3-05-PLAN.md — The props-only pager: `DoubleTapHeart`'s opt-in single tap and slop, windowed ticks, the stage, the playback-error block, gestures, keyboard, wheel and the desktop column
 
 **Wave 3**
