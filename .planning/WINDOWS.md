@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 30
+open_count: 31
 waived_count: 0
 fixed_count: 16
-total_count: 46
-last_updated: 2026-09-26T00:20:16.686Z
+total_count: 47
+last_updated: 2026-09-26T19:02:52.627Z
 ---
 
 # Broken Windows Ledger
@@ -61,6 +61,7 @@ last_updated: 2026-09-26T00:20:16.686Z
 | 44 | 05.2 | stub | apps/web/lib/story-view.ts | 346 | Inicio highlight circles are inert static spans (no accessible name, no onOpen) until plan 05.2-05 makes the viewer group-aware | fixed |  | 2026-09-25T21:56:21.623Z | 2026-09-25T22:30:47.123Z |
 | 45 | 05.2 | stub | apps/web/components/stories/StoryViewerHost.tsx | 514 | The Destacar sheet's empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the story deep link's not-found screen | fixed |  | 2026-09-25T22:53:35.615Z | 2026-09-26T00:20:16.618Z |
 | 46 | 05.2 | stub | apps/web/app/(app)/stories/meus/StoryHistoryList.tsx | 450 | Highlight sheet empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the not-found screen | fixed |  | 2026-09-25T23:10:22.646Z | 2026-09-26T00:20:16.686Z |
+| 47 | 05.3 | stub | packages/modules/reels/package.json |  | @tria/module-reels exports ./ui -> ./ui/index.ts, which plan 05.3-05 creates; nothing imports it yet | open |  | 2026-09-26T19:02:52.627Z |  |
 
 ````json
 [
@@ -615,6 +616,18 @@ last_updated: 2026-09-26T00:20:16.686Z
     "reason": "",
     "recorded_at": "2026-09-25T23:10:22.646Z",
     "resolved_at": "2026-09-26T00:20:16.686Z"
+  },
+  {
+    "id": 47,
+    "kind": "stub",
+    "phase": "05.3",
+    "file": "packages/modules/reels/package.json",
+    "line": null,
+    "description": "@tria/module-reels exports ./ui -> ./ui/index.ts, which plan 05.3-05 creates; nothing imports it yet",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T19:02:52.627Z",
+    "resolved_at": null
   }
 ]
 ````

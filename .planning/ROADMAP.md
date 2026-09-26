@@ -472,13 +472,13 @@ Plans:
 **Research needed**: Light — Mux autoplay/mute policy on iOS, and preloading the next video.
 **Notes**: Part of the MVP (user decision 2026-09-25): Reels is a new tab that filters the feed to video posts, so it moved ahead of the "Rede social" phases. It was 05.5 and "placed last so it is built once over the final set of video sources"; adding member videos is now Phase 9's job. Open questions for discuss-phase: (a) the prototype's lanes "Para você / Resultados / Bastidores" have no data model — fixed lanes, tags, or communities? (b) whether Reels is its own toggleable module or rides on `feed`; the user's framing ("a new tab that filters the feed by video") points to riding on `feed`. Source: user request 2026-09-25.
 
-**Plans**: 9 plans
+**Plans**: 1/9 plans executed
 
 Plans:
 
 **Wave 1**
 
-- [ ] 05.3-01-PLAN.md — Tracer: Reels at the API end to end (the `reels` key and its backfill with a live replay after a backup, `requires: ['feed']` through `effectiveKeys`, the reels manifest package, feed's `?media=video` filter and partial index), the reset consent, pgTAP 130 and every API pin for the seventh key
+- [x] 05.3-01-PLAN.md — Tracer: Reels at the API end to end (the `reels` key and its backfill with a live replay after a backup, `requires: ['feed']` through `effectiveKeys`, the reels manifest package, feed's `?media=video` filter and partial index), the reset consent, pgTAP 130 and every API pin for the seventh key
 - [ ] 05.3-04-PLAN.md — The D-33 design gate: sketch 005 for the six prototype-less Reels surfaces, the user records the approval
 
 **Wave 2** *(blocked on Wave 1; plan 05 also on the sketch approval)*
