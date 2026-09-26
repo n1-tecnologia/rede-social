@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 30
+open_count: 34
 waived_count: 0
 fixed_count: 17
-total_count: 47
-last_updated: 2026-09-26T20:36:02.619Z
+total_count: 51
+last_updated: 2026-09-26T22:42:29.475Z
 ---
 
 # Broken Windows Ledger
@@ -62,6 +62,10 @@ last_updated: 2026-09-26T20:36:02.619Z
 | 45 | 05.2 | stub | apps/web/components/stories/StoryViewerHost.tsx | 514 | The Destacar sheet's empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the story deep link's not-found screen | fixed |  | 2026-09-25T22:53:35.615Z | 2026-09-26T00:20:16.618Z |
 | 46 | 05.2 | stub | apps/web/app/(app)/stories/meus/StoryHistoryList.tsx | 450 | Highlight sheet empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the not-found screen | fixed |  | 2026-09-25T23:10:22.646Z | 2026-09-26T00:20:16.686Z |
 | 47 | 05.3 | stub | packages/modules/reels/package.json |  | @tria/module-reels exports ./ui -> ./ui/index.ts, which plan 05.3-05 creates; nothing imports it yet | fixed |  | 2026-09-26T19:02:52.627Z | 2026-09-26T20:36:02.619Z |
+| 48 | 05.3 | unrun-verify | apps/web/e2e/reels.spec.ts |  | UI E04 populated (phone UAT, blocked until Phase 01.1): on an iPhone standalone PWA and Android Chrome the first video autoplays muted, sound stays on across swipes after 'Ativar som', a refused unmuted play falls back to muted with the icon flipped | open |  | 2026-09-26T22:42:29.269Z |  |
+| 49 | 05.3 | unrun-verify | apps/web/e2e/reels.spec.ts |  | UI E03 populated (phone UAT, blocked until Phase 01.1): a diagonal swipe changes video or lane never both, two quick swipes never read as a double-tap like, a tap pauses after ~300 ms and a double tap likes without pausing | open |  | 2026-09-26T22:42:29.338Z |  |
+| 50 | 05.3 | unrun-verify | apps/web/components/reels/ReelVideo.tsx |  | UI E04 loading (real Mux + phone UAT, blocked until Phase 01.1): swiping to a loaded video shows its first frame or poster with no black flash (neighbour pre-mount, token pre-mint); the fake provider cannot stream | open |  | 2026-09-26T22:42:29.407Z |  |
+| 51 | 05.3 | unrun-verify | packages/modules/reels/ui/ReelRail.tsx |  | UI E06 populated (plan 04 lift, phone UAT, blocked until Phase 01.1): rail, caption and lane labels stay legible over a bright video frame, judged against sketch 005 | open |  | 2026-09-26T22:42:29.475Z |  |
 
 ````json
 [
@@ -628,6 +632,54 @@ last_updated: 2026-09-26T20:36:02.619Z
     "reason": "",
     "recorded_at": "2026-09-26T19:02:52.627Z",
     "resolved_at": "2026-09-26T20:36:02.619Z"
+  },
+  {
+    "id": 48,
+    "kind": "unrun-verify",
+    "phase": "05.3",
+    "file": "apps/web/e2e/reels.spec.ts",
+    "line": null,
+    "description": "UI E04 populated (phone UAT, blocked until Phase 01.1): on an iPhone standalone PWA and Android Chrome the first video autoplays muted, sound stays on across swipes after 'Ativar som', a refused unmuted play falls back to muted with the icon flipped",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T22:42:29.269Z",
+    "resolved_at": null
+  },
+  {
+    "id": 49,
+    "kind": "unrun-verify",
+    "phase": "05.3",
+    "file": "apps/web/e2e/reels.spec.ts",
+    "line": null,
+    "description": "UI E03 populated (phone UAT, blocked until Phase 01.1): a diagonal swipe changes video or lane never both, two quick swipes never read as a double-tap like, a tap pauses after ~300 ms and a double tap likes without pausing",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T22:42:29.338Z",
+    "resolved_at": null
+  },
+  {
+    "id": 50,
+    "kind": "unrun-verify",
+    "phase": "05.3",
+    "file": "apps/web/components/reels/ReelVideo.tsx",
+    "line": null,
+    "description": "UI E04 loading (real Mux + phone UAT, blocked until Phase 01.1): swiping to a loaded video shows its first frame or poster with no black flash (neighbour pre-mount, token pre-mint); the fake provider cannot stream",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T22:42:29.407Z",
+    "resolved_at": null
+  },
+  {
+    "id": 51,
+    "kind": "unrun-verify",
+    "phase": "05.3",
+    "file": "packages/modules/reels/ui/ReelRail.tsx",
+    "line": null,
+    "description": "UI E06 populated (plan 04 lift, phone UAT, blocked until Phase 01.1): rail, caption and lane labels stay legible over a bright video frame, judged against sketch 005",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T22:42:29.475Z",
+    "resolved_at": null
   }
 ]
 ````
