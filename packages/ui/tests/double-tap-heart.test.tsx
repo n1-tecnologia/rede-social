@@ -173,3 +173,106 @@ describe('DoubleTapHeart — reduced motion', () => {
     expect(burst()).toHaveAttribute('data-double-tap-burst', 'spring');
   });
 });
+
+/**
+ * UI-D-86 / D-124 — the two OPT-IN props Reels needs. A pager page is a tap surface where a single
+ * tap pauses and a double tap likes, and where a swipe must never read as either. The props are
+ * opt-in so the feed card (which passes neither) keeps its byte-identical path: the last case pins
+ * that a caller without them never even schedules a timer.
+ */
+describe('DoubleTapHeart — opt-in single tap and tap slop (UI-D-86, D-124)', () => {
+  /** One pointerdown + pointerup pair, the pointerup `dx` pixels to the right of the pointerdown. */
+  function tapWithTravel(target: Element, dx = 0) {
+    fireEvent.pointerDown(target, { clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerUp(target, { clientX: 100 + dx, clientY: 100, pointerId: 1 });
+  }
+
+  it('calls onSingleTap once when the 300 ms window closes with no second tap, and never onDoubleTap', () => {
+    const onDoubleTap = vi.fn();
+    const onSingleTap = vi.fn();
+    render(
+      <DoubleTapHeart onDoubleTap={onDoubleTap} onSingleTap={onSingleTap}>
+        <div data-testid="media">video</div>
+      </DoubleTapHeart>,
+    );
+    tapWithTravel(screen.getByTestId('media'));
+    act(() => {
+      vi.advanceTimersByTime(299);
+    });
+    expect(onSingleTap).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(onSingleTap).toHaveBeenCalledTimes(1);
+    expect(onDoubleTap).not.toHaveBeenCalled();
+  });
+
+  it('two taps inside the window call onDoubleTap once and cancel the pending single tap', () => {
+    const onDoubleTap = vi.fn();
+    const onSingleTap = vi.fn();
+    render(
+      <DoubleTapHeart onDoubleTap={onDoubleTap} onSingleTap={onSingleTap}>
+        <div data-testid="media">video</div>
+      </DoubleTapHeart>,
+    );
+    const media = screen.getByTestId('media');
+    tapWithTravel(media);
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    tapWithTravel(media);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(onDoubleTap).toHaveBeenCalledTimes(1);
+    expect(onSingleTap).not.toHaveBeenCalled();
+  });
+
+  it('with tapSlopPx={10}, a pointerup 11 px from its pointerdown is no tap at all', () => {
+    const onDoubleTap = vi.fn();
+    const onSingleTap = vi.fn();
+    render(
+      <DoubleTapHeart onDoubleTap={onDoubleTap} onSingleTap={onSingleTap} tapSlopPx={10}>
+        <div data-testid="media">video</div>
+      </DoubleTapHeart>,
+    );
+    const media = screen.getByTestId('media');
+    // two quick swipes: neither is a tap, so they never pair into a like
+    tapWithTravel(media, 11);
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    tapWithTravel(media, 11);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(onSingleTap).not.toHaveBeenCalled();
+    expect(onDoubleTap).not.toHaveBeenCalled();
+  });
+
+  it('with tapSlopPx={10}, a pointerup 9 px from its pointerdown still counts as a tap', () => {
+    const onSingleTap = vi.fn();
+    render(
+      <DoubleTapHeart onDoubleTap={vi.fn()} onSingleTap={onSingleTap} tapSlopPx={10}>
+        <div data-testid="media">video</div>
+      </DoubleTapHeart>,
+    );
+    tapWithTravel(screen.getByTestId('media'), 9);
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(onSingleTap).toHaveBeenCalledTimes(1);
+  });
+
+  it('D-124: without the new props a single tap schedules no timer (the feed path is unchanged)', () => {
+    const onDoubleTap = vi.fn();
+    render(
+      <DoubleTapHeart onDoubleTap={onDoubleTap}>
+        <div data-testid="media">foto</div>
+      </DoubleTapHeart>,
+    );
+    tapWithTravel(screen.getByTestId('media'), 40);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(onDoubleTap).not.toHaveBeenCalled();
+  });
+});
