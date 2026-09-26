@@ -1,8 +1,23 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
+import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import reelsMessages from '../messages/pt-BR/reels.json' with { type: 'json' };
-import { closeAdmin, createCommunityAs, createVideoPostAs, deleteReelsFixtures } from './admin';
+import {
+  closeAdmin,
+  createCommunityAs,
+  createFeedCommentAs,
+  createVideoPostAs,
+  deleteReelsFixtures,
+  membershipIdFor,
+} from './admin';
+import {
+  closeFeedAdmin,
+  createEmptyFeedTenant,
+  deleteEmptyFeedTenant,
+  type EmptyFeedTenant,
+} from './feed-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
 
 /**
  * Phase 05.3 — Reels, end to end. Plan 05.3-08 shipped the first case (e1); plan 05.3-09 adds the
@@ -42,16 +57,28 @@ test.use({ serviceWorkers: 'block' });
 
 /** The catalog is the source of copy — never a literal in a spec. */
 const R = reelsMessages.reels;
+const F = feedMessages.feed;
 const NAV = appMessages.app.nav;
 
 /** Every row this spec writes starts with this, and `afterAll` removes it by this. */
 const PREFIX = 'Teste reels';
 const DEMO = 'tria-demo';
+/** The demo tenant's VERIFIED primary origin — what FEED-07's link is built on (feed-share.spec). */
+const DEMO_SHARE_ORIGIN = 'https://tria-demo.localhost';
+/**
+ * A per-run stamp for the throwaway tenants' hosts (03-05's finding, phase4-smoke's technique): the
+ * web tier and the API cache a host for up to 60 s, so a slug reused across runs could resolve to a
+ * tenant a previous run already deleted.
+ */
+const RUN = Date.now().toString(36);
 
 const fixture = {
   communityA: '',
   communityB: '',
 };
+/** The throwaway tenants of e12 (empty) and e13 (feed off), removed in `afterAll`. */
+let emptyTenant: EmptyFeedTenant | null = null;
+let noFeedTenant: EmptyFeedTenant | null = null;
 const NAME_A = `${PREFIX} A comunidade`;
 const NAME_B = `${PREFIX} B comunidade`;
 const NAME_C = `${PREFIX} C processando`;
@@ -90,10 +117,19 @@ async function hangStreams(page: Page): Promise<void> {
   await page.route('**/stream.mux.com/**', () => undefined);
 }
 
-/** Signs the demo member in and opens Reels through the tab, waiting for video 1's credential. */
-async function openReels(page: Page, mobile: boolean): Promise<void> {
+/**
+ * Signs the demo member in and opens Reels, waiting for video 1's credential. Through the tab by
+ * default; `direct` navigates instead, for the 320 px backstops: there `next dev`'s issues pill sits
+ * over the floating BottomNav and intercepts the tap (a dev-only overlay — e1 proves the tab).
+ */
+async function openReels(
+  page: Page,
+  mobile: boolean,
+  options: { direct?: boolean } = {},
+): Promise<void> {
   await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-  await nav(page, mobile).getByRole('link', { name: R.nav }).click();
+  if (options.direct) await page.goto(`${hosts.demo}/reels`);
+  else await nav(page, mobile).getByRole('link', { name: R.nav }).click();
   await expect(page).toHaveURL(/\/reels$/);
   await expect(stage(page)).toBeVisible();
   await expectVideo(page, 1);
@@ -141,6 +177,35 @@ async function drag(page: Page, dy: number, dx = 0): Promise<void> {
   await page.mouse.up();
 }
 
+/**
+ * Makes every server action on `/reels` FAIL (the lane read, the load-more and the mint alike):
+ * actions POST to the page's own URL, and only POSTs are answered here.
+ *
+ * They are answered with a 500 rather than aborted at the network, and that is deliberate: with
+ * `experimental.useOffline` on (PWA-01), Next 16.3 treats a network-level failure of an action as
+ * "offline", probes `HEAD /reels?_rsc` and re-sends the action until connectivity returns, so an
+ * aborted POST never rejects and the host would wait in its loading state. A 500 is the failure the
+ * host's `catch` actually receives (an API that answered badly), which is what UI-D-93a/c are about.
+ */
+async function failServerActions(page: Page): Promise<void> {
+  await page.route('**/reels', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({ status: 500, body: '' })
+      : route.fallback(),
+  );
+}
+
+/** A per-project, per-run throwaway slug (the two projects never provision the same host). */
+function throwawaySlug(kind: string, projectName: string): string {
+  const project = projectName.replace(/[^a-z0-9]+/gi, '').toLowerCase();
+  return `reels-${kind}-${project}-${RUN}`.slice(0, 40);
+}
+
+/** The newest video of the tenant, so it heads "Todos" (and Início) for the case that made it. */
+async function freshVideo(caption: string): Promise<{ postId: string; assetId: string }> {
+  return createVideoPostAs(users.demoAdmin, DEMO, caption);
+}
+
 function laneTab(page: Page, name: string): Locator {
   return page.getByRole('tablist', { name: R.lanes.label }).getByRole('tab', { name });
 }
@@ -179,6 +244,12 @@ test.describe('05.3 Reels', () => {
 
   test.afterAll(async () => {
     await deleteReelsFixtures(PREFIX);
+    if (emptyTenant) await deleteEmptyFeedTenant(emptyTenant.slug);
+    if (noFeedTenant) await deleteEmptyFeedTenant(noFeedTenant.slug);
+    emptyTenant = null;
+    noFeedTenant = null;
+    await closeFeedAdmin();
+    await closeTenantFixtures();
     await closeAdmin();
   });
 
@@ -342,6 +413,376 @@ test.describe('05.3 Reels', () => {
     await expect.poll(() => playerProperty(page, 'muted')).toBe(true);
   });
 
+  test('e6 like parity: a double tap likes once and never unlikes, and Início shows the same like', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    await hangStreams(page);
+    const caption = `${PREFIX} e6 curtir ${testInfo.project.name}.`;
+    const { postId } = await freshVideo(caption);
+    await openReels(page, mobile);
+    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption);
+
+    const heart = currentPage(page).locator('[data-like-state]');
+    await expect(heart).toHaveAttribute('data-like-state', 'unliked');
+
+    // Every like/unlike is a server-action POST whose arguments carry the post id (a mint carries
+    // asset ids only), so this counts exactly the like engine's requests for THIS post.
+    let likeRequests = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && (request.postData() ?? '').includes(postId)) {
+        likeRequests += 1;
+      }
+    });
+    const liked = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        (response.request().postData() ?? '').includes(postId),
+    );
+
+    const box = await page.getByTestId('reels-stack').boundingBox();
+    if (!box) throw new Error('the reels stack has no box');
+    const x = box.x + box.width * 0.3;
+    const y = box.y + box.height * 0.45;
+
+    await page.mouse.dblclick(x, y);
+    await expect(heart).toHaveAttribute('data-like-state', 'liked');
+    await liked;
+    expect(likeRequests).toBe(1);
+
+    // A second double tap, after the 300 ms window closed: still liked, and NOTHING is sent (D-128).
+    await page.waitForTimeout(400);
+    await page.mouse.dblclick(x, y);
+    await page.waitForTimeout(800);
+    await expect(heart).toHaveAttribute('data-like-state', 'liked');
+    expect(likeRequests).toBe(1);
+    // A double tap never also pauses (UI-D-86): no play badge came up.
+    await expect(page.getByTestId('reels-play-badge')).toHaveCount(0);
+
+    // Planning decision 3 of plan 01: back to Início THROUGH THE TAB, the same post reads liked.
+    await nav(page, mobile).getByRole('link', { name: NAV.home }).click();
+    await expect(page).toHaveURL(/\/inicio$/);
+    const card = page.getByRole('article').filter({ hasText: caption });
+    await expect(card.locator('[data-like-state]').first()).toHaveAttribute(
+      'data-like-state',
+      'liked',
+    );
+  });
+
+  test('e7 comments: the threaded sheet opens over Reels, pauses the video, and closing resumes it', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    await hangStreams(page);
+    const caption = `${PREFIX} e7 comentarios ${testInfo.project.name}.`;
+    const { postId } = await freshVideo(caption);
+    await createFeedCommentAs(users.demoAdmin, postId, `${PREFIX} e7: um comentario raiz.`);
+    await openReels(page, mobile);
+    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption);
+    await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
+
+    await currentPage(page).getByRole('button', { name: F.actions.comment }).click();
+    const sheet = page.getByRole('dialog', { name: F.comments.title });
+    await expect(sheet).toBeVisible();
+    // D-59: the feed's THREADED sheet — a root carries the reply affordance the flat variant lacks.
+    await expect(sheet.getByRole('button', { name: F.comments.reply }).first()).toBeVisible();
+    // UI-D-90: the open sheet is a pause source.
+    await expect.poll(() => playerProperty(page, 'paused')).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+    await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
+  });
+
+  test('e8 share: the control copies the post link on the tenant primary host and toasts', async ({
+    page,
+    context,
+    browserName,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    test.skip(mobile, 'the clipboard path is asserted on the desktop project (feed-share.spec)');
+    test.skip(browserName !== 'chromium', 'clipboard permissions are a Chromium grant');
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: hosts.demo });
+    await hangStreams(page);
+    const caption = `${PREFIX} e8 compartilhar.`;
+    const { postId } = await freshVideo(caption);
+    await openReels(page, mobile);
+    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption);
+
+    await currentPage(page).getByRole('button', { name: F.actions.share }).click();
+    await expect(page.getByText(F.share.copied, { exact: true })).toBeVisible();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    // D-130 / FEED-07: the VERIFIED primary origin, not the `http://…:3000` the tab is on.
+    expect(copied).toBe(`${DEMO_SHARE_ORIGIN}/post/${postId}`);
+  });
+
+  test('e9 links: the avatar and the name open the author profile, the chip opens the community, a tenant-wide video has no chip', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    await hangStreams(page);
+    const profile = `/membros/${await membershipIdFor(users.demoAdmin, DEMO)}`;
+    await openReels(page, mobile);
+
+    // "Todos" opens on a tenant-wide video (every fixture video in no community is newer than A/B).
+    const block = currentPage(page).locator('[data-reel-caption]');
+    const authorName = (await block.getByRole('link').first().textContent()) ?? '';
+    expect(authorName).not.toBe('');
+    await expect(
+      currentPage(page).getByRole('link', { name: R.rail.author.replace('{name}', authorName) }),
+    ).toHaveAttribute('href', profile);
+    await expect(block.getByRole('link', { name: authorName, exact: true })).toHaveAttribute(
+      'href',
+      profile,
+    );
+    // D-129: no community, no chip (the chip is the one caption link with its own accessible name).
+    await expect(block.locator('a[aria-label]')).toHaveCount(0);
+
+    await laneTab(page, NAME_A).click();
+    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_A);
+    const chip = currentPage(page).locator('[data-reel-caption] a[aria-label]');
+    await expect(chip).toHaveText(NAME_A);
+    await expect(chip).toHaveAttribute('href', `/comunidades/${fixture.communityA}`);
+  });
+
+  test('e10 long caption (E06 backstop): 2,000 characters clamp to two lines, expand within 40vh, and a link opens without toggling', async ({
+    page,
+    context,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    test.skip(!mobile, 'the 320 px phone is the long-text backstop’s viewport');
+    await page.setViewportSize({ width: 320, height: 568 });
+    await hangStreams(page);
+    // The three links are answered locally, so opening one never leaves the machine.
+    await context.route('https://example.com/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<p>ok</p>' }),
+    );
+
+    const links = [
+      'https://example.com/reels-e10-um',
+      'https://example.com/reels-e10-dois',
+      'https://example.com/reels-e10-tres',
+    ];
+    const filler = 'Uma legenda longa para medir o bloco sobre o video. '.repeat(14);
+    const head = `${PREFIX} e10 legenda longa ${links[0]} `;
+    const body = `${head}${filler}${links[1]} ${filler}${links[2]} ${filler}`;
+    const caption = body.slice(0, 2000);
+    expect(caption.length).toBe(2000);
+    expect(caption).toContain(links[2]);
+    await freshVideo(caption);
+    await openReels(page, mobile, { direct: true });
+
+    const text = currentPage(page).locator('[data-reel-caption-text]');
+    const more = currentPage(page).getByRole('button', { name: F.caption.more });
+    await expect(more).toBeVisible();
+    // Collapsed is exactly two rendered lines.
+    const lines = await text.evaluate(
+      (node) => node.clientHeight / Number.parseFloat(getComputedStyle(node).lineHeight),
+    );
+    expect(Math.round(lines)).toBe(2);
+
+    await more.click();
+    const less = currentPage(page).getByRole('button', { name: R.caption.less });
+    await expect(less).toBeVisible();
+    const box = await text.boundingBox();
+    if (!box) throw new Error('the caption has no box');
+    expect(box.height).toBeLessThanOrEqual(568 * 0.4 + 1);
+    // …and it scrolls inside that box rather than growing past it.
+    expect(await text.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+
+    const opened = context.waitForEvent('page');
+    await text.locator(`a[href="${links[0]}"]`).click();
+    const popup = await opened;
+    await popup.waitForLoadState();
+    expect(popup.url()).toBe(links[0]);
+    await popup.close();
+    // The link navigated; the caption did not toggle under it.
+    await expect(less).toBeVisible();
+  });
+
+  test('e11 long lane row (E02 backstop): six more lanes at 320 px scroll, the active lane is fully visible after a swipe, and no label runs under the sound button', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    test.skip(!mobile, 'the 320 px phone is the long-text backstop’s viewport');
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: 320, height: 568 });
+    await hangStreams(page);
+
+    const local = `${PREFIX} e11`;
+    const long = `${local} comunidade com um nome muito longo mesmo`.padEnd(60, '.');
+    expect(long.length).toBe(60);
+    const names = [1, 2, 3, 4, 5].map((n) => `${local} lane ${n}`).concat(long);
+    try {
+      for (const [n, name] of names.entries()) {
+        const id = await createCommunityAs(users.demoAdmin, DEMO, name, { minutesAgo: 120 });
+        // Older than A and B, and the 60-character lane the oldest, so it is the LAST tab.
+        await createVideoPostAs(users.demoAdmin, DEMO, `${local} video ${n + 1}.`, {
+          communityId: id,
+          minutesAgo: 40 + n,
+        });
+      }
+      await openReels(page, mobile, { direct: true });
+
+      const tablist = page.getByRole('tablist', { name: R.lanes.label });
+      const tabs = tablist.getByRole('tab');
+      await expect(tabs).toHaveCount(3 + names.length);
+      await expect(tabs.last()).toHaveText(long);
+      const scroller = tablist.locator('xpath=..');
+      expect(await scroller.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+
+      // The second-to-last lane by a tap, then the last one by a horizontal swipe (left = next).
+      await tabs.nth(-2).click();
+      await expect(tabs.nth(-2)).toHaveAttribute('aria-selected', 'true');
+      await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(
+        `${local} video 5.`,
+      );
+      await drag(page, 0, -120);
+      await expect(tabs.last()).toHaveAttribute('aria-selected', 'true');
+      await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(
+        `${local} video 6.`,
+      );
+
+      // The active tab is scrolled fully into the row (a smooth scroll, so polled).
+      await expect
+        .poll(async () => {
+          const tab = await tabs.last().boundingBox();
+          const row = await scroller.boundingBox();
+          if (!tab || !row) return false;
+          return tab.x >= row.x - 0.5 && tab.x + tab.width <= row.x + row.width + 0.5;
+        })
+        .toBe(true);
+
+      // No tab's VISIBLE part (its box clipped to the row) intersects the sound button's box.
+      const sound = await stage(page).getByRole('button', { name: R.sound.unmute }).boundingBox();
+      const row = await scroller.boundingBox();
+      if (!sound || !row) throw new Error('the sound button or the lane row has no box');
+      for (const tab of await tabs.all()) {
+        const b = await tab.boundingBox();
+        if (!b) continue;
+        const left = Math.max(b.x, row.x);
+        const right = Math.min(b.x + b.width, row.x + row.width);
+        if (right <= left) continue;
+        const overlaps =
+          left < sound.x + sound.width &&
+          right > sound.x &&
+          b.y < sound.y + sound.height &&
+          b.y + b.height > sound.y;
+        expect(overlaps).toBe(false);
+      }
+    } finally {
+      await deleteReelsFixtures(local);
+    }
+  });
+
+  test('e12 empty state: a tenant with feed and reels on and no video shows the empty state, with the CTA for the admin only', async ({
+    page,
+    context,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const mobile = isMobile(testInfo.project.name);
+    const slug = throwawaySlug('empty', testInfo.project.name);
+    // Flags before any session exists: the API and the web tier cache a tenant's modules.
+    const tenant = await createEmptyFeedTenant(slug, SEED_PASSWORD);
+    emptyTenant = tenant;
+    await setTenantModuleFlag(slug, 'reels', true);
+
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await nav(page, mobile).getByRole('link', { name: R.nav }).click();
+    await expect(page).toHaveURL(/\/reels$/);
+    await expect(stage(page).getByText(R.empty.title, { exact: true })).toBeVisible();
+    await expect(
+      stage(page).getByText(R.empty.body.replace('{tenant}', `Comunidade ${slug}`)),
+    ).toBeVisible();
+    await expect(stage(page).getByRole('link', { name: F.empty.cta })).toHaveCount(0);
+    // UI-D-94: no sound button and no pager, so no ↑/↓ either.
+    await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: R.previous })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: R.next })).toHaveCount(0);
+
+    await context.clearCookies();
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/reels`);
+    await expect(stage(page).getByText(R.empty.title, { exact: true })).toBeVisible();
+    await expect(stage(page).getByRole('link', { name: F.empty.cta })).toHaveAttribute(
+      'href',
+      '/criar',
+    );
+    await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: R.next })).toHaveCount(0);
+  });
+
+  test('e13 requires feed: with reels ON and feed OFF there is no Reels tab and /reels is not found', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const mobile = isMobile(testInfo.project.name);
+    const slug = throwawaySlug('nofeed', testInfo.project.name);
+    const tenant = await createEmptyFeedTenant(slug, SEED_PASSWORD);
+    noFeedTenant = tenant;
+    // D-121, set before any session: reels stays ON, and feed OFF must still remove it.
+    await setTenantModuleFlag(slug, 'reels', true);
+    await setTenantModuleFlag(slug, 'feed', false);
+
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await expect(nav(page, mobile).getByRole('link', { name: NAV.home })).toBeVisible();
+    await expect(nav(page, mobile).getByRole('link', { name: R.nav })).toHaveCount(0);
+
+    await page.goto(`${tenant.origin}/reels`);
+    await expect(page.getByText(/could not be found/i)).toBeVisible();
+    await expect(stage(page)).toHaveCount(0);
+    await expect(page.locator('mux-player')).toHaveCount(0);
+  });
+
+  test('e14 playback error: a video that will not play shows its block, the page still swipes, and the retry mints afresh', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    // Every stream request FAILS: the element raises its error (UI-D-93b).
+    await page.route('**/stream.mux.com/**', (route) => route.abort());
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await nav(page, mobile).getByRole('link', { name: R.nav }).click();
+    await expect(page).toHaveURL(/\/reels$/);
+    await expectVideo(page, 1);
+
+    await expect(currentPage(page).getByText(R.errors.playback, { exact: true })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(currentPage(page).getByRole('button', { name: R.errors.retry })).toBeVisible();
+
+    // REELS-08 adjacency: a broken video never traps the viewer.
+    await drag(page, -100);
+    await expectVideo(page, 2);
+    await drag(page, 100);
+    await expectVideo(page, 1);
+
+    // The stream now hangs instead of failing, and the pill remounts the element on a fresh token.
+    await page.unroute('**/stream.mux.com/**');
+    await hangStreams(page);
+    await currentPage(page).getByRole('button', { name: R.errors.retry }).click();
+    await expect(currentPage(page).getByText(R.errors.playback, { exact: true })).toHaveCount(0);
+    await expectPlaybackToken(currentPage(page));
+  });
+
+  test('e15 lane error: a lane whose first page fails shows the stage error, and its retry loads the lane', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    await hangStreams(page);
+    await openReels(page, mobile);
+
+    await failServerActions(page);
+    await laneTab(page, NAME_A).click();
+    await expect(stage(page).getByText(R.errors.load, { exact: true })).toBeVisible();
+    // UI-D-93a: the lane row stays usable under the error.
+    await expect(laneTab(page, NAME_A)).toHaveAttribute('aria-selected', 'true');
+
+    await page.unroute('**/reels');
+    await stage(page).getByRole('button', { name: R.errors.retry }).click();
+    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(CAPTION_A);
+    await expect(stage(page).getByText(R.errors.load, { exact: true })).toHaveCount(0);
+  });
+
   test('e16 md boundary: the ↑/↓ buttons render beside the column at 768 px and not at 767 px', async ({
     page,
   }, testInfo) => {
@@ -359,5 +800,54 @@ test.describe('05.3 Reels', () => {
     await expect
       .poll(async () => (await page.getByTestId('reels-stack').boundingBox())?.width ?? 0)
       .toBe(767);
+  });
+
+  test('e17 next-page error: a failed load-more at the prefetch point raises exactly one toast', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    test.setTimeout(120_000);
+    const local = `${PREFIX} e17`;
+    const laneName = `${local} D comunidade`;
+    try {
+      // Twelve ready videos: a first keyset page of REELS_PAGE_SIZE (10) plus a second one, so the
+      // prefetch is due at video 9 (loaded − 2). D is the oldest lane, so it sits last in the row.
+      const communityD = await createCommunityAs(users.demoAdmin, DEMO, laneName, {
+        minutesAgo: 300,
+      });
+      for (let n = 0; n < 12; n += 1) {
+        await createVideoPostAs(users.demoAdmin, DEMO, `${local} video ${n + 1}.`, {
+          communityId: communityD,
+          minutesAgo: 189 + n,
+        });
+      }
+      await hangStreams(page);
+      await openReels(page, mobile);
+
+      await laneTab(page, laneName).click();
+      await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(
+        `${local} video 1.`,
+      );
+      for (let n = 2; n <= 7; n += 1) {
+        await drag(page, -100);
+        await expectVideo(page, n);
+      }
+
+      // From video 7 on, every server action fails (the mints and the load-more alike).
+      await failServerActions(page);
+      await drag(page, -100);
+      await expectVideo(page, 8);
+      await drag(page, -100);
+      await expectVideo(page, 9);
+
+      const toast = page.getByText(R.errors.loadMore, { exact: true });
+      await expect(toast).toHaveCount(1);
+      // The prefetch stands down after a failure: no second attempt, so no second toast.
+      await page.waitForTimeout(1_000);
+      await expect(toast).toHaveCount(1);
+    } finally {
+      await page.unroute('**/reels');
+      await deleteReelsFixtures(local);
+    }
   });
 });
