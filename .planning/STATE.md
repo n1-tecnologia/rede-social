@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-08-PLAN.md
-last_updated: "2026-09-25T23:47:14.314Z"
-last_activity: 2026-09-25
-last_activity_desc: "Completed 05.2-08 (publishing into a highlight — existing or created inline — in one write; the composer's Destaque row with the D-112 gate; the community page shows its own highlights)"
-state_head: 610674f783c56b17e183635c5b3ac388c0057f47
+stopped_at: Completed 05.2-09-PLAN.md
+last_updated: "2026-09-26T00:22:44.436Z"
+last_activity: 2026-09-26
+last_activity_desc: "Completed 05.2-09 (the highlight manage screen: Gerenciar and dashed empty highlights in both rows, /stories/destaques and /comunidades/[id]/destaques with create, rename, cover, keyboard/drag/button reorder, Adicionar stories and delete)"
+state_head: b58bbe6e6c6fea8d2b0dc1d26950aa7e74d1cf50
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 72
+  completed_plans: 73
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 9 of 12
-Status: Executing Phase 05.2 — next is 05.2-09
-Last activity: 2026-09-25 — Completed 05.2-08 (POST /v1/stories born inside a highlight — existing or inline — in one write with the manage seam; the composer's "Destaque" row with the D-112 gate and UI-D-71 refusals; the community page's highlight row (HIGHLIGHT-04); both e2e describes green on :3100)
+Plan: 10 of 12
+Status: Executing Phase 05.2 — next is 05.2-10
+Last activity: 2026-09-26 — Completed 05.2-09 (HighlightManageList + HighlightEditSheet in the module; six curation actions; the two manage routes and the HighlightManager island; Gerenciar and dashed empty highlights for curators in both rows; stories/comunidades/phase5-smoke e2e 122 passed on :3100)
 
-Progress: [████████████████░░░░] 72/88 plans ([░░░░░░░░░░] 0%)
+Progress: [█████████████████░░░] 73/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -132,6 +132,7 @@ Progress: [████████████████░░░░] 72/88 p
 | Phase 05.2 P06 | 18 min | 3 tasks | 17 files |
 | Phase 05.2 P07 | 12 min | 2 tasks | 16 files |
 | Phase 05.2 P08 | 31 min | 3 tasks | 16 files |
+| Phase 05.2 P09 | 31 min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -402,6 +403,9 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-08: the composer's HighlightSheet renders OUTSIDE its form — the title step is a form, and nested its submit would publish
 - [Phase 05.2]: 05.2-08: a failed catalog read on /stories/publicar degrades to the D-112 choose gate for a community origin, never to a silent Nenhum
 - [Phase 05.2]: 05.2-08: a publish-time full refusal shows the generic publish error (the UI-SPEC defines no publish-time copy for it)
+- [Phase 05.2]: 05.2-09: isCover reads the resolved cover ASSET, not coverStoryId, so the Capa pill is right under the automatic rule and marks nothing for an uploaded cover
+- [Phase 05.2]: 05.2-09: the manage circle crosses the server/client boundary as a serialisable manage disc; StoriesSurface draws it as the Pencil glyph
+- [Phase 05.2]: 05.2-09: empty highlights and Gerenciar are built by shared helpers (highlightRowCircles) for both rows; only highlights with a member-visible story are viewer groups
 
 ### Pending Todos
 
@@ -455,6 +459,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T23:47:06.050Z
-Stopped at: Completed 05.2-08-PLAN.md
+Last session: 2026-09-26T00:22:24.920Z
+Stopped at: Completed 05.2-09-PLAN.md
 Resume file: None
