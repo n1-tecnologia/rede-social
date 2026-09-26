@@ -14,13 +14,15 @@ import { markStoriesSeenAction } from './story-actions';
  *
  *  1. **Nothing malformed reaches the API** — an empty list or a non-uuid is refused here, with no
  *     request (the contract's own `markStoriesSeenSchema`).
- *  2. **A valid list is ONE `POST /v1/stories/views`** — and a list longer than the contract's cap is
- *     chunked, never refused.
+ *  2. **A valid list is ONE `POST /v1/stories/views`** — the list is deduplicated first, and a list
+ *     of more than the contract's cap of UNIQUE ids is refused with no request at all (review WR-04,
+ *     T-05.2-48): the surface never sends more than 10, so a bigger list is not a real client and
+ *     must not amplify into many API calls.
  *  3. **It is SILENT** (planning decision 4): a refusal, a 401 or a transport failure answers `false`
  *     — it never navigates (`redirect`), never revalidates a page, and never throws.
  *
  * What is stubbed: `lib/api`'s `apiFetch` (the transport), `lib/env`, `next/cache` and
- * `next/navigation`. What is real: the schema guard, the chunking and the fetcher.
+ * `next/navigation`. What is real: the schema guard, `parseSeenBatch` (dedupe, then the cap) and the fetcher.
  */
 
 // The module graph reaches `lib/env`, which validates the process environment at import time.
@@ -86,16 +88,24 @@ describe('markStoriesSeenAction — the silent, batched seen write (05.2-10)', (
     expect(redirect).not.toHaveBeenCalled();
   });
 
-  it('A3. a list over the contract cap is CHUNKED into requests of at most the cap', async () => {
+  it('A3. a list of more than the contract cap of UNIQUE ids is refused with NO request (WR-04)', async () => {
     vi.mocked(apiFetch).mockResolvedValue(status(204));
-    const ids = Array.from({ length: STORY_SEEN_BATCH_MAX + 3 }, (_, n) => uuid(n + 1));
+    const ids = Array.from({ length: STORY_SEEN_BATCH_MAX + 1 }, (_, n) => uuid(n + 1));
+    await expect(markStoriesSeenAction(ids)).resolves.toBe(false);
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('A5. duplicates collapse BEFORE the cap: 60 entries with 50 unique ids are ONE request, first-seen order', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(status(204));
+    const unique = Array.from({ length: STORY_SEEN_BATCH_MAX }, (_, n) => uuid(n + 1));
+    const ids = [...unique.slice(0, 5), ...unique, ...unique.slice(20, 25)];
+    expect(ids).toHaveLength(STORY_SEEN_BATCH_MAX + 10);
     await expect(markStoriesSeenAction(ids)).resolves.toBe(true);
 
-    const bodies = vi
-      .mocked(apiFetch)
-      .mock.calls.map(([, init]) => JSON.parse(String(init?.body)).storyIds as string[]);
-    expect(bodies.map((chunk) => chunk.length)).toEqual([STORY_SEEN_BATCH_MAX, 3]);
-    expect(bodies.flat()).toEqual(ids);
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? [];
+    expect(path).toBe('/v1/stories/views');
+    expect(JSON.parse(String(init?.body))).toEqual({ storyIds: unique });
   });
 
   it('A4. a 401, a 400 and a transport failure all answer false — no navigation, no revalidation, no throw', async () => {

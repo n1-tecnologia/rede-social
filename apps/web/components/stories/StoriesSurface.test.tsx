@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { markStoriesSeenAction } from '@/app/(app)/stories/story-actions';
+import { sendSeenBeacon } from '@/lib/seen-batch';
 import type {
   RowCircleView,
   StoryGroupView,
@@ -21,8 +22,11 @@ import { StoriesSurface } from './StoriesSurface';
  *
  *  - S1/S2: the ring, the accessible name and the resume index come from the server's `seen` flags;
  *  - S3: the session set re-derives the ring on close, with no new server data;
- *  - S4: every flush trigger, one call each, and an id already sent is never sent again;
- *  - S5: a failed flush is logged and swallowed — no toast, no navigation, the viewer stays.
+ *  - S4: every flush trigger, one call each, and an id already sent is never sent again; the
+ *    page-hide flush leaves through `sendSeenBeacon` (review WR-07), every other one through the
+ *    action;
+ *  - S5: a failed flush is logged and swallowed — no toast, no navigation, the viewer stays;
+ *  - S6: a refused beacon is logged by shape and forgets its ids, so they are sent again later.
  *
  * The viewer host is STUBBED: it records the props the surface hands it and exposes the two
  * callbacks the surface owns (`onSegmentShown`, `onClose`). The strip and its circles are REAL, so
@@ -57,6 +61,10 @@ vi.mock('@/app/(app)/stories/highlight-actions', () => ({
 
 vi.mock('@/app/(app)/stories/story-actions', () => ({
   markStoriesSeenAction: vi.fn(async () => true),
+}));
+
+vi.mock('@/lib/seen-batch', () => ({
+  sendSeenBeacon: vi.fn(async () => true),
 }));
 
 const SEEN_LABEL = 'Abrir stories de Demo';
@@ -171,11 +179,14 @@ function setVisibility(state: 'hidden' | 'visible') {
 }
 
 const calls = () => vi.mocked(markStoriesSeenAction).mock.calls.map(([ids]) => ids);
+const beacons = () => vi.mocked(sendSeenBeacon).mock.calls.map(([ids]) => ids);
 
 beforeEach(() => {
   host.props = null;
   vi.mocked(markStoriesSeenAction).mockReset();
   vi.mocked(markStoriesSeenAction).mockResolvedValue(true);
+  vi.mocked(sendSeenBeacon).mockReset();
+  vi.mocked(sendSeenBeacon).mockResolvedValue(true);
   // A shallow history entry is popped by `back()`; happy-dom does not fire `popstate` for it, so
   // the stub does what the browser does.
   vi.spyOn(window.history, 'back').mockImplementation(() => {
@@ -276,13 +287,15 @@ describe('StoriesSurface — the seen ring and the resume (05.2-10)', () => {
     expect(screen.getByTestId('viewer')).toBeTruthy();
     third.unmount();
 
-    // visibilitychange → hidden flushes what is pending.
+    // visibilitychange → hidden flushes what is pending — through the BEACON, not the action,
+    // because a server action is a plain fetch the browser may abort on unload (WR-07).
     vi.mocked(markStoriesSeenAction).mockClear();
     renderSurface([false, false]);
     openTenant();
     shown(1);
     act(() => setVisibility('hidden'));
-    expect(calls()).toEqual([[id(1)]]);
+    expect(beacons()).toEqual([[id(1)]]);
+    expect(calls()).toEqual([]);
   });
 
   it('S5. a flush that rejects or answers false is logged and swallowed — no toast, no navigation', async () => {
@@ -305,5 +318,30 @@ describe('StoriesSurface — the seen ring and the resume (05.2-10)', () => {
     expect(window.location.href).toBe(url);
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('S6. a refused page-hide beacon is logged by shape and forgets its ids, so a later close re-sends them', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(sendSeenBeacon).mockResolvedValueOnce(false);
+
+    renderSurface([false, false]);
+    openTenant();
+    shown(1);
+    act(() => setVisibility('hidden'));
+    await settle();
+    expect(beacons()).toEqual([[id(1)]]);
+    expect(log).toHaveBeenCalledWith('stories.seen_flush_failed', {
+      count: 1,
+      reason: 'refused',
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(id(1));
+
+    // The same story shown again after the page comes back is sent again, through the action.
+    act(() => setVisibility('visible'));
+    shown(1);
+    close();
+    await settle();
+    expect(calls()).toEqual([[id(1)]]);
+    expect(beacons()).toHaveLength(1);
   });
 });
