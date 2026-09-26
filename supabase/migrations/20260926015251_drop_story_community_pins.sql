@@ -1,0 +1,32 @@
+-- drop_story_community_pins — MIGRATION FILE 2 of the pin retirement: the ONE-WAY step (05.2-11,
+-- HIGHLIGHT-05, D-116, roadmap criteria 4 and 5).
+--
+-- WHAT IT DOES: drops Phase 5's per-community pin table and its isolation policy. After it runs, a
+-- curated story has ONE representation — an item under a named highlight (`story_highlight_items`).
+-- In any environment where this file has run, undo means restoring the table from a backup and
+-- re-deploying the deleted pin API; that is why the developer approved it explicitly, at a
+-- blocking-human checkpoint, before any pin code or table was removed (05.2-11 Task 1: `retire`).
+--
+-- WHY IT CANNOT LOSE A PIN: migration file 1 (`20260925191156_story_highlights.sql`) already copied
+-- every pin into a `Destaques` highlight of its own (tenant, community) — same story, same curator,
+-- `added_at = pinned_at` — and ends with a `DO` guard that raises, aborting that whole file
+-- atomically, if any pin is missing its identical item or any community's counts differ. The copy
+-- was replayed on the live local database (05.2-01: 6 pins in 3 communities → 6 items, per-community
+-- counts identical), and `scripts/rehearse-highlights-migration.sh` replays file 1 → this file from
+-- the pins era on an edge fixture (a story in two communities, an expired story, a soft-deleted
+-- story, an archived community, a community with no pins) and asserts no pin was lost.
+--
+-- WHY IT IS A SEPARATE FILE from the backfill: in one generated file drizzle-kit orders drops
+-- before new foreign keys, so the pin rows would be gone before the copy ran; and a combined
+-- create + drop `generate` prompts to treat the new table as a RENAME of the old one (RESEARCH
+-- Pitfall 1). Kept apart, file 1 is create-only and this file is drop-only, and neither prompts.
+--
+-- ORDER: every environment must apply file 1 BEFORE this file. The timestamped filenames guarantee
+-- it — the Supabase CLI applies migrations in version order — and the rehearsal applies them in
+-- exactly that order from the pins era. Hosted environments (Phase 01.1) inherit the same chain.
+--
+-- The statements below are `pnpm db:generate`'s own output, unedited; the generated snapshot
+-- (`meta/20260926015251_snapshot.json`) matches them, so `pnpm db:generate` stays a no-op.
+
+DROP POLICY "story_community_pins_tenant_isolation" ON "story_community_pins" CASCADE;--> statement-breakpoint
+DROP TABLE "story_community_pins" CASCADE;

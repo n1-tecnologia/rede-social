@@ -728,34 +728,6 @@ const SEED_STORY_COMMENT_IDS: Record<string, readonly [string, string, string]> 
 };
 
 /**
- * 05-08 (STORY-04) — TWO pins per tenant, and the pair is chosen so the phase's central claim has a
- * fixture that does NOT depend on a test writing one first.
- *
- * `[0]` pins the EXPIRED story (`SEED_STORIES[3]`) to the first community. That single row is the
- * whole of STORY-04 as a fixture: the story is ABSENT from `/inicio`'s strip because its window
- * closed, and PRESENT on that community's Destaques row because the pin overrides the clock. The
- * e2e walks exactly that contrast, and the UAT reads it on a real screen.
- *
- * `[1]` pins an ACTIVE story (`SEED_STORIES[1]`) to the same community, so the row carries two
- * circles that are visually identical while one of them is expired (D-79, A-4) — a one-circle
- * fixture could not show that.
- *
- * `SEED_STORIES[0]` stays UNPINNED and active: the positive control that a Destaques read returning
- * everything could not satisfy.
- *
- * The community is index 0 in BOTH tenants, and index 0 is `active` — pinning into an archived
- * container is refused by the API, so a fixture that used index 4 would be seeding a state the
- * product cannot reach.
- */
-const SEED_STORY_PIN_IDS: Record<string, readonly [string, string]> = {
-  'tria-demo': ['0d000000-0000-4000-8000-0000000000f1', '0d000000-0000-4000-8000-0000000000f2'],
-  'tria-lab': ['0e000000-0000-4000-8000-0000000000f1', '0e000000-0000-4000-8000-0000000000f2'],
-};
-
-/** Which `SEED_STORIES` index each pin names. Index 3 is the EXPIRED story; index 1 is active. */
-const SEED_STORY_PIN_STORY_INDEXES = [3, 1] as const;
-
-/**
  * 05.2-01 (HIGHLIGHT-01/02/05) — THREE named highlights per tenant, the fixture every later 05.2
  * plan's screens, integration cases and e2e read.
  *
@@ -766,13 +738,20 @@ const SEED_STORY_PIN_STORY_INDEXES = [3, 1] as const;
  *    item, R-D-D rule 3) is the active image.
  *  - Início `Aulas` at position 1 holds NOTHING: the admin-only empty highlight (D-102) — kept,
  *    listed for the curator with `itemCount: 0`, invisible to members.
- *  - community[0] `Destaques` at position 0 holds EXACTLY the two seeded pinned stories, with
- *    `added_by_user_id` = the pinner and `added_at` = each pin's `pinned_at` — the state migration
- *    file 1's backfill would have produced for these pins. The seed runs AFTER migrations on a
- *    `db reset`, so without this block the pins would have no highlight at all.
+ *  - community[0] `Destaques` at position 0 holds `SEED_STORIES[3]` (the EXPIRED image) and
+ *    `SEED_STORIES[1]` (an ACTIVE story) — the STORY-04 contrast on a community page: the expired
+ *    story is absent from `/inicio`'s strip and plays from here, because the item row overrides the
+ *    clock; and the row carries one expired and one active circle that look identical (D-79, A-4).
+ *    `SEED_STORIES[0]` stays out of it: the positive control that a read returning everything could
+ *    not satisfy. It is exactly the state migration file 1's backfill produced for the two community
+ *    pins Phase 5 seeded here (same curator, `added_at` = the pin's time, created/updated spanning
+ *    the first and last) — the pin model retired in 05.2-11 (D-116), so the highlight is now the
+ *    fixture of record. The community is index 0 in BOTH tenants, and index 0 is `active`: an
+ *    archived community takes no new content, so seeding into one would be a state the product
+ *    cannot reach.
  *
  * Ids are fixed (items too), so a re-run is a no-op (`on conflict (id) do nothing`) and the suites
- * can name the rows. The pins stay seeded until plan 11 retires them.
+ * can name the rows.
  */
 const SEED_HIGHLIGHT_IDS: Record<
   string,
@@ -818,6 +797,9 @@ export const SEED_HIGHLIGHT_TITLES = {
 
 /** Which `SEED_STORIES` index each `Bastidores` item names: the active image, then the expired one. */
 const SEED_HIGHLIGHT_HOME_STORY_INDEXES = [2, 3] as const;
+
+/** Which `SEED_STORIES` index each community `Destaques` item names: the EXPIRED one, then active. */
+const SEED_HIGHLIGHT_COMMUNITY_STORY_INDEXES = [3, 1] as const;
 
 /**
  * 05.2-10 (HIGHLIGHT-06, D-105) — the seeded SEEN state, so both ring states exist on a fresh seed:
@@ -1776,35 +1758,15 @@ for (const t of SEED_TENANTS) {
           });
         }
 
-        // 05-08 (STORY-04): the pins. `community_id` points at `SEED_COMMUNITY_IDS[t.slug][0]`,
-        // which the community block above wrote in this same run; if that block did not run there
-        // is nothing to pin to and this one is skipped rather than guessed at.
-        const pinIds = SEED_STORY_PIN_IDS[t.slug];
-        const pinCommunityId = communityIds?.[0];
-        let seededPins = 0;
-        if (pinIds && pinCommunityId) {
-          await withAdminTx(async (tx) => {
-            for (const [index, pinId] of pinIds.entries()) {
-              const storyId = storyIds[SEED_STORY_PIN_STORY_INDEXES[index] ?? 0];
-              if (!storyId) continue;
-              await tx.execute(sql`
-                insert into public.story_community_pins
-                  (id, tenant_id, story_id, community_id, pinned_by_user_id, pinned_at)
-                values (
-                  ${pinId}::uuid, ${tenantId}::uuid, ${storyId}::uuid,
-                  ${pinCommunityId}::uuid, ${authorUserId}::uuid,
-                  ${new Date(storyClock - (index + 1) * 60_000).toISOString()}::timestamptz
-                )
-                on conflict (id) do nothing`);
-              seededPins += 1;
-            }
-          });
-        }
+        // The community `Destaques` lives in `SEED_COMMUNITY_IDS[t.slug][0]`, which the community
+        // block above wrote in this same run; if that block did not run there is no place for it and
+        // it is skipped rather than guessed at.
+        const destaquesCommunityId = communityIds?.[0];
 
         // 05.2-01 (HIGHLIGHT-01/02/05): the named highlights — see `SEED_HIGHLIGHT_IDS`. `position`
         // is written explicitly (the API computes it as `max + 1` under a lock; the seed is the
-        // fixture writer of record). `Destaques` mirrors the pins above row for row, with the pin's
-        // own curator and time, exactly what migration file 1's backfill writes for a pin.
+        // fixture writer of record). `Destaques` is the state migration file 1's backfill produced
+        // for Phase 5's seeded pins (see `SEED_HIGHLIGHT_IDS`).
         const highlightIds = SEED_HIGHLIGHT_IDS[t.slug];
         let seededHighlights = 0;
         let seededHighlightItems = 0;
@@ -1869,20 +1831,20 @@ for (const t of SEED_TENANTS) {
               );
             }
 
-            if (pinCommunityId) {
+            if (destaquesCommunityId) {
               await highlight(
                 highlightIds.community,
-                pinCommunityId,
+                destaquesCommunityId,
                 SEED_HIGHLIGHT_TITLES.community,
                 0,
-                // created = the first pin, updated = the last one — the backfill's own span.
-                new Date(storyClock - SEED_STORY_PIN_STORY_INDEXES.length * 60_000),
+                // created = the first item, updated = the last one — the backfill's own span.
+                new Date(storyClock - SEED_HIGHLIGHT_COMMUNITY_STORY_INDEXES.length * 60_000),
                 new Date(storyClock - 60_000),
               );
               for (const [index, itemId] of highlightIds.communityItems.entries()) {
-                const storyId = storyIds[SEED_STORY_PIN_STORY_INDEXES[index] ?? 0];
+                const storyId = storyIds[SEED_HIGHLIGHT_COMMUNITY_STORY_INDEXES[index] ?? 0];
                 if (!storyId) continue;
-                // The pin's own `pinned_at` (see the pins block above), so the mirror is exact.
+                // One minute apart, oldest last — the times Phase 5's seeded pins carried.
                 await item(
                   itemId,
                   highlightIds.community,
@@ -1922,7 +1884,7 @@ for (const t of SEED_TENANTS) {
         }
 
         console.log(
-          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest, ${seededPins} community pins (1 on the EXPIRED story), ${seededHighlights} highlights (1 empty) with ${seededHighlightItems} items (Destaques mirrors the pins), ${seededViews} story views (member: the oldest only; admin: every active story)`,
+          `seed: tenant ${t.slug} — ${SEED_STORIES.length} stories (3 active, 1 expired but retained, 1 on a processing asset), ${storyLikers.length} likes on the newest + 1 on the expired, 3 flat comments on the newest, ${seededHighlights} highlights (1 empty) with ${seededHighlightItems} items (community Destaques keeps the EXPIRED story), ${seededViews} story views (member: the oldest only; admin: every active story)`,
         );
       }
     }

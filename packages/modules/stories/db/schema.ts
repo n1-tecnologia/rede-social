@@ -73,9 +73,9 @@ import {
  *
  * **Highlights replaced pins (05.2, D-116).** `story_highlights` / `story_highlight_items` generalise
  * Phase 5's per-community pin: migration file 1 (`*_story_highlights.sql`) copied every pin into a
- * `Destaques` highlight of its own community under a no-loss guard, and migration file 2
- * (`*_drop_story_community_pins.sql`) dropped the pin table once its routes and events were gone
- * (05.2-11). One representation of a curated story remains.
+ * `Destaques` highlight of its own community under a no-loss guard, and migration file 2 (the
+ * drop-only file that follows it, 05.2-11) dropped the pin table once its routes and events were
+ * gone. One representation of a curated story remains.
  *
  * Authorship is the generic `author_user_id -> users.id` (SCHEMA-CONVENTIONS §(c).1), so V2 member
  * stories are rows rather than a migration.
@@ -148,62 +148,6 @@ export const stories = pgTable(
 ).enableRLS();
 
 /**
- * STORY-04's join: which stories a community keeps as its Destaques, one row per (story, community)
- * pair. **The pin ROW IS the expiry override** — see item 6 of the docblock above.
- *
- * The pair is a set of INDEPENDENT FACTS, which is why this is a join table and not a column: the
- * requirement says "one or more communities", and no boolean or timestamp on `stories` could
- * represent that without duplicating the join anyway.
- *
- * **`community_id` carries no drizzle `.references()`, and that is not an omission.** The
- * communities table lives in `@tria/module-communities/db`, and reaching it from here would be the
- * `module -> module` package edge `turbo boundaries` denies (MOD-02). The foreign key is REAL and is
- * declared as hand-written SQL inside this table's migration, exactly as `feed_comments_story_fk`
- * and `feed_likes_story_fk` were in `*_stories.sql`. The constraint is what `020-tenant-isolation.sql`
- * and `110-communities-stories.sql` assert; the missing TypeScript reference costs nothing but the
- * convenience of a typed join, which this module never performs.
- */
-export const storyCommunityPins = pgTable(
-  'story_community_pins',
-  {
-    id: uuid().primaryKey().defaultRandom(),
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenants.id, { onDelete: 'cascade' }),
-    storyId: uuid('story_id')
-      .notNull()
-      .references(() => stories.id, { onDelete: 'cascade' }),
-    /** -> `public.communities.id` on delete cascade, declared in SQL. See the docblock above. */
-    communityId: uuid('community_id').notNull(),
-    /** Who performed the editorial act. Phase 8 reads it; no member-facing surface does. */
-    pinnedByUserId: uuid('pinned_by_user_id')
-      .notNull()
-      .references(() => users.id),
-    pinnedAt: timestamp('pinned_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    // THE IDEMPOTENCY ARBITER. `on conflict … do nothing` against this pair is what makes a repeat
-    // pin a no-op rather than a 409, and it is also why unpin can be a plain delete: there is at
-    // most one row to remove, so "remove the pin" needs no disambiguation.
-    uniqueIndex('story_community_pins_uq').on(t.storyId, t.communityId),
-    // The Destaques read's ordering, verbatim, tie-breaker included — `(pinned_at, id)` is a TOTAL
-    // order the index carries, so a page boundary can neither duplicate nor skip a row.
-    //
-    // `.nullsFirst()` is NOT decoration (04-03's lesson): drizzle's `.desc()` alone emits
-    // `DESC NULLS LAST`, while SQL's `order by x desc` means `desc NULLS FIRST`, and the mismatch
-    // stops the planner using the index to DELIVER the ordering. Both key columns are NOT NULL, so
-    // this changes no result — only whether the index is usable at all.
-    index('story_community_pins_tenant_community_idx').on(
-      t.tenantId,
-      t.communityId,
-      t.pinnedAt.desc().nullsFirst(),
-      t.id.desc().nullsFirst(),
-    ),
-    tenantIsolationPolicy('story_community_pins_tenant_isolation'),
-  ],
-).enableRLS();
-
-/**
  * A NAMED HIGHLIGHT (HIGHLIGHT-01/02, D-100..D-103) — a curated, titled circle that belongs to exactly
  * one PLACE and outlives the 24 h window of every story in it.
  *
@@ -211,10 +155,9 @@ export const storyCommunityPins = pgTable(
  * two places exist, and V2's creator-scoped publishing (Phase 10) extends the service's one
  * `resolveHighlightPlace` seam, not this shape.
  *
- * **`community_id` carries no drizzle `.references()`, and that is not an omission** — the pins'
- * reason restated: `public.communities` lives in `@tria/module-communities/db`, and reaching it from
- * here is the `module -> module` package edge `turbo boundaries` denies (MOD-02). The foreign key is
- * REAL: `story_highlights_community_fk` (`on delete cascade`) is hand-written SQL in the table's own
+ * **`community_id` carries no drizzle `.references()`, and that is not an omission** —
+ * `public.communities` lives in `@tria/module-communities/db`, and reaching it from here is the
+ * `module -> module` package edge `turbo boundaries` denies (MOD-02). The foreign key is REAL: `story_highlights_community_fk` (`on delete cascade`) is hand-written SQL in the table's own
  * migration, and `120-story-highlights.sql` asserts it with a 23503 and a positive control.
  *
  * - `title` is required, trimmed and 1..15 characters (`STORY_HIGHLIGHT_MAX_TITLE`); duplicates are
@@ -270,8 +213,8 @@ export const storyHighlights = pgTable(
  *
  * There is deliberately NO ordering column here (D-103): a highlight plays its stories by PUBLISH
  * time, oldest first (`order by s.published_at, s.id`), never by when they were added. `added_at` is
- * kept because it is the automatic cover rule's input (the most recently ADDED image item) and the
- * migrated pin's `pinned_at`.
+ * kept because it is the automatic cover rule's input (the most recently ADDED image item), and for
+ * an item migrated from the retired pin model it carries the pin's own time (D-116).
  */
 export const storyHighlightItems = pgTable(
   'story_highlight_items',
