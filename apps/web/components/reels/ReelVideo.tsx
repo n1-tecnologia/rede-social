@@ -47,6 +47,7 @@ type PlayableElement = HTMLElement & {
   pause?: () => void;
   currentTime?: number;
   muted?: boolean;
+  paused?: boolean;
   poster?: string;
 };
 
@@ -161,7 +162,10 @@ export function ReelVideo(props: ReelVideoProps) {
     /** `play()` with RESEARCH Pattern 4's rejection handling, on the element it was asked of. */
     const play = (target: PlayableElement, wantSound: boolean) => {
       hostPaused = false;
-      played = false;
+      // An element that is ALREADY playing (the host's sound toggle resumes it to catch a refusal)
+      // fires no second `playing`, so resetting here would arm a check that can only report a
+      // false "blocked". Only a paused element (or one that does not say) starts a new check.
+      if (target.paused !== false) played = false;
       target.muted = !wantSound;
       const attempt = target.play?.();
       armCheck();

@@ -690,3 +690,58 @@ describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
     expect(r.status).toBe(0);
   });
 });
+
+/**
+ * 05.3-08 — the `reels` catalog (UI-SPEC Copywriting Contract). One root key, the tab label the
+ * shell's `<key>.nav` resolver reads (D-123), and the four interpolations the client fills: a
+ * deleted brace would not fail typecheck — the call site would pass a value nobody reads — so it
+ * fails here instead.
+ */
+describe('05.3-08 — the reels catalog and its placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['reels.nav', 'Reels'],
+    ['reels.region', 'Reels'],
+    ['reels.lanes.label', 'Filtrar vídeos por comunidade'],
+    ['reels.lanes.all', 'Todos'],
+    ['reels.sound.unmute', 'Ativar som'],
+    ['reels.sound.mute', 'Silenciar'],
+    ['reels.play', 'Reproduzir vídeo'],
+    ['reels.pause', 'Pausar vídeo'],
+    ['reels.caption.less', 'menos'],
+    ['reels.previous', 'Vídeo anterior'],
+    ['reels.next', 'Próximo vídeo'],
+    ['reels.empty.title', 'Nenhum vídeo ainda'],
+    ['reels.errors.load', 'Não foi possível carregar os vídeos.'],
+    ['reels.errors.retry', 'Tentar novamente'],
+    ['reels.errors.playback', 'Não foi possível reproduzir este vídeo.'],
+    ['reels.errors.loadMore', 'Não foi possível carregar mais vídeos.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['reels.rail.author', ['{name}']],
+    ['reels.empty.body', ['{tenant}']],
+    ['reels.position', ['{current}', '{author}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('reuses the feed strings instead of copying them (like, share, caption.more, empty.cta)', () => {
+    const reels = lookup('reels') as Record<string, unknown>;
+    expect(Object.keys(reels)).not.toContain('actions');
+    expect(Object.keys(reels)).not.toContain('meta');
+    expect(Object.keys(reels)).not.toContain('share');
+    expect(lookup('reels.caption.more')).toBeUndefined();
+    expect(lookup('reels.empty.cta')).toBeUndefined();
+  });
+});

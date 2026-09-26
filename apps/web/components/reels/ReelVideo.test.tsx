@@ -419,6 +419,27 @@ describe('ReelVideo — the autoplay check (UI-D-86)', () => {
     });
     expect(handlers.onBlocked).not.toHaveBeenCalled();
   });
+
+  it('resume on an element that is already playing (the sound toggle) is not reported blocked', async () => {
+    const handlers = makeHandlers();
+    renderReel(handlers, { current: true });
+    const player = (await mountedPlayer()) as MediaLikeElement & { paused?: boolean };
+    await flush();
+    await dispatch(player, 'canplay');
+    await dispatch(player, 'playing');
+
+    // A playing element fires no second `playing` for a play() it is already doing.
+    player.paused = false;
+    vi.useFakeTimers();
+    act(() => {
+      controllerOf(handlers).resume(true);
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(handlers.onBlocked).not.toHaveBeenCalled();
+    expect(player.muted).toBe(false);
+  });
 });
 
 describe('ReelVideo — events and lifecycle', () => {

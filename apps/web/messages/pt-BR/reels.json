@@ -1,0 +1,35 @@
+{
+  "reels": {
+    "nav": "Reels",
+    "region": "Reels",
+    "lanes": {
+      "label": "Filtrar vídeos por comunidade",
+      "all": "Todos"
+    },
+    "sound": {
+      "unmute": "Ativar som",
+      "mute": "Silenciar"
+    },
+    "play": "Reproduzir vídeo",
+    "pause": "Pausar vídeo",
+    "rail": {
+      "author": "Ver o perfil de {name}"
+    },
+    "caption": {
+      "less": "menos"
+    },
+    "position": "Vídeo {current}, de {author}",
+    "previous": "Vídeo anterior",
+    "next": "Próximo vídeo",
+    "empty": {
+      "title": "Nenhum vídeo ainda",
+      "body": "Os vídeos publicados por {tenant} vão aparecer aqui."
+    },
+    "errors": {
+      "load": "Não foi possível carregar os vídeos.",
+      "retry": "Tentar novamente",
+      "playback": "Não foi possível reproduzir este vídeo.",
+      "loadMore": "Não foi possível carregar mais vídeos."
+    }
+  }
+}
