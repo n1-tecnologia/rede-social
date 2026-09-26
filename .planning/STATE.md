@@ -1,13 +1,13 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "05.2"
-current_phase_name: Story Highlights
-status: verifying
-stopped_at: Completed 05.2-12-PLAN.md
-last_updated: "2026-09-26T02:42:34.906Z"
+current_phase: "05.3"
+current_phase_name: Reels
+status: planning
+stopped_at: Phase 05.2 closed partial (UAT 2 pass, test 1 blocked on phones until 01.1), ready to discuss Phase 05.3
+last_updated: "2026-09-26T13:21:32.000Z"
 last_activity: 2026-09-26
-last_activity_desc: "Completed 05.2-12 (the phase exit gate: phase52-smoke.spec.ts replays the six-step UAT, cross-device seen ring as a second browser context, 12/12 on :3100; full suite green on a fresh reset+seed: lint, typecheck, unit 1042, boundaries, pgTAP 331, integration 506, build, static routes, e2e 139 passed / 0 failed / 0 flaky); all 12 plans done, ready for code review and phase verification"
-state_head: 7c6f488893933fb6cc2b72a1e3ff76c53ba881f2
+last_activity_desc: "Phase 05.2 closed partial (UAT 2/3, real-phone test 1 blocked until 01.1; follow-ups fixed by quick 260926-d8f), transitioned to Phase 05.3"
+state_head: f54ad6e4cda0dfcd29d9c7b4d381c6a2b6f6eba4
 progress:
   total_phases: 15
   completed_phases: 0
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 05.2 — Story Highlights
+**Current focus:** Phase 05.3 — Reels
 
 ## Current Position
 
-Phase: 05.2 (Story Highlights) — READY FOR VERIFICATION
-Plan: 12 of 12
-Status: Phase complete — ready for verification
-Last activity: 2026-09-26 - Completed quick task 260926-d8f: fix 05.2 follow-ups WR-01 WR-04 WR-03 WR-07 and the Criar destaque link
+Phase: 05.3 — Reels
+Plan: Not started
+Status: Ready to discuss
+Last activity: 2026-09-26 — Phase 05.2 closed partial (UAT 2/3, real-phone test 1 blocked until 01.1; follow-ups fixed by quick 260926-d8f), transitioned to Phase 05.3
 
 Progress: [█████████████████░░░] 76/88 plans ([░░░░░░░░░░] 0%)
 
@@ -433,6 +433,7 @@ None yet.
 - [Phase 5 → 05.1/backlog]: Residual R-1 in 05-SECURITY.md — a well-formed cursor with a non-date `n` makes list routes answer 500 instead of falling back to page 1 (Postgres 22007). Not injectable; fix by validating `n` as an ISO datetime in the shared cursor schema.
 - [Phase 05.1]: Residual R-1 in 05.1-SECURITY.md (WR-01) — `resolvePublishCommunity`, `pinStory` and feed `createPost` read community status without `FOR SHARE`; an archive committing mid-write can still land a pin/post in an archived community. Medium, below threshold.
 - [Phase 5]: `.planning/REQUIREMENTS.md` traceability still shows 16 "Gaps Found" rows (05-SECURITY.md R-5) — documentation lag to clear.
+- [Phase 05.2]: Closed partial on 2026-09-26 by user decision (same as Phases 2-4), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, iPhone Safari + Android Chrome, steps 1-6) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.2`. VERIFICATION.md is stale because quick 260926-d8f changed covered code, so re-run the verifier then instead of re-attesting. Review items still open: WR-02, WR-05, WR-06 (partly covered by 05.2-30..34), IN-01..04, `h-[68px]` in StoriesStrip.
 
 ### Quick Tasks Completed
 
@@ -472,6 +473,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T02:42:21.472Z
-Stopped at: Completed 05.2-12-PLAN.md
+Last session: 2026-09-26T13:21:32.000Z
+Stopped at: Phase 05.2 closed partial (UAT 2 pass, test 1 blocked on phones until 01.1), ready to discuss Phase 05.3
 Resume file: None
