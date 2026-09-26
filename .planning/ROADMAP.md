@@ -472,7 +472,7 @@ Plans:
 **Research needed**: Light — Mux autoplay/mute policy on iOS, and preloading the next video.
 **Notes**: Part of the MVP (user decision 2026-09-25): Reels is a new tab that filters the feed to video posts, so it moved ahead of the "Rede social" phases. It was 05.5 and "placed last so it is built once over the final set of video sources"; adding member videos is now Phase 9's job. Open questions for discuss-phase: (a) the prototype's lanes "Para você / Resultados / Bastidores" have no data model — fixed lanes, tags, or communities? (b) whether Reels is its own toggleable module or rides on `feed`; the user's framing ("a new tab that filters the feed by video") points to riding on `feed`. Source: user request 2026-09-25.
 
-**Plans**: 9/9 plans executed
+**Plans**: 9/9 executed + 1 gap-closure plan (05.3-10) planned from `05.3-VERIFICATION.md`
 
 Plans:
 
@@ -499,6 +499,10 @@ Plans:
 **Wave 5**
 
 - [x] 05.3-09-PLAN.md — The Reels browser battery (lanes, paging, sound, like parity, comments, share, empty state, requires-feed, error states, long-text backstops) and the phase exit gate
+
+**Wave 6** *(gap closure — the FAILED truth 6 of `05.3-VERIFICATION.md`)*
+
+- [ ] 05.3-10-PLAN.md — CR-01 / REELS-07: per-post like and comment-count state promoted to `ReelsHost` so a like or comment survives the ±1 mount window, lane changes and the same post in two lanes (remount matrix + e6 swipe-away-and-back step); plus WR-01 (capture-phase release on the pager stack), WR-02 (player keyed on its playback credential) and WR-03 (function replacements in the live region), each with a regression
 
 ### Phase 6: Events
 
