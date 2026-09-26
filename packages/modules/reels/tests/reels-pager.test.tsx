@@ -481,7 +481,7 @@ describe('ReelsPager — accessibility (UI-D-97)', () => {
     const { container, rerender } = render(<ReelsPager {...baseProps({ index: 0 })} />);
     const current = container.querySelector<HTMLElement>('[data-reel-page="0"]');
     expect(current).not.toBeNull();
-    const first = within(current as HTMLElement).getAllByRole('button')[0];
+    const first = within(current as HTMLElement).getAllByRole('button')[0] as HTMLElement;
     expect(first).toHaveAccessibleName('pause-label');
     expect(first.className).toContain('sr-only');
     expect(first.className).toContain('focus:not-sr-only');

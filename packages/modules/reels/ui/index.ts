@@ -7,5 +7,11 @@
  */
 
 export { ReelPlaybackError, type ReelPlaybackErrorProps } from './ReelPlaybackError';
+export {
+  ReelsPager,
+  type ReelsPagerItem,
+  type ReelsPagerLabels,
+  type ReelsPagerProps,
+} from './ReelsPager';
 export { ReelsStage, type ReelsStageProps } from './ReelsStage';
 export { type ReelsTick, ticksWindow } from './ticks';
