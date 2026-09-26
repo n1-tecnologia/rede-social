@@ -77,12 +77,12 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Story Highlights
 
-- [ ] **HIGHLIGHT-01**: `admin_tenant` can create, rename, re-cover (a frame of one of the highlight's image stories, or an uploaded image) and delete named highlights (a title of up to 15 characters plus a cover) on Início and on each active community, and reorder a place's highlights from that place's "Destaques" manage screen; a highlight with no story is kept and shown only to the admin
-- [ ] **HIGHLIGHT-02**: `admin_tenant` can add a story to, or remove it from, specific highlights — a story may sit in several — from the viewer, from "Seus stories", from a highlight's edit sheet, or into one highlight at publish; a story inside a highlight stays viewable after its 24 h window, and a highlight plays its stories oldest first by publish time
-- [ ] **HIGHLIGHT-03**: Início shows ONE grouped circle (the tenant's logo and display name) holding every active story of the tenant, played oldest to newest, followed by Início's highlights in the admin's order, one circle each; at the end of a circle the viewer moves on to the next circle in the row
-- [ ] **HIGHLIGHT-04**: A community page shows only that community's highlights, with no active-stories circle; with the communities module off, community highlights are unreachable while Início's are unaffected
-- [ ] **HIGHLIGHT-05**: Every existing community pin is migrated into highlights without loss (one "Destaques" highlight per community that had pins, each pin's author and time carried over), and the pin model — its table, routes, events and the publish `communityId` — is retired
-- [ ] **HIGHLIGHT-06**: Members get a server-side, cross-device seen state for active stories: the grouped circle's ring is brand-coloured while any active story is unseen and neutral once all are seen, and opening it resumes at the first unseen story (the seen-ring half of V2-CONT-05; the admin's "quem viu" list stays V2)
+- [x] **HIGHLIGHT-01**: `admin_tenant` can create, rename, re-cover (a frame of one of the highlight's image stories, or an uploaded image) and delete named highlights (a title of up to 15 characters plus a cover) on Início and on each active community, and reorder a place's highlights from that place's "Destaques" manage screen; a highlight with no story is kept and shown only to the admin
+- [x] **HIGHLIGHT-02**: `admin_tenant` can add a story to, or remove it from, specific highlights — a story may sit in several — from the viewer, from "Seus stories", from a highlight's edit sheet, or into one highlight at publish; a story inside a highlight stays viewable after its 24 h window, and a highlight plays its stories oldest first by publish time
+- [x] **HIGHLIGHT-03**: Início shows ONE grouped circle (the tenant's logo and display name) holding every active story of the tenant, played oldest to newest, followed by Início's highlights in the admin's order, one circle each; at the end of a circle the viewer moves on to the next circle in the row
+- [x] **HIGHLIGHT-04**: A community page shows only that community's highlights, with no active-stories circle; with the communities module off, community highlights are unreachable while Início's are unaffected
+- [x] **HIGHLIGHT-05**: Every existing community pin is migrated into highlights without loss (one "Destaques" highlight per community that had pins, each pin's author and time carried over), and the pin model — its table, routes, events and the publish `communityId` — is retired
+- [x] **HIGHLIGHT-06**: Members get a server-side, cross-device seen state for active stories: the grouped circle's ring is brand-coloured while any active story is unseen and neutral once all are seen, and opening it resumes at the first unseen story (the seen-ring half of V2-CONT-05; the admin's "quem viu" list stays V2)
 
 ### Events
 
@@ -263,12 +263,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORY-03 | Phase 5 | Complete |
 | STORY-04 | Phase 5 (re-delivered by Phase 05.2) | Complete (re-delivery through highlights pending in Phase 05.2) |
 | STORY-05 | Phase 5 | Complete |
-| HIGHLIGHT-01 | Phase 05.2 | Pending |
-| HIGHLIGHT-02 | Phase 05.2 | Pending |
-| HIGHLIGHT-03 | Phase 05.2 | Pending |
-| HIGHLIGHT-04 | Phase 05.2 | Pending |
-| HIGHLIGHT-05 | Phase 05.2 | Pending |
-| HIGHLIGHT-06 | Phase 05.2 | Pending |
+| HIGHLIGHT-01 | Phase 05.2 | Complete |
+| HIGHLIGHT-02 | Phase 05.2 | Complete |
+| HIGHLIGHT-03 | Phase 05.2 | Complete |
+| HIGHLIGHT-04 | Phase 05.2 | Complete |
+| HIGHLIGHT-05 | Phase 05.2 | Complete |
+| HIGHLIGHT-06 | Phase 05.2 | Complete |
 | EVENT-01 | Phase 6 | Pending |
 | EVENT-02 | Phase 6 | Pending |
 | EVENT-03 | Phase 6 | Pending |

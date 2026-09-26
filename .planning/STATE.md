@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
-status: executing
-stopped_at: Completed 05.2-11-PLAN.md
-last_updated: "2026-09-26T02:09:48.975Z"
+status: verifying
+stopped_at: Completed 05.2-12-PLAN.md
+last_updated: "2026-09-26T02:42:34.906Z"
 last_activity: 2026-09-26
-last_activity_desc: "Completed 05.2-11 (the pin model retired on the developer's explicit 'retire': pin API/contract/events, publish communityId and pinnedCommunityCount deleted; story_community_pins dropped by drop-only migration file 2; the file 1 -> file 2 rehearsal proves no pin lost on an edge fixture)"
-state_head: ef3e302722f9b40c4a8d46eed727d6091064f357
+last_activity_desc: "Completed 05.2-12 (the phase exit gate: phase52-smoke.spec.ts replays the six-step UAT, cross-device seen ring as a second browser context, 12/12 on :3100; full suite green on a fresh reset+seed: lint, typecheck, unit 1042, boundaries, pgTAP 331, integration 506, build, static routes, e2e 139 passed / 0 failed / 0 flaky); all 12 plans done, ready for code review and phase verification"
+state_head: 7c6f488893933fb6cc2b72a1e3ff76c53ba881f2
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 75
+  completed_plans: 76
   percent: 0
 ---
 
@@ -27,12 +27,12 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 ## Current Position
 
-Phase: 05.2 (Story Highlights) — EXECUTING
+Phase: 05.2 (Story Highlights) — READY FOR VERIFICATION
 Plan: 12 of 12
-Status: Executing Phase 05.2 — next is 05.2-12
-Last activity: 2026-09-26 — Completed 05.2-11 (developer answered `retire` at the blocking-human checkpoint; pin routes/events/contract fields deleted, a stale communityId publish is 400 and every pin route 404; drop-only file 2 20260926015251; rehearsal 6 pins -> 6 items, planted mismatch exits 3; pgTAP 331, integration 506, e2e smoke 12 + stories/comunidades 115 passed on :3100)
+Status: Phase complete — ready for verification
+Last activity: 2026-09-26 — Completed 05.2-12 (the phase exit gate: phase52-smoke.spec.ts replays the six-step UAT, cross-device seen ring as a second browser context, 12/12 on :3100; full suite green on a fresh reset+seed: lint, typecheck, unit 1042, boundaries, pgTAP 331, integration 506, build, static routes, e2e 139 passed / 0 failed / 0 flaky); all 12 plans done, ready for code review and phase verification
 
-Progress: [█████████████████░░░] 75/88 plans ([░░░░░░░░░░] 0%)
+Progress: [█████████████████░░░] 76/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -135,6 +135,7 @@ Progress: [█████████████████░░░] 75/88 p
 | Phase 05.2 P09 | 31 min | 3 tasks | 23 files |
 | Phase 05.2 P10 | 58 min | 3 tasks | 32 files |
 | Phase 05.2 P11 | 31min | 3 tasks | 26 files |
+| Phase 05.2 P12 | 28min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -415,6 +416,8 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-11: the pin model retired on the developer's explicit 'retire' at the blocking-human checkpoint (D-116) — pin API/contract/events/publish communityId/pinnedCommunityCount deleted, story_community_pins dropped by drop-only migration file 2 (20260926015251) after file 1's guarded backfill — Roadmap criteria 4 and 5: one representation of a curated story (the highlight item); the rehearsal (scripts/rehearse-highlights-migration.sh) proves no pin is lost across file 1 -> story_views -> file 2 and is the proof Phase 01.1 inherits
 - [Phase 05.2]: 05.2-11: in the stories module a non-id path segment is the bare 404 (defaultHook, target param), so a retired GET .../pinned (falling through to /{storyId}) answers 404 and a malformed id reads like an unknown one — D-23: 'no such route' and 'no such row' must not be told apart; avoids a tombstone route keeping the pin name in code
 - [Phase 05.2]: 05.2-11: pgTAP assertions that need the seed use skip() when it is absent (120 #41), because CI runs supabase test db before db:seed — Keeps one plan count for seeded local runs and unseeded CI runs; proven both ways (331 PASS each)
+- [Phase 05.2]: 05.2-12: the phase exit gate's e2e stage runs on a :3100 production build; next dev's overlay (nextjs-portal) intercepts the Publicar click (evidence in 05.2-12-SUMMARY)
+- [Phase 05.2]: 05.2-12: the UAT replay's step 6 watches two IMAGE stories with everything else pinned seen (the fake video provider never shows a video segment); the second device is browser.newContext() with the project's device options
 
 ### Pending Todos
 
@@ -468,6 +471,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T02:09:42.554Z
-Stopped at: Completed 05.2-11-PLAN.md
+Last session: 2026-09-26T02:42:21.472Z
+Stopped at: Completed 05.2-12-PLAN.md
 Resume file: None
