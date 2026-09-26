@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.3"
 current_phase_name: Reels
 status: executing
-stopped_at: Completed 05.3-03-PLAN.md
-last_updated: "2026-09-26T20:23:47.529Z"
+stopped_at: Completed 05.3-05-PLAN.md
+last_updated: "2026-09-26T20:37:55.518Z"
 last_activity: 2026-09-26
-last_activity_desc: Completed 05.3-03 (declarative media chrome in the kernel shell, e2e pins for the Reels tab and seven module switches)
-state_head: 2b8e1fc5406cb74ce7954b40758d7ebd6d68200e
+last_activity_desc: Completed 05.3-05 (the Reels pager: ReelsPager, DoubleTapHeart opt-in single tap and tap slop, ticksWindow, ReelsStage, ReelPlaybackError)
+state_head: b10161db4b40cf26b5ab67a5e276c11ade1c7058
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 97
-  completed_plans: 80
+  completed_plans: 81
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.3 (Reels) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
-Last activity: 2026-09-26 — Completed 05.3-03 (`NavItem.chrome` + `activeTabChrome`: TopBar hidden and BottomNav `data-theme="dark"` on a media-chrome tab, no route literal in the kernel; six e2e specs pinned for the Reels tab and seven switches, 69 passed); next 05.3-05
+Last activity: 2026-09-26 — Completed 05.3-05 (`ReelsPager` index pager with one `go()` calling `onActivate` before `onIndexChange`, `DoubleTapHeart` opt-in `onSingleTap`/`tapSlopPx`, `ticksWindow`, `ReelsStage`, `ReelPlaybackError`, the `@tria/module-reels/ui` barrel; 58 reels unit cases); next 05.3-06
 
-Progress: [██████████████████░░] 80/88 plans ([░░░░░░░░░░] 0%)
+Progress: [██████████████████░░] 81/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -140,6 +140,7 @@ Progress: [██████████████████░░] 80/88 p
 | Phase 05.3 P04 | 54 min | 3 tasks | 3 files |
 | Phase 05.3 P02 | 17 min | 2 tasks | 7 files |
 | Phase 05.3 P03 | 39 min | 2 tasks | 13 files |
+| Phase 05.3 P05 | 11 min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -433,6 +434,8 @@ Recent decisions affecting current work:
 - [Phase 05.3]: 05.3-03: media chrome is declarative. NavItem.chrome comes from the manifest nav entry and activeTabChrome (built on activeTabKey) is the one rule TopBar and BottomNav share; the kernel never names /reels (UI-D-81, MOD-02)
 - [Phase 05.3]: 05.3-03: media chrome is a dark-token scope (data-theme=dark on the BottomNav nav only); glass-bar, chip and accent re-resolve from the shipped dark theme with no new token
 - [Phase 05.3]: 05.3-03: the phase2-smoke Feed-off reading asserts Reels leaves with the feed while its flag stays on (D-121 e2e witness), so it is the one list without Reels
+- [Phase 05.3]: 05.3-05: the DoubleTapHeart tap wrapper is rendered for every mounted Reels page with handlers only on the current one, so a pre-mounted neighbour video is never remounted when it becomes current
+- [Phase 05.3]: 05.3-05: a pointer travelling past tapSlopPx cancels the pending single tap too; held arrow keys (event.repeat) never navigate; a wheel over a natively scrollable element (expanded caption) scrolls it instead of paging
 
 ### Pending Todos
 
@@ -488,6 +491,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T20:23:41.135Z
-Stopped at: Completed 05.3-03-PLAN.md
+Last session: 2026-09-26T20:37:55.424Z
+Stopped at: Completed 05.3-05-PLAN.md
 Resume file: None
