@@ -26,11 +26,11 @@ screens:
   - desktop-coluna-populada
   - desktop-vazio-autor
 
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor Vilas Boas
+approved_at: 2026-09-26
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-05.3, design-review, D-33, UI-04, reels]
