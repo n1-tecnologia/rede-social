@@ -1482,7 +1482,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     expect(communityRow.map((item) => item.id)).toEqual([place.id]);
   });
 
-  it('05.2-7 the SEED is the fixture: Bastidores for members, Aulas for the curator, Destaques mirrors the pins', async () => {
+  it('05.2-7 the SEED is the fixture: Bastidores for members, Aulas for the curator, a community Destaques keeps the expired story', async () => {
     // Início, as a member: the seeded `Bastidores` (it holds live stories) and never `Aulas` (the
     // seeded EMPTY highlight, D-102).
     const memberHome = await row(tokens.demoMember);
@@ -1500,14 +1500,16 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     ]);
     expect(curatorHome.find((item) => item.title === 'Aulas')?.itemCount).toBe(0);
 
-    // The seeded pins' community carries `Destaques` — the state migration file 1's backfill would
-    // have produced for those pins — and its items include the seeded EXPIRED story, playable.
-    const [pinned] = await adminSql<{ community_id: string }[]>`
-      select distinct community_id::text from public.story_community_pins
-       where tenant_id = ${tenantIds.demo}::uuid`;
-    const pinnedCommunity = pinned?.community_id ?? '';
-    expect(pinnedCommunity).not.toBe('');
-    const communityRow = await row(tokens.demoMember, `?communityId=${pinnedCommunity}`);
+    // The seeded community carries `Destaques` — the state migration file 1's backfill produced for
+    // Phase 5's seeded pins (the pin model retired in 05.2-11) — and its items include the seeded
+    // EXPIRED story, playable.
+    const [seeded] = await adminSql<{ community_id: string }[]>`
+      select community_id::text from public.story_highlights
+       where tenant_id = ${tenantIds.demo}::uuid and community_id is not null
+         and title = 'Destaques'`;
+    const destaquesCommunity = seeded?.community_id ?? '';
+    expect(destaquesCommunity).not.toBe('');
+    const communityRow = await row(tokens.demoMember, `?communityId=${destaquesCommunity}`);
     const destaques = communityRow.find((item) => item.title === 'Destaques');
     expect(destaques).toBeDefined();
 
@@ -1518,13 +1520,9 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     expect(expired).toBeDefined();
     expect(expired?.isActive).toBe(false);
 
-    // …and exactly the pinned stories, no more: the seeded highlight mirrors the seeded pins.
-    const pins = await adminSql<{ story_id: string }[]>`
-      select story_id::text from public.story_community_pins
-       where tenant_id = ${tenantIds.demo}::uuid and community_id = ${pinnedCommunity}::uuid`;
-    expect(detail.items.map((story) => story.id).sort()).toEqual(
-      pins.map((pin) => pin.story_id).sort(),
-    );
+    // …and exactly two stories, one expired and one active (the seed's contrast, D-79): a read
+    // returning every story of the tenant could not satisfy this.
+    expect(detail.items.map((story) => story.isActive).sort()).toEqual([false, true]);
   });
   /* ── 05.2-03: rename, re-cover, delete, remove (HIGHLIGHT-01/02, D-101, R-D-F, R-D-L) ─────────── */
 

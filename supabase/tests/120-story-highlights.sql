@@ -61,9 +61,17 @@ begin;
 --      plan is captured in TEXT format, where that phrase is literally what a sequential scan prints
 --      (the JSON format splits it into two keys, which would make a `like` check vacuous).
 --
+-- 10. THE PIN MODEL IS RETIRED (05.2-11: HIGHLIGHT-05, D-116, roadmap criteria 4 and 5):
+--    - `story_community_pins` no longer exists — migration file 2 dropped it after file 1's guarded
+--      backfill copied every pin into a `Destaques` highlight;
+--    - STORY-04 RE-DELIVERED ON THE SEED: the seeded community `Destaques` still reaches the seeded
+--      EXPIRED story through the items read (no expiry predicate). CI runs this file on a reset,
+--      UNSEEDED database (`db reset` → `test db` → `db:seed`), so the assertion SKIPS there with a
+--      reason rather than failing — the plan count is identical either way.
+--
 -- Like its siblings this file ROLLS BACK, so it re-runs identically against a seeded or an empty
 -- database, twice in a row, in any order.
-select plan(39);
+select plan(41);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 -- Two tenants, each with one user, one community and one ready image asset. Tenant A also gets an
@@ -495,6 +503,33 @@ select ok(
   (select plan from view_plans where name = 'ring') not like '%Seq Scan on story_views%',
   'the viewer_seen subplan is NEVER a Seq Scan on story_views (the correlated form measured as one)'
 );
+
+-- ══ 40-41. THE PIN MODEL IS RETIRED; the curated expired story outlives it ══════════════════════
+select hasnt_table(
+  'public', 'story_community_pins',
+  'HIGHLIGHT-05 / D-116: the pin table is gone — a highlight item is the one representation of a curated story'
+);
+-- The seeded demo community `Destaques` (scripts/seed.ts `SEED_HIGHLIGHT_IDS['tria-demo'].community`)
+-- and the seeded EXPIRED story (`SEED_STORY_IDS['tria-demo'][3]`, published 30 hours ago), read
+-- through `getHighlight`'s MEMBER items statement verbatim in shape — no expiry predicate.
+select case
+  when exists (select 1 from public.story_highlights
+                where id = '0d000000-0000-4000-8000-0000000002a3')
+  then ok(
+    exists (
+      select 1
+        from public.story_highlight_items i
+        join public.stories s on s.id = i.story_id and s.tenant_id = i.tenant_id
+        join public.media_assets a on a.id = s.media_asset_id
+       where i.highlight_id = '0d000000-0000-4000-8000-0000000002a3'
+         and i.tenant_id = s.tenant_id
+         and s.id = '0d000000-0000-4000-8000-0000000000d4'
+         and s.expires_at < now()
+         and s.deleted_at is null and a.status = 'ready'),
+    'STORY-04 re-delivered: the seeded Destaques still reaches the seeded EXPIRED story through the items read'
+  )
+  else skip('no seed loaded (CI runs pgTAP before db:seed) — the post-seed reachability check needs it', 1)
+end;
 
 select * from finish();
 rollback;
