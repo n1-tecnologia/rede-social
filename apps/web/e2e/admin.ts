@@ -576,6 +576,158 @@ export async function deleteFeedPostsLike(prefix: string): Promise<number> {
 }
 
 /**
+ * 05.3-09: a VIDEO post as Reels reads it — a `fake`-provider asset, the `feed_posts` row with
+ * `media_kind = 'video'` and its one `feed_post_media` row — written in ONE transaction, so a spec
+ * never observes a video post without its media row (the `READY_VIDEO_POST` predicate would drop it,
+ * and the lane row would disagree with the list for a moment).
+ *
+ * `status: 'processing'` writes the asset with no playback id and no `ready_at`: the row is in the
+ * table but no Reels read may return it (REELS-03), which is exactly what the negative cases need.
+ * `minutesAgo` back-dates the post (and the asset) so a spec pins the "Todos" and lane order instead
+ * of inheriting the order its inserts happened to run in. `communityId` puts the post inside a
+ * community; the counters trigger then raises that community's `last_activity_at` to the post's
+ * `created_at`, which is the key the lane row orders by (D-119).
+ *
+ * The caption is the caller's, and it is what `deleteReelsFixtures` removes the row by. Nothing
+ * here is added to `scripts/seed.ts`: the seed's pinned counts must not move (T-05.3-22).
+ */
+export async function createVideoPostAs(
+  email: string,
+  tenantSlug: string,
+  caption: string,
+  options: {
+    status?: 'ready' | 'processing';
+    communityId?: string | null;
+    width?: number;
+    height?: number;
+    minutesAgo?: number;
+  } = {},
+): Promise<{ postId: string; assetId: string }> {
+  const {
+    status = 'ready',
+    communityId = null,
+    width = 1080,
+    height = 1920,
+    minutesAgo = 0,
+  } = options;
+  const createdAt = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  const token = Math.random().toString(36).slice(2);
+  const ready = status === 'ready';
+
+  return sql().begin(async (tx) => {
+    const assets = await tx<{ id: string; tenant_id: string; owner_user_id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+         mime, bytes, duration_seconds, aspect_ratio, width, height, filename, created_at, ready_at)
+      select t.id, u.id, 'video', 'post', ${status}, 'fake',
+             ${`fake-e2e-reels-${token}`}, ${ready ? `fake-playback-reels-${token}` : null},
+             'video/mp4', 1048576, ${ready ? 12 : null}, ${width >= height ? '16:9' : '9:16'},
+             ${width}, ${height}, 'reel.mp4', ${createdAt}::timestamptz,
+             ${ready ? createdAt : null}::timestamptz
+        from public.tenants t, public.users u
+       where t.slug = ${tenantSlug} and u.email = ${email}
+      returning id, tenant_id, owner_user_id`;
+    const asset = assets[0];
+    if (!asset) throw new Error(`could not create a video asset for ${email} in ${tenantSlug}`);
+
+    const posts = await tx<{ id: string }[]>`
+      insert into public.feed_posts
+        (tenant_id, author_user_id, community_id, caption, media_kind, created_at)
+      values (${asset.tenant_id}::uuid, ${asset.owner_user_id}::uuid, ${communityId}::uuid,
+              ${caption}, 'video', ${createdAt}::timestamptz)
+      returning id`;
+    const post = posts[0];
+    if (!post) throw new Error(`could not create a video post for ${email} in ${tenantSlug}`);
+
+    await tx`
+      insert into public.feed_post_media
+        (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+      values (${asset.tenant_id}::uuid, ${post.id}::uuid, 'video', ${asset.id}::uuid, 'video', 0)`;
+
+    return { postId: post.id, assetId: asset.id };
+  });
+}
+
+/**
+ * 05.3-09: an `active` community, for the Reels lane row. `minutesAgo` back-dates BOTH its
+ * `created_at` and its `last_activity_at`, so the video a spec then posts into it (newer than that)
+ * is what decides where its lane sits — the trigger only ever raises `last_activity_at`. The slug is
+ * derived from the name plus a random suffix, so two projects never collide on `(tenant, slug)`.
+ * Returns the id.
+ */
+export async function createCommunityAs(
+  email: string,
+  tenantSlug: string,
+  name: string,
+  options: { minutesAgo?: number } = {},
+): Promise<string> {
+  const stamp = new Date(Date.now() - (options.minutesAgo ?? 0) * 60_000).toISOString();
+  const slug = `${name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)}-${Math.random().toString(36).slice(2, 8)}`;
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.communities
+      (tenant_id, created_by_user_id, name, slug, status, last_activity_at, created_at)
+    select t.id, u.id, ${name}, ${slug}, 'active', ${stamp}::timestamptz, ${stamp}::timestamptz
+      from public.tenants t, public.users u
+     where t.slug = ${tenantSlug} and u.email = ${email}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not create community "${name}" in ${tenantSlug}`);
+  return id;
+}
+
+/**
+ * 05.3-09: a ROOT comment on a post, written directly (the Reels comment case needs a thread whose
+ * reply affordance it can see). The comment-count trigger moves the post's counter; the row goes
+ * with its post, since `feed_comments.post_id` cascades.
+ */
+export async function createFeedCommentAs(
+  email: string,
+  postId: string,
+  body: string,
+): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth)
+    select p.tenant_id, p.id, u.id, ${body}, 0
+      from public.feed_posts p, public.users u
+     where p.id = ${postId}::uuid and u.email = ${email}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not comment on ${postId} as ${email}`);
+  return id;
+}
+
+/**
+ * 05.3-09: removes everything the Reels spec made, by PREFIX — the posts whose caption starts with
+ * it (their media rows, likes and comments cascade), then the assets those posts used (only when no
+ * other row still names them), then the communities whose name starts with it. That order is
+ * forced: `feed_posts.community_id` has no `ON DELETE`, and `feed_post_media.media_asset_id` none
+ * either. Every seeded row survives, because nothing the seed writes carries the prefix.
+ */
+export async function deleteReelsFixtures(prefix: string): Promise<void> {
+  const like = `${prefix}%`;
+  const assets = await sql()<{ media_asset_id: string }[]>`
+    select m.media_asset_id
+      from public.feed_post_media m
+      join public.feed_posts p on p.id = m.post_id
+     where p.caption like ${like}`;
+  await sql()`delete from public.feed_posts where caption like ${like}`;
+  const assetIds = [...new Set(assets.map((row) => row.media_asset_id))];
+  if (assetIds.length > 0) {
+    await sql()`
+      delete from public.media_assets
+       where id = any(${assetIds}::uuid[])
+         and id not in (select media_asset_id from public.feed_post_media)
+         and id not in (select media_asset_id from public.stories)`;
+  }
+  await sql()`delete from public.communities where name like ${like}`;
+}
+
+/**
  * Waits until `count` post images uploaded after `since` have reached `ready`.
  *
  * It exists because variant derivation runs in the WORKER (`kernel.media-derive-variants`), and
