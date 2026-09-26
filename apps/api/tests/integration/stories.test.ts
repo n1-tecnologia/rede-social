@@ -2757,6 +2757,60 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     expect(eventsNamed('highlight.created').length).toBe(createdEvents);
     expect(events.length).toBe(eventsBefore);
   });
+
+  it('05.2-33 an item whose story was soft-deleted does not take one of the STORY_HIGHLIGHT_MAX_ITEMS slots', async () => {
+    // WR-01: 100 item rows, ONE of them a ghost (its story soft-deleted) = 99 live stories.
+    const ghosted = await create(tokens.demoAdmin, { title: 'Teste Fantasma' });
+    await seedItems(ghosted.id, STORY_HIGHLIGHT_MAX_ITEMS, 1);
+    expect(await countItems(ghosted.id)).toBe(STORY_HIGHLIGHT_MAX_ITEMS);
+
+    const { storyId: hundredth } = await publishImage('fantasma vaga');
+    const accepted = await addItem(tokens.demoAdmin, ghosted.id, hundredth);
+    expect(accepted.status).toBe(200);
+    expect(highlightMembershipResultSchema.parse(await accepted.json()).highlighted).toBe(true);
+    expect(await countItems(ghosted.id)).toBe(STORY_HIGHLIGHT_MAX_ITEMS + 1);
+
+    // 100 LIVE stories now: the cap holds for the next one, and nothing is written.
+    const { storyId: overflow } = await publishImage('fantasma cheio');
+    await expectFull(await addItem(tokens.demoAdmin, ghosted.id, overflow));
+    expect(await itemRows(ghosted.id, overflow)).toBe(0);
+    expect(await countItems(ghosted.id)).toBe(STORY_HIGHLIGHT_MAX_ITEMS + 1);
+  });
+
+  it('05.2-34 a ghost item (its story soft-deleted) can still be taken out of the highlight; an unknown story is still the bare 404', async () => {
+    const held = await create(tokens.demoAdmin, { title: 'Teste Remover' });
+    const seeded = await seedItems(held.id, 2, 1);
+    // Never rely on insert order: ask which seeded story is the soft-deleted one.
+    const [ghostRow] = await adminSql<{ id: string }[]>`
+      select id from public.stories where id = any(${seeded}::uuid[]) and deleted_at is not null`;
+    const ghost = ghostRow?.id ?? '';
+    const live = seeded.find((id) => id !== ghost) ?? '';
+    expect(ghost).not.toBe('');
+    expect(live).not.toBe('');
+
+    const removed = await removeItem(tokens.demoAdmin, held.id, ghost);
+    expect(removed.status).toBe(200);
+    expect(highlightMembershipResultSchema.parse(await removed.json())).toEqual({
+      highlighted: false,
+      highlightCount: 0,
+    });
+    expect(await itemRows(held.id, ghost)).toBe(0);
+    expect(await itemRows(held.id, live)).toBe(1);
+
+    const repeat = await removeItem(tokens.demoAdmin, held.id, ghost);
+    expect(repeat.status).toBe(200);
+    expect(highlightMembershipResultSchema.parse(await repeat.json())).toEqual({
+      highlighted: false,
+      highlightCount: 0,
+    });
+
+    // The resolve stays tenant-scoped and bare: an unknown story id is the 404 with no details.
+    const unknown = await removeItem(tokens.demoAdmin, held.id, randomUUID());
+    expect(unknown.status).toBe(404);
+    const body = await envelope(unknown);
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  });
 });
 
 describe('MOD-04 / UI-D-25 — the module flag governs the routes in both directions', () => {
