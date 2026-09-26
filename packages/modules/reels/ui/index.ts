@@ -7,6 +7,7 @@
  */
 
 export { ReelPlaybackError, type ReelPlaybackErrorProps } from './ReelPlaybackError';
+export { type ReelsLane, ReelsLanes, type ReelsLanesProps } from './ReelsLanes';
 export {
   ReelsPager,
   type ReelsPagerItem,

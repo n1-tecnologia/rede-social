@@ -177,7 +177,6 @@ describe('ReelsLanes — selection and keyboard (UI-D-84, automatic activation)'
   it('a pointer on a tab never reaches the pager tap surface behind it', () => {
     const outer = vi.fn();
     render(
-      // biome-ignore lint/a11y/noStaticElementInteractions: a test harness standing in for the pager
       <div onPointerDown={outer} onPointerUp={outer}>
         <ReelsLanes {...props()} />
       </div>,

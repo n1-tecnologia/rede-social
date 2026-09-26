@@ -116,10 +116,45 @@ export type LikeButtonProps = {
   /** Changes on every activation; the pulse runs on the change. */
   pulseKey: number;
   onToggle: () => void;
+  /**
+   * `'default'` (the feed card and the story viewer) renders exactly as before. `'overMedia'` is
+   * for a surface that draws the button straight on video (the Reels rail, D-124): see the tone
+   * note on `LikeButton`.
+   */
+  tone?: LikeButtonTone;
+  /** The heart's size in px (default 20; the Reels rail passes 28, UI-D-87). */
+  glyphSize?: number;
 };
+
+export type LikeButtonTone = 'default' | 'overMedia';
 
 /** How long the pop lasts. Short enough to be over before a second tap can land. */
 const PULSE_MS = 220;
+
+/**
+ * The colour classes per tone. The `default` entry is the pre-D-124 class list, byte for byte.
+ *
+ * **Why `overMedia` exists (D-124).** On video the default tone's `text-text` idle stroke is the
+ * theme's ink (dark in the light theme) and the `hover:bg-bg-hover` disc is a grey blot on the
+ * frame. The over-media tone is a white stroke idle, the like colour liked, the story caption's
+ * drop shadow on the glyph, a translucent white hover and the white focus ring every control over
+ * video carries (UI-D-97).
+ *
+ * **Why it is a tone and not a wrapper override.** The story viewer paints its like white with a
+ * descendant override on a wrapper (`[&_button]:text-white`). That override has higher specificity
+ * than the button's own classes, so it would repaint a LIKED heart white too and lose the like
+ * colour (UI-D-08) — the story surface lives with it, the Reels rail must not. The tone sets the
+ * idle and liked colours on the button itself, so nothing outside has to fight it.
+ */
+const TONE: Record<LikeButtonTone, { idle: string; liked: string; extra?: string }> = {
+  default: { idle: 'text-text', liked: 'text-like [&_svg]:fill-like' },
+  overMedia: {
+    idle: 'text-white',
+    liked: 'text-like [&_svg]:fill-like',
+    extra:
+      '[&_svg]:drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)] hover:bg-white/10 active:bg-white/20 focus-visible:ring-white focus-visible:ring-offset-0',
+  },
+};
 
 export function LikeButton({
   liked,
@@ -128,7 +163,10 @@ export function LikeButton({
   unlikeLabel,
   pulseKey,
   onToggle,
+  tone = 'default',
+  glyphSize = 20,
 }: LikeButtonProps) {
+  const colours = TONE[tone];
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const [pulsing, setPulsing] = useState(false);
   const [seenPulse, setSeenPulse] = useState(pulseKey);
@@ -147,14 +185,15 @@ export function LikeButton({
     <span className="inline-flex items-center">
       <IconButton
         icon={Heart}
-        size={20}
+        size={glyphSize}
         label={liked ? unlikeLabel : likeLabel}
         aria-pressed={liked}
         data-like-state={liked ? 'liked' : 'unliked'}
         onClick={onToggle}
         className={cn(
           '[&_svg]:transition-transform [&_svg]:duration-200',
-          liked ? 'text-like [&_svg]:fill-like' : 'text-text',
+          liked ? colours.liked : colours.idle,
+          colours.extra,
           pulsing && '[&_svg]:scale-125',
         )}
       />
