@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.3"
 current_phase_name: Reels
 status: executing
-stopped_at: Completed 05.3-07-PLAN.md
-last_updated: "2026-09-26T21:06:12.621Z"
+stopped_at: Completed 05.3-08-PLAN.md
+last_updated: "2026-09-26T21:31:17.885Z"
 last_activity: 2026-09-26
-last_activity_desc: "Completed 05.3-07 (playback and data: ReelVideo with its controller, batched mintReelPlaybackAction, loadReelsPageAction, lib/reels, getFeed media)"
-state_head: be2f191b746520e618279bbbf42ea4d74e062201
+last_activity_desc: "Completed 05.3-08 (the /reels route: reels catalog, gated page + loading, ReelsHost state machine, ReelOverlay with the feed like/comments/share, e2e case e1)"
+state_head: 91138e355c2f354411b46d486fc003bef6015d93
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 97
-  completed_plans: 83
+  completed_plans: 84
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.3 (Reels) — EXECUTING
-Plan: 8 of 9
+Plan: 9 of 9
 Status: Ready to execute
-Last activity: 2026-09-26 — Completed 05.3-07 (`ReelVideo`: full-bleed Mux element, muted at mount, `loop`, `nohotkeys`, `noMutedPref`/`noVolumePref`, no `autoPlay`, fit via `--media-object-fit`, a start/pause/resume/setMuted controller with the AbortError/NotAllowedError handling and the 400 ms autoplay check; `mintReelPlaybackAction` mints ≤ 3 ids with `Promise.allSettled` in one action; `loadReelsPageAction`, `lib/reels` (`reelView` over `postCardView`, `loadReelsPage`, `loadVideoCommunities`), client-safe `announcedCount` in `lib/reels-count`, `getFeed` `media`; 55 new web cases); next 05.3-08
+Last activity: 2026-09-26 — Completed 05.3-08 (`/reels`: `reels.json` catalog; `page.tsx` gated by `bootstrap.modules` with `notFound()` outside any try, first Todos page + lanes in parallel, no token on the server; `loading.tsx`; `ReelsHost` — lanes, visit-scoped sound (`useState(false)` + `soundOnRef`), `onActivate` start inside the gesture + `touchend` resume, OR-ed pause (viewer, sheet, background), one batched mint per window change with in-flight set and generation guard, paging with one toast per failed attempt, empty/error/loading states; `ReelOverlay` — the feed's like engine, like-only double tap, linkified caption, share; the threaded `CommentSheet` outside the dark scope; `ReelVideo` false-blocked fix; 28 host + 1 ReelVideo + 20 catalog cases, e2e e1 green in both projects); next 05.3-09
 
-Progress: [██████████████████░░] 83/88 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 84/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -143,6 +143,7 @@ Progress: [██████████████████░░] 83/88 p
 | Phase 05.3 P05 | 11 min | 2 tasks | 10 files |
 | Phase 05.3 P06 | 9min | 2 tasks | 10 files |
 | Phase 05.3 P07 | 11 min | 2 tasks | 8 files |
+| Phase 05.3 P08 | 21min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -443,6 +444,11 @@ Recent decisions affecting current work:
 - [Phase 05.3]: 05.3-07: announcedCount lives in the client-safe apps/web/lib/reels-count.ts and is re-exported from lib/reels.ts; client components (plan 08's ReelOverlay) must import it from @/lib/reels-count because lib/reels reaches lib/api and next/headers
 - [Phase 05.3]: 05.3-07: ReelVideo's autoplay check arms only on the current page, when not host-paused and not yet playing since the last start/resume, after canplay; start/resume also arm it once canplay was seen. A derived poster that fails to load is dropped with poster='' (probed once at attach)
 - [Phase 05.3]: 05.3-07: mintReelPlaybackAction answers per asset (409 notReady, other generic with an asset-id-only log) and redirects once after Promise.allSettled when any mint hit a bootstrap refusal
+- [Phase 05.3]: 05.3-08: ReelVideo play() keeps played on an already-playing element, so the sound toggle's resume(true) never raises a false autoplay-blocked badge
+- [Phase 05.3]: 05.3-08: a stale Reels mint answer is dropped only for assets that left the ±1 window; a held token that outlives the incoming one is never replaced
+- [Phase 05.3]: 05.3-08: the Reels video retry pill stays until the fresh credential lands, so a double tap is one mint
+- [Phase 05.3]: 05.3-08: sheet close and lane change start or resume the video inside the gesture (WebKit sound rule); suppressResume keeps each gesture to one play()
+- [Phase 05.3]: 05.3-08: REQUIREMENTS.md unchanged — REELS/FEED-04/05/07/UI-01 shared with 05.3-09; UI-03/PWA-01 stay Phase 2 cloud gaps
 
 ### Pending Todos
 
@@ -498,6 +504,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T21:05:46.839Z
-Stopped at: Completed 05.3-07-PLAN.md
+Last session: 2026-09-26T21:31:17.790Z
+Stopped at: Completed 05.3-08-PLAN.md
 Resume file: None
