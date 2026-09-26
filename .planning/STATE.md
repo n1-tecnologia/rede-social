@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.3"
 current_phase_name: Reels
 status: executing
-stopped_at: Completed 05.3-04-PLAN.md
-last_updated: "2026-09-26T19:19:10.534Z"
+stopped_at: Completed 05.3-02-PLAN.md
+last_updated: "2026-09-26T19:41:12.918Z"
 last_activity: 2026-09-26
-last_activity_desc: Completed 05.3-04 (sketch 005 D-33 gate, approved provisional)
-state_head: d2ee30ccd33c5ade9d9e35a0a08103e4634d1fa5
+last_activity_desc: Completed 05.3-02 (Reels lanes read GET /v1/feed/video-communities, REELS-03/04 API battery)
+state_head: 16cafea48f677d9e5e33166097fbcf0e91653990
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 97
-  completed_plans: 78
+  completed_plans: 79
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.3 (Reels) — EXECUTING
-Plan: 3 of 9
+Plan: 4 of 9
 Status: Ready to execute
-Last activity: 2026-09-26 — Completed 05.3-04 (sketch 005 D-33 gate approved provisional; Reels UI tasks in 05-08 unblocked). Wave 1 done; next 05.3-02
+Last activity: 2026-09-26 — Completed 05.3-02 (the lanes read `GET /v1/feed/video-communities`, list equality with Início, isolation b9, two one-statement budgets, pgTAP 130 plan(20)); next 05.3-03
 
-Progress: [█████████████████░░░] 78/88 plans ([░░░░░░░░░░] 0%)
+Progress: [█████████████████░░░] 79/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -138,6 +138,7 @@ Progress: [█████████████████░░░] 78/88 p
 | Phase 05.2 P12 | 28min | 2 tasks | 1 files |
 | Phase 05.3 P01 | 25min | 3 tasks | 30 files |
 | Phase 05.3 P04 | 54 min | 3 tasks | 3 files |
+| Phase 05.3 P02 | 17 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -425,6 +426,9 @@ Recent decisions affecting current work:
 - [Phase 05.3]: 05.3-01: GET /v1/feed?media=video stays reachable with reels off (T-05.3-01 accepted); it only narrows what Início already shows
 - [Phase 05.3]: Sketch 005 (six prototype-less Reels surfaces) approved provisionally by the product owner on 2026-09-26. The orchestrator wrote the README frontmatter at the developer's explicit chat instruction ("pode alterar vc mesmo") and it was committed as-is (d65b7c7). The D-33 gate is open for the UI tasks in plans 05.3-05..05.3-08, and the designer review is a follow-up. — Delegated approval, audit trail in 05.3-04-SUMMARY Deviation 2; the developer should confirm it at verify-work. Revert d65b7c7 + fe7026c to re-close the gate.
 - [Phase 05.3]: UI-04 is not marked Complete by 05.3-04 even though requirements.ready-ids reports it ready. It is a Phase 2 requirement spanning all prototype-less surfaces and is still Gaps Found. REELS-02/04/06/07/08 stay open under the shared-ID gate (plans 05-09).
+- [Phase 05.3]: 05.3-02: the Reels lanes read is a sibling path GET /v1/feed/video-communities (no cursor, own item shape, 200 [] with communities off) sharing READY_VIDEO_POST with the list, so a lane can never open empty
+- [Phase 05.3]: 05.3-02: pgTAP 130's lanes fixture carries 10,000 posts of another tenant; without them fact 14 flipped to a Seq Scan on the third rolled-back run (index bloat). Fact 14 pins no Seq Scan, not an index name
+- [Phase 05.3]: 05.3-02: tests that flip lab's communities flag upsert it and restore the row exactly as found (communities.test deletes it, so an UPDATE-only flip is a no-op)
 
 ### Pending Todos
 
@@ -480,6 +484,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T19:19:03.942Z
-Stopped at: Completed 05.3-04-PLAN.md
+Last session: 2026-09-26T19:40:48.761Z
+Stopped at: Completed 05.3-02-PLAN.md
 Resume file: None
