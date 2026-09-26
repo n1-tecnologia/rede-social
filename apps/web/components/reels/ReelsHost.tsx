@@ -1,7 +1,12 @@
 'use client';
 
 import type { MediaPlayback } from '@tria/contracts/media';
-import type { CommentSheetProps, CountTemplates, LikeOutcome } from '@tria/module-feed/ui';
+import {
+  CommentSheet,
+  type CommentSheetProps,
+  type CountTemplates,
+  type LikeOutcome,
+} from '@tria/module-feed/ui';
 import {
   REELS_BUFFERING_DELAY_MS,
   REELS_MINT_MAX_IDS,
@@ -34,7 +39,9 @@ import {
   mintReelPlaybackAction,
   type ReelsPageResult,
 } from '@/app/(app)/reels/reels-actions';
+import { useSharePost } from '@/components/feed/useSharePost';
 import type { ReelView } from '@/lib/reels';
+import { type ReelBinder, ReelOverlay, type ReelOverlayLabels } from './ReelOverlay';
 import { ReelVideo, type ReelVideoController } from './ReelVideo';
 
 /**
@@ -61,10 +68,16 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  * activation for unmuted playback, so the stage wrapper's `onTouchEnd` re-issues `resume` once for
  * the page that gesture activated (RESEARCH A3; idempotent — see `ReelVideo`'s `play`).
  *
- * **Pause sources are OR-ed (UI-D-86).** The viewer's own pause (tap, Space, the badge) and
- * `document.visibilityState === 'hidden'` (plan 05.3-08 Task 2 adds the comment sheet). Coming back
- * from the background resumes only if the viewer had not paused, in either order of the events.
- * The badge shows for the viewer's pause and for an autoplay-blocked page.
+ * **Pause sources are OR-ed (UI-D-86).** The viewer's own pause (tap, Space, the badge), the open
+ * comment sheet (UI-D-90, D-82) and `document.visibilityState === 'hidden'`. Coming back from the
+ * sheet or the background resumes only if the viewer had not paused — and only once BOTH have
+ * cleared, in either order. The badge shows for the viewer's pause and for an autoplay-blocked page.
+ *
+ * **The page's actions are the feed's** (D-128..D-131). Each mounted page renders a `ReelOverlay`
+ * with the feed's like engine; the double tap reaches the current page's like-only binder. Share is
+ * the shipped `useSharePost` over the server-composed link. ONE `CommentSheet` — the feed's threaded
+ * sheet — is rendered as a SIBLING after the stage, outside its dark scope (UI-D-98), and while it
+ * is open the pager ignores gestures and keys (UI-D-90).
  *
  * **Credentials (REELS-05, RESEARCH Pattern 5, D-44).** On every window change the ±1 window's
  * assets that lack a token valid for more than `REELS_TOKEN_REMINT_MARGIN_MS` are minted in ONE
@@ -144,9 +157,6 @@ export type ReelsHostProps = {
   labels: ReelsHostLabels;
 };
 
-/** One page's like binder, registered by its overlay (Task 2): the double tap only ever likes. */
-export type ReelBinder = { likeOnly: () => void; bumpComments: (delta: number) => void };
-
 type LaneStatus = 'idle' | 'loading' | 'ready' | 'error';
 type LaneState = {
   items: ReelView[];
@@ -207,7 +217,17 @@ function expiresSoon(playback: MediaPlayback): boolean {
   return !Number.isFinite(expires) || expires - Date.now() <= REELS_TOKEN_REMINT_MARGIN_MS;
 }
 
-export function ReelsHost({ initial, lanes, canPost, labels }: ReelsHostProps) {
+export function ReelsHost({
+  initial,
+  lanes,
+  canPost,
+  locale,
+  tenantName,
+  onLike,
+  onUnlike,
+  comments,
+  labels,
+}: ReelsHostProps) {
   const toast = useToast();
 
   /* ── Lanes, lists and cursors ─────────────────────────────────────────────────────────────── */
@@ -233,7 +253,10 @@ export function ReelsHost({ initial, lanes, canPost, labels }: ReelsHostProps) {
 
   const [viewerPaused, setViewerPaused] = useState(false);
   const [documentHidden, setDocumentHidden] = useState(false);
-  const effectivePaused = viewerPaused || documentHidden;
+  /** THE post whose comments are open (UI-D-90), or null. The sheet is a pause source. */
+  const [sheetFor, setSheetFor] = useState<string | null>(null);
+  const sheetOpen = sheetFor !== null;
+  const effectivePaused = viewerPaused || documentHidden || sheetOpen;
 
   /* ── Per-page flags ───────────────────────────────────────────────────────────────────────── */
 
@@ -257,7 +280,8 @@ export function ReelsHost({ initial, lanes, canPost, labels }: ReelsHostProps) {
     currentId,
     viewerPaused,
     effectivePaused,
-    otherPaused: documentHidden,
+    documentHidden,
+    otherPaused: documentHidden || sheetOpen,
     blockedCurrent,
     failed,
   });
@@ -269,7 +293,8 @@ export function ReelsHost({ initial, lanes, canPost, labels }: ReelsHostProps) {
     currentId,
     viewerPaused,
     effectivePaused,
-    otherPaused: documentHidden,
+    documentHidden,
+    otherPaused: documentHidden || sheetOpen,
     blockedCurrent,
     failed,
   };
@@ -585,12 +610,56 @@ export function ReelsHost({ initial, lanes, canPost, labels }: ReelsHostProps) {
     if (next && !state.effectivePaused && !state.blockedCurrent) controller?.resume(true);
   }, []);
 
-  /** Per-page binders, registered by each page's overlay (Task 2). */
+  /** Per-page binders, registered by each page's overlay. */
   const binders = useRef(new Map<string, ReelBinder>());
+  const bind = useCallback((postId: string, binder: ReelBinder | null) => {
+    if (binder) binders.current.set(postId, binder);
+    else binders.current.delete(postId);
+  }, []);
   const onDoubleTap = useCallback(() => {
     const postId = latest.current.currentId;
     if (postId !== null) binders.current.get(postId)?.likeOnly();
   }, []);
+
+  /* ── Comments and share (UI-D-90, UI-D-91) ────────────────────────────────────────────────── */
+
+  const onComment = useCallback((postId: string) => {
+    pendingResume.current = null;
+    setSheetFor(postId);
+  }, []);
+
+  /**
+   * STABLE: `BottomSheet`'s focus trap re-arms whenever its `onClose` identity changes. Closing
+   * resumes inside the close gesture when nothing else holds the video (sound stays allowed).
+   */
+  const closeSheet = useCallback(() => {
+    const state = latest.current;
+    setSheetFor(null);
+    if (!state.viewerPaused && !state.documentHidden) {
+      suppressResume.current = true;
+      controllerIn(controllers.current, state.currentId)?.resume(soundOnRef.current);
+    }
+  }, []);
+
+  const onShare = useSharePost(tenantName, { copied: labels.copied, error: labels.generic });
+  const genericError = labels.generic;
+  const onLikeError = useCallback(() => {
+    toast.show({ tone: 'error', message: genericError });
+  }, [toast, genericError]);
+
+  const overlayLabels = useMemo<ReelOverlayLabels>(
+    () => ({
+      railAuthor: labels.railAuthor,
+      captionMore: labels.captionMore,
+      captionLess: labels.captionLess,
+      like: labels.like,
+      unlike: labels.unlike,
+      comment: labels.comment,
+      share: labels.share,
+      likes: labels.likes,
+    }),
+    [labels],
+  );
 
   /* ── Lanes ────────────────────────────────────────────────────────────────────────────────── */
 
@@ -697,7 +766,24 @@ export function ReelsHost({ initial, lanes, canPost, labels }: ReelsHostProps) {
     );
   };
 
-  const renderOverlay = (): ReactNode => null;
+  const renderOverlay = (item: ReelsPagerItem, state: { current: boolean }): ReactNode => {
+    const view = views.get(item.id);
+    if (!view) return null;
+    return (
+      <ReelOverlay
+        view={view}
+        current={state.current}
+        locale={locale}
+        labels={overlayLabels}
+        onLike={onLike}
+        onUnlike={onUnlike}
+        onComment={onComment}
+        onShare={onShare}
+        onError={onLikeError}
+        bind={bind}
+      />
+    );
+  };
 
   /* ── Render ───────────────────────────────────────────────────────────────────────────────── */
 
@@ -810,7 +896,7 @@ export function ReelsHost({ initial, lanes, canPost, labels }: ReelsHostProps) {
         onTogglePause={onTogglePause}
         onDoubleTap={onDoubleTap}
         onToggleSound={toggleSound}
-        gesturesDisabled={false}
+        gesturesDisabled={sheetOpen}
         instantKey={String(instantKey)}
         panelId={multiLane ? PANEL_ID : undefined}
         labelledBy={multiLane ? activeTabId : undefined}
@@ -826,10 +912,23 @@ export function ReelsHost({ initial, lanes, canPost, labels }: ReelsHostProps) {
   }
 
   return (
-    <ReelsStage label={labels.region}>
-      <div className="absolute inset-0" onTouchEnd={onTouchEnd}>
-        {body}
-      </div>
-    </ReelsStage>
+    <>
+      <ReelsStage label={labels.region}>
+        <div className="absolute inset-0" onTouchEnd={onTouchEnd}>
+          {body}
+        </div>
+      </ReelsStage>
+      {/* The feed's ONE sheet, threaded (D-59, D-62), OUTSIDE the stage's dark scope (UI-D-98). */}
+      <CommentSheet
+        {...comments}
+        open={sheetOpen}
+        onClose={closeSheet}
+        // `''` is only ever read while the sheet is closed, and the sheet then renders nothing.
+        targetId={sheetFor ?? ''}
+        onCountChange={(delta) => {
+          if (sheetFor !== null) binders.current.get(sheetFor)?.bumpComments(delta);
+        }}
+      />
+    </>
   );
 }
