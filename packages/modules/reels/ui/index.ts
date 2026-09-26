@@ -6,7 +6,10 @@
  * another `@tria/module-*` package (MOD-02, `turbo boundaries`).
  */
 
+export { compactCount } from './format';
+export { ReelCaption, type ReelCaptionProps } from './ReelCaption';
 export { ReelPlaybackError, type ReelPlaybackErrorProps } from './ReelPlaybackError';
+export { ReelRail, type ReelRailProps } from './ReelRail';
 export { type ReelsLane, ReelsLanes, type ReelsLanesProps } from './ReelsLanes';
 export {
   ReelsPager,

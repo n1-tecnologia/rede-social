@@ -20,7 +20,7 @@ afterEach(() => {
 describe('compactCount (REELS-07 precision edge, UI-D-87)', () => {
   // U+00A0 is Intl's own separator before "mil"/"mi"; spelled as an escape so no editor or
   // formatter can silently turn it into a plain space.
-  const NBSP = ' ';
+  const NBSP = '\u00a0';
   const cases: [number, string | null][] = [
     [0, null],
     [1, '1'],
@@ -43,7 +43,7 @@ describe('compactCount (REELS-07 precision edge, UI-D-87)', () => {
 
   it('the separator before "mil" is U+00A0, never a plain space', () => {
     const drawn = compactCount(8000, 'pt-BR');
-    expect(drawn).toContain(' ');
+    expect(drawn).toContain('\u00a0');
     expect(drawn).not.toContain(' ');
   });
 });
@@ -165,9 +165,10 @@ describe('ReelRail — the reserved count slots (UI-D-87)', () => {
   });
 
   it("likeCount '8 mil' is drawn, aria-hidden, in the rail's number style", () => {
-    const { container } = render(<ReelRail {...props({ likeCount: '8 mil' })} />);
+    const { container } = render(<ReelRail {...props({ likeCount: '8\u00a0mil' })} />);
     const like = slot(container, 'like');
-    expect(like).toHaveTextContent('8 mil');
+    // `toHaveTextContent` folds U+00A0 into a space; the raw text keeps Intl's separator.
+    expect(like.textContent).toBe('8\u00a0mil');
     expect(like).toHaveAttribute('aria-hidden', 'true');
     for (const cls of ['h-5', 'text-xs', 'font-bold', 'text-white', 'tabular-nums']) {
       expect(like.className).toContain(cls);

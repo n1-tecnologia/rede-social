@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReelCaption, type ReelCaptionProps } from '../ui/ReelCaption';
 
@@ -122,7 +122,13 @@ describe('ReelCaption — the measured two-line clamp (REELS-07 boundary, UI-D-8
   it('collapsed is line-clamp-2 with the caption style', () => {
     const { container } = render(<ReelCaption {...props()} />);
     const p = text(container) as HTMLElement;
-    for (const cls of ['line-clamp-2', 'whitespace-pre-wrap', 'break-words', 'text-sm', 'text-white']) {
+    for (const cls of [
+      'line-clamp-2',
+      'whitespace-pre-wrap',
+      'break-words',
+      'text-sm',
+      'text-white',
+    ]) {
       expect(p.className).toContain(cls);
     }
     expect(p.className).not.toContain('max-h-[40vh]');
@@ -178,7 +184,9 @@ describe('ReelCaption — the measured two-line clamp (REELS-07 boundary, UI-D-8
       expect(screen.queryByRole('button', { name: 'more-label' })).toBeNull();
       expect(observers.length).toBeGreaterThan(0);
       layout.scrollHeight = 60;
-      for (const o of observers) o.cb([], {} as ResizeObserver);
+      act(() => {
+        for (const o of observers) o.cb([], {} as ResizeObserver);
+      });
       expect(screen.getByRole('button', { name: 'more-label' })).toBeInTheDocument();
     } finally {
       vi.unstubAllGlobals();
@@ -249,9 +257,7 @@ describe('ReelCaption — expanded (UI-D-88, D-131)', () => {
         </a>
       </>
     );
-    const { rerender } = render(
-      <ReelCaption {...props({ onExpandedChange, children: body })} />,
-    );
+    const { rerender } = render(<ReelCaption {...props({ onExpandedChange, children: body })} />);
     fireEvent.click(screen.getByRole('link', { name: 'link-text' }));
     rerender(<ReelCaption {...props({ onExpandedChange, children: body, expanded: true })} />);
     fireEvent.click(screen.getByRole('link', { name: 'link-text' }));
@@ -283,7 +289,7 @@ describe('ReelCaption — expanded (UI-D-88, D-131)', () => {
 
 describe('ReelCaption — encoding (REELS-07 encoding edge)', () => {
   it('renders the full text of a caption with emoji, a ZWJ family, a flag and a combining mark', () => {
-    const caption = 'Oi 👩‍👩‍👧‍👦 café 🇧🇷 ✨'.repeat(20);
+    const caption = 'Oi 👩‍👩‍👧‍👦 cafe\u0301 🇧🇷 ✨'.repeat(20);
     layout.scrollHeight = 200;
     const { container } = render(<ReelCaption {...props({ children: caption })} />);
     expect(text(container)?.textContent?.startsWith(caption)).toBe(true);
