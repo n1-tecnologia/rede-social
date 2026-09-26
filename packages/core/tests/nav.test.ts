@@ -1,6 +1,7 @@
 import { Bell, LayoutGrid } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 import {
+  activeTabChrome,
   activeTabKey,
   buildNav,
   iconFor,
@@ -99,6 +100,50 @@ describe('active state (longest match, ties to the first tab)', () => {
     expect(activeTabKey(tabs, '/eventos/123')).toBe('events');
     expect(activeTabKey(tabs, '/perfil')).toBe('profile');
     expect(activeTabKey(tabs, '/configuracoes')).toBeNull();
+  });
+});
+
+describe('media chrome (UI-D-81: declared by the nav entry, never a pathname in the kernel)', () => {
+  const withReels: NavModule[] = [
+    ...modules,
+    {
+      key: 'reels',
+      nav: {
+        order: 30,
+        placement: 'tab',
+        href: '/reels',
+        icon: 'film',
+        label: 'Reels',
+        chrome: 'media',
+      },
+    },
+  ];
+
+  it('UI-D-81: an entry declaring chrome media yields a tab carrying it; others carry no chrome key', () => {
+    const nav = buildNav(withReels, labels);
+    expect(nav.tabs.find((t) => t.key === 'reels')?.chrome).toBe('media');
+    for (const tab of nav.tabs.filter((t) => t.key !== 'reels')) {
+      expect(Object.hasOwn(tab, 'chrome'), tab.key).toBe(false);
+    }
+    expect(nav.topbar.every((t) => !Object.hasOwn(t, 'chrome'))).toBe(true);
+  });
+
+  it('UI-D-81: activeTabKey selects the media tab on its path and its sub-paths', () => {
+    const { tabs } = buildNav(withReels, labels);
+    expect(activeTabKey(tabs, '/reels')).toBe('reels');
+    expect(activeTabKey(tabs, '/reels/abc')).toBe('reels');
+    expect(activeTabKey(tabs, '/reels-antigos')).toBeNull();
+  });
+
+  it('UI-D-81: activeTabChrome is media only while the media tab is active', () => {
+    const { tabs } = buildNav(withReels, labels);
+    expect(activeTabChrome(tabs, '/reels')).toBe('media');
+    expect(activeTabChrome(tabs, '/reels/abc')).toBe('media');
+    expect(activeTabChrome(tabs, '/inicio')).toBeNull();
+    expect(activeTabChrome(tabs, '/eventos/123')).toBeNull();
+    expect(activeTabChrome(tabs, '/configuracoes')).toBeNull();
+    // A nav with no media entry never asks for the media chrome.
+    expect(activeTabChrome(buildNav(modules, labels).tabs, '/reels')).toBeNull();
   });
 });
 

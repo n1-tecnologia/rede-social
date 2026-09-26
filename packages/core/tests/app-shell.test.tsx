@@ -1,11 +1,17 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell, buildNav, HomeSlots, type NavLabels, type NavModule } from '../ui';
 
 // The shell reads the route from Next's app router; outside Next the hook returns nothing useful.
-vi.mock('next/navigation', () => ({ usePathname: () => '/inicio' }));
+// The pathname is a hoisted variable each case may set (the mock itself stays top-level — Vitest 5).
+const route = vi.hoisted(() => ({ pathname: '/inicio' }));
+vi.mock('next/navigation', () => ({ usePathname: () => route.pathname }));
+
+beforeEach(() => {
+  route.pathname = '/inicio';
+});
 
 afterEach(() => {
   cleanup();
@@ -123,6 +129,79 @@ describe('AppShell (UI-03, D-39, D-26)', () => {
       '/configuracoes',
     );
     expect(screen.getByRole('button', { name: 'Sair' })).toBeInTheDocument();
+  });
+});
+
+describe('media chrome (UI-D-81, REELS-02)', () => {
+  const mediaNav = buildNav(
+    [
+      {
+        key: 'communities',
+        nav: { label: 'Comunidades', icon: 'users', href: '/comunidades', order: 20 },
+      },
+      {
+        key: 'reels',
+        nav: { label: 'Reels', icon: 'film', href: '/reels', order: 30, chrome: 'media' },
+      },
+    ],
+    labels,
+  );
+  const plainNav = buildNav(
+    [
+      {
+        key: 'communities',
+        nav: { label: 'Comunidades', icon: 'users', href: '/comunidades', order: 20 },
+      },
+    ],
+    labels,
+  );
+
+  it('REELS-02/populated: on the media tab the mobile TopBar is not rendered and the BottomNav is dark', () => {
+    route.pathname = '/reels';
+    const { container } = render(shell({ nav: mediaNav }));
+    expect(container.querySelector('header')).toBeNull();
+    const bottom = container.querySelector('[data-shell-nav="bottom"]');
+    expect(bottom?.getAttribute('data-theme')).toBe('dark');
+    // Geometry and breakpoint unchanged; the Reels chip is the current tab.
+    expect(bottom?.className).toContain('glass-bar');
+    expect(bottom?.className).toContain('md:hidden');
+    expect(
+      [...(bottom?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('aria-label')),
+    ).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
+    expect(bottom?.querySelector('a[aria-current="page"]')?.getAttribute('aria-label')).toBe(
+      'Reels',
+    );
+    // T-05.3-09: the desktop rail keeps the tenant identity on the media tab too.
+    expect(container.querySelector('[data-shell-nav="rail"]')).not.toBeNull();
+    expect(screen.getAllByText('Associação São José')).toHaveLength(1);
+  });
+
+  it('REELS-02/sub-path: a media tab sub-path keeps the media chrome', () => {
+    route.pathname = '/reels/abc';
+    const { container } = render(shell({ nav: mediaNav }));
+    expect(container.querySelector('header')).toBeNull();
+    expect(container.querySelector('[data-shell-nav="bottom"]')?.getAttribute('data-theme')).toBe(
+      'dark',
+    );
+  });
+
+  it('T-05.3-09: off the media tab (same nav, /inicio) the TopBar renders and the BottomNav has no data-theme', () => {
+    route.pathname = '/inicio';
+    const { container } = render(shell({ nav: mediaNav }));
+    expect(container.querySelectorAll('header')).toHaveLength(1);
+    expect(container.querySelector('[data-shell-nav="bottom"]')?.hasAttribute('data-theme')).toBe(
+      false,
+    );
+    expect(screen.getAllByText('Associação São José')).toHaveLength(2);
+  });
+
+  it('a nav without any media entry renders as before on /comunidades (TopBar present, no data-theme)', () => {
+    route.pathname = '/comunidades';
+    const { container } = render(shell({ nav: plainNav }));
+    expect(container.querySelectorAll('header')).toHaveLength(1);
+    expect(container.querySelector('[data-shell-nav="bottom"]')?.hasAttribute('data-theme')).toBe(
+      false,
+    );
   });
 });
 
