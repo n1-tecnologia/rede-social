@@ -685,30 +685,29 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     expect(controlBody.coverAssetId).toBe(assets.demoCover);
   });
 
-  it("b6. born attached: a demo admin cannot publish a story into the lab's community (05.1-01, D-99)", async () => {
-    // `POST /v1/stories` now takes a client-supplied `communityId` and writes a pin row in the SAME
-    // transaction as the story. A foreign id must neither persist nor be distinguishable from an id
-    // that names nothing: the demo lane's lookup carries the tenant predicate, so a lab community
-    // produces no row to refuse — the same bare 404 an unknown uuid gets (D-23, T-05.1-02).
+  it("b6. born in a highlight: a demo admin cannot publish a story into the lab's highlight (05.2-11, D-113; was 05.1-01's born-attached pin)", async () => {
+    // `POST /v1/stories` takes a client-supplied `highlightId` and writes the story AND its item row
+    // in the SAME transaction. A foreign id must neither persist nor be distinguishable from an id
+    // that names nothing: the demo lane resolves the highlight with the tenant predicate under RLS,
+    // so a lab highlight produces no row to refuse — the same bare 404 an unknown uuid gets (D-23).
     //
-    // The lab's communities exist in the seed even though its `stories` flag is off; what is under
-    // test is the DEMO lane's lookup, not anything the lab can do.
+    // 05.2-11 retired the pin model, and with it 05.1's `communityId` destination this case used to
+    // probe; the one publish-time destination that remains is the highlight, so the case probes it.
     const [labRow] = await adminSql<{ id: string }[]>`
-      select id from public.communities
-       where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null
-       limit 1`;
+      select id from public.story_highlights
+       where tenant_id = ${tenantIds.lab}::uuid and community_id is null and title = 'Bastidores'`;
     const [demoRow] = await adminSql<{ id: string }[]>`
-      select id from public.communities
-       where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and status = 'active'
-       limit 1`;
-    const labCommunity = labRow?.id ?? '';
-    const demoCommunity = demoRow?.id ?? '';
-    expect([labCommunity, demoCommunity].every(Boolean)).toBe(true);
+      select id from public.story_highlights
+       where tenant_id = ${tenantIds.demo}::uuid and community_id is null and title = 'Bastidores'`;
+    const labHighlight = labRow?.id ?? '';
+    const demoHighlight = demoRow?.id ?? '';
+    // The SEEDED highlights are the fixture — a missing one means the seed is stale.
+    expect([labHighlight, demoHighlight].every(Boolean)).toBe(true);
 
     const assetId = await seedStoryImage(tenantIds.demo, 'admin@tria-demo.local');
-    const caption = `Isolamento 05.1 ${RUN}`;
-    const controlCaption = `Isolamento 05.1 controle ${RUN}`;
-    const publish = (communityId: string, text: string) =>
+    const caption = `Isolamento 05.2 ${RUN}`;
+    const controlCaption = `Isolamento 05.2 controle ${RUN}`;
+    const publish = (highlightId: string, text: string) =>
       api.request('/v1/stories', {
         method: 'POST',
         headers: {
@@ -720,44 +719,44 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
           mediaAssetId: assetId,
           mediaKind: 'image',
           caption: text,
-          communityId,
+          highlightId,
         }),
       });
-    const labPins = async () => {
+    const labItems = async () => {
       const [row] = await adminSql<{ n: number }[]>`
-        select count(*)::int as n from public.story_community_pins
-         where community_id = ${labCommunity}::uuid`;
+        select count(*)::int as n from public.story_highlight_items
+         where highlight_id = ${labHighlight}::uuid`;
       return row?.n ?? 0;
     };
 
     try {
-      const pinsBefore = await labPins();
+      const itemsBefore = await labItems();
 
-      const res = await publish(labCommunity, caption);
+      const res = await publish(labHighlight, caption);
       expect(res.status).toBe(404);
       const text = await res.text();
       const body = JSON.parse(text) as Envelope;
       expect(body.error.code).toBe('NOT_FOUND');
       // No `details` key at all — the absence IS the existence-oracle control.
       expect(Object.hasOwn(body.error, 'details')).toBe(false);
-      for (const needle of ['tria-lab', tenantIds.lab, labCommunity]) {
+      for (const needle of ['tria-lab', tenantIds.lab, labHighlight]) {
         expect(text).not.toContain(needle);
       }
 
-      // Nothing was written on either side: no demo story with that caption, no new lab pin.
+      // Nothing was written on either side: no demo story with that caption, no new lab item.
       const [written] = await adminSql<{ n: number }[]>`
         select count(*)::int as n from public.stories where caption = ${caption}`;
       expect(written?.n).toBe(0);
-      expect(await labPins()).toBe(pinsBefore);
+      expect(await labItems()).toBe(itemsBefore);
 
-      // Positive control (T-03-56) IN THE SAME TEST: the identical publish naming a community this
+      // Positive control (T-03-56) IN THE SAME TEST: the identical publish naming a highlight this
       // lane CAN see succeeds, so the 404 above is isolation rather than a broken route.
-      const control = await publish(demoCommunity, controlCaption);
+      const control = await publish(demoHighlight, controlCaption);
       expect(control.status).toBe(201);
-      const story = (await control.json()) as { id: string; pinnedCommunityCount: number };
-      expect(story.pinnedCommunityCount).toBe(1);
+      const story = (await control.json()) as { id: string; highlightCount: number };
+      expect(story.highlightCount).toBe(1);
     } finally {
-      // The stories go before the asset they point at; their pin rows cascade with them.
+      // The stories go before the asset they point at; their item rows cascade with them.
       await adminSql`
         delete from public.stories where caption in (${caption}, ${controlCaption})`;
     }

@@ -3199,6 +3199,126 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     expect(strip.find((story) => story.id === live.storyId)?.viewerSeen).toBe(true);
     expect(strip.some((story) => story.id === expired.storyId)).toBe(false);
   });
+
+  /* ── 05.2-11: the pin model is retired (HIGHLIGHT-05, D-116, roadmap criteria 4 and 5) ─────── */
+
+  it('05.2-28 the retired pin API is gone: a publish naming `communityId` is 400 and writes nothing; every pin route is a 404', async () => {
+    const community = await makeHighlightCommunity('Destino aposentado');
+
+    // A stale client (a PWA cached before 05.2-08) still sends 05.1's `communityId`. The contract
+    // is `.strict()`, so the retired key is an unknown key: a plain VALIDATION_FAILED, no story.
+    const before = curationEvents.length;
+    const { res, caption } = await publishInto('destino aposentado', { communityId: community });
+    expect(res.status).toBe(400);
+    const body = await envelope(res);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(Object.hasOwn(body.error.details ?? {}, 'pin')).toBe(false);
+    expect(await captionCount(caption)).toBe(0);
+    expect(publishEventsSince(before)).toHaveLength(0);
+
+    // Every retired pin route answers 404 — never a 500 on a relation that no longer exists.
+    const { storyId } = await publishImage('rota aposentada');
+    for (const [method, path] of [
+      ['PUT', `/v1/stories/${storyId}/pins/${community}`],
+      ['DELETE', `/v1/stories/${storyId}/pins/${community}`],
+      ['GET', `/v1/stories/${storyId}/pins`],
+      ['GET', `/v1/stories/pinned?communityId=${community}`],
+    ] as const) {
+      const retired = await request(path, tokens.demoAdmin, {
+        method,
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      expect(retired.status, `${method} ${path}`).toBe(404);
+    }
+
+    // Nothing was curated anywhere by any of it: the community has no highlight, the story none.
+    expect(await row(tokens.demoAdmin, `?scope=all&communityId=${community}`)).toEqual([]);
+    const story = await request(`/v1/stories/${storyId}`, tokens.demoAdmin, {
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(((await story.json()) as StorySummary).highlightCount).toBe(0);
+  });
+
+  it('05.2-29 the pin invariants live on in highlights: a repeat add announces nothing, a removed story leaves every highlight at once, two identical publishes are two items, and no client value widens a row', async () => {
+    const home = await create(tokens.demoAdmin, { title: 'Teste Gemeo A' });
+    const community = await makeHighlightCommunity('Destaque gemeo');
+    const inCommunity = await create(tokens.demoAdmin, {
+      communityId: community,
+      title: 'Teste Gemeo B',
+    });
+    const { storyId } = await publishImage('gemeo');
+
+    // Transitions, not requests (the retired pin case 37): two adds, ONE `story.highlighted`.
+    const before = curationEvents.length;
+    expect((await addItem(tokens.demoAdmin, home.id, storyId)).status).toBe(200);
+    expect((await addItem(tokens.demoAdmin, home.id, storyId)).status).toBe(200);
+    const highlighted = curationEvents
+      .slice(before)
+      .filter((event) => event.name === 'story.highlighted');
+    expect(highlighted).toHaveLength(1);
+    expect(Object.keys(highlighted[0]?.payload ?? {}).sort()).toEqual([
+      'actorUserId',
+      'highlightId',
+      'storyId',
+      'tenantId',
+    ]);
+    expect((await addItem(tokens.demoAdmin, inCommunity.id, storyId)).status).toBe(200);
+
+    // T-05-52 carried: soft-deleting the story removes it from EVERY highlight read at once, and
+    // the item rows stay as the record of where it had been.
+    const removed = await request(`/v1/stories/${storyId}`, tokens.demoAdmin, {
+      method: 'DELETE',
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(removed.status).toBe(204);
+    for (const highlight of [home, inCommunity]) {
+      const res = await hlRequest(tokens.demoAdmin, `/${highlight.id}`);
+      // Curator read: an emptied highlight still answers, and never lists the removed story.
+      if (res.status === 200) {
+        const detail = highlightDetailSchema.parse(await res.json());
+        expect(detail.items.map((item) => item.id)).not.toContain(storyId);
+      } else {
+        expect(res.status).toBe(404);
+      }
+      expect(await itemRows(highlight.id, storyId)).toBe(1);
+    }
+    expect((await row(tokens.demoMember)).some((item) => item.id === home.id)).toBe(false);
+
+    // D-96 and no idempotency (05.1-8 carried): the same publish into one highlight twice is two
+    // stories and two items — and both are in the strip too.
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const twice = {
+      mediaAssetId: assetId,
+      mediaKind: 'image',
+      caption: `${TEST_CAPTION_PREFIX} — publicada duas vezes ${randomUUID()}`,
+      highlightId: inCommunity.id,
+    };
+    const first = await publish(tokens.demoAdmin, twice);
+    const second = await publish(tokens.demoAdmin, twice);
+    expect([first.status, second.status]).toEqual([201, 201]);
+    const a = (await first.json()) as StorySummary;
+    const b = (await second.json()) as StorySummary;
+    created.push(a.id, b.id);
+    expect(a.id).not.toBe(b.id);
+    const items = highlightDetailSchema
+      .parse(await (await hlRequest(tokens.demoMember, `/${inCommunity.id}`)).json())
+      .items.map((item) => item.id);
+    expect(items).toContain(a.id);
+    expect(items).toContain(b.id);
+    const strip = (await walk(tokens.demoMember, '/v1/stories', STORY_MAX_PAGE_SIZE)).map(
+      (item) => item.id,
+    );
+    expect(strip).toContain(a.id);
+    expect(strip).toContain(b.id);
+
+    // T-05-53 carried: the highlight read takes no `limit`/`cursor` at all (a place is bounded by
+    // STORY_HIGHLIGHT_MAX_PER_PLACE), so a hand-edited one is refused, never a widened read.
+    for (const query of ['?limit=100000', `?cursor=${encodeURIComponent("' or 1=1--")}`]) {
+      const res = await hlRequest(tokens.demoMember, query);
+      expect(res.status, query).toBe(400);
+      expect((await envelope(res)).error.code, query).toBe('VALIDATION_FAILED');
+    }
+  });
 });
 
 describe('MOD-04 / UI-D-25 — the module flag governs the routes in both directions', () => {
