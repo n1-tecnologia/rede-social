@@ -22,7 +22,8 @@
       "communities": "Comunidades",
       "events": "Eventos",
       "chat": "Chat de suporte",
-      "notifications": "Notificações"
+      "notifications": "Notificações",
+      "reels": "Reels"
     },
     "moduleDescriptions": {
       "feed": "Publicações do administrador na tela inicial",
@@ -30,7 +31,8 @@
       "communities": "Grupos temáticos com discussões",
       "events": "Agenda com confirmação de presença e check-in",
       "chat": "Conversa dos membros com a equipe de suporte",
-      "notifications": "Alertas no app e notificações push"
+      "notifications": "Alertas no app e notificações push",
+      "reels": "Vídeos do feed em tela cheia (requer o Feed)"
     },
     "list": {
       "title": "Tenants",

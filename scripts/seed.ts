@@ -179,8 +179,11 @@ const SEED_TENANTS: SeedTenant[] = [
     displayName: 'TRIA Lab',
     rulesText: 'Regras da comunidade TRIA Lab: ambiente de testes de isolamento entre tenants.',
     host: LAB_HOST,
-    // D-17: only feed + events, so the isolation suite exercises the disabled-module 404 from Phase 1.
-    modules: ['feed', 'events'],
+    // D-17: feed + events, so the isolation suite exercises the disabled-module 404 from Phase 1 —
+    // lab keeps `communities`, `chat` and `notifications` OFF for that role. 05.3-01 adds `reels`,
+    // which rides along because it is on by default for every real tenant (D-122); it contributes
+    // only while `feed` is on (D-121). No Reels content is seeded (05.3 planning decision 4).
+    modules: ['feed', 'events', 'reels'],
     colors: { primary: '#0f766e', secondary: '#14b8a6' },
     logoUrl: '/seed-logos/tria-lab.svg',
     members: [
