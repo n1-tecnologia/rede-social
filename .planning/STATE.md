@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "05.2"
 current_phase_name: Story Highlights
 status: executing
-stopped_at: Completed 05.2-09-PLAN.md
-last_updated: "2026-09-26T00:22:44.436Z"
+stopped_at: Completed 05.2-10-PLAN.md
+last_updated: "2026-09-26T01:25:44.486Z"
 last_activity: 2026-09-26
-last_activity_desc: "Completed 05.2-09 (the highlight manage screen: Gerenciar and dashed empty highlights in both rows, /stories/destaques and /comunidades/[id]/destaques with create, rename, cover, keyboard/drag/button reorder, Adicionar stories and delete)"
-state_head: b58bbe6e6c6fea8d2b0dc1d26950aa7e74d1cf50
+last_activity_desc: "Completed 05.2-10 (the seen ring: story_views + POST /v1/stories/views + viewerSeen in the one strip statement; the tenant circle wears the brand ring and 'Há stories novos.' while anything is unseen, greys on close and resumes at the first unseen story)"
+state_head: c3028d29e728549c26c84e8780b54d3b8d2caa79
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 88
-  completed_plans: 73
+  completed_plans: 74
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 05.2 (Story Highlights) — EXECUTING
-Plan: 10 of 12
-Status: Executing Phase 05.2 — next is 05.2-10
-Last activity: 2026-09-26 — Completed 05.2-09 (HighlightManageList + HighlightEditSheet in the module; six curation actions; the two manage routes and the HighlightManager island; Gerenciar and dashed empty highlights for curators in both rows; stories/comunidades/phase5-smoke e2e 122 passed on :3100)
+Plan: 11 of 12
+Status: Executing Phase 05.2 — next is 05.2-11 (opens with a blocking-human checkpoint)
+Last activity: 2026-09-26 — Completed 05.2-10 (story_views with RLS and story_views_uq; POST /v1/stories/views, 204 always, in-lane insert-select; viewerSeen as a constant-tenant exists in storyProjection; StoriesSurface session seen set and buffered flush; seen ring, accessible name and resume index; pgTAP 349, integration 529, stories e2e 60 + comunidades/smoke 55 passed on :3100)
 
-Progress: [█████████████████░░░] 73/88 plans ([░░░░░░░░░░] 0%)
+Progress: [█████████████████░░░] 74/88 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -133,6 +133,7 @@ Progress: [█████████████████░░░] 73/88 p
 | Phase 05.2 P07 | 12 min | 2 tasks | 16 files |
 | Phase 05.2 P08 | 31 min | 3 tasks | 16 files |
 | Phase 05.2 P09 | 31 min | 3 tasks | 23 files |
+| Phase 05.2 P10 | 58 min | 3 tasks | 32 files |
 
 ## Accumulated Context
 
@@ -406,6 +407,10 @@ Recent decisions affecting current work:
 - [Phase 05.2]: 05.2-09: isCover reads the resolved cover ASSET, not coverStoryId, so the Capa pill is right under the automatic rule and marks nothing for an uploaded cover
 - [Phase 05.2]: 05.2-09: the manage circle crosses the server/client boundary as a serialisable manage disc; StoriesSurface draws it as the Pencil glyph
 - [Phase 05.2]: 05.2-09: empty highlights and Gerenciar are built by shared helpers (highlightRowCircles) for both rows; only highlights with a member-visible story are viewer groups
+- [Phase 05.2]: 05.2-10: StoryViewer.onSegmentShown also reports the group key (a story can sit in two groups), so StoriesSurface flushes its seen buffer on a real group change
+- [Phase 05.2]: 05.2-10: the seen ring is re-derived from the session set snapshotted at each close; the resume index uses the live session set at each open; both via one pure tenantSeenState shared with the server render
+- [Phase 05.2]: 05.2-10: viewer_seen filters story_views with a CONSTANT tenant predicate (ctx.tenantId) so the planner probes story_views_uq; the pgTAP EXPLAIN pin reads a TEXT plan so the no-Seq-Scan check is falsifiable
+- [Phase 05.2]: 05.2-10: viewing is now a write, so every e2e case that depends on where the tenant circle opens pins the demo logins' seen state first (setStoryViews) and the spec restores the seed's afterwards
 
 ### Pending Todos
 
@@ -459,6 +464,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-26T00:22:24.920Z
-Stopped at: Completed 05.2-09-PLAN.md
+Last session: 2026-09-26T01:25:27.700Z
+Stopped at: Completed 05.2-10-PLAN.md
 Resume file: None
