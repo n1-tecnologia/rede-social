@@ -20,14 +20,17 @@ import type {
   LinkPreview,
   LinkPreviewProvider,
   LinkPreviewStatus,
+  PostCommunity,
   PostMediaItem,
   RepliesQuery,
   UpdatePost,
+  VideoCommunities,
 } from '../contracts/index';
 import {
   FEED_MAX_ATTACHMENTS,
   FEED_MAX_IMAGES,
   FEED_UNFURL_QUEUE,
+  FEED_VIDEO_COMMUNITIES_CAP,
   firstUrlIn,
 } from '../contracts/index';
 import { feedPosts } from '../db/schema';
@@ -456,6 +459,74 @@ export async function listCommunityFeed(
   );
 
   return page;
+}
+
+/**
+ * `GET /v1/feed/video-communities` (REELS-04, D-117, D-119, D-120) — the communities worth a Reels
+ * lane: the tenant's ACTIVE, not-deleted communities holding at least one post `?media=video` would
+ * list, newest activity first, at most `FEED_VIDEO_COMMUNITIES_CAP`, in ONE statement.
+ *
+ * **No lane is ever empty (RESEARCH Pitfall 7).** The `exists` below appends `READY_VIDEO_POST` —
+ * the SAME fragment `mediaPredicate` gives the list — to the same `deleted_at is null` +
+ * `community_id` equality `listCommunityFeed` pages on. The two cannot drift: there is one fragment,
+ * and a lane is named only when the page it opens has a first item.
+ *
+ * **Which communities.** `c.status = 'active'` is a LITERAL, never a bound parameter, so it is
+ * provably implied by `communities_tenant_activity_idx`'s partial predicate (`status = 'active' and
+ * deleted_at is null`) — the communities list's own lesson — and an archived or removed community can
+ * never be named here, whatever videos it holds (T-05.3-07). The order is `last_activity_at desc,
+ * id desc`, exactly the Comunidades list's active ordering (D-76), which that index carries.
+ *
+ * **The tenant predicate is a CONSTANT on BOTH sides of the `exists`** (`${ctx.tenantId}`), never
+ * the correlated `p.tenant_id = c.tenant_id`. RLS already scopes both tables; the constant is what
+ * lets the planner walk `feed_posts_tenant_community_created_idx (tenant_id, community_id, …)` for
+ * each community — 05.2 measured the correlated form as a Seq Scan (the stories projection's
+ * docblock), and pgTAP 130 pins "no Seq Scan on feed_posts" for this statement on a volume fixture.
+ * It is also the explicit defence against naming another tenant's community (T-05.3-06).
+ *
+ * **Communities off (D-120): an honest `{ items: [] }`**, never a 404 — the lane row simply hides.
+ * The flag is read BEFORE the transaction opens (05.2's one-connection rule: `moduleFlags` may read
+ * `tenant_modules` on a cache miss, and that read must not hold a second connection inside the
+ * tenant transaction). The read takes no parameter (D-117: lanes are communities, never tags).
+ */
+export async function listVideoCommunities(ctx: RequestContext): Promise<VideoCommunities> {
+  const communitiesEnabled = await moduleFlags.isEnabled(ctx, 'communities');
+
+  const items = communitiesEnabled
+    ? await withTenantTx(ctx, (tx) =>
+        tx.execute<PostCommunity>(sql`
+      select c.id, c.name, c.slug
+        from public.communities c
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.deleted_at is null
+         and c.status = 'active'
+         and exists (
+           select 1
+             from public.feed_posts p
+            where p.tenant_id = ${ctx.tenantId}::uuid
+              and p.community_id = c.id
+              and p.deleted_at is null
+              ${READY_VIDEO_POST})
+       order by c.last_activity_at desc, c.id desc
+       limit ${FEED_VIDEO_COMMUNITIES_CAP}`),
+      )
+    : [];
+
+  // The SHAPE of the read — ids and counts. A community NAME is member-facing content and never
+  // reaches a log line (T-05-06).
+  log.info(
+    {
+      event: 'feed.video_communities',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      returned: items.length,
+      communitiesEnabled,
+    },
+    'video communities listed',
+  );
+
+  return { items: items.map((row) => ({ id: row.id, name: row.name, slug: row.slug })) };
 }
 
 /**

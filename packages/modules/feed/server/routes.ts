@@ -18,6 +18,7 @@ import {
   likeResultSchema,
   repliesQuerySchema,
   updatePostSchema,
+  videoCommunitiesSchema,
 } from '../contracts/index';
 import {
   createComment,
@@ -30,6 +31,7 @@ import {
   listCommunityFeed,
   listFeed,
   listReplies,
+  listVideoCommunities,
   softDeletePost,
   unlikeComment,
   unlikePost,
@@ -97,6 +99,24 @@ const listRoute = createRoute({
     404: {
       description:
         "`communityId` names no community visible to this tenant — unknown, another tenant's, removed, or the tenant does not have the `communities` module. One bare code, no details (D-23).",
+    },
+  },
+});
+
+/**
+ * REELS-04's lanes read (D-119). A sibling path rather than a `listRoute` parameter because it is
+ * not a page of posts: no cursor, a different item shape, and a different empty answer (200 `[]`
+ * with communities off, where the community page answers 404). It inherits the file's
+ * `requireAuth, requireModule('feed')` guard, so with feed off it is the same 404 as every feed route.
+ */
+const videoCommunitiesRoute = createRoute({
+  method: 'get',
+  path: '/video-communities',
+  responses: {
+    200: {
+      description:
+        "The communities worth a Reels lane (D-117, D-119): this tenant's ACTIVE, not-removed communities holding at least one post whose video is `ready` — the same predicate `GET /v1/feed?media=video&communityId=` pages on, so every lane opens with at least one item. Ordered `last_activity_at desc, id desc` (D-76, the Comunidades list's own order), at most 50 rows. Takes no parameter.\n\nWhen the tenant does not have the `communities` module the answer is `{ items: [] }` — 200, never 404 — so the lane row simply hides (D-120).",
+      content: { 'application/json': { schema: videoCommunitiesSchema } },
     },
   },
 });
@@ -335,6 +355,9 @@ export const feedRoutes = feed
       : await listFeed(ctx, query);
     return c.json(page, 200);
   })
+  .openapi(videoCommunitiesRoute, async (c) =>
+    c.json(await listVideoCommunities(c.get('ctx')), 200),
+  )
   .openapi(getPostRoute, async (c) => {
     const { postId } = c.req.valid('param');
     return c.json(await getPost(c.get('ctx'), postId), 200);
