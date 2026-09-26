@@ -485,6 +485,40 @@ export const feedPageSchema = z
 export type FeedPage = z.infer<typeof feedPageSchema>;
 
 /**
+ * The most rows `GET /v1/feed/video-communities` answers (D-119). The Reels lane row SCROLLS
+ * (UI-D-84), so this cap bounds the READ — one statement, one bounded index walk (T-05.3-08) — and
+ * never the product: a tenant with more than fifty communities holding videos sees the fifty with
+ * the most recent activity, in the Comunidades list's own order.
+ */
+export const FEED_VIDEO_COMMUNITIES_CAP = 50;
+
+/**
+ * `GET /v1/feed/video-communities` (REELS-04, D-117, D-119, D-120) — the communities worth a Reels
+ * lane, as feed's own published contract. Its one reader is Reels (`@tria/module-reels`, D-121),
+ * which owns no route and so reads the lanes here, beside the list they open.
+ *
+ * - **Lanes are communities, never tags (D-117).** The read takes no parameter: no composer field
+ *   and no per-tenant tag list stands behind a lane.
+ * - **Which communities (D-119):** the tenant's `active`, not-deleted communities that hold at least
+ *   one post the `?media=video` list would show — the SAME ready-video fragment the list uses, so a
+ *   lane can never open empty (RESEARCH Pitfall 7). An archived community and a community whose only
+ *   videos are still transcoding are absent.
+ * - **Order (D-76):** `last_activity_at desc, id desc` — exactly the Comunidades list's active
+ *   ordering, so the lane row reads in the order the member already knows.
+ * - **Communities off (D-120):** the answer is an honest `{ items: [] }` (200, never 404), so the
+ *   lane row simply hides; a tenant without the module has no community to name.
+ *
+ * Each item is `postCommunitySchema` — the same `{ id, name, slug }` label a post carries, and
+ * `.strict()` for the same reason: a lane is a name and a route, never a second community card.
+ */
+export const videoCommunitiesSchema = z
+  .object({
+    items: z.array(postCommunitySchema),
+  })
+  .strict();
+export type VideoCommunities = z.infer<typeof videoCommunitiesSchema>;
+
+/**
  * FEED-08 in one value: who may publish is `tenant_modules['feed'].settings.postingPolicy`, never a
  * column, never a role hard-coded into a route. V2 member posting is
  * `update tenant_modules set settings = settings || '{"postingPolicy":"members"}'` and nothing else.
