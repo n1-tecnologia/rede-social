@@ -161,9 +161,11 @@ export interface StoryViewerProps {
   /**
    * Fired ONCE each time a segment becomes the current one and its media is ready (image `onLoad`,
    * video `onCanPlay`) — never on mount and never for a pre-mounted neighbour. Plan 05.2-10's seen
-   * state consumes it.
+   * state consumes it. The second argument is the key of the GROUP the segment was shown in: the
+   * same story may sit in two groups, so the id alone cannot tell the host that the member moved to
+   * another circle (the seen buffer flushes on a group change).
    */
-  onSegmentShown?: (storyId: string) => void;
+  onSegmentShown?: (storyId: string, groupKey: string) => void;
   labels: StoryViewerLabels;
   onClose: () => void;
   /**
@@ -483,11 +485,12 @@ export function StoryViewer({
    */
   const showing = `${pos.serial}|${currentKey}`;
   const shownRef = useRef<string | null>(null);
+  const shownGroupKey = group?.key ?? '';
   useEffect(() => {
     if (!current || currentState !== 'ready' || shownRef.current === showing) return;
     shownRef.current = showing;
-    onSegmentShownRef.current?.(current.id);
-  }, [showing, current, currentState]);
+    onSegmentShownRef.current?.(current.id, shownGroupKey);
+  }, [showing, current, currentState, shownGroupKey]);
 
   /** White status-bar ink over the media, REMOVED on unmount — the prototype's own hook. */
   useEffect(() => {

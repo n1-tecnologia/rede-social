@@ -8,12 +8,18 @@ import {
 import { Pencil } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadHighlightItemsAction } from '@/app/(app)/stories/highlight-actions';
-import type { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
-import type {
-  RowCircleView,
-  StoryGroupView,
-  StoryViewerItemView,
-  StoryViewerLabelsView,
+import {
+  type likeStoryAction,
+  markStoriesSeenAction,
+  type unlikeStoryAction,
+} from '@/app/(app)/stories/story-actions';
+import {
+  type RowCircleView,
+  type StoryGroupView,
+  type StoryViewerItemView,
+  type StoryViewerLabelsView,
+  tenantSeenDecoration,
+  tenantSeenState,
 } from '@/lib/story-view';
 import {
   type StoryCommentsBinding,
@@ -46,6 +52,20 @@ import {
  * to. Opening a group of the TENANT's stories pushes `/stories/{id}` of the story it opens on;
  * opening a HIGHLIGHT pushes the current URL unchanged, so back still closes and a refresh never
  * lands on a route that cannot rebuild the row (05.2-05 planning decision 3).
+ *
+ * **The seen state lives here for the page's life** (05.2-10: HIGHLIGHT-06, D-105, R-P5). The
+ * viewer reports every segment it SHOWED (`onSegmentShown`: current, media ready — never mount). This
+ * shell keeps two things:
+ *  - a SESSION seen set, so closing the viewer re-derives the tenant circle's ring, name and resume
+ *    index from the server's `seen` flags PLUS what was just watched — it greys the moment the last
+ *    unseen story was shown, with no refresh (UI-D-61). Opening the circle resumes at the first
+ *    unseen story (D-105), recomputed at every open;
+ *  - a BUFFER of ids the server does not know yet, flushed through `markStoriesSeenAction` on close,
+ *    on a group change, at `SEEN_FLUSH_AT` ids and when the page hides (`visibilitychange`). An id
+ *    the server already reported seen, or one already sent this session, is never sent again.
+ * The write is background work: a failure is logged by shape and swallowed — never a toast, never a
+ * navigation — and the session set keeps the ring honest for this page either way. There is NO
+ * device-local copy (no browser storage) of any of it: D-79's rejection stands, the server is the truth.
  */
 export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
   /**
@@ -68,12 +88,18 @@ export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
     comments?: StoryCommentsBinding;
     /** `stories.story.manage` from the bootstrap: the viewer's "Destacar" pill (UI-D-66). */
     canCurate?: boolean;
-    /** TDD RED STUB (05.2-10 Task 2): accepted and ignored until GREEN. */
+    /**
+     * 05.2-10 (UI-D-61): the tenant circle wears the seen ring. Its two accessible names, read from
+     * the catalog on the server; present only where a tenant circle exists (Início).
+     */
     seenRing?: { seenLabel: string; unseenLabel: string };
   };
 };
 
 type Opened = { group: number; index: number };
+
+/** R-P5: the buffer is flushed when it reaches this many ids (the contract caps a batch at 50). */
+const SEEN_FLUSH_AT = 10;
 
 /** The manage circle's glyph (UI-D-63 a): `Pencil` 20, on the module's tertiary disc. */
 function toStripCircle(circle: RowCircleView): StoryStripCircle {
@@ -82,7 +108,34 @@ function toStripCircle(circle: RowCircleView): StoryStripCircle {
 }
 
 export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: StoriesSurfaceProps) {
-  const circles = useMemo(() => rowCircles.map(toStripCircle), [rowCircles]);
+  const seenRing = viewer?.seenRing;
+  /** Every story the viewer SHOWED in this page's life (R-P5) — the optimistic half of the ring. */
+  const sessionSeen = useRef(new Set<string>());
+  /** The session set as of the last close: what the ring is derived from (re-derived per close). */
+  const [seenAtClose, setSeenAtClose] = useState<ReadonlySet<string>>(() => new Set());
+  /** Shown ids the server does not know yet, waiting for the next flush. */
+  const pending = useRef<string[]>([]);
+  /** Ids already sent this session: never sent twice (a failed flush forgets its ids again). */
+  const sent = useRef(new Set<string>());
+  /** The group the last shown segment belonged to — a change of group flushes the buffer. */
+  const lastShownGroup = useRef<string | null>(null);
+
+  const circles = useMemo(
+    () =>
+      rowCircles.map((circle) => {
+        const stripCircle = toStripCircle(circle);
+        if (!seenRing || stripCircle.kind !== 'open') return stripCircle;
+        // UI-D-61: ONLY the circle that opens the tenant's own stories wears the seen ring; a
+        // highlight circle is an archive and keeps the neutral ring the server gave it.
+        const group = viewer?.groups[stripCircle.group];
+        if (group?.kind !== 'tenant' || group.items === null) return stripCircle;
+        return {
+          ...stripCircle,
+          ...tenantSeenDecoration(tenantSeenState(group.items, seenAtClose), seenRing),
+        };
+      }),
+    [rowCircles, seenRing, viewer?.groups, seenAtClose],
+  );
   const [opened, setOpened] = useState<Opened | null>(null);
   /** Highlight items read so far, by group key — kept for the page's life. */
   const [loaded, setLoaded] = useState<Record<string, StoryViewerItemView[]>>({});
@@ -168,6 +221,76 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
     [viewer?.groups],
   );
 
+  /** What the server already reported seen, in every group this page knows — never re-sent. */
+  const serverSeen = useMemo(() => {
+    const ids = new Set<string>();
+    for (const group of groups)
+      for (const item of group.items ?? []) if (item.seen) ids.add(item.id);
+    return ids;
+  }, [groups]);
+  const serverSeenRef = useRef(serverSeen);
+  serverSeenRef.current = serverSeen;
+
+  /**
+   * Send the buffer. Fire and forget: the viewer never waits on it, and a failure is logged by
+   * SHAPE (a count, never an id) and swallowed — no toast, no navigation (planning decision 4). A
+   * failed batch is forgotten from `sent`, so a later showing of the same story may try again.
+   */
+  const flush = useCallback(() => {
+    const ids = pending.current;
+    if (ids.length === 0) return;
+    pending.current = [];
+    for (const id of ids) sent.current.add(id);
+    const failed = (reason: string) => {
+      console.error('stories.seen_flush_failed', { count: ids.length, reason });
+      for (const id of ids) sent.current.delete(id);
+    };
+    markStoriesSeenAction(ids).then(
+      (ok) => {
+        if (!ok) failed('refused');
+      },
+      (error: unknown) => failed(error instanceof Error ? error.name : 'unknown'),
+    );
+  }, []);
+
+  /** R-D-I: the viewer showed `storyId` (current, media ready) as part of group `groupKey`. */
+  const onSegmentShown = useCallback(
+    (storyId: string, groupKey: string) => {
+      // A group change flushes what the previous circle collected BEFORE this story joins.
+      if (lastShownGroup.current !== null && lastShownGroup.current !== groupKey) flush();
+      lastShownGroup.current = groupKey;
+      sessionSeen.current.add(storyId);
+      if (
+        serverSeenRef.current.has(storyId) ||
+        sent.current.has(storyId) ||
+        pending.current.includes(storyId)
+      )
+        return;
+      pending.current.push(storyId);
+      if (pending.current.length >= SEEN_FLUSH_AT) flush();
+    },
+    [flush],
+  );
+
+  /** Both close paths end here: flush, and re-derive the ring from the session set. */
+  const onViewerClosed = useCallback(() => {
+    flush();
+    lastShownGroup.current = null;
+    setSeenAtClose(new Set(sessionSeen.current));
+  }, [flush]);
+
+  // The page going to the background (tab switch, app switch, lock) may be the last chance to send.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      flush();
+    };
+  }, [flush]);
+
   const retryGroup = useCallback(
     (g: number) => {
       const key = viewer?.groups[g]?.key;
@@ -188,36 +311,44 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
       return;
     }
     setOpened(null);
-  }, []);
+    onViewerClosed();
+  }, [onViewerClosed]);
 
   const open = useCallback(
     (group: number, index: number) => {
       const target = groups[group];
       if (!target) return;
       originRef.current = document.activeElement as HTMLElement | null;
-      const story = target.items?.[index];
+      // D-105: the tenant circle resumes at its first unseen story — server flags plus what this
+      // session already showed — recomputed at every open, so a re-open after watching is right.
+      const start =
+        seenRing && target.kind === 'tenant' && target.items
+          ? tenantSeenState(target.items, sessionSeen.current).resumeIndex
+          : index;
+      const story = target.items?.[start];
       // A group of the tenant's stories names the story it opens on; a highlight keeps the URL
       // (planning decision 3) — either way back pops exactly this entry.
       const url =
         target.kind !== 'highlight' && story ? `/stories/${story.id}` : window.location.href;
       window.history.pushState(null, '', url);
       pushedRef.current = true;
-      setOpened({ group, index });
+      setOpened({ group, index: start });
     },
-    [groups],
+    [groups, seenRing],
   );
 
   useEffect(() => {
     const onPopState = () => {
       pushedRef.current = false;
       setOpened(null);
+      onViewerClosed();
       // The focus return has to wait for the viewer's own focus trap to restore first, or the trap
       // would move focus back out from under it as it unmounts.
       queueMicrotask(() => originRef.current?.focus?.({ preventScroll: true }));
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, []);
+  }, [onViewerClosed]);
 
   return (
     <>
@@ -233,6 +364,7 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
           initialIndex={opened.index}
           onNeedGroup={(g) => void requestGroup(g)}
           onRetryGroup={retryGroup}
+          onSegmentShown={onSegmentShown}
           labels={viewer.labels}
           onLike={viewer.onLike}
           onUnlike={viewer.onUnlike}

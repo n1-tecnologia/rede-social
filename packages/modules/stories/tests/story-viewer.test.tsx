@@ -756,7 +756,7 @@ describe('StoryViewer — a row of groups (D-107, UI-D-65, R-D-M)', () => {
 
     act(() => controls.get('story-0')?.onLoad());
     expect(onSegmentShown).toHaveBeenCalledTimes(1);
-    expect(onSegmentShown).toHaveBeenLastCalledWith('story-0');
+    expect(onSegmentShown).toHaveBeenLastCalledWith('story-0', 'A');
 
     // An unrelated re-render (a mute toggle) reports nothing new.
     fireEvent.click(screen.getByRole('button', { name: LABELS.unmute }));
@@ -765,12 +765,12 @@ describe('StoryViewer — a row of groups (D-107, UI-D-65, R-D-M)', () => {
     // Story 1 is already decoded: it is reported the moment it BECOMES current.
     tapAt(RIGHT_TWO_THIRDS());
     expect(onSegmentShown).toHaveBeenCalledTimes(2);
-    expect(onSegmentShown).toHaveBeenLastCalledWith('story-1');
+    expect(onSegmentShown).toHaveBeenLastCalledWith('story-1', 'A');
 
     // Revisiting story 0 is a new showing, and it is reported again.
     tapAt(LEFT_THIRD());
     expect(onSegmentShown).toHaveBeenCalledTimes(3);
-    expect(onSegmentShown).toHaveBeenLastCalledWith('story-0');
+    expect(onSegmentShown).toHaveBeenLastCalledWith('story-0', 'A');
   });
 
   it('G10. the bars show the CURRENT group only and reset on a group change; the live region names the group', () => {

@@ -41,6 +41,8 @@ import {
   openableHighlights,
   storyViewerItem,
   storyViewerLabels,
+  tenantSeenLabels,
+  tenantSeenState,
   tenantSequence,
 } from '@/lib/story-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
@@ -339,7 +341,12 @@ export function storyCommentsProps(
  * Since 05.2-05 every circle OPENS: the viewer plays the row's groups (`inicioGroups`, D-107) — the
  * tenant sequence as group 0, then one group per highlight whose items are read lazily when the
  * member reaches it (`loadHighlightItemsAction`), so this render never carries a highlight's items.
- * Plan 10 gives the tenant circle a resume index.
+ *
+ * **The tenant circle wears the caller's seen ring** (05.2-10: HIGHLIGHT-06, D-105, UI-D-61): the
+ * brand ring and "… Há stories novos." while any story of the sequence is unseen by THIS caller
+ * (`viewerSeen`, their own server-side flag — the same statement as the page, no extra request),
+ * the neutral ring and the plain name once all are seen, and it opens at the first unseen story.
+ * `StoriesSurface` re-derives the same state on every close from the session's seen set.
  *
  * **The `+` circle's visibility is a PERMISSION, never a role** (UI-D-28, T-05-25). It renders
  * exactly when the bootstrap carries `stories.story.publish` — the same composed value the API's
@@ -381,6 +388,10 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
   };
   // D-106: one bounded page, played oldest first.
   const sequence = tenantSequence(page);
+  // D-105: the first render's ring and resume point, from the caller's own flags (oldest first).
+  const tenantSeen = tenantSeenState(
+    sequence.map((story) => ({ id: story.id, seen: story.viewerSeen })),
+  );
   const rowHighlights = highlights?.items ?? [];
   const groups = inicioGroups({
     tenant,
@@ -398,6 +409,7 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
           own: { avatarUrl: bootstrap.membership.profile.avatarUrl },
           tenant,
           sequenceLength: sequence.length,
+          tenantSeen,
           highlights: rowHighlights,
           // D-109: the ONE curation door for Início — the trailing "Gerenciar" circle. It is there
           // even when nothing else is (D-108), so the admin can always create the first highlight.
@@ -430,6 +442,8 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
               // gated on the composed PERMISSION, never a role (the API re-checks it on every read
               // and write the sheet makes, T-05.2-26).
               canCurate: curates,
+              // UI-D-61: the tenant circle's two names, so the surface can re-derive it on close.
+              seenRing: tenantSeenLabels(tenant, tf),
             }
       }
       regionLabel={tf('region')}

@@ -177,6 +177,14 @@ vi.mock('@/app/(app)/stories/highlight-actions', () => ({
 }));
 
 /**
+ * 05.2-10: `StoriesSurface` flushes the seen buffer through a SERVER ACTION too — stubbed at the same
+ * seam (its own cases live in `StoriesSurface.test.tsx`).
+ */
+vi.mock('@/app/(app)/stories/story-actions', () => ({
+  markStoriesSeenAction: vi.fn(async () => true),
+}));
+
+/**
  * 05.2-06: the host reads the highlight sheet's words with `useTranslations('stories')` on the
  * client (the composer's precedent). The stand-in answers from the SAME real catalog `lookup` reads,
  * and returns ONE stable reader, as next-intl's memoised hook does.
@@ -856,7 +864,8 @@ describe('StoriesSurface — every Início circle opens its own group (05.2-05, 
     loadHighlight.mockReturnValue(new Promise(() => {}));
     surface({ live: true });
 
-    const dialog = await openCircle('Abrir stories de Demo');
+    // 05.2-10 (UI-D-61): its one story is unseen, so the circle's name carries "Há stories novos.".
+    const dialog = await openCircle('Abrir stories de Demo. Há stories novos.');
     expect(dialog.getAttribute('data-story-group')).toBe('0');
     expect(dialog.getAttribute('data-story-index')).toBe('0');
     // The tenant group's history entry names the story it opened on (planning decision 3).

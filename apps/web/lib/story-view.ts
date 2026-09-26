@@ -91,8 +91,7 @@ export function storyViewerItem(story: StorySummary, now: number): StoryViewerIt
     likeCount: story.likeCount,
     commentCount: story.commentCount,
     viewerLiked: story.viewerLiked,
-    // TDD RED STUB (05.2-10 Task 2): inert until GREEN maps `story.viewerSeen`.
-    seen: false,
+    seen: story.viewerSeen,
   };
 }
 
@@ -324,36 +323,74 @@ export function tenantSequence<T>(page: { items: readonly T[] } | null): T[] {
 /**
  * The tenant circle (D-104): the tenant's logo and display name — the same identity the viewer
  * header shows, so the circle and the screen it opens agree. No logo → the display name's monogram
- * (UI-D-60). It opens group 0 at index 0; plan 10 adds the resume index and the seen ring.
+ * (UI-D-60). It opens group 0 at the RESUME index — the first unseen story, else 0 — and wears the
+ * seen ring (05.2-10, D-105, UI-D-61; see `tenantSeenState`).
  */
 /** The tenant circle's seen state (D-105): is anything live unseen, and where does it resume. */
 export type TenantSeenState = { anyUnseen: boolean; resumeIndex: number };
 
-/** TDD RED STUB (05.2-10 Task 2): inert — "everything new, resume at 0" until GREEN. */
+/**
+ * D-105 as one pure function, shared by the SERVER (the first render) and `StoriesSurface` (every
+ * close, every open), so the two can never disagree about the ring or the resume point.
+ *
+ * `items` is the tenant sequence OLDEST FIRST (D-106), each with the caller's own server flag
+ * (`viewerSeen`). `session` is what the viewer showed in this page's life and the server may not
+ * have recorded yet (R-P5) — a story in it counts as seen. The circle resumes at the FIRST unseen
+ * story, or at 0 when everything is seen (a re-watch starts from the beginning). An empty sequence
+ * has nothing new; no tenant circle is drawn for it anyway.
+ */
 export function tenantSeenState(
-  _items: readonly { id: string; seen: boolean }[],
-  _session?: ReadonlySet<string>,
+  items: readonly { id: string; seen: boolean }[],
+  session?: ReadonlySet<string>,
 ): TenantSeenState {
-  return { anyUnseen: true, resumeIndex: 0 };
+  const firstUnseen = items.findIndex((item) => !item.seen && !session?.has(item.id));
+  return firstUnseen === -1
+    ? { anyUnseen: false, resumeIndex: 0 }
+    : { anyUnseen: true, resumeIndex: firstUnseen };
+}
+
+/**
+ * The tenant circle's ring and name for a seen state (UI-D-61): the BRAND ring while anything live is
+ * unseen, the neutral ring once all is seen. The state is never colour alone (WCAG 1.4.1) — the
+ * accessible name switches between "… Há stories novos." and the plain name. Only the ring's colour
+ * changes; its geometry is the module's. Exported for `StoriesSurface`, which re-derives the circle
+ * on close with the SAME rule.
+ */
+export function tenantSeenDecoration(
+  seen: TenantSeenState,
+  labels: { seenLabel: string; unseenLabel: string },
+): { ring: 'brand' | 'neutral'; actionLabel: string; index: number } {
+  return seen.anyUnseen
+    ? { ring: 'brand', actionLabel: labels.unseenLabel, index: seen.resumeIndex }
+    : { ring: 'neutral', actionLabel: labels.seenLabel, index: 0 };
+}
+
+/** Both names of the tenant circle, read once from the catalog (`circle.tenant` / `…Unseen`). */
+export function tenantSeenLabels(
+  tenant: { displayName: string },
+  t: RowLabelReader,
+): { seenLabel: string; unseenLabel: string } {
+  return {
+    seenLabel: t('circle.tenant', { tenant: tenant.displayName }),
+    unseenLabel: t('circle.tenantUnseen', { tenant: tenant.displayName }),
+  };
 }
 
 export function tenantCircleView(
   tenant: { displayName: string; logoUrl: string | null },
   t: RowLabelReader,
-  _seen?: TenantSeenState,
+  seen: TenantSeenState,
 ): Extract<RowCircleView, { kind: 'open' }> {
   return {
     kind: 'open',
     key: 'tenant',
     label: tenant.displayName,
-    actionLabel: t('circle.tenant', { tenant: tenant.displayName }),
-    ring: 'brand',
+    ...tenantSeenDecoration(seen, tenantSeenLabels(tenant, t)),
     disc:
       tenant.logoUrl !== null
         ? { kind: 'logo', src: tenant.logoUrl }
         : { kind: 'monogram', text: monogramOf(tenant.displayName) },
     group: 0,
-    index: 0,
   };
 }
 
@@ -513,7 +550,10 @@ export function inicioRow(
     sequenceLength: number;
     highlights: readonly HighlightSummary[];
     curator?: CuratorRow;
-    /** TDD RED STUB (05.2-10 Task 2): accepted and ignored until GREEN. */
+    /**
+     * D-105: the caller's seen state over the tenant sequence (`tenantSeenState`). Absent means
+     * nothing is known to be seen — the brand ring, opening at the first story.
+     */
     tenantSeen?: TenantSeenState;
   },
   t: RowLabelReader,
@@ -533,7 +573,11 @@ export function inicioRow(
   // The openable circles ARE the viewer's groups, in the same order (`inicioGroups`): the tenant's
   // is group 0 when it exists, and each playable highlight takes the next index.
   const first = input.sequenceLength > 0 ? 1 : 0;
-  if (input.sequenceLength > 0) row.push(tenantCircleView(input.tenant, t));
+  if (input.sequenceLength > 0) {
+    row.push(
+      tenantCircleView(input.tenant, t, input.tenantSeen ?? { anyUnseen: true, resumeIndex: 0 }),
+    );
+  }
   row.push(...highlightRowCircles(input.highlights, first, t, input.curator));
   return row;
 }

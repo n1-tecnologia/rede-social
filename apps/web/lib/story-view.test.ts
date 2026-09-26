@@ -108,13 +108,17 @@ describe('monogramOf — the first grapheme, trimmed, upper-cased (UI-D-60, UI-D
 
 describe('tenantCircleView — the tenant circle (D-104, UI-D-60, UI-D-61)', () => {
   it('8. with a logo: a logo disc, the display name as label, "Abrir stories de {tenant}"', () => {
-    const circle = tenantCircleView({ displayName: 'Demo', logoUrl: '/logo.png' }, t);
+    // 05.2-10: the seen state is an input now; "all seen" is the plain name (see case 32).
+    const circle = tenantCircleView({ displayName: 'Demo', logoUrl: '/logo.png' }, t, {
+      anyUnseen: false,
+      resumeIndex: 0,
+    });
     expect(circle).toMatchObject({
       kind: 'open',
       key: 'tenant',
       label: 'Demo',
       actionLabel: 'Abrir stories de Demo',
-      ring: 'brand',
+      ring: 'neutral',
       disc: { kind: 'logo', src: '/logo.png' },
       group: 0,
       index: 0,
@@ -122,7 +126,10 @@ describe('tenantCircleView — the tenant circle (D-104, UI-D-60, UI-D-61)', () 
   });
 
   it('9. without a logo: the monogram of the display name', () => {
-    const circle = tenantCircleView({ displayName: 'édson escola', logoUrl: null }, t);
+    const circle = tenantCircleView({ displayName: 'édson escola', logoUrl: null }, t, {
+      anyUnseen: true,
+      resumeIndex: 0,
+    });
     expect(circle.disc).toEqual({ kind: 'monogram', text: 'É' });
     expect(circle.label).toBe('édson escola');
   });

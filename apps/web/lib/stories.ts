@@ -237,6 +237,21 @@ async function toggleStoryLike(
 export const likeStory = (storyId: string) => toggleStoryLike(storyId, 'POST');
 export const unlikeStory = (storyId: string) => toggleStoryLike(storyId, 'DELETE');
 
+/**
+ * `POST /v1/stories/views` (HIGHLIGHT-06, D-105) — record that the caller was SHOWN these stories.
+ * The API answers 204 for every accepted body (a foreign or unknown id simply writes nothing), so
+ * there is nothing to parse; a non-2xx throws the usual `ApiClientError`, and what a failure means
+ * (nothing — the ring is not worth an error) is `markStoriesSeenAction`'s decision.
+ */
+export async function markStoriesSeen(storyIds: readonly string[]): Promise<void> {
+  const res = await apiFetch('/v1/stories/views', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ storyIds }),
+  });
+  if (!res.ok) throw await apiError(res);
+}
+
 /* ── Story comments (STORY-05, D-82, D-83) ────────────────────────────────────────────────────── */
 
 /** The query the sheet sends; `cursor` is OPAQUE and forwarded verbatim. */

@@ -9,6 +9,7 @@
     "circle": {
       "action": "Abrir story de {time}",
       "tenant": "Abrir stories de {tenant}",
+      "tenantUnseen": "Abrir stories de {tenant}. Há stories novos.",
       "highlight": "Abrir destaque {title}",
       "highlightEmpty": "Editar destaque {title}. Vazio, só você vê."
     },

@@ -3,7 +3,9 @@
 import type { CommentView } from '@tria/module-feed/ui';
 import {
   createStoryCommentSchema,
+  markStoriesSeenSchema,
   publishStorySchema,
+  STORY_SEEN_BATCH_MAX,
   storyCommentsQuerySchema,
   storyQuerySchema,
 } from '@tria/module-stories/contracts';
@@ -22,6 +24,7 @@ import {
   getStoryComments,
   likeStory,
   loadOwnStories,
+  markStoriesSeen,
   type StoryWriteResult,
   storyCommentIssue,
   unlikeStory,
@@ -372,7 +375,40 @@ export async function loadMoreOwnStoriesAction(cursor?: string): Promise<StoryHi
   };
 }
 
-/** TDD RED STUB (05.2-10 Task 2): inert — sends nothing and answers false until GREEN. */
-export async function markStoriesSeenAction(_storyIds: string[]): Promise<boolean> {
-  return false;
+/**
+ * The seen-state write (HIGHLIGHT-06, D-105, R-P5) — what `StoriesSurface` flushes its buffer of
+ * shown story ids through, on close, on a group change, at 10 ids and when the page hides.
+ *
+ * - **The contract's own Zod runs first** (`markStoriesSeenSchema`): the list is untrusted, so an
+ *   empty list or a non-uuid sends NO request. A list longer than `STORY_SEEN_BATCH_MAX` is chunked
+ *   rather than refused — the surface never sends one, but a batch must not be lost to a cap.
+ * - **It is SILENT (planning decision 4).** A refusal, an expired session or a transport failure
+ *   answers `false` and is logged by SHAPE only (status and code, never an id — a log of "who saw
+ *   what" is the record V8 forbids). It deliberately does NOT `redirect()`: a background write must
+ *   never bounce a member out of the viewer; an expired session is handled by their next real
+ *   navigation. And it does NOT revalidate: the ring is re-derived on the client from the session
+ *   set, and re-rendering `/inicio` on every flush would be the like actions' waste, repeated.
+ */
+export async function markStoriesSeenAction(storyIds: string[]): Promise<boolean> {
+  const list = Array.isArray(storyIds) ? storyIds : [];
+  const chunks: string[][] = [];
+  for (let at = 0; at < list.length; at += STORY_SEEN_BATCH_MAX) {
+    chunks.push(list.slice(at, at + STORY_SEEN_BATCH_MAX));
+  }
+  // Every chunk is validated BEFORE any request, so a bad id anywhere sends nothing at all.
+  const parsed = chunks.map((chunk) => markStoriesSeenSchema.safeParse({ storyIds: chunk }));
+  if (parsed.length === 0 || parsed.some((result) => !result.success)) return false;
+
+  try {
+    for (const result of parsed) {
+      if (result.success) await markStoriesSeen(result.data.storyIds);
+    }
+    return true;
+  } catch (error) {
+    console.error('stories.seen_write_failed', {
+      status: error instanceof ApiClientError ? error.status : null,
+      code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
+    });
+    return false;
+  }
 }

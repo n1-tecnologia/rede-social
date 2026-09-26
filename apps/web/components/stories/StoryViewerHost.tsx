@@ -115,6 +115,11 @@ export type StoryViewerHostProps = {
   onNeedGroup?: (group: number) => void;
   /** The retry in a failed group's error frame. */
   onRetryGroup?: (group: number) => void;
+  /**
+   * 05.2-10 (R-D-I): the viewer SHOWED this story in this group — current segment, media ready.
+   * `StoriesSurface` turns it into the session seen set and the buffered seen write.
+   */
+  onSegmentShown?: (storyId: string, groupKey: string) => void;
   labels: StoryViewerLabelsView;
   onLike: typeof likeStoryAction;
   onUnlike: typeof unlikeStoryAction;
@@ -187,6 +192,7 @@ export function StoryViewerHost({
   initialIndex = 0,
   onNeedGroup,
   onRetryGroup,
+  onSegmentShown,
   labels,
   onLike,
   onUnlike,
@@ -463,6 +469,7 @@ export function StoryViewerHost({
       initialIndex={initialIndex}
       onNeedGroup={onNeedGroup}
       onRetryGroup={onRetryGroup}
+      onSegmentShown={onSegmentShown}
       onClose={close}
       // The third source of the viewer's single pause boolean, beside the hold gesture and document
       // visibility. Closing it resumes from the STORED elapsed, because the clock never restarted.
