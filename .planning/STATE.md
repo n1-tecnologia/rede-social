@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 Phase: 05.3 (Reels) — EXECUTING
 Plan: 10 of 10
-Status: All 10 plans executed; awaiting code review, regression gate and phase verification
-Last activity: 2026-09-27 — Completed 05.3-10 (CR-01 like/comment state promoted to ReelsHost; WR-01..03 closed)
+Status: UAT partial (4 passed, 1 blocked: phone run waits for Phase 01.1); secured 29/29, Nyquist-compliant, UI-reviewed 21/24; WR-04/WR-05 and the UI top 3 fixed by quick 260927-ebk
+Last activity: 2026-09-27 - Completed quick task 260927-ebk: 05.3 follow-ups: WR-04/WR-05 fixes with tests and UI-REVIEW top 3 fixes
 
 Progress: [█████████████████░░░] 86/98 plans ([░░░░░░░░░░] 0%)
 
@@ -481,6 +481,7 @@ None yet.
 | 260914-mfk | Route bootstrap 401/403 to redirects through one requireBootstrap()/requirePlatformTenants() helper so concurrently rendered segments no longer log a false ApiClientError | 2026-09-14 | 43db3cd | — | [260914-mfk-move-the-bootstrap-error-to-redirect-map](./quick/260914-mfk-move-the-bootstrap-error-to-redirect-map/) |
 | 260924-fwv | Corrigir os dois defeitos introduzidos pela gap closure da Fase 5: CR-01 (updateCommunity revalida a capa armazenada em todo PATCH) e CR-02 (bindPlay nao chaveado por story id) | 2026-09-24 | e1631da | Verified | [260924-fwv-corrigir-os-dois-defeitos-introduzidos-p](./quick/260924-fwv-corrigir-os-dois-defeitos-introduzidos-p/) |
 | 260926-d8f | Fix 05.2 follow-ups WR-01 (item cap counts live stories only; ghost items removable), WR-04 (seen action bounded to one API call), WR-07 (page-hide seen flush via sendBeacon to POST /api/stories/views), WR-03 (place-cap and item-cap copy for `full`) and the Criar destaque link (next/link to the origin place) | 2026-09-26 | 1a23355 | — | [260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr](./quick/260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr/) |
+| 260927-ebk | Fix 05.3 follow-ups WR-04 (confirmed like pair survives a refused toggle, tagged by request number), WR-05 (Reels gesture tied to its starting pointer; non-primary pointers ignored) and the UI-REVIEW top 3 (44 px caption toggle hit areas, lane underline under the label, empty-state CTA via LinkButton) | 2026-09-27 | 71a603e | — | [260927-ebk-05-3-follow-ups-wr-04-wr-05-fixes-with-t](./quick/260927-ebk-05-3-follow-ups-wr-04-wr-05-fixes-with-t/) |
 
 ### Roadmap Evolution
 
