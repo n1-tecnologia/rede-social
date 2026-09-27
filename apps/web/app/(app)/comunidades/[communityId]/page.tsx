@@ -302,7 +302,11 @@ export default async function CommunityPage({
       <div className="px-4 pt-4 pb-6">
         <CommunityPosts
           initialItems={
-            page === null ? [] : page.items.map((post) => postCardView(post, now, tf, shareOrigin))
+            page === null
+              ? []
+              : page.items.map((post) =>
+                  postCardView(post, now, tf, shareOrigin, bootstrap.tenant.timezone),
+                )
           }
           initialCursor={page?.nextCursor ?? null}
           initialError={page === null}

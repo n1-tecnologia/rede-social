@@ -9,7 +9,7 @@ import { getTranslations } from 'next-intl/server';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import { getFeed } from '@/lib/feed';
-import { postCardView } from '@/lib/feed-view';
+import { postCardBase } from '@/lib/feed-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 export { announcedCount } from '@/lib/reels-count';
@@ -23,7 +23,7 @@ export { announcedCount } from '@/lib/reels-count';
  * Início and a community's own list call (D-58, Pitfall 9), so the page size, the cursor envelope and
  * the tenant scope can never drift between them.
  *
- * **One mapping.** `reelView` is built on the feed card's own `postCardView` for the author link, the
+ * **One mapping.** `reelView` is built on the feed card's own `postCardBase` for the author link, the
  * counts, the liked state and the FEED-07 share link (`null` without a verified primary host,
  * T-04-51), so a Reel and its card can never disagree about any of them.
  *
@@ -59,7 +59,8 @@ export function reelView(
   const video = post.media.find((item) => item.kind === 'video' && item.status === 'ready');
   if (!video) return null;
 
-  const card = postCardView(post, Date.now(), tf, shareOrigin);
+  // `postCardBase`, not `postCardView`: a Reel shows no absolute date, so it needs no zone.
+  const card = postCardBase(post, Date.now(), tf, shareOrigin);
   return {
     id: card.id,
     caption: card.caption,

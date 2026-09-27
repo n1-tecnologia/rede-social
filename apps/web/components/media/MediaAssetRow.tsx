@@ -6,17 +6,6 @@ import { Camera, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { MediaImage } from '@/components/media/MediaImage';
 
-/**
- * The community's timezone for the row's date. The bootstrap payload does not carry
- * `tenants.timezone` yet (only the platform panel's tenant payload does), so the row takes it as a
- * prop with the column's own default — which is what every seeded and newly provisioned community
- * actually has. Formatting is timezone-PINNED rather than local on purpose: the same ISO instant
- * must render identically on the server and after hydration (UI-SPEC §Motion & Accessibility,
- * "no `Date.now()` in render"). When a later phase adds `timezone` to the bootstrap, the screen
- * passes it and nothing else here changes.
- */
-export const DEFAULT_TENANT_TIME_ZONE = 'America/Sao_Paulo';
-
 const TONE_BY_STATUS: Record<string, StatusTone> = {
   pending: 'warning',
   processing: 'warning',
@@ -46,7 +35,14 @@ export interface MediaAssetRowProps {
   asset: MediaAsset;
   /** Only a `ready` row is interactive; the handler is ignored for every other status. */
   onOpen?: (asset: MediaAsset) => void;
-  timeZone?: string;
+  /**
+   * The tenant's zone for the row's date: `bootstrap.tenant.timezone`, which `/configuracoes/midia`
+   * passes through `MediaLibrary` (06-09). Required, with no default, so no row can fall back to a
+   * zone that is not the tenant's. Formatting is timezone-PINNED rather than local on purpose: the
+   * same ISO instant must render identically on the server and after hydration (UI-SPEC §Motion &
+   * Accessibility, "no `Date.now()` in render").
+   */
+  timeZone: string;
 }
 
 /**
@@ -59,11 +55,7 @@ export interface MediaAssetRowProps {
  * non-`ready` row is a plain `<div>` and carries no `role="button"` at all, so "not interactive"
  * is structural rather than a disabled attribute a pointer could still focus.
  */
-export function MediaAssetRow({
-  asset,
-  onOpen,
-  timeZone = DEFAULT_TENANT_TIME_ZONE,
-}: MediaAssetRowProps) {
+export function MediaAssetRow({ asset, onOpen, timeZone }: MediaAssetRowProps) {
   const t = useTranslations('media');
   const ready = asset.status === 'ready';
   const processing = asset.status === 'pending' || asset.status === 'processing';

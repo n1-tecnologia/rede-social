@@ -14,7 +14,7 @@ import type { PostCardView } from '@tria/module-feed/ui';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import { createCommunity, getCommunities, loadCommunity, updateCommunity } from '@/lib/communities';
 import { getFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
@@ -134,7 +134,8 @@ async function communityPostsPage(
     // The share origin is resolved HERE too, not inherited from page 1: a server action runs in its
     // own request, and a card appended by the sentinel must carry the same `https://{primaryHost}`
     // link the server-rendered cards do (FEED-07, T-04-51).
-    const [page, tf, shareOrigin] = await Promise.all([
+    // The tenant's zone comes from the bootstrap (cached per request), the same clock page 1 used.
+    const [page, tf, shareOrigin, bootstrap] = await Promise.all([
       getFeed({
         communityId: query.data.communityId,
         cursor: query.data.cursor,
@@ -142,11 +143,13 @@ async function communityPostsPage(
       }),
       getTranslations('feed'),
       primaryHostOrigin(),
+      getBootstrap(),
     ]);
     const now = Date.now();
+    const timeZone = bootstrap.tenant.timezone;
     result = {
       ok: true,
-      items: page.items.map((post) => postCardView(post, now, tf, shareOrigin)),
+      items: page.items.map((post) => postCardView(post, now, tf, shareOrigin, timeZone)),
       nextCursor: page.nextCursor,
     };
   } catch (error) {

@@ -31,21 +31,35 @@ import { VideoPlayer } from '@/components/media/VideoPlayer';
 type Translator = Awaited<ReturnType<typeof getTranslations>>;
 
 /**
- * The community's time zone for a post's absolute timestamp. The bootstrap payload does not carry
- * `tenants.timezone` yet, so the column's own default — what every seeded and newly provisioned
- * community actually has — stands in. Formatting is timezone-PINNED rather than local because the
- * same ISO instant must render identically on the server and after hydration (UI-D-14).
+ * A post's and a comment's absolute timestamp, in the TENANT's zone (06-09, UI-D-203).
+ *
+ * The zone is `bootstrap.tenant.timezone` — the tenant's own `tenants.timezone` row, parsed on the
+ * server — and every caller passes it in: a page or a home renderer from the bootstrap it already
+ * holds, a server action from `getBootstrap()` (cached per request). Nothing here reads a zone
+ * from a request parameter or from the device (T-06-57). Formatting is still timezone-PINNED rather
+ * than local, because the same ISO instant must render identically on the server and after
+ * hydration (UI-D-14); the pin is now the tenant's zone instead of a constant.
+ *
+ * One `Intl.DateTimeFormat` per zone, memoised: constructing one is the expensive part, and a feed
+ * page formats every card with the same zone.
  */
-const TENANT_TIME_ZONE = 'America/Sao_Paulo';
+const absoluteFormatters = new Map<string, Intl.DateTimeFormat>();
 
-const absoluteTime = new Intl.DateTimeFormat('pt-BR', {
-  timeZone: TENANT_TIME_ZONE,
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-});
+export function absoluteTimeFormatter(timeZone: string): Intl.DateTimeFormat {
+  let format = absoluteFormatters.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('pt-BR', {
+      timeZone,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    absoluteFormatters.set(timeZone, format);
+  }
+  return format;
+}
 
 /**
  * "há 2 h" — re-exported from `lib/relative-time.ts`, which is where it lives since 05-06 so that a
@@ -157,6 +171,9 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
 /**
  * The module's UI resolves no URL, formats no date and knows no route table; this does all three.
  *
+ * `timeZone` is `bootstrap.tenant.timezone` (see `absoluteTimeFormatter`), required so a caller
+ * cannot forget it and fall back to some other clock.
+ *
  * `shareOrigin` is `primaryHostOrigin()`'s answer — `https://{primaryHost}` on a tenant host, `null`
  * everywhere else — and it is what turns a post id into the FEED-07 link (D-56). It is a PARAMETER
  * rather than a lookup inside this function for the same reason `now` and `tf` are: this module is
@@ -169,7 +186,27 @@ export function postCardView(
   now: number,
   tf: Translator,
   shareOrigin: string | null,
+  timeZone: string,
 ): PostCardView {
+  return {
+    ...postCardBase(post, now, tf, shareOrigin),
+    createdAtAbsolute: absoluteTimeFormatter(timeZone).format(new Date(post.createdAt)),
+  };
+}
+
+/**
+ * Everything on the card except its absolute timestamp — the ONE mapping `postCardView` and the
+ * Reel (`lib/reels.ts`) share. A Reel renders no date at all, so it takes this and never needs a
+ * zone; a card always goes through `postCardView`, which adds the absolute time in the tenant's
+ * zone. Splitting it here keeps a single mapping for the author link, the counts and the share link
+ * without inventing a zone for a surface that shows none.
+ */
+export function postCardBase(
+  post: FeedPost,
+  now: number,
+  tf: Translator,
+  shareOrigin: string | null,
+): Omit<PostCardView, 'createdAtAbsolute'> {
   return {
     id: post.id,
     caption: post.caption,
@@ -182,7 +219,6 @@ export function postCardView(
     },
     createdAtIso: post.createdAt,
     createdAtRelative: relativeFrom(post.createdAt, now),
-    createdAtAbsolute: absoluteTime.format(new Date(post.createdAt)),
     /**
      * D-71 / UI-D-36 — "em {Comunidade}", composed HERE for the same two reasons `profileHref` and
      * `shareUrl` are: `@tria/module-feed` knows no route table (MOD-02) and ships no language
@@ -294,7 +330,12 @@ export function composerDraft(post: FeedPost, tf: Translator): ComposerDraft {
  * what actually decides, and a client-side guess that disagreed with it would either hide a
  * legitimate control or offer one that always 404s.
  */
-export function commentView(comment: FeedComment, now: number, nowLabel: string): CommentView {
+export function commentView(
+  comment: FeedComment,
+  now: number,
+  nowLabel: string,
+  timeZone: string,
+): CommentView {
   // A comment written seconds ago reads "agora" rather than "há 0 s" (UI-D-14); the ISO value and
   // the absolute title are still real, so the `<time>` element stays machine-readable.
   const elapsed = now - new Date(comment.createdAt).getTime();
@@ -314,7 +355,7 @@ export function commentView(comment: FeedComment, now: number, nowLabel: string)
     authorRemoved: comment.authorRemoved,
     createdAtIso: comment.createdAt,
     createdAtRelative: relative,
-    createdAtAbsolute: absoluteTime.format(new Date(comment.createdAt)),
+    createdAtAbsolute: absoluteTimeFormatter(timeZone).format(new Date(comment.createdAt)),
     likeCount: comment.likeCount,
     viewerLiked: comment.viewerLiked,
     replyCount: comment.replyCount,

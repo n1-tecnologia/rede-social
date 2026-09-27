@@ -62,6 +62,8 @@ export interface MediaLibraryProps {
   initialCursor: string | null;
   /** `true` when the server could not read the first page at all. */
   initialError?: boolean;
+  /** `bootstrap.tenant.timezone`, forwarded to every row's date (06-09). */
+  timeZone: string;
 }
 
 /**
@@ -80,7 +82,12 @@ export interface MediaLibraryProps {
  * Nothing here offers "pick an existing asset" — that reuse surface belongs to Phase 4's composer
  * and is explicitly deferred (CONTEXT §Deferred Ideas).
  */
-export function MediaLibrary({ initialItems, initialCursor, initialError }: MediaLibraryProps) {
+export function MediaLibrary({
+  initialItems,
+  initialCursor,
+  initialError,
+  timeZone,
+}: MediaLibraryProps) {
   const t = useTranslations('media');
   const toast = useToast();
   const isDesktop = useMediaQuery('(min-width: 768px)');
@@ -227,7 +234,7 @@ export function MediaLibrary({ initialItems, initialCursor, initialError }: Medi
                 key={asset.id}
                 className={index === items.length - 1 ? undefined : 'border-b border-divider'}
               >
-                <MediaAssetRow asset={asset} onOpen={setPlaying} />
+                <MediaAssetRow asset={asset} onOpen={setPlaying} timeZone={timeZone} />
                 {asset.status === 'failed' || asset.status === 'rejected' ? (
                   <div className="px-4 pb-3">
                     <Button

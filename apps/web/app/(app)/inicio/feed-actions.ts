@@ -13,7 +13,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
-import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
   createComment,
   deleteComment,
@@ -83,16 +83,19 @@ async function loadPage(cursor?: string): Promise<FeedPageResult> {
     // The share origin is resolved HERE too, not inherited from page 1: a server action runs in its
     // own request, and a card appended by the sentinel must carry the same `https://{primaryHost}`
     // link the server-rendered cards do (FEED-07). Reading it in the browser instead is what
-    // T-04-51 bans.
-    const [page, tf, shareOrigin] = await Promise.all([
+    // T-04-51 bans. The tenant's zone comes from the bootstrap (cached per request), so a card
+    // appended by the sentinel prints its absolute time on the same clock as the first page.
+    const [page, tf, shareOrigin, bootstrap] = await Promise.all([
       getFeed({ cursor: query.data.cursor, limit: query.data.limit }),
       getTranslations('feed'),
       primaryHostOrigin(),
+      getBootstrap(),
     ]);
     const now = Date.now();
+    const timeZone = bootstrap.tenant.timezone;
     result = {
       ok: true,
-      items: page.items.map((post) => postCardView(post, now, tf, shareOrigin)),
+      items: page.items.map((post) => postCardView(post, now, tf, shareOrigin, timeZone)),
       nextCursor: page.nextCursor,
     };
   } catch (error) {
@@ -264,11 +267,13 @@ async function commentPage(
   let refusal: string | null = null;
   let result: CommentPageResult = { ok: false, code: 'generic' };
   try {
-    const page = await run();
+    // The tenant's zone for the absolute title, from the bootstrap (cached per request).
+    const [page, bootstrap] = await Promise.all([run(), getBootstrap()]);
     const now = Date.now();
+    const timeZone = bootstrap.tenant.timezone;
     result = {
       ok: true,
-      items: page.items.map((comment) => commentView(comment, now, nowLabel)),
+      items: page.items.map((comment) => commentView(comment, now, nowLabel, timeZone)),
       nextCursor: page.nextCursor,
     };
   } catch (error) {
@@ -345,11 +350,15 @@ export async function createCommentAction(
   let refusal: string | null = null;
   let result: CommentCreateResult = { ok: false, code: 'generic' };
   try {
-    const [created, tf] = await Promise.all([
+    const [created, tf, bootstrap] = await Promise.all([
       createComment(id.data, input.data.body, input.data.parentId ?? undefined),
       getTranslations('feed'),
+      getBootstrap(),
     ]);
-    result = { ok: true, comment: commentView(created, Date.now(), tf('comments.now')) };
+    result = {
+      ok: true,
+      comment: commentView(created, Date.now(), tf('comments.now'), bootstrap.tenant.timezone),
+    };
   } catch (error) {
     const issue = commentIssue(error);
     if (issue) {

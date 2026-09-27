@@ -161,7 +161,11 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
   return (
     <FeedSurface
       initialItems={
-        page === null ? [] : page.items.map((post) => postCardView(post, now, tf, shareOrigin))
+        page === null
+          ? []
+          : page.items.map((post) =>
+              postCardView(post, now, tf, shareOrigin, bootstrap.tenant.timezone),
+            )
       }
       initialCursor={page?.nextCursor ?? null}
       initialError={page === null}

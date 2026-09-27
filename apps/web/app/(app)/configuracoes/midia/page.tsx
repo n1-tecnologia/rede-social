@@ -43,6 +43,7 @@ export default async function AdminMediaPage() {
         initialItems={page?.items ?? []}
         initialCursor={page?.nextCursor ?? null}
         initialError={page === null}
+        timeZone={bootstrap.tenant.timezone}
       />
     </div>
   );

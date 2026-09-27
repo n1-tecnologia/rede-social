@@ -107,7 +107,7 @@ export default async function PostPage({ params }: { params: Promise<{ postId: s
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
       {header}
       <PostDetail
-        post={postCardView(result.post, now, tf, shareOrigin)}
+        post={postCardView(result.post, now, tf, shareOrigin, bootstrap.tenant.timezone)}
         captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
         locale={locale}
         labels={postCardLabels(tf)}
@@ -125,7 +125,9 @@ export default async function PostPage({ params }: { params: Promise<{ postId: s
           initialItems:
             commentPage === null
               ? undefined
-              : commentPage.items.map((comment) => commentView(comment, now, nowLabel)),
+              : commentPage.items.map((comment) =>
+                  commentView(comment, now, nowLabel, bootstrap.tenant.timezone),
+                ),
           initialCursor: commentPage?.nextCursor ?? null,
           initialError: commentPage === null,
         }}

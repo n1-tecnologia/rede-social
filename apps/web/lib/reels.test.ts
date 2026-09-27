@@ -22,7 +22,7 @@ import {
  *  1. **One fetch implementation.** `getFeed` forwards `media=video`, and `loadReelsPage` reaches
  *     the API through it with `REELS_PAGE_SIZE`, the lane and the opaque cursor. A page size above
  *     the feed's own maximum would be refused by the `.strict()` feed query, so it is pinned here.
- *  2. **One mapping.** `reelView` is built on the feed card's `postCardView` for the author link,
+ *  2. **One mapping.** `reelView` is built on the feed card's `postCardBase` for the author link,
  *     the counts, the liked state and the FEED-07 share link, and drops a post with no ready video.
  *  3. **Graceful lanes.** A failed lanes read is an empty list (the D-120 "Todos only" view), except
  *     a refusal the bootstrap knows, which is a navigation.
@@ -30,7 +30,7 @@ import {
  *
  * What is stubbed: `lib/api`'s `apiFetch` (the transport), `lib/env`, `lib/tenant-host`'s
  * `primaryHostOrigin` and `next/navigation`. What is real: `getFeed`, the feed schema parse, the
- * lanes schema parse, `postCardView`, and the pt-BR catalog through next-intl's own translator.
+ * lanes schema parse, `postCardBase`, and the pt-BR catalog through next-intl's own translator.
  */
 
 // The module graph reaches `lib/env`, which validates the process environment at import time.
