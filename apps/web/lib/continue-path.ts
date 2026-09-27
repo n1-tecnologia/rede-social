@@ -12,11 +12,15 @@
  * it. It is `HttpOnly` and `SameSite=Lax`, read exactly once by the login action, and cleared on
  * use.
  *
- * **Why it is scoped to `/post/`.** This is the only route in the product that is meant to travel
- * outside it. Remembering EVERY private path would silently change where an ordinary login lands
- * (a member who once bounced off `/configuracoes` would later be teleported there), which is a
- * behaviour change nobody asked for. Widening the predicate is a one-line change the day another
- * route becomes shareable.
+ * **Why it is scoped to `/post/` and the two event shapes.** These are the only routes in the
+ * product meant to travel outside it: `/post/{id}` is the link members send each other (D-56), and
+ * `/eventos/{id}` and `/eventos/{id}/entrar` are the links an exported calendar entry carries
+ * (06-06, D-211). A member who taps the calendar's `Entrar` while logged out must land back on
+ * `/entrar` after the login, or the check-in the tap was meant to record is lost. Remembering EVERY
+ * private path would silently change where an ordinary login lands (a member who once bounced off
+ * `/configuracoes` would later be teleported there), which is a behaviour change nobody asked for.
+ * The event shapes are EXACT: a lowercase uuid, optionally followed by `/entrar` and nothing else
+ * (`/eventos/novo`, `…/editar`, `…/entrar/aviso` and an uppercase id are all refused).
  *
  * **The open-redirect rule.** The value is validated at USE, never at write: it must be a path on
  * THIS origin — one leading slash, no second slash or backslash (`//evil.com` and `/\evil.com` are
@@ -28,9 +32,12 @@ export const CONTINUE_COOKIE = 'tria_continue';
 /** Ten minutes: long enough to type a password, short enough that a stale bounce cannot resurface. */
 export const CONTINUE_MAX_AGE_S = 600;
 
-/** Which private paths are worth remembering — the shareable deep link, and nothing else (D-56). */
+/**
+ * Which private paths are worth remembering — the shareable post link (D-56) and the two calendar
+ * link shapes of an event (D-211), and nothing else.
+ */
 export function isContinuablePath(path: string): boolean {
-  return /^\/post\/[^/]+$/.test(path);
+  return /^\/post\/[^/]+$/.test(path) || /^\/eventos\/[0-9a-f-]{36}(\/entrar)?$/.test(path);
 }
 
 /**

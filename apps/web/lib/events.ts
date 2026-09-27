@@ -1,6 +1,7 @@
 import {
   type CheckinResult,
   checkinResultSchema,
+  type EnterResult,
   EVENT_PAGE_SIZE,
   type EventDetail,
   type EventEdit,
@@ -9,6 +10,7 @@ import {
   type EventPeriod,
   type EventStatus,
   type EventSummary,
+  enterResultSchema,
   eventDetailSchema,
   eventEditSchema,
   eventPageSchema,
@@ -154,6 +156,49 @@ export async function checkIn(eventId: string, code: string): Promise<CheckinRes
   });
   if (!res.ok) throw await apiError(res);
   return checkinResultSchema.parse(await res.json());
+}
+
+/* ── 06-06: the online `Entrar` (EVENT-04 online, D-207, D-210, D-218) ──────────────────────── */
+
+/** `enterEvent`'s answer: the gate's result, the ONE not-found, a bootstrap refusal, or a failure. */
+export type EnterEventResult =
+  | { status: 'ok'; result: EnterResult }
+  | { status: 'not-found' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `POST /v1/events/{eventId}/enter` (06-06): the API half of `Entrar`. The gate, the window and the
+ * online check-in all run inside Postgres (`app.events_enter`); this call pre-checks nothing.
+ *
+ * The answer is an API-to-BFF contract (`enterResultSchema`): ONLY the `/entrar` route handler calls
+ * this, on the server, and turns a passing outcome into a 303. The meeting URL is never logged here
+ * and never handed to a page (D-207, T-06-35). A 404 or 400 is the ONE `not-found` (D-23); a refusal
+ * `bootstrapRedirectPath` knows (401, blocked, host mismatch…) is returned as a path for the route
+ * handler to redirect to, because a route handler answers with a `Response` rather than `redirect()`.
+ */
+export async function enterEvent(eventId: string): Promise<EnterEventResult> {
+  try {
+    const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/enter`, {
+      method: 'POST',
+    });
+    if (res.ok) {
+      const parsed = enterResultSchema.safeParse(await res.json());
+      if (parsed.success) return { status: 'ok', result: parsed.data };
+      // The body is deliberately NOT logged: a malformed passing answer may still carry the URL.
+      console.error('events.enter_failed', { status: res.status, code: 'INVALID_BODY' });
+      return { status: 'error' };
+    }
+    if (res.status === 404 || res.status === 400) return { status: 'not-found' };
+    const error = await apiError(res);
+    const path = bootstrapRedirectPath(error);
+    if (path) return { status: 'redirect', path };
+    console.error('events.enter_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('events.enter_failed', { error: String(error) });
+    return { status: 'error' };
+  }
 }
 
 /* ── EVENT-01's admin half (06-04): create, the edit read, replace, cancel / reactivate ────────── */

@@ -1089,3 +1089,53 @@ describe('06-05 — events check-in strings and placeholders', () => {
     ).toBe('O check-in abre 1 hora antes do início, em sáb., 12 de out., às 18:00.');
   });
 });
+
+/**
+ * 06-06 — the online `Entrar` strings (UI-SPEC Copywriting Contract, "Online hints" and "/entrar
+ * refusal screens"), verbatim. `hintBefore` is pinned AND formatted, so a dropped `{time}` brace fails
+ * here rather than rendering on a phone. No key here carries a URL placeholder: the meeting URL is
+ * never a catalog value (D-207).
+ */
+describe('06-06 — events online Entrar strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.online.enter', 'Entrar'],
+    ['events.online.hintBefore', 'A transmissão começa às {time}.'],
+    ['events.online.confirmToGetLink', 'Confirme presença para receber o link.'],
+    ['events.online.hintLive', 'Ao entrar, sua presença é registrada.'],
+    ['events.enter.ended.title', 'Este evento já terminou'],
+    ['events.enter.ended.body', 'O link da transmissão não está mais disponível.'],
+    ['events.enter.cancelled.title', 'Este evento foi cancelado'],
+    [
+      'events.enter.cancelled.body',
+      'A organização cancelou o evento, e o link da transmissão foi desativado.',
+    ],
+    ['events.enter.confirmFirst.title', 'Confirme sua presença'],
+    [
+      'events.enter.confirmFirst.body',
+      'O link fica disponível para quem confirmou presença. A partir de 1 hora antes do início, ele abre para todos.',
+    ],
+    ['events.enter.cta', 'Ver evento'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('hintBefore formats {time}, and no online/enter string carries a URL or a placeholder beyond it', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+    expect(t('online.hintBefore', { time: '19:30' })).toBe('A transmissão começa às 19:30.');
+    const texts = JSON.stringify([lookup('events.online'), lookup('events.enter')]);
+    expect(texts).not.toMatch(/https?:|\{url\}|\{link\}/i);
+    expect(texts.match(/\{\w+\}/g)).toEqual(['{time}']);
+  });
+});

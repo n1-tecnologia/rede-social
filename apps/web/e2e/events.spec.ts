@@ -1073,3 +1073,286 @@ test.describe('events check-in', () => {
     await expect(codeField(page)).toHaveCount(0);
   });
 });
+
+/**
+ * EVENT-04 online (06-06, D-207, D-210, D-218, UI-D-209): `Entrar` and its refusal screens, on the
+ * phone in a throwaway tenant (`e2e-events-entrar`), serial.
+ *
+ * Every event is ONLINE and written relative to the database's `now()` (`insertEvent`). The route
+ * handler is exercised as the browser would follow it: `page.request.get(…, { maxRedirects: 0 })`
+ * carries the member's session cookies and shows the 303 itself, so the `Location` header — the ONLY
+ * place the meeting URL may reach the browser — is asserted directly. The meeting host
+ * (`https://meet.example.test`) never resolves, and Playwright routes only the first url of a
+ * redirect chain, so a browsing context that must land there is proved by its navigation REQUEST to
+ * the stored URL, redirected from `/entrar`. Presence is read through `attendanceFor` (a superuser read no browser can
+ * make). No detail, list or aviso page may ever contain the meeting host (D-207, T-06-35).
+ */
+test.describe('events entrar', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  const SLUG = 'e2e-events-entrar';
+  const MEETING = 'https://meet.example.test';
+  let tenant: EventsTenant | null = null;
+  let walkInEmail = '';
+  let calendarEmail = '';
+  const ids = { early: '', live: '', ended: '', cancelled: '', prefetch: '' };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    tenant = await createEventsTenant(SLUG, SEED_PASSWORD);
+    walkInEmail = await addEventsMember(tenant, 'sem.resposta', 'Membro Sem Resposta');
+    calendarEmail = await addEventsMember(tenant, 'agenda', 'Membro da Agenda');
+    const online = (title: string, startsInMinutes: number, endsInMinutes: number, room: string) =>
+      insertEvent(tenant?.tenantId ?? '', {
+        title,
+        format: 'online',
+        meetingUrl: `${MEETING}/${room}`,
+        startsInMinutes,
+        endsInMinutes,
+      });
+    ids.early = await online('Live mais tarde', 180, 300, 'cedo');
+    ids.live = await online('Live agora', 30, 150, 'agora');
+    ids.ended = await online('Live encerrada', -180, -1, 'fim');
+    ids.prefetch = await online('Live pre-carregada', 30, 150, 'prefetch');
+    ids.cancelled = await insertEvent(tenant.tenantId, {
+      title: 'Live cancelada',
+      format: 'online',
+      meetingUrl: `${MEETING}/cancelada`,
+      startsInMinutes: 30,
+      endsInMinutes: 150,
+      cancelled: true,
+    });
+  });
+
+  test.afterAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    await deleteEventsTenant(SLUG);
+    await closeEventsAdmin();
+  });
+
+  const enterPath = (id: string) => `/eventos/${id}/entrar`;
+  const enterLink = (page: Page) => page.getByTestId('event-actions-enter');
+  const onlineHint = (page: Page) => page.getByTestId('event-actions-online-hint');
+  const vou = (page: Page) =>
+    page
+      .getByRole('group', { name: E.rsvp.label })
+      .getByRole('button', { name: E.rsvp.going, exact: true });
+
+  /** GET `/entrar` as the page's member, without following the redirect. */
+  const follow = (page: Page, id: string, headers: Record<string, string> = {}) =>
+    page.request.get(`${tenant?.origin ?? ''}${enterPath(id)}`, { maxRedirects: 0, headers });
+
+  /** D-207: the rendered page never carries the meeting host, in any attribute or text. */
+  async function expectNoMeetingHost(page: Page) {
+    expect(await page.content()).not.toContain('meet.example.test');
+  }
+
+  test('1. P0: without Vou the Lock hint and no Entrar; after Vou the OUTLINE Entrar, and following it forwards to the meeting WITHOUT recording', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events entrar tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${ids.early}`);
+
+    await expect(onlineHint(page)).toHaveText(E.online.confirmToGetLink);
+    await expect(enterLink(page)).toHaveCount(0);
+    await expectNoMeetingHost(page);
+
+    await vou(page).dispatchEvent('click');
+    await expect(vou(page)).toHaveAttribute('aria-pressed', 'true');
+    const link = enterLink(page);
+    await expect(link).toHaveAttribute('href', enterPath(ids.early));
+    await expect(link).toHaveAttribute('data-tone', 'outline');
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveAttribute('rel', /noopener/);
+    await expect(link).toHaveAttribute('data-no-prefetch', '');
+    const [before] = E.online.hintBefore.split('{time}');
+    await expect(onlineHint(page)).toHaveText(
+      new RegExp(`^${literal(before ?? '')}\\d{2}:\\d{2}\\.$`),
+    );
+    await expect(page.getByTestId('event-actions').locator('.bg-brand')).toHaveCount(0);
+    await expectNoMeetingHost(page);
+
+    const res = await follow(page, ids.early);
+    expect(res.status()).toBe(303);
+    expect(res.headers().location).toBe(`${MEETING}/cedo`);
+    expect(res.headers()['cache-control']).toContain('no-store');
+    expect(res.headers()['referrer-policy']).toBe('no-referrer');
+    // D-218: entering early works but counts nothing.
+    expect(await attendanceFor(ids.early, tenant.memberEmail)).toEqual({
+      status: 'going',
+      checkinVia: null,
+    });
+  });
+
+  test('2. P0 without Vou: the gate refuses with no URL, and the aviso page says "Confirme sua presença"', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events entrar tenant was not provisioned');
+    await login(page, walkInEmail, tenant.password, tenant.origin);
+
+    const res = await follow(page, ids.early);
+    expect(res.status()).toBe(303);
+    const location = res.headers().location ?? '';
+    expect(location).toBe(`/eventos/${ids.early}/entrar/aviso?motivo=confirmar`);
+    expect(location).not.toContain('meet.example.test');
+    expect(await attendanceFor(ids.early, walkInEmail)).toBeNull();
+
+    await page.goto(`${tenant.origin}${location}`);
+    await expect(page.getByTestId('enter-notice')).toHaveAttribute('data-reason', 'confirmar');
+    await expect(page.getByRole('heading', { name: E.enter.confirmFirst.title })).toBeVisible();
+    await expect(page.getByText(E.enter.confirmFirst.body)).toBeVisible();
+    await expect(page.getByTestId('enter-notice-cta')).toHaveText(E.enter.cta);
+    await expect(page.getByTestId('enter-notice-cta')).toHaveAttribute(
+      'href',
+      `/eventos/${ids.early}`,
+    );
+    await expectNoMeetingHost(page);
+  });
+
+  test('3. in the window with no answer: a prefetch is 204 and records nothing; the tap is a 303 to the meeting and a walk_in via online; a repeat forwards again with one row', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events entrar tenant was not provisioned');
+    await login(page, walkInEmail, tenant.password, tenant.origin);
+
+    await page.goto(`${tenant.origin}/eventos/${ids.live}`);
+    await expect(enterLink(page)).toHaveAttribute('data-tone', 'brand');
+    await expect(enterLink(page)).toHaveAttribute('href', enterPath(ids.live));
+    await expect(onlineHint(page)).toHaveText(E.online.hintLive);
+    await expect(page.getByTestId('event-actions').locator('.bg-brand')).toHaveCount(1);
+    await expectNoMeetingHost(page);
+    // A render recorded nothing.
+    expect(await attendanceFor(ids.live, walkInEmail)).toBeNull();
+
+    // D-218: a request that announces itself as a prefetch learns nothing and records nothing.
+    // (A framework data fetch, `RSC: 1`, gets the same 204 — `entrar/route.test.ts`; Next itself
+    // answers a hand-made RSC request without its cache-busting parameter before the handler runs.)
+    const prefetchHeaders: Record<string, string>[] = [
+      { 'Sec-Purpose': 'prefetch' },
+      { Purpose: 'prefetch' },
+      { 'Next-Router-Prefetch': '1' },
+    ];
+    for (const headers of prefetchHeaders) {
+      const prefetch = await follow(page, ids.prefetch, headers);
+      expect(prefetch.status(), JSON.stringify(headers)).toBe(204);
+      expect(prefetch.headers()['cache-control']).toContain('no-store');
+      expect(prefetch.headers().location).toBeUndefined();
+    }
+    expect(await attendanceFor(ids.prefetch, walkInEmail)).toBeNull();
+
+    const first = await follow(page, ids.live);
+    expect(first.status()).toBe(303);
+    expect(first.headers().location).toBe(`${MEETING}/agora`);
+    expect(await attendanceFor(ids.live, walkInEmail)).toEqual({
+      status: 'walk_in',
+      checkinVia: 'online',
+    });
+
+    const again = await follow(page, ids.live);
+    expect(again.status()).toBe(303);
+    expect(again.headers().location).toBe(`${MEETING}/agora`);
+    expect(await attendanceFor(ids.live, walkInEmail)).toEqual({
+      status: 'walk_in',
+      checkinVia: 'online',
+    });
+
+    // The detail now shows the banner, and Entrar stays to rejoin (no hint).
+    await page.goto(`${tenant.origin}/eventos/${ids.live}`);
+    await expect(page.getByTestId('event-banner')).toHaveAttribute('data-kind', 'checkedIn');
+    await expect(enterLink(page)).toHaveAttribute('data-tone', 'brand');
+    await expect(onlineHint(page)).toHaveCount(0);
+    await expectNoMeetingHost(page);
+  });
+
+  test('4. ended and cancelled name their reason on the one aviso layout; an unknown or repeated motivo falls back to the detail', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events entrar tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+
+    const cases = [
+      { id: ids.ended, reason: 'encerrado', copy: E.enter.ended },
+      { id: ids.cancelled, reason: 'cancelado', copy: E.enter.cancelled },
+    ] as const;
+    for (const { id, reason, copy } of cases) {
+      const res = await follow(page, id);
+      expect(res.status(), reason).toBe(303);
+      expect(res.headers().location).toBe(`/eventos/${id}/entrar/aviso?motivo=${reason}`);
+      expect(await attendanceFor(id, tenant.memberEmail)).toBeNull();
+      await page.goto(`${tenant.origin}${res.headers().location}`);
+      await expect(page.getByTestId('enter-notice')).toHaveAttribute('data-reason', reason);
+      await expect(page.getByRole('heading', { name: copy.title })).toBeVisible();
+      await expect(page.getByText(copy.body)).toBeVisible();
+      await expectNoMeetingHost(page);
+    }
+
+    // The cancelled detail: the disabled Entrar, which is not a link.
+    await page.goto(`${tenant.origin}/eventos/${ids.cancelled}`);
+    await expect(enterLink(page)).toHaveAttribute('aria-disabled', 'true');
+    await expect(enterLink(page)).not.toHaveAttribute('href');
+    await expectNoMeetingHost(page);
+
+    // D-93: anything but one exact motivo is the detail, silently.
+    for (const query of ['?motivo=xyz', '?motivo=encerrado&motivo=encerrado', '']) {
+      await page.goto(`${tenant.origin}/eventos/${ids.ended}/entrar/aviso${query}`);
+      await expect(page, query).toHaveURL(new RegExp(`/eventos/${ids.ended}$`));
+    }
+
+    // Not found: an unknown id and a malformed one land on the detail's not-found screen.
+    const unknown = '0d000000-0000-4000-8000-00000000ffff';
+    const miss = await follow(page, unknown);
+    expect(miss.status()).toBe(303);
+    expect(miss.headers().location).toBe(`/eventos/${unknown}`);
+    const malformed = await follow(page, 'nao-e-um-id');
+    expect(malformed.status()).toBe(303);
+    expect(malformed.headers().location).toBe('/eventos/nao-e-um-id');
+
+    // The list carries no meeting host either.
+    await page.goto(`${tenant.origin}/eventos`);
+    await expect(posters(page).first()).toBeVisible();
+    await expectNoMeetingHost(page);
+  });
+
+  test('5. a logged-out calendar tap: /entrar bounces to login, and after signing in the member lands in the meeting, counted', async ({
+    browser,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events entrar tenant was not provisioned');
+    const context = await browser.newContext({
+      ...devices['iPhone 14'],
+      serviceWorkers: 'block',
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${tenant.origin}${enterPath(ids.live)}`);
+      await expect(page).toHaveURL(/\/entrar$/);
+      expect(await attendanceFor(ids.live, calendarEmail)).toBeNull();
+
+      // The meeting host never resolves, and Playwright routes only the FIRST url of a redirect
+      // chain, so the proof is the browser's own navigation request to the stored URL (the 303's
+      // Location), not a fulfilled page.
+      const meeting = page.waitForRequest((request) => request.url() === `${MEETING}/agora`, {
+        timeout: 20_000,
+      });
+      await page.locator('#email').fill(calendarEmail);
+      await page.locator('#password').fill(tenant.password);
+      await page.getByRole('button', { name: 'Entrar' }).click();
+      const request = await meeting;
+      expect(request.isNavigationRequest()).toBe(true);
+      const hop = request.redirectedFrom();
+      expect(hop ? new URL(hop.url()).pathname : '').toBe(enterPath(ids.live));
+
+      expect(await attendanceFor(ids.live, calendarEmail)).toEqual({
+        status: 'walk_in',
+        checkinVia: 'online',
+      });
+    } finally {
+      await context.close();
+    }
+  });
+});

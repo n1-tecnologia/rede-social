@@ -385,6 +385,8 @@ describe("06-03 — eventActionState (UI-D-207, the island's props)", () => {
       checkinOpensAt: '2026-10-12T21:00:00.000Z',
       startsAt: '2026-10-12T22:00:00.000000Z',
       endsAt: '2026-10-13T00:00:00.000000Z',
+      // 06-06: the start in the TENANT's zone (22:00Z is 19:00 in São Paulo), for the online P0 hint.
+      startTime: '19:00',
     });
     expect(state('2026-10-12T21:30:00Z', { viewerStatus: 'not_going' })).toMatchObject({
       phase: 'P1',

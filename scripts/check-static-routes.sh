@@ -92,6 +92,10 @@ const REQUIRED_KEYS = [
   // 06-05: the in-person check-in ticket. It reads the session, the viewer's own attendance and the
   // request instant (open, not open yet, closed), so it may never be prerendered.
   '/(app)/eventos/[eventId]/check-in/page',
+  // 06-06: the online `Entrar`. The route handler calls the enter gate per request (a side effect
+  // inside the window) and the aviso page reads its `motivo`; neither may ever be prerendered.
+  '/(app)/eventos/[eventId]/entrar/route',
+  '/(app)/eventos/[eventId]/entrar/aviso/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

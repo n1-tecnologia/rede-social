@@ -12,6 +12,9 @@ import base from './playwright.config';
  * A stale production server from an aborted run: `lsof -ti:3100 | xargs kill`.
  *
  * `pwa.spec.ts` self-skips unless `PWA_PROD=1`, so the default `pnpm e2e` (dev server) ignores it.
+ * 06-06: the events prefetch spec runs here too (D-218, Pitfall 6): Next prefetches only in
+ * production, so "rendering the detail of an in-window online event records nothing" can only be
+ * proved on this build. It self-skips the same way.
  * Importing the base config loads `.env.local` first (SEED_PASSWORD for the login cases).
  */
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -29,7 +32,7 @@ const apiServer = (Array.isArray(base.webServer) ? base.webServer : [base.webSer
 
 export default defineConfig({
   ...base,
-  testMatch: /pwa\.spec\.ts$/,
+  testMatch: /(pwa|events-prefetch)\.spec\.ts$/,
   use: { ...base.use, baseURL: process.env.PLAYWRIGHT_DEMO_URL },
   projects: [
     { name: 'iphone-chromium', use: { ...devices['iPhone 14'], browserName: 'chromium' } },

@@ -114,6 +114,27 @@
         "failed": "Não foi possível fazer o check-in. Tente novamente."
       }
     },
+    "online": {
+      "enter": "Entrar",
+      "hintBefore": "A transmissão começa às {time}.",
+      "confirmToGetLink": "Confirme presença para receber o link.",
+      "hintLive": "Ao entrar, sua presença é registrada."
+    },
+    "enter": {
+      "ended": {
+        "title": "Este evento já terminou",
+        "body": "O link da transmissão não está mais disponível."
+      },
+      "cancelled": {
+        "title": "Este evento foi cancelado",
+        "body": "A organização cancelou o evento, e o link da transmissão foi desativado."
+      },
+      "confirmFirst": {
+        "title": "Confirme sua presença",
+        "body": "O link fica disponível para quem confirmou presença. A partir de 1 hora antes do início, ele abre para todos."
+      },
+      "cta": "Ver evento"
+    },
     "notFound": {
       "title": "Evento não encontrado",
       "body": "Este link não existe mais ou não é de {tenant}.",

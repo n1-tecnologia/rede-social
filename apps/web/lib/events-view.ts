@@ -1,4 +1,5 @@
 import {
+  type EnterOutcome,
   EVENT_CHECKIN_OPENS_BEFORE_MINUTES,
   type EventDetail,
   type EventSummary,
@@ -367,6 +368,8 @@ export type EventDetailView = {
   checkinOpensAt: string;
   startsAt: string;
   endsAt: string;
+  /** The start as the tenant's wall-clock `HH:MM` (the online P0 hint, 06-06). */
+  startTime: string;
 };
 
 /**
@@ -506,6 +509,7 @@ export function eventDetailView(
     ).toISOString(),
     startsAt: event.startsAt,
     endsAt: event.endsAt,
+    startTime: start,
   };
 }
 
@@ -517,6 +521,10 @@ export function eventDetailView(
  *
  * `answer` is the recorded RSVP only (`going` / `not_going`); a check-in (`checked_in`, `walk_in`)
  * is `checkedIn` instead, and then the zone shows no RSVP row at all (the banner says it).
+ *
+ * `startTime` (06-06) is the start already formatted on the server in the tenant zone, for the online
+ * P0 hint "A transmissão começa às {time}." — the island formats no instant. The zone never receives
+ * the meeting URL: every `Entrar` points at `/eventos/{id}/entrar` (D-207).
  */
 export type EventActionState = {
   eventId: string;
@@ -528,6 +536,7 @@ export type EventActionState = {
   checkinOpensAt: string;
   startsAt: string;
   endsAt: string;
+  startTime: string;
 };
 
 /** `EventDetail` + its `EventDetailView` → the island's props (the view already holds the phase). */
@@ -535,7 +544,7 @@ export function eventActionState(
   event: Pick<EventDetail, 'id' | 'viewerStatus' | 'viewerCheckedInAt'>,
   view: Pick<
     EventDetailView,
-    'phase' | 'format' | 'cancelled' | 'checkinOpensAt' | 'startsAt' | 'endsAt'
+    'phase' | 'format' | 'cancelled' | 'checkinOpensAt' | 'startsAt' | 'endsAt' | 'startTime'
   >,
 ): EventActionState {
   const answer =
@@ -552,6 +561,7 @@ export function eventActionState(
     checkinOpensAt: view.checkinOpensAt,
     startsAt: view.startsAt,
     endsAt: view.endsAt,
+    startTime: view.startTime,
   };
 }
 
@@ -652,3 +662,20 @@ export function eventTicketView(
     section,
   };
 }
+
+/* ── 06-06: the online `Entrar` refusal screens (UI-D-209) ──────────────────────────────────── */
+
+/** A lowercase-or-uppercase RFC 4122-shaped id: the only `eventId` `/entrar` sends to the API. */
+export const EVENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The `?motivo=` values of `/eventos/{id}/entrar/aviso` (UI-D-209), one per refusal the gate names.
+ * The aviso page accepts EXACTLY these and nothing else (D-93).
+ */
+export const ENTER_NOTICE_REASONS = ['encerrado', 'cancelado', 'confirmar'] as const;
+export type EnterNoticeReason = (typeof ENTER_NOTICE_REASONS)[number];
+
+/** Which refusal screen each refusing outcome of the gate lands on. */
+export const ENTER_NOTICE_FOR: Readonly<
+  Record<Extract<EnterOutcome, 'ended' | 'cancelled' | 'confirm_first'>, EnterNoticeReason>
+> = { ended: 'encerrado', cancelled: 'cancelado', confirm_first: 'confirmar' };
