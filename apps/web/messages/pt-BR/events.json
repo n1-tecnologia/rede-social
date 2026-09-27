@@ -20,7 +20,9 @@
     },
     "state": {
       "cancelled": "Cancelado",
-      "ended": "Encerrado"
+      "ended": "Encerrado",
+      "going": "Você vai",
+      "present": "Presente"
     },
     "when": {
       "now": "Agora",
@@ -49,6 +51,49 @@
       "generic": "Não foi possível carregar os eventos. Tente novamente.",
       "retry": "Tentar novamente",
       "loadMore": "Não foi possível carregar mais eventos."
+    },
+    "count": {
+      "confirmed": "{count, plural, =0 {Ninguém confirmou ainda} one {# confirmado} other {# confirmados}}",
+      "present": "{count, plural, =0 {Ninguém fez check-in} one {# presente} other {# presentes}}"
+    },
+    "detail": {
+      "back": "Voltar para eventos",
+      "more": "Ver mais",
+      "less": "Ver menos"
+    },
+    "hero": {
+      "countdown": "{count, plural, one {Falta # dia} other {Faltam # dias}} · {date}",
+      "tomorrow": "Amanhã · {time}",
+      "today": "É hoje! · {time}",
+      "live": "Acontecendo agora",
+      "happened": "Aconteceu em {date}"
+    },
+    "info": {
+      "date": "Data",
+      "time": "Horário",
+      "place": "Local",
+      "confirmed": "Confirmados",
+      "present": "Presentes",
+      "timeRange": "{start} às {end}",
+      "timeRangeMultiDay": "Começa {start} · termina {end}"
+    },
+    "location": {
+      "openMaps": "Abrir no Maps",
+      "openMapsLabel": "Abrir {venue} no aplicativo de mapas"
+    },
+    "cancelled": {
+      "title": "Evento cancelado",
+      "body": "A organização cancelou este evento. A confirmação e o check-in estão desativados."
+    },
+    "checkin": {
+      "banner": "Check-in confirmado",
+      "doneAt": "Realizado às {time}",
+      "doneOn": "Realizado em {date}, às {time}"
+    },
+    "notFound": {
+      "title": "Evento não encontrado",
+      "body": "Este link não existe mais ou não é de {tenant}.",
+      "cta": "Ver eventos"
     }
   }
 }

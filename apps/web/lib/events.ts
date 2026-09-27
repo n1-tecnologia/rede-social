@@ -1,7 +1,9 @@
 import {
   EVENT_PAGE_SIZE,
+  type EventDetail,
   type EventPage,
   type EventPeriod,
+  eventDetailSchema,
   eventPageSchema,
 } from '@tria/module-events/contracts';
 import { redirect } from 'next/navigation';
@@ -70,4 +72,39 @@ export async function loadEvents(query: EventQueryInput): Promise<EventPage | nu
 
   if (path) redirect(path);
   return page;
+}
+
+/** `loadEvent`'s answer: the event, the ONE not-found (D-23), or "we could not reach the server". */
+export type EventResult =
+  | { status: 'ok'; event: EventDetail }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/events/{eventId}` (EVENT-02), the `loadCommunity` shape. The API answers ONE bare 404 for
+ * an unknown, another tenant's or a removed event, and a 400 for an id that is not a uuid: both
+ * collapse into `not-found`, so the page renders one screen for all of them. A transport or 5xx
+ * failure is `error`, a different screen. A refusal `bootstrapRedirectPath` knows becomes a
+ * navigation OUTSIDE the try/catch (`redirect()` throws in Next 16).
+ */
+export async function loadEvent(eventId: string): Promise<EventResult> {
+  let path: string | null = null;
+  let result: EventResult = { status: 'error' };
+  try {
+    const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}`);
+    if (res.ok) {
+      result = { status: 'ok', event: eventDetailSchema.parse(await res.json()) };
+    } else if (res.status === 404 || res.status === 400) {
+      result = { status: 'not-found' };
+    } else {
+      const error = await apiError(res);
+      path = bootstrapRedirectPath(error);
+      if (!path) console.error('events.read_failed', { status: res.status, code: error.code });
+    }
+  } catch (error) {
+    console.error('events.read_failed', { error: String(error) });
+  }
+
+  if (path) redirect(path);
+  return result;
 }

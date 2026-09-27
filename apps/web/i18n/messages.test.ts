@@ -811,3 +811,93 @@ describe('06 — events list strings and placeholders', () => {
     );
   });
 });
+
+/**
+ * 06-03 — the detail page's strings (UI-SPEC Copywriting Contract, "Detail page" and the core
+ * contract's not-found row), the two viewer pills and the D-219 count lines. The ICU plurals are
+ * FORMATTED, including pt-BR digit grouping ("1.204 confirmados").
+ */
+describe('06-03 — events detail strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.state.going', 'Você vai'],
+    ['events.state.present', 'Presente'],
+    ['events.detail.back', 'Voltar para eventos'],
+    ['events.detail.more', 'Ver mais'],
+    ['events.detail.less', 'Ver menos'],
+    ['events.hero.live', 'Acontecendo agora'],
+    ['events.info.date', 'Data'],
+    ['events.info.time', 'Horário'],
+    ['events.info.place', 'Local'],
+    ['events.info.confirmed', 'Confirmados'],
+    ['events.info.present', 'Presentes'],
+    ['events.location.openMaps', 'Abrir no Maps'],
+    ['events.cancelled.title', 'Evento cancelado'],
+    [
+      'events.cancelled.body',
+      'A organização cancelou este evento. A confirmação e o check-in estão desativados.',
+    ],
+    ['events.checkin.banner', 'Check-in confirmado'],
+    ['events.notFound.title', 'Evento não encontrado'],
+    ['events.notFound.cta', 'Ver eventos'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['events.hero.countdown', ['{count, plural', '{date}']],
+    ['events.hero.tomorrow', ['{time}']],
+    ['events.hero.today', ['{time}']],
+    ['events.hero.happened', ['{date}']],
+    ['events.info.timeRange', ['{start}', '{end}']],
+    ['events.info.timeRangeMultiDay', ['{start}', '{end}']],
+    ['events.location.openMapsLabel', ['{venue}']],
+    ['events.checkin.doneAt', ['{time}']],
+    ['events.checkin.doneOn', ['{date}', '{time}']],
+    ['events.notFound.body', ['{tenant}']],
+    ['events.count.confirmed', ['{count, plural']],
+    ['events.count.present', ['{count, plural']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('the count and countdown plurals format zero, one, many and pt-BR grouping', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+    expect(t('count.confirmed', { count: 0 })).toBe('Ninguém confirmou ainda');
+    expect(t('count.confirmed', { count: 1 })).toBe('1 confirmado');
+    expect(t('count.confirmed', { count: 1204 })).toBe('1.204 confirmados');
+    expect(t('count.present', { count: 0 })).toBe('Ninguém fez check-in');
+    expect(t('count.present', { count: 1 })).toBe('1 presente');
+    expect(t('count.present', { count: 2 })).toBe('2 presentes');
+    expect(t('hero.countdown', { count: 1, date: 'x' })).toBe('Falta 1 dia · x');
+    expect(t('hero.countdown', { count: 5, date: 'x' })).toBe('Faltam 5 dias · x');
+    expect(t('hero.today', { time: '19:00' })).toBe('É hoje! · 19:00');
+    expect(t('hero.tomorrow', { time: '19:00' })).toBe('Amanhã · 19:00');
+    expect(t('hero.happened', { date: 'x' })).toBe('Aconteceu em x');
+    expect(t('info.timeRange', { start: '19:00', end: '21:00' })).toBe('19:00 às 21:00');
+    expect(t('info.timeRangeMultiDay', { start: '19:00', end: '18:00' })).toBe(
+      'Começa 19:00 · termina 18:00',
+    );
+    expect(t('location.openMapsLabel', { venue: 'Sede' })).toBe(
+      'Abrir Sede no aplicativo de mapas',
+    );
+    expect(t('checkin.doneOn', { date: 'seg., 12 de out.', time: '18:40' })).toBe(
+      'Realizado em seg., 12 de out., às 18:40',
+    );
+    expect(t('notFound.body', { tenant: 'TRIA Demo' })).toBe(
+      'Este link não existe mais ou não é de TRIA Demo.',
+    );
+  });
+});

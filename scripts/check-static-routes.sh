@@ -82,6 +82,9 @@ const REQUIRED_KEYS = [
   // Phase 6: the Eventos tab. It reads the session, the tenant's timezone and the request instant
   // per request (relative labels such as "Hoje" and "Agora"), so it may never be prerendered.
   '/(app)/eventos/page',
+  // 06-03: one event's detail. It reads the session, the viewer's own attendance and the request
+  // instant (the hero countdown, the phase), so it may never be prerendered either.
+  '/(app)/eventos/[eventId]/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

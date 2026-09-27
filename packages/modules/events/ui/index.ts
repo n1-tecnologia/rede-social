@@ -4,6 +4,13 @@ export {
   type EventCoverGeometry,
   type EventCoverProps,
 } from './EventCover';
+export { EventHero, type EventHeroProps } from './EventHero';
+export {
+  type EventInfoCell,
+  EventInfoGrid,
+  type EventInfoGridProps,
+  type EventInfoIcon,
+} from './EventInfoGrid';
 export {
   EventPoster,
   type EventPosterPill,

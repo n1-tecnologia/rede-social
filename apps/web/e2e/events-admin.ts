@@ -118,6 +118,8 @@ export async function deleteEventsTenant(slug: string): Promise<void> {
 
 export type EventFixture = {
   title: string;
+  /** Plain text; `''` by default. */
+  description?: string;
   format?: 'in_person' | 'online';
   venueName?: string;
   address?: string;
@@ -142,9 +144,10 @@ export async function insertEvent(tenantId: string, fields: EventFixture): Promi
        where tenant_id = ${tenantId}::uuid and role = 'admin_tenant' and deleted_at is null
        order by joined_at limit 1
     ), e as (
-      insert into public.events (tenant_id, created_by_user_id, title, format, venue_name, address,
-                                 starts_at, ends_at, status, cancelled_at)
-      select ${tenantId}::uuid, author.user_id, ${fields.title}, ${format},
+      insert into public.events (tenant_id, created_by_user_id, title, description, format,
+                                 venue_name, address, starts_at, ends_at, status, cancelled_at)
+      select ${tenantId}::uuid, author.user_id, ${fields.title}, ${fields.description ?? ''},
+             ${format},
              ${online ? null : (fields.venueName ?? 'Auditorio da sede')},
              ${online ? null : (fields.address ?? 'Rua das Flores, 100')},
              now() + make_interval(mins => ${fields.startsInMinutes}),
@@ -181,4 +184,19 @@ export async function readEventInstants(
   const row = rows[0];
   if (!row) throw new Error(`no event titled ${title} in ${tenantSlug}`);
   return { id: row.id, startsAt: row.starts_at.toISOString(), endsAt: row.ends_at.toISOString() };
+}
+
+/** The id of a tenant by slug (the seeded ones included). */
+export async function tenantIdBySlug(slug: string): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`select id from public.tenants where slug = ${slug}`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no tenant ${slug}`);
+  return id;
+}
+
+/** Removes every event of `tenantId` whose title starts with `prefix` (secrets and answers cascade). */
+export async function deleteEventsByTitlePrefix(tenantId: string, prefix: string): Promise<void> {
+  await sql()`
+    delete from public.events
+     where tenant_id = ${tenantId}::uuid and title like ${`${prefix}%`}`;
 }

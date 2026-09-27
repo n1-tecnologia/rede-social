@@ -1,7 +1,7 @@
 'use client';
 
 import { chipBase, cn } from '@tria/ui';
-import { CalendarX2, MapPin, Video } from 'lucide-react';
+import { CalendarX2, Check, MapPin, Video } from 'lucide-react';
 import { EventCover } from './EventCover';
 
 /**
@@ -17,13 +17,19 @@ import { EventCover } from './EventCover';
  * overline, so the card states each fact once (UI-D-201). It is `whitespace-nowrap` alone in its row,
  * so it never wraps into the image. The over-media ground is `bg-black/60 backdrop-blur-sm` for every
  * kind in this plan: `Cancelado` is NOT `bg-danger`, because white on the danger red is 3.8:1, below AA
- * for 12px text (UI-D-202). The pill kinds are an open union: 06-03 adds the viewer's `going`
- * ("Você vai") and `present` ("Presente") states and the meta count line.
+ * for 12px text (UI-D-202). 06-03 adds the viewer's two states: `going` ("Você vai") on the brand
+ * fill `bg-brand text-on-brand` (the per-tenant on-colour, never white), and `present` ("Presente") on
+ * the same over-media ground with a leading `Check` 12. The host resolves which one applies
+ * (`Cancelado` → `Presente` → `Você vai` → relative date).
+ *
+ * **The meta line** (06-03, UI-D-201) is the count, 12/700 `tabular-nums`: "N confirmados" while
+ * upcoming, "N presentes" once past, and ABSENT when the host passes none (a cancelled event). Its
+ * absence leaves no gap: the 4/5 box never reflows either way.
  *
  * **Truncation is CSS only** (`truncate`, `line-clamp-2`): no `.slice()` of any string here, so a
  * multi-byte grapheme is never split and the 4/5 box never reflows.
  */
-export type EventPosterPillKind = 'cancelled' | 'relative';
+export type EventPosterPillKind = 'cancelled' | 'relative' | 'going' | 'present';
 
 export interface EventPosterPill {
   kind: EventPosterPillKind;
@@ -47,14 +53,19 @@ export interface EventPosterProps {
   coverAssetId: string | null;
   coverVariantWidths: readonly number[];
   coverAlt: string;
+  /** The count line ("3 confirmados"), or undefined for none (a cancelled event). */
+  meta?: string;
   /** A cancelled event's photo is desaturated (UI-D-202). */
   grayscale?: boolean;
   /** The first two posters of a list load eagerly. */
   eager?: boolean;
 }
 
-/** The pill's over-media ground, shared by every kind this plan renders. */
+/** The pill's over-media ground, shared by every kind except `going`. */
 const PILL_GROUND = 'bg-black/60 backdrop-blur-sm text-white';
+
+/** `going` is the member's own confirmed answer: the tenant's brand fill and its on-colour. */
+const PILL_GOING = 'bg-brand text-on-brand';
 
 export function EventPoster({
   href,
@@ -68,6 +79,7 @@ export function EventPoster({
   coverAssetId,
   coverVariantWidths,
   coverAlt,
+  meta,
   grayscale = false,
   eager = false,
 }: EventPosterProps) {
@@ -114,6 +126,14 @@ export function EventPoster({
         <PlaceIcon size={12} aria-hidden className="shrink-0" />
         <span className="min-w-0 truncate">{place}</span>
       </p>
+      {meta ? (
+        <p
+          data-testid="event-poster-meta"
+          className={cn('mt-1 text-xs font-bold tabular-nums', onPhoto && 'text-white')}
+        >
+          {meta}
+        </p>
+      ) : null}
     </div>
   );
 
@@ -138,9 +158,10 @@ export function EventPoster({
           <span
             data-testid="event-poster-pill"
             data-kind={pill.kind}
-            className={cn(chipBase, PILL_GROUND)}
+            className={cn(chipBase, pill.kind === 'going' ? PILL_GOING : PILL_GROUND)}
           >
             {pill.kind === 'cancelled' ? <CalendarX2 size={12} aria-hidden /> : null}
+            {pill.kind === 'present' ? <Check size={12} strokeWidth={3} aria-hidden /> : null}
             {pill.label}
           </span>
         </span>

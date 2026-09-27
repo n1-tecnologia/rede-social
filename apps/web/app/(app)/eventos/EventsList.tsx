@@ -188,6 +188,7 @@ export function EventsList({
               coverAssetId={poster.coverAssetId}
               coverVariantWidths={poster.coverVariantWidths}
               coverAlt={poster.coverAlt}
+              meta={poster.meta}
               grayscale={poster.grayscale}
               eager={index < 2}
             />

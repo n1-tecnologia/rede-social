@@ -1,15 +1,18 @@
 import { fileURLToPath } from 'node:url';
-import type { EventSummary } from '@tria/module-events/contracts';
+import type { EventDetail, EventSummary } from '@tria/module-events/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
+  eventCountLine,
+  eventDetailView,
   eventPhase,
   eventPill,
   eventPosterView,
   eventWhenLine,
   formatEventDate,
   formatEventTime,
+  mapsHref,
   tenantDayKey,
 } from './events-view';
 
@@ -190,5 +193,174 @@ describe('eventPosterView — the finished strings a poster renders', () => {
     expect(online.placeKind).toBe('online');
     expect(online.grayscale).toBe(true);
     expect(online.pill).toEqual({ kind: 'cancelled', label: 'Cancelado' });
+  });
+});
+
+/** A detail payload: the summary plus the three detail-only keys. */
+function detail(overrides: Partial<EventDetail> = {}): EventDetail {
+  return {
+    ...event(),
+    description: 'Uma descrição.',
+    address: 'Rua das Flores, 100',
+    viewerRespondedAt: null,
+    ...overrides,
+  };
+}
+
+describe('06-03 — the viewer pills and the count line', () => {
+  const before = at('2026-10-01T12:00:00Z');
+  const after = at('2026-10-20T12:00:00Z');
+
+  it('12. priority: Cancelado → Presente → Você vai → relative date', () => {
+    const going = event({ viewerStatus: 'going' });
+    expect(eventPill(going, SP, before, t)).toEqual({ kind: 'going', label: 'Você vai' });
+    // A Vou on a PAST event is no longer "Você vai": the relative label takes over.
+    expect(eventPill(going, SP, after, t)).toEqual({ kind: 'relative', label: 'Encerrado' });
+    // A checked-in viewer on a past event is "Presente" (walk-ins too: the instant decides).
+    const present = event({
+      viewerStatus: 'checked_in',
+      viewerCheckedInAt: '2026-10-12T21:30:00.000000Z',
+    });
+    expect(eventPill(present, SP, after, t)).toEqual({ kind: 'present', label: 'Presente' });
+    const walkIn = event({
+      viewerStatus: 'walk_in',
+      viewerCheckedInAt: '2026-10-12T21:30:00.000000Z',
+    });
+    expect(eventPill(walkIn, SP, after, t).kind).toBe('present');
+    // Cancelled wins over both.
+    expect(eventPill({ ...present, status: 'cancelled' }, SP, after, t).kind).toBe('cancelled');
+    expect(eventPill({ ...going, status: 'cancelled' }, SP, before, t).kind).toBe('cancelled');
+    // Não vou is not a state pill.
+    expect(eventPill(event({ viewerStatus: 'not_going' }), SP, before, t).kind).toBe('relative');
+  });
+
+  it('13. the count line: confirmados while upcoming, presentes once past, none when cancelled', () => {
+    const counted = event({ confirmedCount: 1204, presentCount: 1 });
+    expect(eventCountLine(counted, before, t)).toBe('1.204 confirmados');
+    expect(eventCountLine(counted, after, t)).toBe('1 presente');
+    expect(eventCountLine(event(), before, t)).toBe('Ninguém confirmou ainda');
+    expect(eventCountLine(event(), after, t)).toBe('Ninguém fez check-in');
+    expect(eventCountLine(event({ confirmedCount: 1 }), before, t)).toBe('1 confirmado');
+    expect(eventCountLine(event({ status: 'cancelled', confirmedCount: 3 }), before, t)).toBe(
+      undefined,
+    );
+    const poster = eventPosterView(event({ status: 'cancelled' }), { tz: SP, nowMs: before, t });
+    expect('meta' in poster).toBe(false);
+  });
+});
+
+describe('06-03 — eventDetailView (UI-D-204)', () => {
+  it('14. the hero overline: countdown, Amanhã, É hoje!, live, Aconteceu em, cancelled', () => {
+    const view = (nowIso: string, overrides: Partial<EventDetail> = {}) =>
+      eventDetailView(detail(overrides), { tz: SP, nowMs: at(nowIso), t }).hero.overline;
+    expect(view('2026-10-01T12:00:00Z')).toBe('Faltam 11 dias · seg., 12 de out.');
+    expect(view('2026-10-10T12:00:00Z')).toBe('Faltam 2 dias · seg., 12 de out.');
+    expect(view('2026-10-11T12:00:00Z')).toBe('Amanhã · 19:00');
+    expect(view('2026-10-12T12:00:00Z')).toBe('É hoje! · 19:00');
+    expect(view('2026-10-12T23:00:00Z')).toBe('Acontecendo agora');
+    expect(view('2026-10-20T12:00:00Z')).toBe('Aconteceu em seg., 12 de out.');
+    expect(view('2026-10-01T12:00:00Z', { status: 'cancelled' })).toBe('seg., 12 de out. · 19:00');
+  });
+
+  it('15. the header pill and the banners, by the same priority', () => {
+    const now = { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t };
+    expect(eventDetailView(detail({ viewerStatus: 'going' }), now).headerPill).toEqual({
+      tone: 'brand',
+      label: 'Você vai',
+    });
+    const cancelled = eventDetailView(detail({ status: 'cancelled', viewerStatus: 'going' }), now);
+    expect(cancelled.headerPill).toEqual({ tone: 'danger', label: 'Cancelado' });
+    expect(cancelled.banner).toEqual({
+      kind: 'cancelled',
+      title: 'Evento cancelado',
+      body: 'A organização cancelou este evento. A confirmação e o check-in estão desativados.',
+    });
+    expect(eventDetailView(detail(), now).headerPill).toBeNull();
+    expect(eventDetailView(detail(), now).banner).toBeNull();
+
+    // Checked in, read later that evening (same tenant day) and a week later (another day).
+    const checkedIn = detail({
+      viewerStatus: 'checked_in',
+      viewerCheckedInAt: '2026-10-12T21:40:00.000000Z',
+    });
+    const sameDay = eventDetailView(checkedIn, { tz: SP, nowMs: at('2026-10-12T23:00:00Z'), t });
+    expect(sameDay.headerPill).toEqual({ tone: 'success', label: 'Presente' });
+    expect(sameDay.banner).toEqual({
+      kind: 'checkedIn',
+      title: 'Check-in confirmado',
+      body: 'Realizado às 18:40',
+    });
+    const later = eventDetailView(checkedIn, { tz: SP, nowMs: at('2026-10-20T12:00:00Z'), t });
+    expect(later.banner?.body).toBe('Realizado em seg., 12 de out., às 18:40');
+  });
+
+  it('16. the info grid: same day, multi-day, online, and Presentes once past', () => {
+    const upcoming = eventDetailView(detail({ confirmedCount: 3 }), {
+      tz: SP,
+      nowMs: at('2026-10-01T12:00:00Z'),
+      t,
+    });
+    expect(upcoming.info).toEqual([
+      { icon: 'date', label: 'Data', value: 'seg., 12 de out.' },
+      { icon: 'time', label: 'Horário', value: '19:00 às 21:00' },
+      { icon: 'place', label: 'Local', value: 'Auditório da sede' },
+      { icon: 'people', label: 'Confirmados', value: '3 confirmados' },
+    ]);
+    expect(upcoming.countIndex).toBe(3);
+
+    const multiDay = eventDetailView(
+      detail({ startsAt: '2026-10-12T22:00:00.000000Z', endsAt: '2026-10-14T21:00:00.000000Z' }),
+      { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t },
+    );
+    expect(multiDay.info[0]?.value).toBe('12 a 14 de out.');
+    expect(multiDay.info[1]?.value).toBe('Começa 19:00 · termina 18:00');
+
+    const past = eventDetailView(detail({ presentCount: 2, confirmedCount: 5 }), {
+      tz: SP,
+      nowMs: at('2026-10-20T12:00:00Z'),
+      t,
+    });
+    expect(past.info[3]).toEqual({ icon: 'people', label: 'Presentes', value: '2 presentes' });
+    expect(past.phase).toBe('P3');
+
+    const online = eventDetailView(detail({ format: 'online', venueName: null, address: null }), {
+      tz: SP,
+      nowMs: at('2026-10-01T12:00:00Z'),
+      t,
+    });
+    expect(online.info[2]).toEqual({ icon: 'online', label: 'Local', value: 'Online' });
+    expect(online.location).toBeNull();
+    expect(online.hero.placeKind).toBe('online');
+  });
+
+  it('17. the tenant wall clock: the same event read with a Manaus tenant zone is an hour earlier', () => {
+    const view = eventDetailView(detail(), { tz: MANAUS, nowMs: at('2026-10-01T12:00:00Z'), t });
+    expect(view.info[1]?.value).toBe('18:00 às 20:00');
+  });
+
+  it('18. the in-person location and the instants the client refreshes at', () => {
+    const view = eventDetailView(detail(), { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t });
+    expect(view.location).toEqual({
+      venue: 'Auditório da sede',
+      address: 'Rua das Flores, 100',
+      href: mapsHref('Auditório da sede', 'Rua das Flores, 100'),
+      label: 'Abrir no Maps',
+      ariaLabel: 'Abrir Auditório da sede no aplicativo de mapas',
+    });
+    expect(view.checkinOpensAt).toBe('2026-10-12T21:00:00.000Z');
+    expect(view.startsAt).toBe('2026-10-12T22:00:00.000000Z');
+    expect(view.endsAt).toBe('2026-10-13T00:00:00.000000Z');
+  });
+});
+
+describe('06-03 — mapsHref (D-203)', () => {
+  it('19. the universal search URL, with accents, commas and line breaks encoded', () => {
+    const href = mapsHref('Auditório da sede', 'Rua São João, 100\nCentro');
+    expect(href.startsWith('https://www.google.com/maps/search/?api=1&query=')).toBe(true);
+    const query = href.slice(href.indexOf('query=') + 'query='.length);
+    expect(query).toBe(
+      'Audit%C3%B3rio%20da%20sede%2C%20Rua%20S%C3%A3o%20Jo%C3%A3o%2C%20100%0ACentro',
+    );
+    expect(decodeURIComponent(query)).toBe('Auditório da sede, Rua São João, 100\nCentro');
   });
 });
