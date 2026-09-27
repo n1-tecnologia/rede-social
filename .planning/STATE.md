@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Events
 status: executing
-stopped_at: Completed 06-07-PLAN.md
-last_updated: "2026-09-27T20:26:08.081Z"
+stopped_at: Completed 06-08-PLAN.md
+last_updated: "2026-09-27T21:16:15.285Z"
 last_activity: 2026-09-27
-last_activity_desc: "06-07 complete: EVENT-05 Participantes. Three literal keyset chips (confirmed = going only, present with walk-ins, not_going) over their named indexes, one summary read with pendingConfirmedCount vs confirmedCount and the admin-only door code, D-217 regeneration (always a new code, online refused), the /eventos/{id}/participantes screen with the code card, counted chips, walk-in tags and removed members, and the manage-card Participantes row"
-state_head: d1e4c7a2d3f715ebb74d048b61b4bc5d2f56393d
+last_activity_desc: "06-08 complete: EVENT-06 calendar export (RFC 5545 .ics + Google TEMPLATE link, online LOCATION = /entrar, the meeting-URL prohibition closed) and the Início 'Próximo evento' card (GET /v1/events/next, home order 7, check-in mode without a reload via the boundary refresh)"
+state_head: d021cfd9bd496b24b91490326df94784900f05d3
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 98
-  completed_plans: 93
+  completed_plans: 94
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 6 (Events) — EXECUTING
-Plan: 7 of 9 complete (06-01, 06-02, 06-03, 06-04, 06-05, 06-06, 06-07); 06-08 next
-Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair, the event form, the check-in ticket, the online Entrar / calendar hand-off and Participantes (E11 chip overflow, the code at arm's length) waits on 01.1
-Last activity: 2026-09-27 — 06-07 complete: EVENT-05. `GET /v1/events/{id}/attendance` (three literal keysets: `confirmed` = going only, `present` = checked_in + walk_in with `walkIn`, `not_going`; in-lane 404 first; the list value never bound; a tampered cursor instant degrades to page 1) and `/attendance/summary` (pendingConfirmedCount vs confirmedCount, Pitfall 11; the in-person code through `event_secrets_staff_all`) under the literal `events.attendance.read`; `POST /v1/events/{id}/checkin-code` under `events.event.manage` (two distinct candidates, always a new code, online refused). pgTAP 141 plan 26 pins both chip plans by index name. `/eventos/{id}/participantes` (notFound() without the permission): the code card first, three counted chips that scroll at 320px, rows with the Sem confirmação tag in Presentes and Membro removido, paging/refresh, Gerar novo código behind a danger confirm; the detail's manage card gains the Participantes row. Open pilot question: should support_tenant see the code and list? EVENT-05 stays Pending until 06-08/06-09 (shared requirement)
+Plan: 8 of 9 complete (06-01, 06-02, 06-03, 06-04, 06-05, 06-06, 06-07, 06-08); 06-09 next
+Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair, the event form, the check-in ticket, the online Entrar / calendar hand-off (Google A2, .ics import), Participantes and the Início card waits on 01.1
+Last activity: 2026-09-27 — 06-08 complete: EVENT-06. `apps/web/lib/events-calendar.ts` (utcStamp, icsEscape, 75-octet foldIcsLine by code point, calendarLocation, buildIcs, googleCalendarHref with UTC Z dates and no time-zone parameter; TDD, RED_EVIDENCE_OK), `GET /eventos/{id}/agenda.ics` (pure member-lane read, text/calendar, private no-store), the detail's calendar pair (stacked below sm: half width wraps at 390 and 320), and D-202: `GET /v1/events/next` (status = 'active', soonest first), `NextEventCard` at home order 7, `eventsHome` (never rejects) and `NextEventRefresh` (the card turns into 'Fazer check-in' / `Entrar` at the window's opening without a reload). Integration 35 files / 590 tests; e2e `events agenda|events inicio` 9/9 on the phone
 
-Progress: [███████████████████░] 93/98 plans (Phase 6: 7/9)
+Progress: [███████████████████░] 94/98 plans (Phase 6: 8/9)
 
 ## Performance Metrics
 
@@ -153,6 +153,7 @@ Progress: [███████████████████░] 93/98 p
 | Phase 06 P05 | 29 min | 2 tasks | 36 files |
 | Phase 06 P06 | 25 min | 2 tasks | 29 files |
 | Phase 06 P07 | 23min | 2 tasks | 28 files |
+| Phase 06 P08 | 45 min | 2 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -543,6 +544,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T20:26:07.974Z
-Stopped at: Completed 06-07-PLAN.md
+Last session: 2026-09-27T21:16:15.050Z
+Stopped at: Completed 06-08-PLAN.md
 Resume file: None
