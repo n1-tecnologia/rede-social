@@ -327,12 +327,39 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
  * live region's `{group}: story {current} de {total}` — never the header text alone, because a
  * seeded tenant story's caption also contains the word "Bastidores".
  *
- * Read-only: nothing here writes, so the shared seed is left exactly as it was found.
+ * Read-only apart from the member's seen state (the cases that start on the tenant circle pin it,
+ * see `openTenantCircleAtFirst`), which the file's `beforeEach` clears and its `afterAll` puts back
+ * to the seed's, so the shared seed is left exactly as it was found.
  */
 test.describe('the grouped viewer — circles in a row (D-107, UI-D-65, mobile)', () => {
   const V = S.viewer;
   const dialog = (page: Page) => page.getByRole('dialog', { name: V.dialog });
   const position = (page: Page) => page.getByTestId('story-position');
+
+  /**
+   * Logs the member in and opens the tenant circle on its FIRST story, for the cases whose gesture
+   * starts there. `beforeEach` clears the views, but the case before this one SHOWED tenant stories,
+   * and the viewer delivers its seen buffer when it closes or the page hides, through a keepalive
+   * request that outlives the page (WR-07). That write can land AFTER this case's `beforeEach`, and
+   * the circle then resumes at the first UNSEEN story (D-105): in the 06-09 exit gate the LEFT-swipe
+   * case opened on the second story, auto-advanced into Bastidores, and swiped past the row's end.
+   * So this pins EVERY live tenant story as seen first. A late delivery can only ADD views, and with
+   * everything seen the circle restarts at the beginning, so it is the one state the race cannot
+   * move. The URL check makes the precondition exact: it is pushed once, at the open.
+   */
+  async function openTenantCircleAtFirst(page: Page): Promise<void> {
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, `/v1/stories?limit=${STORY_MAX_PAGE_SIZE}`);
+    const { items } = (await list.json()) as { items: { id: string }[] };
+    const sequence = [...items].reverse().map((item) => item.id);
+    expect(sequence.length, 'the strip holds every live tenant story').toBe(activeStories);
+    await setStoryViews(users.demoMember, 'tria-demo', sequence);
+    await login(page, users.demoMember, SEED_PASSWORD);
+    await tenantCircle(page).click();
+    await expect(page).toHaveURL(new RegExp(`/stories/${sequence[0]}$`));
+    await expect(dialog(page)).toHaveAttribute('data-story-group', '0');
+    await expect(dialog(page)).toHaveAttribute('data-story-index', '0');
+  }
 
   test('a member opens Bastidores: its own stories, OLDEST first — the expired one included', async ({
     page,
@@ -372,9 +399,7 @@ test.describe('the grouped viewer — circles in a row (D-107, UI-D-65, mobile)'
     isMobile,
   }) => {
     test.skip(!isMobile, 'the gesture model is the phone’s');
-    await login(page, users.demoMember, SEED_PASSWORD);
-    await tenantCircle(page).click();
-    await expect(dialog(page)).toHaveAttribute('data-story-group', '0');
+    await openTenantCircleAtFirst(page);
 
     const size = page.viewportSize() ?? { width: 390, height: 844 };
     const tapRight = () =>
@@ -408,9 +433,7 @@ test.describe('the grouped viewer — circles in a row (D-107, UI-D-65, mobile)'
   }) => {
     test.skip(!isMobile, 'the gesture model is the phone’s');
     test.skip(activeStories < 2, 'a skip is only distinguishable from a tap with two stories');
-    await login(page, users.demoMember, SEED_PASSWORD);
-    await tenantCircle(page).click();
-    await expect(dialog(page)).toHaveAttribute('data-story-index', '0');
+    await openTenantCircleAtFirst(page);
 
     const size = page.viewportSize() ?? { width: 390, height: 844 };
     const y = Math.round(size.height * 0.5);
