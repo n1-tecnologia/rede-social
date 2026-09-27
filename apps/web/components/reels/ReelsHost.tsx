@@ -99,9 +99,13 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  * lane, keyed by post id, and seeds every mounted page from it (`withInteraction`): a page that
  * leaves the window and comes back, a lane left and re-selected, and the same post in "Todos" and
  * in its community lane all show the one state. The like engine in each page is only the in-flight
- * optimistic layer. Only the LATEST request per post is recorded (`likeSeq`, the engine's own
- * `requestId` rule), so a stale answer never re-seeds a page into a state the viewer left, and an
- * answer that lands after its page unmounted is still recorded. A refusal records nothing. The
+ * optimistic layer. The host keeps the last SERVER-confirmed pair per post (`confirmed`, tagged with
+ * the number of the request that produced it) and publishes it into the map when the post's LATEST
+ * request settles (`likeSeq`, the engine's own `requestId` rule), whatever that request's outcome:
+ * an older request's `ok` answer is remembered but never re-seeds a mounted page mid-flight into a
+ * state the viewer left, an answer that lands after its page unmounted is still recorded, and a
+ * refused or rejected latest request still leaves the confirmed pair for a page that remounts
+ * (WR-04) instead of the stale server read. Only an `ok` answer is ever confirmed. The
  * comment count lives in the same entry (`bumpCommentCount`), as an ABSOLUTE count seeded from the
  * count the viewer was shown plus the sheet's server-confirmed deltas, so a lane read made after
  * the comment, which already counts it, is never added to twice. For the rest of the visit the
@@ -294,8 +298,17 @@ export function ReelsHost({
    * it dies with the host and is never persisted.
    */
   const [interactions, setInteractions] = useState<Record<string, ReelInteraction>>({});
-  /** The number of the latest like request per post: only that request's answer is recorded. */
+  /**
+   * The number of the latest like request per post. It decides WHEN the confirmed pair is
+   * published: only once the post's latest request has settled, so a newer toggle in flight is never
+   * overwritten by an older answer (WR-04).
+   */
   const likeSeq = useRef(new Map<string, number>());
+  /**
+   * WR-04: the last SERVER-confirmed like pair per post for this visit, tagged with the seq of the
+   * request that produced it. Like `interactions`, it is visit-scoped and never persisted.
+   */
+  const confirmed = useRef(new Map<string, { seq: number; like: LikeState }>());
 
   const lane = laneStates[activeLane] ?? EMPTY_LANE;
   const items = lane.items;
@@ -704,21 +717,43 @@ export function ReelsHost({
   }, [toast, genericError]);
 
   /**
-   * The feed's like action, remembered (CR-01). Only an `ok` answer to the post's LATEST request is
-   * written into the map, whether or not its page is still mounted; a refusal writes nothing and
-   * the outcome goes back unchanged, so the page's engine reverts exactly as the card's does. A
-   * rejection is not caught: it must reach the engine.
+   * The feed's like action, remembered (CR-01, WR-04). Every `ok` answer becomes the post's
+   * confirmed pair unless a NEWER request's answer is already held (Next serialises server actions,
+   * so answers normally arrive in order; the seq guard keeps an out-of-order older answer from
+   * replacing a newer one). When the post's LATEST request settles — `ok`, refused or rejected —
+   * the confirmed pair is written into the map, whether or not its page is still mounted, so a
+   * remounted page starts from what the server last confirmed. The outcome goes back unchanged and a
+   * rejection is rethrown, so the page's engine reverts and raises the toast exactly as the card's
+   * does.
    */
   const trackLike = useCallback(
     async (postId: string, nextLiked: boolean): Promise<LikeOutcome> => {
       const seq = (likeSeq.current.get(postId) ?? 0) + 1;
       likeSeq.current.set(postId, seq);
-      const outcome = nextLiked ? await onLike(postId) : await onUnlike(postId);
-      if (outcome.ok && likeSeq.current.get(postId) === seq) {
-        const settled: LikeState = { liked: outcome.liked, likeCount: outcome.likeCount };
-        setInteractions((map) => ({ ...map, [postId]: { ...map[postId], like: settled } }));
+      const publish = () => {
+        // A newer request is in flight: it will publish when it settles.
+        if (likeSeq.current.get(postId) !== seq) return;
+        const pair = confirmed.current.get(postId)?.like;
+        if (pair === undefined) return;
+        setInteractions((map) => ({ ...map, [postId]: { ...map[postId], like: pair } }));
+      };
+      try {
+        const outcome = nextLiked ? await onLike(postId) : await onUnlike(postId);
+        if (outcome.ok) {
+          const held = confirmed.current.get(postId);
+          if (held === undefined || held.seq < seq) {
+            confirmed.current.set(postId, {
+              seq,
+              like: { liked: outcome.liked, likeCount: outcome.likeCount },
+            });
+          }
+        }
+        publish();
+        return outcome;
+      } catch (error) {
+        publish();
+        throw error;
       }
-      return outcome;
     },
     [onLike, onUnlike],
   );

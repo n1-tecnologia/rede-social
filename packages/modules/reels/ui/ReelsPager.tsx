@@ -45,6 +45,10 @@ import { ticksWindow } from './ticks';
  *    capture: the event still continues to its target, so `DoubleTapHeart` still sees every
  *    `pointerup`. `origin` is only set by a `pointerdown` that reached the stack (one that began on
  *    the media), so a press that began on the rail, the caption or the like button is unaffected.
+ *    The gesture belongs to the PRIMARY pointer that started it (`origin.pointerId`): a
+ *    non-primary pointerdown never starts or takes over a gesture, and every other pointer's move,
+ *    release and cancel is ignored (WR-05), so a second finger tapping the rail or the caption never
+ *    decides, cancels or steers the first finger's drag.
  *
  * **The WebKit rule (RESEARCH Pitfall 1).** Every index change — swipe, ↑/↓ key, wheel, desktop
  * button — runs through ONE `go(next)`, which calls `onActivate(next)` SYNCHRONOUSLY inside that
@@ -217,7 +221,7 @@ export function ReelsPager({
   labels,
 }: ReelsPagerProps) {
   const [drag, setDrag] = useState<Drag>(IDLE);
-  const origin = useRef<{ x: number; y: number } | null>(null);
+  const origin = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const wheel = useRef({ acc: 0, lockedUntil: 0 });
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
@@ -333,22 +337,29 @@ export function ReelsPager({
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (gesturesDisabled) return;
+    // WR-05: a second finger never starts or takes over a gesture.
+    if (!event.isPrimary) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
-    origin.current = { x: event.clientX, y: event.clientY };
+    // A PRIMARY pointerdown always (re)starts the gesture: a new primary pointer exists only when no
+    // other pointer of its type is active, so an origin still held here is stale (its release never
+    // reached the stack) and overwriting it self-heals instead of locking the pager.
+    origin.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     setDrag({ active: true, dx: 0, dy: 0 });
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const start = origin.current;
-    if (!start) return;
+    if (!start || event.pointerId !== start.pointerId) return;
     setDrag({ active: true, dx: event.clientX - start.x, dy: event.clientY - start.y });
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     const start = origin.current;
+    // Another pointer's release is not this gesture's end (WR-05): keep the drag, re-render nothing.
+    if (!start || event.pointerId !== start.pointerId) return;
     origin.current = null;
     setDrag(IDLE);
-    if (!start || gesturesDisabled) return;
+    if (gesturesDisabled) return;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
     // The DOMINANT axis decides, so one gesture never both pages and steps the lane (D-117).
@@ -361,15 +372,23 @@ export function ReelsPager({
     else if (dx >= REELS_SWIPE_THRESHOLD_PX) onLaneStep?.(-1);
   };
 
-  /** A cancelled gesture resets and decides NOTHING (the prototype's cancel-as-up is fixed here). */
-  const onPointerCancel = () => {
+  /**
+   * A cancelled gesture resets and decides NOTHING (the prototype's cancel-as-up is fixed here).
+   * Another pointer's cancel leaves this gesture running (WR-05).
+   */
+  const onPointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = origin.current;
+    if (start && event.pointerId !== start.pointerId) return;
     origin.current = null;
     setDrag(IDLE);
   };
 
   /** A mouse released outside the stack never reports its pointerup here: treat the exit as a cancel. */
   const onPointerLeave = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (origin.current && event.pointerType === 'mouse') onPointerCancel();
+    const start = origin.current;
+    if (start && event.pointerType === 'mouse' && event.pointerId === start.pointerId) {
+      onPointerCancel(event);
+    }
   };
 
   /* ── Render ──────────────────────────────────────────────────────────────────────────────────── */
