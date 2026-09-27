@@ -579,6 +579,15 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     expect(served2.html).not.toContain(NEUTRAL);
     await expect.poll(() => entrarBg(page)).toBe(hexToRgb(PRIMARY_2));
 
+    // The manifest route caches the tenant branding on its own clock, so it can still serve the
+    // pre-rebrand record after the HTML has turned over. Wait for it with the same 70 s budget
+    // (the same 60 s web host cache) before asserting it; the assertions below are unchanged.
+    await expect
+      .poll(async () => (await readManifest(page, origin, slug)).json.theme_color, {
+        timeout: 70_000,
+        intervals: [1_000, 2_000, 3_000],
+      })
+      .toBe(PRIMARY_2);
     const manifest2 = await readManifest(page, origin, slug);
     expect(manifest2.status).toBe(200);
     expect(manifest2.json.theme_color).toBe(PRIMARY_2);
