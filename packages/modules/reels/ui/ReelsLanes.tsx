@@ -140,15 +140,22 @@ export function ReelsLanes({ lanes, activeKey, onSelect, label, panelId }: Reels
                 onClick={() => select(lane.key)}
                 onKeyDown={(event) => onKeyDown(event, index)}
                 className={cn(
-                  'h-11 max-w-40 shrink-0 truncate border-b-2 px-1 text-sm',
-                  active
-                    ? 'border-white font-bold text-white'
-                    : 'border-transparent font-normal text-white/70',
+                  'inline-flex h-11 max-w-40 shrink-0 items-center px-1 text-sm',
+                  active ? 'font-bold text-white' : 'font-normal text-white/70',
                   SHADOW,
                   RING,
                 )}
               >
-                {lane.label}
+                {/* The underline sits on the label (UI-REVIEW fix 2), ~4 px under the text, while
+                    the 44 px hit area stays on the tab. */}
+                <span
+                  className={cn(
+                    'min-w-0 truncate border-b-2 pb-1',
+                    active ? 'border-white' : 'border-transparent',
+                  )}
+                >
+                  {lane.label}
+                </span>
               </button>
             );
           })}

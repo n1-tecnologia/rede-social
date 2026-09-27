@@ -93,14 +93,25 @@ describe('ReelsLanes — the tablist (UI-D-84)', () => {
     for (const tab of tabs) expect(tab).toHaveAttribute('aria-controls', 'reels-panel');
   });
 
-  it('the active tab is white 700 underlined; an idle tab is white/70 with a transparent border', () => {
+  it('the active tab is white 700 with the underline on its label span; an idle tab is white/70 with a transparent one (UI-REVIEW fix 2)', () => {
     render(<ReelsLanes {...props()} />);
     const [active, idle] = screen.getAllByRole('tab') as [HTMLElement, HTMLElement];
-    for (const cls of ['font-bold', 'text-white', 'border-b-2', 'border-white', 'h-11']) {
+    for (const cls of ['font-bold', 'text-white', 'h-11']) {
       expect(active.className).toContain(cls);
     }
-    for (const cls of ['font-normal', 'text-white/70', 'border-b-2', 'border-transparent']) {
+    expect(active.className).not.toContain('border-b-2');
+    expect(active.children).toHaveLength(1);
+    const activeSpan = active.firstElementChild as HTMLElement;
+    for (const cls of ['border-b-2', 'border-white', 'pb-1']) {
+      expect(activeSpan.className).toContain(cls);
+    }
+    for (const cls of ['font-normal', 'text-white/70']) {
       expect(idle.className).toContain(cls);
+    }
+    expect(idle.children).toHaveLength(1);
+    const idleSpan = idle.firstElementChild as HTMLElement;
+    for (const cls of ['border-b-2', 'border-transparent']) {
+      expect(idleSpan.className).toContain(cls);
     }
   });
 
@@ -125,8 +136,10 @@ describe('ReelsLanes — the tablist (UI-D-84)', () => {
     ];
     render(<ReelsLanes {...props({ lanes: long })} />);
     const tab = screen.getByRole('tab', { name: LONG });
-    expect(tab.className).toContain('truncate');
     expect(tab.className).toContain('max-w-40');
+    const span = tab.firstElementChild as HTMLElement;
+    expect(span.className).toContain('truncate');
+    expect(span.className).toContain('min-w-0');
   });
 });
 

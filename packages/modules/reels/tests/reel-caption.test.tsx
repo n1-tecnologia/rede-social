@@ -149,6 +149,29 @@ describe('ReelCaption — the measured two-line clamp (REELS-07 boundary, UI-D-8
     }
   });
 
+  it('"… mais" and "menos" reach a 44 px hit area without moving their label (UI-REVIEW fix 1)', () => {
+    layout.scrollHeight = 41;
+    const { rerender } = render(<ReelCaption {...props()} />);
+    const more = screen.getByRole('button', { name: 'more-label' });
+    for (const cls of [
+      'after:absolute',
+      'after:inset-x-0',
+      'after:-inset-y-3',
+      'absolute',
+      'right-0',
+      'bottom-0',
+      'pl-6',
+    ]) {
+      expect(more.className).toContain(cls);
+    }
+    expect(more.className).not.toContain('min-h-11');
+
+    rerender(<ReelCaption {...props({ expanded: true })} />);
+    const less = screen.getByRole('button', { name: 'less-label' });
+    expect(less.className).toContain('pt-6');
+    expect(less.className).toContain('-mt-6');
+  });
+
   it('clicking "… mais" calls onExpandedChange(true) once', () => {
     layout.scrollHeight = 41;
     const onExpandedChange = vi.fn();

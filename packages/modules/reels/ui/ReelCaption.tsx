@@ -173,11 +173,15 @@ export function ReelCaption({
               {expanded ? (
                 <>
                   {' '}
+                  {/* 44 px hit area (UI-REVIEW fix 1): 24 px of padding ABOVE the 20 px line, cancelled
+                      by an equal negative margin, so the label and the line box stay put. Upward,
+                      not below: "menos" sits on the last line of this scroll container, and a pad
+                      below it would extend the scrollable overflow. */}
                   <button
                     type="button"
                     aria-expanded="true"
                     onClick={() => onExpandedChange(false)}
-                    className={TOGGLE}
+                    className={cn(TOGGLE, 'pt-6 -mt-6')}
                   >
                     {lessLabel}
                   </button>
@@ -185,12 +189,16 @@ export function ReelCaption({
               ) : null}
             </p>
             {!expanded && overflowing ? (
+              // 44 px hit area (UI-REVIEW fix 1): only a pseudo-element grows, 12 px above and below
+              // the 20 px line, so the bottom-anchored box, its gradient and its label stay exactly
+              // where they are (a 44 px box would lift the label or stretch the gradient).
               <button
                 type="button"
                 aria-expanded="false"
                 onClick={() => onExpandedChange(true)}
                 className={cn(
                   'absolute right-0 bottom-0 bg-gradient-to-r from-transparent to-black/70 pl-6',
+                  'after:absolute after:inset-x-0 after:-inset-y-3 after:content-[""]',
                   TOGGLE,
                 )}
               >
