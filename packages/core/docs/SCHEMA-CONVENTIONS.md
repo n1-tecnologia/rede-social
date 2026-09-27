@@ -198,3 +198,119 @@ Copy this into the PR description and tick every line (shape of `@tria/module-fe
 - [ ] pgTAP: coverage test passes and an isolation case for each new table was added.
 - [ ] Domain events are emitted after commit; fan-out and any slow work run in the worker, never
       inside the producing request (PITFALLS §15).
+- [ ] Values the tenant's own members must not read (a door code, a meeting URL, a counter a
+      member must not reset) → §(l): a separate table, a definer that returns outcomes, and the
+      tests each pattern needs.
+
+## (l) Secrets inside a tenant
+
+Phase 6 (events, plans 06-01 to 06-07) was the first module with values that belong to a tenant but
+must stay hidden from most of that tenant's own members: the venue check-in code and the online
+meeting URL (D-207, D-217). Tenant isolation (§(a)) does not help here, because the reader and the
+owner are in the same tenant. The four patterns below are what the events module settled on. The
+next module that keeps a secret (Phase 7's chat and notifications are the likely next ones) copies
+them rather than rediscovering them. Reference files:
+`supabase/migrations/20260927145318_events.sql`, `…154335_event_attendance_guard.sql`,
+`…185926_event_check_in_function.sql` and `…193130_event_enter_function.sql`; tests in
+`supabase/tests/140-events.sql`, `141-event-attendances.sql` and `142-event-checkin.sql`.
+
+1. **A separate table behind an inline role-claim policy**, for values the tenant's own members must
+   not read.
+   - **Why:** every member lane reads the parent table under `<table>_tenant_isolation`, so any
+     column on it can be selected by any member through RLS alone. A column privilege cannot help
+     either: an admin and a member are the same database role (`authenticated`), and only the
+     `tenant_role` claim tells them apart.
+   - **How:** the secret goes in its own table (`event_secrets`, keyed by `event_id`, with its own
+     `tenant_id`). It gets `.enableRLS()` and one policy that reads the claim inline:
+     `event_secrets_staff_all`, `for all to authenticated using (tenant_id = app.tenant_id() and
+     app.tenant_role() = 'admin_tenant')` with the same `with check`. The predicate is an inline
+     literal, not a helper function, because a helper would have to exist before a statement that
+     drizzle-kit owns. This is the one sanctioned exception to "always `tenantIsolationPolicy`"
+     (§(a) rule 3). The PR must say so, and 010 still passes because the table has a policy.
+   - **Widening it** to another staff role is one `alter policy` plus the matching permission in the
+     module manifest. Do it deliberately; nothing else changes. In V1, `support_tenant` does not
+     see the door code (06-07, asked at the pilot UAT).
+   - **Test it:** in pgTAP, a member lane reads **zero** rows of the secrets table for its own
+     tenant's event, and the tenant's `admin_tenant` lane reads the row as the positive control, in
+     the same file. Also add the usual cross-tenant case in 020. At the API, the secret is absent
+     from every member-facing payload: only the manage-guarded edit read carries it.
+
+2. **SECURITY DEFINER functions called from a module service, which return outcomes instead of
+   raising.** Use this when a member must *use* a secret they cannot read, or write a row their
+   lane may not write: check a code, get forwarded to a URL, bump a guess counter.
+   - **Why a definer:** the comparison has to run where the secret is, inside Postgres. That way the
+     secret never leaves the database on the member's path. `app.events_check_in(p_event_id,
+     p_code)` compares the venue code and writes the attendance. `app.events_enter(p_event_id)`
+     returns the meeting URL only on the outcomes that let the member in (`forward`, `recorded`,
+     `already`), and a null URL on every refusal. The counter table
+     (`event_checkin_attempts`) has a self-select policy and no write policy at all, so only the
+     definer writes it.
+   - **Why return outcomes instead of raising:** a `raise` rolls back the whole transaction. That
+     includes the write the refusal itself must keep: a wrong code must still increment the guess
+     counter, or the bound never trips. The function returns a row (`outcome`, plus whatever the
+     success path needs). The service takes that row out of `withTenantTx` and maps a refusal to
+     its HTTP error only after the transaction has committed.
+   - **Why every statement filters by `app.tenant_id()` / `app.user_id()`:** the owner is
+     `postgres`, which has `rolbypassrls`, so RLS protects nothing inside the function. Read both
+     claims into locals at the top and return `not_found` when either is null. Then put
+     `tenant_id = v_t` (and `user_id = v_u` for the member's own rows) on every `select`, `insert
+     … on conflict … where` and `update`. A single missing predicate reads or writes another
+     tenant's rows.
+   - **Harden it:** `set search_path = ''` with fully qualified names, `revoke all … from public`
+     (PUBLIC holds EXECUTE on every new function by default), and `grant execute … to
+     authenticated` only. Add `#variable_conflict use_column` plus table aliases when the `returns
+     table (…)` OUT columns share names with table columns.
+   - **Test it:** in pgTAP, call the function from tenant A's lane with **tenant B's** id and assert
+     `not_found` **and** that B's rows are unchanged, read through the service lane. Put A's own id
+     in the same block as the positive control. Also assert the privilege facts (`authenticated`
+     can execute, PUBLIC cannot) and that a claimless lane gets `not_found`. In integration, prove
+     that the committed side effect survives the refusal: N refusals in N separate requests, then
+     read the counter through `adminSql`.
+
+3. **A cross-table XOR through a redundant discriminator and deferrable composite foreign keys.**
+   - **Why:** "an in-person event has a venue, an online event has an `https:` URL" spans two tables
+     once the URL is a secret. A CHECK cannot read another table. So the child carries a copy of
+     the parent's discriminator (`event_secrets.event_format`), a composite FK pins the copy to the
+     parent, and a CHECK on the child (`event_secrets_url_chk`) does the rest. The FKs are:
+     - `event_secrets_event_fk (tenant_id, event_id, event_format) → events (tenant_id, id,
+       format)`, backed by the unique index `events_tenant_id_format_uq`. This is the D-53
+       redundant-discriminator pattern.
+     - `events_secrets_fk (id) → event_secrets (event_id)` makes "every event has exactly one
+       secrets row" a commit-time fact.
+   - **Why deferrable:** both FKs are `deferrable initially deferred`. That is the only order that
+     admits a format switch: the update to `events.format` and the update to `event_secrets.
+     {event_format, meeting_url}` each break the FK until the other has run. It is also the only
+     way to create the pair, since each half references the other. Referential actions still fire
+     immediately (`on delete cascade`); only the check waits for commit.
+   - drizzle-kit cannot express `DEFERRABLE`, so these FKs live in the hand-written half of the
+     migration, below the generated statements. They are absent from the snapshot, so drizzle-kit
+     never tries to drop them.
+   - **Test it:** a pgTAP file rolls back and never reaches commit, so a deferred check would pass
+     there vacuously. Issue `set constraints all immediate` before each `throws_ok` that expects
+     the FK to fire. Include a `lives_ok('set constraints all immediate')` after a legal
+     two-statement pair as the positive control.
+
+4. **A BEFORE trigger raising SQLSTATE 23514 with a named `constraint`**, for rules a CHECK cannot
+   read.
+   - **Why:** a rule that compares a row with *another* table's row cannot be a CHECK. Examples: "no
+     RSVP from `starts_at` on", "no check-in outside the window", "no answer on a cancelled event".
+     Hiding the control in the UI is not enough, because the API, a psql session, a backfill and
+     the definers of pattern 2 all write the table. A `before insert or update … for each row`
+     trigger is the one place every writer passes through. It fires before the `on conflict`
+     arbiter too.
+   - **How:** the reference is `app.event_attendance_guard()` on `event_attendances`. It reads the
+     parent row in the writer's own lane, with an explicit `tenant_id = new.tenant_id` and
+     `for share`. The share lock serialises the write against a concurrent cancel or edit, without
+     making two writers wait on each other. Every refusal is `raise exception using errcode =
+     '23514', constraint = '<table>_<rule>', message = '<code>'` (use 23503 for a missing parent).
+     The service therefore maps it exactly like a real CHECK violation: it walks the driver's cause
+     chain for `code` and `constraint_name`. Do not maintain counters on the parent from inside the
+     trigger. Upgrading the share lock would deadlock two concurrent writers, so read counts as
+     aggregates instead.
+   - **Test it:** use `throws_ok(<statement>, '23514', '<message>')` for each refusal, each with
+     its positive control (the boundary pair: the last instant that is allowed and the first that is
+     refused).
+
+Pattern 4 and pattern 2 overlap on purpose. The definers write through the guarded table, so the
+trigger re-checks the window for them too. The two cannot disagree: `now()` is the transaction
+timestamp, and the definer reads the parent row `for share` first.
