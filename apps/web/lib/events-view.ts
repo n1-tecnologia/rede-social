@@ -1,4 +1,7 @@
+import { avatarUrlFor } from '@tria/contracts/profiles';
 import {
+  type AttendanceList,
+  type Attendee,
   type EnterOutcome,
   EVENT_CHECKIN_OPENS_BEFORE_MINUTES,
   type EventDetail,
@@ -679,3 +682,86 @@ export type EnterNoticeReason = (typeof ENTER_NOTICE_REASONS)[number];
 export const ENTER_NOTICE_FOR: Readonly<
   Record<Extract<EnterOutcome, 'ended' | 'cancelled' | 'confirm_first'>, EnterNoticeReason>
 > = { ended: 'encerrado', cancelled: 'cancelado', confirm_first: 'confirmar' };
+
+/* ── 06-07: Participantes (UI-D-213) ─────────────────────────────────────────────────────────────── */
+
+/** The pt-BR `?lista=` value of each chip; the API's closed enum never appears in a URL. */
+export const ATTENDANCE_LIST_PARAMS: Readonly<Record<AttendanceList, string>> = {
+  confirmed: 'confirmados',
+  present: 'presentes',
+  not_going: 'nao-vao',
+};
+
+/**
+ * `?lista=` -> the chip (D-93): only EXACTLY `presentes` or `nao-vao` select those chips; an array, a
+ * re-cased or unknown value, or no value lands on Confirmados silently.
+ */
+export function attendanceListFromParam(value: string | string[] | undefined): AttendanceList {
+  if (value === ATTENDANCE_LIST_PARAMS.present) return 'present';
+  if (value === ATTENDANCE_LIST_PARAMS.not_going) return 'not_going';
+  return 'confirmed';
+}
+
+/** The chip link. Confirmados is the bare path, so it is the one canonical URL of the default. */
+export function participantsHref(eventId: string, list: AttendanceList): string {
+  const base = `/eventos/${encodeURIComponent(eventId)}/participantes`;
+  return list === 'confirmed' ? base : `${base}?lista=${ATTENDANCE_LIST_PARAMS[list]}`;
+}
+
+/** `'K7QM'` -> `'K, 7, Q, M'`: the code's accessible name, so a screen reader spells it (UI-D-213). */
+export function spelledCode(code: string): string {
+  return Array.from(code).join(', ');
+}
+
+/** One finished Participantes row: every string built here, on the server. */
+export type AttendeeView = {
+  id: string;
+  /** The display name, or the catalog's "Membro removido" for a member who has left. */
+  name: string;
+  removed: boolean;
+  avatarUrl: string | null;
+  meta: string;
+  walkIn: boolean;
+};
+
+/**
+ * `Attendee` -> `AttendeeView` for the chip it is listed under, in the TENANT's timezone from ONE
+ * request instant (UI-D-203). The meta line by chip:
+ *  - `confirmed`: "Confirmou em {date}" (when they answered Vou);
+ *  - `present`: "Check-in às {time}", or "Check-in em {date}, às {time}" when the check-in was on
+ *    another tenant-local day than `nowMs`;
+ *  - `not_going`: "Respondeu em {date}".
+ * A member who has left (or, defensively, a row with no name) renders the removed label with the
+ * neutral avatar, and the row still counts (D-219/A5). The avatar is the stable `/v1/media` path,
+ * never a signed URL.
+ */
+export function attendeeView(
+  attendee: Attendee,
+  list: AttendanceList,
+  { tz, nowMs, t }: { tz: string; nowMs: number; t: Translator },
+): AttendeeView {
+  const removed = attendee.removed || attendee.displayName === null;
+  let meta = '';
+  if (list === 'present' && attendee.checkedInAt) {
+    const at = attendee.checkedInAt;
+    const time = formatEventTime(at, tz);
+    meta =
+      tenantDayKey(at, tz) === tenantDayKey(nowMs, tz)
+        ? t('participants.meta.presentAt', { time })
+        : t('participants.meta.presentOn', { date: formatEventDate(at, tz, nowMs), time });
+  } else if (attendee.respondedAt) {
+    const date = formatEventDate(attendee.respondedAt, tz, nowMs);
+    meta =
+      list === 'not_going'
+        ? t('participants.meta.notGoing', { date })
+        : t('participants.meta.confirmed', { date });
+  }
+  return {
+    id: attendee.id,
+    name: removed ? t('participants.removed') : (attendee.displayName ?? ''),
+    removed,
+    avatarUrl: removed ? null : avatarUrlFor(attendee.avatarAssetId),
+    meta,
+    walkIn: attendee.walkIn,
+  };
+}

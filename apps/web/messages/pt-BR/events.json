@@ -22,7 +22,8 @@
       "cancelled": "Cancelado",
       "ended": "Encerrado",
       "going": "Você vai",
-      "present": "Presente"
+      "present": "Presente",
+      "walkIn": "Sem confirmação"
     },
     "when": {
       "now": "Agora",
@@ -55,7 +56,8 @@
       "cancelled": "Este evento foi cancelado.",
       "cancel": "Não foi possível cancelar o evento. Tente novamente.",
       "reactivate": "Não foi possível reativar o evento. Tente novamente.",
-      "reactivateStarted": "Não é possível reativar um evento que já começou."
+      "reactivateStarted": "Não é possível reativar um evento que já começou.",
+      "regenerate": "Não foi possível gerar um novo código. Tente novamente."
     },
     "count": {
       "confirmed": "{count, plural, =0 {Ninguém confirmou ainda} one {# confirmado} other {# confirmados}}",
@@ -157,6 +159,8 @@
     },
     "manage": {
       "title": "Gerenciar evento",
+      "participants": "Participantes",
+      "participantsSub": "{confirmed} · {present}",
       "edit": "Editar evento"
     },
     "reactivate": {
@@ -246,13 +250,61 @@
         "body": "A confirmação e o check-in voltam a funcionar, e as respostas anteriores continuam valendo.",
         "confirm": "Reativar evento",
         "dismiss": "Manter cancelado"
+      },
+      "regenerate": {
+        "title": "Gerar novo código?",
+        "body": "O código atual deixa de funcionar. Os check-ins já feitos continuam valendo.",
+        "confirm": "Gerar novo código",
+        "dismiss": "Manter código"
       }
     },
     "toasts": {
       "created": "Evento criado.",
       "saved": "Alterações salvas.",
       "cancelled": "Evento cancelado.",
-      "reactivated": "Evento reativado."
+      "reactivated": "Evento reativado.",
+      "codeRegenerated": "Novo código gerado."
+    },
+    "participants": {
+      "title": "Participantes",
+      "region": "Participantes do evento",
+      "code": {
+        "label": "Código de check-in",
+        "helper": "Diga ou escreva este código no local. Os membros digitam no app para fazer check-in.",
+        "aria": "Código {spelled}",
+        "regenerate": "Gerar novo código"
+      },
+      "online": "Em eventos online, o check-in é registrado quando o membro toca em Entrar.",
+      "filter": {
+        "label": "Filtrar participantes",
+        "confirmed": "Confirmados · {count, number}",
+        "present": "Presentes · {count, number}",
+        "notGoing": "Não vão · {count, number}"
+      },
+      "meta": {
+        "confirmed": "Confirmou em {date}",
+        "presentAt": "Check-in às {time}",
+        "presentOn": "Check-in em {date}, às {time}",
+        "notGoing": "Respondeu em {date}"
+      },
+      "removed": "Membro removido",
+      "empty": {
+        "confirmed": {
+          "title": "Ninguém confirmou ainda",
+          "body": "Quem responder Vou aparece aqui até fazer check-in."
+        },
+        "present": {
+          "title": "Nenhum check-in ainda",
+          "body": "Os check-ins feitos no local ou pelo Entrar aparecem aqui."
+        },
+        "notGoing": {
+          "title": "Ninguém recusou",
+          "body": "Quem responder Não vou aparece aqui."
+        }
+      },
+      "errors": {
+        "loadMore": "Não foi possível carregar mais participantes."
+      }
     }
   }
 }

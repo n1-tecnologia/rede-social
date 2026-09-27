@@ -310,3 +310,39 @@ export async function waitForReadyCover(
   }
   throw new Error(`no ready cover for ${tenantId} within ${timeoutMs} ms; statuses: ${seen}`);
 }
+
+/** The API the Playwright config starts (or reuses) as a webServer. */
+const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
+
+/**
+ * 06-07: calls the events API AS a member of a throwaway tenant (a real GoTrue password session,
+ * presented on the tenant's own host), so a fixture's answers and check-ins go through the SAME
+ * member routes a phone uses (`PUT /rsvp`, `POST /check-in`), guard trigger and SECURITY DEFINER
+ * function included, rather than being written into the table. Throws on a non-2xx answer.
+ */
+export async function eventsApiAs(
+  tenant: Pick<EventsTenant, 'slug' | 'password'>,
+  email: string,
+  path: string,
+  init: { method: string; body?: unknown },
+): Promise<unknown> {
+  const session = await fetch(`${envValue('SUPABASE_URL')}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: envValue('SUPABASE_PUBLISHABLE_KEY'), 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: tenant.password }),
+  });
+  if (!session.ok) throw new Error(`${email} sign-in failed: ${session.status}`);
+  const { access_token } = (await session.json()) as { access_token: string };
+  const res = await fetch(`${API_URL}${path}`, {
+    method: init.method,
+    headers: {
+      authorization: `Bearer ${access_token}`,
+      'x-tenant-host': `${tenant.slug}.localhost`,
+      ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+  if (!res.ok)
+    throw new Error(`${init.method} ${path} as ${email}: ${res.status} ${await res.text()}`);
+  return res.json();
+}

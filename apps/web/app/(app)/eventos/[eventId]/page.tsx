@@ -8,6 +8,7 @@ import {
   CircleCheck,
   Navigation,
   Pencil,
+  Users,
 } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -48,8 +49,11 @@ import { ReactivateEventControl } from './ReactivateEventControl';
  * URL, opened by the member's tap in a new context. No iframe, no static map, no SDK.
  *
  * **06-04 — the manager's doors (UI-D-211).** Below the hero card, `SectionTitle` "Gerenciar evento"
- * and a `Card` of link rows, each gated on its own composed PERMISSION (never a role): "Editar evento"
- * on `events.event.manage` (06-07 adds "Participantes" above it). No permission, no section. In the
+ * and a `Card` of link rows, each gated on its own composed PERMISSION (never a role): "Participantes"
+ * on `events.attendance.read` (06-07), with the sub-line "{n} confirmados · {m} presentes" built from
+ * the SAME detail read's two count strings (UI E07: server-rendered with the page), then "Editar
+ * evento" on `events.event.manage`. The section renders when the viewer holds either. No permission,
+ * no section. In the
  * cancelled banner, the same permission plus "before the start" (from THIS request's instant) adds the
  * outline "Reativar evento". Cancel itself lives only at the bottom of the edit form.
  */
@@ -88,6 +92,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   const nowMs = Date.now();
   const view = eventDetailView(result.event, { tz: bootstrap.tenant.timezone, nowMs, t });
   const canManage = bootstrap.permissions.includes(EVENT_PERMISSIONS.manage);
+  const canReadAttendance = bootstrap.permissions.includes(EVENT_PERMISSIONS.attendanceRead);
   const canReactivate = canManage && view.cancelled && nowMs < Date.parse(result.event.startsAt);
 
   return (
@@ -145,23 +150,47 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
             </div>
           </Card>
         </div>
-        {canManage ? (
+        {canManage || canReadAttendance ? (
           <section aria-labelledby="event-manage-title" data-event-manage>
             <SectionTitle id="event-manage-title" className="mt-6 mb-2 px-4">
               {t('manage.title')}
             </SectionTitle>
             <Card className="mx-4">
-              <a
-                href={`/eventos/${encodeURIComponent(result.event.id)}/editar`}
-                data-event-manage-edit
-                className="flex min-h-14 items-center gap-3 px-4 text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
-              >
-                <Pencil aria-hidden size={20} className="shrink-0 text-text-secondary" />
-                <span className="min-w-0 flex-1 truncate text-sm font-bold">
-                  {t('manage.edit')}
-                </span>
-                <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
-              </a>
+              {canReadAttendance ? (
+                <a
+                  href={`/eventos/${encodeURIComponent(result.event.id)}/participantes`}
+                  data-event-manage-participants
+                  className="flex min-h-14 items-center gap-3 px-4 py-2 text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
+                >
+                  <Users aria-hidden size={20} className="shrink-0 text-text-secondary" />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-bold">{t('manage.participants')}</span>
+                    <span
+                      data-event-manage-participants-sub
+                      className="truncate text-xs font-normal tabular-nums text-text-tertiary"
+                    >
+                      {t('manage.participantsSub', {
+                        confirmed: t('count.confirmed', { count: result.event.confirmedCount }),
+                        present: t('count.present', { count: result.event.presentCount }),
+                      })}
+                    </span>
+                  </span>
+                  <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
+                </a>
+              ) : null}
+              {canManage ? (
+                <a
+                  href={`/eventos/${encodeURIComponent(result.event.id)}/editar`}
+                  data-event-manage-edit
+                  className={`flex min-h-14 items-center gap-3 px-4 text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset${canReadAttendance ? ' border-t border-divider' : ''}`}
+                >
+                  <Pencil aria-hidden size={20} className="shrink-0 text-text-secondary" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-bold">
+                    {t('manage.edit')}
+                  </span>
+                  <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
+                </a>
+              ) : null}
             </Card>
           </section>
         ) : null}

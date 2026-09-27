@@ -9,6 +9,7 @@ import {
   deleteEventsByTitlePrefix,
   deleteEventsTenant,
   type EventsTenant,
+  eventsApiAs,
   insertEvent,
   moveEventStart,
   readEventInstants,
@@ -1354,5 +1355,168 @@ test.describe('events entrar', () => {
     } finally {
       await context.close();
     }
+  });
+});
+
+/**
+ * EVENT-05 (06-07, D-215, UI-D-213): the organiser's `Participantes`, on the phone in a throwaway
+ * tenant (`e2e-events-participantes`), serial.
+ *
+ * ONE in-person event inside its check-in window (`insertEvent`, relative to the database's `now()`).
+ * Every answer goes through the MEMBER API (`eventsApiAs`: `PUT /rsvp`, `POST /check-in` with the real
+ * code), so the guard trigger and `app.events_check_in` wrote them, exactly as a phone would:
+ *  - Ana and Bruno answered Vou (Confirmados);
+ *  - Carla answered Vou and checked in (Presentes, no tag);
+ *  - Elisa never answered and checked in (Presentes, "Sem confirmação");
+ *  - Davi answered Não vou (Não vão).
+ * So the member-facing number is 3 confirmados (going + checked_in), the Confirmados chip is 2
+ * (going only: Pitfall 11), and 2 are present. The tenant's own member answers nothing and is the
+ * negative case.
+ */
+test.describe('events participantes', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  const SLUG = 'e2e-events-participantes';
+  let tenant: EventsTenant | null = null;
+  let eventId = '';
+
+  /** "Confirmados · 2": the catalog string with its `{count, number}` filled. */
+  const chipLabel = (message: string, n: number) => message.replace('{count, number}', String(n));
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    tenant = await createEventsTenant(SLUG, SEED_PASSWORD);
+    const people = {
+      ana: await addEventsMember(tenant, 'ana', 'Ana Confirmada'),
+      bruno: await addEventsMember(tenant, 'bruno', 'Bruno Confirmado'),
+      carla: await addEventsMember(tenant, 'carla', 'Carla Presente'),
+      davi: await addEventsMember(tenant, 'davi', 'Davi Recusou'),
+      elisa: await addEventsMember(tenant, 'elisa', 'Elisa Sem Resposta'),
+    };
+    eventId = await insertEvent(tenant.tenantId, {
+      title: 'Encontro com participantes',
+      startsInMinutes: 30,
+      endsInMinutes: 150,
+    });
+    const rsvp = (email: string, answer: 'going' | 'not_going') =>
+      eventsApiAs(tenant as EventsTenant, email, `/v1/events/${eventId}/rsvp`, {
+        method: 'PUT',
+        body: { answer },
+      });
+    await rsvp(people.ana, 'going');
+    await rsvp(people.bruno, 'going');
+    await rsvp(people.carla, 'going');
+    await rsvp(people.davi, 'not_going');
+    const { checkinCode } = await secretsFor(eventId);
+    for (const email of [people.carla, people.elisa]) {
+      await eventsApiAs(tenant, email, `/v1/events/${eventId}/check-in`, {
+        method: 'POST',
+        body: { code: checkinCode },
+      });
+    }
+    expect(await attendanceFor(eventId, people.elisa)).toEqual({
+      status: 'walk_in',
+      checkinVia: 'code',
+    });
+  });
+
+  test.afterAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    await deleteEventsTenant(SLUG);
+    await closeEventsAdmin();
+  });
+
+  test('1-4. the admin: the manage row, the code, the counted chips with the walk-in tag, and a new code', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events participantes tenant was not provisioned');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${eventId}`);
+
+    // 1. The manage card's Participantes row, with the member-facing numbers from the detail read.
+    const row = page.locator('[data-event-manage-participants]');
+    await expect(row).toContainText(E.manage.participants);
+    await expect(page.locator('[data-event-manage-participants-sub]')).toHaveText(
+      `${count(E.count.confirmed, 3)} · ${count(E.count.present, 2)}`,
+    );
+    await row.dispatchEvent('click');
+    await expect(page).toHaveURL(new RegExp(`/eventos/${eventId}/participantes$`));
+    await expect(page.getByRole('heading', { level: 1, name: E.participants.title })).toBeVisible();
+
+    // 2. The door code, first on the screen, is the stored one.
+    const before = (await secretsFor(eventId)).checkinCode;
+    await expect(page.getByTestId('checkin-code')).toHaveText(before);
+
+    // 3. Three counted chips (Confirmados is `going` only), and one walk-in tag in Presentes.
+    const chips = page
+      .getByRole('navigation', { name: E.participants.filter.label })
+      .getByRole('link');
+    await expect(chips).toHaveText([
+      chipLabel(E.participants.filter.confirmed, 2),
+      chipLabel(E.participants.filter.present, 2),
+      chipLabel(E.participants.filter.notGoing, 1),
+    ]);
+    await expect(page.getByTestId('attendee-row')).toHaveCount(2);
+    await expect(page.getByTestId('walk-in-tag')).toHaveCount(0);
+    await chips.nth(1).dispatchEvent('click');
+    await expect(page).toHaveURL(
+      new RegExp(`/eventos/${eventId}/participantes\\?lista=presentes$`),
+    );
+    await expect(chips.nth(1)).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('attendee-row')).toHaveCount(2);
+    const tags = page.getByTestId('walk-in-tag');
+    await expect(tags).toHaveCount(1);
+    await expect(tags).toHaveText(E.state.walkIn);
+    await expect(
+      page
+        .getByTestId('attendee-row')
+        .filter({ hasText: 'Elisa Sem Resposta' })
+        .getByTestId('walk-in-tag'),
+    ).toHaveCount(1);
+    await expect(
+      page
+        .getByTestId('attendee-row')
+        .filter({ hasText: 'Carla Presente' })
+        .getByTestId('walk-in-tag'),
+    ).toHaveCount(0);
+    await chips.nth(2).dispatchEvent('click');
+    await expect(page).toHaveURL(new RegExp(`/eventos/${eventId}/participantes\\?lista=nao-vao$`));
+    await expect(page.getByTestId('attendee-row')).toHaveCount(1);
+    await expect(page.getByTestId('attendee-row')).toContainText('Davi Recusou');
+
+    // 4. "Gerar novo código", confirmed: a different code is shown, and it is the stored one.
+    // Tapped until React owns the button (a tap before hydration opens nothing).
+    const dialog = page.getByRole('dialog');
+    await expect(async () => {
+      await page.locator('[data-regenerate-code]').dispatchEvent('click');
+      await expect(dialog).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+    await expect(dialog).toContainText(E.confirm.regenerate.title);
+    await dialog.getByRole('button', { name: E.confirm.regenerate.confirm }).click();
+    await expect(page.getByText(E.toasts.codeRegenerated)).toBeVisible();
+    await expect(page.getByTestId('checkin-code')).not.toHaveText(before);
+    const after = (await secretsFor(eventId)).checkinCode;
+    expect(after).not.toBe(before);
+    await expect(page.getByTestId('checkin-code')).toHaveText(after);
+  });
+
+  test('5. a member has no manage section, and typing /participantes gives the not-found screen', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events participantes tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${eventId}`);
+    await expect(page.getByRole('group', { name: E.rsvp.label })).toBeVisible();
+    await expect(page.locator('[data-event-manage]')).toHaveCount(0);
+    await expect(page.getByText(E.manage.title)).toHaveCount(0);
+
+    await page.goto(`${tenant.origin}/eventos/${eventId}/participantes`);
+    await expect(page.getByText(E.notFound.title, { exact: true })).toBeVisible();
+    await expect(page.getByTestId('checkin-code')).toHaveCount(0);
+    await expect(
+      page.getByText((await secretsFor(eventId)).checkinCode, { exact: true }),
+    ).toHaveCount(0);
   });
 });

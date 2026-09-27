@@ -96,6 +96,9 @@ const REQUIRED_KEYS = [
   // inside the window) and the aviso page reads its `motivo`; neither may ever be prerendered.
   '/(app)/eventos/[eventId]/entrar/route',
   '/(app)/eventos/[eventId]/entrar/aviso/page',
+  // 06-07: the organiser's Participantes screen (D-215). It is permission-gated per request and
+  // shows the door code, so it may never be prerendered.
+  '/(app)/eventos/[eventId]/participantes/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

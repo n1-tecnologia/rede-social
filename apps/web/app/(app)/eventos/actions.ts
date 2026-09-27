@@ -1,6 +1,9 @@
 'use server';
 
 import {
+  ATTENDANCE_LISTS,
+  type AttendanceList,
+  attendanceQuerySchema,
   type CheckinOutcome,
   checkinSchema,
   EVENT_ISSUE_SET,
@@ -19,13 +22,22 @@ import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/boots
 import {
   checkIn,
   createEvent,
+  getAttendance,
   getEvents,
   loadEvent,
   putRsvp,
+  regenerateCode,
   setEventStatus,
   updateEvent,
 } from '@/lib/events';
-import { checkedInLine, type EventPosterView, eventPosterView } from '@/lib/events-view';
+import {
+  type AttendeeView,
+  attendeeView,
+  checkedInLine,
+  EVENT_ID_RE,
+  type EventPosterView,
+  eventPosterView,
+} from '@/lib/events-view';
 
 /**
  * The `/eventos` list's two actions (EVENT-02), the detail's RSVP action (EVENT-03), the ticket's
@@ -386,4 +398,114 @@ export async function cancelEventAction(eventId: string): Promise<EventWriteResu
 /** Reactivate (D-214): refused by the API once the event has started (`reactivate_started`). */
 export async function reactivateEventAction(eventId: string): Promise<EventWriteResult> {
   return statusAction(eventId, 'active');
+}
+
+/* ── EVENT-05: the organiser's Participantes (06-07) ──────────────────────────────────────────── */
+
+export type AttendancePageResult =
+  | { ok: true; items: AttendeeView[]; nextCursor: string | null }
+  | { ok: false; code: 'generic' };
+
+/** Only the three closed values; anything else is refused before a request is built. */
+const isAttendanceList = (value: unknown): value is AttendanceList =>
+  typeof value === 'string' && (ATTENDANCE_LISTS as readonly string[]).includes(value);
+
+/** A canonical event id, or nothing is sent (a server action is a public endpoint). */
+const isEventId = (value: unknown): value is string =>
+  typeof value === 'string' && EVENT_ID_RE.test(value);
+
+/**
+ * One page of one chip, as FINISHED rows (the `eventsPage` shape): the SAME Zod the API validates
+ * with runs first, the list is threaded through (05.1 Pitfall 9: a pull on Presentes never swaps the
+ * Confirmados list in), and a bootstrap refusal is a navigation OUTSIDE the try/catch. The API's
+ * `events.attendance.read` guard is the authority: a member calling this action gets `generic`.
+ */
+async function attendancePage(
+  eventId: string,
+  list: AttendanceList,
+  cursor?: string,
+): Promise<AttendancePageResult> {
+  const query = attendanceQuerySchema.safeParse({ list, cursor });
+  if (!query.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let loaded: Awaited<ReturnType<typeof getAttendance>> | null = null;
+  let tz = '';
+  try {
+    const [bootstrap, page] = await Promise.all([
+      getBootstrap(),
+      getAttendance(eventId, {
+        list: query.data.list,
+        cursor: query.data.cursor,
+        limit: query.data.limit,
+      }),
+    ]);
+    tz = bootstrap.tenant.timezone;
+    loaded = page;
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    // Shape only: a member's name never reaches a log line.
+    if (!refusal) console.error('events.attendance_page_failed', { list, error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  if (!loaded) return { ok: false, code: 'generic' };
+
+  const t = await getTranslations('events');
+  const nowMs = Date.now();
+  return {
+    ok: true,
+    items: loaded.items.map((attendee) => attendeeView(attendee, list, { tz, nowMs, t })),
+    nextCursor: loaded.nextCursor,
+  };
+}
+
+/** One more page of the given chip. The cursor is OPAQUE and forwarded untouched. */
+export async function loadMoreAttendanceAction(
+  eventId: string,
+  list: AttendanceList,
+  cursor: string,
+): Promise<AttendancePageResult> {
+  if (!isEventId(eventId) || !isAttendanceList(list)) return { ok: false, code: 'generic' };
+  return attendancePage(eventId, list, cursor);
+}
+
+/** Page 1 of the given chip again — what `PullToRefresh` calls. */
+export async function refreshAttendanceAction(
+  eventId: string,
+  list: AttendanceList,
+): Promise<AttendancePageResult> {
+  if (!isEventId(eventId) || !isAttendanceList(list)) return { ok: false, code: 'generic' };
+  return attendancePage(eventId, list);
+}
+
+export type RegenerateCodeResult = { ok: true } | { ok: false; code: 'not_found' | 'generic' };
+
+/**
+ * `POST /v1/events/{id}/checkin-code` (D-217) for "Gerar novo código": a server action, so a POST and
+ * never a GET a prefetch or a crawler could follow (the 06-06 rule for side effects). The API's
+ * literal `events.event.manage` guard is the authority. The fresh code is NOT returned to the client:
+ * the control refreshes the page, whose RSC read shows it. Nothing here logs a code.
+ */
+export async function regenerateCheckinCodeAction(eventId: string): Promise<RegenerateCodeResult> {
+  if (!isEventId(eventId)) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: RegenerateCodeResult = { ok: false, code: 'generic' };
+  try {
+    await regenerateCode(eventId);
+    result = { ok: true };
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      if (!refusal && error.status === 404) result = { ok: false, code: 'not_found' };
+    }
+    if (!refusal && !result.ok && result.code === 'generic') {
+      console.error('events.regenerate_code_failed', { error: String(error) });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  if (result.ok) revalidatePath(`/eventos/${eventId}/participantes`);
+  return result;
 }

@@ -1,5 +1,12 @@
 import {
+  type AttendanceList,
+  type AttendancePage,
+  type AttendanceSummary,
+  attendancePageSchema,
+  attendanceSummarySchema,
+  type CheckinCode,
   type CheckinResult,
+  checkinCodeSchema,
   checkinResultSchema,
   type EnterResult,
   EVENT_PAGE_SIZE,
@@ -281,4 +288,101 @@ export async function setEventStatus(eventId: string, status: EventStatus): Prom
   });
   if (!res.ok) throw await apiError(res);
   return eventSummarySchema.parse(await res.json());
+}
+
+/* ── EVENT-05: the organiser's Participantes (06-07) ─────────────────────────────────────────────── */
+
+/** The query the page and its actions send; `cursor` is OPAQUE and forwarded verbatim. */
+export type AttendanceQueryInput = { list: AttendanceList; cursor?: string; limit?: number };
+
+/**
+ * `GET /v1/events/{eventId}/attendance` (admin only, `events.attendance.read`). `list` is always sent
+ * explicitly (the API's closed enum; the web translates its own pt-BR `?lista=`). Throws an
+ * `ApiClientError` on any refusal, for the actions to map.
+ */
+export async function getAttendance(
+  eventId: string,
+  query: AttendanceQueryInput,
+): Promise<AttendancePage> {
+  const search = new URLSearchParams();
+  search.set('list', query.list);
+  if (query.cursor) search.set('cursor', query.cursor);
+  search.set('limit', String(query.limit ?? EVENT_PAGE_SIZE));
+  const res = await apiFetch(
+    `/v1/events/${encodeURIComponent(eventId)}/attendance?${search.toString()}`,
+  );
+  if (!res.ok) throw await apiError(res);
+  return attendancePageSchema.parse(await res.json());
+}
+
+/**
+ * Page 1 of one chip for the RSC page, or `null` when the API could not answer (the list then renders
+ * its own first-load error while the code card still shows). A bootstrap refusal becomes a navigation
+ * OUTSIDE the try/catch (`redirect()` throws in Next 16).
+ */
+export async function loadAttendance(
+  eventId: string,
+  list: AttendanceList,
+): Promise<AttendancePage | null> {
+  let path: string | null = null;
+  let page: AttendancePage | null = null;
+  try {
+    page = await getAttendance(eventId, { list });
+  } catch (error) {
+    if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
+    // Shape only: a member's name never reaches a log line.
+    if (!path) console.error('events.attendance_failed', { list, error: String(error) });
+  }
+
+  if (path) redirect(path);
+  return page;
+}
+
+/** `loadAttendanceSummary`'s answer: the counts and the code, the ONE not-found, or a failure. */
+export type AttendanceSummaryResult =
+  | { status: 'ok'; summary: AttendanceSummary }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/events/{eventId}/attendance/summary` (admin only): the chip counts and the door code in
+ * one read. A 404 (unknown, another tenant's, removed), a 400 (not a uuid) and a 403 (the permission
+ * vanished between the bootstrap and this read) collapse into `not-found`, the one screen (D-23).
+ * The code is never logged.
+ */
+export async function loadAttendanceSummary(eventId: string): Promise<AttendanceSummaryResult> {
+  let path: string | null = null;
+  let result: AttendanceSummaryResult = { status: 'error' };
+  try {
+    const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/attendance/summary`);
+    if (res.ok) {
+      result = { status: 'ok', summary: attendanceSummarySchema.parse(await res.json()) };
+    } else if (res.status === 404 || res.status === 400) {
+      result = { status: 'not-found' };
+    } else {
+      const error = await apiError(res);
+      path = bootstrapRedirectPath(error);
+      if (!path && res.status === 403) result = { status: 'not-found' };
+      if (!path && res.status !== 403) {
+        console.error('events.attendance_summary_failed', { status: res.status, code: error.code });
+      }
+    }
+  } catch (error) {
+    console.error('events.attendance_summary_failed', { error: String(error) });
+  }
+
+  if (path) redirect(path);
+  return result;
+}
+
+/**
+ * `POST /v1/events/{eventId}/checkin-code` (manage only, D-217): replaces the door code. A POST from a
+ * server action only, never a GET a prefetch could follow. Throws an `ApiClientError` on refusal.
+ */
+export async function regenerateCode(eventId: string): Promise<CheckinCode> {
+  const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/checkin-code`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw await apiError(res);
+  return checkinCodeSchema.parse(await res.json());
 }

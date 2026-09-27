@@ -1139,3 +1139,96 @@ describe('06-06 — events online Entrar strings and placeholders', () => {
     expect(texts.match(/\{\w+\}/g)).toEqual(['{time}']);
   });
 });
+
+/**
+ * 06-07 — the `Participantes` strings (UI-SPEC Copywriting Contract, "Participantes", the regenerate
+ * confirm, the manage card and the toast), verbatim. The chip counts are ICU `{count, number}`, so
+ * four digits read "1.204" in pt-BR (the E11 backstop's own label), and the manage sub-line is two
+ * placeholders the page fills with the two existing count strings.
+ */
+describe('06-07 — events Participantes strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.participants.title', 'Participantes'],
+    ['events.participants.code.label', 'Código de check-in'],
+    [
+      'events.participants.code.helper',
+      'Diga ou escreva este código no local. Os membros digitam no app para fazer check-in.',
+    ],
+    ['events.participants.code.aria', 'Código {spelled}'],
+    ['events.participants.code.regenerate', 'Gerar novo código'],
+    [
+      'events.participants.online',
+      'Em eventos online, o check-in é registrado quando o membro toca em Entrar.',
+    ],
+    ['events.participants.filter.label', 'Filtrar participantes'],
+    ['events.participants.filter.confirmed', 'Confirmados · {count, number}'],
+    ['events.participants.filter.present', 'Presentes · {count, number}'],
+    ['events.participants.filter.notGoing', 'Não vão · {count, number}'],
+    ['events.participants.meta.confirmed', 'Confirmou em {date}'],
+    ['events.participants.meta.presentAt', 'Check-in às {time}'],
+    ['events.participants.meta.presentOn', 'Check-in em {date}, às {time}'],
+    ['events.participants.meta.notGoing', 'Respondeu em {date}'],
+    ['events.participants.removed', 'Membro removido'],
+    ['events.participants.empty.confirmed.title', 'Ninguém confirmou ainda'],
+    [
+      'events.participants.empty.confirmed.body',
+      'Quem responder Vou aparece aqui até fazer check-in.',
+    ],
+    ['events.participants.empty.present.title', 'Nenhum check-in ainda'],
+    [
+      'events.participants.empty.present.body',
+      'Os check-ins feitos no local ou pelo Entrar aparecem aqui.',
+    ],
+    ['events.participants.empty.notGoing.title', 'Ninguém recusou'],
+    ['events.participants.empty.notGoing.body', 'Quem responder Não vou aparece aqui.'],
+    ['events.participants.errors.loadMore', 'Não foi possível carregar mais participantes.'],
+    ['events.state.walkIn', 'Sem confirmação'],
+    ['events.manage.participants', 'Participantes'],
+    ['events.manage.participantsSub', '{confirmed} · {present}'],
+    ['events.confirm.regenerate.title', 'Gerar novo código?'],
+    [
+      'events.confirm.regenerate.body',
+      'O código atual deixa de funcionar. Os check-ins já feitos continuam valendo.',
+    ],
+    ['events.confirm.regenerate.confirm', 'Gerar novo código'],
+    ['events.confirm.regenerate.dismiss', 'Manter código'],
+    ['events.toasts.codeRegenerated', 'Novo código gerado.'],
+    ['events.errors.regenerate', 'Não foi possível gerar um novo código. Tente novamente.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('the chip counts group thousands in pt-BR, and the manage sub-line joins the two count strings', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+    expect(t('participants.filter.confirmed', { count: 1204 })).toBe('Confirmados · 1.204');
+    expect(t('participants.filter.present', { count: 18 })).toBe('Presentes · 18');
+    expect(t('participants.filter.notGoing', { count: 0 })).toBe('Não vão · 0');
+    expect(
+      t('manage.participantsSub', {
+        confirmed: t('count.confirmed', { count: 3 }),
+        present: t('count.present', { count: 2 }),
+      }),
+    ).toBe('3 confirmados · 2 presentes');
+    expect(
+      t('manage.participantsSub', {
+        confirmed: t('count.confirmed', { count: 37 }),
+        present: t('count.present', { count: 0 }),
+      }),
+    ).toBe('37 confirmados · Ninguém fez check-in');
+    expect(t('participants.meta.presentOn', { date: 'sex., 11 de out.', time: '23:58' })).toBe(
+      'Check-in em sex., 11 de out., às 23:58',
+    );
+  });
+});

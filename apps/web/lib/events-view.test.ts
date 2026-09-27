@@ -1,9 +1,12 @@
 import { fileURLToPath } from 'node:url';
-import type { EventDetail, EventSummary } from '@tria/module-events/contracts';
+import type { Attendee, EventDetail, EventSummary } from '@tria/module-events/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
+  ATTENDANCE_LIST_PARAMS,
+  attendanceListFromParam,
+  attendeeView,
   checkedInLine,
   eventActionState,
   eventCountLine,
@@ -16,6 +19,8 @@ import {
   formatEventDate,
   formatEventTime,
   mapsHref,
+  participantsHref,
+  spelledCode,
   tenantDayKey,
   tenantZoneLabel,
 } from './events-view';
@@ -491,5 +496,94 @@ describe('06-05 — eventTicketView (UI-D-208, the check-in boarding pass)', () 
     expect(checkedInLine('2026-10-12T21:42:00.000000Z', SP, at('2026-10-14T12:00:00Z'), t)).toBe(
       'Realizado em seg., 12 de out., às 18:42',
     );
+  });
+});
+
+describe('06-07 — Participantes (UI-D-213): the chip param, the row meta and the spelled code', () => {
+  const EVENT_ID = '11111111-1111-4111-8111-111111111111';
+  const AVATAR = 'a1111111-1111-4111-8111-111111111111';
+  const attendee = (overrides: Partial<Attendee> = {}): Attendee => ({
+    id: 'aaaaaaaa-0000-4000-8000-000000000001',
+    displayName: 'Iris Muñoz',
+    avatarAssetId: null,
+    avatarVariantWidths: [],
+    removed: false,
+    status: 'going',
+    respondedAt: '2026-10-02T15:00:00.000000Z',
+    checkedInAt: null,
+    walkIn: false,
+    ...overrides,
+  });
+  const NOW = at('2026-10-12T23:00:00Z');
+
+  it('26. ?lista= selects a chip only on the EXACT pt-BR value; anything else is Confirmados (D-93)', () => {
+    expect(ATTENDANCE_LIST_PARAMS).toEqual({
+      confirmed: 'confirmados',
+      present: 'presentes',
+      not_going: 'nao-vao',
+    });
+    expect(attendanceListFromParam(undefined)).toBe('confirmed');
+    expect(attendanceListFromParam('confirmados')).toBe('confirmed');
+    expect(attendanceListFromParam('presentes')).toBe('present');
+    expect(attendanceListFromParam('nao-vao')).toBe('not_going');
+    for (const bad of ['PRESENTES', 'present', 'not_going', 'nao_vao', '', ['presentes']]) {
+      expect(attendanceListFromParam(bad), String(bad)).toBe('confirmed');
+    }
+    expect(participantsHref(EVENT_ID, 'confirmed')).toBe(`/eventos/${EVENT_ID}/participantes`);
+    expect(participantsHref(EVENT_ID, 'present')).toBe(
+      `/eventos/${EVENT_ID}/participantes?lista=presentes`,
+    );
+    expect(participantsHref(EVENT_ID, 'not_going')).toBe(
+      `/eventos/${EVENT_ID}/participantes?lista=nao-vao`,
+    );
+  });
+
+  it('27. the meta by chip: Confirmou em / Check-in às (today) / Check-in em …, às (another day) / Respondeu em', () => {
+    const tz = { tz: SP, nowMs: NOW, t };
+    expect(attendeeView(attendee(), 'confirmed', tz).meta).toBe('Confirmou em sex., 2 de out.');
+    expect(
+      attendeeView(
+        attendee({ status: 'checked_in', checkedInAt: '2026-10-12T21:42:00.000000Z' }),
+        'present',
+        tz,
+      ).meta,
+    ).toBe('Check-in às 18:42');
+    expect(
+      attendeeView(
+        attendee({ status: 'walk_in', respondedAt: null, checkedInAt: '2026-10-12T02:58:00Z' }),
+        'present',
+        tz,
+      ).meta,
+    ).toBe('Check-in em dom., 11 de out., às 23:58');
+    expect(attendeeView(attendee({ status: 'not_going' }), 'not_going', tz).meta).toBe(
+      'Respondeu em sex., 2 de out.',
+    );
+    // Manaus is an hour behind: the same instant is another wall clock, never the device's.
+    expect(
+      attendeeView(
+        attendee({ status: 'checked_in', checkedInAt: '2026-10-12T21:42:00.000000Z' }),
+        'present',
+        { tz: MANAUS, nowMs: NOW, t },
+      ).meta,
+    ).toBe('Check-in às 17:42');
+  });
+
+  it('28. a removed member is "Membro removido" with no photo; walkIn and the avatar path map through', () => {
+    const tz = { tz: SP, nowMs: NOW, t };
+    const removed = attendeeView(
+      attendee({ removed: true, displayName: null, avatarAssetId: null, walkIn: true }),
+      'present',
+      tz,
+    );
+    expect(removed).toMatchObject({ name: 'Membro removido', removed: true, avatarUrl: null });
+    expect(removed.walkIn).toBe(true);
+    const named = attendeeView(attendee({ avatarAssetId: AVATAR }), 'confirmed', tz);
+    expect(named).toMatchObject({ name: 'Iris Muñoz', removed: false, walkIn: false });
+    expect(named.avatarUrl).toBe(`/v1/media/${AVATAR}/w128`);
+  });
+
+  it('29. spelledCode spells the code character by character', () => {
+    expect(spelledCode('K7QM')).toBe('K, 7, Q, M');
+    expect(t('participants.code.aria', { spelled: spelledCode('K7QM') })).toBe('Código K, 7, Q, M');
   });
 });
