@@ -36,12 +36,20 @@ begin;
 --     1 walk_in and 1 not_going.
 --
 -- 11. The count aggregate rides `event_attendances_tenant_event_status_idx` BY NAME on a 4,000-row
---     fixture built and ANALYZEd here (with a handful of rows the planner always scans).
+--     fixture built and ANALYZEd here (with a handful of rows the planner always scans). The volume
+--     events start in 30 minutes (inside the check-in window), so the fixture mixes all four statuses.
+--
+-- 12. D-215 (06-07): the Participantes chips ride their indexes BY NAME, on the same fixture, with the
+--     statements copied VERBATIM from `listAttendance` in `packages/modules/events/server/service.ts`
+--     (page 1: the bound cursor is null). `confirmed` (`a.status = 'going'`, `responded_at desc, id
+--     desc`) rides `event_attendances_tenant_event_status_idx`; `present` (`a.checked_in_at is not
+--     null`, `checked_in_at desc, id desc`) rides the partial `event_attendances_tenant_event_checkin_idx`.
+--     Neither plan has a Sort node: the index order IS the chip order. Edit both files together.
 --
 -- The event fixtures carry their `event_secrets` rows (written in one statement), but this file never
 -- commits, so the deferred keys are never checked; `140-events.sql` proves them. Fixture ids use the
 -- `1e100000-…` prefix, free of 140's `1e000000-…`. Like its siblings, this file ROLLS BACK.
-select plan(22);
+select plan(26);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ea-a', 'Presencas A', '1e100000-0000-4000-8000-000000000001');
@@ -315,18 +323,22 @@ with e as (
   select ('1e1000e0-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
          '1e100000-0000-4000-8000-000000000001', '1e100000-0000-4000-8000-000000000003',
          'Volume ' || g, 'in_person', 'Sede', 'Rua A, 1',
-         now() + interval '1 day', now() + interval '1 day 2 hours'
+         now() + interval '30 minutes', now() + interval '2 hours 30 minutes'
     from generate_series(1, 200) g
   returning id, tenant_id, format
 )
 insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code)
 select id, tenant_id, format, 'K7QM' from e;
-insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at)
+-- u % 4: 0 not_going, 1 going, 2 checked_in (after a Vou), 3 walk_in (no answer).
+insert into public.event_attendances
+  (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via)
 select '1e100000-0000-4000-8000-000000000001',
        ('1e1000e0-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
        ('1e1000a0-0000-4000-8000-' || lpad(u::text, 12, '0'))::uuid,
-       case when u % 3 = 0 then 'not_going' else 'going' end,
-       now()
+       case u % 4 when 0 then 'not_going' when 1 then 'going' when 2 then 'checked_in' else 'walk_in' end,
+       case when u % 4 = 3 then null else now() - make_interval(mins => u) end,
+       case when u % 4 in (2, 3) then now() - make_interval(secs => u) end,
+       case when u % 4 in (2, 3) then 'code' end
   from generate_series(1, 200) g, generate_series(1, 20) u;
 analyze public.event_attendances;
 
@@ -353,6 +365,87 @@ select matches(
 select ok(
   (select plan from attendance_plans where name = 'counts') not like '%Seq Scan%',
   '…and it is not a sequential scan'
+);
+
+-- ── 12. the Participantes chips ride their indexes, by name (D-215) ────────────────────────────
+do $$
+declare
+  v_plan text;
+begin
+  execute $q$
+    explain (format json)
+    select a.id,
+           a.status,
+           to_char(a.responded_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as responded_at,
+           to_char(a.checked_in_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as checked_in_at,
+           (ms.id is null) as removed,
+           mp.display_name,
+           mp.avatar_asset_id,
+           av.variant_widths as avatar_variant_widths
+      from public.event_attendances a
+      left join public.memberships ms
+             on ms.tenant_id = a.tenant_id
+            and ms.user_id = a.user_id
+            and ms.deleted_at is null
+      left join public.member_profiles mp on mp.membership_id = ms.id
+      left join public.media_assets av on av.id = mp.avatar_asset_id
+     where a.tenant_id = '1e100000-0000-4000-8000-000000000001'::uuid
+       and a.event_id = '1e1000e0-0000-4000-8000-000000000042'::uuid
+       and a.status = 'going'
+       and (
+         null::timestamptz is null
+         or (a.responded_at, a.id) < (null::timestamptz, null::uuid)
+       )
+     order by a.responded_at desc, a.id desc
+     limit 11 $q$ into v_plan;
+  insert into attendance_plans values ('confirmed', v_plan);
+
+  execute $q$
+    explain (format json)
+    select a.id,
+           a.status,
+           to_char(a.responded_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as responded_at,
+           to_char(a.checked_in_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as checked_in_at,
+           (ms.id is null) as removed,
+           mp.display_name,
+           mp.avatar_asset_id,
+           av.variant_widths as avatar_variant_widths
+      from public.event_attendances a
+      left join public.memberships ms
+             on ms.tenant_id = a.tenant_id
+            and ms.user_id = a.user_id
+            and ms.deleted_at is null
+      left join public.member_profiles mp on mp.membership_id = ms.id
+      left join public.media_assets av on av.id = mp.avatar_asset_id
+     where a.tenant_id = '1e100000-0000-4000-8000-000000000001'::uuid
+       and a.event_id = '1e1000e0-0000-4000-8000-000000000042'::uuid
+       and a.checked_in_at is not null
+       and (
+         null::timestamptz is null
+         or (a.checked_in_at, a.id) < (null::timestamptz, null::uuid)
+       )
+     order by a.checked_in_at desc, a.id desc
+     limit 11 $q$ into v_plan;
+  insert into attendance_plans values ('present', v_plan);
+end
+$$;
+select matches(
+  (select plan from attendance_plans where name = 'confirmed'),
+  'event_attendances_tenant_event_status_idx',
+  'D-215: the Confirmados chip (status = going, responded_at desc, id desc) rides event_attendances_tenant_event_status_idx, BY NAME'
+);
+select ok(
+  (select plan from attendance_plans where name = 'confirmed') not like '%"Node Type": "Sort"%',
+  '…with no Sort node (the index order is the chip order)'
+);
+select matches(
+  (select plan from attendance_plans where name = 'present'),
+  'event_attendances_tenant_event_checkin_idx',
+  'D-215: the Presentes chip (checked_in_at is not null, checked_in_at desc, id desc) rides the partial event_attendances_tenant_event_checkin_idx, BY NAME'
+);
+select ok(
+  (select plan from attendance_plans where name = 'present') not like '%"Node Type": "Sort"%',
+  '…with no Sort node (the index order is the chip order)'
 );
 
 select * from finish();

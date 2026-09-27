@@ -1299,6 +1299,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       // 06-04: the manage-only edit read joins it (the loop is GET-only; the PUT/PATCH cross-tenant
       // cases live in events-admin.test.ts case 9). The host check refuses before the permission.
       '/v1/events/0d000000-0000-4000-8000-000000000e01/edit',
+      // 06-07: the admin-only attendance reads join it (the regeneration POST's cross-tenant cases,
+      // and the lab-id bare 404s, live in events-attendance.test.ts). The host check refuses first.
+      '/v1/events/0d000000-0000-4000-8000-000000000e01/attendance',
+      '/v1/events/0d000000-0000-4000-8000-000000000e01/attendance/summary',
     ]) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);

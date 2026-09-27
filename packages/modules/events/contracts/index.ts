@@ -426,6 +426,99 @@ export const eventPageSchema = z
 export type EventPage = z.infer<typeof eventPageSchema>;
 
 /**
+ * 06-07 (EVENT-05, D-215): the organiser's three attendance chips on `Participantes`. Each is its own
+ * keyset over its own index, and a cursor never spans two:
+ *  - `confirmed`: `status = 'going'` (answered Vou, NOT yet checked in), newest answer first, over
+ *    `event_attendances_tenant_event_status_idx`;
+ *  - `present`: `checked_in_at is not null` (`checked_in` AND `walk_in`), newest check-in first, over
+ *    the partial `event_attendances_tenant_event_checkin_idx`;
+ *  - `not_going`: `status = 'not_going'`, newest answer first, over the status index.
+ */
+export const ATTENDANCE_LISTS = ['confirmed', 'present', 'not_going'] as const;
+export type AttendanceList = (typeof ATTENDANCE_LISTS)[number];
+
+/**
+ * `GET /v1/events/{eventId}/attendance?list=&cursor=&limit=`. `.strict()`. The `period` rule again:
+ * `list` is a closed enum that does NOT clamp (`PRESENT` is 400, never a widened read; the web
+ * translates its own pt-BR `?lista=` values), and `limit` clamps to `1..EVENT_MAX_PAGE_SIZE`.
+ */
+export const attendanceQuerySchema = z
+  .object({
+    list: z.enum(ATTENDANCE_LISTS).default('confirmed'),
+    cursor: z.string().max(EVENT_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(EVENT_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), EVENT_MAX_PAGE_SIZE))
+      .default(EVENT_PAGE_SIZE),
+  })
+  .strict();
+export type AttendanceQuery = z.infer<typeof attendanceQuerySchema>;
+
+/**
+ * One attendee row, as ONLY the `events.attendance.read` holder sees it (D-206: this is the one
+ * surface where individual attendance is visible). `.strict()`, and deliberately WITHOUT an email, a
+ * membership id or a membership role (T-06-46): a row is a name, a photo and a status, and it is not a
+ * link into the directory (D-47).
+ *
+ * `removed` is true when the member's membership is gone or soft-deleted; `displayName` and
+ * `avatarAssetId` are then null together (the UI-D-24 rule), and the row STILL counts (D-219/A5).
+ * `id` is the attendance row's id (the keyset tiebreaker), never a user id. Instants are UTC ISO with
+ * microseconds, formatted by Postgres (the `ISO_MICROSECONDS` rule).
+ */
+export const attendeeSchema = z
+  .object({
+    id: z.uuid(),
+    displayName: z.string().nullable(),
+    avatarAssetId: z.uuid().nullable(),
+    avatarVariantWidths: z.array(z.number().int()),
+    removed: z.boolean(),
+    status: z.enum(ATTENDANCE_STATUSES),
+    respondedAt: z.string().nullable(),
+    checkedInAt: z.string().nullable(),
+    walkIn: z.boolean(),
+  })
+  .strict();
+export type Attendee = z.infer<typeof attendeeSchema>;
+
+/** One keyset page of one chip. `nextCursor` is non-null EXACTLY when another row exists. */
+export const attendancePageSchema = z
+  .object({
+    items: z.array(attendeeSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type AttendancePage = z.infer<typeof attendancePageSchema>;
+
+/**
+ * `GET /v1/events/{eventId}/attendance/summary` (06-07): the chip counts and the door code in ONE
+ * read. **Pitfall 11: two different "confirmados" numbers, two different names.**
+ *  - `pendingConfirmedCount`: `going` only, the `Confirmados` chip (answered Vou, not yet arrived);
+ *  - `confirmedCount`: `going + checked_in`, the member-facing D-219 number the poster prints and the
+ *    manage-card sub-line repeats;
+ *  - `presentCount`: `checked_in + walk_in`, the `Presentes` chip;
+ *  - `notGoingCount`: `not_going`, the `Não vão` chip.
+ * `checkinCode` is the venue code (D-208) for an in-person event and null for an online one. It is
+ * read through `event_secrets_staff_all`, so only the admin lane ever gets a non-null value here.
+ */
+export const attendanceSummarySchema = z
+  .object({
+    format: z.enum(EVENT_FORMATS),
+    pendingConfirmedCount: z.number().int().nonnegative(),
+    presentCount: z.number().int().nonnegative(),
+    notGoingCount: z.number().int().nonnegative(),
+    confirmedCount: z.number().int().nonnegative(),
+    checkinCode: z.string().nullable(),
+  })
+  .strict();
+export type AttendanceSummary = z.infer<typeof attendanceSummarySchema>;
+
+/** `POST /v1/events/{eventId}/checkin-code` (D-217): the fresh code, and nothing else. */
+export const checkinCodeSchema = z.object({ checkinCode: z.string() }).strict();
+export type CheckinCode = z.infer<typeof checkinCodeSchema>;
+
+/**
  * Payload of `event.published` (MOD-03), emitted once per create after the transaction commits.
  * **Ids and instants only** (T-06-06, Pitfall 12): no title, no venue, no URL and no code, because a
  * payload is what a subscriber logs. Phase 7's reminders read `startsAt`; the reminder text needs the

@@ -33,6 +33,11 @@ import type {
  * 06-06 adds `app.events_enter`'s mapping: `event.checked_in` with `via: 'online'` ONLY for
  * `recorded`, nothing for `forward` / `already`, the URL only on the passing outcomes, and a bare 404.
  *
+ * 06-07 adds the attendance reads and the code regeneration: three LITERAL chip statements (the list
+ * value is never bound), the in-lane 404 first, a tampered cursor degrading to page 1, the two
+ * "confirmados" numbers under their own names, and a regenerated code that is always new and never
+ * logged or emitted.
+ *
  * `withTenantTx` is the seam; the bus under test is the real one.
  */
 
@@ -98,8 +103,17 @@ vi.mock('@tria/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
 }));
 
-const { checkInEvent, createEvent, enterEvent, rsvpEvent, setEventStatus, updateEvent } =
-  await import('../server/service');
+const {
+  checkInEvent,
+  createEvent,
+  enterEvent,
+  getAttendanceSummary,
+  listAttendance,
+  regenerateCheckinCode,
+  rsvpEvent,
+  setEventStatus,
+  updateEvent,
+} = await import('../server/service');
 
 function context(): RequestContext {
   return {
@@ -663,6 +677,127 @@ describe('06-06 — the online enter: outcome mapping and event.checked_in via o
   it('24. not_found (unknown, foreign, removed or in person) is ONE bare 404', async () => {
     script = [enterRow('not_found', null, null, null)];
     const miss = enterEvent(context(), EVENT_ID);
+    await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    await expect(miss).rejects.not.toHaveProperty('details.event');
+  });
+});
+
+describe('06-07 — attendance reads and code regeneration', () => {
+  const attendeeRow = (id: string, status: string, removed = false) => ({
+    id,
+    status,
+    responded_at: status === 'walk_in' ? null : '2026-10-10T12:00:00.123456Z',
+    checked_in_at:
+      status === 'checked_in' || status === 'walk_in' ? '2026-10-12T21:30:00.654321Z' : null,
+    removed,
+    display_name: removed ? null : 'Iris',
+    avatar_asset_id: null,
+    avatar_variant_widths: null,
+  });
+  const A1 = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const A2 = 'aaaaaaaa-0000-4000-8000-000000000002';
+
+  it('25. each chip is its own LITERAL statement, and the list value is never a bound parameter', async () => {
+    const predicates = {
+      confirmed: "a.status = 'going'",
+      not_going: "a.status = 'not_going'",
+      present: 'a.checked_in_at is not null',
+    } as const;
+    for (const list of ['confirmed', 'not_going', 'present'] as const) {
+      statements.length = 0;
+      script = [[{ id: EVENT_ID }], []];
+      await expect(listAttendance(context(), EVENT_ID, { list, limit: 10 })).resolves.toEqual({
+        items: [],
+        nextCursor: null,
+      });
+      expect(statements).toHaveLength(2);
+      expect(statements[0]).toContain('from events');
+      expect(statements[1], list).toContain(predicates[list]);
+      for (const [other, predicate] of Object.entries(predicates)) {
+        if (other !== list) expect(statements[1], `${list} vs ${other}`).not.toContain(predicate);
+      }
+      expect(statements[1]).not.toContain(`"${list}"`);
+    }
+  });
+
+  it('26. the in-lane existence check comes first: a miss is ONE bare 404 and no chip is read', async () => {
+    script = [[]];
+    const miss = listAttendance(context(), EVENT_ID, { list: 'present', limit: 10 });
+    await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    await expect(miss).rejects.not.toHaveProperty('details.event');
+    expect(statements).toHaveLength(1);
+  });
+
+  it('27. over-fetch sets nextCursor; a present page keys on checked_in_at; walkIn and removed map', async () => {
+    script = [
+      [{ id: EVENT_ID }],
+      [attendeeRow(A2, 'walk_in', true), attendeeRow(A1, 'checked_in'), attendeeRow(A1, 'going')],
+    ];
+    const page = await listAttendance(context(), EVENT_ID, { list: 'present', limit: 2 });
+    expect(page.items.map((item) => [item.walkIn, item.removed, item.displayName])).toEqual([
+      [true, true, null],
+      [false, false, 'Iris'],
+    ]);
+    expect(page.nextCursor).not.toBeNull();
+    const envelope = JSON.parse(
+      Buffer.from(page.nextCursor ?? '', 'base64url').toString('utf8'),
+    ) as { n: string; id: string };
+    expect(envelope).toMatchObject({ n: '2026-10-12T21:30:00.654321Z', id: A1 });
+
+    // The cursor is spliced back as the next page's bound; a tampered `n` degrades to page 1.
+    const tampered = Buffer.from(JSON.stringify({ v: 1, n: 'not-an-instant', id: A1 })).toString(
+      'base64url',
+    );
+    statements.length = 0;
+    script = [[{ id: EVENT_ID }], []];
+    await listAttendance(context(), EVENT_ID, { list: 'present', limit: 2, cursor: tampered });
+    expect(statements[1]).not.toContain('not-an-instant');
+  });
+
+  it('28. Pitfall 11: pending (going) and confirmed (going + checked_in) keep their own names', async () => {
+    script = [
+      [
+        {
+          format: 'in_person',
+          pending_confirmed_count: 2,
+          present_count: 2,
+          not_going_count: 1,
+          confirmed_count: 3,
+          checkin_code: 'K7QM',
+        },
+      ],
+    ];
+    await expect(getAttendanceSummary(context(), EVENT_ID)).resolves.toEqual({
+      format: 'in_person',
+      pendingConfirmedCount: 2,
+      presentCount: 2,
+      notGoingCount: 1,
+      confirmedCount: 3,
+      checkinCode: 'K7QM',
+    });
+    expect(statements[0]).toContain("count(*) filter (where x.status = 'going')");
+    expect(statements[0]).toContain("count(*) filter (where x.status in ('going','checked_in'))");
+    script = [[]];
+    await expect(getAttendanceSummary(context(), EVENT_ID)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it('29. regeneration draws two DISTINCT candidates, emits nothing, and a miss is a bare 404', async () => {
+    script = [[{ checkin_code: 'ABCD' }]];
+    const ctx = context();
+    await expect(regenerateCheckinCode(ctx, EVENT_ID)).resolves.toEqual({ checkinCode: 'ABCD' });
+    expect(ctx.events).toHaveLength(0);
+    expect(statements[0]).toContain('code_rotated_at = now()');
+    expect(statements[0]).toContain("s.event_format = 'in_person'");
+    const params = (
+      JSON.parse(statements[0] ?? '{}') as { queryChunks: unknown[] }
+    ).queryChunks.filter((chunk): chunk is string => typeof chunk === 'string');
+    const candidates = params.filter((value) => /^[A-Z2-9]{4}$/.test(value));
+    expect(new Set(candidates).size).toBe(2);
+
+    script = [[]];
+    const miss = regenerateCheckinCode(context(), EVENT_ID);
     await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     await expect(miss).rejects.not.toHaveProperty('details.event');
   });

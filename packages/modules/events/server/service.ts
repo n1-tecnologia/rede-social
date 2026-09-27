@@ -6,8 +6,14 @@ import { moduleLogger } from '@tria/core/server/logging';
 import { decodeCursor, encodeCursor, keysetComparison } from '@tria/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
+  AttendanceList,
+  AttendancePage,
+  AttendanceQuery,
   AttendanceStatus,
+  AttendanceSummary,
+  Attendee,
   Checkin,
+  CheckinCode,
   CheckinResult,
   EnterOutcome,
   EnterResult,
@@ -1138,4 +1144,311 @@ export async function enterEvent(ctx: RequestContext, eventId: string): Promise<
   }
 
   return parsed.data;
+}
+
+/** One hydrated attendee row, snake_case straight off `tx.execute`. */
+type AttendeeRow = {
+  id: string;
+  status: AttendanceStatus;
+  responded_at: string | null;
+  checked_in_at: string | null;
+  removed: boolean;
+  display_name: string | null;
+  avatar_asset_id: string | null;
+  avatar_variant_widths: number[] | null;
+};
+
+/**
+ * THE attendee projection, shared by the three chip statements so they can never disagree about what
+ * a row looks like (06-07, EVENT-05). Ends without a `where`: each statement appends its own
+ * predicate and ordering.
+ *
+ * The member join is the feed's comment-author join (UI-D-24), tenant-scoped on the join itself:
+ * `left join memberships ms on … and ms.deleted_at is null`, then `member_profiles` and the avatar's
+ * variant ladder. It is a LEFT join on purpose: a member who has left yields `ms.id is null`, so
+ * `removed` is true and the name and photo are null together, and the ROW STILL COUNTS (D-219/A5).
+ * No email, no membership id and no role is projected (T-06-46).
+ */
+const attendeeProjection = sql`
+    select a.id,
+           a.status,
+           to_char(a.responded_at at time zone 'utc', ${ISO_MICROSECONDS}) as responded_at,
+           to_char(a.checked_in_at at time zone 'utc', ${ISO_MICROSECONDS}) as checked_in_at,
+           (ms.id is null) as removed,
+           mp.display_name,
+           mp.avatar_asset_id,
+           av.variant_widths as avatar_variant_widths
+      from event_attendances a
+      left join memberships ms
+             on ms.tenant_id = a.tenant_id
+            and ms.user_id = a.user_id
+            and ms.deleted_at is null
+      left join member_profiles mp on mp.membership_id = ms.id
+      left join media_assets av on av.id = mp.avatar_asset_id`;
+
+/** Row → published contract. The flag and the two nulls move together (UI-D-24). */
+const toAttendee = (row: AttendeeRow): Attendee => ({
+  id: row.id,
+  displayName: row.removed ? null : row.display_name,
+  avatarAssetId: row.removed ? null : row.avatar_asset_id,
+  avatarVariantWidths: row.removed ? [] : (row.avatar_variant_widths ?? []),
+  removed: row.removed,
+  status: row.status,
+  respondedAt: row.responded_at,
+  checkedInAt: row.checked_in_at,
+  walkIn: row.status === 'walk_in',
+});
+
+/**
+ * A cursor's `n` must be an instant this service could have issued before it reaches a
+ * `::timestamptz` cast: `decodeCursor` only proves it is a string, and a tampered `n` would otherwise
+ * be a 500 instead of the first page (T-06-04).
+ */
+const CURSOR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+/** A live event of THIS tenant, in this lane: the existence check every attendance read starts with. */
+async function assertEventInLane(tx: Tx, ctx: RequestContext, eventId: string): Promise<void> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select id
+      from events
+     where tenant_id = ${ctx.tenantId}::uuid
+       and id = ${eventId}::uuid
+       and deleted_at is null
+     limit 1`);
+  if (!rows[0]) throw new ApiError(404, 'NOT_FOUND');
+}
+
+/**
+ * `GET /v1/events/{eventId}/attendance?list=&cursor=&limit=` (06-07, EVENT-05, D-215). Guarded by the
+ * literal `events.attendance.read` at the route (admin_tenant only in V1).
+ *
+ * The event is confirmed in-lane FIRST: an unknown, another tenant's or a removed event is ONE bare
+ * 404 (D-23, T-06-47), never an empty page that would tell a lab id from a missing one.
+ *
+ * **Three chips, three COMPLETE literal statements.** `query.list` picks one in TypeScript and is
+ * never a bound SQL parameter (T-06-48), so each predicate and ordering is fixed text that
+ * `141-event-attendances.sql` can match to an index BY NAME:
+ *  - `confirmed`: `a.status = 'going'`, ordered `responded_at desc, id desc`
+ *    (`event_attendances_tenant_event_status_idx`);
+ *  - `not_going`: `a.status = 'not_going'`, the same ordering and index;
+ *  - `present`: `a.checked_in_at is not null`, ordered `checked_in_at desc, id desc` (the partial
+ *    `event_attendances_tenant_event_checkin_idx`). Walk-ins are here, with `walkIn: true`.
+ * The ordering is TOTAL (`(instant, id)` descending), so a tie on the instant is broken by `id`, two
+ * identical requests answer the same page, and a page boundary never repeats or skips a row. `limit
+ * + 1` over-fetch; a chip with no rows, and a cursor past the end, answer `{ items: [], nextCursor:
+ * null }`.
+ */
+export async function listAttendance(
+  ctx: RequestContext,
+  eventId: string,
+  query: AttendanceQuery,
+): Promise<AttendancePage> {
+  const limit = query.limit;
+  const decoded = decodeCursor(query.cursor);
+  const after = decoded && CURSOR_INSTANT.test(decoded.n) ? decoded : null;
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+  const list: AttendanceList = query.list;
+
+  const rows = await withTenantTx(ctx, async (tx) => {
+    await assertEventInLane(tx, ctx, eventId);
+    if (list === 'present') {
+      return tx.execute<AttendeeRow>(sql`
+      ${attendeeProjection}
+       where a.tenant_id = ${ctx.tenantId}::uuid
+         and a.event_id = ${eventId}::uuid
+         and a.checked_in_at is not null
+         and (
+           ${afterAt}::timestamptz is null
+           or (a.checked_in_at, a.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by a.checked_in_at desc, a.id desc
+       limit ${limit + 1}`);
+    }
+    if (list === 'not_going') {
+      return tx.execute<AttendeeRow>(sql`
+      ${attendeeProjection}
+       where a.tenant_id = ${ctx.tenantId}::uuid
+         and a.event_id = ${eventId}::uuid
+         and a.status = 'not_going'
+         and (
+           ${afterAt}::timestamptz is null
+           or (a.responded_at, a.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by a.responded_at desc, a.id desc
+       limit ${limit + 1}`);
+    }
+    return tx.execute<AttendeeRow>(sql`
+      ${attendeeProjection}
+       where a.tenant_id = ${ctx.tenantId}::uuid
+         and a.event_id = ${eventId}::uuid
+         and a.status = 'going'
+         and (
+           ${afterAt}::timestamptz is null
+           or (a.responded_at, a.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by a.responded_at desc, a.id desc
+       limit ${limit + 1}`);
+  });
+
+  // Over-fetch by one: `nextCursor` is non-null EXACTLY when another row exists.
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const lastKey = last ? (list === 'present' ? last.checked_in_at : last.responded_at) : null;
+  const nextCursor =
+    rows.length > limit && last && lastKey ? encodeCursor({ n: lastKey, id: last.id }) : null;
+
+  log.info(
+    {
+      event: 'events.attendance.list',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      list,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'event attendance listed',
+  );
+
+  return { items: page.map(toAttendee), nextCursor };
+}
+
+/** The summary's one row. */
+type AttendanceSummaryRow = {
+  format: EventFormat;
+  pending_confirmed_count: number;
+  present_count: number;
+  not_going_count: number;
+  confirmed_count: number;
+  checkin_code: string | null;
+};
+
+/**
+ * `GET /v1/events/{eventId}/attendance/summary` (06-07, EVENT-05, D-208): the chip counts and the door
+ * code in ONE statement. Guarded by the literal `events.attendance.read` at the route.
+ *
+ * **Pitfall 11, both names.** `pending_confirmed_count` is `going` only (the `Confirmados` chip:
+ * answered Vou, not yet arrived); `confirmed_count` is `going + checked_in` (the member-facing D-219
+ * number, the same expression as `eventSource`); `present_count` is `checked_in + walk_in`;
+ * `not_going_count` is `not_going`. The lateral aggregate rides
+ * `event_attendances_tenant_event_status_idx` like `eventSource`'s.
+ *
+ * The code comes from `left join event_secrets`, which `event_secrets_staff_all` shows to the
+ * `admin_tenant` lane only: the route's permission plus the policy are two independent gates
+ * (T-06-44). It is null for an online event (its code is never used: `Entrar` is the check-in).
+ * A miss is ONE bare 404 (D-23).
+ */
+export async function getAttendanceSummary(
+  ctx: RequestContext,
+  eventId: string,
+): Promise<AttendanceSummary> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<AttendanceSummaryRow>(sql`
+      select e.format,
+             c.pending_confirmed_count,
+             c.present_count,
+             c.not_going_count,
+             c.confirmed_count,
+             case when e.format = 'in_person' then s.checkin_code end as checkin_code
+        from events e
+        left join event_secrets s on s.tenant_id = e.tenant_id and s.event_id = e.id
+        left join lateral (
+          select count(*) filter (where x.status = 'going')::int as pending_confirmed_count,
+                 count(*) filter (where x.status in ('checked_in','walk_in'))::int as present_count,
+                 count(*) filter (where x.status = 'not_going')::int as not_going_count,
+                 count(*) filter (where x.status in ('going','checked_in'))::int as confirmed_count
+            from event_attendances x
+           where x.tenant_id = e.tenant_id
+             and x.event_id = e.id
+        ) c on true
+       where e.tenant_id = ${ctx.tenantId}::uuid
+         and e.id = ${eventId}::uuid
+         and e.deleted_at is null
+       limit 1`),
+  );
+  const row = rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'events.attendance.summary',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      // Whether a code was readable, never the code itself (Pitfall 12).
+      hasCode: row.checkin_code !== null,
+    },
+    'event attendance summary',
+  );
+
+  return {
+    format: row.format,
+    pendingConfirmedCount: Number(row.pending_confirmed_count ?? 0),
+    presentCount: Number(row.present_count ?? 0),
+    notGoingCount: Number(row.not_going_count ?? 0),
+    confirmedCount: Number(row.confirmed_count ?? 0),
+    checkinCode: row.checkin_code,
+  };
+}
+
+/**
+ * `POST /v1/events/{eventId}/checkin-code` (06-07, D-217): a leaked code is replaced. Guarded by the
+ * literal `events.event.manage` at the route (T-06-45: a member rotating the code would lock the room
+ * out).
+ *
+ * ONE guarded UPDATE of `event_secrets` in the admin lane (`event_secrets_staff_all`), on a live
+ * IN-PERSON event of this tenant, stamping `code_rotated_at`. Two distinct candidates are drawn and
+ * the statement keeps the one that differs from the stored code, so the new code is ALWAYS different
+ * (a 1-in-923,521 repeat would otherwise leave a leaked code working). Afterwards the old code answers
+ * `wrong_code` and existing check-ins are untouched (nothing here reads `event_attendances`).
+ *
+ * Zero rows (unknown, another tenant's, removed, online, or a lane the policy hides the row from) is
+ * ONE bare 404. It emits nothing, and its log line carries no code (Pitfall 12).
+ */
+export async function regenerateCheckinCode(
+  ctx: RequestContext,
+  eventId: string,
+): Promise<CheckinCode> {
+  const first = generateCheckinCode();
+  let second = generateCheckinCode();
+  while (second === first) second = generateCheckinCode();
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ checkin_code: string }>(sql`
+      update event_secrets s
+         set checkin_code = case when s.checkin_code = ${first} then ${second} else ${first} end,
+             code_rotated_at = now(),
+             updated_at = now()
+       where s.tenant_id = ${ctx.tenantId}::uuid
+         and s.event_id = ${eventId}::uuid
+         and s.event_format = 'in_person'
+         and exists (
+           select 1
+             from events e
+            where e.tenant_id = s.tenant_id
+              and e.id = s.event_id
+              and e.deleted_at is null
+         )
+      returning s.checkin_code`),
+  );
+  const row = rows[0];
+
+  log.info(
+    {
+      event: 'events.checkin_code.regenerated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      rotated: row !== undefined,
+    },
+    'event check-in code regenerated',
+  );
+
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return { checkinCode: row.checkin_code };
 }

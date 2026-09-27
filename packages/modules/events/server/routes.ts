@@ -5,6 +5,10 @@ import { ApiError } from '@tria/core/server/http/api-error';
 import { requireModule } from '@tria/core/server/modules/require-module';
 import { requirePermission } from '@tria/core/server/rbac/permissions';
 import {
+  attendancePageSchema,
+  attendanceQuerySchema,
+  attendanceSummarySchema,
+  checkinCodeSchema,
   checkinResultSchema,
   checkinSchema,
   EVENT_ISSUE_SET,
@@ -23,9 +27,12 @@ import {
   checkInEvent,
   createEvent,
   enterEvent,
+  getAttendanceSummary,
   getEvent,
   getEventForEdit,
+  listAttendance,
   listEvents,
+  regenerateCheckinCode,
   rsvpEvent,
   setEventStatus,
   updateEvent,
@@ -37,7 +44,8 @@ import {
  *
  * Order is the ROLE-06 order: `requireAuth` (401) -> `requireModule('events')` (404 when the tenant
  * does not have events — never 403, so a member cannot tell "not allowed" from "not here") ->
- * `requirePermission` on the create, edit-read, replace, status, RSVP, check-in and enter routes (403). The write guard is a PERMISSION, never a role
+ * `requirePermission` on the create, edit-read, replace, status, RSVP, check-in, enter, attendance
+ * and code-regeneration routes (403). The write guard is a PERMISSION, never a role
  * comparison: granting creation to another role later is a manifest line, not a route edit.
  */
 
@@ -314,6 +322,80 @@ const enterRoute = createRoute({
   },
 });
 
+/**
+ * The organiser's attendance list (06-07, EVENT-05, D-215). The literal `events.attendance.read`
+ * (T-06-44): granted to `admin_tenant` only in V1, so a member is 403 before any read. Widening it to
+ * `support_tenant` is one manifest line plus one `ALTER POLICY` on `event_secrets_staff_all` (the
+ * open pilot question).
+ */
+const attendanceRoute = createRoute({
+  method: 'get',
+  path: '/{eventId}/attendance',
+  middleware: [requirePermission('events.attendance.read')] as const,
+  request: { params: eventParamSchema, query: attendanceQuerySchema },
+  responses: {
+    200: {
+      description:
+        'One keyset page of one attendance chip. `list=confirmed` (the default) is every `going` answer (Vou, not yet checked in), newest answer first; `list=present` is every check-in (`checked_in` and `walk_in`, with `walkIn: true` on a walk-in), newest check-in first; `list=not_going` is every `Não vou`, newest first. Ties on the instant are broken by the row id, descending. A row is a name, a photo and a status: no email, no role, no link. A member who has left has `removed: true` and a null name, and still counts. An empty chip, and a cursor past the end, answer `{ items: [], nextCursor: null }`.',
+      content: { 'application/json': { schema: attendancePageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: the id is not a uuid, or `list` is not exactly `confirmed` | `present` | `not_going`.',
+    },
+    403: { description: 'The caller does not hold `events.attendance.read` in this tenant' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+/** The chip counts and the door code in one read (06-07, D-208). The same literal guard. */
+const attendanceSummaryRoute = createRoute({
+  method: 'get',
+  path: '/{eventId}/attendance/summary',
+  middleware: [requirePermission('events.attendance.read')] as const,
+  request: { params: eventParamSchema },
+  responses: {
+    200: {
+      description:
+        "The event's attendance counts and its venue code. `pendingConfirmedCount` is `going` only (the Confirmados chip); `confirmedCount` is `going + checked_in` (the member-facing number, D-219); `presentCount` is `checked_in + walk_in`; `notGoingCount` is `not_going`. `checkinCode` is the in-person event's code (null online), readable by the tenant admin only.",
+      content: { 'application/json': { schema: attendanceSummarySchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    403: { description: 'The caller does not hold `events.attendance.read` in this tenant' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+/**
+ * Code regeneration (06-07, D-217). A WRITE, so the literal manage guard (T-06-45), and a POST, never
+ * a GET: nothing a prefetch or a crawler follows may rotate the code.
+ */
+const regenerateCodeRoute = createRoute({
+  method: 'post',
+  path: '/{eventId}/checkin-code',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: { params: eventParamSchema },
+  responses: {
+    200: {
+      description:
+        'The fresh venue code, always different from the one it replaces. The old code answers `wrong_code` from now on, and every existing check-in is kept.',
+      content: { 'application/json': { schema: checkinCodeSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, removed, or ONLINE (an online event has no door code). One bare code, no details (D-23).',
+    },
+  },
+});
+
 export const eventsRoutes = events
   .openapi(listRoute, async (c) =>
     c.json(await listEvents(c.get('ctx'), c.req.valid('query')), 200),
@@ -347,4 +429,16 @@ export const eventsRoutes = events
   )
   .openapi(enterRoute, async (c) =>
     c.json(await enterEvent(c.get('ctx'), c.req.valid('param').eventId), 200),
+  )
+  .openapi(attendanceSummaryRoute, async (c) =>
+    c.json(await getAttendanceSummary(c.get('ctx'), c.req.valid('param').eventId), 200),
+  )
+  .openapi(attendanceRoute, async (c) =>
+    c.json(
+      await listAttendance(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('query')),
+      200,
+    ),
+  )
+  .openapi(regenerateCodeRoute, async (c) =>
+    c.json(await regenerateCheckinCode(c.get('ctx'), c.req.valid('param').eventId), 200),
   );

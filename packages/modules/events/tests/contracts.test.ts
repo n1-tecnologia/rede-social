@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ATTENDANCE_LISTS,
   ATTENDANCE_STATUSES,
+  attendancePageSchema,
+  attendanceQuerySchema,
+  attendanceSummarySchema,
+  attendeeSchema,
   CHECKIN_OUTCOMES,
+  checkinCodeSchema,
   checkinResultSchema,
   checkinSchema,
   ENTER_OUTCOMES,
@@ -359,6 +365,85 @@ describe('06-06 — the online enter contract (an API-to-BFF answer)', () => {
       enterResultSchema.safeParse({ outcome: 'forward', meetingUrl: URL, status: 'going' }).success,
     ).toBe(false);
     expect(enterResultSchema.safeParse({ outcome: 'not_found', meetingUrl: null }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('06-07 — the attendance contract (Participantes)', () => {
+  const attendee = {
+    id: '0e000000-0000-4000-8000-0000000000a1',
+    displayName: 'Iris Muñoz',
+    avatarAssetId: null,
+    avatarVariantWidths: [],
+    removed: false,
+    status: 'going',
+    respondedAt: '2026-10-10T12:00:00.000000Z',
+    checkedInAt: null,
+    walkIn: false,
+  } as const;
+
+  it('23. the list is a closed enum that does not clamp; limit clamps; strict', () => {
+    expect([...ATTENDANCE_LISTS]).toEqual(['confirmed', 'present', 'not_going']);
+    expect(attendanceQuerySchema.parse({})).toEqual({ list: 'confirmed', limit: EVENT_PAGE_SIZE });
+    for (const list of ATTENDANCE_LISTS) {
+      expect(attendanceQuerySchema.parse({ list }).list).toBe(list);
+    }
+    for (const bad of ['PRESENT', 'presentes', 'going', 'walk_in', '']) {
+      expect(attendanceQuerySchema.safeParse({ list: bad }).success, bad).toBe(false);
+    }
+    expect(attendanceQuerySchema.parse({ limit: '0' }).limit).toBe(1);
+    expect(attendanceQuerySchema.parse({ limit: '999' }).limit).toBe(EVENT_MAX_PAGE_SIZE);
+    expect(attendanceQuerySchema.parse({ limit: 'abc' }).limit).toBe(EVENT_PAGE_SIZE);
+    expect(attendanceQuerySchema.safeParse({ period: 'past' }).success).toBe(false);
+  });
+
+  it('24. an attendee carries no email, no role and no membership id (T-06-46), and is strict', () => {
+    expect(attendeeSchema.safeParse(attendee).success).toBe(true);
+    const keys = Object.keys(attendeeSchema.shape).sort();
+    expect(keys).toEqual([
+      'avatarAssetId',
+      'avatarVariantWidths',
+      'checkedInAt',
+      'displayName',
+      'id',
+      'removed',
+      'respondedAt',
+      'status',
+      'walkIn',
+    ]);
+    for (const extra of ['email', 'role', 'membershipId', 'userId']) {
+      expect(attendeeSchema.safeParse({ ...attendee, [extra]: 'x' }).success, extra).toBe(false);
+    }
+    expect(attendancePageSchema.safeParse({ items: [attendee], nextCursor: null }).success).toBe(
+      true,
+    );
+    expect(attendancePageSchema.safeParse({ items: [], nextCursor: null }).success).toBe(true);
+  });
+
+  it('25. Pitfall 11: the summary names both "confirmados" numbers, and the code is nullable', () => {
+    const summary = {
+      format: 'in_person',
+      pendingConfirmedCount: 2,
+      presentCount: 2,
+      notGoingCount: 1,
+      confirmedCount: 3,
+      checkinCode: 'K7QM',
+    } as const;
+    expect(attendanceSummarySchema.safeParse(summary).success).toBe(true);
+    expect(
+      attendanceSummarySchema.safeParse({ ...summary, format: 'online', checkinCode: null })
+        .success,
+    ).toBe(true);
+    expect(Object.keys(attendanceSummarySchema.shape)).toEqual(
+      expect.arrayContaining(['pendingConfirmedCount', 'confirmedCount']),
+    );
+    expect(attendanceSummarySchema.safeParse({ ...summary, meetingUrl: null }).success).toBe(false);
+  });
+
+  it('26. the regeneration answer is the code and nothing else', () => {
+    expect(checkinCodeSchema.safeParse({ checkinCode: 'K7QM' }).success).toBe(true);
+    expect(checkinCodeSchema.safeParse({ checkinCode: 'K7QM', previous: 'ABCD' }).success).toBe(
       false,
     );
   });
