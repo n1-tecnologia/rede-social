@@ -1,13 +1,13 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "05.3"
-current_phase_name: Reels
+current_phase: "6"
+current_phase_name: Events
 status: executing
-stopped_at: Completed 05.3-10-PLAN.md
-last_updated: "2026-09-27T11:58:45.103Z"
+stopped_at: Phase 05.3 closed partial (UAT 4 pass, test 1 blocked on phones until 01.1), ready to execute Phase 6
+last_updated: "2026-09-27T14:10:00.000Z"
 last_activity: 2026-09-27
-last_activity_desc: Completed 05.3-10 (CR-01 gap closure, WR-01..03); awaiting code review, regression gate and phase verification
-state_head: 82feba88be32ffe00fb23bcd0122dc19adb57eea
+last_activity_desc: "Phase 05.3 closed partial (UAT 4/5, real-phone test 1 blocked until 01.1; secured 29/29, Nyquist-compliant, UI 21/24; follow-ups fixed by quick 260927-ebk), transitioned to Phase 6"
+state_head: 05e8d14
 progress:
   total_phases: 15
   completed_phases: 0
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 05.3 — Reels
+**Current focus:** Phase 6 — Events
 
 ## Current Position
 
-Phase: 05.3 (Reels) — EXECUTING
-Plan: 10 of 10
-Status: UAT partial (4 passed, 1 blocked: phone run waits for Phase 01.1); secured 29/29, Nyquist-compliant, UI-reviewed 21/24; WR-04/WR-05 and the UI top 3 fixed by quick 260927-ebk
-Last activity: 2026-09-27 - Completed quick task 260927-ebk: 05.3 follow-ups: WR-04/WR-05 fixes with tests and UI-REVIEW top 3 fixes
+Phase: 6 (Events) — READY TO EXECUTE
+Plan: 0 of 9
+Status: Ready to execute
+Last activity: 2026-09-27 — Phase 05.3 closed partial (UAT 4/5, real-phone test 1 blocked until 01.1; follow-ups fixed by quick 260927-ebk), transitioned to Phase 6
 
 Progress: [█████████████████░░░] 86/98 plans ([░░░░░░░░░░] 0%)
 
@@ -473,6 +473,7 @@ None yet.
 - [Phase 05.1]: Residual R-1 in 05.1-SECURITY.md (WR-01) — `resolvePublishCommunity`, `pinStory` and feed `createPost` read community status without `FOR SHARE`; an archive committing mid-write can still land a pin/post in an archived community. Medium, below threshold.
 - [Phase 5]: `.planning/REQUIREMENTS.md` traceability still shows 16 "Gaps Found" rows (05-SECURITY.md R-5) — documentation lag to clear.
 - [Phase 05.2]: Closed partial on 2026-09-26 by user decision (same as Phases 2-4), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, iPhone Safari + Android Chrome, steps 1-6) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.2`. VERIFICATION.md is stale because quick 260926-d8f changed covered code, so re-run the verifier then instead of re-attesting. Review items still open: WR-02, WR-05, WR-06 (partly covered by 05.2-30..34), IN-01..04, `h-[68px]` in StoriesStrip.
+- [Phase 05.3]: Closed partial on 2026-09-27 by user decision (same as 05.2), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, WINDOWS #48-#51, plus WR-06 on real Mux) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.3`. VERIFICATION.md is stale because quick 260927-ebk changed covered code, so re-run the verifier then instead of re-attesting. REELS-06 stays Pending until that run. Review items still open: IN-01..07; UI-REVIEW minor: the `right-[3px]` tick offset in ReelsPager.
 
 ### Quick Tasks Completed
 
@@ -513,6 +514,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T11:58:45.007Z
-Stopped at: Completed 05.3-10-PLAN.md
+Last session: 2026-09-27T14:10:00.000Z
+Stopped at: Phase 05.3 closed partial (UAT 4 pass, test 1 blocked on phones until 01.1), ready to execute Phase 6
 Resume file: None
