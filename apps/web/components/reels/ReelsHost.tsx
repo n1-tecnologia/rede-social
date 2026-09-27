@@ -24,7 +24,6 @@ import {
 } from '@tria/module-reels/ui';
 import { Button, EmptyState, IconButton, useToast } from '@tria/ui';
 import { CircleAlert, Film, Loader2, Volume2, VolumeX } from 'lucide-react';
-import Link from 'next/link';
 import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
@@ -40,6 +39,7 @@ import {
   mintReelPlaybackAction,
   type ReelsPageResult,
 } from '@/app/(app)/reels/reels-actions';
+import { LinkButton } from '@/app/(auth)/LinkButton';
 import { useSharePost } from '@/components/feed/useSharePost';
 import type { ReelView } from '@/lib/reels';
 import { type ReelBinder, ReelOverlay, type ReelOverlayLabels } from './ReelOverlay';
@@ -953,12 +953,16 @@ export function ReelsHost({
             body={labels.emptyBody}
             action={
               canPost ? (
-                <Link
+                // The shared Button's link form, with the white ring and no offset every control
+                // on the dark Reels surface carries (UI-REVIEW fix 3).
+                <LinkButton
                   href="/criar"
-                  className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  variant="brand"
+                  size="md"
+                  className="focus-visible:ring-white focus-visible:ring-offset-0"
                 >
                   {labels.emptyCta}
-                </Link>
+                </LinkButton>
               ) : undefined
             }
           />

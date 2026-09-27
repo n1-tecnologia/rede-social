@@ -698,6 +698,19 @@ describe('ReelsHost — the empty state and the lane row (UI-D-94, D-120)', () =
     renderHost({ initial: { items: [], nextCursor: null }, canPost: true });
     const cta = screen.getByRole('link', { name: f('empty.cta') });
     expect(cta.getAttribute('href')).toBe('/criar');
+    // The shared Button geometry (LinkButton brand/md), with the white ring on the dark surface.
+    for (const cls of [
+      'bg-brand',
+      'text-on-brand',
+      'rounded-xl',
+      'h-11',
+      'px-5',
+      'focus-visible:ring-white',
+      'focus-visible:ring-offset-0',
+    ]) {
+      expect(cta.className).toContain(cls);
+    }
+    expect(cta.className).not.toContain('focus-visible:ring-brand');
   });
 
   it('with one lane there is no tablist and the pager gets no onLaneStep', async () => {
