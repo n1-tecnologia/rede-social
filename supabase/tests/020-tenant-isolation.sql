@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(115);
+select plan(131);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -187,6 +187,21 @@ insert into public.story_views (id, tenant_id, user_id, story_id) values
    '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-0000000000d1'),
   ('0b000000-0000-4000-8000-0000000000e8', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000000d1');
+
+-- 06-01: ONE event per tenant, IDENTICAL on both sides (the same title 'x', the same venue, the same
+-- check-in code 'K7QM'), each with its `event_secrets` row. The file never commits, so the two
+-- deferred keys between the tables are never checked here; `140-events.sql` proves them.
+insert into public.events
+  (id, tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at) values
+  ('0a000000-0000-4000-8000-0000000000e9', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-000000000002', 'x', 'in_person', 'Sede', 'Rua A, 1',
+   now() + interval '1 day', now() + interval '1 day 2 hours'),
+  ('0b000000-0000-4000-8000-0000000000e9', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-000000000002', 'x', 'in_person', 'Sede', 'Rua A, 1',
+   now() + interval '1 day', now() + interval '1 day 2 hours');
+insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code) values
+  ('0a000000-0000-4000-8000-0000000000e9', '0a000000-0000-4000-8000-000000000001', 'in_person', 'K7QM'),
+  ('0b000000-0000-4000-8000-0000000000e9', '0b000000-0000-4000-8000-000000000001', 'in_person', 'K7QM');
 
 -- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
 -- global) and RLS with ZERO policies, like platform_admins and tenant_invites: one community's
@@ -818,6 +833,88 @@ select throws_ok(
   'tenant_invites: the lane cannot create an invite — provisioning is a platform-lane operation (D-30)'
 );
 
+-- ── events: the same six cases (06-01). Every member of the tenant reads events, so the member
+--    lane is the right one here. ─────────────────────────────────────────────────────────────────
+select results_eq(
+  $$ select count(*)::int from public.events
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own events row'
+);
+select results_eq(
+  $$ select count(*)::int from public.events where title = 'x' $$,
+  ARRAY[1],
+  'adjacency: both tenants have an event titled x, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.events where title = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the event it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.events where id = '0b000000-0000-4000-8000-0000000000e9' $$,
+  'detail by id: B''s event is not found through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.events
+       (tenant_id, created_by_user_id, title, format, venue_name, address, starts_at, ends_at)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002',
+             'y', 'in_person', 'Sede', 'Rua A, 1', now(), now() + interval '1 hour') $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write an event stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with u as (
+       update public.events set title = 'y'
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: an update aimed at B''s events touches nothing'
+);
+
+-- ── event_secrets: the same six cases (06-01), from A's ADMIN lane. A member lane already sees no
+--    secrets row of its OWN tenant by design (`140-events.sql` fact 8), so only the admin lane can
+--    show that the tenant scope is also right: it sees A's row and none of B's. ──────────────────
+reset role;
+select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'admin_tenant');
+select results_eq(
+  $$ select count(*)::int from public.event_secrets
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A''s admin lane sees its own event_secrets row'
+);
+select results_eq(
+  $$ select count(*)::int from public.event_secrets where checkin_code = 'K7QM' $$,
+  ARRAY[1],
+  'adjacency: both tenants'' events carry the code K7QM, A''s admin lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.event_secrets where checkin_code = 'K7QM' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the event_secrets row it returns belongs to A'
+);
+select is_empty(
+  $$ select event_id from public.event_secrets
+      where event_id = '0b000000-0000-4000-8000-0000000000e9' $$,
+  'detail by id: B''s event_secrets row is not found through A''s admin lane'
+);
+select throws_ok(
+  $$ insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code)
+     values (gen_random_uuid(), '0b000000-0000-4000-8000-000000000001', 'in_person', 'K7QM') $$,
+  '42501',
+  null,
+  'WITH CHECK: A''s admin cannot write an event_secrets row stamped with B''s tenant_id'
+);
+select results_eq(
+  $$ with u as (
+       update public.event_secrets set checkin_code = 'ABCD'
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: an update aimed at B''s event_secrets touches nothing'
+);
+
 -- ── 03-02 (PROF-01/PROF-02/TENANT-04): member_profiles, the first TENANT-WIDE select policy ─────
 -- A second member of A is created here, mid-file, on purpose: the self-scoped UPDATE policy needs a
 -- NEIGHBOUR to be meaningful (a tenant with one member cannot distinguish "my row" from "a row of my
@@ -952,6 +1049,30 @@ select results_eq(
   $$ select count(*)::int from public.media_provider_events $$,
   ARRAY[0],
   'symmetry: B''s lane sees no provider event either'
+);
+
+-- 06-01, the events half of the symmetry: B's lane (member for events, admin for the secrets)
+-- returns B's row for the same title and code, and never A's.
+select results_eq(
+  $$ select tenant_id::text from public.events where title = 'x' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s event for the same title'
+);
+select is_empty(
+  $$ select id from public.events where id = '0a000000-0000-4000-8000-0000000000e9' $$,
+  'symmetry: A''s event is not found through B''s lane'
+);
+reset role;
+select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'admin_tenant');
+select results_eq(
+  $$ select tenant_id::text from public.event_secrets where checkin_code = 'K7QM' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s admin lane returns B''s event_secrets row for the same code'
+);
+select is_empty(
+  $$ select event_id from public.event_secrets
+      where event_id = '0a000000-0000-4000-8000-0000000000e9' $$,
+  'symmetry: A''s event_secrets row is not found through B''s admin lane'
 );
 
 -- ── the admin lane (withAdminTx behind requireSuperAdmin) is the only reader of invites ─────────

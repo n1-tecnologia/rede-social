@@ -507,9 +507,51 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  // b4 (05-08's community pins) retired with the pin model in 05.2-11 (HIGHLIGHT-05, D-116). Its
-  // crossings — a foreign story into an own place, an own story into a foreign place, and the
-  // foreign place's read — are b7's highlight crossings now, and the letter stays unused.
+  // b4 was 05-08's community pins, retired with the pin model in 05.2-11 (HIGHLIGHT-05, D-116); its
+  // crossings are b7's highlight crossings now. 06-01 reuses the free letter for events.
+  it("b4. events: the other tenant's events never reach a demo list, and a demo session on the lab host is refused (06-01)", async () => {
+    // Both sides from the DATABASE: `events` is enabled for tria-lab too (D-17), so the lab has its
+    // own seeded events with titles IDENTICAL to the demo's (§(j) adjacency) — which is why every
+    // assertion below compares ids, never titles. The detail route is 06-03's, so its cross-tenant
+    // 404 is asserted there; this case owns the LIST.
+    const labEvents = await adminSql<{ id: string }[]>`
+      select id from public.events where tenant_id = ${tenantIds.lab}::uuid`;
+    const demoEvents = await adminSql<{ id: string }[]>`
+      select id from public.events where tenant_id = ${tenantIds.demo}::uuid`;
+    expect(labEvents.length).toBeGreaterThan(0);
+    expect(demoEvents.length).toBeGreaterThan(0);
+    const labIds = labEvents.map((row) => row.id);
+
+    const seen: string[] = [];
+    for (const period of ['upcoming', 'past']) {
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 40; guard++) {
+        const query: string = cursor
+          ? `?period=${period}&limit=25&cursor=${encodeURIComponent(cursor)}`
+          : `?period=${period}&limit=25`;
+        const res = await request(`/v1/events${query}`, tokens.demoMember, {
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+        seen.push(...body.items.map((item) => item.id));
+        cursor = body.nextCursor;
+        if (cursor === null) break;
+      }
+    }
+    for (const id of labIds) expect(seen).not.toContain(id);
+
+    // Positive control IN THE SAME TEST: the demo member's two lists DO contain the demo tenant's own
+    // seeded events, so the absences above are isolation, not an empty or broken route.
+    for (const row of demoEvents) expect(seen).toContain(row.id);
+
+    // …and the same session presented on the lab's registered host is refused before any read.
+    const mismatch = await request('/v1/events', tokens.demoMember, {
+      [TENANT_HOST_HEADER]: HOSTS.lab,
+    });
+    expect(mismatch.status).toBe(403);
+    expect(await code(mismatch)).toBe('TENANT_HOST_MISMATCH');
+  });
 
   it("b5. covers: a demo admin cannot point a community at the lab's asset, and learns nothing by trying (05-09)", async () => {
     // GAP 1 of 05-VERIFICATION.md. `cover_asset_id` is the one Phase 5 write that took a
@@ -1150,6 +1192,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       // endpoint adds a cross-tenant case here. It NAMES communities, so the host check must refuse
       // the session before a single name is read.
       REELS_LANES_PATH,
+      // 06-01: the events list joins the loop — SCHEMA-CONVENTIONS §(j) rule 2.
+      '/v1/events',
     ]) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);

@@ -42,6 +42,21 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
     expect(body.user.email).toBe(MEMBER);
   });
 
+  it('1a. Phase 6: the bootstrap carries tenants.timezone, and follows it when it changes (06-01)', async () => {
+    // Every events string on the web is formatted in THIS zone (UI-D-203), so the value must be the
+    // column itself, read through the same tenant lane — not a constant the API assumes.
+    const first = bootstrapSchema.parse(await (await bootstrap()).json());
+    expect(first.tenant.timezone).toBe('America/Sao_Paulo');
+
+    try {
+      await adminSql`update public.tenants set timezone = 'America/Manaus' where slug = 'tria-demo'`;
+      const second = bootstrapSchema.parse(await (await bootstrap()).json());
+      expect(second.tenant.timezone).toBe('America/Manaus');
+    } finally {
+      await adminSql`update public.tenants set timezone = 'America/Sao_Paulo' where slug = 'tria-demo'`;
+    }
+  });
+
   it('1b. PROF-01 filled `membership.profile` WITHOUT growing it (Pitfall 9)', async () => {
     const res = await bootstrap();
     const body = bootstrapSchema.parse(await res.json());
