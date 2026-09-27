@@ -1,4 +1,5 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
+import { devices, expect, type Locator, type Page, test } from '@playwright/test';
 import eventMessages from '../messages/pt-BR/events.json' with { type: 'json' };
 import {
   closeEventsAdmin,
@@ -9,9 +10,12 @@ import {
   insertEvent,
   moveEventStart,
   readEventInstants,
+  secretsFor,
   tenantIdBySlug,
+  waitForReadyCover,
 } from './events-admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
 const E = eventMessages.events;
@@ -601,5 +605,245 @@ test.describe('events rsvp', () => {
     await expect(pair(page)).toHaveCount(0);
     await expect(page.getByTestId('event-actions-answer')).toHaveText(E.rsvp.answeredNotGoing);
     await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
+  });
+});
+
+/**
+ * EVENT-01, the admin's half from a phone (06-04): create in person with a cover, create online,
+ * edit, a format switch that stores only the visible side, a cancel the member can still see
+ * (D-201), and a reactivation, on `mobile-chromium` (iPhone 14) in a throwaway tenant.
+ *
+ * Every step goes through the real form and the real API; the ONLY direct read is `secretsFor`, the
+ * admin-only `event_secrets` row no browser can observe (that is the point of D-217). The cover is a
+ * real upload through the file chooser, derived by a real worker (`ensureWorker`), and the form is
+ * submitted only once the database says the cover is `ready` (the 05-09 tuple rule the API applies).
+ *
+ * Hydration proof before typing (the `media-fixtures.ts` lesson): a `filechooser` event or a
+ * segmented toggle flipping `aria-pressed` can only happen once React's handlers are attached, so
+ * no keystroke lands on server-rendered HTML. Controls that can sit under Next's dev pill or the
+ * BottomNav at the bottom of a phone are dispatched (`dispatchEvent('click')`, the 06-01 note).
+ */
+test.describe('events admin', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  const SLUG = 'e2e-events-admin';
+  const ZONE = 'America/Sao_Paulo';
+  const PHOTO = `${fileURLToPath(new URL('./fixtures/', import.meta.url))}post-a.jpg`;
+  const MEETING_HOST = 'meet.example.test';
+  const MEETING_URL = `https://${MEETING_HOST}/e2e-sala`;
+  const TITLE = 'Encontro admin e2e';
+  const RENAMED = 'Encontro admin e2e renomeado';
+  const ONLINE_TITLE = 'Live admin e2e';
+
+  let tenant: EventsTenant | null = null;
+  let stopWorker: (() => Promise<void>) | null = null;
+  let inPersonId = '';
+
+  /** `YYYY-MM-DD` of the tenant-local day `days` from now (the `en-CA` trick). */
+  const tenantDate = (days: number) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(Date.now() + days * 86_400_000));
+
+  const submit = (page: Page) => page.locator('[data-event-submit]');
+  const toast = (page: Page, message: string) =>
+    page.getByRole('status').filter({ hasText: message });
+  const segment = (page: Page, label: string) =>
+    page.getByRole('group', { name: E.form.format.label }).getByRole('button', { name: label });
+  const eventIdFrom = (page: Page) => page.url().split('/eventos/')[1]?.split(/[/?#]/)[0] ?? '';
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    tenant = await createEventsTenant(SLUG, SEED_PASSWORD);
+    stopWorker = await ensureWorker();
+  });
+
+  test.afterAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    await stopWorker?.();
+    await deleteEventsTenant(SLUG);
+    await closeEventsAdmin();
+  });
+
+  test('1. from the empty list, the admin creates an in-person event with a cover and an online one', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events admin tenant was not provisioned');
+    test.setTimeout(240_000);
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos`);
+
+    // D-212: the icon-only control below `sm`, named by the catalog string, and the manager empty.
+    const create = page.locator('[data-events-create]');
+    await expect(create).toBeVisible();
+    await expect(create).toHaveAccessibleName(E.actions.create);
+    const box = await create.boundingBox();
+    expect(Math.round(box?.width ?? 0)).toBe(44);
+    expect(Math.round(box?.height ?? 0)).toBe(44);
+    await expect(page.getByTestId('events-empty-upcoming')).toContainText(
+      E.empty.upcoming.bodyManager,
+    );
+    await expect(page.locator('[data-events-empty-create]')).toHaveText(E.actions.create);
+    await create.click();
+    await expect(page).toHaveURL(/\/eventos\/novo$/);
+
+    // E10/empty: submit disabled, the gradient preview, the tenant zone helper.
+    await expect(submit(page)).toBeDisabled();
+    await expect(
+      page.locator('[data-event-cover-preview] [data-testid="event-cover-fallback"]'),
+    ).toBeVisible();
+    await expect(page.locator('[data-event-zone]')).toHaveText(
+      E.form.when.zone.replace('{zone}', 'Horário Padrão de Brasília'),
+    );
+
+    // The cover through the real file chooser (also the hydration proof).
+    const since = new Date(Date.now() - 1_000);
+    const choosing = page.waitForEvent('filechooser');
+    // The sr-only file input carries the same name, so the visible BUTTON is picked by tag.
+    await page.locator('[data-event-form] button', { hasText: E.form.cover.add }).click();
+    await (await choosing).setFiles(PHOTO);
+    await expect(
+      page.locator('[data-event-cover-preview] [data-testid="event-cover-image"]'),
+    ).toBeVisible({ timeout: 60_000 });
+    await waitForReadyCover(tenant.tenantId, since);
+
+    const date = tenantDate(3);
+    await page.locator('#event-title').fill(TITLE);
+    await page.locator('#event-start-date').fill(date);
+    await page.locator('#event-start-time').fill('19:00');
+    // D-213: the untouched end followed the start, +2 h.
+    await expect(page.locator('#event-end-date')).toHaveValue(date);
+    await expect(page.locator('#event-end-time')).toHaveValue('21:00');
+    await page.locator('#event-venue').fill('Auditorio da sede');
+    await page.locator('#event-address').fill('Rua das Flores, 100');
+    await expect(submit(page)).toBeEnabled();
+    await submit(page).click();
+
+    await expect(page).toHaveURL(/\/eventos\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    await expect(toast(page, E.toasts.created)).toBeVisible();
+    inPersonId = eventIdFrom(page);
+    await expect(page.getByTestId('event-hero-title')).toHaveText(TITLE);
+    await expect(page.getByTestId('event-maps-link')).toHaveText(E.location.openMaps);
+    await expect(page.locator('[data-event-manage-edit]')).toHaveText(E.manage.edit);
+
+    // The online one: Online selected first (the hydration proof), then the link.
+    await page.goto(`${tenant.origin}/eventos/novo`);
+    await segment(page, E.form.format.online).click();
+    await expect(segment(page, E.form.format.online)).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#event-title').fill(ONLINE_TITLE);
+    await page.locator('#event-start-date').fill(tenantDate(4));
+    await page.locator('#event-start-time').fill('20:00');
+    await page.locator('#event-url').fill(MEETING_URL);
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/eventos\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    await expect(toast(page, E.toasts.created)).toBeVisible();
+    await expect(page.getByTestId('event-hero-place')).toHaveText(E.place.online);
+    // T-06-20: the link is stored, and no byte of it reaches the page.
+    expect((await secretsFor(eventIdFrom(page))).meetingUrl).toBe(MEETING_URL);
+    expect(await page.content()).not.toContain('meet.example.test');
+  });
+
+  test('2. edit arrives in wall clock; a rename saves, and a format switch stores only the visible side', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant || !inPersonId) throw new Error('test 1 did not create the in-person event');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${inPersonId}`);
+
+    await page.locator('[data-event-manage-edit]').click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}/editar$`));
+    await expect(page.locator('#event-start-time')).toHaveValue('19:00');
+    await expect(page.locator('#event-end-time')).toHaveValue('21:00');
+    await expect(page.locator('#event-title')).toHaveValue(TITLE);
+    await expect(page.getByText(E.form.editNote)).toBeVisible();
+    // Hydration proof, harmless: the hidden side is never submitted.
+    await segment(page, E.form.format.online).click();
+    await segment(page, E.form.format.inPerson).click();
+    await expect(segment(page, E.form.format.inPerson)).toHaveAttribute('aria-pressed', 'true');
+
+    await page.locator('#event-title').fill(RENAMED);
+    await submit(page).click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
+    await expect(toast(page, E.toasts.saved)).toBeVisible();
+    await expect(page.getByTestId('event-hero-title')).toHaveText(RENAMED);
+
+    // Online, a link typed, back to Presencial, save: still in person, and NO link stored.
+    await page.goto(`${tenant.origin}/eventos/${inPersonId}/editar`);
+    await segment(page, E.form.format.online).click();
+    await expect(segment(page, E.form.format.online)).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#event-url').fill(MEETING_URL);
+    await segment(page, E.form.format.inPerson).click();
+    await expect(page.locator('#event-venue')).toHaveValue('Auditorio da sede');
+    await submit(page).click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
+    await expect(page.getByTestId('event-maps-link')).toBeVisible();
+    expect(await secretsFor(inPersonId)).toEqual({ eventFormat: 'in_person', meetingUrl: null });
+  });
+
+  test('3. cancel from the form, the member still sees it cancelled, and Reativar brings it back', async ({
+    page,
+    browser,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant || !inPersonId) throw new Error('test 1 did not create the in-person event');
+    test.setTimeout(180_000);
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${inPersonId}/editar`);
+    await expect(segment(page, E.form.format.inPerson)).toHaveAttribute('aria-pressed', 'true');
+
+    // The bottom row, confirmed first (UI-D-211).
+    await page.locator('[data-event-cancel]').dispatchEvent('click');
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText(E.confirm.cancel.title);
+    await dialog.getByRole('button', { name: E.confirm.cancel.confirm }).click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
+    await expect(toast(page, E.toasts.cancelled)).toBeVisible();
+    const banner = page.getByTestId('event-banner');
+    await expect(banner).toHaveAttribute('data-kind', 'cancelled');
+    await expect(banner.locator('[data-event-reactivate]')).toHaveText(E.reactivate.action);
+
+    // D-201, on the member's own session: still listed, with the pill; the detail disabled.
+    const memberContext = await browser.newContext({
+      ...devices['iPhone 14'],
+      serviceWorkers: 'block',
+    });
+    const member = await memberContext.newPage();
+    try {
+      await login(member, tenant.memberEmail, tenant.password, tenant.origin);
+      await member.goto(`${tenant.origin}/eventos`);
+      const poster = posterFor(member, RENAMED);
+      await expect(poster.getByTestId('event-poster-pill')).toHaveText(E.state.cancelled);
+      // A member has no create control at all.
+      await expect(member.locator('[data-events-create]')).toHaveCount(0);
+      await poster.click();
+      await expect(member.getByTestId('event-banner')).toHaveAttribute('data-kind', 'cancelled');
+      await expect(member.getByRole('group', { name: E.rsvp.label })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+      await expect(member.locator('[data-event-reactivate]')).toHaveCount(0);
+      await expect(member.locator('[data-event-manage]')).toHaveCount(0);
+
+      // Back as the admin: Reativar from the banner, confirmed.
+      await banner.locator('[data-event-reactivate]').dispatchEvent('click');
+      await expect(dialog).toContainText(E.confirm.reactivate.title);
+      await dialog.getByRole('button', { name: E.confirm.reactivate.confirm }).click();
+      await expect(toast(page, E.toasts.reactivated)).toBeVisible();
+      await expect(page.getByTestId('event-banner')).toHaveCount(0);
+
+      // A member typing the form's URL gets the one not-found screen.
+      await member.goto(`${tenant.origin}/eventos/novo`);
+      await expect(member.getByText(E.notFound.title)).toBeVisible();
+      await expect(member.locator('[data-event-form]')).toHaveCount(0);
+      await member.goto(`${tenant.origin}/eventos/${inPersonId}/editar`);
+      await expect(member.getByText(E.notFound.title)).toBeVisible();
+    } finally {
+      await memberContext.close();
+    }
   });
 });

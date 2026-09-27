@@ -101,12 +101,27 @@ export async function createEventsTenant(slug: string, password: string): Promis
   return { slug, origin: throwawayOrigin(host), tenantId, adminEmail, memberEmail, password };
 }
 
-/** Removes the tenant (its events and secrets cascade), its memberships and its GoTrue users. */
+/**
+ * Removes the tenant, its memberships and its GoTrue users. 06-04: the admin spec uploads a real
+ * cover, so the tenant also owns `media_assets` rows, whose tenant key does NOT cascade (and which
+ * `events.cover_asset_id` references): the events go first, then the assets, then the tenant. The
+ * users are found by membership AND by the fixture's `@<slug>.local` domain, so a teardown that was
+ * interrupted after the memberships were gone still removes them. The uploaded bytes stay in the
+ * local Storage bucket (a few hundred bytes per run; no row points at them).
+ */
 export async function deleteEventsTenant(slug: string): Promise<void> {
   const users = await sql()<{ user_id: string }[]>`
     select m.user_id from public.memberships m
       join public.tenants t on t.id = m.tenant_id
-     where t.slug = ${slug}`;
+     where t.slug = ${slug}
+    union
+    select u.id as user_id from auth.users u where u.email like ${`%@${slug}.local`}`;
+  await sql()`
+    delete from public.events
+     where tenant_id = (select id from public.tenants where slug = ${slug})`;
+  await sql()`
+    delete from public.media_assets
+     where tenant_id = (select id from public.tenants where slug = ${slug})`;
   await deleteTenantBySlug(slug);
   for (const row of users) {
     await fetch(`${envValue('SUPABASE_URL')}/auth/v1/admin/users/${row.user_id}`, {
@@ -212,4 +227,47 @@ export async function moveEventStart(eventId: string, startsInMinutes: number): 
     update public.events
        set starts_at = now() + make_interval(mins => ${startsInMinutes}), updated_at = now()
      where id = ${eventId}::uuid`;
+}
+
+/**
+ * 06-04: an event's admin-only half, read through the superuser connection (test-only). This is how
+ * the `events admin` spec proves a format switch stored ONLY the visible side: the meeting URL lives
+ * in `event_secrets`, which no member lane and no member payload can read, so the browser cannot
+ * observe it and the spec must look at the table itself.
+ */
+export async function secretsFor(
+  eventId: string,
+): Promise<{ eventFormat: string; meetingUrl: string | null }> {
+  const rows = await sql()<{ event_format: string; meeting_url: string | null }[]>`
+    select event_format, meeting_url from public.event_secrets where event_id = ${eventId}::uuid`;
+  const row = rows[0];
+  if (!row) throw new Error(`no event_secrets row for ${eventId}`);
+  return { eventFormat: row.event_format, meetingUrl: row.meeting_url };
+}
+
+/**
+ * 06-04: waits until the worker has derived a `cover` image uploaded to `tenantId` after `since`
+ * (the `waitForReadyPostImages` shape). A cover is only accepted by the API once it is `ready`
+ * (the 05-09 tuple rule), so the form must not be submitted before this settles.
+ */
+export async function waitForReadyCover(
+  tenantId: string,
+  since: Date,
+  timeoutMs = 120_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let seen = '(no rows at all)';
+  while (Date.now() < deadline) {
+    const rows = await sql()<{ id: string; status: string }[]>`
+      select id, status from public.media_assets
+       where tenant_id = ${tenantId}::uuid
+         and kind = 'image' and purpose = 'cover'
+         and created_at >= ${since.toISOString()}::timestamptz
+       order by created_at desc`;
+    seen = rows.map((row) => row.status).join(', ') || '(no rows at all)';
+    const ready = rows.find((row) => row.status === 'ready');
+    if (ready) return ready.id;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`no ready cover for ${tenantId} within ${timeoutMs} ms; statuses: ${seen}`);
 }
