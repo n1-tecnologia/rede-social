@@ -847,6 +847,15 @@ describe('06-03 — events detail strings and placeholders', () => {
     ['events.checkin.banner', 'Check-in confirmado'],
     ['events.notFound.title', 'Evento não encontrado'],
     ['events.notFound.cta', 'Ver eventos'],
+    ['events.rsvp.label', 'Você vai a este evento?'],
+    ['events.rsvp.going', 'Vou'],
+    ['events.rsvp.notGoing', 'Não vou'],
+    ['events.rsvp.windowHint', 'O check-in abre 1 hora antes do início.'],
+    ['events.rsvp.answeredGoing', 'Você confirmou presença.'],
+    ['events.rsvp.answeredNotGoing', 'Você respondeu que não vai.'],
+    ['events.rsvp.errors.failed', 'Não foi possível salvar sua resposta. Tente novamente.'],
+    ['events.rsvp.errors.closed', 'As confirmações deste evento encerraram quando ele começou.'],
+    ['events.errors.cancelled', 'Este evento foi cancelado.'],
   ])('%s is the UI-SPEC string', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });

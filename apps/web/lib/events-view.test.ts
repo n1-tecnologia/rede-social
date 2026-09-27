@@ -4,6 +4,7 @@ import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
+  eventActionState,
   eventCountLine,
   eventDetailView,
   eventPhase,
@@ -362,5 +363,49 @@ describe('06-03 — mapsHref (D-203)', () => {
       'Audit%C3%B3rio%20da%20sede%2C%20Rua%20S%C3%A3o%20Jo%C3%A3o%2C%20100%0ACentro',
     );
     expect(decodeURIComponent(query)).toBe('Auditório da sede, Rua São João, 100\nCentro');
+  });
+});
+
+describe("06-03 — eventActionState (UI-D-207, the island's props)", () => {
+  it('20. the recorded answer, the check-in flag, the server phase and the three boundaries', () => {
+    const state = (nowIso: string, overrides: Partial<EventDetail> = {}) => {
+      const d = detail(overrides);
+      return eventActionState(d, eventDetailView(d, { tz: SP, nowMs: at(nowIso), t }));
+    };
+    expect(state('2026-10-01T12:00:00Z', { viewerStatus: 'going' })).toEqual({
+      eventId: '11111111-1111-4111-8111-111111111111',
+      phase: 'P0',
+      format: 'in_person',
+      cancelled: false,
+      answer: 'going',
+      checkedIn: false,
+      checkinOpensAt: '2026-10-12T21:00:00.000Z',
+      startsAt: '2026-10-12T22:00:00.000000Z',
+      endsAt: '2026-10-13T00:00:00.000000Z',
+    });
+    expect(state('2026-10-12T21:30:00Z', { viewerStatus: 'not_going' })).toMatchObject({
+      phase: 'P1',
+      answer: 'not_going',
+    });
+    expect(state('2026-10-12T23:00:00Z')).toMatchObject({ phase: 'P2', answer: null });
+    // A check-in is NOT an answer: the zone shows the banner instead of any RSVP row.
+    expect(
+      state('2026-10-12T23:00:00Z', {
+        viewerStatus: 'checked_in',
+        viewerCheckedInAt: '2026-10-12T21:40:00.000000Z',
+      }),
+    ).toMatchObject({ phase: 'P2', answer: null, checkedIn: true });
+    expect(
+      state('2026-10-20T12:00:00Z', {
+        viewerStatus: 'walk_in',
+        viewerCheckedInAt: '2026-10-12T22:10:00.000000Z',
+      }),
+    ).toMatchObject({ phase: 'P3', answer: null, checkedIn: true });
+    expect(
+      state('2026-10-01T12:00:00Z', { status: 'cancelled', viewerStatus: 'going' }),
+    ).toMatchObject({ cancelled: true, answer: 'going' });
+    expect(state('2026-10-01T12:00:00Z', { format: 'online', venueName: null })).toMatchObject({
+      format: 'online',
+    });
   });
 });

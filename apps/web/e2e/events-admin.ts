@@ -200,3 +200,16 @@ export async function deleteEventsByTitlePrefix(tenantId: string, prefix: string
     delete from public.events
      where tenant_id = ${tenantId}::uuid and title like ${`${prefix}%`}`;
 }
+
+/**
+ * Moves an event's start to `startsInMinutes` from the DATABASE's `now()` (negative = already
+ * started), leaving its end alone. The guard trigger polices ATTENDANCE writes only, so this is the
+ * time-travel step (planning decision 4): an open page still draws the old phase, and the next RSVP
+ * tap meets the database's refusal (`rsvp_closed`, D-204).
+ */
+export async function moveEventStart(eventId: string, startsInMinutes: number): Promise<void> {
+  await sql()`
+    update public.events
+       set starts_at = now() + make_interval(mins => ${startsInMinutes}), updated_at = now()
+     where id = ${eventId}::uuid`;
+}

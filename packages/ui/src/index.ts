@@ -57,6 +57,11 @@ export { Input, type InputProps } from './primitives/Input';
 export { PageHeader, type PageHeaderProps } from './primitives/PageHeader';
 export { SearchBar, type SearchBarProps } from './primitives/SearchBar';
 export { SectionTitle, type SectionTitleProps } from './primitives/SectionTitle';
+export {
+  SegmentedControl,
+  type SegmentedControlProps,
+  type SegmentedOption,
+} from './primitives/SegmentedControl';
 export { Skeleton, type SkeletonProps } from './primitives/Skeleton';
 export { StatusPill, type StatusPillProps, type StatusTone } from './primitives/StatusPill';
 export { Switch, type SwitchProps } from './primitives/Switch';

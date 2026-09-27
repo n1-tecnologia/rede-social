@@ -2,6 +2,7 @@ import {
   EVENT_CHECKIN_OPENS_BEFORE_MINUTES,
   type EventDetail,
   type EventSummary,
+  type RsvpAnswer,
 } from '@tria/module-events/contracts';
 import type { getTranslations } from 'next-intl/server';
 
@@ -480,5 +481,51 @@ export function eventDetailView(
     ).toISOString(),
     startsAt: event.startsAt,
     endsAt: event.endsAt,
+  };
+}
+
+/**
+ * What the action-zone island (`EventActions`, UI-D-207) needs to decide its RSVP rows, as plain
+ * serialisable values: the phase the SERVER computed from the request instant, the flags, the
+ * viewer's recorded answer, and the three ISO boundaries the island's one scheduled refresh targets
+ * (UI-D-203). No instant is formatted and no clock is read on the client to draw it.
+ *
+ * `answer` is the recorded RSVP only (`going` / `not_going`); a check-in (`checked_in`, `walk_in`)
+ * is `checkedIn` instead, and then the zone shows no RSVP row at all (the banner says it).
+ */
+export type EventActionState = {
+  eventId: string;
+  phase: EventPhase;
+  format: 'in_person' | 'online';
+  cancelled: boolean;
+  answer: RsvpAnswer | null;
+  checkedIn: boolean;
+  checkinOpensAt: string;
+  startsAt: string;
+  endsAt: string;
+};
+
+/** `EventDetail` + its `EventDetailView` → the island's props (the view already holds the phase). */
+export function eventActionState(
+  event: Pick<EventDetail, 'id' | 'viewerStatus' | 'viewerCheckedInAt'>,
+  view: Pick<
+    EventDetailView,
+    'phase' | 'format' | 'cancelled' | 'checkinOpensAt' | 'startsAt' | 'endsAt'
+  >,
+): EventActionState {
+  const answer =
+    event.viewerStatus === 'going' || event.viewerStatus === 'not_going'
+      ? event.viewerStatus
+      : null;
+  return {
+    eventId: event.id,
+    phase: view.phase,
+    format: view.format,
+    cancelled: view.cancelled,
+    answer,
+    checkedIn: event.viewerCheckedInAt !== null,
+    checkinOpensAt: view.checkinOpensAt,
+    startsAt: view.startsAt,
+    endsAt: view.endsAt,
   };
 }

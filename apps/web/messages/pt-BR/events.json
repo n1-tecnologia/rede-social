@@ -50,7 +50,8 @@
       "title": "Algo deu errado",
       "generic": "Não foi possível carregar os eventos. Tente novamente.",
       "retry": "Tentar novamente",
-      "loadMore": "Não foi possível carregar mais eventos."
+      "loadMore": "Não foi possível carregar mais eventos.",
+      "cancelled": "Este evento foi cancelado."
     },
     "count": {
       "confirmed": "{count, plural, =0 {Ninguém confirmou ainda} one {# confirmado} other {# confirmados}}",
@@ -94,6 +95,18 @@
       "title": "Evento não encontrado",
       "body": "Este link não existe mais ou não é de {tenant}.",
       "cta": "Ver eventos"
+    },
+    "rsvp": {
+      "label": "Você vai a este evento?",
+      "going": "Vou",
+      "notGoing": "Não vou",
+      "windowHint": "O check-in abre 1 hora antes do início.",
+      "answeredGoing": "Você confirmou presença.",
+      "answeredNotGoing": "Você respondeu que não vai.",
+      "errors": {
+        "failed": "Não foi possível salvar sua resposta. Tente novamente.",
+        "closed": "As confirmações deste evento encerraram quando ele começou."
+      }
     }
   }
 }

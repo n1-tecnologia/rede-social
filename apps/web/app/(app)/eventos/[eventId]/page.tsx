@@ -5,7 +5,8 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadEvent } from '@/lib/events';
-import { type EventDetailView, eventDetailView } from '@/lib/events-view';
+import { type EventDetailView, eventActionState, eventDetailView } from '@/lib/events-view';
+import { EventActions } from './EventActions';
 import { EventDescription } from './EventDescription';
 import { EventRefresh } from './EventRefresh';
 
@@ -15,8 +16,9 @@ import { EventRefresh } from './EventRefresh';
  * The prototype's page, ported: the sticky back header with a trailing state pill ("Você vai" brand,
  * "Presente" success, "Cancelado" danger), then ONE hero `Card`: the 16/10 cover with its overlay,
  * and a body in UI-D-204 order — banner (cancelled or checked in), description, info grid, location
- * (in person), then the action zone. Dropped [proto] extras: spots, payment and certificate banners,
- * the embedded map (D-203), `MyEventDetails`, the photos rail.
+ * (in person), then the action zone (`EventActions`, the RSVP pair of sketch 006). Dropped [proto]
+ * extras: spots, payment and certificate banners, the embedded map (D-203), `MyEventDetails`, the
+ * photos rail.
  *
  * **Every string is built on the server** by `eventDetailView` in the TENANT's timezone from ONE
  * request instant (UI-D-203): no client render reads the clock, and a device in Manaus reads the
@@ -109,7 +111,8 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
               ) : null}
               <EventInfoGrid layout="grid" cells={view.info} ariaLiveIndex={view.countIndex} />
               {view.location ? <EventLocation location={view.location} /> : null}
-              {/* The action zone (UI-D-207): the RSVP pair lands here with its D-33-gated island. */}
+              {/* The action zone (UI-D-207): the RSVP rows; 06-05 / 06-06 add the check-in CTAs. */}
+              <EventActions {...eventActionState(result.event, view)} />
             </div>
           </Card>
         </div>

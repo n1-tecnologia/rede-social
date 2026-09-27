@@ -5,6 +5,9 @@ import {
   type EventPeriod,
   eventDetailSchema,
   eventPageSchema,
+  type RsvpAnswer,
+  type RsvpResult,
+  rsvpResultSchema,
 } from '@tria/module-events/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -107,4 +110,22 @@ export async function loadEvent(eventId: string): Promise<EventResult> {
 
   if (path) redirect(path);
   return result;
+}
+
+/**
+ * `PUT /v1/events/{eventId}/rsvp` (EVENT-03): the member's `Vou` / `Não vou`. The API writes ONE row
+ * per member per event and the database's guard trigger is the only authority on whether the answer
+ * is still allowed (D-204), so this call never pre-checks the clock. A refusal is thrown as an
+ * `ApiClientError` carrying the envelope's `details` (`{ event: 'rsvp_closed' | 'cancelled' |
+ * 'attendance_locked' }` on a 409, nothing on the bare 404), which `rsvpEventAction` maps to a
+ * catalog key.
+ */
+export async function putRsvp(eventId: string, answer: RsvpAnswer): Promise<RsvpResult> {
+  const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/rsvp`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ answer }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return rsvpResultSchema.parse(await res.json());
 }

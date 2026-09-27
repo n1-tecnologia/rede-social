@@ -1,14 +1,21 @@
 'use server';
 
-import { EVENT_PERIODS, type EventPeriod, eventQuerySchema } from '@tria/module-events/contracts';
+import {
+  EVENT_PERIODS,
+  type EventPeriod,
+  eventQuerySchema,
+  type RsvpAnswer,
+  rsvpSchema,
+} from '@tria/module-events/contracts';
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
-import { getEvents } from '@/lib/events';
+import { getEvents, putRsvp } from '@/lib/events';
 import { type EventPosterView, eventPosterView } from '@/lib/events-view';
 
 /**
- * The `/eventos` list's two actions (EVENT-02), in the `comunidades/actions.ts` conventions: the SAME
+ * The `/eventos` list's two actions (EVENT-02) and the detail's RSVP action (EVENT-03, below), in the `comunidades/actions.ts` conventions: the SAME
  * Zod the API validates with runs BEFORE the request (a server action is a public endpoint), a
  * 401/403 becomes a navigation OUTSIDE the try/catch (Next 16: `redirect()` throws), and a refusal is
  * answered with a catalog KEY rather than pt-BR copy.
@@ -76,4 +83,66 @@ export async function loadMoreEventsAction(
 export async function refreshEventsAction(period: EventPeriod): Promise<EventsPageResult> {
   if (!isPeriod(period)) return { ok: false, code: 'generic' };
   return eventsPage(period);
+}
+
+/* ── EVENT-03: the member's answer (06-03) ─────────────────────────────────────────────────────── */
+
+/**
+ * What an RSVP write can answer. Every refusal is a catalog-mapped CODE, never pt-BR copy: the three
+ * the database decides (D-204, via the guard trigger and the API's `details.event`) and `failed` for
+ * everything else, a bare 404 included (the event vanished or was never the caller's, D-23).
+ */
+export type RsvpActionResult =
+  | { ok: true; status: RsvpAnswer }
+  | { ok: false; error: 'rsvp_closed' | 'cancelled' | 'attendance_locked' | 'failed' };
+
+const RSVP_REFUSALS = new Set(['rsvp_closed', 'cancelled', 'attendance_locked']);
+
+/**
+ * `PUT /v1/events/{id}/rsvp` for the detail page's `SegmentedControl` (D-205, UI-D-206), in the
+ * `comunidades/actions.ts` conventions:
+ *
+ *  1. **The SAME Zod the API validates with runs first** (`rsvpSchema`): a server action is a public
+ *     endpoint, so a crafted answer (`checked_in`, say) is refused before any request is built. The
+ *     member lane could not write it anyway (the self-only RLS policies, T-06-11).
+ *  2. **The clock is never consulted here.** Whether the answer is still allowed is the database's
+ *     call for every writer (the guard trigger, D-204); a late tap comes back as `rsvp_closed`.
+ *  3. **`redirect()` sits OUTSIDE the try/catch** (Next 16: it throws), for the bootstrap refusals.
+ *
+ * On success the list is revalidated so a poster's count line is fresh on the way back; the island
+ * refreshes the detail itself.
+ */
+export async function rsvpEventAction(
+  eventId: string,
+  answer: RsvpAnswer,
+): Promise<RsvpActionResult> {
+  const body = rsvpSchema.safeParse({ answer });
+  if (!body.success || typeof eventId !== 'string' || eventId.length === 0) {
+    return { ok: false, error: 'failed' };
+  }
+
+  let refusal: string | null = null;
+  let result: RsvpActionResult = { ok: false, error: 'failed' };
+  try {
+    const written = await putRsvp(eventId, body.data.answer);
+    result = { ok: true, status: body.data.answer };
+    // The API answers the stored status; a going/not_going write can only store the answer sent.
+    if (written.status !== body.data.answer) result = { ok: false, error: 'failed' };
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      const code = (error.details as { event?: unknown } | undefined)?.event;
+      if (!refusal && typeof code === 'string' && RSVP_REFUSALS.has(code)) {
+        result = { ok: false, error: code as 'rsvp_closed' | 'cancelled' | 'attendance_locked' };
+      }
+    }
+    // Shape only: never the event's title (member-facing content).
+    if (!refusal && !result.ok && result.error === 'failed') {
+      console.error('events.rsvp_failed', { error: String(error) });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  if (result.ok) revalidatePath('/eventos');
+  return result;
 }

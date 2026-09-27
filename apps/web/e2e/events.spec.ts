@@ -2,8 +2,12 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import eventMessages from '../messages/pt-BR/events.json' with { type: 'json' };
 import {
   closeEventsAdmin,
+  createEventsTenant,
   deleteEventsByTitlePrefix,
+  deleteEventsTenant,
+  type EventsTenant,
   insertEvent,
+  moveEventStart,
   readEventInstants,
   tenantIdBySlug,
 } from './events-admin';
@@ -495,5 +499,107 @@ test.describe('events detalhe', () => {
       );
       await expect(time).not.toContainText(clock(startsAt, 'America/Manaus'));
     });
+  });
+});
+
+/** The catalog's `=0` branch of a `{count, plural, …}` string ("Ninguém confirmou ainda"). */
+const zero = (message: string) => /=0 \{([^}]*)\}/.exec(message)?.[1] ?? '';
+/** The catalog's `one` branch, with `#` = 1 ("1 confirmado"). */
+const one = (message: string) => (/one \{([^}]*)\}/.exec(message)?.[1] ?? '').replace('#', '1');
+
+/**
+ * EVENT-03 (06-03 Task 3, sketch 006 surface 2): the member answers `Vou` / `Não vou` on the detail
+ * page and watches the count move, then meets the database's refusal once the event has started.
+ *
+ * Runs in a THROWAWAY events tenant (`createEventsTenant`) so the seeded counts other describes read
+ * never move, with an event written relative to the database's `now()` (Pitfall 7: `page.clock` moves
+ * only the browser). Phone only: the pair is the phone's primary action, and one tenant per run keeps
+ * the serial flow simple. Taps are dispatched AT the element (the dev overlay pill can sit over a
+ * phone's bottom edge, the 06-01 workaround).
+ */
+test.describe('events rsvp', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  const SLUG = 'e2e-events-rsvp';
+  let tenant: EventsTenant | null = null;
+  let eventId = '';
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    tenant = await createEventsTenant(SLUG, SEED_PASSWORD);
+    eventId = await insertEvent(tenant.tenantId, {
+      title: 'Encontro RSVP e2e',
+      startsInMinutes: 3 * 24 * 60,
+      endsInMinutes: 3 * 24 * 60 + 120,
+    });
+  });
+
+  test.afterAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    await deleteEventsTenant(SLUG);
+    await closeEventsAdmin();
+  });
+
+  const pair = (page: Page) => page.getByRole('group', { name: E.rsvp.label });
+  const vou = (page: Page) => pair(page).getByRole('button', { name: E.rsvp.going, exact: true });
+  const naoVou = (page: Page) => pair(page).getByRole('button', { name: E.rsvp.notGoing });
+  const countCell = (page: Page) => page.getByTestId('event-info-value').nth(3);
+
+  test('Vou moves the count to "1 confirmado", Não vou moves it back, and a reload keeps the answer', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events rsvp tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${eventId}`);
+
+    // Unanswered: both segments idle, the count reads its zero form, the P0 in-person hint shows.
+    await expect(pair(page)).toBeVisible();
+    await expect(vou(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(naoVou(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
+    await expect(page.getByText(E.rsvp.windowHint)).toBeVisible();
+    // The pair spends no brand fill (the zone's one fill is the check-in CTA, 06-05).
+    await expect(pair(page).locator('.bg-brand')).toHaveCount(0);
+
+    await vou(page).dispatchEvent('click');
+    await expect(vou(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(countCell(page)).toHaveText(one(E.count.confirmed));
+    await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.going);
+    await expect(pair(page)).not.toHaveAttribute('aria-busy', 'true');
+
+    await naoVou(page).dispatchEvent('click');
+    await expect(naoVou(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(vou(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
+    await expect(page.getByTestId('event-header-pill')).toHaveCount(0);
+    // No success toast: the pressed state and the count are the feedback.
+    await expect(page.getByText(E.rsvp.errors.failed)).toHaveCount(0);
+
+    await page.reload();
+    await expect(naoVou(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(vou(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
+  });
+
+  test('a tap after the start is refused by the database: the "encerraram" toast, then the read-only line', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events rsvp tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${eventId}`);
+    await expect(naoVou(page)).toHaveAttribute('aria-pressed', 'true');
+
+    // The page still draws P0; the database now says the event started five minutes ago.
+    await moveEventStart(eventId, -5);
+    await vou(page).dispatchEvent('click');
+
+    await expect(page.getByText(E.rsvp.errors.closed)).toBeVisible();
+    // The refresh swaps in the P2 zone: no pair, the stored answer as a read-only line (Não vou
+    // survived: the late Vou was never written).
+    await expect(pair(page)).toHaveCount(0);
+    await expect(page.getByTestId('event-actions-answer')).toHaveText(E.rsvp.answeredNotGoing);
+    await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
   });
 });
