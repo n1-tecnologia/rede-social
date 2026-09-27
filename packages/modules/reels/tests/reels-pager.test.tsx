@@ -123,7 +123,8 @@ const track = () => screen.getByTestId('reels-track');
 
 /** A drag on `target` from (200, 400) by (dx, dy), released where it ended. */
 function drag(target: Element, dx: number, dy: number) {
-  const from = { clientX: 200, clientY: 400, pointerId: 1, pointerType: 'touch' };
+  // isPrimary: a real browser's lone pointer is primary; happy-dom's PointerEvent defaults to false.
+  const from = { clientX: 200, clientY: 400, pointerId: 1, isPrimary: true, pointerType: 'touch' };
   fireEvent.pointerDown(target, from);
   fireEvent.pointerMove(target, { ...from, clientX: 200 + dx, clientY: 400 + dy });
   fireEvent.pointerUp(target, { ...from, clientX: 200 + dx, clientY: 400 + dy });
@@ -131,7 +132,7 @@ function drag(target: Element, dx: number, dy: number) {
 
 /** A still tap on `target`. */
 function tap(target: Element) {
-  const at = { clientX: 150, clientY: 300, pointerId: 1, pointerType: 'touch' };
+  const at = { clientX: 150, clientY: 300, pointerId: 1, isPrimary: true, pointerType: 'touch' };
   fireEvent.pointerDown(target, at);
   fireEvent.pointerUp(target, at);
 }
@@ -233,7 +234,7 @@ describe('ReelsPager — the ends and the cancel', () => {
 
   it('pointerdown, a 100 px move up, then pointercancel calls nothing and resets the drag', () => {
     render(<ReelsPager {...baseProps({ index: 1 })} />);
-    const at = { clientX: 200, clientY: 400, pointerId: 1, pointerType: 'touch' };
+    const at = { clientX: 200, clientY: 400, pointerId: 1, isPrimary: true, pointerType: 'touch' };
     fireEvent.pointerDown(stack(), at);
     fireEvent.pointerMove(stack(), { ...at, clientY: 300 });
     expect(track().style.transform).toContain('-35px');
@@ -549,7 +550,14 @@ describe('ReelsPager — never advances on its own (D-125)', () => {
 });
 
 describe('ReelsPager — a mouse drag released over the overlay (WR-01, D-117, D-132)', () => {
-  const mouse = { clientX: 200, clientY: 400, pointerId: 1, pointerType: 'mouse', button: 0 };
+  const mouse = {
+    clientX: 200,
+    clientY: 400,
+    pointerId: 1,
+    isPrimary: true,
+    pointerType: 'mouse',
+    button: 0,
+  };
 
   it('a 100 px upward mouse drag released over the rail pages once and ends the drag', () => {
     render(<ReelsPager {...baseProps()} />);
@@ -585,5 +593,97 @@ describe('ReelsPager — the live region reads a display name literally (WR-03, 
   it("`$'` and `$$` in an author name are announced as written, never expanded", () => {
     render(<ReelsPager {...baseProps({ items: [{ id: 'p0', authorName: "Ana $' $$ fim" }] })} />);
     expect(screen.getByTestId('reels-position').textContent).toBe("position 1 of Ana $' $$ fim");
+  });
+});
+
+describe('ReelsPager — only the pointer that started a gesture decides it (WR-05, D-117)', () => {
+  const finger1 = { pointerId: 1, isPrimary: true, pointerType: 'touch' };
+  const finger2 = { pointerId: 2, isPrimary: false, pointerType: 'touch' };
+
+  it('WR-05: a second finger tapping the rail while the first rests on the video moves neither the lane nor the video', () => {
+    render(<ReelsPager {...baseProps()} />);
+    fireEvent.pointerDown(screen.getByTestId('media-p0'), {
+      ...finger1,
+      clientX: 200,
+      clientY: 400,
+    });
+    fireEvent.pointerMove(stack(), { ...finger1, clientX: 200, clientY: 300 });
+    expect(track().style.transform).toContain('-35px');
+
+    // Finger 2 taps the rail at (+160, -150) from finger 1's origin.
+    fireEvent.pointerDown(screen.getByTestId('overlay-p0'), {
+      ...finger2,
+      clientX: 360,
+      clientY: 250,
+    });
+    fireEvent.pointerUp(screen.getByTestId('overlay-p0'), {
+      ...finger2,
+      clientX: 360,
+      clientY: 250,
+    });
+    expect(events).toEqual([]);
+    expect(track().style.transform).toContain('-35px');
+
+    // Finger 1's own release pages exactly once.
+    fireEvent.pointerUp(stack(), { ...finger1, clientX: 200, clientY: 300 });
+    expect(events).toEqual([
+      ['activate', 1],
+      ['index', 1],
+    ]);
+    expect(track().style.transform).not.toContain('-35px');
+  });
+
+  it("WR-05: a second pointer's cancel on the rail leaves the first pointer's drag running", () => {
+    render(<ReelsPager {...baseProps()} />);
+    fireEvent.pointerDown(screen.getByTestId('media-p0'), {
+      ...finger1,
+      clientX: 200,
+      clientY: 400,
+    });
+    fireEvent.pointerMove(stack(), { ...finger1, clientX: 200, clientY: 300 });
+    expect(track().style.transform).toContain('-35px');
+
+    fireEvent.pointerDown(screen.getByTestId('overlay-p0'), {
+      ...finger2,
+      clientX: 360,
+      clientY: 250,
+    });
+    fireEvent.pointerCancel(screen.getByTestId('overlay-p0'), {
+      ...finger2,
+      clientX: 360,
+      clientY: 250,
+    });
+    expect(track().style.transform).toContain('-35px');
+    expect(events).toEqual([]);
+
+    fireEvent.pointerUp(stack(), { ...finger1, clientX: 200, clientY: 300 });
+    expect(events).toEqual([
+      ['activate', 1],
+      ['index', 1],
+    ]);
+  });
+
+  it("WR-05: a non-primary pointerdown on the video never takes over the first pointer's gesture", () => {
+    render(<ReelsPager {...baseProps()} />);
+    fireEvent.pointerDown(screen.getByTestId('media-p0'), {
+      ...finger1,
+      clientX: 200,
+      clientY: 400,
+    });
+    // Finger 2 lands on the video too, and is never lifted.
+    fireEvent.pointerDown(screen.getByTestId('media-p0'), {
+      ...finger2,
+      clientX: 200,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(stack(), { ...finger1, clientX: 200, clientY: 300 });
+    expect(track().style.transform).toContain('-35px');
+    expect(track().style.transform).not.toContain('+ 70px');
+
+    fireEvent.pointerUp(stack(), { ...finger1, clientX: 200, clientY: 300 });
+    expect(events).toEqual([
+      ['activate', 1],
+      ['index', 1],
+    ]);
   });
 });

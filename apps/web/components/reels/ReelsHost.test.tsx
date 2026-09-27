@@ -246,10 +246,12 @@ function minted(ids: string[]) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 const noLike = vi.fn(async () => ({ ok: false }) as const);
@@ -1230,5 +1232,87 @@ describe('ReelsHost — per-post interaction state across remounts (CR-01)', () 
     expect(countOn(0, 'like')).toBe('');
     expect(countOn(0, 'comment')).toBe('');
     expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it('CR-01 (h): a like confirmed before a refused unlike is what a remounted page shows (WR-04)', async () => {
+    const first = deferred<{ ok: true; liked: boolean; likeCount: number }>();
+    const second = deferred<{ ok: false }>();
+    const like = vi.fn(() => first.promise);
+    const unlike = vi.fn(() => second.promise);
+    renderHost({ onLike: like, onUnlike: unlike });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.unlike') }));
+    await flush();
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(unlike).toHaveBeenCalledTimes(1);
+
+    // The like is confirmed while the unlike is still in flight: latest-wins keeps the heart off.
+    await act(async () => {
+      first.resolve({ ok: true, liked: true, likeCount: 1 });
+    });
+    await flush();
+    expect(heartOn(0)?.getAttribute('aria-pressed')).toBe('false');
+
+    // The unlike is refused: the engine reverts to the confirmed like with one toast.
+    await act(async () => {
+      second.resolve({ ok: false });
+    });
+    await flush();
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(toast.show).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: f('errors.generic') });
+
+    // A remounted page starts from the confirmed like, not from the stale server read.
+    await press('ArrowDown');
+    await press('ArrowDown');
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(unlike).toHaveBeenCalledTimes(1);
+  });
+
+  it('CR-01 (i): a rejected latest request still leaves the confirmed like for a remounted page (WR-04)', async () => {
+    const first = deferred<{ ok: true; liked: boolean; likeCount: number }>();
+    const second = deferred<{ ok: true; liked: boolean; likeCount: number }>();
+    const like = vi.fn(() => first.promise);
+    const unlike = vi.fn(() => second.promise);
+    renderHost({ onLike: like, onUnlike: unlike });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.unlike') }));
+    await flush();
+
+    await act(async () => {
+      first.resolve({ ok: true, liked: true, likeCount: 1 });
+    });
+    await flush();
+    expect(heartOn(0)?.getAttribute('aria-pressed')).toBe('false');
+
+    // The unlike's request itself fails (a network error, a thrown server action).
+    await act(async () => {
+      second.reject(new Error('network'));
+    });
+    await flush();
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(toast.show).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: f('errors.generic') });
+
+    await press('ArrowDown');
+    await press('ArrowDown');
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(unlike).toHaveBeenCalledTimes(1);
   });
 });
