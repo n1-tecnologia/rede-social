@@ -320,6 +320,60 @@ export const checkinResultSchema = z
 export type CheckinResult = z.infer<typeof checkinResultSchema>;
 
 /**
+ * The outcomes of `POST /v1/events/{eventId}/enter` (06-06, EVENT-04 online, D-207, D-210, D-218) that
+ * answer 200. `not_found` (unknown, another tenant's, removed or IN PERSON) is a bare 404 instead.
+ *  - `forward`: before the window, after a `Vou`: the member is let through, and NOTHING is recorded;
+ *  - `recorded`: inside the window, the online check-in was recorded (`checked_in` or `walk_in`);
+ *  - `already`: inside the window, the member was present already: let through again (rejoin);
+ *  - `confirm_first`: before the window without a `Vou`: no URL (D-207);
+ *  - `ended`: from `ends_at` on; `cancelled`: a cancelled event. Neither carries a URL.
+ */
+export const ENTER_OUTCOMES = [
+  'forward',
+  'recorded',
+  'already',
+  'confirm_first',
+  'ended',
+  'cancelled',
+] as const;
+export type EnterOutcome = (typeof ENTER_OUTCOMES)[number];
+
+/** The three outcomes that let the member through, and the ONLY ones that carry the meeting URL. */
+export const ENTER_PASSING_OUTCOMES: ReadonlySet<EnterOutcome> = new Set([
+  'forward',
+  'recorded',
+  'already',
+]);
+
+/**
+ * The answer of `POST /v1/events/{eventId}/enter`. **An API-to-BFF contract that never reaches a
+ * member page** (D-207, T-06-35): the web's `/eventos/{id}/entrar` route handler reads it on the server
+ * and turns a passing outcome into a 303 whose `Location` is `meetingUrl`, and that header is the only
+ * place the URL ever reaches the member's browser. No page, payload, catalog string, log line, event
+ * payload or calendar file carries it.
+ *
+ * `.strict()`, and the refinement pins the gate's shape both ways: the URL is present EXACTLY for
+ * `forward`, `recorded` and `already`, and null for every refusal. `https:` only, the same rule as the
+ * create schema and the database CHECK (the route handler re-checks it before redirecting).
+ */
+export const enterResultSchema = z
+  .object({
+    outcome: z.enum(ENTER_OUTCOMES),
+    meetingUrl: z.url({ protocol: /^https$/ }).nullable(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const passing = ENTER_PASSING_OUTCOMES.has(value.outcome);
+    if (passing && value.meetingUrl === null) {
+      ctx.addIssue({ code: 'custom', path: ['meetingUrl'], message: 'url_required' });
+    }
+    if (!passing && value.meetingUrl !== null) {
+      ctx.addIssue({ code: 'custom', path: ['meetingUrl'], message: 'url_forbidden' });
+    }
+  });
+export type EnterResult = z.infer<typeof enterResultSchema>;
+
+/**
  * `GET /v1/events/{eventId}/edit` (06-04, D-214): the event as the edit FORM needs it. Returned ONLY
  * by the manage-guarded edit read, never by a member-reachable route, which is why it may carry
  * `meetingUrl` (read through the admin-only `event_secrets_staff_all` policy; a manage-holding
@@ -443,9 +497,9 @@ export interface EventReactivated {
 /**
  * Payload of `event.checked_in` (MOD-03, 06-05): emitted after commit, ONCE per member per event, on
  * the FIRST check-in only (`already` emits nothing). `walkIn` is true when there was no prior `Vou`
- * (D-216), `via` is how presence was proved (`'code'` at the venue here; `'online'` is 06-06's
- * `Entrar`), and `startsAt` lets Phase 7 read the payload alone. Ids, flags and one instant: never a
- * title and never the code.
+ * (D-216), `via` is how presence was proved (`'code'` at the venue, 06-05; `'online'` for 06-06's
+ * `Entrar`, emitted only on `recorded`), and `startsAt` lets Phase 7 read the payload alone. Ids,
+ * flags and one instant: never a title, never the code and never the meeting URL.
  */
 export interface EventCheckedIn {
   tenantId: string;

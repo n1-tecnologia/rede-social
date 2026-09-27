@@ -8,6 +8,7 @@ import {
   checkinResultSchema,
   checkinSchema,
   EVENT_ISSUE_SET,
+  enterResultSchema,
   eventDetailSchema,
   eventEditSchema,
   eventInputSchema,
@@ -21,6 +22,7 @@ import {
 import {
   checkInEvent,
   createEvent,
+  enterEvent,
   getEvent,
   getEventForEdit,
   listEvents,
@@ -35,7 +37,7 @@ import {
  *
  * Order is the ROLE-06 order: `requireAuth` (401) -> `requireModule('events')` (404 when the tenant
  * does not have events — never 403, so a member cannot tell "not allowed" from "not here") ->
- * `requirePermission` on the create, edit-read, replace, status, RSVP and check-in routes (403). The write guard is a PERMISSION, never a role
+ * `requirePermission` on the create, edit-read, replace, status, RSVP, check-in and enter routes (403). The write guard is a PERMISSION, never a role
  * comparison: granting creation to another role later is a manifest line, not a route edit.
  */
 
@@ -282,6 +284,36 @@ const checkInRoute = createRoute({
   },
 });
 
+/**
+ * The online `Entrar` (06-06, EVENT-04 online, D-207, D-210, D-218). The literal permission, like the
+ * RSVP and check-in routes: every role enters in V1. It is a POST because it has a side effect (the
+ * online check-in inside the window); the web's GET `/eventos/{id}/entrar` route handler is its only
+ * caller, and it turns the answer into a 303. The gate, the window and the write all run inside
+ * Postgres (`app.events_enter`), and the URL is in the body ONLY for `forward`, `recorded` and
+ * `already` (T-06-35).
+ */
+const enterRoute = createRoute({
+  method: 'post',
+  path: '/{eventId}/enter',
+  middleware: [requirePermission('events.attendance.respond')] as const,
+  request: { params: eventParamSchema },
+  responses: {
+    200: {
+      description:
+        "The gate's answer at this instant. `forward` (before the window, after a `Vou`: let through, nothing recorded), `recorded` (inside the window: the online check-in was recorded, `checked_in` after a `Vou` or `walk_in` otherwise, D-216), `already` (inside the window, present already: let through again) carry the https `meetingUrl`. `confirm_first` (before the window without a `Vou`), `ended` (from `ends_at` on) and `cancelled` carry `meetingUrl: null`. An API-to-BFF answer: no member page ever renders the URL (D-207).",
+      content: { 'application/json': { schema: enterResultSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    403: {
+      description: 'The caller does not hold `events.attendance.respond` in this tenant',
+    },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, removed, or IN PERSON (an in-person event is checked in by its venue code). One bare code, no details (D-23).',
+    },
+  },
+});
+
 export const eventsRoutes = events
   .openapi(listRoute, async (c) =>
     c.json(await listEvents(c.get('ctx'), c.req.valid('query')), 200),
@@ -312,4 +344,7 @@ export const eventsRoutes = events
       await checkInEvent(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')),
       200,
     ),
+  )
+  .openapi(enterRoute, async (c) =>
+    c.json(await enterEvent(c.get('ctx'), c.req.valid('param').eventId), 200),
   );

@@ -9,6 +9,8 @@ import type {
   AttendanceStatus,
   Checkin,
   CheckinResult,
+  EnterOutcome,
+  EnterResult,
   EventDetail,
   EventEdit,
   EventFormat,
@@ -22,6 +24,7 @@ import type {
   RsvpInput,
   RsvpResult,
 } from '../contracts/index';
+import { enterResultSchema } from '../contracts/index';
 import { generateCheckinCode } from './checkin-code';
 
 const log = moduleLogger('module-events');
@@ -1061,4 +1064,78 @@ export async function checkInEvent(
     outcome: outcome === 'walk_in' ? 'walk_in' : outcome === 'already' ? 'already' : 'checked_in',
     checkedInAt: row.checked_in_at,
   };
+}
+
+/** Every outcome `app.events_enter` can return (its migration header is the vocabulary). */
+type EnterRowOutcome = EnterOutcome | 'not_found';
+
+/** The one row the definer returns. `meeting_url` is non-null only on the three passing outcomes. */
+type EnterRow = {
+  outcome: EnterRowOutcome;
+  meeting_url: string | null;
+  attendance_status: AttendanceStatus | null;
+  starts_at: string | null;
+};
+
+/**
+ * `POST /v1/events/{eventId}/enter` (06-06, EVENT-04 online, D-207, D-210, D-218): the API half of
+ * `Entrar`. The web's `GET /eventos/{id}/entrar` route handler calls it and turns the answer into a
+ * 303, so this is the ONE member-reachable route that returns the meeting URL, and only when the gate
+ * lets the member through.
+ *
+ * **Everything is decided inside Postgres**, by `app.events_enter(p_event_id)` (SECURITY DEFINER): the
+ * event (online, this tenant, live), its state, the window, the member's answer, "already present",
+ * the online check-in itself and the URL, which this lane cannot read. The URL leaves the database
+ * only with `forward`, `recorded` or `already` (T-06-35).
+ *
+ * The callback RETURNS the row and the outcome is mapped after `withTenantTx` resolved (the 06-05
+ * shape): `not_found` (unknown, another tenant's, removed or IN PERSON) is one bare 404 (D-23), and
+ * everything else is 200 `{ outcome, meetingUrl }`, parsed by `enterResultSchema` on the way out.
+ *
+ * `event.checked_in` (MOD-03) fires ONCE per member per event, only for `recorded`, with
+ * `via: 'online'`; `forward` (nothing was recorded) and `already` emit nothing. The log line carries
+ * the outcome only, never the URL (Pitfall 12).
+ */
+export async function enterEvent(ctx: RequestContext, eventId: string): Promise<EnterResult> {
+  const row = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<EnterRow>(sql`
+      select r.outcome, r.meeting_url, r.attendance_status,
+             to_char(r.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at
+        from app.events_enter(${eventId}::uuid) r`);
+    // Returned, never thrown: the outcome is mapped after the transaction (Pitfall 1).
+    return rows[0];
+  });
+
+  const outcome = row?.outcome ?? 'not_found';
+  log.info(
+    {
+      event: 'events.enter',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      // The outcome only (Pitfall 12, T-06-35).
+      outcome,
+    },
+    'event enter',
+  );
+
+  if (outcome === 'not_found' || !row) throw new ApiError(404, 'NOT_FOUND');
+  // The contract is also the gate's shape check: a passing outcome without a URL (or a refusal with
+  // one) is a server bug, never a response.
+  const parsed = enterResultSchema.safeParse({ outcome, meetingUrl: row.meeting_url });
+  if (!parsed.success) throw new ApiError(500, 'INTERNAL');
+
+  if (outcome === 'recorded' && row.starts_at) {
+    emit(ctx, 'event.checked_in', {
+      tenantId: ctx.tenantId,
+      eventId,
+      userId: ctx.userId,
+      walkIn: row.attendance_status === 'walk_in',
+      via: 'online',
+      startsAt: row.starts_at,
+    });
+  }
+
+  return parsed.data;
 }

@@ -602,6 +602,21 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(checkIn.status).toBe(404);
       expect(((await checkIn.json()) as Envelope).error.details).toBeUndefined();
       expect(await labRows()).toBe(labBefore);
+
+      // 06-06: the online ENTER. Whatever the lab event's format, the demo lane gets the same bare
+      // 404 as an unknown id: no meeting URL in the body and nothing written on the lab's side.
+      const entered = await api.request(`/v1/events/${id}/enter`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.demoMember}`,
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+        },
+      });
+      expect(entered.status).toBe(404);
+      const enteredText = await entered.text();
+      expect((JSON.parse(enteredText) as Envelope).error.details).toBeUndefined();
+      expect(enteredText).not.toContain('meet.example.test');
+      expect(await labRows()).toBe(labBefore);
     }
 
     // 06-05: the check-in POST presented on the lab's registered host is refused before any read
@@ -617,6 +632,16 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     });
     expect(hostMismatch.status).toBe(403);
     expect(await code(hostMismatch)).toBe('TENANT_HOST_MISMATCH');
+    // 06-06: …and so is the enter POST.
+    const enterMismatch = await api.request(`/v1/events/${demoEvents[0]?.id ?? ''}/enter`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${tokens.demoMember}`,
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      },
+    });
+    expect(enterMismatch.status).toBe(403);
+    expect(await code(enterMismatch)).toBe('TENANT_HOST_MISMATCH');
     const [written] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.event_attendances a
         join public.users u on u.id = a.user_id

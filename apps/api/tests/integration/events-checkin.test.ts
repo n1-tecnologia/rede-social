@@ -1,6 +1,7 @@
 import { subscribe } from '@tria/core/server/events/bus';
 import type {
   CheckinResult,
+  EnterResult,
   EventCheckedIn,
   EventDetail,
   EventSummary,
@@ -32,6 +33,12 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
  *  - two concurrent right-code requests by the same member record ONE row: one `checked_in` and one
  *    `already` (T-06-34).
  *
+ * 06-06 adds the describe `enter` (EVENT-04 ONLINE, `app.events_enter`): every outcome over online
+ * events created here and moved in time through `adminSql`, the URL present EXACTLY on `forward`,
+ * `recorded` and `already` (null on `confirm_first`, `ended`, `cancelled`), `event.checked_in` once
+ * with `via: 'online'`, the concurrent pair recording one row, and a bare 404 for the lab's ONLINE
+ * event, an in-person event and an unknown id.
+ *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
 
@@ -48,6 +55,12 @@ const TEST_TITLE_PREFIX = 'Evento de check-in';
 
 /** 06-01's seeded upcoming event #1 in the LAB tenant (`scripts/seed.ts` SEED_EVENT_IDS). */
 const LAB_UPCOMING = '0e000000-0000-4000-8000-000000000e01';
+
+/** The LAB tenant's seeded ONLINE event (#2 in `SEED_EVENTS`). */
+const LAB_ONLINE = '0e000000-0000-4000-8000-000000000e02';
+
+/** The meeting URL `createEvent(…, 'online')` stores. */
+const MEETING_URL = 'https://meet.example.test/checkin';
 
 const request = (path: string, token?: string, init: RequestInit = {}, host = HOSTS.demo) =>
   api.request(path, {
@@ -379,5 +392,170 @@ describe('events check-in (in person, by code)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe('checked_in');
     expect(received.slice(before).filter((payload) => payload.eventId === race.id)).toHaveLength(1);
+  });
+});
+
+describe('enter (online, EVENT-04, D-207, D-210, D-218)', () => {
+  const enter = (eventId: string, token: string, host = HOSTS.demo) =>
+    request(`/v1/events/${eventId}/enter`, token, { method: 'POST' }, host);
+
+  async function enterBody(eventId: string, token: string) {
+    const res = await enter(eventId, token);
+    expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+    const body = (await res.json()) as EnterResult;
+    expect(Object.keys(body).sort()).toEqual(['meetingUrl', 'outcome']);
+    return body;
+  }
+
+  async function onlineRow(eventId: string, userId: string) {
+    return adminSql<{ status: string; checked_in: boolean; checkin_via: string | null }[]>`
+      select status, checked_in_at is not null as checked_in, checkin_via
+        from public.event_attendances
+       where event_id = ${eventId}::uuid and user_id = ${userId}::uuid`;
+  }
+
+  let live: EventSummary;
+
+  it('1. before the window: Vou is forwarded WITH the URL and nothing is recorded; no answer is confirm_first with meetingUrl null', async () => {
+    const early = await createEvent('online cedo', 'online');
+    expect((await rsvp(early.id, 'going', tokens.joao)).status).toBe(200);
+    const before = received.length;
+
+    expect(await enterBody(early.id, tokens.joao)).toEqual({
+      outcome: 'forward',
+      meetingUrl: MEETING_URL,
+    });
+    const rows = await onlineRow(early.id, userIds.joao ?? '');
+    expect(rows).toEqual([{ status: 'going', checked_in: false, checkin_via: null }]);
+
+    expect(await enterBody(early.id, tokens.iris)).toEqual({
+      outcome: 'confirm_first',
+      meetingUrl: null,
+    });
+    expect(await onlineRow(early.id, userIds.iris ?? '')).toHaveLength(0);
+    expect(received.length).toBe(before);
+  });
+
+  it('2. inside the window: no answer records a walk-in, Vou records checked_in, both via online, ONE event.checked_in each', async () => {
+    live = await createEvent('online ao vivo', 'online');
+    expect((await rsvp(live.id, 'going', tokens.iris)).status).toBe(200);
+    await openWindow(live.id);
+    const before = received.length;
+
+    expect(await enterBody(live.id, tokens.rafael)).toEqual({
+      outcome: 'recorded',
+      meetingUrl: MEETING_URL,
+    });
+    expect(await onlineRow(live.id, userIds.rafael ?? '')).toEqual([
+      { status: 'walk_in', checked_in: true, checkin_via: 'online' },
+    ]);
+
+    expect(await enterBody(live.id, tokens.iris)).toEqual({
+      outcome: 'recorded',
+      meetingUrl: MEETING_URL,
+    });
+    expect(await onlineRow(live.id, userIds.iris ?? '')).toEqual([
+      { status: 'checked_in', checked_in: true, checkin_via: 'online' },
+    ]);
+
+    const mine = received.slice(before).filter((payload) => payload.eventId === live.id);
+    expect(mine).toHaveLength(2);
+    const [starts] = await adminSql<{ s: string }[]>`
+      select to_char(starts_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as s
+        from public.events where id = ${live.id}::uuid`;
+    expect(mine).toEqual([
+      {
+        tenantId: demoTenantId,
+        eventId: live.id,
+        userId: userIds.rafael,
+        walkIn: true,
+        via: 'online',
+        startsAt: starts?.s,
+      },
+      {
+        tenantId: demoTenantId,
+        eventId: live.id,
+        userId: userIds.iris,
+        walkIn: false,
+        via: 'online',
+        startsAt: starts?.s,
+      },
+    ]);
+  });
+
+  it('3. a repeat answers already WITH the URL (rejoin), writes no second row and emits nothing', async () => {
+    const before = received.length;
+    expect(await enterBody(live.id, tokens.rafael)).toEqual({
+      outcome: 'already',
+      meetingUrl: MEETING_URL,
+    });
+    expect(await onlineRow(live.id, userIds.rafael ?? '')).toHaveLength(1);
+    expect(received.length).toBe(before);
+  });
+
+  it('4. ended and cancelled answer 200 with meetingUrl null and record nothing', async () => {
+    const past = await createEvent('online encerrado', 'online');
+    await adminSql`
+      update public.events
+         set starts_at = now() - interval '3 hours', ends_at = now() - interval '1 minute'
+       where id = ${past.id}::uuid`;
+    expect(await enterBody(past.id, tokens.sofia)).toEqual({ outcome: 'ended', meetingUrl: null });
+
+    const off = await createEvent('online cancelado', 'online');
+    await openWindow(off.id);
+    await adminSql`
+      update public.events set status = 'cancelled', cancelled_at = now()
+       where id = ${off.id}::uuid`;
+    expect(await enterBody(off.id, tokens.sofia)).toEqual({
+      outcome: 'cancelled',
+      meetingUrl: null,
+    });
+
+    for (const id of [past.id, off.id]) {
+      expect(await onlineRow(id, userIds.sofia ?? ''), id).toHaveLength(0);
+    }
+  });
+
+  it('5. two concurrent enters by the same member record ONE row: one recorded, one already', async () => {
+    const race = await createEvent('online corrida', 'online');
+    await openWindow(race.id);
+    const before = received.length;
+
+    const [a, b] = await Promise.all([enter(race.id, tokens.sofia), enter(race.id, tokens.sofia)]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const outcomes = [(await a.json()) as EnterResult, (await b.json()) as EnterResult];
+    expect(outcomes.map((body) => body.outcome).sort()).toEqual(['already', 'recorded']);
+    expect(outcomes.every((body) => body.meetingUrl === MEETING_URL)).toBe(true);
+
+    expect(await onlineRow(race.id, userIds.sofia ?? '')).toHaveLength(1);
+    expect(received.slice(before).filter((payload) => payload.eventId === race.id)).toHaveLength(1);
+  });
+
+  it('6. the lab ONLINE event, an in-person event and an unknown id: ONE bare 404; a malformed id is a 400', async () => {
+    // The lab event stays where the seed put it (untouched, so no other file's counts drift): from
+    // the demo lane it must be a bare 404, never the lab's own `confirm_first`.
+    const [lab] = await adminSql<{ format: string }[]>`
+      select format from public.events where id = ${LAB_ONLINE}::uuid`;
+    expect(lab?.format).toBe('online');
+    const [labBefore] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.event_attendances where event_id = ${LAB_ONLINE}::uuid`;
+
+    const inPerson = await createEvent('presencial via entrar');
+    await openWindow(inPerson.id);
+
+    for (const id of [LAB_ONLINE, inPerson.id, '0d000000-0000-4000-8000-00000000ffff']) {
+      const res = await enter(id, tokens.sofia);
+      expect(res.status, id).toBe(404);
+      const error = await envelope(res);
+      expect(error.code).toBe('NOT_FOUND');
+      expect(error.details).toBeUndefined();
+      expect(JSON.stringify(error)).not.toContain('meet.example.test');
+    }
+    const [labAfter] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.event_attendances where event_id = ${LAB_ONLINE}::uuid`;
+    expect(labAfter).toEqual(labBefore);
+    expect(await onlineRow(inPerson.id, userIds.sofia ?? '')).toHaveLength(0);
+
+    expect((await enter('not-a-uuid', tokens.sofia)).status).toBe(400);
   });
 });

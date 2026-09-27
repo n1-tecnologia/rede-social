@@ -7,6 +7,7 @@ export { eventsRoutes } from './routes';
 export {
   checkInEvent,
   createEvent,
+  enterEvent,
   getEvent,
   getEventForEdit,
   guardIssue,

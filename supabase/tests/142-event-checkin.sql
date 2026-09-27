@@ -44,11 +44,25 @@ begin;
 --     attempts row, the row is intact afterwards, and another member of the same tenant reads none of
 --     it.
 --
+-- 12..20 (06-06) — EVENT-04 ONLINE, the SECURITY DEFINER `app.events_enter(uuid)` (D-207, D-210,
+--     D-218). Its URL leaves the database ONLY with `forward`, `recorded` or `already` (T-06-35):
+-- 12. T-06-43, the same privilege facts as fact 1, and no claims gives `not_found`.
+-- 13. P0 after `Vou`: `forward` WITH the URL, and NOTHING is written (the row is still `going`).
+-- 14. P0 without an answer: `confirm_first` with a NULL URL, and no row appears.
+-- 15. Inside the window: no row gives `recorded` + `walk_in`; `going` gives `recorded` + `checked_in`
+--     keeping `responded_at`; both with `checkin_via = 'online'`.
+-- 16. A repeat: `already` with the URL and the recorded status, and still one row.
+-- 17. `ended` when `ends_at = now()`, with a NULL URL.
+-- 18. `cancelled`, with a NULL URL.
+-- 19. An IN-PERSON event gives `not_found` (its check-in is the venue code).
+-- 20. T-06-38: tenant A's lane with B's online event id gives `not_found`, B's rows are unchanged
+--     (read as the service lane), and A's own online event, same lane, same block, records.
+--
 -- The event fixtures carry their `event_secrets` rows (written in one statement), but this file never
 -- commits, so the deferred keys are never checked; `140-events.sql` proves them. Fixture ids use the
 -- `1e200000-…` prefix, free of 140's `1e000000-…` and 141's `1e100000-…`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(43);
+select plan(65);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ci-a', 'Checkin A', '1e200000-0000-4000-8000-000000000001');
@@ -385,6 +399,174 @@ select results_eq(
       where tenant_id = '1e200000-0000-4000-8000-000000000001' $$,
   ARRAY[1],
   'positive control: the row exists (the service lane sees it)'
+);
+reset role;
+
+-- ── 12..20 (06-06): app.events_enter, the online gate ─────────────────────────────────────────
+-- F1: online, in 3 hours (BEFORE the window). F2: online, in 30 minutes (inside). F3: online, ends
+-- NOW. F4: online, cancelled, inside. F9: tenant B's online event, inside. Every online URL is
+-- https://meet.example.test/ci (pg_temp.ev).
+select pg_temp.ev('1e200000-0000-4000-8000-0000000000f1', now() + interval '3 hours', now() + interval '5 hours', p_format => 'online');
+select pg_temp.ev('1e200000-0000-4000-8000-0000000000f2', now() + interval '30 minutes', now() + interval '2 hours 30 minutes', p_format => 'online');
+select pg_temp.ev('1e200000-0000-4000-8000-0000000000f3', now() - interval '2 hours', now(), p_format => 'online');
+select pg_temp.ev('1e200000-0000-4000-8000-0000000000f4', now() + interval '30 minutes', now() + interval '2 hours', 'cancelled', 'online');
+select pg_temp.ev('1e200000-0000-4000-8000-0000000000f9', now() + interval '30 minutes', now() + interval '2 hours', p_format => 'online',
+                  p_tenant => '1e200000-0000-4000-8000-000000000011', p_author => '1e200000-0000-4000-8000-000000000012');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at) values
+  ('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000f1',
+   '1e200000-0000-4000-8000-0000000000a1', 'going', now() - interval '1 day'),
+  ('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000f2',
+   '1e200000-0000-4000-8000-0000000000a1', 'going', now() - interval '1 day'),
+  ('1e200000-0000-4000-8000-000000000011', '1e200000-0000-4000-8000-0000000000f9',
+   '1e200000-0000-4000-8000-000000000012', 'going', now() - interval '1 day');
+
+-- ── 12. the privilege facts (T-06-43) ─────────────────────────────────────────────────────────
+select ok(
+  (select prosecdef from pg_proc where oid = 'app.events_enter(uuid)'::regprocedure),
+  'T-06-43: app.events_enter is SECURITY DEFINER'
+);
+select ok(
+  (select 'search_path=""' = any(proconfig) from pg_proc
+    where oid = 'app.events_enter(uuid)'::regprocedure),
+  'T-06-43: …and pins search_path to the empty string'
+);
+select ok(
+  not has_function_privilege('anon', 'app.events_enter(uuid)', 'execute'),
+  'T-06-43: anon cannot execute it (PUBLIC''s default EXECUTE is revoked)'
+);
+select ok(
+  has_function_privilege('authenticated', 'app.events_enter(uuid)', 'execute'),
+  'positive control: the tenant lane''s role (authenticated) can'
+);
+select tests.as_tenant_without_claims();
+select results_eq(
+  $$ select outcome, meeting_url is null from app.events_enter('1e200000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('not_found'::text, true) $$,
+  'a lane with NO claims gets not_found and no URL'
+);
+reset role;
+
+-- ── 13. P0 after Vou: forward, record nothing (D-218) ─────────────────────────────────────────
+select tests.as_tenant('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000a1');
+select results_eq(
+  $$ select outcome, meeting_url, attendance_status, starts_at = now() + interval '3 hours'
+       from app.events_enter('1e200000-0000-4000-8000-0000000000f1') $$,
+  $$ values ('forward'::text, 'https://meet.example.test/ci'::text, 'going'::text, true) $$,
+  'D-218: before the window, after Vou, the member is forwarded WITH the URL'
+);
+select results_eq(
+  $$ select status, checked_in_at is null, checkin_via is null from public.event_attendances
+      where event_id = '1e200000-0000-4000-8000-0000000000f1'
+        and user_id = '1e200000-0000-4000-8000-0000000000a1' $$,
+  $$ values ('going'::text, true, true) $$,
+  '…and NOTHING was recorded: the row is still going, with no check-in'
+);
+reset role;
+
+-- ── 14. P0 without Vou: confirm_first, no URL (D-207) ─────────────────────────────────────────
+select tests.as_tenant('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000a2');
+select results_eq(
+  $$ select outcome, meeting_url is null from app.events_enter('1e200000-0000-4000-8000-0000000000f1') $$,
+  $$ values ('confirm_first'::text, true) $$,
+  'D-207: before the window, with no answer, confirm_first and NO URL'
+);
+select is_empty(
+  $$ select 1 from public.event_attendances
+      where event_id = '1e200000-0000-4000-8000-0000000000f1'
+        and user_id = '1e200000-0000-4000-8000-0000000000a2' $$,
+  '…and no row was written'
+);
+
+-- ── 15. inside the window: recorded (D-210, D-216) ────────────────────────────────────────────
+select results_eq(
+  $$ select outcome, meeting_url, attendance_status
+       from app.events_enter('1e200000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('recorded'::text, 'https://meet.example.test/ci'::text, 'walk_in'::text) $$,
+  'D-210: inside the window, with no answer, Entrar records a walk-in and forwards'
+);
+select results_eq(
+  $$ select status, checked_in_at = now(), checkin_via, responded_at is null
+       from public.event_attendances
+      where event_id = '1e200000-0000-4000-8000-0000000000f2'
+        and user_id = '1e200000-0000-4000-8000-0000000000a2' $$,
+  $$ values ('walk_in'::text, true, 'online'::text, true) $$,
+  '…the row is walk_in, stamped now, via online'
+);
+reset role;
+select tests.as_tenant('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000a1');
+select results_eq(
+  $$ select outcome, meeting_url, attendance_status
+       from app.events_enter('1e200000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('recorded'::text, 'https://meet.example.test/ci'::text, 'checked_in'::text) $$,
+  'D-216: after Vou, Entrar records checked_in'
+);
+select results_eq(
+  $$ select status, responded_at = now() - interval '1 day', checkin_via
+       from public.event_attendances
+      where event_id = '1e200000-0000-4000-8000-0000000000f2'
+        and user_id = '1e200000-0000-4000-8000-0000000000a1' $$,
+  $$ values ('checked_in'::text, true, 'online'::text) $$,
+  '…keeping responded_at, via online'
+);
+
+-- ── 16. a repeat: already, rejoin (T-06-42) ───────────────────────────────────────────────────
+select results_eq(
+  $$ select outcome, meeting_url, attendance_status
+       from app.events_enter('1e200000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('already'::text, 'https://meet.example.test/ci'::text, 'checked_in'::text) $$,
+  'a second Entrar answers already WITH the URL (rejoin)'
+);
+select results_eq(
+  $$ select count(*)::int from public.event_attendances
+      where event_id = '1e200000-0000-4000-8000-0000000000f2'
+        and user_id = '1e200000-0000-4000-8000-0000000000a1' $$,
+  ARRAY[1],
+  '…with no second record'
+);
+
+-- ── 17-19. the refusals carry no URL ──────────────────────────────────────────────────────────
+select results_eq(
+  $$ select outcome, meeting_url is null from app.events_enter('1e200000-0000-4000-8000-0000000000f3') $$,
+  $$ values ('ended'::text, true) $$,
+  'D-209: an online event whose ends_at = now() answers ended, with NO URL'
+);
+select results_eq(
+  $$ select outcome, meeting_url is null from app.events_enter('1e200000-0000-4000-8000-0000000000f4') $$,
+  $$ values ('cancelled'::text, true) $$,
+  'D-201: a cancelled online event answers cancelled, with NO URL'
+);
+select results_eq(
+  $$ select outcome, meeting_url is null from app.events_enter('1e200000-0000-4000-8000-0000000000e1') $$,
+  $$ values ('not_found'::text, true) $$,
+  'an IN-PERSON event is not entered: not_found (its check-in is the venue code)'
+);
+reset role;
+
+-- ── 20. the definer never crosses tenants (T-06-38) ───────────────────────────────────────────
+select tests.as_tenant('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000a5');
+select results_eq(
+  $$ select outcome, meeting_url is null from app.events_enter('1e200000-0000-4000-8000-0000000000f9') $$,
+  $$ values ('not_found'::text, true) $$,
+  'T-06-38: A''s lane with B''s online event id gets not_found and NO URL'
+);
+select results_eq(
+  $$ select outcome, attendance_status from app.events_enter('1e200000-0000-4000-8000-0000000000f2') $$,
+  $$ values ('recorded'::text, 'walk_in'::text) $$,
+  'positive control, same block, same lane: A''s own online event records'
+);
+reset role;
+select tests.as_service();
+select results_eq(
+  $$ select count(*)::int, min(status), bool_and(checked_in_at is null) from public.event_attendances
+      where event_id = '1e200000-0000-4000-8000-0000000000f9' $$,
+  $$ values (1, 'going'::text, true) $$,
+  'T-06-38: B''s online event still has exactly its own one row, still going, unchecked'
+);
+select is_empty(
+  $$ select 1 from public.event_attendances
+      where user_id = '1e200000-0000-4000-8000-0000000000a5'
+        and event_id = '1e200000-0000-4000-8000-0000000000f9' $$,
+  '…none of them A''s member'
 );
 reset role;
 

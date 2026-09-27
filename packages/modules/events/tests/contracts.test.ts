@@ -4,12 +4,15 @@ import {
   CHECKIN_OUTCOMES,
   checkinResultSchema,
   checkinSchema,
+  ENTER_OUTCOMES,
+  ENTER_PASSING_OUTCOMES,
   EVENT_CHECKIN_FAILED_WINDOW_MINUTES,
   EVENT_CHECKIN_MAX_FAILED,
   EVENT_ISSUE_SET,
   EVENT_ISSUES,
   EVENT_MAX_PAGE_SIZE,
   EVENT_PAGE_SIZE,
+  enterResultSchema,
   eventDetailSchema,
   eventEditSchema,
   eventInputSchema,
@@ -307,5 +310,56 @@ describe('06-05 — the in-person check-in contract', () => {
     }
     expect(EVENT_CHECKIN_MAX_FAILED).toBe(5);
     expect(EVENT_CHECKIN_FAILED_WINDOW_MINUTES).toBe(15);
+  });
+});
+
+describe('06-06 — the online enter contract (an API-to-BFF answer)', () => {
+  const URL = 'https://meet.example.test/sala';
+
+  it('21. the outcomes are closed, and the URL rides EXACTLY with forward, recorded and already', () => {
+    expect([...ENTER_OUTCOMES]).toEqual([
+      'forward',
+      'recorded',
+      'already',
+      'confirm_first',
+      'ended',
+      'cancelled',
+    ]);
+    expect([...ENTER_PASSING_OUTCOMES].sort()).toEqual(['already', 'forward', 'recorded']);
+    for (const outcome of ['forward', 'recorded', 'already'] as const) {
+      expect(enterResultSchema.safeParse({ outcome, meetingUrl: URL }).success, outcome).toBe(true);
+      // A passing outcome WITHOUT the URL is refused (the refine's first direction).
+      expect(enterResultSchema.safeParse({ outcome, meetingUrl: null }).success, outcome).toBe(
+        false,
+      );
+    }
+    for (const outcome of ['confirm_first', 'ended', 'cancelled'] as const) {
+      expect(enterResultSchema.safeParse({ outcome, meetingUrl: null }).success, outcome).toBe(
+        true,
+      );
+      // A refusal WITH a URL is refused (the refine's second direction, T-06-35).
+      expect(enterResultSchema.safeParse({ outcome, meetingUrl: URL }).success, outcome).toBe(
+        false,
+      );
+    }
+  });
+
+  it('22. https only, strict, and not_found is never a 200 outcome', () => {
+    for (const bad of [
+      'http://meet.example.test/sala',
+      'javascript:alert(1)',
+      'meet.example.test',
+    ]) {
+      expect(
+        enterResultSchema.safeParse({ outcome: 'forward', meetingUrl: bad }).success,
+        bad,
+      ).toBe(false);
+    }
+    expect(
+      enterResultSchema.safeParse({ outcome: 'forward', meetingUrl: URL, status: 'going' }).success,
+    ).toBe(false);
+    expect(enterResultSchema.safeParse({ outcome: 'not_found', meetingUrl: null }).success).toBe(
+      false,
+    );
   });
 });

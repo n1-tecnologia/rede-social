@@ -30,6 +30,9 @@ import type {
  * and the outcome mapping of `app.events_check_in`, whose refusals are RETURNED by the database and
  * thrown only after the transaction resolved (Pitfall 1).
  *
+ * 06-06 adds `app.events_enter`'s mapping: `event.checked_in` with `via: 'online'` ONLY for
+ * `recorded`, nothing for `forward` / `already`, the URL only on the passing outcomes, and a bare 404.
+ *
  * `withTenantTx` is the seam; the bus under test is the real one.
  */
 
@@ -95,9 +98,8 @@ vi.mock('@tria/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
 }));
 
-const { checkInEvent, createEvent, rsvpEvent, setEventStatus, updateEvent } = await import(
-  '../server/service'
-);
+const { checkInEvent, createEvent, enterEvent, rsvpEvent, setEventStatus, updateEvent } =
+  await import('../server/service');
 
 function context(): RequestContext {
   return {
@@ -579,6 +581,88 @@ describe('06-05 — event.checked_in and the check-in outcome mapping', () => {
   it('20. not_found (unknown, foreign, removed or online) is ONE bare 404', async () => {
     script = [[{ outcome: 'not_found', checked_in_at: null, starts_at: null }]];
     const miss = checkInEvent(context(), EVENT_ID, { code: 'K7QM' });
+    await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    await expect(miss).rejects.not.toHaveProperty('details.event');
+  });
+});
+
+describe('06-06 — the online enter: outcome mapping and event.checked_in via online', () => {
+  let checkIns: EventCheckedIn[] = [];
+  let stop: () => void = () => {};
+  beforeEach(() => {
+    checkIns = [];
+    stop = subscribe('event.checked_in', async (payload) => {
+      checkIns.push(payload);
+    });
+  });
+  afterEach(() => stop());
+
+  const enterRow = (
+    outcome: string,
+    url: string | null,
+    status: string | null,
+    startsAt: string | null = STARTS_AT,
+  ) => [{ outcome, meeting_url: url, attendance_status: status, starts_at: startsAt }];
+
+  it('21. recorded queues ONE event.checked_in via online (walkIn from the recorded status)', async () => {
+    script = [enterRow('recorded', MEETING_URL, 'checked_in')];
+    const ctx = context();
+    await expect(enterEvent(ctx, EVENT_ID)).resolves.toEqual({
+      outcome: 'recorded',
+      meetingUrl: MEETING_URL,
+    });
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('app.events_enter');
+    await flush(ctx);
+    expect(checkIns).toEqual([
+      {
+        tenantId: TENANT_ID,
+        eventId: EVENT_ID,
+        userId: USER_ID,
+        walkIn: false,
+        via: 'online',
+        startsAt: STARTS_AT,
+      },
+    ]);
+
+    script = [enterRow('recorded', MEETING_URL, 'walk_in')];
+    const walkIn = context();
+    await enterEvent(walkIn, EVENT_ID);
+    await flush(walkIn);
+    expect(checkIns[1]).toMatchObject({ walkIn: true, via: 'online' });
+  });
+
+  it('22. forward and already let the member through and emit NOTHING', async () => {
+    for (const [outcome, status] of [
+      ['forward', 'going'],
+      ['already', 'walk_in'],
+    ] as const) {
+      script = [enterRow(outcome, MEETING_URL, status)];
+      const ctx = context();
+      await expect(enterEvent(ctx, EVENT_ID)).resolves.toEqual({
+        outcome,
+        meetingUrl: MEETING_URL,
+      });
+      expect(ctx.events, outcome).toHaveLength(0);
+    }
+  });
+
+  it('23. the refusals answer 200 with meetingUrl null; a refusal carrying a URL is a 500, never a leak', async () => {
+    for (const outcome of ['confirm_first', 'ended', 'cancelled']) {
+      script = [enterRow(outcome, null, null)];
+      const ctx = context();
+      await expect(enterEvent(ctx, EVENT_ID)).resolves.toEqual({ outcome, meetingUrl: null });
+      expect(ctx.events, outcome).toHaveLength(0);
+    }
+    script = [enterRow('ended', MEETING_URL, null)];
+    await expect(enterEvent(context(), EVENT_ID)).rejects.toMatchObject({ status: 500 });
+    script = [enterRow('recorded', null, 'walk_in')];
+    await expect(enterEvent(context(), EVENT_ID)).rejects.toMatchObject({ status: 500 });
+  });
+
+  it('24. not_found (unknown, foreign, removed or in person) is ONE bare 404', async () => {
+    script = [enterRow('not_found', null, null, null)];
+    const miss = enterEvent(context(), EVENT_ID);
     await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     await expect(miss).rejects.not.toHaveProperty('details.event');
   });
