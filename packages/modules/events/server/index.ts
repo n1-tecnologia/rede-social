@@ -4,4 +4,4 @@
  */
 export { generateCheckinCode, normalizeCheckinCode } from './checkin-code';
 export { eventsRoutes } from './routes';
-export { createEvent, listEvents } from './service';
+export { createEvent, getEvent, guardIssue, listEvents, rsvpEvent } from './service';

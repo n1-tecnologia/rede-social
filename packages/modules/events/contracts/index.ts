@@ -58,6 +58,18 @@ export const EVENT_STATUSES = ['active', 'cancelled'] as const;
 export type EventStatus = (typeof EVENT_STATUSES)[number];
 
 /**
+ * D-216: the attendance row's status vocabulary, mirrored by `event_attendances_status_chk`. One
+ * column, never boolean pairs: `going` and `not_going` are RSVP answers, `checked_in` is a `going`
+ * that checked in (its `respondedAt` is kept), and `walk_in` is a check-in with no prior `going`.
+ */
+export const ATTENDANCE_STATUSES = ['going', 'not_going', 'checked_in', 'walk_in'] as const;
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+
+/** D-205: the two answers a member may give (`Vou` / `Não vou`). A recorded `Não vou` is a value. */
+export const RSVP_ANSWERS = ['going', 'not_going'] as const;
+export type RsvpAnswer = (typeof RSVP_ANSWERS)[number];
+
+/**
  * D-200: the two list chips. `upcoming` is `ends_at > now()` (an event in progress stays here until
  * it ends) and `past` is `ends_at <= now()`. Each is its own keyset: a cursor never spans two.
  */
@@ -216,7 +228,18 @@ export type EventQuery = z.infer<typeof eventQuerySchema>;
  * `startsAt` / `endsAt` are UTC ISO strings with microsecond precision, formatted by Postgres (the
  * `ISO_MICROSECONDS` rule): the keyset cursor is built from them, so a JS `Date` round trip would
  * move a page boundary. `coverAssetId` is nullable (D-69) with its variant ladder beside it, never a
- * URL. 06-03 widens this shape with the counts and the viewer's own state.
+ * URL.
+ *
+ * **The viewer's OWN state and two COUNTS, never anyone else's row (D-206, T-06-13).** 06-03 adds:
+ *  - `viewerStatus` / `viewerCheckedInAt`: the caller's own attendance row, or null;
+ *  - `confirmedCount` (D-219): every member whose recorded answer was `Vou`, i.e. `going` plus
+ *    `checked_in`, excluding `walk_in` and `not_going`. What the poster and the detail print as
+ *    "N confirmados" while the event is upcoming;
+ *  - `presentCount`: `checked_in` plus `walk_in`, printed as "N presentes" once the event is past.
+ * Staff answers count like anyone's, and rows of members who have since left still count. The
+ * organiser's Participantes chip `Confirmados` (`going` only) is a DIFFERENT number with its own name
+ * (Pitfall 11), which 06-07 adds as `pendingConfirmedCount`. No key here names, pictures or ids another
+ * member.
  */
 export const eventSummarySchema = z
   .object({
@@ -230,9 +253,40 @@ export const eventSummarySchema = z
     startsAt: z.string(),
     endsAt: z.string(),
     status: z.enum(EVENT_STATUSES),
+    viewerStatus: z.enum(ATTENDANCE_STATUSES).nullable(),
+    viewerCheckedInAt: z.string().nullable(),
+    confirmedCount: z.number().int().nonnegative(),
+    presentCount: z.number().int().nonnegative(),
   })
   .strict();
 export type EventSummary = z.infer<typeof eventSummarySchema>;
+
+/**
+ * `GET /v1/events/{eventId}` (EVENT-02): the list item plus what only the detail page prints: the
+ * description, the address (null for an online event) and when the viewer last answered. Still NO
+ * URL and NO code key (D-207, D-208), and still no other member's identity (D-206). `.strict()` so
+ * a key added by mistake fails the contract test rather than reaching a member.
+ */
+export const eventDetailSchema = eventSummarySchema
+  .extend({
+    description: z.string(),
+    address: z.string().nullable(),
+    viewerRespondedAt: z.string().nullable(),
+  })
+  .strict();
+export type EventDetail = z.infer<typeof eventDetailSchema>;
+
+/**
+ * `PUT /v1/events/{eventId}/rsvp` (EVENT-03, D-205). `.strict()`: a forged `status: 'checked_in'`
+ * or `userId` fails loudly. The database is still the authority on WHEN an answer is allowed
+ * (D-204): the guard trigger refuses it from `starts_at` on, for every writer.
+ */
+export const rsvpSchema = z.object({ answer: z.enum(RSVP_ANSWERS) }).strict();
+export type RsvpInput = z.infer<typeof rsvpSchema>;
+
+/** The viewer's attendance status after the call (unchanged on a repeat answer). */
+export const rsvpResultSchema = z.object({ status: z.enum(ATTENDANCE_STATUSES) }).strict();
+export type RsvpResult = z.infer<typeof rsvpResultSchema>;
 
 /** One keyset page. `nextCursor` is non-null EXACTLY when another row exists (the over-fetch rule). */
 export const eventPageSchema = z
@@ -259,11 +313,27 @@ export interface EventPublished {
 }
 
 /**
+ * Payload of `event.rsvp` (MOD-03), emitted after commit and ONLY when the answer changed (a repeat
+ * answer writes nothing and emits nothing). Ids, statuses and one instant: enough for Phase 7 to
+ * schedule a reminder from the payload alone (`startsAt`), with `previousStatus` null on the first
+ * answer. Never a title and never another member.
+ */
+export interface EventRsvp {
+  tenantId: string;
+  eventId: string;
+  userId: string;
+  status: RsvpAnswer;
+  previousStatus: AttendanceStatus | null;
+  startsAt: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
 declare module '@tria/contracts' {
   interface EventMap {
     'event.published': EventPublished;
+    'event.rsvp': EventRsvp;
   }
 }

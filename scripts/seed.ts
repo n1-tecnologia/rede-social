@@ -589,6 +589,96 @@ export const SEED_EVENTS: readonly SeedEvent[] = [
 ];
 
 /**
+ * 06-03: one event's seeded attendance. `rsvps` are answered first, then `checkIns` (each must be a
+ * `going` of `rsvps`) move to `checked_in` and `walkIns` land as `walk_in` rows with no answer.
+ */
+type SeedAttendancePlan = {
+  eventIndex: number;
+  rsvps: [string, 'going' | 'not_going'][];
+  checkIns: string[];
+  walkIns: string[];
+};
+
+/**
+ * 06-03 (planning decision 4) — THE TIME-TRAVEL SEQUENCE. The guard trigger
+ * (`app.event_attendance_guard()`) applies to the admin lane too: an RSVP is refused from
+ * `starts_at` on, a check-in outside `[starts_at - 1 h, ends_at)` and anything on a cancelled event.
+ * So, in ONE admin transaction per event, the seed does what really happens over time:
+ *   1. moves the event to "active, starting tomorrow" and writes the answers;
+ *   2. moves it to "starting in 30 minutes" (inside the check-in window) and writes the check-ins
+ *      and walk-ins;
+ *   3. puts its real times, status and `cancelled_at` back.
+ * Only attendance writes are guarded, and moving an event's times after answers exist is D-214's own
+ * "every field stays editable". Idempotent: an event that already has attendance rows is skipped,
+ * so a re-run never proposes a tuple the guard would now refuse.
+ */
+async function seedEventAttendances(
+  tenantId: string,
+  eventId: string,
+  plan: SeedAttendancePlan,
+): Promise<void> {
+  await withAdminTx(async (tx) => {
+    const existing = await tx.execute<{ n: number }>(sql`
+      select count(*)::int as n from public.event_attendances
+       where tenant_id = ${tenantId}::uuid and event_id = ${eventId}::uuid`);
+    if ((existing[0]?.n ?? 0) > 0) return;
+
+    const original = await tx.execute<{
+      starts_at: string;
+      ends_at: string;
+      status: string;
+      cancelled_at: string | null;
+    }>(sql`
+      select starts_at::text, ends_at::text, status, cancelled_at::text
+        from public.events
+       where tenant_id = ${tenantId}::uuid and id = ${eventId}::uuid`);
+    const real = original[0];
+    if (!real) return;
+
+    // 1. Before the start: the answers, each at its own instant a minute apart.
+    await tx.execute(sql`
+      update public.events
+         set starts_at = now() + interval '1 day', ends_at = now() + interval '1 day 2 hours',
+             status = 'active', cancelled_at = null
+       where tenant_id = ${tenantId}::uuid and id = ${eventId}::uuid`);
+    for (const [index, [userId, answer]] of plan.rsvps.entries()) {
+      await tx.execute(sql`
+        insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at)
+        values (${tenantId}::uuid, ${eventId}::uuid, ${userId}::uuid, ${answer},
+                now() - ${`${plan.rsvps.length - index} minutes`}::interval)`);
+    }
+
+    // 2. Inside the check-in window: confirmed members check in, walk-ins arrive.
+    if (plan.checkIns.length > 0 || plan.walkIns.length > 0) {
+      await tx.execute(sql`
+        update public.events
+           set starts_at = now() + interval '30 minutes', ends_at = now() + interval '2 hours 30 minutes'
+         where tenant_id = ${tenantId}::uuid and id = ${eventId}::uuid`);
+      for (const userId of plan.checkIns) {
+        await tx.execute(sql`
+          update public.event_attendances
+             set status = 'checked_in', checked_in_at = now(), checkin_via = 'code', updated_at = now()
+           where tenant_id = ${tenantId}::uuid and event_id = ${eventId}::uuid
+             and user_id = ${userId}::uuid`);
+      }
+      for (const userId of plan.walkIns) {
+        await tx.execute(sql`
+          insert into public.event_attendances
+            (tenant_id, event_id, user_id, status, checked_in_at, checkin_via)
+          values (${tenantId}::uuid, ${eventId}::uuid, ${userId}::uuid, 'walk_in', now(), 'code')`);
+      }
+    }
+
+    // 3. The event's real times and status, back.
+    await tx.execute(sql`
+      update public.events
+         set starts_at = ${real.starts_at}::timestamptz, ends_at = ${real.ends_at}::timestamptz,
+             status = ${real.status}, cancelled_at = ${real.cancelled_at}::timestamptz
+       where tenant_id = ${tenantId}::uuid and id = ${eventId}::uuid`);
+  });
+}
+
+/**
  * 05-05 (STORY-01, STORY-03) — FIVE stories per tenant, identical-looking on both sides (§(j)).
  *
  * The shapes are chosen so every branch of the strip's read and of D-84's history has a fixture
@@ -1818,6 +1908,53 @@ for (const t of SEED_TENANTS) {
         console.log(
           `seed: tenant ${t.slug} — ${SEED_EVENTS.length} events (2 past, 1 in progress multi-day, 1 online, 2 cancelled, 1 long-title without a cover)`,
         );
+
+        // 06-03 (EVENT-03, D-216, D-219): the answers and check-ins. `memberUserIds` is
+        // [member@, ...t.members]; only the first three named members are used, so the mix is
+        // IDENTICAL in both tenants (tria-lab has three) — §(j) adjacency.
+        const [memberAt, named0, named1, named2] = memberUserIds;
+        if (memberAt && named0 && named1 && named2) {
+          const plans: SeedAttendancePlan[] = [
+            // #1 upcoming: member@, two named members Vou, one Não vou -> "3 confirmados".
+            {
+              eventIndex: 0,
+              rsvps: [
+                [memberAt, 'going'],
+                [named0, 'going'],
+                [named1, 'going'],
+                [named2, 'not_going'],
+              ],
+              checkIns: [],
+              walkIns: [],
+            },
+            // #3 in progress: one member confirmed and checked in.
+            {
+              eventIndex: 2,
+              rsvps: [[named0, 'going']],
+              checkIns: [named0],
+              walkIns: [],
+            },
+            // #4 past: member@ checked in (via going), one walk-in, one going who never came.
+            {
+              eventIndex: 3,
+              rsvps: [
+                [memberAt, 'going'],
+                [named2, 'going'],
+              ],
+              checkIns: [memberAt],
+              walkIns: [named1],
+            },
+            // #5 cancelled: member@ answered Vou BEFORE the cancel.
+            { eventIndex: 4, rsvps: [[memberAt, 'going']], checkIns: [], walkIns: [] },
+          ];
+          for (const plan of plans) {
+            const eventId = eventIds[plan.eventIndex];
+            if (eventId) await seedEventAttendances(tenantId, eventId, plan);
+          }
+          console.log(
+            `seed: tenant ${t.slug} — event answers and check-ins on ${plans.length} events (going, not_going, checked_in, walk_in)`,
+          );
+        }
       }
 
       // 05-05 (STORY-01, STORY-03): the tenant's stories, on REAL `purpose: 'story'` assets at the
@@ -2152,9 +2289,10 @@ await withAdminTx(async (tx) => {
   await tx.execute(sql`analyze public.feed_link_previews`);
   await tx.execute(sql`analyze public.communities`);
   await tx.execute(sql`analyze public.events`);
+  await tx.execute(sql`analyze public.event_attendances`);
 });
 console.log(
-  'seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media, feed_link_previews, communities, events',
+  'seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media, feed_link_previews, communities, events, event_attendances',
 );
 
 console.log(`seed: hosts — platform=${PLATFORM_HOST} tria-demo=${DEMO_HOST} tria-lab=${LAB_HOST}`);

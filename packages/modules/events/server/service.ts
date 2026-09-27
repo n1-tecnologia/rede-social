@@ -6,19 +6,25 @@ import { moduleLogger } from '@tria/core/server/logging';
 import { decodeCursor, encodeCursor, keysetComparison } from '@tria/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
+  AttendanceStatus,
+  EventDetail,
   EventFormat,
   EventInput,
+  EventIssue,
   EventPage,
   EventQuery,
   EventStatus,
   EventSummary,
+  RsvpInput,
+  RsvpResult,
 } from '../contracts/index';
 import { generateCheckinCode } from './checkin-code';
 
 const log = moduleLogger('module-events');
 
 /**
- * The events service (EVENT-01 create half, EVENT-02 list) — a PURE TENANT-LANE area.
+ * The events service (EVENT-01 create half, EVENT-02 list and detail, EVENT-03 RSVP) — a PURE
+ * TENANT-LANE area.
  *
  * Every function is `withTenantTx(ctx, …)`: the tenant is never a parameter a caller supplies and
  * never a value this file compares. `events_tenant_isolation` supplies it under the explicit
@@ -41,6 +47,17 @@ type EventRow = {
   status: EventStatus;
   starts_at: string;
   ends_at: string;
+  viewer_status: AttendanceStatus | null;
+  viewer_checked_in_at: string | null;
+  confirmed_count: number;
+  present_count: number;
+};
+
+/** The detail read adds what only the detail page prints. */
+type EventDetailRow = EventRow & {
+  description: string;
+  address: string | null;
+  viewer_responded_at: string | null;
 };
 
 /**
@@ -51,14 +68,22 @@ type EventRow = {
 const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
 
 /**
- * THE projection, shared by the list and the create read-back so the two can never disagree about
- * what an event looks like. The cover ladder comes back in the SAME statement (the query-budget
- * rule); the `left join media_assets` carries no tenant condition because
- * `media_assets_tenant_select` decides visibility in this lane. `created_by_user_id`, `description`,
- * `address` and everything in `event_secrets` are deliberately absent from the select list.
+ * THE projection, shared by the list, the detail and the create read-back so they can never disagree
+ * about what an event looks like. Everything comes back in the SAME statement (the query-budget
+ * rule):
+ *  - the cover ladder, through a `left join media_assets` with no tenant condition because
+ *    `media_assets_tenant_select` decides visibility in this lane;
+ *  - the VIEWER's own attendance row (`me`), through the unique
+ *    `event_attendances_tenant_event_user_uq`: only the caller's row, never anyone else's (D-206);
+ *  - the two D-219 counts, from a lateral aggregate served by
+ *    `event_attendances_tenant_event_status_idx`. `confirmed` is `going + checked_in` (every member
+ *    whose recorded answer was Vou), `present` is `checked_in + walk_in`. Cast to `int`: a bare
+ *    `count(*)` is a bigint, which the driver hands back as a string. The expressions are copied
+ *    VERBATIM into `141-event-attendances.sql` fact 10, so edit both together.
+ * `created_by_user_id`, and everything in `event_secrets`, are deliberately absent.
  */
-const eventProjection = sql`
-    select e.id,
+const eventColumns = sql`
+           e.id,
            e.title,
            e.format,
            e.venue_name,
@@ -66,9 +91,31 @@ const eventProjection = sql`
            a.variant_widths as cover_variant_widths,
            e.status,
            to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
-           to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at
+           to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at,
+           me.status as viewer_status,
+           to_char(me.checked_in_at at time zone 'utc', ${ISO_MICROSECONDS}) as viewer_checked_in_at,
+           c.confirmed_count,
+           c.present_count`;
+
+/** The FROM clause of the projection; `viewerId` is always `ctx.userId`, never a caller's value. */
+const eventSource = (viewerId: string) => sql`
       from events e
-      left join media_assets a on a.id = e.cover_asset_id`;
+      left join media_assets a on a.id = e.cover_asset_id
+      left join event_attendances me
+             on me.tenant_id = e.tenant_id
+            and me.event_id = e.id
+            and me.user_id = ${viewerId}::uuid
+      left join lateral (
+        select count(*) filter (where x.status in ('going','checked_in'))::int as confirmed_count,
+               count(*) filter (where x.status in ('checked_in','walk_in'))::int as present_count
+          from event_attendances x
+         where x.tenant_id = e.tenant_id
+           and x.event_id = e.id
+      ) c on true`;
+
+const eventProjection = (viewerId: string) => sql`
+    select ${eventColumns}
+    ${eventSource(viewerId)}`;
 
 /** Row → published contract. No URL or code key exists to fill (D-207). */
 const toEvent = (row: EventRow): EventSummary => ({
@@ -81,6 +128,11 @@ const toEvent = (row: EventRow): EventSummary => ({
   startsAt: row.starts_at,
   endsAt: row.ends_at,
   status: row.status,
+  viewerStatus: row.viewer_status,
+  viewerCheckedInAt: row.viewer_checked_in_at,
+  // `?? 0` only covers a driver that returns nothing for an aggregate; `count(*)` is never null.
+  confirmedCount: Number(row.confirmed_count ?? 0),
+  presentCount: Number(row.present_count ?? 0),
 });
 
 /**
@@ -99,6 +151,9 @@ const toEvent = (row: EventRow): EventSummary => ({
  * A CANCELLED event stays in both lists wherever it would otherwise be, carrying its status (D-201):
  * in V1 nothing else tells a member who confirmed that it was cancelled.
  *
+ * Every item carries the viewer's own state and the two D-219 counts from the SAME statement (06-03):
+ * a page is still one statement, which `feed-query-budget.test.ts` measures with a ceiling and a floor.
+ *
  * `decodeCursor` is total: a tampered envelope degrades to page 1 (T-06-04).
  */
 export async function listEvents(ctx: RequestContext, query: EventQuery): Promise<EventPage> {
@@ -112,7 +167,7 @@ export async function listEvents(ctx: RequestContext, query: EventQuery): Promis
     if (upcoming) {
       const cmp = keysetComparison('asc');
       return tx.execute<EventRow>(sql`
-      ${eventProjection}
+      ${eventProjection(ctx.userId)}
        where e.tenant_id = ${ctx.tenantId}::uuid
          and e.deleted_at is null
          and e.ends_at > now()
@@ -125,7 +180,7 @@ export async function listEvents(ctx: RequestContext, query: EventQuery): Promis
     }
     const cmp = keysetComparison('desc');
     return tx.execute<EventRow>(sql`
-      ${eventProjection}
+      ${eventProjection(ctx.userId)}
        where e.tenant_id = ${ctx.tenantId}::uuid
          and e.deleted_at is null
          and e.ends_at <= now()
@@ -300,7 +355,7 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
                 ${meetingUrl})`);
 
       const rows = await tx.execute<EventRow>(sql`
-        ${eventProjection}
+        ${eventProjection(ctx.userId)}
          where e.tenant_id = ${ctx.tenantId}::uuid
            and e.id = ${id}::uuid
          limit 1`);
@@ -341,4 +396,200 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
   );
 
   return toEvent(created);
+}
+
+/**
+ * `GET /v1/events/{eventId}` (EVENT-02): the shared projection plus the description, the address and
+ * the viewer's `responded_at`. ONE statement.
+ *
+ * A miss is ONE bare 404 with no `details`: an unknown id, another tenant's id (RLS and the explicit
+ * `tenant_id` predicate both exclude it) and a moderated one are indistinguishable (D-23, T-06-14).
+ */
+export async function getEvent(ctx: RequestContext, eventId: string): Promise<EventDetail> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<EventDetailRow>(sql`
+      select ${eventColumns},
+             e.description,
+             e.address,
+             to_char(me.responded_at at time zone 'utc', ${ISO_MICROSECONDS}) as viewer_responded_at
+      ${eventSource(ctx.userId)}
+       where e.tenant_id = ${ctx.tenantId}::uuid
+         and e.id = ${eventId}::uuid
+         and e.deleted_at is null
+       limit 1`),
+  );
+  const row = rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return {
+    ...toEvent(row),
+    description: row.description,
+    address: row.address,
+    viewerRespondedAt: row.viewer_responded_at,
+  };
+}
+
+/**
+ * The guard trigger's refusals (`20260927154335_event_attendance_guard.sql`), by the constraint name
+ * each raise carries, mapped to the closed `EVENT_ISSUES` vocabulary. `event_attendances_immutable`
+ * is deliberately absent: no API path moves a row, so reaching it is a bug and stays a 500.
+ */
+const GUARD_ISSUES: Readonly<Record<string, EventIssue>> = {
+  event_attendances_rsvp_open: 'rsvp_closed',
+  event_attendances_event_active: 'cancelled',
+  event_attendances_locked: 'attendance_locked',
+  event_attendances_checkin_window: 'checkin_not_open',
+};
+
+/**
+ * What a guard refusal means, walked out of whatever the driver wrapped it in (the `isSlugCollision`
+ * cause-chain walk, generalised): the mapped machine code for a 23514, `'not_found'` for the 23503
+ * `event_attendances_event_visible`, and null for anything else (which the caller rethrows).
+ * `checkin_window` keeps the side the database named in its message (`checkin_not_open` before the
+ * window, `checkin_closed` after it).
+ */
+export function guardIssue(error: unknown): EventIssue | 'not_found' | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current !== null && current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as {
+      code?: unknown;
+      constraint_name?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    if (
+      candidate.code === '23503' &&
+      candidate.constraint_name === 'event_attendances_event_visible'
+    ) {
+      return 'not_found';
+    }
+    if (candidate.code === '23514' && typeof candidate.constraint_name === 'string') {
+      const issue = GUARD_ISSUES[candidate.constraint_name];
+      if (issue === 'checkin_not_open' && candidate.message === 'checkin_closed') {
+        return 'checkin_closed';
+      }
+      if (issue) return issue;
+    }
+    current = candidate.cause;
+  }
+  return null;
+}
+
+/** One row of the RSVP upsert: the new status, and the snapshot taken in the same statement. */
+type RsvpRow = {
+  status: AttendanceStatus;
+  previous_status: AttendanceStatus | null;
+  starts_at: string | null;
+};
+
+/**
+ * `PUT /v1/events/{eventId}/rsvp { answer }` (EVENT-03, D-204, D-205).
+ *
+ * ONE statement inside `withTenantTx`: a data-modifying CTE snapshots the previous status and the
+ * event's `starts_at` (every CTE reads the same snapshot, taken before the write), then upserts on
+ * `event_attendances_tenant_event_user_uq`. The `do update … where` does two jobs:
+ *  - `status in ('going','not_going')`: a checked-in or walk-in row is never rewritten by an answer;
+ *  - `status is distinct from excluded.status`: a REPEAT answer writes nothing, so `updated_at` and
+ *    `responded_at` stay put and no event is emitted.
+ * Zero rows back means "unchanged or locked", told apart by a follow-up read of the viewer's row
+ * (for the answer only, never for the decision, which the database already made).
+ *
+ * **The database decides WHEN** (D-204). The guard trigger fires on the proposed tuple BEFORE the
+ * arbiter, reads the event `FOR SHARE` and raises by constraint name. `guardIssue` maps each refusal:
+ * `409 CONFLICT { event: 'rsvp_closed' | 'cancelled' | 'attendance_locked' }`, and an unknown or
+ * foreign event is a bare 404 (the guard's 23503 comes first, so the composite FK never answers).
+ *
+ * `event.rsvp` is emitted after `withTenantTx` resolved, only when the status changed.
+ */
+export async function rsvpEvent(
+  ctx: RequestContext,
+  eventId: string,
+  input: RsvpInput,
+): Promise<RsvpResult> {
+  const answer = input.answer;
+  let outcome: { status: AttendanceStatus; changed: RsvpRow | null };
+  try {
+    outcome = await withTenantTx(ctx, async (tx) => {
+      const written = await tx.execute<RsvpRow>(sql`
+        with previous as (
+          select status
+            from event_attendances
+           where tenant_id = ${ctx.tenantId}::uuid
+             and event_id = ${eventId}::uuid
+             and user_id = ${ctx.userId}::uuid
+        ),
+        ev as (
+          select to_char(starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at
+            from events
+           where tenant_id = ${ctx.tenantId}::uuid
+             and id = ${eventId}::uuid
+             and deleted_at is null
+        ),
+        upserted as (
+          insert into event_attendances (tenant_id, event_id, user_id, status, responded_at)
+          values (${ctx.tenantId}::uuid, ${eventId}::uuid, ${ctx.userId}::uuid, ${answer}, now())
+          on conflict (tenant_id, event_id, user_id) do update
+             set status = excluded.status,
+                 responded_at = now(),
+                 updated_at = now()
+           where event_attendances.status in ('going','not_going')
+             and event_attendances.status is distinct from excluded.status
+          returning status
+        )
+        select upserted.status,
+               (select status from previous) as previous_status,
+               (select starts_at from ev) as starts_at
+          from upserted`);
+      const row = written[0];
+      if (row) return { status: row.status, changed: row };
+
+      // Nothing written: the same answer again, or a row that has checked in.
+      const current = await tx.execute<{ status: AttendanceStatus }>(sql`
+        select status
+          from event_attendances
+         where tenant_id = ${ctx.tenantId}::uuid
+           and event_id = ${eventId}::uuid
+           and user_id = ${ctx.userId}::uuid
+         limit 1`);
+      const status = current[0]?.status;
+      if (status === undefined) throw new ApiError(500, 'INTERNAL');
+      if (status !== answer) {
+        throw new ApiError(409, 'CONFLICT', { event: 'attendance_locked' });
+      }
+      return { status, changed: null };
+    });
+  } catch (error) {
+    const issue = guardIssue(error);
+    if (issue === 'not_found') throw new ApiError(404, 'NOT_FOUND');
+    if (issue) throw new ApiError(409, 'CONFLICT', { event: issue });
+    throw error;
+  }
+
+  const changed = outcome.changed;
+  if (changed?.starts_at) {
+    emit(ctx, 'event.rsvp', {
+      tenantId: ctx.tenantId,
+      eventId,
+      userId: ctx.userId,
+      status: answer,
+      previousStatus: changed.previous_status,
+      startsAt: changed.starts_at,
+    });
+  }
+
+  log.info(
+    {
+      event: 'events.rsvp',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      answer,
+      changed: changed !== null,
+    },
+    'event rsvp',
+  );
+
+  return { status: outcome.status };
 }

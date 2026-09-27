@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(131);
+select plan(139);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -202,6 +202,14 @@ insert into public.events
 insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code) values
   ('0a000000-0000-4000-8000-0000000000e9', '0a000000-0000-4000-8000-000000000001', 'in_person', 'K7QM'),
   ('0b000000-0000-4000-8000-0000000000e9', '0b000000-0000-4000-8000-000000000001', 'in_person', 'K7QM');
+
+-- 06-03: ONE attendance per tenant, IDENTICAL on both sides (each tenant's member answered `going`
+-- on that tenant's event 'x'). The events start tomorrow, so the guard trigger lets the fixture in.
+insert into public.event_attendances (id, tenant_id, event_id, user_id, status, responded_at) values
+  ('0a000000-0000-4000-8000-0000000000ea', '0a000000-0000-4000-8000-000000000001',
+   '0a000000-0000-4000-8000-0000000000e9', '0a000000-0000-4000-8000-000000000002', 'going', now()),
+  ('0b000000-0000-4000-8000-0000000000ea', '0b000000-0000-4000-8000-000000000001',
+   '0b000000-0000-4000-8000-0000000000e9', '0b000000-0000-4000-8000-000000000002', 'going', now());
 
 -- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
 -- global) and RLS with ZERO policies, like platform_admins and tenant_invites: one community's
@@ -873,6 +881,45 @@ select results_eq(
   'USING: an update aimed at B''s events touches nothing'
 );
 
+-- ── event_attendances: the same six cases (06-03), from A's MEMBER lane. The select policy is
+--    tenant-wide (the in-lane counts need it), so what is proved here is the TENANT scope. ─────────
+select results_eq(
+  $$ select count(*)::int from public.event_attendances
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own event_attendances row'
+);
+select results_eq(
+  $$ select count(*)::int from public.event_attendances where status = 'going' $$,
+  ARRAY[1],
+  'adjacency: both tenants have a going answer, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text from public.event_attendances where status = 'going' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'and the attendance it returns belongs to A'
+);
+select is_empty(
+  $$ select id from public.event_attendances where id = '0b000000-0000-4000-8000-0000000000ea' $$,
+  'detail by id: B''s attendance row is not found through A''s lane'
+);
+select throws_ok(
+  $$ insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000000e9',
+             '0a000000-0000-4000-8000-000000000002', 'going', now()) $$,
+  '23503',
+  'event_not_found',
+  'A cannot write an attendance stamped with B''s tenant: the guard cannot even see B''s event through A''s lane'
+);
+select results_eq(
+  $$ with u as (
+       update public.event_attendances set status = 'not_going'
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: an update aimed at B''s attendance touches nothing'
+);
+
 -- ── event_secrets: the same six cases (06-01), from A's ADMIN lane. A member lane already sees no
 --    secrets row of its OWN tenant by design (`140-events.sql` fact 8), so only the admin lane can
 --    show that the tenant scope is also right: it sees A's row and none of B's. ──────────────────
@@ -1061,6 +1108,16 @@ select results_eq(
 select is_empty(
   $$ select id from public.events where id = '0a000000-0000-4000-8000-0000000000e9' $$,
   'symmetry: A''s event is not found through B''s lane'
+);
+-- 06-03, the attendance half of the symmetry: B's member lane returns B's own answer, never A's.
+select results_eq(
+  $$ select tenant_id::text from public.event_attendances where status = 'going' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s attendance for the same answer'
+);
+select is_empty(
+  $$ select id from public.event_attendances where id = '0a000000-0000-4000-8000-0000000000ea' $$,
+  'symmetry: A''s attendance row is not found through B''s lane'
 );
 reset role;
 select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'admin_tenant');

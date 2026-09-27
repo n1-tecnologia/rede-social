@@ -513,7 +513,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // Both sides from the DATABASE: `events` is enabled for tria-lab too (D-17), so the lab has its
     // own seeded events with titles IDENTICAL to the demo's (§(j) adjacency) — which is why every
     // assertion below compares ids, never titles. The detail route is 06-03's, so its cross-tenant
-    // 404 is asserted there; this case owns the LIST.
+    // 404 is asserted there and again below (06-03); this case owns the LIST and the detail.
     const labEvents = await adminSql<{ id: string }[]>`
       select id from public.events where tenant_id = ${tenantIds.lab}::uuid`;
     const demoEvents = await adminSql<{ id: string }[]>`
@@ -551,6 +551,42 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     });
     expect(mismatch.status).toBe(403);
     expect(await code(mismatch)).toBe('TENANT_HOST_MISMATCH');
+
+    // 06-03: the DETAIL route. A lab event id read by the demo member is ONE bare 404 with no
+    // details (D-23), exactly like an unknown id, and answering it is the same bare 404 with nothing
+    // written; the demo member's own event is 200 (the positive control, in the same test).
+    for (const id of labIds.slice(0, 2)) {
+      const foreign = await request(`/v1/events/${id}`, tokens.demoMember, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      expect(foreign.status).toBe(404);
+      const text = await foreign.text();
+      const body = JSON.parse(text) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.details).toBeUndefined();
+      expect(text).not.toContain(id);
+
+      const answer = await api.request(`/v1/events/${id}/rsvp`, {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${tokens.demoMember}`,
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ answer: 'going' }),
+      });
+      expect(answer.status).toBe(404);
+      expect(((await answer.json()) as Envelope).error.details).toBeUndefined();
+    }
+    const [written] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.event_attendances a
+        join public.users u on u.id = a.user_id
+       where a.tenant_id = ${tenantIds.lab}::uuid and u.email = 'member@tria-demo.local'`;
+    expect(written?.n).toBe(0);
+    const own = await request(`/v1/events/${demoEvents[0]?.id ?? ''}`, tokens.demoMember, {
+      [TENANT_HOST_HEADER]: HOSTS.demo,
+    });
+    expect(own.status).toBe(200);
   });
 
   it("b5. covers: a demo admin cannot point a community at the lab's asset, and learns nothing by trying (05-09)", async () => {
@@ -1194,6 +1230,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       REELS_LANES_PATH,
       // 06-01: the events list joins the loop — SCHEMA-CONVENTIONS §(j) rule 2.
       '/v1/events',
+      // 06-03: the event detail joins it too (the demo's own seeded upcoming event).
+      '/v1/events/0d000000-0000-4000-8000-000000000e01',
     ]) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);

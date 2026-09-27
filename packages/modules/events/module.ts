@@ -32,6 +32,13 @@ export const eventsModule = defineModule({
         log.info({ event: 'event.published', ...payload }, 'event published');
       },
     },
+    {
+      event: 'event.rsvp',
+      handler: async (payload) => {
+        // Shape only (06-03): ids, statuses and `startsAt`, which Phase 7's reminders schedule from.
+        log.info({ event: 'event.rsvp', ...payload }, 'event rsvp');
+      },
+    },
   ],
   defaultRolePermissions: {
     admin_tenant: [

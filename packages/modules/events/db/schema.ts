@@ -3,6 +3,7 @@ import { mediaAssets, tenants, users } from '@tria/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
   check,
+  foreignKey,
   index,
   pgPolicy,
   pgTable,
@@ -53,6 +54,9 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  * `events` keeps the standard `for all` isolation policy: the RSVP guard trigger (06-03) reads the
  * event row `FOR SHARE` from a member lane, which needs the UPDATE policy to see it. Who may WRITE an
  * event is `requirePermission('events.event.manage')`, the Phase 4/5 posture.
+ *
+ * `event_attendances` (06-03) is the third table: one row per member per event, policed for EVERY
+ * writer by the hand-written guard trigger `app.event_attendance_guard()` (see its docblock below).
  *
  * Owned by `packages/modules/events` and picked up by `apps/api/drizzle.config.ts`'s module glob.
  */
@@ -171,6 +175,115 @@ export const eventSecrets = pgTable(
       to: authenticatedRole,
       using: STAFF_ONLY,
       withCheck: STAFF_ONLY,
+    }),
+  ],
+).enableRLS();
+
+/**
+ * The RSVP write policies' ONE predicate, for `with check` and (update) `using` alike: this tenant,
+ * the caller's OWN row, and only an RSVP status. `checked_in` / `walk_in` are unreachable from a
+ * member lane (T-06-11): 06-05/06-06 write them through SECURITY DEFINER functions.
+ */
+const SELF_RSVP = sql`tenant_id = app.tenant_id() and user_id = app.user_id() and status in ('going','not_going')`;
+
+/**
+ * One member's attendance at one event (EVENT-03, D-216): their RSVP answer and, later, their
+ * check-in. THREE THINGS A REVIEWER MUST NOT "FIX":
+ *
+ * 1. **`status` is one column with four values** (`going`, `not_going`, `checked_in`, `walk_in`),
+ *    never boolean pairs (SCHEMA-CONVENTIONS §(d).1). Walk-in is its OWN value (D-216), set when a
+ *    check-in lands on no row or on a `not_going` row; `going -> checked_in` keeps `responded_at`, so
+ *    "Confirmou em" survives the check-in. Every attendance chip is then one status predicate, and
+ *    the member-facing count is `going + checked_in` (D-219), computed at READ time: a counter row
+ *    updated inside the guard's `FOR SHARE` would upgrade the lock and deadlock two concurrent
+ *    RSVPs (Pitfall 3).
+ *
+ * 2. **The select policy is tenant-wide, the write policies are self-only.** The in-lane counts
+ *    (`count(*) filter …`) need every row of the event visible to the member's lane. Who-is-going
+ *    privacy (D-206) is an API property: no member payload ever projects another member's row. There
+ *    is NO delete policy: answers and check-ins always survive (D-214, T-06-15).
+ *
+ * 3. **When an answer is still allowed is NOT expressed here.** A CHECK cannot read `events`, so the
+ *    rule "no RSVP from `starts_at` on, nothing on a cancelled event, a checked-in row is locked, a
+ *    check-in only inside its window" lives in the hand-written BEFORE INSERT OR UPDATE trigger
+ *    `event_attendances_guard` (`supabase/migrations/*_event_attendance_guard.sql`), which applies to
+ *    every writer, admin lane included (D-204).
+ */
+export const eventAttendances = pgTable(
+  'event_attendances',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').notNull(),
+    /** Does not cascade, like every other authored row (`users` rows are not deleted). */
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    /** `'going' | 'not_going' | 'checked_in' | 'walk_in'` (fact 1). */
+    status: text().notNull(),
+    /** The LAST RSVP answer's instant, kept after check-in. Null only on a walk-in. */
+    respondedAt: timestamp('responded_at', { withTimezone: true }),
+    checkedInAt: timestamp('checked_in_at', { withTimezone: true }),
+    /** `'code' | 'online'`, present exactly when checked in. */
+    checkinVia: text('checkin_via'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Composite, so an attendance can only point at an event of ITS OWN tenant.
+    foreignKey({
+      name: 'event_attendances_event_fk',
+      columns: [t.tenantId, t.eventId],
+      foreignColumns: [events.tenantId, events.id],
+    }).onDelete('cascade'),
+    // The RSVP upsert's arbiter, and the viewer join's lookup.
+    uniqueIndex('event_attendances_tenant_event_user_uq').on(t.tenantId, t.eventId, t.userId),
+    // The count aggregate and 06-07's status chips. `.nullsFirst()` on the DESC columns matches
+    // SQL's `order by x desc` (the 04-03 lesson).
+    index('event_attendances_tenant_event_status_idx').on(
+      t.tenantId,
+      t.eventId,
+      t.status,
+      t.respondedAt.desc().nullsFirst(),
+      t.id.desc().nullsFirst(),
+    ),
+    // 06-07's Presentes chip.
+    index('event_attendances_tenant_event_checkin_idx')
+      .on(t.tenantId, t.eventId, t.checkedInAt.desc().nullsFirst(), t.id.desc().nullsFirst())
+      .where(sql`checked_in_at is not null`),
+    check(
+      'event_attendances_status_chk',
+      sql`${t.status} in ('going','not_going','checked_in','walk_in')`,
+    ),
+    check(
+      'event_attendances_checkin_chk',
+      sql`(${t.status} in ('checked_in','walk_in')) = (${t.checkedInAt} is not null) and (${t.status} in ('checked_in','walk_in')) = (${t.checkinVia} is not null)`,
+    ),
+    check(
+      'event_attendances_via_chk',
+      sql`${t.checkinVia} is null or ${t.checkinVia} in ('code','online')`,
+    ),
+    check(
+      'event_attendances_answered_chk',
+      sql`${t.status} = 'walk_in' or ${t.respondedAt} is not null`,
+    ),
+    pgPolicy('event_attendances_tenant_select', {
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id()`,
+    }),
+    pgPolicy('event_attendances_self_rsvp_insert', {
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: SELF_RSVP,
+    }),
+    pgPolicy('event_attendances_self_rsvp_update', {
+      for: 'update',
+      to: authenticatedRole,
+      using: SELF_RSVP,
+      withCheck: SELF_RSVP,
     }),
   ],
 ).enableRLS();

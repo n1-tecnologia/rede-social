@@ -1,4 +1,4 @@
-import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
+import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import type { AppEnv } from '@tria/core/server/auth/context';
 import { requireAuth } from '@tria/core/server/auth/require-auth';
 import { ApiError } from '@tria/core/server/http/api-error';
@@ -6,12 +6,15 @@ import { requireModule } from '@tria/core/server/modules/require-module';
 import { requirePermission } from '@tria/core/server/rbac/permissions';
 import {
   EVENT_ISSUE_SET,
+  eventDetailSchema,
   eventInputSchema,
   eventPageSchema,
   eventQuerySchema,
   eventSummarySchema,
+  rsvpResultSchema,
+  rsvpSchema,
 } from '../contracts/index';
-import { createEvent, listEvents } from './service';
+import { createEvent, getEvent, listEvents, rsvpEvent } from './service';
 
 /**
  * The module owns its guard chain: the mount in `apps/api/src/app.ts` is a plain
@@ -94,10 +97,72 @@ const createEventRoute = createRoute({
   },
 });
 
+/** The path parameter: a malformed id is a 400 before any read, never a 500 at the `::uuid` cast. */
+const eventParamSchema = z.object({ eventId: z.uuid() });
+
+/** The detail carries NO permission middleware: every member of the tenant reads an event (EVENT-02). */
+const detailRoute = createRoute({
+  method: 'get',
+  path: '/{eventId}',
+  request: { params: eventParamSchema },
+  responses: {
+    200: {
+      description:
+        "One event of the caller's tenant: the list item plus `description`, `address` (null online) and `viewerRespondedAt`. It carries the caller's OWN attendance (`viewerStatus`, `viewerCheckedInAt`, `viewerRespondedAt`) and two counts (`confirmedCount` = going + checked_in, `presentCount` = checked_in + walk_in), and never another member's id, name or avatar (D-206). No meeting URL and no check-in code.",
+      content: { 'application/json': { schema: eventDetailSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const rsvpRoute = createRoute({
+  method: 'put',
+  path: '/{eventId}/rsvp',
+  // The literal, for the same reason as the create route (T-06-12): V1 grants it to every role, so no
+  // member is refused, but granting or revoking it later is a manifest line, not a route edit.
+  middleware: [requirePermission('events.attendance.respond')] as const,
+  request: {
+    params: eventParamSchema,
+    body: { content: { 'application/json': { schema: rsvpSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        "The caller's attendance status after the call. `going` and `not_going` change freely until `starts_at`; the same answer twice answers 200 both times, writes nothing and emits nothing.",
+      content: { 'application/json': { schema: rsvpResultSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: the id is not a uuid, or `answer` is not `going` | `not_going`.',
+    },
+    403: {
+      description: 'The caller does not hold `events.attendance.respond` in this tenant',
+    },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.event`, decided by the DATABASE for every writer (D-204): `rsvp_closed` (the event has started), `cancelled` (the event is cancelled, D-201) or `attendance_locked` (the caller has already checked in).',
+    },
+  },
+});
+
 export const eventsRoutes = events
   .openapi(listRoute, async (c) =>
     c.json(await listEvents(c.get('ctx'), c.req.valid('query')), 200),
   )
   .openapi(createEventRoute, async (c) =>
     c.json(await createEvent(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(detailRoute, async (c) =>
+    c.json(await getEvent(c.get('ctx'), c.req.valid('param').eventId), 200),
+  )
+  .openapi(rsvpRoute, async (c) =>
+    c.json(await rsvpEvent(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')), 200),
   );

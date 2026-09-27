@@ -103,6 +103,19 @@ const STORY_TABLES_PATTERN = 'stories';
  */
 const STORY_HIGHLIGHT_TABLES_PATTERN = 'stor(ies|y_highlights|y_highlight_items)';
 
+/**
+ * 06-03: `GET /v1/events` — ONE statement per page, the viewer's own attendance and the two D-219
+ * counts included. The counts come from a lateral aggregate inside `eventSource`, so a per-poster
+ * count lookup would show up here as 10 statements instead of 1.
+ */
+const EVENT_LIST_STATEMENT_BUDGET = 1;
+
+/**
+ * `events` as a whole word (never `media_provider_events`, whose `_` is a word character) and
+ * `event_attendances`: every statement that touches either table is counted.
+ */
+const EVENT_TABLES_PATTERN = '\\yevents\\y|event_attendances';
+
 let token = '';
 /**
  * The demo ADMIN (05.1-02): the archived community list is a manager read (D-89), so its budget is
@@ -267,6 +280,42 @@ async function communityCalls(): Promise<number> {
      where query ~ ${COMMUNITY_TABLES_PATTERN}`;
   return measured?.calls ?? 0;
 }
+
+/** Sum of `calls` over the EVENT tables since the last reset — filtered, never a total. */
+async function eventCalls(): Promise<number> {
+  const [measured] = await adminSql<{ calls: number }[]>`
+    select coalesce(sum(calls), 0)::int as calls
+      from pg_stat_statements
+     where query ~ ${EVENT_TABLES_PATTERN}`;
+  return measured?.calls ?? 0;
+}
+
+describe('GET /v1/events — the events list query budget (06-03)', () => {
+  it(`costs at most ${EVENT_LIST_STATEMENT_BUDGET} statement against the event tables, counts included`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+
+    const res = await api.request('/v1/events?period=upcoming&limit=10', {
+      headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { confirmedCount: number | null; presentCount: number | null }[];
+    };
+    // Guard against a vacuous pass: the seeded upcoming events are on the page, each carrying both
+    // counts, and at least one of them is non-zero (the seeded answers), so the aggregate really ran.
+    expect(body.items.length).toBeGreaterThan(0);
+    for (const item of body.items) {
+      expect(item.confirmedCount).not.toBeNull();
+      expect(item.presentCount).not.toBeNull();
+    }
+    expect(body.items.some((item) => (item.confirmedCount ?? 0) > 0)).toBe(true);
+
+    // Floor AND ceiling: a zero would mean the regex matched nothing, not that the page got cheaper.
+    const calls = await eventCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(EVENT_LIST_STATEMENT_BUDGET);
+  });
+});
 
 /** Sum of `calls` over the STORY table since the last reset — filtered, never a total. */
 async function storyCalls(): Promise<number> {

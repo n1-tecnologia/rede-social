@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ATTENDANCE_STATUSES,
   EVENT_ISSUE_SET,
   EVENT_ISSUES,
   EVENT_MAX_PAGE_SIZE,
   EVENT_PAGE_SIZE,
+  eventDetailSchema,
   eventInputSchema,
   eventQuerySchema,
   eventSummarySchema,
+  RSVP_ANSWERS,
+  rsvpResultSchema,
+  rsvpSchema,
 } from '../contracts/index';
 
 /**
@@ -154,11 +159,65 @@ describe('eventSummarySchema — no secret key exists (D-207)', () => {
       startsAt: '2026-10-12T22:00:00.000000Z',
       endsAt: '2026-10-13T00:00:00.000000Z',
       status: 'active',
+      viewerStatus: null,
+      viewerCheckedInAt: null,
+      confirmedCount: 0,
+      presentCount: 0,
     };
     expect(eventSummarySchema.safeParse(summary).success).toBe(true);
     expect(
       eventSummarySchema.safeParse({ ...summary, meetingUrl: 'https://meet.example.test/x' })
         .success,
     ).toBe(false);
+  });
+});
+
+/** A valid detail payload, the positive control every case below mutates. */
+const detail = {
+  id: '11111111-1111-4111-8111-111111111111',
+  title: 't',
+  format: 'in_person',
+  venueName: 'Sede',
+  coverAssetId: null,
+  coverVariantWidths: [],
+  startsAt: '2026-10-12T22:00:00.000000Z',
+  endsAt: '2026-10-13T00:00:00.000000Z',
+  status: 'active',
+  viewerStatus: 'going',
+  viewerCheckedInAt: null,
+  confirmedCount: 1204,
+  presentCount: 0,
+  description: '',
+  address: 'Rua das Flores, 100',
+  viewerRespondedAt: '2026-10-10T12:00:00.000000Z',
+};
+
+describe('06-03 — attendance vocabulary, detail and RSVP contracts', () => {
+  it('12. the status vocabulary is the four D-216 values, and an answer is only going | not_going', () => {
+    expect([...ATTENDANCE_STATUSES]).toEqual(['going', 'not_going', 'checked_in', 'walk_in']);
+    expect([...RSVP_ANSWERS]).toEqual(['going', 'not_going']);
+  });
+
+  it('13. the detail carries the viewer state and two counts, and NO url, code or attendee key (D-206, D-207)', () => {
+    expect(eventDetailSchema.safeParse(detail).success).toBe(true);
+    const keys = Object.keys(eventDetailSchema.shape);
+    for (const forbidden of ['meetingUrl', 'checkinCode', 'attendees', 'attendeeIds', 'userId']) {
+      expect(keys).not.toContain(forbidden);
+    }
+    expect(eventDetailSchema.safeParse({ ...detail, checkinCode: 'K7QM' }).success).toBe(false);
+    expect(eventDetailSchema.safeParse({ ...detail, attendees: [] }).success).toBe(false);
+    // The counts are exact non-negative integers (never rounded or abbreviated on the wire).
+    expect(eventDetailSchema.safeParse({ ...detail, confirmedCount: 1.5 }).success).toBe(false);
+    expect(eventDetailSchema.safeParse({ ...detail, presentCount: -1 }).success).toBe(false);
+  });
+
+  it('14. rsvpSchema is strict: only { answer: going | not_going }', () => {
+    expect(rsvpSchema.safeParse({ answer: 'going' }).success).toBe(true);
+    expect(rsvpSchema.safeParse({ answer: 'not_going' }).success).toBe(true);
+    expect(rsvpSchema.safeParse({ answer: 'checked_in' }).success).toBe(false);
+    expect(rsvpSchema.safeParse({ answer: 'walk_in' }).success).toBe(false);
+    expect(rsvpSchema.safeParse({ answer: 'going', userId: detail.id }).success).toBe(false);
+    expect(rsvpSchema.safeParse({}).success).toBe(false);
+    expect(rsvpResultSchema.safeParse({ status: 'checked_in' }).success).toBe(true);
   });
 });

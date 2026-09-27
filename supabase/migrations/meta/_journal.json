@@ -246,6 +246,20 @@
       "when": 1790520798121,
       "tag": "20260927145318_events",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1790523806871,
+      "tag": "20260927154326_event_attendances",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790523815982,
+      "tag": "20260927154335_event_attendance_guard",
+      "breakpoints": true
     }
   ]
 }

@@ -44,6 +44,10 @@ function event(overrides: Partial<EventSummary> = {}): EventSummary {
     startsAt: '2026-10-12T22:00:00.000000Z',
     endsAt: '2026-10-13T00:00:00.000000Z',
     status: 'active',
+    viewerStatus: null,
+    viewerCheckedInAt: null,
+    confirmedCount: 0,
+    presentCount: 0,
     ...overrides,
   };
 }
