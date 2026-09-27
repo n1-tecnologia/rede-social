@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 import { devices, expect, type Locator, type Page, test } from '@playwright/test';
 import eventMessages from '../messages/pt-BR/events.json' with { type: 'json' };
 import {
+  addEventsMember,
+  attendanceFor,
   closeEventsAdmin,
   createEventsTenant,
   deleteEventsByTitlePrefix,
@@ -782,7 +784,10 @@ test.describe('events admin', () => {
     await submit(page).click();
     await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
     await expect(page.getByTestId('event-maps-link')).toBeVisible();
-    expect(await secretsFor(inPersonId)).toEqual({ eventFormat: 'in_person', meetingUrl: null });
+    expect(await secretsFor(inPersonId)).toMatchObject({
+      eventFormat: 'in_person',
+      meetingUrl: null,
+    });
   });
 
   test('3. cancel from the form, the member still sees it cancelled, and Reativar brings it back', async ({
@@ -845,5 +850,226 @@ test.describe('events admin', () => {
     } finally {
       await memberContext.close();
     }
+  });
+});
+
+/**
+ * EVENT-04 in person, on a phone (06-05, UI-D-207 / UI-D-208, sketch 006 surface 3): the member at
+ * the venue types the code the organiser reads aloud and becomes present, confirmed or not.
+ *
+ * One throwaway tenant (`e2e-events-checkin`), phone only, serial. Every event is written RELATIVE
+ * to the database's `now()` (`insertEvent`), so the window is really open (Pitfall 7: the API and the
+ * database use the real clock). The code is learned ONLY through `secretsFor`, the superuser read no
+ * browser can make; the walk-in is proved through `attendanceFor` (the status is admin-only in the UI).
+ *
+ * The main event carries a 60-character venue: the UI E08 long-text backstop (the Local cell
+ * truncates on one line at 320px without widening its column) and the Data-cell fix (the date prints
+ * without its weekday, so it fits a third of the ticket at 390 and 320) are measured on it.
+ */
+test.describe('events check-in', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  const SLUG = 'e2e-events-checkin';
+  /** 60 characters: the E08 backstop fixture. */
+  const LONG_VENUE = 'Auditorio Principal do Centro de Convencoes Anhembi, Bloco B';
+  let tenant: EventsTenant | null = null;
+  let walkInEmail = '';
+  const ids = { live: '', later: '', online: '' };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    tenant = await createEventsTenant(SLUG, SEED_PASSWORD);
+    walkInEmail = await addEventsMember(tenant, 'sem.resposta', 'Membro Sem Resposta');
+    ids.live = await insertEvent(tenant.tenantId, {
+      title: 'Encontro presencial com check-in',
+      venueName: LONG_VENUE,
+      startsInMinutes: 30,
+      endsInMinutes: 150,
+    });
+    ids.later = await insertEvent(tenant.tenantId, {
+      title: 'Encontro mais tarde',
+      startsInMinutes: 180,
+      endsInMinutes: 300,
+    });
+    ids.online = await insertEvent(tenant.tenantId, {
+      title: 'Live com check-in',
+      format: 'online',
+      startsInMinutes: 30,
+      endsInMinutes: 150,
+    });
+  });
+
+  test.afterAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    await deleteEventsTenant(SLUG);
+    await closeEventsAdmin();
+  });
+
+  const cta = (page: Page) => page.getByRole('link', { name: E.checkin.cta });
+  const codeField = (page: Page) => page.getByLabel(E.checkin.codeLabel);
+  const confirm = (page: Page) => page.getByRole('button', { name: E.checkin.submit });
+  /** The form's own `role="alert"` slot (the page has others, e.g. Next's route announcer). */
+  const fieldAlert = (page: Page) => page.getByTestId('event-ticket').getByRole('alert');
+
+  /** Fills the code once React owns the field: the submit only enables on the client's state. */
+  async function typeCode(page: Page, code: string) {
+    await expect(async () => {
+      await codeField(page).fill(code);
+      await expect(confirm(page)).toBeEnabled({ timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+  }
+
+  /** `true` when an element's text is cut by its own box (the `truncate` ellipsis is showing). */
+  const isCut = (locator: Locator) =>
+    locator.evaluate((node) => node.scrollWidth > node.clientWidth + 1);
+
+  test('1. after Vou, "Fazer check-in" opens the ticket; at 320px the long Local cell truncates and Data/Horário keep their width', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events check-in tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${ids.live}`);
+
+    // P1: the pair is still open; answer Vou, then the ONE brand CTA below it.
+    const vou = page
+      .getByRole('group', { name: E.rsvp.label })
+      .getByRole('button', { name: E.rsvp.going, exact: true });
+    await vou.dispatchEvent('click');
+    await expect(vou).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.going);
+    await expect(cta(page)).toHaveAttribute('href', `/eventos/${ids.live}/check-in`);
+    await expect(page.getByTestId('event-actions').locator('.bg-brand')).toHaveCount(1);
+
+    await cta(page).click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${ids.live}/check-in$`));
+    await expect(page.getByRole('heading', { level: 1, name: E.checkin.title })).toBeVisible();
+    await expect(page.getByText(E.checkin.tip)).toBeVisible();
+    await expect(codeField(page)).toHaveAttribute('maxlength', '4');
+    await expect(confirm(page)).toBeDisabled();
+
+    const ticket = page.getByTestId('event-ticket');
+    const cells = ticket.getByTestId('event-info-cell');
+    const values = ticket.getByTestId('event-info-value');
+    await expect(cells).toHaveCount(3);
+    await expect(values.nth(2)).toHaveText(LONG_VENUE);
+
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      // The Data cell fits (the weekday-free date); the 60-character venue is cut on one line.
+      expect(await isCut(values.nth(0)), `Data cut at ${width}px`).toBe(false);
+      expect(await isCut(values.nth(1)), `Horário cut at ${width}px`).toBe(false);
+      expect(await isCut(values.nth(2)), `Local not cut at ${width}px`).toBe(true);
+      const boxes = await Promise.all([0, 1, 2].map((i) => cells.nth(i).boundingBox()));
+      const widths = boxes.map((box) => Math.round(box?.width ?? 0));
+      // Three equal columns: the long venue widens nothing.
+      expect(Math.max(...widths) - Math.min(...widths), `widths ${widths}`).toBeLessThanOrEqual(1);
+      const valueHeight = (await values.nth(2).boundingBox())?.height ?? 0;
+      const dataHeight = (await values.nth(0).boundingBox())?.height ?? 0;
+      expect(Math.abs(valueHeight - dataHeight), 'the Local value stays on one line').toBeLessThan(
+        2,
+      );
+      // The ticket stays inside its 16px gutters.
+      const ticketBox = await ticket.boundingBox();
+      expect(ticketBox?.x ?? 0).toBeGreaterThanOrEqual(15);
+      expect((ticketBox?.x ?? 0) + (ticketBox?.width ?? 0)).toBeLessThanOrEqual(width - 15);
+    }
+  });
+
+  test('2. a wrong code: the inline error, the value kept; the right code: "Check-in confirmado!", and the detail shows the banner with no CTA', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events check-in tenant was not provisioned');
+    const { checkinCode } = await secretsFor(ids.live);
+    const wrong = checkinCode === 'ZZZZ' ? 'YYYY' : 'ZZZZ';
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${ids.live}/check-in`);
+
+    await expect(fieldAlert(page)).toHaveCount(0);
+    await typeCode(page, wrong.toLowerCase());
+    await expect(codeField(page)).toHaveValue(wrong);
+    await confirm(page).click();
+    await expect(fieldAlert(page)).toHaveText(E.checkin.errors.wrongCode);
+    await expect(codeField(page)).toHaveValue(wrong);
+    await expect(codeField(page)).toHaveAttribute('aria-invalid', 'true');
+
+    await typeCode(page, checkinCode);
+    await confirm(page).click();
+    const done = page.getByRole('heading', { name: E.checkin.doneTitle });
+    await expect(done).toBeVisible();
+    await expect(done).toBeFocused();
+    await expect(page.getByTestId('checkin-done-at')).toHaveText(
+      new RegExp(`^${literal(E.checkin.doneAt).replace(literal('{time}'), '\\d{2}:\\d{2}')}$`),
+    );
+    await expect(confirm(page)).toHaveCount(0);
+    expect(await attendanceFor(ids.live, tenant.memberEmail)).toEqual({
+      status: 'checked_in',
+      checkinVia: 'code',
+    });
+
+    await page.getByRole('link', { name: E.checkin.back, exact: true }).last().click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${ids.live}$`));
+    const banner = page.getByTestId('event-banner');
+    await expect(banner).toHaveAttribute('data-kind', 'checkedIn');
+    await expect(banner).toContainText(E.checkin.banner);
+    await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.present);
+    await expect(page.getByTestId('event-actions-checkin')).toHaveCount(0);
+    await expect(page.getByRole('group', { name: E.rsvp.label })).toHaveCount(0);
+
+    // Back on the ticket, the state is read from the database: done, with no form.
+    await page.goto(`${tenant.origin}/eventos/${ids.live}/check-in`);
+    await expect(page.getByTestId('checkin-done')).toBeVisible();
+    await expect(page.getByTestId('checkin-form')).toHaveCount(0);
+  });
+
+  test('3. a member who never answered checks in with the same code and is recorded as a walk-in', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events check-in tenant was not provisioned');
+    const { checkinCode } = await secretsFor(ids.live);
+    await login(page, walkInEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${ids.live}`);
+    await expect(cta(page)).toBeVisible();
+    await page.goto(`${tenant.origin}/eventos/${ids.live}/check-in`);
+    await typeCode(page, checkinCode);
+    await confirm(page).click();
+    await expect(page.getByRole('heading', { name: E.checkin.doneTitle })).toBeVisible();
+    expect(await attendanceFor(ids.live, walkInEmail)).toEqual({
+      status: 'walk_in',
+      checkinVia: 'code',
+    });
+    // The walk-in sees exactly the confirmed member's banner (the walk-in tag is admin-only, 06-07).
+    await page.goto(`${tenant.origin}/eventos/${ids.live}`);
+    await expect(page.getByTestId('event-banner')).toHaveAttribute('data-kind', 'checkedIn');
+    await expect(page.getByTestId('event-banner')).toContainText(E.checkin.banner);
+  });
+
+  test('4. an event starting in 3 hours: the not-open-yet sentence and no form; an online event’s /check-in is the not-found screen', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events check-in tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+
+    await page.goto(`${tenant.origin}/eventos/${ids.later}`);
+    await expect(page.getByTestId('event-actions-checkin')).toHaveCount(0);
+    await expect(page.getByText(E.rsvp.windowHint)).toBeVisible();
+
+    await page.goto(`${tenant.origin}/eventos/${ids.later}/check-in`);
+    const state = page.getByTestId('checkin-state');
+    await expect(state).toHaveAttribute('data-kind', 'notOpenYet');
+    const [prefix] = E.checkin.notOpenYet.split('{when}');
+    await expect(state).toContainText(prefix ?? '');
+    // `{when}` is "às 18:00" (the window opens today) or "em {date}, às 18:00" (another day).
+    const at = literal(E.checkin.opensAt).replace(literal('{time}'), '\\d{2}:\\d{2}');
+    await expect(state).toContainText(new RegExp(`${at}\\.$`));
+    await expect(page.getByTestId('checkin-form')).toHaveCount(0);
+    await expect(codeField(page)).toHaveCount(0);
+
+    await page.goto(`${tenant.origin}/eventos/${ids.online}/check-in`);
+    await expect(page.getByText(E.notFound.title, { exact: true })).toBeVisible();
+    await expect(codeField(page)).toHaveCount(0);
   });
 });

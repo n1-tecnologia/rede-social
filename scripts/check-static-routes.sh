@@ -89,6 +89,9 @@ const REQUIRED_KEYS = [
   // request (and the edit route the manage-only edit read), so neither may be prerendered.
   '/(app)/eventos/novo/page',
   '/(app)/eventos/[eventId]/editar/page',
+  // 06-05: the in-person check-in ticket. It reads the session, the viewer's own attendance and the
+  // request instant (open, not open yet, closed), so it may never be prerendered.
+  '/(app)/eventos/[eventId]/check-in/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

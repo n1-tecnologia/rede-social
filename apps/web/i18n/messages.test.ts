@@ -1029,3 +1029,63 @@ describe('06-04 — events form, confirm and manage strings', () => {
     );
   });
 });
+
+/**
+ * 06-05 — the check-in ticket's strings (UI-SPEC Copywriting Contract, "Check-in ticket" and the
+ * check-in error rows), verbatim. `{when}` is pinned and FORMATTED with both of its fillers, so a
+ * dropped brace or a reworded filler fails here rather than rendering "…, {when}." on a phone.
+ */
+describe('06-05 — events check-in strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.checkin.cta', 'Fazer check-in'],
+    ['events.checkin.title', 'Check-in'],
+    ['events.checkin.back', 'Voltar para o evento'],
+    ['events.checkin.codeLabel', 'Código do evento'],
+    ['events.checkin.codePlaceholder', 'Digite o código'],
+    ['events.checkin.submit', 'Confirmar check-in'],
+    ['events.checkin.submitting', 'Confirmando…'],
+    ['events.checkin.doneTitle', 'Check-in confirmado!'],
+    ['events.checkin.doneAt', 'Realizado às {time}'],
+    ['events.checkin.doneOn', 'Realizado em {date}, às {time}'],
+    ['events.checkin.notOpenYet', 'O check-in abre 1 hora antes do início, {when}.'],
+    ['events.checkin.closed', 'O check-in deste evento foi encerrado.'],
+    ['events.checkin.tip', 'Peça o código à organização, no local do evento.'],
+    [
+      'events.checkin.errors.wrongCode',
+      'Código incorreto. Confira o código com a organização do evento.',
+    ],
+    [
+      'events.checkin.errors.tooManyAttempts',
+      'Muitas tentativas incorretas. Aguarde alguns minutos e tente de novo.',
+    ],
+    ['events.checkin.errors.notOpen', 'O check-in deste evento não está aberto agora.'],
+    ['events.checkin.errors.failed', 'Não foi possível fazer o check-in. Tente novamente.'],
+    ['events.errors.cancelled', 'Este evento foi cancelado.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('notOpenYet formats with both {when} fillers ("às 18:00" and "em {date}, às 18:00")', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+    expect(t('checkin.notOpenYet', { when: t('checkin.opensAt', { time: '18:00' }) })).toBe(
+      'O check-in abre 1 hora antes do início, às 18:00.',
+    );
+    expect(
+      t('checkin.notOpenYet', {
+        when: t('checkin.opensOn', { date: 'sáb., 12 de out.', time: '18:00' }),
+      }),
+    ).toBe('O check-in abre 1 hora antes do início, em sáb., 12 de out., às 18:00.');
+  });
+});

@@ -17,3 +17,4 @@ export {
   type EventPosterPillKind,
   type EventPosterProps,
 } from './EventPoster';
+export { EventTicket, type EventTicketProps } from './EventTicket';

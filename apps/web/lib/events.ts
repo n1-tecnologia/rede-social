@@ -1,4 +1,6 @@
 import {
+  type CheckinResult,
+  checkinResultSchema,
   EVENT_PAGE_SIZE,
   type EventDetail,
   type EventEdit,
@@ -134,6 +136,24 @@ export async function putRsvp(eventId: string, answer: RsvpAnswer): Promise<Rsvp
   });
   if (!res.ok) throw await apiError(res);
   return rsvpResultSchema.parse(await res.json());
+}
+
+/**
+ * `POST /v1/events/{eventId}/check-in { code }` (06-05, EVENT-04 in person): the member types the
+ * code the organiser reads aloud. The comparison, the window, the walk-in rule and the guess bound all
+ * run inside Postgres (`app.events_check_in`), so this call never pre-checks anything. A refusal is
+ * thrown as an `ApiClientError` carrying `details.event` (`wrong_code`, `too_many_attempts`,
+ * `checkin_not_open`, `checkin_closed`, `cancelled` on a 409; nothing on the bare 404), which
+ * `checkInEventAction` maps to a code. The answer never carries the code (T-06-31).
+ */
+export async function checkIn(eventId: string, code: string): Promise<CheckinResult> {
+  const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/check-in`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return checkinResultSchema.parse(await res.json());
 }
 
 /* ── EVENT-01's admin half (06-04): create, the edit read, replace, cancel / reactivate ────────── */

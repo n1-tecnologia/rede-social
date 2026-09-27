@@ -388,6 +388,18 @@ function heroOverline(event: EventDetail, tz: string, nowMs: number, t: Translat
 }
 
 /**
+ * "Realizado às 18:42", or "Realizado em sáb., 12 de out., às 18:42" when the check-in happened on
+ * another tenant-local day than `nowMs` (UI-D-207). ONE definition for the detail's checked-in banner,
+ * the ticket's done state and the check-in action's answer, so the three can never word it apart.
+ */
+export function checkedInLine(at: string, tz: string, nowMs: number, t: Translator): string {
+  const time = formatEventTime(at, tz);
+  return tenantDayKey(at, tz) === tenantDayKey(nowMs, tz)
+    ? t('checkin.doneAt', { time })
+    : t('checkin.doneOn', { date: formatEventDate(at, tz, nowMs), time });
+}
+
+/**
  * `EventDetail` → `EventDetailView` (UI-D-204): the header pill, the hero, the banner, the four info
  * cells, the location and the action-zone phase, all in the TENANT's timezone from ONE request instant.
  */
@@ -412,15 +424,10 @@ export function eventDetailView(
   if (cancelled) {
     banner = { kind: 'cancelled', title: t('cancelled.title'), body: t('cancelled.body') };
   } else if (event.viewerCheckedInAt !== null) {
-    const at = event.viewerCheckedInAt;
-    const time = formatEventTime(at, tz);
-    const sameDay = tenantDayKey(at, tz) === tenantDayKey(nowMs, tz);
     banner = {
       kind: 'checkedIn',
       title: t('checkin.banner'),
-      body: sameDay
-        ? t('checkin.doneAt', { time })
-        : t('checkin.doneOn', { date: formatEventDate(at, tz, nowMs), time }),
+      body: checkedInLine(event.viewerCheckedInAt, tz, nowMs, t),
     };
   }
 
@@ -545,5 +552,103 @@ export function eventActionState(
     checkinOpensAt: view.checkinOpensAt,
     startsAt: view.startsAt,
     endsAt: view.endsAt,
+  };
+}
+
+/* ── 06-05: the check-in boarding pass (`/eventos/[eventId]/check-in`, UI-D-208) ───────────────── */
+
+/**
+ * The ticket's bottom section, ONE state at a time (UI E08/partial): the code form, or a finished
+ * state with no form. `done` carries the "Realizado às …" line; the three closed states carry their
+ * sentence.
+ */
+export type EventTicketSection =
+  | { kind: 'open' }
+  | { kind: 'done'; doneLine: string }
+  | { kind: 'notOpenYet'; sentence: string }
+  | { kind: 'closed'; sentence: string }
+  | { kind: 'cancelled'; sentence: string };
+
+/** Everything `/eventos/[eventId]/check-in` renders, as finished strings. */
+export type EventTicketView = {
+  id: string;
+  title: string;
+  /** The cover overline: the contract date, `sáb., 12 de out.` (UI-D-203). */
+  overline: string;
+  place: string;
+  coverAssetId: string | null;
+  coverVariantWidths: number[];
+  coverAlt: string;
+  /** Exactly three: Data, Horário (the start), Local. */
+  cells: EventInfoCellView[];
+  section: EventTicketSection;
+};
+
+/**
+ * `EventDetail` → `EventTicketView` (UI-D-208), in the TENANT's timezone from ONE request instant.
+ *
+ * **The section, in precedence order:** `done` when the viewer is already present (a walk-in
+ * included), then `cancelled`, then `closed` from `ends_at`, then `notOpenYet` before
+ * `starts_at − 1 h` (D-209), otherwise `open`. The window here only decides what to DRAW; the
+ * database decides whether a check-in lands (`app.events_check_in`), and a race comes back as the
+ * form's inline refusal.
+ *
+ * `notOpenYet`'s `{when}` is "às 18:00" when the window opens on the same tenant-local day as the
+ * request, or "em sáb., 12 de out., às 18:00" otherwise.
+ *
+ * **The Data cell prints the date WITHOUT the weekday** (`12 de out.`; a multi-day event prints its
+ * range, `12 a 14 de out.`). Measured in Chromium on the built page: the contract date
+ * (`sáb., 12 de out.`, ~104px at 14/700) fits the 106px cell of a 390px ticket with 2px to spare, but
+ * is cut to "sáb., 12 de o…" in the 83px cell at 320px (the 06-02 drawing's finding, which it placed
+ * at 390); a year-suffixed date would be cut at both. `12 de out.` fits at both widths, and the cover
+ * overline above already carries the weekday. Same formatter, no new token or size; the
+ * `events check-in` e2e asserts the cell is not cut at 390 and 320.
+ */
+export function eventTicketView(
+  event: EventDetail,
+  { tz, nowMs, t }: { tz: string; nowMs: number; t: Translator },
+): EventTicketView {
+  const venue = event.venueName ?? '';
+  const opensAtMs = Date.parse(event.startsAt) - EVENT_CHECKIN_OPENS_BEFORE_MINUTES * 60_000;
+
+  let section: EventTicketSection;
+  if (event.viewerCheckedInAt !== null) {
+    section = { kind: 'done', doneLine: checkedInLine(event.viewerCheckedInAt, tz, nowMs, t) };
+  } else if (event.status === 'cancelled') {
+    section = { kind: 'cancelled', sentence: t('errors.cancelled') };
+  } else if (nowMs >= Date.parse(event.endsAt)) {
+    section = { kind: 'closed', sentence: t('checkin.closed') };
+  } else if (nowMs < opensAtMs) {
+    const opens = new Date(opensAtMs).toISOString();
+    const time = formatEventTime(opens, tz);
+    const when =
+      tenantDayKey(opens, tz) === tenantDayKey(nowMs, tz)
+        ? t('checkin.opensAt', { time })
+        : t('checkin.opensOn', { date: formatEventDate(opens, tz, nowMs), time });
+    section = { kind: 'notOpenYet', sentence: t('checkin.notOpenYet', { when }) };
+  } else {
+    section = { kind: 'open' };
+  }
+
+  return {
+    id: event.id,
+    title: event.title,
+    overline: formatEventDate(event.startsAt, tz, nowMs),
+    place: venue,
+    coverAssetId: event.coverAssetId,
+    coverVariantWidths: event.coverVariantWidths,
+    coverAlt: t('cover.alt', { title: event.title }),
+    cells: [
+      {
+        icon: 'date',
+        label: t('info.date'),
+        value: isMultiDay(event, tz)
+          ? multiDayRange(event, tz, nowMs, t)
+          : formatDayMonth(event.startsAt, tz, nowMs),
+      },
+      { icon: 'time', label: t('info.time'), value: formatEventTime(event.startsAt, tz) },
+      { icon: 'place', label: t('info.place'), value: venue },
+    ],
+    section,
   };
 }

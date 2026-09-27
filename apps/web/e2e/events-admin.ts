@@ -237,12 +237,51 @@ export async function moveEventStart(eventId: string, startsInMinutes: number): 
  */
 export async function secretsFor(
   eventId: string,
-): Promise<{ eventFormat: string; meetingUrl: string | null }> {
-  const rows = await sql()<{ event_format: string; meeting_url: string | null }[]>`
-    select event_format, meeting_url from public.event_secrets where event_id = ${eventId}::uuid`;
+): Promise<{ eventFormat: string; meetingUrl: string | null; checkinCode: string }> {
+  const rows = await sql()<
+    { event_format: string; meeting_url: string | null; checkin_code: string }[]
+  >`
+    select event_format, meeting_url, checkin_code
+      from public.event_secrets where event_id = ${eventId}::uuid`;
   const row = rows[0];
   if (!row) throw new Error(`no event_secrets row for ${eventId}`);
-  return { eventFormat: row.event_format, meetingUrl: row.meeting_url };
+  return {
+    eventFormat: row.event_format,
+    meetingUrl: row.meeting_url,
+    // 06-05: the venue code the organiser reads aloud. A spec may only learn it HERE: no member
+    // payload carries it (T-06-31), which is what makes typing it a proof of presence.
+    checkinCode: row.checkin_code,
+  };
+}
+
+/**
+ * 06-05: one more member of a throwaway events tenant (`<local>@<slug>.local`, so `deleteEventsTenant`
+ * removes the GoTrue user with the tenant). Returns the email.
+ */
+export async function addEventsMember(
+  tenant: Pick<EventsTenant, 'slug' | 'tenantId' | 'password'>,
+  local: string,
+  displayName: string,
+): Promise<string> {
+  const email = `${local}@${tenant.slug}.local`;
+  await addMembership(tenant.tenantId, email, tenant.password, 'member', displayName);
+  return email;
+}
+
+/**
+ * 06-05: one member's attendance row at one event, read through the superuser connection — how the
+ * check-in spec proves a walk-in was RECORDED as `walk_in` (the status is admin-only in the UI).
+ */
+export async function attendanceFor(
+  eventId: string,
+  email: string,
+): Promise<{ status: string; checkinVia: string | null } | null> {
+  const rows = await sql()<{ status: string; checkin_via: string | null }[]>`
+    select a.status, a.checkin_via from public.event_attendances a
+      join public.users u on u.id = a.user_id
+     where a.event_id = ${eventId}::uuid and u.email = ${email}`;
+  const row = rows[0];
+  return row ? { status: row.status, checkinVia: row.checkin_via } : null;
 }
 
 /**

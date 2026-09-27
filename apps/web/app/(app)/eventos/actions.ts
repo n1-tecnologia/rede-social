@@ -1,6 +1,8 @@
 'use server';
 
 import {
+  type CheckinOutcome,
+  checkinSchema,
   EVENT_ISSUE_SET,
   EVENT_PERIODS,
   type EventIssue,
@@ -15,6 +17,7 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
+  checkIn,
   createEvent,
   getEvents,
   loadEvent,
@@ -22,14 +25,15 @@ import {
   setEventStatus,
   updateEvent,
 } from '@/lib/events';
-import { type EventPosterView, eventPosterView } from '@/lib/events-view';
+import { checkedInLine, type EventPosterView, eventPosterView } from '@/lib/events-view';
 
 /**
- * The `/eventos` list's two actions (EVENT-02), the detail's RSVP action (EVENT-03) and the admin's
- * four write actions (EVENT-01, 06-04), below, in the `comunidades/actions.ts` conventions: the SAME
- * Zod the API validates with runs BEFORE the request (a server action is a public endpoint), a
- * 401/403 becomes a navigation OUTSIDE the try/catch (Next 16: `redirect()` throws), and a refusal is
- * answered with a catalog KEY rather than pt-BR copy.
+ * The `/eventos` list's two actions (EVENT-02), the detail's RSVP action (EVENT-03), the ticket's
+ * check-in action (EVENT-04, 06-05) and the admin's four write actions (EVENT-01, 06-04), below, in
+ * the `comunidades/actions.ts` conventions: the SAME Zod the API validates with runs BEFORE the
+ * request (a server action is a public endpoint), a 401/403 becomes a navigation OUTSIDE the
+ * try/catch (Next 16: `redirect()` throws), and a refusal is answered with a catalog KEY rather than
+ * pt-BR copy.
  *
  * Both return FINISHED poster views: every string is formatted here, on the server, in the tenant's
  * timezone from ONE `Date.now()` per action, so the client list never formats an instant and never
@@ -150,6 +154,90 @@ export async function rsvpEventAction(
     // Shape only: never the event's title (member-facing content).
     if (!refusal && !result.ok && result.error === 'failed') {
       console.error('events.rsvp_failed', { error: String(error) });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  if (result.ok) revalidatePath('/eventos');
+  return result;
+}
+
+/* ── EVENT-04 in person: the venue code (06-05) ───────────────────────────────────────────────── */
+
+/** The refusals the check-in route names (`409 { event }`), each mapped to a catalog key by the form. */
+export type CheckinRefusal =
+  | 'wrong_code'
+  | 'too_many_attempts'
+  | 'checkin_not_open'
+  | 'checkin_closed'
+  | 'cancelled';
+
+/**
+ * What a check-in can answer. `doneLine` is the finished "Realizado às 18:42" (or "… em {date}, às
+ * …"), formatted HERE in the tenant's timezone, so the ticket's done state never formats an instant
+ * on the client (UI-D-203). Every refusal is a CODE, never pt-BR copy; `failed` is everything else,
+ * the bare 404 included (the event vanished or was never the caller's, D-23).
+ */
+export type CheckinActionResult =
+  | { ok: true; outcome: CheckinOutcome; doneLine: string }
+  | { ok: false; error: CheckinRefusal | 'failed' };
+
+const CHECKIN_REFUSALS: ReadonlySet<string> = new Set<CheckinRefusal>([
+  'wrong_code',
+  'too_many_attempts',
+  'checkin_not_open',
+  'checkin_closed',
+  'cancelled',
+]);
+
+/**
+ * `POST /v1/events/{id}/check-in` for the ticket's code form (06-05, UI-D-208), in the
+ * `rsvpEventAction` conventions:
+ *
+ *  1. **The SAME Zod the API validates with runs first** (`checkinSchema`): a server action is a
+ *     public endpoint, so an empty or oversized code is refused before any request is built.
+ *  2. **Nothing is decided here.** The comparison, the window, the walk-in rule and the guess bound
+ *     are the database's (`app.events_check_in`); a wrong code comes back as `wrong_code` and is
+ *     already COUNTED by then. Nothing is persisted on the device either (UI-D-208 drops the
+ *     prototype's browser storage).
+ *  3. **`redirect()` sits OUTSIDE the try/catch** (Next 16: it throws), for the bootstrap refusals.
+ *
+ * `already` is a success: the member is present, and the form shows the done state with the ORIGINAL
+ * stamp. On success the list is revalidated so the poster's `Presente` pill is fresh on the way back.
+ */
+export async function checkInEventAction(
+  eventId: string,
+  code: string,
+): Promise<CheckinActionResult> {
+  const body = checkinSchema.safeParse({ code });
+  if (!body.success || typeof eventId !== 'string' || eventId.length === 0) {
+    return { ok: false, error: 'failed' };
+  }
+
+  let refusal: string | null = null;
+  let result: CheckinActionResult = { ok: false, error: 'failed' };
+  try {
+    const [bootstrap, written] = await Promise.all([
+      getBootstrap(),
+      checkIn(eventId, body.data.code),
+    ]);
+    const t = await getTranslations('events');
+    result = {
+      ok: true,
+      outcome: written.outcome,
+      doneLine: checkedInLine(written.checkedInAt, bootstrap.tenant.timezone, Date.now(), t),
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      const issue = (error.details as { event?: unknown } | undefined)?.event;
+      if (!refusal && typeof issue === 'string' && CHECKIN_REFUSALS.has(issue)) {
+        result = { ok: false, error: issue as CheckinRefusal };
+      }
+    }
+    // Shape only: never the code the member typed, and never the event's title.
+    if (!refusal && !result.ok && result.error === 'failed') {
+      console.error('events.checkin_failed', { error: String(error) });
     }
   }
 

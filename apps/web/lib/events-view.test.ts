@@ -4,12 +4,14 @@ import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
+  checkedInLine,
   eventActionState,
   eventCountLine,
   eventDetailView,
   eventPhase,
   eventPill,
   eventPosterView,
+  eventTicketView,
   eventWhenLine,
   formatEventDate,
   formatEventTime,
@@ -416,5 +418,76 @@ describe('tenantZoneLabel — the form helper names the TENANT zone (06-04, UI-D
     expect(tenantZoneLabel('America/Sao_Paulo')).toBe('Horário Padrão de Brasília');
     expect(tenantZoneLabel('America/Manaus')).toBe('Horário Padrão do Amazonas');
     expect(tenantZoneLabel('Not/AZone')).toBe('Not/AZone');
+  });
+});
+
+describe('06-05 — eventTicketView (UI-D-208, the check-in boarding pass)', () => {
+  const ticket = (nowIso: string, overrides: Partial<EventDetail> = {}, tz = SP) =>
+    eventTicketView(detail(overrides), { tz, nowMs: at(nowIso), t });
+
+  it('22. the not-open-yet {when}: "às 18:00" on the same tenant-local day, "em {date}, às 18:00" on another', () => {
+    // The event starts 19:00 in São Paulo (22:00Z), so the window opens at 18:00 there.
+    expect(ticket('2026-10-12T15:00:00Z').section).toEqual({
+      kind: 'notOpenYet',
+      sentence: 'O check-in abre 1 hora antes do início, às 18:00.',
+    });
+    expect(ticket('2026-10-10T12:00:00Z').section).toEqual({
+      kind: 'notOpenYet',
+      sentence: 'O check-in abre 1 hora antes do início, em seg., 12 de out., às 18:00.',
+    });
+    // Tenant-local days, not UTC ones: 23:30 in São Paulo on the 11th is already the 12th in UTC,
+    // and it is still "another day" for the tenant.
+    expect(ticket('2026-10-12T02:30:00Z').section).toMatchObject({
+      sentence: 'O check-in abre 1 hora antes do início, em seg., 12 de out., às 18:00.',
+    });
+    // A Manaus tenant reads its own wall clock (one hour earlier).
+    expect(ticket('2026-10-12T15:00:00Z', {}, MANAUS).section).toMatchObject({
+      sentence: 'O check-in abre 1 hora antes do início, às 17:00.',
+    });
+  });
+
+  it('23. the section precedence: done, cancelled, closed from ends_at, open inside the window', () => {
+    expect(ticket('2026-10-12T21:00:00Z').section).toEqual({ kind: 'open' });
+    expect(ticket('2026-10-12T23:59:59Z').section).toEqual({ kind: 'open' });
+    expect(ticket('2026-10-13T00:00:00Z').section).toEqual({
+      kind: 'closed',
+      sentence: 'O check-in deste evento foi encerrado.',
+    });
+    expect(ticket('2026-10-12T21:30:00Z', { status: 'cancelled' }).section).toEqual({
+      kind: 'cancelled',
+      sentence: 'Este evento foi cancelado.',
+    });
+    // Present beats every other state, a walk-in included, even if the event was cancelled later.
+    expect(
+      ticket('2026-10-12T22:30:00Z', {
+        status: 'cancelled',
+        viewerStatus: 'walk_in',
+        viewerCheckedInAt: '2026-10-12T21:42:00.000000Z',
+      }).section,
+    ).toEqual({ kind: 'done', doneLine: 'Realizado às 18:42' });
+  });
+
+  it('24. the cover overline carries the weekday; the Data cell drops it so it fits a third of the ticket', () => {
+    const view = ticket('2026-10-12T21:30:00Z');
+    expect(view.overline).toBe('seg., 12 de out.');
+    expect(view.place).toBe('Auditório da sede');
+    expect(view.cells).toEqual([
+      { icon: 'date', label: 'Data', value: '12 de out.' },
+      { icon: 'time', label: 'Horário', value: '19:00' },
+      { icon: 'place', label: 'Local', value: 'Auditório da sede' },
+    ]);
+    // A multi-day event prints its range in the Data cell.
+    const multi = ticket('2026-10-12T21:30:00Z', { endsAt: '2026-10-14T21:00:00.000000Z' });
+    expect(multi.cells[0]?.value).toBe('12 a 14 de out.');
+    expect(view.coverAlt).toBe('Capa do evento Encontro anual');
+  });
+
+  it('25. checkedInLine: "Realizado às" today, "Realizado em {date}, às" on another tenant-local day', () => {
+    expect(checkedInLine('2026-10-12T21:42:00.000000Z', SP, at('2026-10-12T23:00:00Z'), t)).toBe(
+      'Realizado às 18:42',
+    );
+    expect(checkedInLine('2026-10-12T21:42:00.000000Z', SP, at('2026-10-14T12:00:00Z'), t)).toBe(
+      'Realizado em seg., 12 de out., às 18:42',
+    );
   });
 });

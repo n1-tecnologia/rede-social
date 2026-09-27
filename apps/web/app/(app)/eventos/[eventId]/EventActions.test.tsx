@@ -72,6 +72,7 @@ const C = catalog as {
     errors: { failed: string; closed: string };
   };
   errors: { cancelled: string };
+  checkin: { cta: string };
 };
 
 const ID = '44444444-4444-4444-8444-4444444444e1';
@@ -132,7 +133,7 @@ describe('EventActions — every RSVP row of the action-zone contract (UI-D-207)
     expect(naoVou().getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('1c. in person P1: the enabled pair and NO hint (the check-in CTA is 06-05’s)', () => {
+  it('1c. in person P1: the enabled pair and NO hint (the check-in CTA below is case 6a)', () => {
     const { container } = render(<EventActions {...state({ phase: 'P1', answer: 'not_going' })} />);
     expect(naoVou().getAttribute('aria-pressed')).toBe('true');
     expect((naoVou() as HTMLButtonElement).disabled).toBe(false);
@@ -157,10 +158,17 @@ describe('EventActions — every RSVP row of the action-zone contract (UI-D-207)
     );
   });
 
-  it('1f. P2 unanswered and P3 render nothing at all', () => {
-    const { container, rerender } = render(<EventActions {...state({ phase: 'P2' })} />);
+  it('1f. P3 renders nothing at all; P2 unanswered keeps only the check-in CTA (06-05)', () => {
+    const { container, rerender } = render(
+      <EventActions {...state({ phase: 'P3', answer: 'going' })} />,
+    );
     expect(container.innerHTML).toBe('');
-    rerender(<EventActions {...state({ phase: 'P3', answer: 'going' })} />);
+    rerender(<EventActions {...state({ phase: 'P2' })} />);
+    expect(screen.queryByRole('group')).toBeNull();
+    expect(screen.queryByTestId('event-actions-answer')).toBeNull();
+    expect(screen.getByRole('link', { name: C.checkin.cta })).toBeTruthy();
+    // Online P2 is 06-06's `Entrar`: nothing from this plan.
+    rerender(<EventActions {...state({ phase: 'P2', format: 'online' })} />);
     expect(container.innerHTML).toBe('');
   });
 
@@ -190,9 +198,15 @@ describe('EventActions — every RSVP row of the action-zone contract (UI-D-207)
     }
   });
 
-  it('1i. cancelled P2: no RSVP row (no read-only line either)', () => {
+  it('1i. cancelled P2: no RSVP row and no read-only line (06-05 adds only the DISABLED CTA, case 6d)', () => {
+    render(<EventActions {...state({ phase: 'P2', cancelled: true, answer: 'going' })} />);
+    expect(screen.queryByRole('group')).toBeNull();
+    expect(screen.queryByTestId('event-actions-answer')).toBeNull();
+    // Online cancelled P2 is 06-06's disabled `Entrar`: nothing from this plan.
     const { container } = render(
-      <EventActions {...state({ phase: 'P2', cancelled: true, answer: 'going' })} />,
+      <EventActions
+        {...state({ phase: 'P2', cancelled: true, answer: 'going', format: 'online' })}
+      />,
     );
     expect(container.innerHTML).toBe('');
   });
@@ -368,5 +382,76 @@ describe('EventActions — the boundary refresh (UI-D-203)', () => {
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(48 * HOUR);
     expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe('EventActions — the in-person check-in CTA (06-05, UI-D-207)', () => {
+  const cta = () => screen.getByRole('link', { name: C.checkin.cta });
+
+  it('6a. in person P1, not checked in: the pair, then ONE brand <a> to /check-in (the zone’s only fill)', () => {
+    const { container } = render(<EventActions {...state({ phase: 'P1', answer: 'going' })} />);
+    expect(group()).toBeTruthy();
+    expect(cta().tagName).toBe('A');
+    expect(cta().getAttribute('href')).toBe(`/eventos/${ID}/check-in`);
+    expect(cta().className).toContain('bg-brand');
+    expect(cta().className).toContain('w-full');
+    expect(brandFills(container)).toHaveLength(1);
+    // Below the pair, in the zone's reading order.
+    const zone = screen.getByTestId('event-actions');
+    const children = Array.from(zone.children);
+    expect(children.indexOf(cta())).toBeGreaterThan(
+      children.findIndex((node) => node.contains(group())),
+    );
+  });
+
+  it('6b. in person P2, not checked in: the read-only answer line, then the brand CTA', () => {
+    const { container } = render(<EventActions {...state({ phase: 'P2', answer: 'going' })} />);
+    expect(screen.queryByRole('group')).toBeNull();
+    expect(screen.getByTestId('event-actions-answer').textContent).toContain(C.rsvp.answeredGoing);
+    expect(cta().getAttribute('href')).toBe(`/eventos/${ID}/check-in`);
+    expect(brandFills(container)).toHaveLength(1);
+  });
+
+  it('6c. no CTA before the window (P0), after the end (P3), once checked in (walk-in included), or online', () => {
+    for (const overrides of [
+      { phase: 'P0' as const },
+      { phase: 'P3' as const },
+      { phase: 'P1' as const, checkedIn: true },
+      { phase: 'P2' as const, checkedIn: true },
+      { phase: 'P1' as const, format: 'online' as const },
+    ]) {
+      const { unmount } = render(<EventActions {...state(overrides)} />);
+      expect(screen.queryByTestId('event-actions-checkin'), JSON.stringify(overrides)).toBeNull();
+      unmount();
+    }
+  });
+
+  it('6d. cancelled P1 / P2: the CTA is DISABLED, not a link, and still one brand fill at most', () => {
+    for (const phase of ['P1', 'P2'] as const) {
+      const { container, unmount } = render(
+        <EventActions {...state({ phase, cancelled: true, answer: 'going' })} />,
+      );
+      expect(screen.queryByRole('link', { name: C.checkin.cta })).toBeNull();
+      const disabled = screen.getByTestId('event-actions-checkin');
+      expect(disabled.tagName).toBe('SPAN');
+      expect(disabled.getAttribute('aria-disabled')).toBe('true');
+      expect(disabled.getAttribute('href')).toBeNull();
+      expect(disabled.className).toContain('opacity-50');
+      expect(disabled.textContent).toBe(C.checkin.cta);
+      expect(brandFills(container).length).toBeLessThanOrEqual(1);
+      unmount();
+    }
+    // Cancelled P0 and P3: no CTA at all.
+    for (const phase of ['P0', 'P3'] as const) {
+      const { unmount } = render(<EventActions {...state({ phase, cancelled: true })} />);
+      expect(screen.queryByTestId('event-actions-checkin')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('6e. the CTA only navigates: rendering or tapping it calls no action', () => {
+    render(<EventActions {...state({ phase: 'P1' })} />);
+    fireEvent.click(cta());
+    expect(rsvp).not.toHaveBeenCalled();
   });
 });

@@ -91,9 +91,28 @@
       "body": "A organização cancelou este evento. A confirmação e o check-in estão desativados."
     },
     "checkin": {
+      "cta": "Fazer check-in",
+      "title": "Check-in",
+      "back": "Voltar para o evento",
       "banner": "Check-in confirmado",
+      "codeLabel": "Código do evento",
+      "codePlaceholder": "Digite o código",
+      "submit": "Confirmar check-in",
+      "submitting": "Confirmando…",
+      "doneTitle": "Check-in confirmado!",
       "doneAt": "Realizado às {time}",
-      "doneOn": "Realizado em {date}, às {time}"
+      "doneOn": "Realizado em {date}, às {time}",
+      "notOpenYet": "O check-in abre 1 hora antes do início, {when}.",
+      "opensAt": "às {time}",
+      "opensOn": "em {date}, às {time}",
+      "closed": "O check-in deste evento foi encerrado.",
+      "tip": "Peça o código à organização, no local do evento.",
+      "errors": {
+        "wrongCode": "Código incorreto. Confira o código com a organização do evento.",
+        "tooManyAttempts": "Muitas tentativas incorretas. Aguarde alguns minutos e tente de novo.",
+        "notOpen": "O check-in deste evento não está aberto agora.",
+        "failed": "Não foi possível fazer o check-in. Tente novamente."
+      }
     },
     "notFound": {
       "title": "Evento não encontrado",

@@ -26,7 +26,8 @@ import { ReactivateEventControl } from './ReactivateEventControl';
  * The prototype's page, ported: the sticky back header with a trailing state pill ("Você vai" brand,
  * "Presente" success, "Cancelado" danger), then ONE hero `Card`: the 16/10 cover with its overlay,
  * and a body in UI-D-204 order — banner (cancelled or checked in), description, info grid, location
- * (in person), then the action zone (`EventActions`, the RSVP pair of sketch 006). Dropped [proto]
+ * (in person), then the action zone (`EventActions`: the RSVP pair of sketch 006 and, in person in
+ * P1/P2, the "Fazer check-in" link to `/eventos/{id}/check-in`, 06-05). Dropped [proto]
  * extras: spots, payment and certificate banners, the embedded map (D-203), `MyEventDetails`, the
  * photos rail.
  *
@@ -136,7 +137,8 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
               ) : null}
               <EventInfoGrid layout="grid" cells={view.info} ariaLiveIndex={view.countIndex} />
               {view.location ? <EventLocation location={view.location} /> : null}
-              {/* The action zone (UI-D-207): the RSVP rows; 06-05 / 06-06 add the check-in CTAs. */}
+              {/* The action zone (UI-D-207): the RSVP rows and, in person in P1/P2, the brand
+                  "Fazer check-in" link to /check-in (06-05); 06-06 adds `Entrar`. */}
               <EventActions {...eventActionState(result.event, view)} />
             </div>
           </Card>

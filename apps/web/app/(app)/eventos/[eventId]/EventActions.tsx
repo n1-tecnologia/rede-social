@@ -29,10 +29,15 @@ const isRsvpAnswer = (value: string): value is RsvpAnswer =>
  * | P2 unanswered, P3, checked in | nothing (the checked-in banner above says it) |
  * | cancelled, P0 / P1 | the pair DISABLED, showing the stored answer, no hint (D-201) |
  * | cancelled, P2 / P3 | nothing (the cancelled banner above says it) |
+ * | in person, P1 / P2, not checked in (06-05) | below the rows above: ONE brand `<a>` "Fazer check-in" → `/eventos/{id}/check-in` |
+ * | in person, cancelled, P1 / P2 (06-05) | the same CTA DISABLED (`aria-disabled`, opacity 50, not a link) |
  *
- * The check-in CTA (06-05) and `Entrar` with its hints (06-06) slot in below later; this markup does
- * not change for them. The pair carries NO brand fill (its only brand ink is the small `Check`), so
- * the zone's single brand fill stays reserved for that CTA.
+ * `Entrar` with its hints (06-06) slots in below later. The pair carries NO brand fill (its only
+ * brand ink is the small `Check`), so the zone's single brand fill is the check-in CTA. Once checked
+ * in (a walk-in included) the zone renders nothing: the success banner above replaces every CTA.
+ *
+ * **The CTA records nothing** (the plan's presence prohibition): it is a plain link to the ticket,
+ * where the member must type the code the organiser announces.
  *
  * **The database decides, the UI reflects** (D-204). A tap moves `aria-pressed` optimistically, marks
  * the group busy and calls `rsvpEventAction`. Success refreshes the page (the count cell, announced
@@ -118,7 +123,11 @@ export function EventActions({
       ? t(answer === 'going' ? 'rsvp.answeredGoing' : 'rsvp.answeredNotGoing')
       : null;
 
-  if (!showPair && answeredLine === null) return null;
+  const checkinWindow = format === 'in_person' && (phase === 'P1' || phase === 'P2');
+  const checkinClasses =
+    'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors';
+
+  if (!showPair && answeredLine === null && !checkinWindow) return null;
 
   return (
     <div data-testid="event-actions" data-phase={phase} className="flex flex-col gap-3">
@@ -146,6 +155,25 @@ export function EventActions({
         <p data-testid="event-actions-answer" className="break-words text-sm text-text-secondary">
           {answeredLine}
         </p>
+      ) : null}
+      {checkinWindow ? (
+        cancelled ? (
+          <span
+            data-testid="event-actions-checkin"
+            aria-disabled="true"
+            className={`${checkinClasses} pointer-events-none cursor-not-allowed opacity-50`}
+          >
+            {t('checkin.cta')}
+          </span>
+        ) : (
+          <a
+            href={`/eventos/${encodeURIComponent(eventId)}/check-in`}
+            data-testid="event-actions-checkin"
+            className={`${checkinClasses} hover:bg-brand-hover active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg`}
+          >
+            {t('checkin.cta')}
+          </a>
+        )
       ) : null}
     </div>
   );
