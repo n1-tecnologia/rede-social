@@ -108,6 +108,16 @@ function errorName(error: unknown): string | undefined {
  * renders an error message (a player `error` is reported as `onError(postId)` and the host shows
  * catalog copy) and holds no sound state (the visit-long sound state is the host's).
  *
+ * **Credential swaps (WR-02).** A re-minted token is never written into a mounted element in place:
+ * the vendor reloads its source when its playback token changes, and a video that was already
+ * playing would stop on a still frame with no badge (the host would still believe it plays). The
+ * player is keyed on its playback token instead, so a swap is an explicit remount: the observer
+ * detaches the old element (`onController(postId, null)`), attaches the new one, and the host
+ * restarts it through `onController` when it is the current, unpaused page. The same credential
+ * re-rendered, or a neighbour becoming current, keeps the element, so the gesture's synchronous
+ * `start` still finds it. The token lives only in React's in-memory key and the element property it
+ * already had (never stored, logged or rendered as an attribute, T-05-34 unchanged).
+ *
  * **Poster.** Before the first frame the element shows the provider's poster when one resolves and
  * plain black otherwise. A derived poster URL that fails to load is replaced by `poster=""`, which
  * the player reads as "no poster", so a broken-image glyph is never drawn. Locally the fake
@@ -306,6 +316,7 @@ export function ReelVideo(props: ReelVideoProps) {
     <div ref={frameRef} className="absolute inset-0 bg-black" data-testid="reel-video">
       {playback ? (
         <MuxPlayer
+          key={playback.tokens.playback}
           playbackId={playback.playbackId}
           tokens={{
             playback: playback.tokens.playback,

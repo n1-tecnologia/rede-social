@@ -547,3 +547,43 @@ describe('ReelsPager — never advances on its own (D-125)', () => {
     expect(events).toEqual([]);
   });
 });
+
+describe('ReelsPager — a mouse drag released over the overlay (WR-01, D-117, D-132)', () => {
+  const mouse = { clientX: 200, clientY: 400, pointerId: 1, pointerType: 'mouse', button: 0 };
+
+  it('a 100 px upward mouse drag released over the rail pages once and ends the drag', () => {
+    render(<ReelsPager {...baseProps()} />);
+    fireEvent.pointerDown(screen.getByTestId('media-p0'), mouse);
+    fireEvent.pointerMove(stack(), { ...mouse, clientY: 300 });
+    expect(track().style.transform).toContain('-35px');
+    // Released over an overlay node, whose layer stops the bubbling pointerup.
+    fireEvent.pointerUp(screen.getByTestId('overlay-p0'), { ...mouse, clientY: 300 });
+    expect(events).toEqual([
+      ['activate', 1],
+      ['index', 1],
+    ]);
+    expect(track().style.transform).not.toContain('-35px');
+    // No button is held any more: a later mouse move no longer moves the track.
+    fireEvent.pointerMove(stack(), { ...mouse, clientY: 250 });
+    expect(track().style.transform).toContain('+ 0px)');
+  });
+
+  it('a 30 px mouse drag released over the rail pages nothing and ends the drag', () => {
+    render(<ReelsPager {...baseProps()} />);
+    fireEvent.pointerDown(screen.getByTestId('media-p0'), mouse);
+    fireEvent.pointerMove(stack(), { ...mouse, clientY: 370 });
+    expect(track().style.transform).not.toContain('+ 0px)');
+    fireEvent.pointerUp(screen.getByTestId('overlay-p0'), { ...mouse, clientY: 370 });
+    expect(events).toEqual([]);
+    expect(track().style.transform).toContain('+ 0px)');
+    fireEvent.pointerMove(stack(), { ...mouse, clientY: 300 });
+    expect(track().style.transform).toContain('+ 0px)');
+  });
+});
+
+describe('ReelsPager — the live region reads a display name literally (WR-03, UI-D-97)', () => {
+  it("`$'` and `$$` in an author name are announced as written, never expanded", () => {
+    render(<ReelsPager {...baseProps({ items: [{ id: 'p0', authorName: "Ana $' $$ fim" }] })} />);
+    expect(screen.getByTestId('reels-position').textContent).toBe("position 1 of Ana $' $$ fim");
+  });
+});

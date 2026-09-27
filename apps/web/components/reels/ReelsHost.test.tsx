@@ -129,34 +129,34 @@ vi.mock('@tria/module-reels/ui', async (orig) => {
 
 /**
  * The video element's stand-in: like the real one, it hands the host a controller only once it has
- * a credential (the vendor element mounts with `playback`), and `null` when it goes away.
+ * a credential (the vendor element mounts with `playback`), and `null` when it goes away. Like the
+ * real one since WR-02, the element is keyed on the playback TOKEN: a re-minted credential is a new
+ * element with a new controller (unregistered, then registered), while the same token re-rendered
+ * keeps both.
  */
 vi.mock('./ReelVideo', async () => {
-  const { createElement, useEffect, useRef } = await import('react');
+  const { createElement, useEffect } = await import('react');
   return {
     ReelVideo: function ReelVideoStandIn(props: ReelVideoProps) {
       videoProps.set(props.postId, props);
-      const own = useRef<FakeController | null>(null);
-      if (own.current === null) {
-        own.current = {
+      const token = props.playback?.tokens.playback ?? null;
+      const { postId, onController } = props;
+      useEffect(() => {
+        if (token === null) return;
+        const controller: FakeController = {
           start: vi.fn<(wantSound: boolean) => void>(),
           pause: vi.fn<() => void>(),
           resume: vi.fn<(wantSound: boolean) => void>(),
           setMuted: vi.fn<(muted: boolean) => void>(),
         };
-      }
-      const hasPlayback = props.playback !== null;
-      const { postId, onController } = props;
-      useEffect(() => {
-        const controller = own.current;
-        if (!hasPlayback || controller === null) return;
         controllers.set(postId, controller);
         onController(postId, controller);
         return () => onController(postId, null);
-      }, [hasPlayback, postId, onController]);
+      }, [token, postId, onController]);
       return createElement('div', {
         'data-testid': `reel-video-${props.postId}`,
         'data-playback': props.playback?.playbackId ?? '',
+        'data-token': token ?? '',
         'data-current': props.current ? 'true' : 'false',
       });
     },
@@ -459,6 +459,48 @@ describe('ReelsHost — credentials and the gesture (REELS-05, RESEARCH Pattern 
     await flush();
     expect(loadPage).toHaveBeenCalledTimes(1);
     expect(position()).toBe('Vídeo 1, de Autora 10');
+  });
+
+  it('WR-02: a re-minted credential restarts the current page once and leaves the neighbour unstarted', async () => {
+    // The first mint answers inside REELS_TOKEN_REMINT_MARGIN_MS, so the next window re-mints.
+    mint.mockImplementationOnce(async (ids: string[]) => ({
+      ok: true,
+      results: ids.map((assetId) => ({
+        assetId,
+        ok: true,
+        playback: {
+          ...playback(assetId),
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        },
+      })),
+    }));
+    mint.mockImplementation(async (ids: string[]) => ({
+      ok: true,
+      results: ids.map((assetId) => ({
+        assetId,
+        ok: true,
+        playback: {
+          ...playback(assetId),
+          tokens: { playback: `tok2-${assetId}`, thumbnail: 'thumb', storyboard: 'board' },
+        },
+      })),
+    }));
+    renderHost();
+    await flush();
+    const before = controllerOf(2);
+
+    await press('ArrowDown');
+
+    expect(mint).toHaveBeenLastCalledWith(['asset-1', 'asset-2', 'asset-3']);
+    // The gesture started the element it found; the re-minted element is restarted ONCE by the host.
+    expect(before.start).toHaveBeenCalledTimes(1);
+    const after = controllerOf(2);
+    expect(after).not.toBe(before);
+    expect(after.start).toHaveBeenCalledTimes(1);
+    expect(after.start).toHaveBeenCalledWith(false);
+    // The neighbour got its fresh element too, and is registered but never started.
+    expect(controllerOf(1).start).not.toHaveBeenCalled();
+    expect(screen.getByTestId(`reel-video-${postId(2)}`).dataset.token).toBe('tok2-asset-2');
   });
 
   it('two retries while the fresh mint is in flight send ONE mint (REELS-08 idempotency)', async () => {

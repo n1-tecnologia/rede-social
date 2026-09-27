@@ -556,3 +556,72 @@ describe('ReelVideo — events and lifecycle', () => {
     expect(recorded.at(-1)?.poster).toBeUndefined();
   });
 });
+
+describe('ReelVideo — a re-minted credential (WR-02, D-44, D-125)', () => {
+  function reel(handlers: Handlers, playback: MediaPlayback, current: boolean) {
+    return (
+      <ReelVideo
+        postId={POST_ID}
+        playback={playback}
+        width={1080}
+        height={1920}
+        current={current}
+        {...handlers}
+      />
+    );
+  }
+
+  it('the same credential in a new object, and a page turning neighbour and back, keep the element', async () => {
+    const handlers = makeHandlers();
+    const { rerender } = render(reel(handlers, PLAYBACK, true));
+    const first = await mountedPlayer();
+    await flush();
+    const registrations = handlers.onController.mock.calls.length;
+
+    rerender(reel(handlers, { ...PLAYBACK, tokens: { ...PLAYBACK.tokens } }, false));
+    await flush(10);
+    rerender(reel(handlers, { ...PLAYBACK, tokens: { ...PLAYBACK.tokens } }, true));
+    await flush(10);
+
+    expect(document.querySelector('mux-player')).toBe(first);
+    expect(first.isConnected).toBe(true);
+    expect(handlers.onController.mock.calls.length).toBe(registrations);
+  });
+
+  it('a new playback token remounts the vendor element, re-registers the controller and plays the new node', async () => {
+    const handlers = makeHandlers();
+    const { rerender } = render(reel(handlers, PLAYBACK, true));
+    const first = await mountedPlayer();
+    await flush();
+    const firstController = controllerOf(handlers);
+    const registrations = handlers.onController.mock.calls.length;
+
+    const fresh: MediaPlayback = {
+      ...PLAYBACK,
+      tokens: { ...PLAYBACK.tokens, playback: 'tok-playback-2' },
+      expiresAt: '2026-09-27T02:00:00.000Z',
+    };
+    rerender(reel(handlers, fresh, true));
+    await flush(10);
+    const second = await mountedPlayer();
+    await flush(10);
+
+    expect(first.isConnected).toBe(false);
+    expect(second).not.toBe(first);
+    const later = handlers.onController.mock.calls.slice(registrations);
+    expect(later[0]).toEqual([POST_ID, null]);
+    const secondController = later.at(-1)?.[1];
+    expect(secondController).toBeTruthy();
+    expect(secondController).not.toBe(firstController);
+    expect((recorded.at(-1)?.tokens as { playback?: string } | undefined)?.playback).toBe(
+      'tok-playback-2',
+    );
+
+    second.currentTime = 12;
+    secondController?.start(false);
+    await flush();
+    expect(second.currentTime).toBe(0);
+    expect(play).toHaveBeenCalled();
+    expect(play.mock.contexts.at(-1)).toBe(second);
+  });
+});

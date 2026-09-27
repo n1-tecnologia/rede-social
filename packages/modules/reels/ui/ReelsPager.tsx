@@ -37,7 +37,14 @@ import { ticksWindow } from './ticks';
  *    OS-cancelled gesture (an edge swipe, a scroll takeover) could still change the video.
  * 3. The pager listens WITHOUT pointer capture. With capture, `pointerup` would be retargeted to the
  *    stack and the current page's `DoubleTapHeart` would never see it — no single tap, no double
- *    tap.
+ *    tap. The release and the cancel are instead heard in React's CAPTURE PHASE on the stack
+ *    (`onPointerUpCapture`, `onPointerCancelCapture`, WR-01): a mouse has no implicit capture, so a
+ *    drag that began on the media and is released over the rail or the caption (layers that stop
+ *    the bubbling `pointerup`) still ends here and is decided by the dominant axis, instead of
+ *    leaving the track following a mouse with no button held. The capture phase is not DOM pointer
+ *    capture: the event still continues to its target, so `DoubleTapHeart` still sees every
+ *    `pointerup`. `origin` is only set by a `pointerdown` that reached the stack (one that began on
+ *    the media), so a press that began on the rail, the caption or the like button is unaffected.
  *
  * **The WebKit rule (RESEARCH Pitfall 1).** Every index change — swipe, ↑/↓ key, wheel, desktop
  * button — runs through ONE `go(next)`, which calls `onActivate(next)` SYNCHRONOUSLY inside that
@@ -372,10 +379,11 @@ export function ReelsPager({
   const transition = drag.active || reduceMotion || instant ? 'none' : PAGER_TRANSITION;
 
   const current = items[index];
+  // Function replacements, so a `$` pattern in a display name is announced literally (WR-03).
   const position = current
     ? labels.position
-        .replace('{current}', String(index + 1))
-        .replace('{author}', current.authorName)
+        .replace('{current}', () => String(index + 1))
+        .replace('{author}', () => current.authorName)
     : '';
   const ticks = ticksWindow(index, items.length, hasMore);
   const atStart = index <= 0;
@@ -402,8 +410,8 @@ export function ReelsPager({
             style={{ touchAction: 'none' }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerCancel}
+            onPointerUpCapture={onPointerUp}
+            onPointerCancelCapture={onPointerCancel}
             onPointerLeave={onPointerLeave}
           >
             <div
