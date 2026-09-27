@@ -44,11 +44,11 @@ screens:
   - participantes-online-nao-vao
   - participantes-vazios-esqueletos-erro
   - dialogo-gerar-novo-codigo
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor Vilas Boas
+approved_at: 2026-09-27
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-06, design-review, D-33, UI-04, events]
