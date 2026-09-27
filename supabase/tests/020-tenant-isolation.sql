@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(139);
+select plan(148);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -210,6 +210,17 @@ insert into public.event_attendances (id, tenant_id, event_id, user_id, status, 
    '0a000000-0000-4000-8000-0000000000e9', '0a000000-0000-4000-8000-000000000002', 'going', now()),
   ('0b000000-0000-4000-8000-0000000000ea', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-0000000000e9', '0b000000-0000-4000-8000-000000000002', 'going', now());
+
+-- 06-05: ONE guess counter per tenant, IDENTICAL on both sides (each tenant's member has 2 wrong codes
+-- on that tenant's event 'x'). Written as the service lane: the table has NO write policy, and in
+-- production only the SECURITY DEFINER `app.events_check_in` writes it.
+select tests.as_service();
+insert into public.event_checkin_attempts (tenant_id, event_id, user_id, failed_count) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-0000000000e9',
+   '0a000000-0000-4000-8000-000000000002', 2),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000000e9',
+   '0b000000-0000-4000-8000-000000000002', 2);
+reset role;
 
 -- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
 -- global) and RLS with ZERO policies, like platform_admins and tenant_invites: one community's
@@ -1004,6 +1015,60 @@ select results_eq(
   'member_profiles: an update aimed at a NEIGHBOUR''s row in the same tenant touches nothing'
 );
 
+-- ── event_checkin_attempts: the isolation cases on a SELF-select table (06-05). The member sees its
+--    OWN counter, none of B's, and none of a same-tenant peer's (the neighbour above); it can write
+--    nothing at all, because only the SECURITY DEFINER check-in writes this table (T-06-30). ─────
+reset role;
+select tests.as_service();
+insert into public.event_checkin_attempts (tenant_id, event_id, user_id, failed_count) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-0000000000e9',
+   '0a000000-0000-4000-8000-00000000000a', 2);
+reset role;
+select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
+select results_eq(
+  $$ select count(*)::int from public.event_checkin_attempts
+      where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1],
+  'A sees its own event_checkin_attempts row, and only its own (the peer''s is not in the count)'
+);
+select results_eq(
+  $$ select count(*)::int from public.event_checkin_attempts where failed_count = 2 $$,
+  ARRAY[1],
+  'adjacency: three members in two tenants have failed_count 2, the lane returns exactly one'
+);
+select results_eq(
+  $$ select tenant_id::text || '/' || user_id::text from public.event_checkin_attempts
+      where failed_count = 2 $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001/0a000000-0000-4000-8000-000000000002'],
+  'and the counter it returns is A''s, and the member''s own'
+);
+select is_empty(
+  $$ select 1 from public.event_checkin_attempts
+      where event_id = '0b000000-0000-4000-8000-0000000000e9' $$,
+  'detail by id: B''s counter is not found through A''s lane'
+);
+select is_empty(
+  $$ select 1 from public.event_checkin_attempts
+      where user_id = '0a000000-0000-4000-8000-00000000000a' $$,
+  'self-select: a same-tenant PEER''s counter is not found through A''s member lane'
+);
+select throws_ok(
+  $$ insert into public.event_checkin_attempts (tenant_id, event_id, user_id, failed_count)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000000e9',
+             '0a000000-0000-4000-8000-000000000002', 0) $$,
+  '42501',
+  null,
+  'WITH CHECK: A cannot write a counter stamped with B''s tenant (no write policy at all)'
+);
+select results_eq(
+  $$ with u as (
+       update public.event_checkin_attempts set failed_count = 0
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'USING: an update aimed at B''s counters touches nothing'
+);
+
 -- ── tenant B's lane: the symmetric half, so nothing above is an artefact of who went first ──────
 reset role;
 select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
@@ -1118,6 +1183,17 @@ select results_eq(
 select is_empty(
   $$ select id from public.event_attendances where id = '0a000000-0000-4000-8000-0000000000ea' $$,
   'symmetry: A''s attendance row is not found through B''s lane'
+);
+-- 06-05, the counter half of the symmetry: B's member lane returns B's own counter, never A's.
+select results_eq(
+  $$ select tenant_id::text from public.event_checkin_attempts where failed_count = 2 $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'],
+  'symmetry: B''s lane returns B''s event_checkin_attempts row for the same count'
+);
+select is_empty(
+  $$ select 1 from public.event_checkin_attempts
+      where event_id = '0a000000-0000-4000-8000-0000000000e9' $$,
+  'symmetry: A''s counters are not found through B''s lane'
 );
 reset role;
 select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'admin_tenant');

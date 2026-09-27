@@ -3,6 +3,7 @@ import { flush, subscribe } from '@tria/core/server/events/bus';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   EventCancelled,
+  EventCheckedIn,
   EventInput,
   EventPublished,
   EventReactivated,
@@ -24,6 +25,10 @@ import type {
  * 06-04 adds `event.updated` (exactly seven keys, `timesChanged` true only when an instant moved, and
  * nothing for an identical body), `event.cancelled` and `event.reactivated` (exactly five keys, once
  * per transition, nothing for a repeat), and the two 409 codes of the status write.
+ *
+ * 06-05 adds `event.checked_in` (exactly six keys, once on the FIRST check-in, nothing for `already`)
+ * and the outcome mapping of `app.events_check_in`, whose refusals are RETURNED by the database and
+ * thrown only after the transaction resolved (Pitfall 1).
  *
  * `withTenantTx` is the seam; the bus under test is the real one.
  */
@@ -90,7 +95,9 @@ vi.mock('@tria/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
 }));
 
-const { createEvent, rsvpEvent, setEventStatus, updateEvent } = await import('../server/service');
+const { checkInEvent, createEvent, rsvpEvent, setEventStatus, updateEvent } = await import(
+  '../server/service'
+);
 
 function context(): RequestContext {
   return {
@@ -482,6 +489,96 @@ describe('06-04 — event.updated, event.cancelled, event.reactivated: exact key
 
     script = [[], []];
     const miss = setEventStatus(context(), EVENT_ID, { status: 'cancelled' });
+    await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    await expect(miss).rejects.not.toHaveProperty('details.event');
+  });
+});
+
+describe('06-05 — event.checked_in and the check-in outcome mapping', () => {
+  let checkIns: EventCheckedIn[] = [];
+  let stop: () => void = () => {};
+  beforeEach(() => {
+    checkIns = [];
+    stop = subscribe('event.checked_in', async (payload) => {
+      checkIns.push(payload);
+    });
+  });
+  afterEach(() => stop());
+
+  const STAMP = '2026-10-12T21:30:00.123456Z';
+
+  it('17. a first check-in queues ONE event.checked_in with exactly six keys, via code', async () => {
+    script = [[{ outcome: 'checked_in', checked_in_at: STAMP, starts_at: STARTS_AT }]];
+    const ctx = context();
+    await expect(checkInEvent(ctx, EVENT_ID, { code: 'k7-qm' })).resolves.toEqual({
+      outcome: 'checked_in',
+      checkedInAt: STAMP,
+    });
+    // ONE statement, and it is the definer: the service never reads or compares the code itself.
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('app.events_check_in');
+    await flush(ctx);
+    expect(checkIns).toHaveLength(1);
+    expect(Object.keys(checkIns[0] ?? {}).sort()).toEqual([
+      'eventId',
+      'startsAt',
+      'tenantId',
+      'userId',
+      'via',
+      'walkIn',
+    ]);
+    expect(checkIns[0]).toEqual({
+      tenantId: TENANT_ID,
+      eventId: EVENT_ID,
+      userId: USER_ID,
+      walkIn: false,
+      via: 'code',
+      startsAt: STARTS_AT,
+    });
+  });
+
+  it('18. a walk-in carries walkIn true; already answers 200 with the original stamp and emits nothing', async () => {
+    script = [[{ outcome: 'walk_in', checked_in_at: STAMP, starts_at: STARTS_AT }]];
+    const ctx = context();
+    await expect(checkInEvent(ctx, EVENT_ID, { code: 'K7QM' })).resolves.toEqual({
+      outcome: 'walk_in',
+      checkedInAt: STAMP,
+    });
+    await flush(ctx);
+    expect(checkIns[0]).toMatchObject({ walkIn: true, via: 'code' });
+
+    script = [[{ outcome: 'already', checked_in_at: STAMP, starts_at: STARTS_AT }]];
+    const repeat = context();
+    await expect(checkInEvent(repeat, EVENT_ID, { code: 'ZZZZ' })).resolves.toEqual({
+      outcome: 'already',
+      checkedInAt: STAMP,
+    });
+    expect(repeat.events).toHaveLength(0);
+  });
+
+  it('19. every refusal is RETURNED by the database and mapped to a 409 only after the transaction', async () => {
+    const cases: [string, string][] = [
+      ['wrong_code', 'wrong_code'],
+      ['too_many_attempts', 'too_many_attempts'],
+      ['not_open', 'checkin_not_open'],
+      ['closed', 'checkin_closed'],
+      ['cancelled', 'cancelled'],
+    ];
+    for (const [outcome, issue] of cases) {
+      script = [[{ outcome, checked_in_at: null, starts_at: STARTS_AT }]];
+      const ctx = context();
+      await expect(checkInEvent(ctx, EVENT_ID, { code: 'ABCD' })).rejects.toMatchObject({
+        status: 409,
+        code: 'CONFLICT',
+        details: { event: issue },
+      });
+      expect(ctx.events, outcome).toHaveLength(0);
+    }
+  });
+
+  it('20. not_found (unknown, foreign, removed or online) is ONE bare 404', async () => {
+    script = [[{ outcome: 'not_found', checked_in_at: null, starts_at: null }]];
+    const miss = checkInEvent(context(), EVENT_ID, { code: 'K7QM' });
     await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     await expect(miss).rejects.not.toHaveProperty('details.event');
   });

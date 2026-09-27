@@ -60,6 +60,13 @@ export const eventsModule = defineModule({
         log.info({ event: 'event.reactivated', ...payload }, 'event reactivated');
       },
     },
+    {
+      event: 'event.checked_in',
+      handler: async (payload) => {
+        // Shape only (06-05): once per member per event, on the FIRST check-in; never the code.
+        log.info({ event: 'event.checked_in', ...payload }, 'event checked in');
+      },
+    },
   ],
   defaultRolePermissions: {
     admin_tenant: [

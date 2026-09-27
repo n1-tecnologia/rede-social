@@ -7,6 +7,8 @@ import { decodeCursor, encodeCursor, keysetComparison } from '@tria/core/server/
 import { sql } from 'drizzle-orm';
 import type {
   AttendanceStatus,
+  Checkin,
+  CheckinResult,
   EventDetail,
   EventEdit,
   EventFormat,
@@ -958,4 +960,105 @@ export async function setEventStatus(
   );
 
   return toEvent(row);
+}
+
+/** Every outcome `app.events_check_in` can return (its migration header is the vocabulary). */
+type CheckInOutcome =
+  | 'checked_in'
+  | 'walk_in'
+  | 'already'
+  | 'wrong_code'
+  | 'too_many_attempts'
+  | 'not_open'
+  | 'closed'
+  | 'cancelled'
+  | 'not_found';
+
+/** The one row the definer returns, formatted by Postgres (the `ISO_MICROSECONDS` rule). */
+type CheckInRow = {
+  outcome: CheckInOutcome;
+  checked_in_at: string | null;
+  starts_at: string | null;
+};
+
+/** The refusals, mapped to the closed `EVENT_ISSUES` vocabulary (a `409 CONFLICT { event }`). */
+const CHECKIN_REFUSALS: Readonly<Partial<Record<CheckInOutcome, EventIssue>>> = {
+  wrong_code: 'wrong_code',
+  too_many_attempts: 'too_many_attempts',
+  not_open: 'checkin_not_open',
+  closed: 'checkin_closed',
+  cancelled: 'cancelled',
+};
+
+/**
+ * `POST /v1/events/{eventId}/check-in { code }` (06-05, EVENT-04 in person, D-208, D-209, D-216,
+ * D-217). The first module service in this repo that calls a SECURITY DEFINER function.
+ *
+ * **Everything is decided inside Postgres**, by `app.events_check_in(p_event_id, p_code)`: the event
+ * (in person, this tenant, live), its state and window, "already present", the guess bound and the
+ * comparison against `event_secrets.checkin_code`, which this lane cannot read. The code never leaves
+ * the database on this path (T-06-31), and this file never compares it.
+ *
+ * **The function RETURNS its refusal and this service throws only AFTER `withTenantTx` resolved**
+ * (Pitfall 1). A throw inside the callback would roll back the `event_checkin_attempts` increment the
+ * function just wrote, and five wrong codes would never add up. So the callback returns the row, the
+ * transaction commits, and only then is the outcome mapped:
+ *  - `checked_in` / `walk_in` / `already` -> 200 `{ outcome, checkedInAt }`;
+ *  - `wrong_code` / `too_many_attempts` / `not_open` / `closed` / `cancelled` -> `409 CONFLICT
+ *    { event: 'wrong_code' | 'too_many_attempts' | 'checkin_not_open' | 'checkin_closed' |
+ *    'cancelled' }`;
+ *  - `not_found` (unknown, another tenant's, removed, or ONLINE) -> ONE bare 404 (D-23).
+ *
+ * `event.checked_in` (MOD-03) fires ONCE per member per event, on the first check-in only, after
+ * commit (`already` emits nothing). Log lines carry the outcome, never the code (Pitfall 12).
+ */
+export async function checkInEvent(
+  ctx: RequestContext,
+  eventId: string,
+  input: Checkin,
+): Promise<CheckinResult> {
+  const row = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<CheckInRow>(sql`
+      select r.outcome,
+             to_char(r.checked_in_at at time zone 'utc', ${ISO_MICROSECONDS}) as checked_in_at,
+             to_char(r.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at
+        from app.events_check_in(${eventId}::uuid, ${input.code}::text) r`);
+    // Returned, never thrown: the transaction must commit whatever the outcome (Pitfall 1).
+    return rows[0];
+  });
+
+  const outcome = row?.outcome ?? 'not_found';
+  log.info(
+    {
+      event: 'events.check_in',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId,
+      // The outcome only: never the code the member typed (Pitfall 12).
+      outcome,
+    },
+    'event check-in',
+  );
+
+  if (outcome === 'not_found' || !row) throw new ApiError(404, 'NOT_FOUND');
+  const refusal = CHECKIN_REFUSALS[outcome];
+  if (refusal) throw new ApiError(409, 'CONFLICT', { event: refusal });
+  if (!row.checked_in_at) throw new ApiError(500, 'INTERNAL');
+
+  if ((outcome === 'checked_in' || outcome === 'walk_in') && row.starts_at) {
+    emit(ctx, 'event.checked_in', {
+      tenantId: ctx.tenantId,
+      eventId,
+      userId: ctx.userId,
+      walkIn: outcome === 'walk_in',
+      via: 'code',
+      startsAt: row.starts_at,
+    });
+  }
+
+  return {
+    outcome: outcome === 'walk_in' ? 'walk_in' : outcome === 'already' ? 'already' : 'checked_in',
+    checkedInAt: row.checked_in_at,
+  };
 }

@@ -49,6 +49,16 @@ export const EVENT_CHECKIN_OPENS_BEFORE_MINUTES = 60;
 export const EVENT_CHECKIN_CODE_LENGTH = 4;
 export const EVENT_CHECKIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
+/**
+ * D-217 guess bound (06-05, T-06-27): at most this many WRONG codes per member per event inside one
+ * window of `EVENT_CHECKIN_FAILED_WINDOW_MINUTES`; the next attempt answers `too_many_attempts` even
+ * with the right code. MIRRORS of the literals inside `app.events_check_in`
+ * (`supabase/migrations/*_event_check_in_function.sql`), which is the only enforcer: these exist for
+ * copy and tests, and editing one without the other changes nothing but the words.
+ */
+export const EVENT_CHECKIN_MAX_FAILED = 5;
+export const EVENT_CHECKIN_FAILED_WINDOW_MINUTES = 15;
+
 /** Mirrored by `events_format_chk`. */
 export const EVENT_FORMATS = ['in_person', 'online'] as const;
 export type EventFormat = (typeof EVENT_FORMATS)[number];
@@ -289,6 +299,27 @@ export const rsvpResultSchema = z.object({ status: z.enum(ATTENDANCE_STATUSES) }
 export type RsvpResult = z.infer<typeof rsvpResultSchema>;
 
 /**
+ * `POST /v1/events/{eventId}/check-in { code }` (06-05, EVENT-04 in person, D-208). `.strict()`: a
+ * forged `userId` or `status` fails loudly. The bound is generous on purpose (16, not the code's 4):
+ * the database normalises the guess (uppercase; whitespace and hyphens stripped), so `k7-qm` and
+ * ` K7 QM ` are the same code, and a wrong guess is COUNTED there rather than refused here.
+ */
+export const checkinSchema = z.object({ code: z.string().trim().min(1).max(16) }).strict();
+export type Checkin = z.infer<typeof checkinSchema>;
+
+/**
+ * The three outcomes that answer 200. `already` carries the ORIGINAL `checkedInAt` (a re-submit, or
+ * the loser of two racing check-ins). There is deliberately NO code key (T-06-31): the comparison ran
+ * inside Postgres and the code never left it. Every refusal is a `409 { event }` or a bare 404.
+ */
+export const CHECKIN_OUTCOMES = ['checked_in', 'walk_in', 'already'] as const;
+export type CheckinOutcome = (typeof CHECKIN_OUTCOMES)[number];
+export const checkinResultSchema = z
+  .object({ outcome: z.enum(CHECKIN_OUTCOMES), checkedInAt: z.string() })
+  .strict();
+export type CheckinResult = z.infer<typeof checkinResultSchema>;
+
+/**
  * `GET /v1/events/{eventId}/edit` (06-04, D-214): the event as the edit FORM needs it. Returned ONLY
  * by the manage-guarded edit read, never by a member-reachable route, which is why it may carry
  * `meetingUrl` (read through the admin-only `event_secrets_staff_all` policy; a manage-holding
@@ -410,6 +441,22 @@ export interface EventReactivated {
 }
 
 /**
+ * Payload of `event.checked_in` (MOD-03, 06-05): emitted after commit, ONCE per member per event, on
+ * the FIRST check-in only (`already` emits nothing). `walkIn` is true when there was no prior `Vou`
+ * (D-216), `via` is how presence was proved (`'code'` at the venue here; `'online'` is 06-06's
+ * `Entrar`), and `startsAt` lets Phase 7 read the payload alone. Ids, flags and one instant: never a
+ * title and never the code.
+ */
+export interface EventCheckedIn {
+  tenantId: string;
+  eventId: string;
+  userId: string;
+  walkIn: boolean;
+  via: 'code' | 'online';
+  startsAt: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
@@ -420,5 +467,6 @@ declare module '@tria/contracts' {
     'event.updated': EventUpdated;
     'event.cancelled': EventCancelled;
     'event.reactivated': EventReactivated;
+    'event.checked_in': EventCheckedIn;
   }
 }

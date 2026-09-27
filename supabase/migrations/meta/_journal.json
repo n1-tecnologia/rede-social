@@ -260,6 +260,20 @@
       "when": 1790523815982,
       "tag": "20260927154335_event_attendance_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1790535549832,
+      "tag": "20260927185909_event_checkin_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790535566457,
+      "tag": "20260927185926_event_check_in_function",
+      "breakpoints": true
     }
   ]
 }

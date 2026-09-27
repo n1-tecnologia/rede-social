@@ -577,7 +577,46 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       });
       expect(answer.status).toBe(404);
       expect(((await answer.json()) as Envelope).error.details).toBeUndefined();
+
+      // 06-05: the in-person CHECK-IN, with the lab event's REAL code (read through adminSql): the
+      // SECURITY DEFINER function filters by the caller's tenant, so the answer is the same bare 404
+      // as an unknown id, and neither an attendance nor a guess counter is written on the lab's side.
+      const [secret] = await adminSql<{ checkin_code: string }[]>`
+        select checkin_code from public.event_secrets where event_id = ${id}::uuid`;
+      const labRows = async () => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select (select count(*)::int from public.event_attendances where event_id = ${id}::uuid)
+               + (select count(*)::int from public.event_checkin_attempts where event_id = ${id}::uuid) as n`;
+        return row?.n ?? 0;
+      };
+      const labBefore = await labRows();
+      const checkIn = await api.request(`/v1/events/${id}/check-in`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.demoMember}`,
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ code: secret?.checkin_code ?? 'K7QM' }),
+      });
+      expect(checkIn.status).toBe(404);
+      expect(((await checkIn.json()) as Envelope).error.details).toBeUndefined();
+      expect(await labRows()).toBe(labBefore);
     }
+
+    // 06-05: the check-in POST presented on the lab's registered host is refused before any read
+    // (f2's host-mismatch loop is GET-only).
+    const hostMismatch = await api.request(`/v1/events/${demoEvents[0]?.id ?? ''}/check-in`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${tokens.demoMember}`,
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ code: 'K7QM' }),
+    });
+    expect(hostMismatch.status).toBe(403);
+    expect(await code(hostMismatch)).toBe('TENANT_HOST_MISMATCH');
     const [written] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.event_attendances a
         join public.users u on u.id = a.user_id

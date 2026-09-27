@@ -5,8 +5,10 @@ import {
   check,
   foreignKey,
   index,
+  integer,
   pgPolicy,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -57,6 +59,8 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  *
  * `event_attendances` (06-03) is the third table: one row per member per event, policed for EVERY
  * writer by the hand-written guard trigger `app.event_attendance_guard()` (see its docblock below).
+ * `event_checkin_attempts` (06-05) is the fourth: the venue-code guess counter, written ONLY by the
+ * SECURITY DEFINER function `app.events_check_in` (see its docblock at the end of this file).
  *
  * Owned by `packages/modules/events` and picked up by `apps/api/drizzle.config.ts`'s module glob.
  */
@@ -284,6 +288,61 @@ export const eventAttendances = pgTable(
       to: authenticatedRole,
       using: SELF_RSVP,
       withCheck: SELF_RSVP,
+    }),
+  ],
+).enableRLS();
+
+/**
+ * The venue-code guess counter (D-217, T-06-27, T-06-30): at most `EVENT_CHECKIN_MAX_FAILED` wrong
+ * codes per member per event per `EVENT_CHECKIN_FAILED_WINDOW_MINUTES` window. THREE THINGS A
+ * REVIEWER MUST NOT "FIX":
+ *
+ * 1. **There is NO insert, update or delete policy, on purpose.** The only writer is the SECURITY
+ *    DEFINER function `app.events_check_in` (`supabase/migrations/*_event_check_in_function.sql`),
+ *    which runs as its owner and bypasses RLS. A member lane that could write this table could reset
+ *    its own bound (T-06-30), so the member lane reads its OWN row (`…_self_select`, for tests and a
+ *    future "tentativas restantes" hint) and writes nothing. `supabase/tests/142-event-checkin.sql`
+ *    fact 11 asserts the refusal.
+ *
+ * 2. **A refused guess must COMMIT** (Pitfall 1). The function RETURNS `wrong_code` instead of
+ *    raising, and the service throws its 409 only after `withTenantTx` resolved, so the counter
+ *    increment survives the refusal. A trigger or a `raise` here would roll it back and the bound
+ *    would never trip.
+ *
+ * 3. **The primary key is `(tenant_id, event_id, user_id)`**: tenant-first (the 040 gate), and the
+ *    function's upsert arbiter. The window is ONE row per member per event: `failed_count` counts
+ *    inside the window that started at `window_started_at`, and the first wrong code after the
+ *    window expired resets both.
+ */
+export const eventCheckinAttempts = pgTable(
+  'event_checkin_attempts',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').notNull(),
+    /** Does not cascade, like every other authored row (`users` rows are not deleted). */
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    failedCount: integer('failed_count').notNull().default(0),
+    windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({
+      name: 'event_checkin_attempts_pkey',
+      columns: [t.tenantId, t.eventId, t.userId],
+    }),
+    // Composite, so a counter can only point at an event of ITS OWN tenant, and dies with it.
+    foreignKey({
+      name: 'event_checkin_attempts_event_fk',
+      columns: [t.tenantId, t.eventId],
+      foreignColumns: [events.tenantId, events.id],
+    }).onDelete('cascade'),
+    pgPolicy('event_checkin_attempts_self_select', {
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
     }),
   ],
 ).enableRLS();

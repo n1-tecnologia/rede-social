@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   ATTENDANCE_STATUSES,
+  CHECKIN_OUTCOMES,
+  checkinResultSchema,
+  checkinSchema,
+  EVENT_CHECKIN_FAILED_WINDOW_MINUTES,
+  EVENT_CHECKIN_MAX_FAILED,
   EVENT_ISSUE_SET,
   EVENT_ISSUES,
   EVENT_MAX_PAGE_SIZE,
@@ -269,5 +274,38 @@ describe('06-04 — the edit read and the status write', () => {
     expect(eventInputSchema.safeParse({ ...base, meetingUrl: 'https://x.test' }).success).toBe(
       false,
     );
+  });
+});
+
+describe('06-05 — the in-person check-in contract', () => {
+  it('18. checkinSchema takes one trimmed, non-empty code of at most 16 characters, and is strict', () => {
+    expect(checkinSchema.parse({ code: ' k7-qm ' })).toEqual({ code: 'k7-qm' });
+    expect(checkinSchema.safeParse({ code: '' }).success).toBe(false);
+    expect(checkinSchema.safeParse({ code: '   ' }).success).toBe(false);
+    expect(checkinSchema.safeParse({ code: 'A'.repeat(17) }).success).toBe(false);
+    expect(checkinSchema.safeParse({ code: 'K7QM', userId: 'x' }).success).toBe(false);
+    expect(checkinSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('19. checkinResultSchema answers only the three 200 outcomes, and never a code key', () => {
+    expect([...CHECKIN_OUTCOMES]).toEqual(['checked_in', 'walk_in', 'already']);
+    const ok = { outcome: 'walk_in', checkedInAt: '2026-10-12T21:30:00.000000Z' };
+    expect(checkinResultSchema.safeParse(ok).success).toBe(true);
+    expect(checkinResultSchema.safeParse({ ...ok, outcome: 'wrong_code' }).success).toBe(false);
+    expect(checkinResultSchema.safeParse({ ...ok, code: 'K7QM' }).success).toBe(false);
+  });
+
+  it('20. the refusals are in the closed vocabulary, and the bound mirrors the SQL literals', () => {
+    for (const issue of [
+      'wrong_code',
+      'too_many_attempts',
+      'checkin_not_open',
+      'checkin_closed',
+      'cancelled',
+    ]) {
+      expect(EVENT_ISSUE_SET.has(issue), issue).toBe(true);
+    }
+    expect(EVENT_CHECKIN_MAX_FAILED).toBe(5);
+    expect(EVENT_CHECKIN_FAILED_WINDOW_MINUTES).toBe(15);
   });
 });

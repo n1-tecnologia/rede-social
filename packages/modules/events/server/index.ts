@@ -5,6 +5,7 @@
 export { generateCheckinCode, normalizeCheckinCode } from './checkin-code';
 export { eventsRoutes } from './routes';
 export {
+  checkInEvent,
   createEvent,
   getEvent,
   getEventForEdit,

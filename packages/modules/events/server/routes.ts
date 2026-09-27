@@ -5,6 +5,8 @@ import { ApiError } from '@tria/core/server/http/api-error';
 import { requireModule } from '@tria/core/server/modules/require-module';
 import { requirePermission } from '@tria/core/server/rbac/permissions';
 import {
+  checkinResultSchema,
+  checkinSchema,
   EVENT_ISSUE_SET,
   eventDetailSchema,
   eventEditSchema,
@@ -17,6 +19,7 @@ import {
   rsvpSchema,
 } from '../contracts/index';
 import {
+  checkInEvent,
   createEvent,
   getEvent,
   getEventForEdit,
@@ -32,7 +35,7 @@ import {
  *
  * Order is the ROLE-06 order: `requireAuth` (401) -> `requireModule('events')` (404 when the tenant
  * does not have events — never 403, so a member cannot tell "not allowed" from "not here") ->
- * `requirePermission` on the create, edit-read, replace and status routes (403). The write guard is a PERMISSION, never a role
+ * `requirePermission` on the create, edit-read, replace, status, RSVP and check-in routes (403). The write guard is a PERMISSION, never a role
  * comparison: granting creation to another role later is a manifest line, not a route edit.
  */
 
@@ -242,6 +245,43 @@ const statusRoute = createRoute({
   },
 });
 
+/**
+ * The in-person check-in (06-05, EVENT-04, D-208). The literal permission, like the RSVP route
+ * (T-06-12): every role answers and checks in in V1. The comparison, the window, the walk-in rule and
+ * the guess bound all run inside Postgres (`app.events_check_in`); this route only carries the code
+ * in and the outcome out, and no response ever carries the code (T-06-31).
+ */
+const checkInRoute = createRoute({
+  method: 'post',
+  path: '/{eventId}/check-in',
+  middleware: [requirePermission('events.attendance.respond')] as const,
+  request: {
+    params: eventParamSchema,
+    body: { content: { 'application/json': { schema: checkinSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The caller is present. `outcome` is `checked_in` (after a `Vou`), `walk_in` (no answer, or `Não vou`, D-216) or `already` (they were present before; `checkedInAt` is the ORIGINAL instant, and no guess was spent). The window is fixed (D-209): from `starts_at - 1 hour` to `ends_at`, once per event.',
+      content: { 'application/json': { schema: checkinResultSchema } },
+    },
+    400: {
+      description: '`VALIDATION_FAILED`: the id is not a uuid, or `code` is empty or too long.',
+    },
+    403: {
+      description: 'The caller does not hold `events.attendance.respond` in this tenant',
+    },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, removed, or ONLINE (an online event is checked in by `Entrar`). One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.event`: `wrong_code` (counted), `too_many_attempts` (5 wrong codes within 15 minutes; answered even with the right code), `checkin_not_open` (before `starts_at - 1 hour`), `checkin_closed` (from `ends_at` on) or `cancelled`.',
+    },
+  },
+});
+
 export const eventsRoutes = events
   .openapi(listRoute, async (c) =>
     c.json(await listEvents(c.get('ctx'), c.req.valid('query')), 200),
@@ -264,6 +304,12 @@ export const eventsRoutes = events
   .openapi(statusRoute, async (c) =>
     c.json(
       await setEventStatus(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(checkInRoute, async (c) =>
+    c.json(
+      await checkInEvent(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')),
       200,
     ),
   );
