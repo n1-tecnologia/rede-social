@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Events
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-09-27T15:36:22.533Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-09-27T18:25:49.308Z"
 last_activity: 2026-09-27
-last_activity_desc: "06-01 complete: Events tracer (module-events, events + event_secrets, /v1/events, bootstrap timezone, /eventos); D-33 review of sketch 006 still pending"
-state_head: 69e80c7c4f818b769e6060f6e39fc5ad34192994
+last_activity_desc: "06-03 complete: event_attendances + guard trigger, GET/PUT RSVP API, /eventos/[eventId] detail, SegmentedControl RSVP pair; sketch 006 approved (provisional) 2026-09-27"
+state_head: 24c4fe3d41872fa2a26cfbfe3c2988bc7d7de0cc
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 98
-  completed_plans: 88
+  completed_plans: 89
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 6 (Events) — EXECUTING
-Plan: 2 of 9 complete (06-01, 06-02); Wave 2 next (06-03)
-Status: Executing — D-33 review of sketch 006 pending
-Last activity: 2026-09-27 — 06-01 complete: Events tracer (module-events, events + event_secrets, POST/GET /v1/events, bootstrap timezone, /eventos with Próximos/Passados); D-33 review of sketch 006 still pending
+Plan: 3 of 9 complete (06-01, 06-02, 06-03); Wave 3 next (06-04)
+Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair waits on 01.1
+Last activity: 2026-09-27 — 06-03 complete: event_attendances + app.event_attendance_guard(), GET /v1/events/{id} and PUT /v1/events/{id}/rsvp, /eventos/[eventId] detail page, @tria/ui SegmentedControl and the EventActions RSVP island; EVENT-02/EVENT-03 stay Pending until 06-08/06-09
 
-Progress: [██████████████████░░] 88/98 plans ([░░░░░░░░░░] 0%)
+Progress: [██████████████████░░] 89/98 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -148,6 +148,7 @@ Progress: [██████████████████░░] 88/98 p
 | Phase 05.3 P10 | 12 min | 3 tasks | 8 files |
 | Phase 06 P02 | 18min | 2 tasks | 3 files |
 | Phase 06 P01 | 49 min | 3 tasks | 54 files |
+| Phase 06 P03 | 164min (~40min active) | 3 tasks | 44 files |
 
 ## Accumulated Context
 
@@ -464,6 +465,11 @@ Recent decisions affecting current work:
 - [Phase 06]: [06-01] D-217 store: meeting URL and check-in code live only in event_secrets behind the inline policy tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant'; tied to events by two hand-written deferrable FKs (XOR discriminator + existence)
 - [Phase 06]: [06-01] Event times are entered as tenant wall-clock pairs and converted inside the insert (at time zone tenants.timezone); bootstrap.tenant.timezone carries the zone and every events string is formatted server-side by apps/web/lib/events-view.ts
 - [Phase 06]: [06-01] Eventos is nav order 40 (after Reels 30), no home slot until 06-08; period is a closed enum, limit clamps; event.published carries ids and instants only (Phase 7 reads the title via a contract)
+- [Phase 06]: 06-03: the RSVP-close rule lives only in the database (app.event_attendance_guard, now() >= starts_at, FOR SHARE); the web action and EventActions never consult the clock to allow or refuse an answer
+- [Phase 06]: 06-03: EventActions reads its catalog strings via useTranslations; the RSC passes only eventActionState (phase, flags, recorded answer, three ISO instants); one boundary setTimeout within 24 h, 1 s past the boundary, re-armed by phase
+- [Phase 06]: 06-03: optimistic RSVP press is an override keyed to the server answer it replaced ({value, from}), so success holds the new answer until the refresh lands; attendance_locked toasts the generic failure and refreshes
+- [Phase 06]: 06-03: sketch 006 approval (provisional) was written into its README by the orchestrator on Igor's instruction ('aprovo pode continuar'), commit 239bd88; the executor only re-ran the precondition grep
+- [Phase 06]: 06-03: EVENT-02 and EVENT-03 stay Pending: requirements.ready-ids 0/2 because 06-08 and 06-09 also declare them
 
 ### Pending Todos
 
@@ -521,6 +527,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T15:36:22.432Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-09-27T18:25:26.663Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
