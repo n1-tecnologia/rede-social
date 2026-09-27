@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Events
 status: executing
-stopped_at: Completed 06-02-PLAN.md (D-33 review of sketch 006 pending)
-last_updated: "2026-09-27T14:43:25.915Z"
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-09-27T15:36:22.533Z"
 last_activity: 2026-09-27
-last_activity_desc: "06-02 complete: sketch 006 drawn and registered, D-33 gate armed (approved: false), review pending"
-state_head: c3c272595883005b251e1da7a8a5008d8b2e87b4
+last_activity_desc: "06-01 complete: Events tracer (module-events, events + event_secrets, /v1/events, bootstrap timezone, /eventos); D-33 review of sketch 006 still pending"
+state_head: 69e80c7c4f818b769e6060f6e39fc5ad34192994
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 98
-  completed_plans: 87
+  completed_plans: 88
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 6 (Events) — EXECUTING
-Plan: 1 of 9 complete (06-02); 06-01 not yet executed
+Plan: 2 of 9 complete (06-01, 06-02); Wave 2 next (06-03)
 Status: Executing — D-33 review of sketch 006 pending
-Last activity: 2026-09-27 — 06-02 complete: sketch 006 drawn and registered, D-33 gate armed (approved: false), review pending
+Last activity: 2026-09-27 — 06-01 complete: Events tracer (module-events, events + event_secrets, POST/GET /v1/events, bootstrap timezone, /eventos with Próximos/Passados); D-33 review of sketch 006 still pending
 
-Progress: [█████████████████░░░] 87/98 plans ([░░░░░░░░░░] 0%)
+Progress: [██████████████████░░] 88/98 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -147,6 +147,7 @@ Progress: [█████████████████░░░] 87/98 p
 | Phase 05.3 P09 | 69min | 3 tasks | 4 files |
 | Phase 05.3 P10 | 12 min | 3 tasks | 8 files |
 | Phase 06 P02 | 18min | 2 tasks | 3 files |
+| Phase 06 P01 | 49 min | 3 tasks | 54 files |
 
 ## Accumulated Context
 
@@ -460,6 +461,9 @@ Recent decisions affecting current work:
 - [Phase 05.3]: 05.3-10 requirements: REELS-05 and REELS-07 marked Complete; REELS-06 stays Pending until the phone UAT (blocked until Phase 01.1)
 - [Phase 06]: 06-02: Phase 6 D-33 sketch is 006-phase-06-designed-screens (004/005 taken by 05.2/05.3); gate armed approved: false; six gated tasks wait on the user's approval
 - [Phase 06]: 06-02: review findings flagged, not fixed: calendar pair overflows half-width at 320px; ticket Data cell truncates the contract date at 390px
+- [Phase 06]: [06-01] D-217 store: meeting URL and check-in code live only in event_secrets behind the inline policy tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant'; tied to events by two hand-written deferrable FKs (XOR discriminator + existence)
+- [Phase 06]: [06-01] Event times are entered as tenant wall-clock pairs and converted inside the insert (at time zone tenants.timezone); bootstrap.tenant.timezone carries the zone and every events string is formatted server-side by apps/web/lib/events-view.ts
+- [Phase 06]: [06-01] Eventos is nav order 40 (after Reels 30), no home slot until 06-08; period is a closed enum, limit clamps; event.published carries ids and instants only (Phase 7 reads the title via a contract)
 
 ### Pending Todos
 
@@ -517,6 +521,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T14:43:25.812Z
-Stopped at: Completed 06-02-PLAN.md (D-33 review of sketch 006 pending)
+Last session: 2026-09-27T15:36:22.432Z
+Stopped at: Completed 06-01-PLAN.md
 Resume file: None

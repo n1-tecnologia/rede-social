@@ -517,13 +517,13 @@ Plans:
   3. `admin_tenant` can see the attendance list per event with confirmed vs checked-in status.
   4. Member can add an event to their calendar via .ics download and a Google Calendar link.
 
-**Plans**: 1/9 plans executed
+**Plans**: 2/9 plans executed
 
 Plans:
 
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — Tracer: `@tria/module-events` with `events` + the role-gated `event_secrets`, wall-clock→UTC create, the Próximos/Passados keysets in the tenant timezone, `bootstrap.tenant.timezone`, the `Eventos` tab, pgTAP 130 + isolation, the seeded events
+- [x] 06-01-PLAN.md — Tracer: `@tria/module-events` with `events` + the role-gated `event_secrets`, wall-clock→UTC create, the Próximos/Passados keysets in the tenant timezone, `bootstrap.tenant.timezone`, the `Eventos` tab, pgTAP 130 + isolation, the seeded events
 - [x] 06-02-PLAN.md — The D-33 design gate: a sketch of the six prototype-less surfaces plus the three proto deltas, shipped `approved: false`
 
 **Wave 2** *(blocked on Wave 1; Task 3 blocked on the sketch approval)*
@@ -674,7 +674,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
-| 6. Events | 1/9 | In Progress|  |
+| 6. Events | 2/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
