@@ -20,3 +20,4 @@ export {
   type EventPosterProps,
 } from './EventPoster';
 export { EventTicket, type EventTicketProps } from './EventTicket';
+export { NextEventCard, type NextEventCardProps } from './NextEventCard';

@@ -1,9 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import { devices, expect, type Locator, type Page, test } from '@playwright/test';
 import eventMessages from '../messages/pt-BR/events.json' with { type: 'json' };
+import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import {
   addEventsMember,
   attendanceFor,
+  cancelEventNow,
   closeEventsAdmin,
   createEventsTenant,
   deleteEventsByTitlePrefix,
@@ -12,6 +14,7 @@ import {
   eventsApiAs,
   insertEvent,
   moveEventStart,
+  moveEventStartSeconds,
   readEventInstants,
   secretsFor,
   tenantIdBySlug,
@@ -1747,5 +1750,194 @@ test.describe('events agenda', () => {
 
     const malformed = await page.request.get(`${tenant.origin}/eventos/nao-e-um-id/agenda.ics`);
     expect(malformed.status()).toBe(404);
+  });
+});
+
+/**
+ * 06-08 (D-202, UI-D-214, UI-D-203): the Início "Próximo evento" card, on the phone, in a throwaway
+ * events tenant with `feed` on (so `/inicio` has its feed below the card).
+ *
+ * The switch into check-in mode is watched LIVE (Pitfall 7): the server clock is real, so the event's
+ * `starts_at` is moved to put the window's opening ~25 s ahead, and the spec waits out that real
+ * boundary on an open page, with a marker proving the document was never reloaded (the refresh
+ * island's `router.refresh()` keeps the document).
+ */
+test.describe('events inicio', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  const SLUG = 'e2e-events-inicio';
+  const MEETING = 'https://meet.example.test/inicio';
+  /** 120 characters (the contract's cap), so the E09 long-text backstop is the real worst case. */
+  const LONG_TITLE =
+    'Encontro regional de associados voluntarios e parceiros do programa de formacao continuada com oficinas e roda de conversa'.slice(
+      0,
+      120,
+    );
+  let tenant: EventsTenant | null = null;
+  const ids = { inPerson: '', online: '' };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    tenant = await createEventsTenant(SLUG, SEED_PASSWORD, ['feed']);
+  });
+
+  test.afterAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    await deleteEventsTenant(SLUG);
+    await closeEventsAdmin();
+  });
+
+  const card = (page: Page) => page.getByTestId('next-event');
+  const heading = (page: Page) => page.getByRole('heading', { name: E.home.title, exact: true });
+
+  test('1. with no event coming, /inicio has no "Próximo evento" section and the feed renders', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events inicio tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await expect(page.getByText(feedMessages.feed.empty.title)).toBeVisible();
+    await expect(card(page)).toHaveCount(0);
+    await expect(heading(page)).toHaveCount(0);
+  });
+
+  test('2. a 120-character in-person event: two lines, no CTA; at the window’s opening "Fazer check-in" appears WITHOUT a reload, whole at 320px, and opens the ticket', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events inicio tenant was not provisioned');
+    expect(LONG_TITLE).toHaveLength(120);
+    ids.inPerson = await insertEvent(tenant.tenantId, {
+      title: LONG_TITLE,
+      venueName: 'Centro de Convencoes Professor Joaquim Nabuco, Auditorio 12B',
+      startsInMinutes: 180,
+      endsInMinutes: 300,
+    });
+    await page.setViewportSize({ width: 320, height: 740 });
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+
+    // The window opens (starts_at − 1 h) ~25 s from the DATABASE's now.
+    await moveEventStartSeconds(ids.inPerson, 60 * 60 + 25);
+    await page.reload();
+    await expect(heading(page)).toBeVisible();
+    const row = page.getByRole('link', { name: `Ver o evento ${LONG_TITLE}` });
+    await expect(row).toHaveAttribute('href', `/eventos/${ids.inPerson}`);
+    await expect(page.getByTestId('next-event-title')).toHaveText(LONG_TITLE);
+    await expect(page.getByTestId('next-event-cta')).toHaveCount(0);
+    // UI E09/long-text: the title stops at TWO lines at 320px.
+    const clamp = await page.getByTestId('next-event-title').evaluate((el) => {
+      const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
+      return {
+        lines: Math.round(el.clientHeight / lineHeight),
+        clipped: el.scrollHeight > el.clientHeight,
+      };
+    });
+    expect(clamp).toEqual({ lines: 2, clipped: true });
+    // The feed below still renders.
+    await expect(page.getByText(feedMessages.feed.empty.title)).toBeVisible();
+
+    // UI-D-203: no reload — a marker on the document survives the island's router.refresh().
+    await page.evaluate(() => {
+      (window as unknown as { __noReload: boolean }).__noReload = true;
+    });
+    const cta = page.getByTestId('next-event-checkin');
+    await expect(cta).toBeVisible({ timeout: 45_000 });
+    expect(
+      await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload),
+    ).toBe(true);
+    await expect(cta).toHaveText(E.checkin.cta);
+    await expect(cta).toHaveAttribute('href', `/eventos/${ids.inPerson}/check-in`);
+    // The CTA is a SIBLING of the row, never inside its anchor.
+    expect(await row.locator('[data-testid="next-event-checkin"]').count()).toBe(0);
+    // Whole at 320px (the E09 backstop): inside the viewport, its label not overflowing, and the
+    // title still at two lines.
+    const box = await cta.boundingBox();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 999)).toBeLessThanOrEqual(320);
+    expect(await cta.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(
+      await page
+        .getByTestId('next-event-title')
+        .evaluate((el) =>
+          Math.round(el.clientHeight / Number.parseFloat(getComputedStyle(el).lineHeight)),
+        ),
+    ).toBe(2);
+
+    await cta.dispatchEvent('click');
+    await expect(page).toHaveURL(new RegExp(`/eventos/${ids.inPerson}/check-in$`));
+    await expect(page.getByTestId('event-ticket')).toBeVisible();
+  });
+
+  test('3. the in-person event cancelled, an online one in its window: the card offers the plain Entrar anchor', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events inicio tenant was not provisioned');
+    await cancelEventNow(ids.inPerson);
+    ids.online = await insertEvent(tenant.tenantId, {
+      title: 'Live do Inicio',
+      format: 'online',
+      meetingUrl: MEETING,
+      startsInMinutes: 30,
+      endsInMinutes: 150,
+    });
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await expect(page.getByTestId('next-event-title')).toHaveText('Live do Inicio');
+    await expect(page.getByTestId('next-event-place')).toHaveText(E.place.online);
+    const enter = page.getByTestId('next-event-enter');
+    await expect(enter).toHaveText(E.online.enter);
+    await expect(enter).toHaveAttribute('href', `/eventos/${ids.online}/entrar`);
+    await expect(enter).toHaveAttribute('target', '_blank');
+    await expect(enter).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(enter).toHaveAttribute('data-no-prefetch', '');
+    await expect(page.getByTestId('next-event-checkin')).toHaveCount(0);
+    expect(await page.content()).not.toContain('meet.example.test');
+    // Rendering Início recorded nothing (D-218).
+    expect(await attendanceFor(ids.online, tenant.memberEmail)).toBeNull();
+  });
+
+  test('4. checked in online, Entrar stays to rejoin and the pill reads "Presente"', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events inicio tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    const res = await page.request.get(`${tenant.origin}/eventos/${ids.online}/entrar`, {
+      maxRedirects: 0,
+    });
+    expect(res.status()).toBe(303);
+    expect(await attendanceFor(ids.online, tenant.memberEmail)).toEqual({
+      status: 'walk_in',
+      checkinVia: 'online',
+    });
+    await page.reload();
+    await expect(page.getByTestId('next-event-enter')).toHaveAttribute(
+      'href',
+      `/eventos/${ids.online}/entrar`,
+    );
+    await expect(page.getByTestId('next-event-pill')).toHaveText(E.state.present);
+  });
+
+  test.describe('on a device in another timezone', () => {
+    test.use({ timezoneId: 'America/Manaus' });
+
+    test('5. the card’s when-line shows the TENANT wall clock, not the device one', async ({
+      page,
+    }, testInfo) => {
+      test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+      if (!tenant) throw new Error('the events inicio tenant was not provisioned');
+      const { startsAt } = await readEventInstants(SLUG, 'Live do Inicio');
+      const tenantDay = (iso: string | Date) =>
+        new Intl.DateTimeFormat('en-CA', { timeZone: TENANT_ZONE }).format(new Date(iso));
+      const sameDay = tenantDay(startsAt) === tenantDay(new Date());
+      const expected = (sameDay ? E.when.todayAt : E.when.tomorrowAt).replace(
+        '{time}',
+        clock(startsAt, TENANT_ZONE),
+      );
+      expect(clock(startsAt, 'America/Manaus')).not.toBe(clock(startsAt, TENANT_ZONE));
+
+      await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+      await expect(page.getByTestId('next-event-overline')).toHaveText(expected);
+    });
   });
 });

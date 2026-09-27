@@ -1303,6 +1303,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       // and the lab-id bare 404s, live in events-attendance.test.ts). The host check refuses first.
       '/v1/events/0d000000-0000-4000-8000-000000000e01/attendance',
       '/v1/events/0d000000-0000-4000-8000-000000000e01/attendance/summary',
+      // 06-08: the Início card's next-event read joins it — SCHEMA-CONVENTIONS §(j) rule 2. It
+      // names the tenant's next event, so the host check must refuse the session before any read.
+      '/v1/events/next',
     ]) {
       const res = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(res.status).toBe(403);

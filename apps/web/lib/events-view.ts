@@ -575,6 +575,115 @@ export function eventActionState(
   };
 }
 
+/* ── 06-08: the Início "Próximo evento" card (UI-D-214, D-202) ─────────────────────────────────── */
+
+/**
+ * The card's check-in mode (P1/P2): the in-person ticket link, the online `Entrar` anchor, or none.
+ * Only the KIND and the path cross to the renderer; the anchor's markup is the host's.
+ */
+export type NextEventCta =
+  | { kind: 'checkin'; href: string }
+  | { kind: 'enter'; href: string }
+  | null;
+
+/** Everything the Início card renders, as finished strings, plus the ISO boundaries to refresh at. */
+export type NextEventCardView = {
+  id: string;
+  href: string;
+  /** The row's accessible name, "Ver o evento {title}". */
+  ariaLabel: string;
+  title: string;
+  /** "Hoje · 19:00" / "Amanhã · 19:00" / "{date} · {time}" / "Acontecendo agora". */
+  overline: string;
+  place: string;
+  placeKind: 'venue' | 'online';
+  /** "N confirmados" (the event is never past here: the read excludes ended events). */
+  meta: string;
+  pill: { tone: 'brand' | 'success'; label: string } | null;
+  coverAssetId: string | null;
+  coverVariantWidths: number[];
+  phase: EventPhase;
+  cta: NextEventCta;
+  /** `checkinOpensAt`, `startsAt`, `endsAt`: the UI-D-203 refresh targets (ISO). */
+  boundaries: [string, string, string];
+};
+
+/**
+ * `EventSummary` → the Início card (UI-D-214), in the TENANT's timezone from ONE request instant.
+ *
+ * - **Overline** (the Início when-line): "Acontecendo agora" while it runs (P2); otherwise, by
+ *   tenant-local calendar day, "Hoje · {time}", "Amanhã · {time}" or "{date} · {time}".
+ * - **Pill**: "Presente" (success) once checked in, a walk-in included; "Você vai" (brand) after Vou;
+ *   none otherwise.
+ * - **Check-in mode** (P1/P2, never cancelled): in person, `checkin` → `/eventos/{id}/check-in` until
+ *   the member is checked in (then none); online, `enter` → `/eventos/{id}/entrar`, STILL offered
+ *   after the check-in so the member can rejoin (UI E05+E09/partial). Before the window: none.
+ */
+export function nextEventCardView(
+  event: EventSummary,
+  { tz, nowMs, t }: { tz: string; nowMs: number; t: Translator },
+): NextEventCardView {
+  const online = event.format === 'online';
+  const cancelled = event.status === 'cancelled';
+  const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
+  const time = formatEventTime(event.startsAt, tz);
+
+  let overline: string;
+  if (phase === 'P2') {
+    overline = t('when.live');
+  } else {
+    const days = tenantDaysUntil(event.startsAt, tz, nowMs);
+    overline =
+      days <= 0
+        ? t('when.todayAt', { time })
+        : days === 1
+          ? t('when.tomorrowAt', { time })
+          : t('when.at', { date: formatEventDate(event.startsAt, tz, nowMs), time });
+  }
+
+  const state = viewerState(event, nowMs);
+  const pill =
+    state === 'present'
+      ? { tone: 'success' as const, label: t('state.present') }
+      : state === 'going'
+        ? { tone: 'brand' as const, label: t('state.going') }
+        : null;
+
+  const inWindow = !cancelled && (phase === 'P1' || phase === 'P2');
+  const base = `/eventos/${encodeURIComponent(event.id)}`;
+  const checkedIn = event.viewerCheckedInAt !== null;
+  const cta: NextEventCta = !inWindow
+    ? null
+    : online
+      ? { kind: 'enter', href: `${base}/entrar` }
+      : checkedIn
+        ? null
+        : { kind: 'checkin', href: `${base}/check-in` };
+
+  return {
+    id: event.id,
+    href: base,
+    ariaLabel: t('home.open', { title: event.title }),
+    title: event.title,
+    overline,
+    place: online ? t('place.online') : (event.venueName ?? ''),
+    placeKind: online ? 'online' : 'venue',
+    meta: t('count.confirmed', { count: event.confirmedCount }),
+    pill,
+    coverAssetId: event.coverAssetId,
+    coverVariantWidths: event.coverVariantWidths,
+    phase,
+    cta,
+    boundaries: [
+      new Date(
+        Date.parse(event.startsAt) - EVENT_CHECKIN_OPENS_BEFORE_MINUTES * 60_000,
+      ).toISOString(),
+      event.startsAt,
+      event.endsAt,
+    ],
+  };
+}
+
 /* ── 06-05: the check-in boarding pass (`/eventos/[eventId]/check-in`, UI-D-208) ───────────────── */
 
 /**

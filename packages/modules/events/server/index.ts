@@ -11,6 +11,7 @@ export {
   getAttendanceSummary,
   getEvent,
   getEventForEdit,
+  getNextEvent,
   guardIssue,
   listAttendance,
   listEvents,

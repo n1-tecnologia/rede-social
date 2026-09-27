@@ -1259,3 +1259,39 @@ describe('06-08 — events calendar strings', () => {
     expect(texts).not.toMatch(/https?:|\{\w+\}/);
   });
 });
+
+/**
+ * 06-08 — the Início card (UI-SPEC Copywriting Contract, "List, poster and Início"), verbatim, with
+ * the `{time}` and `{title}` placeholders formatted so a dropped brace fails here.
+ */
+describe('06-08 — events Início card strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.home.title', 'Próximo evento'],
+    ['events.home.open', 'Ver o evento {title}'],
+    ['events.when.todayAt', 'Hoje · {time}'],
+    ['events.when.tomorrowAt', 'Amanhã · {time}'],
+    ['events.when.at', '{date} · {time}'],
+    ['events.when.live', 'Acontecendo agora'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('formats the when-lines and the row label', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+    expect(t('when.todayAt', { time: '19:00' })).toBe('Hoje · 19:00');
+    expect(t('when.tomorrowAt', { time: '07:30' })).toBe('Amanhã · 07:30');
+    expect(t('home.open', { title: 'Encontro anual' })).toBe('Ver o evento Encontro anual');
+  });
+});

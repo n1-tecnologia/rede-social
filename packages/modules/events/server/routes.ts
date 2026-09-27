@@ -20,6 +20,7 @@ import {
   eventQuerySchema,
   eventStatusUpdateSchema,
   eventSummarySchema,
+  nextEventSchema,
   rsvpResultSchema,
   rsvpSchema,
 } from '../contracts/index';
@@ -30,6 +31,7 @@ import {
   getAttendanceSummary,
   getEvent,
   getEventForEdit,
+  getNextEvent,
   listAttendance,
   listEvents,
   regenerateCheckinCode,
@@ -116,6 +118,22 @@ const createEventRoute = createRoute({
     404: {
       description:
         'The cover asset id is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+/**
+ * `GET /next` (06-08, D-202): the Início card's read. NO permission middleware: every member of the
+ * tenant sees what is coming. Registered BEFORE `/{eventId}`, so `next` is never read as an id.
+ */
+const nextRoute = createRoute({
+  method: 'get',
+  path: '/next',
+  responses: {
+    200: {
+      description:
+        "The tenant's soonest ACTIVE event that has not ended (one in progress included), soonest start first, with the caller's own state and the two counts, or `{ event: null }` when there is none. Cancelled events are skipped. No meeting URL and no check-in code.",
+      content: { 'application/json': { schema: nextEventSchema } },
     },
   },
 });
@@ -403,6 +421,7 @@ export const eventsRoutes = events
   .openapi(createEventRoute, async (c) =>
     c.json(await createEvent(c.get('ctx'), c.req.valid('json')), 201),
   )
+  .openapi(nextRoute, async (c) => c.json(await getNextEvent(c.get('ctx')), 200))
   .openapi(detailRoute, async (c) =>
     c.json(await getEvent(c.get('ctx'), c.req.valid('param').eventId), 200),
   )

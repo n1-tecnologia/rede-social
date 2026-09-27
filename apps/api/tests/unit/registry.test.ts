@@ -84,15 +84,20 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       chrome: 'media',
     });
     expect(MODULE_REGISTRY.reels?.requires).toEqual(['feed']);
-    // D-55 / UI-D-215: `events` spends the Eventos TAB at order 40, after Reels' 30. It declares no
-    // home slot yet: the "Próximo evento" card lands with its renderer in 06-08.
+    // D-55 / UI-D-215: `events` spends the Eventos TAB at order 40, after Reels' 30.
     expect(MODULE_REGISTRY.events?.nav).toMatchObject({
       placement: 'tab',
       href: '/eventos',
       order: 40,
       icon: 'calendar-days',
     });
-    expect(MODULE_REGISTRY.events?.home).toBeUndefined();
+    // 06-08 (D-202, UI-D-214): the Início "Próximo evento" card at order 7, strictly BETWEEN the
+    // stories row (5) and the feed (10), pinned against both so a move on either side fails here.
+    expect(MODULE_REGISTRY.events?.home).toEqual([{ order: 7 }]);
+    const storiesOrder = MODULE_REGISTRY.stories?.home?.[0]?.order ?? Number.POSITIVE_INFINITY;
+    const feedOrder = MODULE_REGISTRY.feed?.home?.[0]?.order ?? Number.NEGATIVE_INFINITY;
+    expect(storiesOrder).toBeLessThan(7);
+    expect(feedOrder).toBeGreaterThan(7);
   });
 
   it('2. defineModule accepts a manifest with only a key, and it lists without nav (MOD-01 empty)', () => {

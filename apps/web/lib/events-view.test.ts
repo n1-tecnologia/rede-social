@@ -19,6 +19,7 @@ import {
   formatEventDate,
   formatEventTime,
   mapsHref,
+  nextEventCardView,
   participantsHref,
   spelledCode,
   tenantDayKey,
@@ -605,5 +606,95 @@ describe('06-08 — the calendar pair (UI-D-210)', () => {
     expect(calendar('2026-10-20T12:00:00Z')).toBe(false);
     expect(calendar('2026-10-01T12:00:00Z', { status: 'cancelled' })).toBe(false);
     expect(calendar('2026-10-12T23:00:00Z', { status: 'cancelled' })).toBe(false);
+  });
+});
+
+describe('06-08 — nextEventCardView (UI-D-214, the Início card)', () => {
+  const view = (nowIso: string, overrides: Partial<EventSummary> = {}, tz = SP) =>
+    nextEventCardView(event(overrides), { tz, nowMs: at(nowIso), t });
+
+  it('31. the Início when-line: "{date} · {time}", "Amanhã · …", "Hoje · …", then "Acontecendo agora"', () => {
+    expect(view('2026-10-01T12:00:00Z').overline).toBe('seg., 12 de out. · 19:00');
+    expect(view('2026-10-11T15:00:00Z').overline).toBe('Amanhã · 19:00');
+    expect(view('2026-10-12T15:00:00Z').overline).toBe('Hoje · 19:00');
+    expect(view('2026-10-12T21:30:00Z').overline).toBe('Hoje · 19:00');
+    expect(view('2026-10-12T22:30:00Z').overline).toBe('Acontecendo agora');
+  });
+
+  it('32. the tenant zone, not the device one, draws the wall clock and the calendar day', () => {
+    // 22:00Z is 19:00 in São Paulo and 18:00 in Manaus: the zone passed in (the tenant's) wins.
+    expect(view('2026-10-12T15:00:00Z', {}, MANAUS).overline).toBe('Hoje · 18:00');
+    // 02:30Z on the 13th is still the 12th, 23:30, in São Paulo: "Hoje" there.
+    expect(
+      view('2026-10-12T15:00:00Z', {
+        startsAt: '2026-10-13T02:30:00.000000Z',
+        endsAt: '2026-10-13T04:00:00.000000Z',
+      }).overline,
+    ).toBe('Hoje · 23:30');
+  });
+
+  it('33. href, label, place, meta and the pill (Você vai / Presente / none)', () => {
+    const v = view('2026-10-01T12:00:00Z', { confirmedCount: 24, viewerStatus: 'going' });
+    expect(v).toMatchObject({
+      href: '/eventos/11111111-1111-4111-8111-111111111111',
+      ariaLabel: 'Ver o evento Encontro anual',
+      title: 'Encontro anual',
+      place: 'Auditório da sede',
+      placeKind: 'venue',
+      meta: '24 confirmados',
+      pill: { tone: 'brand', label: 'Você vai' },
+    });
+    expect(view('2026-10-01T12:00:00Z').pill).toBeNull();
+    expect(view('2026-10-01T12:00:00Z', { viewerStatus: 'not_going' }).pill).toBeNull();
+    expect(
+      view('2026-10-12T21:30:00Z', {
+        viewerStatus: 'walk_in',
+        viewerCheckedInAt: '2026-10-12T21:20:00.000000Z',
+      }).pill,
+    ).toEqual({ tone: 'success', label: 'Presente' });
+    const online = view('2026-10-01T12:00:00Z', { format: 'online', venueName: null });
+    expect(online).toMatchObject({ place: 'Online', placeKind: 'online' });
+  });
+
+  it('34. check-in mode: none before the window; in person the ticket until checked in', () => {
+    expect(view('2026-10-12T20:59:00Z').cta).toBeNull();
+    const ticket = {
+      kind: 'checkin',
+      href: '/eventos/11111111-1111-4111-8111-111111111111/check-in',
+    };
+    expect(view('2026-10-12T21:00:00Z').cta).toEqual(ticket);
+    expect(view('2026-10-12T23:00:00Z', { viewerStatus: 'going' }).cta).toEqual(ticket);
+    expect(
+      view('2026-10-12T21:30:00Z', {
+        viewerStatus: 'checked_in',
+        viewerCheckedInAt: '2026-10-12T21:20:00.000000Z',
+      }).cta,
+    ).toBeNull();
+    // Defensive: the read excludes cancelled events, but a cancelled one never offers a CTA.
+    expect(view('2026-10-12T21:30:00Z', { status: 'cancelled' }).cta).toBeNull();
+  });
+
+  it('35. check-in mode online: Entrar in the window, and STILL after the check-in (rejoin)', () => {
+    const enter = { kind: 'enter', href: '/eventos/11111111-1111-4111-8111-111111111111/entrar' };
+    const online = { format: 'online' as const, venueName: null };
+    expect(view('2026-10-12T20:00:00Z', online).cta).toBeNull();
+    expect(view('2026-10-12T21:10:00Z', online).cta).toEqual(enter);
+    expect(
+      view('2026-10-12T22:30:00Z', {
+        ...online,
+        viewerStatus: 'walk_in',
+        viewerCheckedInAt: '2026-10-12T22:05:00.000000Z',
+      }).cta,
+    ).toEqual(enter);
+  });
+
+  it('36. the three ISO boundaries the refresh island targets', () => {
+    const v = view('2026-10-01T12:00:00Z');
+    expect(v.phase).toBe('P0');
+    expect(v.boundaries).toEqual([
+      '2026-10-12T21:00:00.000Z',
+      '2026-10-12T22:00:00.000000Z',
+      '2026-10-13T00:00:00.000000Z',
+    ]);
   });
 });

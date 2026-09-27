@@ -6,9 +6,10 @@ import {
   type EventPage,
   type EventPublished,
   type EventSummary,
+  type NextEvent,
 } from '@tria/module-events/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
  * `@tria/module-events` end to end against the live local stack and the real seed (06-01) — the
@@ -488,5 +489,162 @@ describe('events list and create', () => {
       moduleFlags.invalidate(tenantIds.lab);
     }
     expect((await lab()).status).toBe(200);
+  });
+});
+
+/**
+ * 06-08 (D-202, UI-D-214): `GET /v1/events/next`, the Início card's read. The ordering cases run in a
+ * THROWAWAY tenant with `events` on and one member, so no seeded row moves (other files count the
+ * seed). The seeded tenants are only READ: each lane's answer must equal the database's own
+ * "soonest active not-ended" row for THAT tenant, which is also the cross-tenant proof (T-06-53).
+ */
+describe('next', () => {
+  const SLUG = `e2e-next-${Date.now()}`.slice(0, 40);
+  const MEMBER = `member-${SLUG}@tria-test.local`;
+  const PASSWORD = 'Segredo123';
+  let tenantId = '';
+  let userId = '';
+  let token = '';
+
+  const next = async (bearer: string, host?: string): Promise<NextEvent> => {
+    const res = await request(
+      '/v1/events/next',
+      bearer,
+      host ? { headers: { 'x-tenant-host': host } } : {},
+    );
+    expect(res.status, 'GET /v1/events/next').toBe(200);
+    return (await res.json()) as NextEvent;
+  };
+
+  /** One event of the throwaway tenant, relative to the DATABASE's now(), with its secrets row. */
+  async function insert(
+    title: string,
+    startsInMinutes: number,
+    endsInMinutes: number,
+    status: 'active' | 'cancelled' = 'active',
+  ): Promise<string> {
+    const rows = await adminSql<{ id: string }[]>`
+      with e as (
+        insert into public.events (tenant_id, created_by_user_id, title, format, venue_name,
+                                   address, starts_at, ends_at, status, cancelled_at)
+        values (${tenantId}::uuid, ${userId}::uuid, ${title}, 'in_person', 'Sala', 'Rua 1',
+                now() + make_interval(mins => ${startsInMinutes}),
+                now() + make_interval(mins => ${endsInMinutes}),
+                ${status}, ${status === 'cancelled' ? adminSql`now()` : null})
+        returning id, tenant_id, format
+      )
+      insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code, meeting_url)
+      select id, tenant_id, format, 'K7QM', null from e
+      returning event_id as id`;
+    const id = rows[0]?.id;
+    if (!id) throw new Error(`could not insert ${title}`);
+    return id;
+  }
+
+  /** The database's own answer for one tenant: the rule the endpoint must mirror exactly. */
+  async function dbNext(forTenant: string): Promise<string | null> {
+    const [row] = await adminSql<{ id: string }[]>`
+      select id from public.events
+       where tenant_id = ${forTenant}::uuid and deleted_at is null
+         and status = 'active' and ends_at > now()
+       order by starts_at asc, id asc
+       limit 1`;
+    return row?.id ?? null;
+  }
+
+  beforeAll(async () => {
+    const created = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${SLUG}, 'Comunidade Proximo Evento', 'Regras de teste.', 1)
+      returning id`;
+    tenantId = created[0]?.id ?? '';
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${tenantId}::uuid, 'events', true)`;
+    const { data, error } = await authAdmin().createUser({
+      email: MEMBER,
+      password: PASSWORD,
+      email_confirm: true,
+      user_metadata: { name: 'Proximo Evento' },
+    });
+    if (error || !data.user) throw new Error(`createUser failed: ${error?.message}`);
+    userId = data.user.id;
+    await adminSql`
+      insert into public.memberships (tenant_id, user_id, role, status)
+      values (${tenantId}::uuid, ${userId}::uuid, 'member', 'active')`;
+    token = await signInAs(MEMBER, PASSWORD);
+  });
+
+  afterAll(async () => {
+    // Events first (their tenant key does not cascade), then the user (its membership goes with
+    // it), then the tenant: the modules.test teardown order.
+    await adminSql`delete from public.events where tenant_id = ${tenantId}::uuid`;
+    await adminSql`delete from public.memberships where tenant_id = ${tenantId}::uuid`;
+    if (userId) await authAdmin().deleteUser(userId);
+    await adminSql`delete from public.tenants where slug = ${SLUG}`;
+  });
+
+  it('1. no upcoming event answers { event: null }, and an ended one does not count', async () => {
+    expect(await next(token)).toEqual({ event: null });
+    await insert('Ja terminou', -300, -60);
+    expect(await next(token)).toEqual({ event: null });
+  });
+
+  it('2. the soonest active event is returned, with the viewer state and the two counts', async () => {
+    const later = await insert('Mais tarde', 3 * 24 * 60, 3 * 24 * 60 + 120);
+    const sooner = await insert('Mais cedo', 24 * 60, 24 * 60 + 120);
+    const body = await next(token);
+    expect(body.event?.id).toBe(sooner);
+    expect(body.event?.id).not.toBe(later);
+    expect(body.event).toMatchObject({
+      status: 'active',
+      viewerStatus: null,
+      viewerCheckedInAt: null,
+      confirmedCount: 0,
+      presentCount: 0,
+    });
+    // The same shape as a list item: no meeting URL and no check-in code key (D-207, D-208).
+    expect(JSON.stringify(body)).not.toMatch(/meeting|checkin_?code|K7QM/i);
+  });
+
+  it('3. a cancelled SOONER event is skipped', async () => {
+    const expected = (await next(token)).event?.id;
+    const cancelled = await insert('Cancelado antes', 60, 180, 'cancelled');
+    const body = await next(token);
+    expect(body.event?.id).not.toBe(cancelled);
+    expect(body.event?.id).toBe(expected);
+  });
+
+  it('4. an event in progress is returned while it runs', async () => {
+    const running = await insert('Acontecendo', -30, 90);
+    expect((await next(token)).event?.id).toBe(running);
+    expect(await dbNext(tenantId)).toBe(running);
+  });
+
+  it("5. each seeded lane gets ITS tenant's next event only (a lab member never sees the demo's)", async () => {
+    const [demoExpected, labExpected] = [await dbNext(tenantIds.demo), await dbNext(tenantIds.lab)];
+    const demo = await next(tokens.demoMember, HOSTS.demo);
+    const lab = await next(tokens.labMember, HOSTS.lab);
+    expect(demo.event?.id ?? null).toBe(demoExpected);
+    expect(lab.event?.id ?? null).toBe(labExpected);
+    if (demo.event) expect(demo.event.id).not.toBe(lab.event?.id);
+    if (lab.event) {
+      const [owner] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id from public.events where id = ${lab.event.id}::uuid`;
+      expect(owner?.tenant_id).toBe(tenantIds.lab);
+    }
+    // The demo's next event, asked for through the lab's lane, is a bare 404.
+    if (demo.event) {
+      const crossed = await request(`/v1/events/${demo.event.id}`, tokens.labMember, {
+        headers: { 'x-tenant-host': HOSTS.lab },
+      });
+      expect(crossed.status).toBe(404);
+    }
+    // A demo session presented on the lab host is refused before any read.
+    const mismatch = await request('/v1/events/next', tokens.demoMember, {
+      headers: { 'x-tenant-host': HOSTS.lab },
+    });
+    expect(mismatch.status).toBe(403);
+    expect((await envelope(mismatch)).code).toBe('TENANT_HOST_MISMATCH');
   });
 });

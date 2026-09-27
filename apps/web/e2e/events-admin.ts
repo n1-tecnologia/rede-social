@@ -77,8 +77,16 @@ export type EventsTenant = {
   password: string;
 };
 
-/** Provisions `slug` with `events` enabled, an admin, one member and zero events. Idempotent. */
-export async function createEventsTenant(slug: string, password: string): Promise<EventsTenant> {
+/**
+ * Provisions `slug` with `events` enabled, an admin, one member and zero events. Idempotent.
+ * `extraModules` (06-08) turns more modules on too — the Início spec needs `feed`, so `/inicio` has
+ * its feed below the "Próximo evento" card.
+ */
+export async function createEventsTenant(
+  slug: string,
+  password: string,
+  extraModules: readonly string[] = [],
+): Promise<EventsTenant> {
   await deleteEventsTenant(slug);
 
   const host = `${slug}.localhost`;
@@ -92,6 +100,12 @@ export async function createEventsTenant(slug: string, password: string): Promis
     insert into public.tenant_modules (tenant_id, module_key, enabled)
     values (${tenantId}::uuid, 'events', true)
     on conflict (tenant_id, module_key) do update set enabled = true`;
+  for (const key of extraModules) {
+    await sql()`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${tenantId}::uuid, ${key}, true)
+      on conflict (tenant_id, module_key) do update set enabled = true`;
+  }
 
   const adminEmail = `admin@${slug}.local`;
   const memberEmail = `membro@${slug}.local`;
@@ -226,6 +240,26 @@ export async function moveEventStart(eventId: string, startsInMinutes: number): 
   await sql()`
     update public.events
        set starts_at = now() + make_interval(mins => ${startsInMinutes}), updated_at = now()
+     where id = ${eventId}::uuid`;
+}
+
+/**
+ * 06-08: moves an event's start to `seconds` from the DATABASE's `now()`, to the second — how the
+ * Início spec puts the check-in window's opening (`starts_at − 1 h`) a few seconds ahead and then
+ * waits out the REAL boundary (Pitfall 7: the server clock is real).
+ */
+export async function moveEventStartSeconds(eventId: string, seconds: number): Promise<void> {
+  await sql()`
+    update public.events
+       set starts_at = now() + make_interval(secs => ${seconds}), updated_at = now()
+     where id = ${eventId}::uuid`;
+}
+
+/** 06-08: cancels an event through the superuser connection (the admin UI is 06-04's spec). */
+export async function cancelEventNow(eventId: string): Promise<void> {
+  await sql()`
+    update public.events
+       set status = 'cancelled', cancelled_at = now(), updated_at = now()
      where id = ${eventId}::uuid`;
 }
 

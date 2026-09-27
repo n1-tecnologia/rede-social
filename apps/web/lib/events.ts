@@ -22,6 +22,7 @@ import {
   eventEditSchema,
   eventPageSchema,
   eventSummarySchema,
+  nextEventSchema,
   type RsvpAnswer,
   type RsvpResult,
   rsvpResultSchema,
@@ -127,6 +128,34 @@ export async function loadEvent(eventId: string): Promise<EventResult> {
 
   if (path) redirect(path);
   return result;
+}
+
+/**
+ * `GET /v1/events/next` (06-08, D-202): the Início card's ONE event, or `null` — for "nothing coming"
+ * AND for every failure. The home slot must never be the reason `/inicio` shows an error card (the
+ * stories-strip rule, UI E09/error), so this read swallows everything: a refusal, a 5xx, a transport
+ * error or a body that fails the contract all log `events.next_failed` with their SHAPE only (a
+ * status and a code, never a title) and answer `null`, and it never navigates. A session problem is
+ * the page's own bootstrap to handle.
+ */
+export async function loadNextEvent(): Promise<EventSummary | null> {
+  try {
+    const res = await apiFetch('/v1/events/next');
+    if (!res.ok) {
+      const error = await apiError(res);
+      console.error('events.next_failed', { status: res.status, code: error.code });
+      return null;
+    }
+    const parsed = nextEventSchema.safeParse(await res.json());
+    if (!parsed.success) {
+      console.error('events.next_failed', { status: res.status, code: 'INVALID_BODY' });
+      return null;
+    }
+    return parsed.data.event;
+  } catch (error) {
+    console.error('events.next_failed', { error: String(error) });
+    return null;
+  }
 }
 
 /**

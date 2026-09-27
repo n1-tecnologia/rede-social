@@ -32,7 +32,10 @@
       "inDays": "{count, plural, one {Em # dia} other {Em # dias}}",
       "at": "{date} · {time}",
       "liveUntil": "Acontecendo agora · até {time}",
-      "range": "{start} a {end}"
+      "range": "{start} a {end}",
+      "todayAt": "Hoje · {time}",
+      "tomorrowAt": "Amanhã · {time}",
+      "live": "Acontecendo agora"
     },
     "place": {
       "online": "Online"
@@ -310,6 +313,10 @@
       "label": "Adicionar à agenda",
       "google": "Google Agenda",
       "ics": "Arquivo .ics"
+    },
+    "home": {
+      "title": "Próximo evento",
+      "open": "Ver o evento {title}"
     }
   }
 }

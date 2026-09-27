@@ -272,6 +272,16 @@ export const eventSummarySchema = z
 export type EventSummary = z.infer<typeof eventSummarySchema>;
 
 /**
+ * `GET /v1/events/next` (06-08, D-202, UI-D-214): the Início "Próximo evento" card's read. The
+ * tenant's soonest ACTIVE event that has not ended (one in progress included), or `null` when there
+ * is none. Cancelled events are excluded (the card is a promotion; a cancelled event would hide the
+ * real next one). The item is the list's own `eventSummarySchema`: the viewer's own state and the two
+ * counts, and still no meeting URL and no check-in code (D-207, D-208).
+ */
+export const nextEventSchema = z.object({ event: eventSummarySchema.nullable() }).strict();
+export type NextEvent = z.infer<typeof nextEventSchema>;
+
+/**
  * `GET /v1/events/{eventId}` (EVENT-02): the list item plus what only the detail page prints: the
  * description, the address (null for an online event) and when the viewer last answered. Still NO
  * URL and NO code key (D-207, D-208), and still no other member's identity (D-206). `.strict()` so

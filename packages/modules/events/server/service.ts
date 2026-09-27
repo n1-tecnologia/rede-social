@@ -27,6 +27,7 @@ import type {
   EventStatus,
   EventStatusUpdate,
   EventSummary,
+  NextEvent,
   RsvpInput,
   RsvpResult,
 } from '../contracts/index';
@@ -227,6 +228,41 @@ export async function listEvents(ctx: RequestContext, query: EventQuery): Promis
   );
 
   return { items: page.map(toEvent), nextCursor };
+}
+
+/**
+ * `GET /v1/events/next` (06-08, D-202, UI-D-214): the Início card's ONE event. The upcoming branch's
+ * own projection (the viewer's row and the two counts, one statement) with the soonest start first,
+ * `limit 1`, riding `events_tenant_starts_idx` exactly like page 1 of `period=upcoming`, plus
+ * `e.status = 'active'`: a cancelled event is skipped, so the real next one shows (UI-D-214). An
+ * event in progress has not ended, so it is returned while it runs (the check-in window runs to the
+ * end, D-209). No such event is `{ event: null }`, and the web slot then renders nothing.
+ */
+export async function getNextEvent(ctx: RequestContext): Promise<NextEvent> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<EventRow>(sql`
+      ${eventProjection(ctx.userId)}
+       where e.tenant_id = ${ctx.tenantId}::uuid
+         and e.deleted_at is null
+         and e.status = 'active'
+         and e.ends_at > now()
+       order by e.starts_at asc, e.id asc
+       limit 1`),
+  );
+  const row = rows[0];
+
+  log.info(
+    {
+      event: 'events.next',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      found: row !== undefined,
+    },
+    'next event read',
+  );
+
+  return { event: row ? toEvent(row) : null };
 }
 
 /** What the cover lookup inside the writing transaction needs to decide. */

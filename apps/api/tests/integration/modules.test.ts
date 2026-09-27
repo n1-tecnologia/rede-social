@@ -181,8 +181,8 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
         continue;
       }
       if (m.key === 'events') {
-        // 06-01 (D-55, UI-D-215): the Eventos tab, the manifest's entry verbatim. No home slot yet
-        // (the Início card lands with its renderer in 06-08).
+        // 06-01 (D-55, UI-D-215): the Eventos tab, the manifest's entry verbatim; 06-08 (D-202,
+        // UI-D-214): the Início "Próximo evento" slot at order 7, verbatim.
         expect(m.nav).toEqual({
           placement: 'tab',
           label: 'Eventos',
@@ -190,7 +190,7 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
           href: '/eventos',
           order: 40,
         });
-        expect(m.home).toBeUndefined();
+        expect(m.home).toEqual([{ order: 7 }]);
         continue;
       }
       // A key enabled for the tenant but not yet implemented appears WITHOUT nav — that is what

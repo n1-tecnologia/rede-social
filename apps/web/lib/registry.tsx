@@ -1,10 +1,11 @@
 import type { Bootstrap, ModuleKey } from '@tria/contracts';
 import type { HomeSlot } from '@tria/core/ui';
+import { NextEventCard } from '@tria/module-events/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@tria/module-feed/ui';
 import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@tria/module-stories/contracts';
 import { EmptyState } from '@tria/ui';
-import { TriangleAlert } from 'lucide-react';
+import { TriangleAlert, Video } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import {
@@ -29,8 +30,11 @@ import {
   refuseStoryRepliesAction,
   unlikeStoryAction,
 } from '@/app/(app)/stories/story-actions';
+import { NextEventRefresh } from '@/components/events/NextEventRefresh';
 import { FeedSurface } from '@/components/feed/FeedSurface';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
+import { loadNextEvent } from '@/lib/events';
+import { type NextEventCta, nextEventCardView } from '@/lib/events-view';
 import { loadFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
 import { loadHighlights, loadStories } from '@/lib/stories';
@@ -451,9 +455,98 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
   );
 };
 
+/** `Button md fullWidth brand`, as classes on the card's CTA anchor (the `EventActions` shape). */
+const EVENT_BRAND_CTA =
+  'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors hover:bg-brand-hover active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+/**
+ * The Início card's CTA, as the EXACT anchors the detail's action zone uses (UI-D-214, UI-D-209):
+ *  - in person, a brand `<a>` "Fazer check-in" to the ticket, where the member still types the code;
+ *  - online, the plain `<a target="_blank" rel="noopener noreferrer" data-no-prefetch>` `Entrar` with
+ *    `Video` 16 — never a framework link component, so no render, hover or viewport entry can fire
+ *    it (D-218), and the meeting URL is never here (D-207).
+ */
+function nextEventCta(cta: NextEventCta, t: Translator): ReactNode {
+  if (cta === null) return undefined;
+  if (cta.kind === 'checkin') {
+    return (
+      <a href={cta.href} data-testid="next-event-checkin" className={EVENT_BRAND_CTA}>
+        {t('checkin.cta')}
+      </a>
+    );
+  }
+  return (
+    <a
+      href={cta.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-no-prefetch=""
+      data-testid="next-event-enter"
+      className={EVENT_BRAND_CTA}
+    >
+      <Video size={16} aria-hidden className="shrink-0" />
+      {t('online.enter')}
+    </a>
+  );
+}
+
+/**
+ * `events` → home[0] at order 7 (06-08, D-202, UI-D-214): the Início "Próximo evento" card, after the
+ * stories row (5) and before the feed (10). The tenant's next ACTIVE event that has not ended
+ * (`GET /v1/events/next`, cancelled excluded), drawn as one row to its detail; from the window's
+ * opening (`starts_at − 1 h`) until the end the card grows ONE brand CTA below the row — "Fazer
+ * check-in" in person (gone once checked in), `Entrar` online (kept, to rejoin).
+ *
+ * **Every string and the check-in mode are decided HERE, on the server** (`nextEventCardView`, in the
+ * TENANT's timezone from ONE request instant), so a device in another zone reads the tenant's wall
+ * clock and the module card holds no route, no clock and no words. `NextEventRefresh` (renders
+ * nothing) schedules one `router.refresh()` at the next boundary within 24 h, which is how the card
+ * turns into the check-in door while Início is open (UI-D-203).
+ *
+ * **It never rejects, and renders nothing when there is nothing to show** (UI E09/empty and /error,
+ * the stories-strip rule): no upcoming event → `null` and `/inicio` closes up; a failed read is
+ * `loadNextEvent`'s `null` (logged `events.next_failed`, shape only); and anything thrown while
+ * composing is caught here and logged the same way, so `homeSlotsFor` never swaps this slot for the
+ * generic error card and the feed below is unaffected.
+ */
+const eventsHome: HomeSlotRenderer = async ({ bootstrap }) => {
+  try {
+    const [next, t] = await Promise.all([loadNextEvent(), getTranslations('events')]);
+    if (!next) return null;
+    const view = nextEventCardView(next, {
+      tz: bootstrap.tenant.timezone,
+      nowMs: Date.now(),
+      t,
+    });
+    return (
+      <>
+        <NextEventCard
+          heading={t('home.title')}
+          href={view.href}
+          ariaLabel={view.ariaLabel}
+          title={view.title}
+          overline={view.overline}
+          place={view.place}
+          placeKind={view.placeKind}
+          meta={view.meta}
+          pill={view.pill}
+          coverAssetId={view.coverAssetId}
+          coverVariantWidths={view.coverVariantWidths}
+          cta={nextEventCta(view.cta, t)}
+        />
+        <NextEventRefresh boundaries={view.boundaries} phase={view.phase} />
+      </>
+    );
+  } catch (error) {
+    console.error('events.next_failed', { stage: 'render', error: String(error) });
+    return null;
+  }
+};
+
 export const WEB_MODULE_REGISTRY: Partial<Record<ModuleKey, WebModule>> = {
   feed: { home: [feedHome] },
   stories: { home: [storiesHome] },
+  events: { home: [eventsHome] },
 };
 
 /**

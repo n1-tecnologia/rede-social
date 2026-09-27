@@ -14,8 +14,9 @@ const log = moduleLogger('module-events');
  * The tab is driven by the module FLAG, never by data (D-77): a tenant with no events still sees it
  * and lands on the empty state.
  *
- * No `home` key yet: the "Próximo evento" slot lands with its renderer in 06-08, because a slot
- * declared without a renderer would reach the bootstrap with nothing behind it.
+ * **D-202 / UI-D-214: one home slot at order 7** (06-08), the Início "Próximo evento" card: after the
+ * stories row (5) and before the feed (10), both re-checked against the current manifests. Its
+ * renderer is `apps/web/lib/registry.tsx` `eventsHome` at index 0, so the kernel imports no module UI.
  *
  * `defaultRolePermissions`: only `admin_tenant` manages events and reads attendance (with the
  * check-in code, D-208); every role may answer and check in.
@@ -23,6 +24,7 @@ const log = moduleLogger('module-events');
 export const eventsModule = defineModule({
   key: 'events',
   nav: { placement: 'tab', label: 'Eventos', icon: 'calendar-days', href: '/eventos', order: 40 },
+  home: [{ order: 7 }],
   routes: () => import('./server/routes').then((m) => m.eventsRoutes),
   events: [
     {
