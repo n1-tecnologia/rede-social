@@ -687,6 +687,24 @@ describe('ReelsHost — the empty state and the lane row (UI-D-94, D-120)', () =
 
 /* ── One page's actions: like, comments, share (D-128..D-131, UI-D-87..UI-D-91) ───────────────── */
 
+/** The comment the sheet's create action answers with (the server-confirmed row). */
+function createdComment(): CommentView {
+  return {
+    id: 'c-new',
+    body: 'Que vídeo!',
+    author: { displayName: 'Eu', profileHref: null, avatarUrl: null },
+    authorRemoved: false,
+    createdAtIso: new Date().toISOString(),
+    createdAtRelative: 'agora',
+    createdAtAbsolute: 'agora',
+    likeCount: 0,
+    viewerLiked: false,
+    replyCount: 0,
+    isReply: false,
+    canDelete: true,
+  };
+}
+
 function currentPage(): HTMLElement {
   const page = document.querySelector<HTMLElement>('[data-reel-page="0"]');
   if (!page) throw new Error('page 0 is not rendered');
@@ -867,21 +885,7 @@ describe('ReelsHost — the comment sheet over Reels (UI-D-90, D-59, D-82)', () 
   });
 
   it('a comment written in the sheet bumps the rail count by the session delta', async () => {
-    const created: CommentView = {
-      id: 'c-new',
-      body: 'Que vídeo!',
-      author: { displayName: 'Eu', profileHref: null, avatarUrl: null },
-      authorRemoved: false,
-      createdAtIso: new Date().toISOString(),
-      createdAtRelative: 'agora',
-      createdAtAbsolute: 'agora',
-      likeCount: 0,
-      viewerLiked: false,
-      replyCount: 0,
-      isReply: false,
-      canDelete: true,
-    };
-    createComment.mockResolvedValue({ ok: true, comment: created });
+    createComment.mockResolvedValue({ ok: true, comment: createdComment() });
     renderHost();
     await flush();
     expect(currentPage().querySelector('[data-reel-count="comment"]')?.textContent).toBe('');
@@ -955,5 +959,234 @@ describe('ReelsHost — per-post interaction state across remounts (CR-01)', () 
     await flush();
     expect(unlike).toHaveBeenCalledTimes(1);
     expect(unlike).toHaveBeenCalledWith(postId(1));
+  });
+
+  it('CR-01 (a): a like made in Todos survives a lane change and back', async () => {
+    const like = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    loadPage.mockResolvedValue({ ok: true, items: [view(10), view(11)], nextCursor: null });
+    renderHost({ onLike: like, lanes: [{ id: 'c1', name: 'Comunidade 1' }] });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    fireEvent.click(screen.getByRole('tab', { name: 'Comunidade 1' }));
+    await flush();
+    expect(position()).toBe('Vídeo 1, de Autora 10');
+
+    fireEvent.click(screen.getByRole('tab', { name: r('lanes.all') }));
+    await flush();
+    expect(position()).toBe('Vídeo 1, de Autora 1');
+    expect(heartOn(0)?.getAttribute('aria-pressed')).toBe('true');
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(like).toHaveBeenCalledTimes(1);
+  });
+
+  it('CR-01 (b): one post in Todos and in its community lane shows one like state, both ways', async () => {
+    const like = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    // The lane's own read carries the server's PRE-like values for post 1.
+    loadPage.mockResolvedValue({
+      ok: true,
+      items: [view(10), view(11), view(12), view(1)],
+      nextCursor: null,
+    });
+    renderHost({ onLike: like, lanes: [{ id: 'c1', name: 'Comunidade 1' }] });
+    await flush();
+
+    // Liked in Todos, seen in the lane: post 1 is page 3, a mounted neighbour of page 2.
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    fireEvent.click(screen.getByRole('tab', { name: 'Comunidade 1' }));
+    await flush();
+    await press('ArrowDown');
+    await press('ArrowDown');
+    expect(position()).toBe('Vídeo 3, de Autora 12');
+    expect(heartOn(3)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(3, 'like')).toBe('1');
+    await press('ArrowDown');
+    expect(position()).toBe('Vídeo 4, de Autora 1');
+    await act(async () => {
+      pagerProps.at(-1)?.onDoubleTap();
+    });
+    await flush();
+    expect(like).toHaveBeenCalledTimes(1);
+
+    // The reverse, in a fresh visit: liked in the lane, seen in Todos.
+    cleanup();
+    controllers.clear();
+    const likeInLane = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    renderHost({ onLike: likeInLane, lanes: [{ id: 'c1', name: 'Comunidade 1' }] });
+    await flush();
+    fireEvent.click(screen.getByRole('tab', { name: 'Comunidade 1' }));
+    await flush();
+    await press('ArrowDown');
+    await press('ArrowDown');
+    await press('ArrowDown');
+    expect(position()).toBe('Vídeo 4, de Autora 1');
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    // Two pages away, so post 1's overlay really unmounts before the lane change.
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(heartOn(3)).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: r('lanes.all') }));
+    await flush();
+    expect(position()).toBe('Vídeo 1, de Autora 1');
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(likeInLane).toHaveBeenCalledTimes(1);
+  });
+
+  it('CR-01 (c): a comment count survives the window and the lanes and is never counted twice', async () => {
+    createComment.mockResolvedValue({ ok: true, comment: createdComment() });
+    renderHost({ lanes: [{ id: 'c1', name: 'Comunidade 1' }] });
+    await flush();
+
+    const dialog = await openSheet();
+    const input = within(dialog).getByPlaceholderText(f('comments.placeholder'));
+    fireEvent.change(input, { target: { value: 'Que vídeo!' } });
+    const form = input.closest('form');
+    if (!form) throw new Error('the comment field has no form');
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+    await flush();
+    await closeSheet();
+    expect(countOn(0, 'comment')).toBe('1');
+
+    await press('ArrowDown');
+    await press('ArrowDown');
+    expect(pageAt(0)?.querySelector('[data-reel-count="comment"]')).toBeNull();
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(countOn(0, 'comment')).toBe('1');
+
+    // A lane read made AFTER the comment already counts it: shown once, never twice.
+    loadPage.mockResolvedValue({
+      ok: true,
+      items: [view(1, { commentCount: 1 }), view(10)],
+      nextCursor: null,
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Comunidade 1' }));
+    await flush();
+    expect(position()).toBe('Vídeo 1, de Autora 1');
+    expect(countOn(0, 'comment')).toBe('1');
+  });
+
+  it('CR-01 (d): a like that settles after its page unmounted is still shown on return', async () => {
+    const pending = deferred<{ ok: true; liked: boolean; likeCount: number }>();
+    const like = vi.fn(() => pending.promise);
+    renderHost({ onLike: like });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await press('ArrowDown');
+    await press('ArrowDown');
+    expect(heartOn(0)).toBeNull();
+    await act(async () => {
+      pending.resolve({ ok: true, liked: true, likeCount: 1 });
+    });
+    await flush();
+
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(like).toHaveBeenCalledTimes(1);
+  });
+
+  it('CR-01 (e): with two toggles in flight only the latest is recorded', async () => {
+    const first = deferred<{ ok: true; liked: boolean; likeCount: number }>();
+    const second = deferred<{ ok: true; liked: boolean; likeCount: number }>();
+    const like = vi.fn(() => first.promise);
+    const unlike = vi.fn(() => second.promise);
+    renderHost({ onLike: like, onUnlike: unlike });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.unlike') }));
+    await flush();
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(unlike).toHaveBeenCalledTimes(1);
+
+    // The stale answer lands first: the heart stays where the viewer left it.
+    await act(async () => {
+      first.resolve({ ok: true, liked: true, likeCount: 1 });
+    });
+    await flush();
+    expect(heartOn(0)?.getAttribute('aria-pressed')).toBe('false');
+
+    await act(async () => {
+      second.resolve({ ok: true, liked: false, likeCount: 0 });
+    });
+    await flush();
+    await press('ArrowDown');
+    await press('ArrowDown');
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('unliked');
+    expect(countOn(0, 'like')).toBe('');
+  });
+
+  it('CR-01 (f): a refused unlike on a remounted page reverts to the host pair with one toast', async () => {
+    const like = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    const unlike = vi.fn(async () => ({ ok: false }) as const);
+    renderHost({ onLike: like, onUnlike: unlike });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    await press('ArrowDown');
+    await press('ArrowDown');
+    await press('ArrowUp');
+    await press('ArrowUp');
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.unlike') }));
+    await flush();
+    expect(unlike).toHaveBeenCalledTimes(1);
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(toast.show).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: f('errors.generic') });
+
+    await press('ArrowDown');
+    await press('ArrowDown');
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+  });
+
+  it('CR-01 (g): the map is visit-scoped — a new visit starts from the server, nothing is stored', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const like = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    createComment.mockResolvedValue({ ok: true, comment: createdComment() });
+    const { unmount } = renderHost({ onLike: like });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    const dialog = await openSheet();
+    const input = within(dialog).getByPlaceholderText(f('comments.placeholder'));
+    fireEvent.change(input, { target: { value: 'Que vídeo!' } });
+    const form = input.closest('form');
+    if (!form) throw new Error('the comment field has no form');
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+    await flush();
+    await closeSheet();
+    expect(countOn(0, 'like')).toBe('1');
+    expect(countOn(0, 'comment')).toBe('1');
+
+    unmount();
+    controllers.clear();
+    renderHost({ onLike: like });
+    await flush();
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('unliked');
+    expect(countOn(0, 'like')).toBe('');
+    expect(countOn(0, 'comment')).toBe('');
+    expect(setItem).not.toHaveBeenCalled();
   });
 });

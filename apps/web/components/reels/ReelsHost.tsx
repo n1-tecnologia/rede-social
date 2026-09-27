@@ -101,10 +101,12 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  * in its community lane all show the one state. The like engine in each page is only the in-flight
  * optimistic layer. Only the LATEST request per post is recorded (`likeSeq`, the engine's own
  * `requestId` rule), so a stale answer never re-seeds a page into a state the viewer left, and an
- * answer that lands after its page unmounted is still recorded. A refusal records nothing. For the
- * rest of the visit the host's entry wins over any later lane read of the same post (a read can
- * predate the like); the map is never persisted, dies with this component, and the next visit
- * starts from the server.
+ * answer that lands after its page unmounted is still recorded. A refusal records nothing. The
+ * comment count lives in the same entry (`bumpCommentCount`), as an ABSOLUTE count seeded from the
+ * count the viewer was shown plus the sheet's server-confirmed deltas, so a lane read made after
+ * the comment, which already counts it, is never added to twice. For the rest of the visit the
+ * host's entry wins over any later lane read of the same post (a read can predate the like); the
+ * map is never persisted, dies with this component, and the next visit starts from the server.
  *
  * **No watch tracking.** Nothing here records what a member watched: no view, watch-time or
  * completion event exists. The only writes are the feed's own like and comment actions.
@@ -237,6 +239,21 @@ function postOfAsset(laneStates: Record<string, LaneState>, assetId: string): st
   for (const state of Object.values(laneStates)) {
     const view = state.items.find((item) => item.video.assetId === assetId);
     if (view) return view.id;
+  }
+  return null;
+}
+
+/** A post's view as the viewer is shown it: in the active lane, else in any loaded lane. */
+function viewOf(
+  laneStates: Record<string, LaneState>,
+  activeLane: string,
+  postId: string,
+): ReelView | null {
+  const active = laneStates[activeLane]?.items.find((item) => item.id === postId);
+  if (active) return active;
+  for (const state of Object.values(laneStates)) {
+    const view = state.items.find((item) => item.id === postId);
+    if (view) return view;
   }
   return null;
 }
@@ -708,6 +725,23 @@ export function ReelsHost({
   const onLikeTracked = useCallback((postId: string) => trackLike(postId, true), [trackLike]);
   const onUnlikeTracked = useCallback((postId: string) => trackLike(postId, false), [trackLike]);
 
+  /**
+   * The sheet's server-confirmed `+1`/`-1` (D-59, D-62, UI-D-90), held per post as an ABSOLUTE
+   * count: the first delta starts from the count the viewer was shown, so a lane read made after
+   * the comment (which already counts it) is never added to twice.
+   */
+  const bumpCommentCount = useCallback((postId: string, delta: number) => {
+    setInteractions((map) => {
+      const entry = map[postId];
+      const state = latest.current;
+      const base =
+        entry?.commentCount ??
+        viewOf(state.laneStates, state.activeLane, postId)?.commentCount ??
+        0;
+      return { ...map, [postId]: { ...entry, commentCount: Math.max(0, base + delta) } };
+    });
+  }, []);
+
   const overlayLabels = useMemo<ReelOverlayLabels>(
     () => ({
       railAuthor: labels.railAuthor,
@@ -987,7 +1021,7 @@ export function ReelsHost({
         // `''` is only ever read while the sheet is closed, and the sheet then renders nothing.
         targetId={sheetFor ?? ''}
         onCountChange={(delta) => {
-          if (sheetFor !== null) binders.current.get(sheetFor)?.bumpComments(delta);
+          if (sheetFor !== null) bumpCommentCount(sheetFor, delta);
         }}
       />
     </>

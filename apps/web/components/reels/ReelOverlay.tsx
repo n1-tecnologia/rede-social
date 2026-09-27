@@ -32,10 +32,11 @@ import { announcedCount } from '@/lib/reels-count';
  * records the same pair the engine has just accepted.
  *
  * **The binder.** The pager's double tap reaches the host, not this component, so the page
- * registers a binder through `bind`: `likeOnly` calls the engine's toggle ONLY while the post is
- * not liked — a double tap never unlikes — and `bumpComments` applies the comment sheet's session
- * delta to the rail's count (the story host's `bindCountBump` pattern). The binder reads refs, so it
- * always sees the latest state without re-registering on every render.
+ * registers a binder through `bind` that carries ONLY the like-only double tap: `likeOnly` calls
+ * the engine's toggle ONLY while the post is not liked — a double tap never unlikes. The binder
+ * reads refs, so it always sees the latest state without re-registering on every render. The
+ * comment count is not this page's: it is the host's per-post value (CR-01), already merged into
+ * `view`, so it outlives the page and a lane change.
  *
  * **Share** (D-130, UI-D-91) is offered only when the server composed a `shareUrl` from the verified
  * primary host (FEED-07, T-04-51); the host's handler owns the result table. The video does not
@@ -61,8 +62,8 @@ export type ReelOverlayLabels = {
   likes: CountTemplates;
 };
 
-/** What a page registers with its host: the like-only double tap and the comment-count bump. */
-export type ReelBinder = { likeOnly: () => void; bumpComments: (delta: number) => void };
+/** What a page registers with its host: the like-only double tap. */
+export type ReelBinder = { likeOnly: () => void };
 
 export type ReelOverlayProps = {
   view: ReelView;
@@ -107,8 +108,6 @@ export function ReelOverlay({
     onError,
   });
 
-  /** The server's comment count plus this visit's sheet delta; the next read replaces it. */
-  const [commentDelta, setCommentDelta] = useState(0);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -128,14 +127,14 @@ export function ReelOverlay({
         likedRef.current = true;
         toggleRef.current();
       },
-      bumpComments: (delta) => setCommentDelta((value) => value + delta),
     });
     return () => bind(view.id, null);
   }, [bind, view.id]);
 
   const shareUrl = view.shareUrl;
   const authorName = view.author.displayName;
-  const commentCount = Math.max(0, view.commentCount + commentDelta);
+  /** The host already merged this visit's sheet deltas into `view` (CR-01). */
+  const commentCount = Math.max(0, view.commentCount);
 
   return (
     <>
