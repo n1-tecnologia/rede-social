@@ -1232,3 +1232,30 @@ describe('06-07 — events Participantes strings and placeholders', () => {
     );
   });
 });
+
+/**
+ * 06-08 — the calendar pair (UI-SPEC Copywriting Contract, "Calendar"), verbatim. No key carries a
+ * placeholder or a URL: the pair's hrefs are built on the server, never from the catalog (D-207).
+ */
+describe('06-08 — events calendar strings', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.calendar.label', 'Adicionar à agenda'],
+    ['events.calendar.google', 'Google Agenda'],
+    ['events.calendar.ics', 'Arquivo .ics'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('carries no placeholder and no URL', () => {
+    const texts = JSON.stringify(lookup('events.calendar'));
+    expect(texts).not.toMatch(/https?:|\{\w+\}/);
+  });
+});

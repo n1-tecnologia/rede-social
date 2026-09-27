@@ -305,6 +305,11 @@
       "errors": {
         "loadMore": "Não foi possível carregar mais participantes."
       }
+    },
+    "calendar": {
+      "label": "Adicionar à agenda",
+      "google": "Google Agenda",
+      "ics": "Arquivo .ics"
     }
   }
 }

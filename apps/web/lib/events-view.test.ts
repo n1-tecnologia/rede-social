@@ -587,3 +587,23 @@ describe('06-07 — Participantes (UI-D-213): the chip param, the row meta and t
     expect(t('participants.code.aria', { spelled: spelledCode('K7QM') })).toBe('Código K, 7, Q, M');
   });
 });
+
+describe('06-08 — the calendar pair (UI-D-210)', () => {
+  it('30. shows in P0-P2 whatever the answer, and never when cancelled or ended', () => {
+    const calendar = (nowIso: string, overrides: Partial<EventDetail> = {}) =>
+      eventDetailView(detail(overrides), { tz: SP, nowMs: at(nowIso), t }).calendar;
+    expect(calendar('2026-10-01T12:00:00Z')).toBe(true);
+    expect(calendar('2026-10-01T12:00:00Z', { viewerStatus: 'not_going' })).toBe(true);
+    expect(calendar('2026-10-12T21:30:00Z', { viewerStatus: 'going' })).toBe(true);
+    expect(
+      calendar('2026-10-12T23:00:00Z', {
+        viewerStatus: 'checked_in',
+        viewerCheckedInAt: '2026-10-12T21:40:00.000000Z',
+      }),
+    ).toBe(true);
+    expect(calendar('2026-10-12T23:00:00Z', { format: 'online', venueName: null })).toBe(true);
+    expect(calendar('2026-10-20T12:00:00Z')).toBe(false);
+    expect(calendar('2026-10-01T12:00:00Z', { status: 'cancelled' })).toBe(false);
+    expect(calendar('2026-10-12T23:00:00Z', { status: 'cancelled' })).toBe(false);
+  });
+});

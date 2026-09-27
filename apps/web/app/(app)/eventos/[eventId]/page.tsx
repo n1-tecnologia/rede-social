@@ -2,20 +2,25 @@ import { EVENT_PERMISSIONS } from '@tria/module-events/contracts';
 import { EventHero, EventInfoGrid } from '@tria/module-events/ui';
 import { Card, EmptyState, PageHeader, SectionTitle, StatusPill } from '@tria/ui';
 import {
+  CalendarPlus,
   CalendarX2,
   ChevronRight,
   CircleAlert,
   CircleCheck,
+  Download,
   Navigation,
   Pencil,
   Users,
 } from 'lucide-react';
+import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadEvent } from '@/lib/events';
+import { googleCalendarHref } from '@/lib/events-calendar';
 import { type EventDetailView, eventActionState, eventDetailView } from '@/lib/events-view';
+import { primaryHostOrigin } from '@/lib/tenant-host';
 import { EventActions } from './EventActions';
 import { EventDescription } from './EventDescription';
 import { EventRefresh } from './EventRefresh';
@@ -56,6 +61,12 @@ import { ReactivateEventControl } from './ReactivateEventControl';
  * no section. In the
  * cancelled banner, the same permission plus "before the start" (from THIS request's instant) adds the
  * outline "Reativar evento". Cancel itself lives only at the bottom of the edit form.
+ *
+ * **06-08 — the calendar pair (UI-D-210, D-211, EVENT-06).** After the action zone, in P0-P2 for
+ * EVERY member whatever their answer and never when cancelled or ended: "Adicionar à agenda", then
+ * two outline anchors — "Google Agenda" (the template link built HERE, on the server, opened in a
+ * new context) and "Arquivo .ics" (`download`, the same-origin `agenda.ics` route). Neither carries
+ * the meeting URL: an online event's calendar location is the app's own `/entrar` (D-207).
  */
 export default async function EventPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
@@ -94,6 +105,9 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   const canManage = bootstrap.permissions.includes(EVENT_PERMISSIONS.manage);
   const canReadAttendance = bootstrap.permissions.includes(EVENT_PERMISSIONS.attendanceRead);
   const canReactivate = canManage && view.cancelled && nowMs < Date.parse(result.event.startsAt);
+  const googleHref = view.calendar
+    ? googleCalendarHref(result.event, { origin: await exportOrigin() })
+    : null;
 
   return (
     <div className="mx-auto w-full max-w-[680px] pb-6">
@@ -147,6 +161,15 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                   check-in" link to /check-in (06-05); online, the `Entrar` anchor to /entrar with its
                   hints (06-06, UI-D-209). The zone never receives the meeting URL (D-207). */}
               <EventActions {...eventActionState(result.event, view)} />
+              {googleHref !== null ? (
+                <CalendarPair
+                  label={t('calendar.label')}
+                  googleLabel={t('calendar.google')}
+                  googleHref={googleHref}
+                  icsLabel={t('calendar.ics')}
+                  icsHref={`/eventos/${encodeURIComponent(result.event.id)}/agenda.ics`}
+                />
+              ) : null}
             </div>
           </Card>
         </div>
@@ -239,6 +262,74 @@ function EventBanner({
           {banner.body}
         </p>
         {action ? <div className="mt-3 flex">{action}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The origin a calendar entry links back to: the tenant's verified primary host (the share-link
+ * origin), or — on the local and generic shells, which have none — this request's own host, the same
+ * fallback the `agenda.ics` route takes from its request URL.
+ */
+async function exportOrigin(): Promise<string> {
+  const primary = await primaryHostOrigin();
+  if (primary) return primary;
+  const h = await headers();
+  const host = h.get('host') ?? 'localhost';
+  const proto = h.get('x-forwarded-proto')?.split(',')[0]?.trim() === 'https' ? 'https' : 'http';
+  return `${proto}://${host}`;
+}
+
+/** `Button md outline`, as classes on a half-width anchor of the calendar pair. */
+const CALENDAR_ANCHOR =
+  'inline-flex h-11 w-full min-w-0 items-center justify-center gap-2 rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+/**
+ * The calendar pair (UI-D-210): a 12/700 uppercase tertiary label, then two outline anchors. Both are
+ * plain anchors with no in-page state (UI E06/loading): Google opens in a new tab, the `.ics` is a
+ * browser download.
+ *
+ * **Stacked below `sm`, side by side from it (06-08 deviation, the 06-02 drawing's finding).** Two
+ * `Button outline md` at half width do NOT fit a phone: measured in Chromium on this page, the half-
+ * width anchor is 157px at 390 and 122px at 320, and "Google Agenda" (icon 16 + gap 8 + 14/700 label
+ * inside `px-5`) wraps onto two lines at both widths ("Arquivo .ics" also wraps at 320). Full width,
+ * each label sits on one line at 320; from `sm` (the 680px column) the half width is ~280px and the
+ * pair sits side by side as UI-D-210 draws it. Existing breakpoint and scale only: no new token or
+ * size. The `events agenda` e2e asserts one-line labels at 390 and 320 and the side-by-side row at
+ * 700.
+ */
+function CalendarPair({
+  label,
+  googleLabel,
+  googleHref,
+  icsLabel,
+  icsHref,
+}: {
+  label: string;
+  googleLabel: string;
+  googleHref: string;
+  icsLabel: string;
+  icsHref: string;
+}) {
+  return (
+    <div data-testid="event-calendar">
+      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-text-tertiary">{label}</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <a
+          href={googleHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="event-calendar-google"
+          className={CALENDAR_ANCHOR}
+        >
+          <CalendarPlus size={16} aria-hidden className="shrink-0" />
+          {googleLabel}
+        </a>
+        <a href={icsHref} download data-testid="event-calendar-ics" className={CALENDAR_ANCHOR}>
+          <Download size={16} aria-hidden className="shrink-0" />
+          {icsLabel}
+        </a>
       </div>
     </div>
   );

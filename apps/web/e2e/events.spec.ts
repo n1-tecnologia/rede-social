@@ -1520,3 +1520,232 @@ test.describe('events participantes', () => {
     ).toHaveCount(0);
   });
 });
+
+/**
+ * 06-08 (EVENT-06, D-211, UI-D-210): the calendar pair on the detail page, and the `.ics` it downloads.
+ * A throwaway events tenant, on the phone. The file is read from disk after the browser's own
+ * download, so what is asserted is exactly what a calendar app would import.
+ */
+test.describe('events agenda', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  const SLUG = 'e2e-events-agenda';
+  const MEETING = 'https://meet.example.test/agenda-secreta';
+  let tenant: EventsTenant | null = null;
+  const ids = { inPerson: '', online: '', onlineLive: '', cancelled: '' };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    tenant = await createEventsTenant(SLUG, SEED_PASSWORD);
+    ids.inPerson = await insertEvent(tenant.tenantId, {
+      title: 'Encontro para a agenda',
+      description: 'Traga um amigo.',
+      venueName: 'Auditorio da sede',
+      address: 'Rua das Flores, 100',
+      startsInMinutes: 180,
+      endsInMinutes: 300,
+    });
+    ids.online = await insertEvent(tenant.tenantId, {
+      title: 'Live para a agenda',
+      format: 'online',
+      meetingUrl: MEETING,
+      startsInMinutes: 180,
+      endsInMinutes: 300,
+    });
+    // In its window: here following /entrar WOULD record a walk-in, so an export must not.
+    ids.onlineLive = await insertEvent(tenant.tenantId, {
+      title: 'Live na janela',
+      format: 'online',
+      meetingUrl: MEETING,
+      startsInMinutes: 30,
+      endsInMinutes: 150,
+    });
+    ids.cancelled = await insertEvent(tenant.tenantId, {
+      title: 'Encontro cancelado',
+      startsInMinutes: 180,
+      endsInMinutes: 300,
+      cancelled: true,
+    });
+  });
+
+  test.afterAll(async ({ browser: _browser }, testInfo) => {
+    if (testInfo.project.name !== 'mobile-chromium') return;
+    await deleteEventsTenant(SLUG);
+    await closeEventsAdmin();
+  });
+
+  const pair = (page: Page) => page.getByTestId('event-calendar');
+  const googleLink = (page: Page) => page.getByTestId('event-calendar-google');
+  const icsLink = (page: Page) => page.getByTestId('event-calendar-ics');
+
+  /** Taps "Arquivo .ics" and returns the downloaded file's text. */
+  async function downloadIcs(page: Page): Promise<{ name: string; text: string }> {
+    const [download] = await Promise.all([page.waitForEvent('download'), icsLink(page).click()]);
+    const { readFile } = await import('node:fs/promises');
+    const file = await download.path();
+    return { name: download.suggestedFilename(), text: await readFile(file, 'utf8') };
+  }
+
+  /** RFC 5545 unfolding, then the logical lines. */
+  const icsLines = (text: string) => text.replace(/\r\n /g, '').split('\r\n');
+
+  /** Each anchor of the pair: its box, whether its label sits on ONE line, and any overflow. */
+  async function measurePair(page: Page) {
+    return pair(page)
+      .locator('a')
+      .evaluateAll((anchors) =>
+        anchors.map((a) => {
+          // The LABEL's lines only: the text nodes, never the icon's box.
+          const tops = new Set<number>();
+          for (const node of Array.from(a.childNodes)) {
+            if (node.nodeType !== Node.TEXT_NODE) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            for (const r of Array.from(range.getClientRects())) {
+              if (r.width > 0) tops.add(Math.round(r.top));
+            }
+          }
+          const box = a.getBoundingClientRect();
+          return {
+            top: Math.round(box.top),
+            width: Math.round(box.width),
+            lines: tops.size,
+            overflowX: a.scrollWidth > a.clientWidth,
+            overflowY: a.scrollHeight > a.clientHeight,
+          };
+        }),
+      );
+  }
+
+  test('1. in person: the pair reads "Adicionar à agenda", and the .ics has UTC times, the venue and CRLF lines', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events agenda tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${ids.inPerson}`);
+
+    await expect(pair(page).getByText(E.calendar.label, { exact: true })).toBeVisible();
+    await expect(googleLink(page)).toHaveText(E.calendar.google);
+    await expect(googleLink(page)).toHaveAttribute('target', '_blank');
+    await expect(googleLink(page)).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(icsLink(page)).toHaveText(E.calendar.ics);
+    await expect(icsLink(page)).toHaveAttribute('href', `/eventos/${ids.inPerson}/agenda.ics`);
+    await expect(icsLink(page)).toHaveAttribute('download', '');
+
+    // UI E06/long-text (06-08 deviation): at half width the labels wrapped at 390 and 320, so below
+    // `sm` the pair stacks; each label then sits on ONE line with no overflow. From `sm` it is the
+    // side-by-side row UI-D-210 draws.
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      const [google, ics] = await measurePair(page);
+      expect(google, `google @${width}`).toMatchObject({
+        lines: 1,
+        overflowX: false,
+        overflowY: false,
+      });
+      expect(ics, `ics @${width}`).toMatchObject({ lines: 1, overflowX: false, overflowY: false });
+      expect(ics?.top ?? 0, `stacked @${width}`).toBeGreaterThan(google?.top ?? 0);
+    }
+    await page.setViewportSize({ width: 700, height: 844 });
+    const [wideGoogle, wideIcs] = await measurePair(page);
+    expect(wideGoogle).toMatchObject({ lines: 1, overflowX: false });
+    expect(wideIcs).toMatchObject({ lines: 1, overflowX: false });
+    expect(wideIcs?.top).toBe(wideGoogle?.top);
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    const { name, text } = await downloadIcs(page);
+    expect(name).toBe('evento.ics');
+    expect(text).toContain('\r\n');
+    expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/);
+    const lines = icsLines(text);
+    expect(lines[0]).toBe('BEGIN:VCALENDAR');
+    expect(lines.filter((line) => line === 'BEGIN:VEVENT')).toHaveLength(1);
+    expect(lines.find((line) => line.startsWith('DTSTART:'))).toMatch(/^DTSTART:\d{8}T\d{6}Z$/);
+    expect(lines.find((line) => line.startsWith('DTEND:'))).toMatch(/^DTEND:\d{8}T\d{6}Z$/);
+    expect(lines).toContain('SUMMARY:Encontro para a agenda');
+    expect(lines).toContain('LOCATION:Auditorio da sede\\, Rua das Flores\\, 100');
+    expect(lines).toContain('STATUS:CONFIRMED');
+    expect(lines.find((line) => line.startsWith('UID:'))).toMatch(
+      new RegExp(`^UID:${ids.inPerson}@`),
+    );
+  });
+
+  test('2. online: the .ics and the Google link point at /entrar, never at the meeting host, and Google gets no ctz', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events agenda tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${ids.online}`);
+
+    const href = (await googleLink(page).getAttribute('href')) ?? '';
+    const google = new URL(href);
+    expect(google.host).toBe('calendar.google.com');
+    expect(google.searchParams.get('action')).toBe('TEMPLATE');
+    expect(google.searchParams.has('ctz')).toBe(false);
+    expect(google.searchParams.get('dates')).toMatch(/^\d{8}T\d{6}Z\/\d{8}T\d{6}Z$/);
+    expect(google.searchParams.get('location')).toMatch(
+      new RegExp(`/eventos/${ids.online}/entrar$`),
+    );
+    expect(href).not.toContain('meet.example.test');
+    expect(await page.content()).not.toContain('meet.example.test');
+
+    const { text } = await downloadIcs(page);
+    const location = icsLines(text).find((line) => line.startsWith('LOCATION:')) ?? '';
+    expect(location).toMatch(new RegExp(`/eventos/${ids.online}/entrar$`));
+    expect(text).not.toContain('meet.example.test');
+  });
+
+  test('3. EVENT-06 concurrency: three parallel downloads are three well-formed files and record nothing', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events agenda tenant was not provisioned');
+    await eventsApiAs(tenant, tenant.memberEmail, `/v1/events/${ids.inPerson}/rsvp`, {
+      method: 'PUT',
+      body: { answer: 'going' },
+    });
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    const before = {
+      inPerson: await attendanceFor(ids.inPerson, tenant.memberEmail),
+      onlineLive: await attendanceFor(ids.onlineLive, tenant.memberEmail),
+    };
+    expect(before).toEqual({ inPerson: { status: 'going', checkinVia: null }, onlineLive: null });
+
+    for (const id of [ids.inPerson, ids.onlineLive]) {
+      const url = `${tenant.origin}/eventos/${id}/agenda.ics`;
+      const answers = await Promise.all([1, 2, 3].map(() => page.request.get(url)));
+      for (const res of answers) {
+        expect(res.status()).toBe(200);
+        expect(res.headers()['content-type']).toBe('text/calendar; charset=utf-8');
+        expect(res.headers()['content-disposition']).toBe('attachment; filename="evento.ics"');
+        expect(res.headers()['cache-control']).toContain('no-store');
+        const text = await res.text();
+        expect(text.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
+        expect(text.endsWith('END:VCALENDAR\r\n')).toBe(true);
+        expect(text).not.toContain('meet.example.test');
+      }
+    }
+
+    expect({
+      inPerson: await attendanceFor(ids.inPerson, tenant.memberEmail),
+      onlineLive: await attendanceFor(ids.onlineLive, tenant.memberEmail),
+    }).toEqual(before);
+  });
+
+  test('4. a cancelled event has no calendar pair, and a malformed id is a 404', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events agenda tenant was not provisioned');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${ids.cancelled}`);
+    await expect(page.getByTestId('event-banner')).toHaveAttribute('data-kind', 'cancelled');
+    await expect(pair(page)).toHaveCount(0);
+    await expect(page.getByText(E.calendar.label)).toHaveCount(0);
+
+    const malformed = await page.request.get(`${tenant.origin}/eventos/nao-e-um-id/agenda.ics`);
+    expect(malformed.status()).toBe(404);
+  });
+});

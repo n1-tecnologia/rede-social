@@ -373,6 +373,12 @@ export type EventDetailView = {
   endsAt: string;
   /** The start as the tenant's wall-clock `HH:MM` (the online P0 hint, 06-06). */
   startTime: string;
+  /**
+   * 06-08 (UI-D-210): whether the calendar pair ("Adicionar à agenda") renders — P0-P2 for EVERY
+   * member whatever their answer, never for a cancelled or ended event (no export of an event that
+   * will not happen).
+   */
+  calendar: boolean;
 };
 
 /**
@@ -513,6 +519,7 @@ export function eventDetailView(
     startsAt: event.startsAt,
     endsAt: event.endsAt,
     startTime: start,
+    calendar: !cancelled && phase !== 'P3',
   };
 }
 

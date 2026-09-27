@@ -99,6 +99,9 @@ const REQUIRED_KEYS = [
   // 06-07: the organiser's Participantes screen (D-215). It is permission-gated per request and
   // shows the door code, so it may never be prerendered.
   '/(app)/eventos/[eventId]/participantes/page',
+  // 06-08: the calendar export. It reads the member's own event through the member lane per request
+  // (the session decides which tenant's event it may serialise), so it may never be prerendered.
+  '/(app)/eventos/[eventId]/agenda.ics/route',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',
