@@ -37,10 +37,19 @@ begin;
 --    `events_tenant_ends_idx` serves Passados (`ends_at <= now()`, `ends_at desc, id desc`). The
 --    statements are `listEvents`' own, page 1, and neither plan may be a sequential scan.
 --
+-- 10. THE FORMAT SWITCH (06-04, D-214, T-06-22). `updateEvent` switches format as two statements in
+--     one transaction: `events` (format + location) first, `event_secrets` (discriminator + URL)
+--     second. With the keys DEFERRED (the application's mode) the half-switched state between them is
+--     legal, and `set constraints all immediate` issued AFTER both statements is the commit-time
+--     check: it passes for in person -> online (URL set) and for online -> in person (URL cleared).
+--     Negative controls: switching `events.format` ALONE is refused 23503 on
+--     `event_secrets_event_fk` once checked, and a URL on an in-person secrets row is 23514
+--     `event_secrets_url_chk` (the CHECK is immediate, never deferred).
+--
 -- `now()` is the transaction timestamp, so every instant below is placed relative to the SAME clock.
 -- Fixture ids use the `1e000000-…` prefix, which no other pgTAP file uses. Like its siblings, this
 -- file ROLLS BACK, so it re-runs identically against a seeded or an empty database.
-select plan(29);
+select plan(35);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ev-a', 'Eventos A', '1e000000-0000-4000-8000-000000000001');
@@ -296,6 +305,70 @@ select is_empty(
   '…and never B''s, although B''s row carries the identical code'
 );
 reset role;
+
+-- ── 10. the format switch, both directions, checked after the switch (06-04) ──────────────────
+select pg_temp.event_pair('1e000000-0000-4000-8000-000000000a01', 'in_person', 'Sede', 'Rua A, 1',
+                          now() + interval '2 days', now() + interval '2 days 2 hours');
+select pg_temp.event_pair('1e000000-0000-4000-8000-000000000a02', 'online', null, null,
+                          now() + interval '2 days', now() + interval '2 days 2 hours',
+                          p_url => 'https://meet.x.test/a02');
+
+-- The application's mode: both keys deferred to the check point.
+set constraints all deferred;
+update public.events set format = 'online', venue_name = null, address = null
+ where id = '1e000000-0000-4000-8000-000000000a01';
+update public.event_secrets set event_format = 'online', meeting_url = 'https://meet.x.test/sala'
+ where event_id = '1e000000-0000-4000-8000-000000000a01';
+update public.events set format = 'in_person', venue_name = 'Sede', address = 'Rua A, 1'
+ where id = '1e000000-0000-4000-8000-000000000a02';
+update public.event_secrets set event_format = 'in_person', meeting_url = null
+ where event_id = '1e000000-0000-4000-8000-000000000a02';
+select lives_ok(
+  $$ set constraints all immediate $$,
+  'D-214: both switches, written statement by statement with the keys deferred, satisfy event_secrets_event_fk when checked after the switch'
+);
+set constraints all immediate;
+select results_eq(
+  $$ select e.format || '/' || s.event_format || '/' || coalesce(s.meeting_url, '-')
+       from public.events e join public.event_secrets s on s.event_id = e.id
+      where e.id = '1e000000-0000-4000-8000-000000000a01' $$,
+  ARRAY['online/online/https://meet.x.test/sala'],
+  '…in person -> online: the event, the discriminator and the https: URL moved together'
+);
+select results_eq(
+  $$ select e.format || '/' || s.event_format || '/' || coalesce(s.meeting_url, '-')
+              || '/' || e.venue_name
+       from public.events e join public.event_secrets s on s.event_id = e.id
+      where e.id = '1e000000-0000-4000-8000-000000000a02' $$,
+  ARRAY['in_person/in_person/-/Sede'],
+  '…online -> in person: the URL is cleared and the venue is back'
+);
+select throws_like(
+  $$ do $d$
+     begin
+       set constraints all deferred;
+       update public.events set format = 'online', venue_name = null, address = null
+        where id = '1e000000-0000-4000-8000-000000000a02';
+       set constraints all immediate;
+     end
+     $d$ $$,
+  '%event_secrets_event_fk%',
+  'negative control: switching events.format ALONE is refused (23503) on event_secrets_event_fk once checked'
+);
+set constraints all immediate;
+select throws_ok(
+  $$ update public.event_secrets set meeting_url = 'https://meet.x.test/nao'
+      where event_id = '1e000000-0000-4000-8000-000000000a02' $$,
+  '23514',
+  null,
+  'negative control: a URL on an in-person secrets row is refused (23514)'
+);
+select throws_like(
+  $$ update public.event_secrets set meeting_url = 'https://meet.x.test/nao'
+      where event_id = '1e000000-0000-4000-8000-000000000a02' $$,
+  '%event_secrets_url_chk%',
+  '…by event_secrets_url_chk, by name'
+);
 
 -- ── 9. both list statements ride their index, by name ─────────────────────────────────────────
 -- 400 events in tenant A, half ended and half not, then `analyze`: with a handful of rows the

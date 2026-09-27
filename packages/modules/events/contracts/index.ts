@@ -288,6 +288,49 @@ export type RsvpInput = z.infer<typeof rsvpSchema>;
 export const rsvpResultSchema = z.object({ status: z.enum(ATTENDANCE_STATUSES) }).strict();
 export type RsvpResult = z.infer<typeof rsvpResultSchema>;
 
+/**
+ * `GET /v1/events/{eventId}/edit` (06-04, D-214): the event as the edit FORM needs it. Returned ONLY
+ * by the manage-guarded edit read, never by a member-reachable route, which is why it may carry
+ * `meetingUrl` (read through the admin-only `event_secrets_staff_all` policy; a manage-holding
+ * non-admin would read null, which degrades and does not leak).
+ *
+ * `start` / `end` are the stored instants converted BACK to the tenant's wall clock by Postgres
+ * (`to_char(… at time zone t.timezone, 'YYYY-MM-DD')` / `'HH24:MI'`), so the web never converts a
+ * timezone. `startsAt` / `endsAt` are the UTC instants beside them, for the server-computed flags
+ * (`canCancel`, `canReactivate`). `.strict()`.
+ */
+export const eventEditSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    description: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    coverVariantWidths: z.array(z.number().int()),
+    format: z.enum(EVENT_FORMATS),
+    venueName: z.string().nullable(),
+    address: z.string().nullable(),
+    meetingUrl: z.string().nullable(),
+    start: z.object({ date: z.string(), time: z.string() }).strict(),
+    end: z.object({ date: z.string(), time: z.string() }).strict(),
+    status: z.enum(EVENT_STATUSES),
+    startsAt: z.string(),
+    endsAt: z.string(),
+  })
+  .strict();
+export type EventEdit = z.infer<typeof eventEditSchema>;
+
+/**
+ * `PATCH /v1/events/{eventId}` (06-04, D-214): the STATUS write, and nothing else (the communities
+ * archive-as-status-write). `.strict()`, so a PATCH carrying a title fails loudly: content edits are
+ * the whole-event `PUT` with `eventInputSchema`.
+ *  - `cancelled`: only an active event that has not ended (`409 event_ended` after `ends_at`);
+ *  - `active`: only a cancelled event that has not started (`409 reactivate_started` from
+ *    `starts_at` on).
+ * Asking for the status the event already has answers 200 and writes nothing.
+ */
+export const eventStatusUpdateSchema = z.object({ status: z.enum(EVENT_STATUSES) }).strict();
+export type EventStatusUpdate = z.infer<typeof eventStatusUpdateSchema>;
+
 /** One keyset page. `nextCursor` is non-null EXACTLY when another row exists (the over-fetch rule). */
 export const eventPageSchema = z
   .object({
@@ -328,6 +371,45 @@ export interface EventRsvp {
 }
 
 /**
+ * Payload of `event.updated` (MOD-03, 06-04), emitted once per CONTENT change after commit. A `PUT`
+ * identical to the stored event writes nothing and emits nothing. `timesChanged` is true exactly when
+ * `starts_at` or `ends_at` moved, so Phase 7 re-arms its reminders from the payload alone. Ids,
+ * the format and instants only: no title, venue, URL or code, and no diff (the `CommunityUpdated`
+ * rule: a diff in a payload is the shortest path to a title in a log).
+ */
+export interface EventUpdated {
+  tenantId: string;
+  eventId: string;
+  actorUserId: string;
+  format: EventFormat;
+  startsAt: string;
+  endsAt: string;
+  timesChanged: boolean;
+}
+
+/**
+ * Payload of `event.cancelled` (MOD-03, 06-04): once per active -> cancelled TRANSITION. Cancelling an
+ * already-cancelled event answers 200 and emits nothing (the `CommunityArchived` rule: a subscriber
+ * counts transitions, not states).
+ */
+export interface EventCancelled {
+  tenantId: string;
+  eventId: string;
+  actorUserId: string;
+  startsAt: string;
+  endsAt: string;
+}
+
+/** Payload of `event.reactivated` (MOD-03, 06-04): once per cancelled -> active transition. */
+export interface EventReactivated {
+  tenantId: string;
+  eventId: string;
+  actorUserId: string;
+  startsAt: string;
+  endsAt: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
@@ -335,5 +417,8 @@ declare module '@tria/contracts' {
   interface EventMap {
     'event.published': EventPublished;
     'event.rsvp': EventRsvp;
+    'event.updated': EventUpdated;
+    'event.cancelled': EventCancelled;
+    'event.reactivated': EventReactivated;
   }
 }

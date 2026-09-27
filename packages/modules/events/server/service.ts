@@ -8,12 +8,14 @@ import { sql } from 'drizzle-orm';
 import type {
   AttendanceStatus,
   EventDetail,
+  EventEdit,
   EventFormat,
   EventInput,
   EventIssue,
   EventPage,
   EventQuery,
   EventStatus,
+  EventStatusUpdate,
   EventSummary,
   RsvpInput,
   RsvpResult,
@@ -263,6 +265,17 @@ async function loadCoverAsset(
 /** The accepted tuple, stated ONCE. */
 function isUsableCover(asset: CoverAssetRow): boolean {
   return asset.purpose === 'cover' && asset.kind === 'image' && asset.status === 'ready';
+}
+
+/**
+ * Is the STORED cover reference still usable? The non-throwing half of `resolveCoverAsset`, off the
+ * SAME lookup (the communities `coverIsUsable`, CR-01): an edit that re-sends the cover it already
+ * had asserts nothing new, so a stored cover the admin has since retired is self-healed to null
+ * instead of bricking every later edit with a 404 about an event open on their screen.
+ */
+async function coverIsUsable(tx: Tx, ctx: RequestContext, coverAssetId: string): Promise<boolean> {
+  const asset = await loadCoverAsset(tx, ctx, coverAssetId);
+  return asset !== undefined && isUsableCover(asset);
 }
 
 /**
@@ -592,4 +605,357 @@ export async function rsvpEvent(
   );
 
   return { status: outcome.status };
+}
+
+/** One row of the edit read: the stored event in the tenant's wall clock, plus the admin's URL. */
+type EventEditRow = {
+  id: string;
+  title: string;
+  description: string;
+  cover_asset_id: string | null;
+  cover_variant_widths: number[] | null;
+  format: EventFormat;
+  venue_name: string | null;
+  address: string | null;
+  meeting_url: string | null;
+  start_date: string;
+  start_time: string;
+  end_date: string;
+  end_time: string;
+  status: EventStatus;
+  starts_at: string;
+  ends_at: string;
+};
+
+/**
+ * `GET /v1/events/{eventId}/edit` (06-04, D-214): the event as the edit form needs it. ONE statement.
+ *
+ * **The instants go back to the tenant's wall clock IN SQL** (`to_char(e.starts_at at time zone
+ * t.timezone, 'YYYY-MM-DD')` / `'HH24:MI'`), the exact inverse of the create/update conversion, so a
+ * São Paulo 23:30 start stored as 02:30Z the next day reads back as `{ date, time: '23:30' }` of the
+ * day the admin typed. The web never converts a timezone.
+ *
+ * The meeting URL comes through `left join event_secrets`, which `event_secrets_staff_all` shows to
+ * the `admin_tenant` lane only: the route's manage guard plus the policy are two independent gates
+ * (T-06-20). A manage-holding non-admin would read a null URL, which degrades and does not leak.
+ *
+ * A miss is ONE bare 404 (D-23).
+ */
+export async function getEventForEdit(ctx: RequestContext, eventId: string): Promise<EventEdit> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<EventEditRow>(sql`
+      select e.id,
+             e.title,
+             e.description,
+             e.cover_asset_id,
+             a.variant_widths as cover_variant_widths,
+             e.format,
+             e.venue_name,
+             e.address,
+             s.meeting_url,
+             to_char(e.starts_at at time zone t.timezone, 'YYYY-MM-DD') as start_date,
+             to_char(e.starts_at at time zone t.timezone, 'HH24:MI') as start_time,
+             to_char(e.ends_at at time zone t.timezone, 'YYYY-MM-DD') as end_date,
+             to_char(e.ends_at at time zone t.timezone, 'HH24:MI') as end_time,
+             e.status,
+             to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+             to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at
+        from events e
+        join tenants t on t.id = e.tenant_id
+        left join media_assets a on a.id = e.cover_asset_id
+        left join event_secrets s on s.tenant_id = e.tenant_id and s.event_id = e.id
+       where e.tenant_id = ${ctx.tenantId}::uuid
+         and e.id = ${eventId}::uuid
+         and e.deleted_at is null
+       limit 1`),
+  );
+  const row = rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    coverAssetId: row.cover_asset_id,
+    coverVariantWidths: row.cover_variant_widths ?? [],
+    format: row.format,
+    venueName: row.venue_name,
+    address: row.address,
+    meetingUrl: row.meeting_url,
+    start: { date: row.start_date, time: row.start_time },
+    end: { date: row.end_date, time: row.end_time },
+    status: row.status,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+  };
+}
+
+/** The locked current row an update starts from. */
+type LockedEventRow = { cover_asset_id: string | null; starts_at: string; ends_at: string };
+
+/**
+ * `PUT /v1/events/{eventId}` (06-04, D-214): a WHOLE-EVENT REPLACEMENT with the create's own
+ * `eventInputSchema` (planning decision 1: format, location and URL move together, so a partial body
+ * would have to re-derive the XOR). Every field stays editable after members answered, and nothing
+ * here touches `event_attendances`: answers and check-ins are kept.
+ *
+ * ONE `withTenantTx`, in this order:
+ *  1. **Lock** the current row (`for update`), keeping its old instants for `timesChanged`. A miss
+ *     (unknown, another tenant's, removed) is a bare 404 (D-23).
+ *  2. **The cover** (Pitfall 5 + CR-01): an id that DIFFERS from the stored one is a new assertion
+ *     and is resolved strictly (foreign -> bare 404, unusable -> `cover_invalid`, T-06-21). The SAME
+ *     id re-sent, now unusable (its admin retired it), is self-healed to null.
+ *  3. **`events`**, with the wall clock converted inside the statement exactly as the create does,
+ *     `where (…) is distinct from (…)`: an identical body matches no row, so `updated_at` stays put.
+ *  4. **`event_secrets`** `set event_format, meeting_url` under the same `is distinct from` rule.
+ *     A FORMAT SWITCH is steps 3 and 4 together: `event_secrets_event_fk` is DEFERRABLE INITIALLY
+ *     DEFERRED, so the half-switched state between them is legal until COMMIT, where the pair is
+ *     whole again (pgTAP proves both directions under `set constraints all immediate`).
+ *
+ * Zero rows from both writes means the body equalled the stored event: 200, nothing written, nothing
+ * emitted (EVENT-01 idempotency, edit half; T-06-26). A `23514 events_window_chk` (a DST fold Zod
+ * cannot see) answers `end_before_start`. After commit, ONE `event.updated` with `timesChanged` true
+ * exactly when `starts_at` or `ends_at` moved, so Phase 7 re-arms its reminders.
+ *
+ * The response is the member-facing summary projection, which has no URL key (T-06-20).
+ */
+export async function updateEvent(
+  ctx: RequestContext,
+  eventId: string,
+  input: EventInput,
+): Promise<EventSummary> {
+  if (input.title.trim().length === 0) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { event: 'name_required' });
+  }
+
+  const inPerson = input.format === 'in_person';
+  const venueName = inPerson ? orNull(input.venueName) : null;
+  const address = inPerson ? orNull(input.address) : null;
+  const meetingUrl = inPerson ? null : orNull(input.meetingUrl);
+  const requestedCover = input.coverAssetId ?? null;
+
+  let outcome: { row: EventRow; changed: boolean; timesChanged: boolean; healed: boolean };
+  try {
+    outcome = await withTenantTx(ctx, async (tx) => {
+      const locked = await tx.execute<LockedEventRow>(sql`
+        select cover_asset_id,
+               to_char(starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+               to_char(ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at
+          from events
+         where tenant_id = ${ctx.tenantId}::uuid
+           and id = ${eventId}::uuid
+           and deleted_at is null
+         for update`);
+      const before = locked[0];
+      if (!before) throw new ApiError(404, 'NOT_FOUND');
+
+      let coverAssetId = requestedCover;
+      let healed = false;
+      if (coverAssetId !== before.cover_asset_id) {
+        await resolveCoverAsset(tx, ctx, coverAssetId);
+      } else if (coverAssetId !== null && !(await coverIsUsable(tx, ctx, coverAssetId))) {
+        coverAssetId = null;
+        healed = true;
+      }
+
+      const updated = await tx.execute<{ starts_at: string; ends_at: string }>(sql`
+        with next as (
+          select ${input.title}::text as title,
+                 ${input.description}::text as description,
+                 ${coverAssetId}::uuid as cover_asset_id,
+                 ${input.format}::text as format,
+                 ${venueName}::text as venue_name,
+                 ${address}::text as address,
+                 (${input.start.date}::text || ' ' || ${input.start.time}::text)::timestamp at time zone t.timezone as starts_at,
+                 (${input.end.date}::text || ' ' || ${input.end.time}::text)::timestamp at time zone t.timezone as ends_at
+            from tenants t
+           where t.id = ${ctx.tenantId}::uuid
+        )
+        update events e
+           set title = n.title,
+               description = n.description,
+               cover_asset_id = n.cover_asset_id,
+               format = n.format,
+               venue_name = n.venue_name,
+               address = n.address,
+               starts_at = n.starts_at,
+               ends_at = n.ends_at,
+               updated_at = now()
+          from next n
+         where e.tenant_id = ${ctx.tenantId}::uuid
+           and e.id = ${eventId}::uuid
+           and e.deleted_at is null
+           and (e.title, e.description, e.cover_asset_id, e.format, e.venue_name, e.address,
+                e.starts_at, e.ends_at)
+               is distinct from
+               (n.title, n.description, n.cover_asset_id, n.format, n.venue_name, n.address,
+                n.starts_at, n.ends_at)
+        returning to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+                  to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at`);
+
+      const secrets = await tx.execute<{ event_id: string }>(sql`
+        update event_secrets
+           set event_format = ${input.format},
+               meeting_url = ${meetingUrl},
+               updated_at = now()
+         where tenant_id = ${ctx.tenantId}::uuid
+           and event_id = ${eventId}::uuid
+           and (event_format, meeting_url) is distinct from (${input.format}::text, ${meetingUrl}::text)
+        returning event_id`);
+
+      const moved = updated[0];
+      const timesChanged =
+        moved !== undefined &&
+        (moved.starts_at !== before.starts_at || moved.ends_at !== before.ends_at);
+
+      const rows = await tx.execute<EventRow>(sql`
+        ${eventProjection(ctx.userId)}
+         where e.tenant_id = ${ctx.tenantId}::uuid
+           and e.id = ${eventId}::uuid
+         limit 1`);
+      const row = rows[0];
+      if (!row) throw new ApiError(500, 'INTERNAL');
+      return {
+        row,
+        changed: moved !== undefined || secrets.length > 0,
+        timesChanged,
+        healed,
+      };
+    });
+  } catch (error) {
+    if (checkViolation(error) === 'events_window_chk') {
+      throw new ApiError(400, 'VALIDATION_FAILED', { event: 'end_before_start' });
+    }
+    throw error;
+  }
+
+  const { row, changed, timesChanged, healed } = outcome;
+  if (changed) {
+    emit(ctx, 'event.updated', {
+      tenantId: ctx.tenantId,
+      eventId: row.id,
+      actorUserId: ctx.userId,
+      format: row.format,
+      startsAt: row.starts_at,
+      endsAt: row.ends_at,
+      timesChanged,
+    });
+  }
+
+  log.info(
+    {
+      event: 'events.updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId: row.id,
+      // Flags and lengths, never the words themselves (Pitfall 12).
+      changed,
+      timesChanged,
+      coverHealed: healed,
+      format: row.format,
+      titleLength: input.title.length,
+      hasCover: row.cover_asset_id !== null,
+    },
+    'event updated',
+  );
+
+  return toEvent(row);
+}
+
+/**
+ * `PATCH /v1/events/{eventId} { status }` (06-04, D-214): cancel and reactivate, the ONLY status
+ * writes. There is no delete anywhere (D-214, T-06-23): a cancelled event stays in every list with
+ * its `Cancelado` state until it ends (D-201).
+ *
+ * Each transition is ONE guarded UPDATE, so the rule and the write are the same statement:
+ *  - cancel: `set status = 'cancelled', cancelled_at = now() where status = 'active' and now() <
+ *    ends_at` (planning decision 2: cancelling a finished event is meaningless);
+ *  - reactivate: `set status = 'active', cancelled_at = null where status = 'cancelled' and now() <
+ *    starts_at`.
+ * Zero rows is disambiguated by one read: a miss is a bare 404; the target status already held is
+ * 200 with nothing written and nothing emitted; otherwise `409 event_ended` (cancel) or
+ * `409 reactivate_started` (reactivate). The RSVP guard trigger reads the event `FOR SHARE`, so a
+ * cancel serialises against an in-flight answer (06-03's held-cancel case).
+ *
+ * After commit, ONE `event.cancelled` or `event.reactivated` per transition.
+ */
+export async function setEventStatus(
+  ctx: RequestContext,
+  eventId: string,
+  input: EventStatusUpdate,
+): Promise<EventSummary> {
+  const cancel = input.status === 'cancelled';
+  const { row, transitioned } = await withTenantTx(ctx, async (tx) => {
+    const written = cancel
+      ? await tx.execute<{ id: string }>(sql`
+          update events
+             set status = 'cancelled', cancelled_at = now(), updated_at = now()
+           where tenant_id = ${ctx.tenantId}::uuid
+             and id = ${eventId}::uuid
+             and deleted_at is null
+             and status = 'active'
+             and now() < ends_at
+          returning id`)
+      : await tx.execute<{ id: string }>(sql`
+          update events
+             set status = 'active', cancelled_at = null, updated_at = now()
+           where tenant_id = ${ctx.tenantId}::uuid
+             and id = ${eventId}::uuid
+             and deleted_at is null
+             and status = 'cancelled'
+             and now() < starts_at
+          returning id`);
+
+    if (written.length === 0) {
+      // The guarded UPDATE already decided; this read only names the refusal.
+      const probe = await tx.execute<{ status: EventStatus }>(sql`
+        select status
+          from events
+         where tenant_id = ${ctx.tenantId}::uuid
+           and id = ${eventId}::uuid
+           and deleted_at is null
+         limit 1`);
+      const current = probe[0];
+      if (!current) throw new ApiError(404, 'NOT_FOUND');
+      if (current.status !== input.status) {
+        throw new ApiError(409, 'CONFLICT', {
+          event: cancel ? 'event_ended' : 'reactivate_started',
+        });
+      }
+    }
+
+    const rows = await tx.execute<EventRow>(sql`
+      ${eventProjection(ctx.userId)}
+       where e.tenant_id = ${ctx.tenantId}::uuid
+         and e.id = ${eventId}::uuid
+       limit 1`);
+    const after = rows[0];
+    if (!after) throw new ApiError(500, 'INTERNAL');
+    return { row: after, transitioned: written.length > 0 };
+  });
+
+  if (transitioned) {
+    emit(ctx, cancel ? 'event.cancelled' : 'event.reactivated', {
+      tenantId: ctx.tenantId,
+      eventId: row.id,
+      actorUserId: ctx.userId,
+      startsAt: row.starts_at,
+      endsAt: row.ends_at,
+    });
+  }
+
+  log.info(
+    {
+      event: 'events.status',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      eventId: row.id,
+      status: input.status,
+      transitioned,
+    },
+    'event status written',
+  );
+
+  return toEvent(row);
 }

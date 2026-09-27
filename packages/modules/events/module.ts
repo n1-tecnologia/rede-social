@@ -39,6 +39,27 @@ export const eventsModule = defineModule({
         log.info({ event: 'event.rsvp', ...payload }, 'event rsvp');
       },
     },
+    {
+      event: 'event.updated',
+      handler: async (payload) => {
+        // Shape only (06-04): `timesChanged` is what Phase 7 re-arms its reminders on.
+        log.info({ event: 'event.updated', ...payload }, 'event updated');
+      },
+    },
+    {
+      event: 'event.cancelled',
+      handler: async (payload) => {
+        // Shape only (06-04): one per active -> cancelled transition.
+        log.info({ event: 'event.cancelled', ...payload }, 'event cancelled');
+      },
+    },
+    {
+      event: 'event.reactivated',
+      handler: async (payload) => {
+        // Shape only (06-04): one per cancelled -> active transition.
+        log.info({ event: 'event.reactivated', ...payload }, 'event reactivated');
+      },
+    },
   ],
   defaultRolePermissions: {
     admin_tenant: [

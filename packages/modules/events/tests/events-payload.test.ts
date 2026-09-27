@@ -1,7 +1,14 @@
 import type { RequestContext } from '@tria/core/server/auth/context';
 import { flush, subscribe } from '@tria/core/server/events/bus';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EventInput, EventPublished, EventRsvp } from '../contracts/index';
+import type {
+  EventCancelled,
+  EventInput,
+  EventPublished,
+  EventReactivated,
+  EventRsvp,
+  EventUpdated,
+} from '../contracts/index';
 
 /**
  * MOD-03 / T-06-06 — `event.published`, asserted without a database (the communities `events.test.ts`
@@ -13,6 +20,10 @@ import type { EventInput, EventPublished, EventRsvp } from '../contracts/index';
  *  2. a create whose transaction THROWS queues nothing;
  *  3. a `23514` raised by `events_window_chk` (the DST-fold case Zod cannot see) maps to
  *     `400 { event: 'end_before_start' }`, never a 500.
+ *
+ * 06-04 adds `event.updated` (exactly seven keys, `timesChanged` true only when an instant moved, and
+ * nothing for an identical body), `event.cancelled` and `event.reactivated` (exactly five keys, once
+ * per transition, nothing for a repeat), and the two 409 codes of the status write.
  *
  * `withTenantTx` is the seam; the bus under test is the real one.
  */
@@ -79,7 +90,7 @@ vi.mock('@tria/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
 }));
 
-const { createEvent, rsvpEvent } = await import('../server/service');
+const { createEvent, rsvpEvent, setEventStatus, updateEvent } = await import('../server/service');
 
 function context(): RequestContext {
   return {
@@ -294,5 +305,184 @@ describe('event.rsvp — after commit, only on a change, the exact six keys (06-
     await expect(rsvpEvent(context(), EVENT_ID, { answer: 'going' })).rejects.toMatchObject({
       message: 'Failed query',
     });
+  });
+});
+
+describe('06-04 — event.updated, event.cancelled, event.reactivated: exact keys, once per change', () => {
+  const MOVED_START = '2026-10-12T23:00:00.000000Z';
+  const locked = [{ cover_asset_id: null, starts_at: STARTS_AT, ends_at: ENDS_AT }];
+  let updates: EventUpdated[] = [];
+  let cancels: EventCancelled[] = [];
+  let reactivations: EventReactivated[] = [];
+  let stops: (() => void)[] = [];
+  beforeEach(() => {
+    updates = [];
+    cancels = [];
+    reactivations = [];
+    stops = [
+      subscribe('event.updated', async (payload) => {
+        updates.push(payload);
+      }),
+      subscribe('event.cancelled', async (payload) => {
+        cancels.push(payload);
+      }),
+      subscribe('event.reactivated', async (payload) => {
+        reactivations.push(payload);
+      }),
+    ];
+  });
+  afterEach(() => {
+    for (const stop of stops) stop();
+  });
+
+  it('10. a title-only change emits ONE event.updated with exactly seven keys and timesChanged false', async () => {
+    // lock, update events (a row came back), update event_secrets (unchanged), read-back.
+    script = [locked, [{ starts_at: STARTS_AT, ends_at: ENDS_AT }], [], [row]];
+    const ctx = context();
+    const updated = await updateEvent(ctx, EVENT_ID, { ...input, title: 'Outro nome' });
+    expect(Object.keys(updated)).not.toContain('meetingUrl');
+    // The one transaction: lock first, then events, then event_secrets, both guarded.
+    expect(statements[0]).toContain('for update');
+    expect(statements[1]).toContain('is distinct from');
+    expect(statements[2]).toContain('update event_secrets');
+    await flush(ctx);
+    expect(updates).toHaveLength(1);
+    expect(Object.keys(updates[0] ?? {}).sort()).toEqual([
+      'actorUserId',
+      'endsAt',
+      'eventId',
+      'format',
+      'startsAt',
+      'tenantId',
+      'timesChanged',
+    ]);
+    expect(updates[0]).toEqual({
+      tenantId: TENANT_ID,
+      eventId: EVENT_ID,
+      actorUserId: USER_ID,
+      format: 'online',
+      startsAt: STARTS_AT,
+      endsAt: ENDS_AT,
+      timesChanged: false,
+    });
+    expect(JSON.stringify(updates[0])).not.toContain('Outro');
+    expect(JSON.stringify(updates[0])).not.toContain('meet.example');
+  });
+
+  it('11. a moved start emits timesChanged true; a URL-only change still emits, with false', async () => {
+    script = [locked, [{ starts_at: MOVED_START, ends_at: ENDS_AT }], [], [row]];
+    const ctx = context();
+    await updateEvent(ctx, EVENT_ID, input);
+    await flush(ctx);
+    expect(updates[0]?.timesChanged).toBe(true);
+
+    script = [locked, [], [{ event_id: EVENT_ID }], [row]];
+    const second = context();
+    await updateEvent(second, EVENT_ID, input);
+    await flush(second);
+    expect(updates).toHaveLength(2);
+    expect(updates[1]?.timesChanged).toBe(false);
+  });
+
+  it('12. an identical body writes no row and emits NOTHING', async () => {
+    script = [locked, [], [], [row]];
+    const ctx = context();
+    await updateEvent(ctx, EVENT_ID, input);
+    expect(ctx.events).toHaveLength(0);
+    await flush(ctx);
+    expect(updates).toHaveLength(0);
+  });
+
+  it('13. an unknown event is a bare 404, and events_window_chk maps to end_before_start', async () => {
+    script = [[]];
+    const miss = updateEvent(context(), EVENT_ID, input);
+    await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    await expect(miss).rejects.not.toHaveProperty('details.event');
+
+    script = [locked, refusal('23514', 'events_window_chk')];
+    const ctx = context();
+    await expect(updateEvent(ctx, EVENT_ID, input)).rejects.toMatchObject({
+      status: 400,
+      details: { event: 'end_before_start' },
+    });
+    expect(ctx.events).toHaveLength(0);
+  });
+
+  it('14. cancel emits ONE event.cancelled with exactly five keys; a repeat cancel emits nothing', async () => {
+    const cancelledRow = { ...row, status: 'cancelled' as const };
+    script = [[{ id: EVENT_ID }], [cancelledRow]];
+    const ctx = context();
+    const result = await setEventStatus(ctx, EVENT_ID, { status: 'cancelled' });
+    expect(result.status).toBe('cancelled');
+    expect(statements[0]).toContain("status = 'active'");
+    expect(statements[0]).toContain('now() < ends_at');
+    await flush(ctx);
+    expect(cancels).toHaveLength(1);
+    expect(Object.keys(cancels[0] ?? {}).sort()).toEqual([
+      'actorUserId',
+      'endsAt',
+      'eventId',
+      'startsAt',
+      'tenantId',
+    ]);
+    expect(cancels[0]).toEqual({
+      tenantId: TENANT_ID,
+      eventId: EVENT_ID,
+      actorUserId: USER_ID,
+      startsAt: STARTS_AT,
+      endsAt: ENDS_AT,
+    });
+
+    script = [[], [{ status: 'cancelled' }], [cancelledRow]];
+    const repeat = context();
+    await expect(setEventStatus(repeat, EVENT_ID, { status: 'cancelled' })).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(repeat.events).toHaveLength(0);
+  });
+
+  it('15. reactivate emits ONE event.reactivated with the same five keys; a repeat emits nothing', async () => {
+    script = [[{ id: EVENT_ID }], [row]];
+    const ctx = context();
+    await setEventStatus(ctx, EVENT_ID, { status: 'active' });
+    expect(statements[0]).toContain("status = 'cancelled'");
+    expect(statements[0]).toContain('now() < starts_at');
+    await flush(ctx);
+    expect(reactivations).toHaveLength(1);
+    expect(Object.keys(reactivations[0] ?? {}).sort()).toEqual([
+      'actorUserId',
+      'endsAt',
+      'eventId',
+      'startsAt',
+      'tenantId',
+    ]);
+    expect(cancels).toHaveLength(0);
+
+    script = [[], [{ status: 'active' }], [row]];
+    const repeat = context();
+    await setEventStatus(repeat, EVENT_ID, { status: 'active' });
+    expect(repeat.events).toHaveLength(0);
+  });
+
+  it('16. the refusals: event_ended, reactivate_started, and a bare 404', async () => {
+    script = [[], [{ status: 'active' }]];
+    const ended = context();
+    await expect(setEventStatus(ended, EVENT_ID, { status: 'cancelled' })).rejects.toMatchObject({
+      status: 409,
+      code: 'CONFLICT',
+      details: { event: 'event_ended' },
+    });
+    expect(ended.events).toHaveLength(0);
+
+    script = [[], [{ status: 'cancelled' }]];
+    await expect(setEventStatus(context(), EVENT_ID, { status: 'active' })).rejects.toMatchObject({
+      status: 409,
+      details: { event: 'reactivate_started' },
+    });
+
+    script = [[], []];
+    const miss = setEventStatus(context(), EVENT_ID, { status: 'cancelled' });
+    await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    await expect(miss).rejects.not.toHaveProperty('details.event');
   });
 });

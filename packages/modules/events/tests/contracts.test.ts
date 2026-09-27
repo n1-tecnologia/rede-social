@@ -6,8 +6,10 @@ import {
   EVENT_MAX_PAGE_SIZE,
   EVENT_PAGE_SIZE,
   eventDetailSchema,
+  eventEditSchema,
   eventInputSchema,
   eventQuerySchema,
+  eventStatusUpdateSchema,
   eventSummarySchema,
   RSVP_ANSWERS,
   rsvpResultSchema,
@@ -219,5 +221,53 @@ describe('06-03 — attendance vocabulary, detail and RSVP contracts', () => {
     expect(rsvpSchema.safeParse({ answer: 'going', userId: detail.id }).success).toBe(false);
     expect(rsvpSchema.safeParse({}).success).toBe(false);
     expect(rsvpResultSchema.safeParse({ status: 'checked_in' }).success).toBe(true);
+  });
+});
+
+describe('06-04 — the edit read and the status write', () => {
+  const edit = {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 'Encontro anual',
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    format: 'online',
+    venueName: null,
+    address: null,
+    meetingUrl: 'https://meet.google.com/abc',
+    start: { date: '2026-10-12', time: '23:30' },
+    end: { date: '2026-10-13', time: '01:30' },
+    status: 'active',
+    startsAt: '2026-10-13T02:30:00.000000Z',
+    endsAt: '2026-10-13T04:30:00.000000Z',
+  };
+
+  it('15. eventEditSchema carries the wall-clock pairs and the URL, and is strict', () => {
+    expect(eventEditSchema.safeParse(edit).success).toBe(true);
+    expect(eventEditSchema.safeParse({ ...edit, checkinCode: 'K7QM' }).success).toBe(false);
+    expect(
+      eventEditSchema.safeParse({ ...edit, start: { ...edit.start, zone: 'x' } }).success,
+    ).toBe(false);
+  });
+
+  it('16. eventStatusUpdateSchema is only { status: active | cancelled }', () => {
+    expect(eventStatusUpdateSchema.safeParse({ status: 'cancelled' }).success).toBe(true);
+    expect(eventStatusUpdateSchema.safeParse({ status: 'active' }).success).toBe(true);
+    expect(eventStatusUpdateSchema.safeParse({ status: 'deleted' }).success).toBe(false);
+    expect(eventStatusUpdateSchema.safeParse({ status: 'cancelled', title: 'x' }).success).toBe(
+      false,
+    );
+    expect(eventStatusUpdateSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('17. the edit PUT reuses the create schema: the hidden side of the XOR is refused', () => {
+    // An online replacement that still carries the venue the in-person event had is refused, so the
+    // form must submit only the visible side (D-213).
+    expect(
+      eventInputSchema.safeParse({ ...online, venueName: 'Sede', address: 'Rua A' }).success,
+    ).toBe(false);
+    expect(eventInputSchema.safeParse({ ...base, meetingUrl: 'https://x.test' }).success).toBe(
+      false,
+    );
   });
 });

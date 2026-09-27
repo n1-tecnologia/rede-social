@@ -7,14 +7,24 @@ import { requirePermission } from '@tria/core/server/rbac/permissions';
 import {
   EVENT_ISSUE_SET,
   eventDetailSchema,
+  eventEditSchema,
   eventInputSchema,
   eventPageSchema,
   eventQuerySchema,
+  eventStatusUpdateSchema,
   eventSummarySchema,
   rsvpResultSchema,
   rsvpSchema,
 } from '../contracts/index';
-import { createEvent, getEvent, listEvents, rsvpEvent } from './service';
+import {
+  createEvent,
+  getEvent,
+  getEventForEdit,
+  listEvents,
+  rsvpEvent,
+  setEventStatus,
+  updateEvent,
+} from './service';
 
 /**
  * The module owns its guard chain: the mount in `apps/api/src/app.ts` is a plain
@@ -22,7 +32,7 @@ import { createEvent, getEvent, listEvents, rsvpEvent } from './service';
  *
  * Order is the ROLE-06 order: `requireAuth` (401) -> `requireModule('events')` (404 when the tenant
  * does not have events — never 403, so a member cannot tell "not allowed" from "not here") ->
- * `requirePermission` on the write route only (403). The write guard is a PERMISSION, never a role
+ * `requirePermission` on the create, edit-read, replace and status routes (403). The write guard is a PERMISSION, never a role
  * comparison: granting creation to another role later is a manifest line, not a route edit.
  */
 
@@ -153,6 +163,85 @@ const rsvpRoute = createRoute({
   },
 });
 
+/**
+ * The edit read (06-04). The literal manage guard, like every admin route here (T-06-19): this is
+ * the ONE route that returns the meeting URL, and only to the manager (T-06-20).
+ */
+const editReadRoute = createRoute({
+  method: 'get',
+  path: '/{eventId}/edit',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: { params: eventParamSchema },
+  responses: {
+    200: {
+      description:
+        "The event as the edit form needs it: `start` / `end` are the stored instants converted back to the TENANT's wall clock by the database, `startsAt` / `endsAt` the UTC instants, and `meetingUrl` the admin-only link (null for an in-person event).",
+      content: { 'application/json': { schema: eventEditSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const updateEventRoute = createRoute({
+  method: 'put',
+  path: '/{eventId}',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: {
+    params: eventParamSchema,
+    body: { content: { 'application/json': { schema: eventInputSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The event after a WHOLE-EVENT replacement (D-214), in the shape the list returns (no URL). Every field is editable after members answered, and their answers and check-ins are kept. A format switch moves the location and the link together. A body equal to the stored event writes nothing and emits nothing.',
+      content: { 'application/json': { schema: eventSummarySchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.event`: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`.',
+    },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The event, or a NEW cover asset id, is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const statusRoute = createRoute({
+  method: 'patch',
+  path: '/{eventId}',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: {
+    params: eventParamSchema,
+    body: { content: { 'application/json': { schema: eventStatusUpdateSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The event after the status write. `cancelled` cancels an active event that has not ended; `active` reactivates a cancelled event that has not started. Asking for the status the event already has writes nothing and emits nothing. There is no delete (D-214).',
+      content: { 'application/json': { schema: eventSummarySchema } },
+    },
+    400: {
+      description: '`VALIDATION_FAILED`: the id is not a uuid, or the body is not `{ status }`.',
+    },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.event`: `event_ended` (a finished event cannot be cancelled) or `reactivate_started` (a cancelled event cannot be reactivated once it has started).',
+    },
+  },
+});
+
 export const eventsRoutes = events
   .openapi(listRoute, async (c) =>
     c.json(await listEvents(c.get('ctx'), c.req.valid('query')), 200),
@@ -165,4 +254,16 @@ export const eventsRoutes = events
   )
   .openapi(rsvpRoute, async (c) =>
     c.json(await rsvpEvent(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')), 200),
+  )
+  .openapi(editReadRoute, async (c) =>
+    c.json(await getEventForEdit(c.get('ctx'), c.req.valid('param').eventId), 200),
+  )
+  .openapi(updateEventRoute, async (c) =>
+    c.json(await updateEvent(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')), 200),
+  )
+  .openapi(statusRoute, async (c) =>
+    c.json(
+      await setEventStatus(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('json')),
+      200,
+    ),
   );
