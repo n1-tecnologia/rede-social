@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Events
 status: executing
-stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-09-27T19:28:17.699Z"
+stopped_at: Completed 06-06-PLAN.md
+last_updated: "2026-09-27T19:58:08.078Z"
 last_activity: 2026-09-27
-last_activity_desc: "06-05 complete: event_checkin_attempts, SECURITY DEFINER app.events_check_in (outcomes, 5-per-15-min guess bound), POST /v1/events/{id}/check-in, event.checked_in, the /eventos/{id}/check-in boarding-pass ticket and the Fazer check-in CTA"
-state_head: b8cb92908960b0a1da7f76257f64563b7d14c1e6
+last_activity_desc: "06-06 complete: SECURITY DEFINER app.events_enter (D-207 gate at click time, online check-in inside the window, URL only on forward/recorded/already), POST /v1/events/{id}/enter, event.checked_in via online, the /eventos/{id}/entrar route handler (prefetch and RSC 204, 303 to the stored https URL) and aviso refusal page, the online action-zone rows, calendar links that survive a login, and the production-build prefetch proof"
+state_head: 93cd2c2c95a2bf3db03cbc81b46b4d54dcd6c088
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 98
-  completed_plans: 91
+  completed_plans: 92
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 6 (Events) — EXECUTING
-Plan: 5 of 9 complete (06-01, 06-02, 06-03, 06-04, 06-05); 06-06 next
-Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair, the event form and the check-in ticket waits on 01.1
-Last activity: 2026-09-27 — 06-05 complete: EVENT-04 in person. `event_checkin_attempts` (self-select, no write policy), the SECURITY DEFINER `app.events_check_in` that compares the venue code inside Postgres and RETURNS its refusals so a wrong guess commits (5 per member per event per 15 min), walk-ins, `POST /v1/events/{id}/check-in` mapped after the transaction, `event.checked_in`, pgTAP 142, the ported boarding-pass ticket at /eventos/[eventId]/check-in and the in-person "Fazer check-in" CTA; EVENT-04 stays Pending until 06-06/06-08/06-09
+Plan: 6 of 9 complete (06-01, 06-02, 06-03, 06-04, 06-05, 06-06); 06-07 next
+Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair, the event form, the check-in ticket and the online Entrar / calendar hand-off waits on 01.1
+Last activity: 2026-09-27 — 06-06 complete: EVENT-04 online. `app.events_enter` (SECURITY DEFINER, the 06-05 posture) decides the D-207 gate at the instant of the tap: `forward` before the window after a Vou (nothing recorded), `confirm_first` otherwise, `recorded` (checked_in / walk_in via online) or `already` inside the window, `ended` / `cancelled`; the meeting URL leaves the database only on the three passing outcomes. `POST /v1/events/{id}/enter`, `event.checked_in` via online, pgTAP 142 facts 12-20, the `/eventos/{id}/entrar` route handler (204 to prefetch and RSC fetches, 303 to the stored https URL with no-store + no-referrer, never a destination from the request), the `/entrar/aviso` refusal page, the online action-zone rows, `isContinuablePath` widened for calendar links, and `events-prefetch.spec.ts` on the production build; EVENT-04 stays Pending until 06-08/06-09
 
-Progress: [██████████████████░░] 91/98 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 92/98 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -151,6 +151,7 @@ Progress: [██████████████████░░] 91/98 p
 | Phase 06 P03 | 164min (~40min active) | 3 tasks | 44 files |
 | Phase 06 P04 | 25 min | 3 tasks | 31 files |
 | Phase 06 P05 | 29 min | 2 tasks | 36 files |
+| Phase 06 P06 | 25 min | 2 tasks | 29 files |
 
 ## Accumulated Context
 
@@ -478,6 +479,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-05: app.events_check_in (SECURITY DEFINER, owner postgres, search_path '') RETURNS every refusal as an outcome and the service throws only after withTenantTx resolved, so a wrong guess commits; the 5-per-15-min bound lives in event_checkin_attempts, which has no write policy
 - [Phase 06]: 06-05: only wrong codes spend the guess bound; an already-present member re-submitting answers already (original stamp) before the counter is read, and a racing second check-in re-reads and answers already
 - [Phase 06]: 06-05: the ticket Data cell prints the date without the weekday (the contract date is cut at 320px); the cover overline keeps it; the not-open-yet {when} fillers are catalog keys (checkin.opensAt/opensOn) and the done line is formatted by the server action
+- [Phase 06]: 06-06: app.events_enter (SECURITY DEFINER, 06-05 posture) forwards WITHOUT recording before the window for a going or already-present member, answers confirm_first otherwise, records checked_in/walk_in via online inside the window, and releases the meeting URL only on forward/recorded/already
+- [Phase 06]: 06-06: /eventos/{id}/entrar answers 204 no-store to Sec-Purpose/Purpose prefetch, Next-Router-Prefetch AND any RSC fetch — a server action's redirect() makes the Next server fetch the target with RSC: 1 and follow its redirects, which recorded the check-in server-side and made the deployment GET the admin-supplied meeting URL; every future side-effecting or externally-redirecting route handler must do the same
+- [Phase 06]: 06-06: isContinuablePath accepts /eventos/{uuid} and /eventos/{uuid}/entrar (lowercase only), so a logged-out calendar tap lands in the meeting after login, counted; Playwright routes only the first url of a redirect chain, so arrival at the meeting host is proved by the navigation request and redirectedFrom()
 
 ### Pending Todos
 
@@ -535,6 +539,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T19:27:36.146Z
-Stopped at: Completed 06-05-PLAN.md
+Last session: 2026-09-27T19:57:50.120Z
+Stopped at: Completed 06-06-PLAN.md
 Resume file: None
