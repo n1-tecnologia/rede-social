@@ -15,6 +15,7 @@ import {
   formatEventTime,
   mapsHref,
   tenantDayKey,
+  tenantZoneLabel,
 } from './events-view';
 
 /**
@@ -407,5 +408,13 @@ describe("06-03 — eventActionState (UI-D-207, the island's props)", () => {
     expect(state('2026-10-01T12:00:00Z', { format: 'online', venueName: null })).toMatchObject({
       format: 'online',
     });
+  });
+});
+
+describe('tenantZoneLabel — the form helper names the TENANT zone (06-04, UI-D-212)', () => {
+  it('21. São Paulo reads "Horário Padrão de Brasília", Manaus its own zone, and a bad id falls back', () => {
+    expect(tenantZoneLabel('America/Sao_Paulo')).toBe('Horário Padrão de Brasília');
+    expect(tenantZoneLabel('America/Manaus')).toBe('Horário Padrão do Amazonas');
+    expect(tenantZoneLabel('Not/AZone')).toBe('Not/AZone');
   });
 });

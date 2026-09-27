@@ -1,8 +1,11 @@
 'use server';
 
 import {
+  EVENT_ISSUE_SET,
   EVENT_PERIODS,
+  type EventIssue,
   type EventPeriod,
+  eventInputSchema,
   eventQuerySchema,
   type RsvpAnswer,
   rsvpSchema,
@@ -11,11 +14,19 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
-import { getEvents, putRsvp } from '@/lib/events';
+import {
+  createEvent,
+  getEvents,
+  loadEvent,
+  putRsvp,
+  setEventStatus,
+  updateEvent,
+} from '@/lib/events';
 import { type EventPosterView, eventPosterView } from '@/lib/events-view';
 
 /**
- * The `/eventos` list's two actions (EVENT-02) and the detail's RSVP action (EVENT-03, below), in the `comunidades/actions.ts` conventions: the SAME
+ * The `/eventos` list's two actions (EVENT-02), the detail's RSVP action (EVENT-03) and the admin's
+ * four write actions (EVENT-01, 06-04), below, in the `comunidades/actions.ts` conventions: the SAME
  * Zod the API validates with runs BEFORE the request (a server action is a public endpoint), a
  * 401/403 becomes a navigation OUTSIDE the try/catch (Next 16: `redirect()` throws), and a refusal is
  * answered with a catalog KEY rather than pt-BR copy.
@@ -145,4 +156,146 @@ export async function rsvpEventAction(
   if (refusal) redirect(refusal);
   if (result.ok) revalidatePath('/eventos');
   return result;
+}
+
+/* ── EVENT-01's admin half: create, edit, cancel and reactivate (06-04) ─────────────────────────── */
+
+/**
+ * What an event write can answer. Every refusal is a CODE the client maps to a catalog key, never
+ * pt-BR copy: the API's closed `EventIssue` vocabulary plus the two transport-shaped outcomes a form
+ * must be able to draw, the event vanished (`not_found`) and everything else (`generic`).
+ */
+export type EventWriteResult =
+  | { ok: true; eventId: string }
+  | { ok: false; code: EventIssue | 'not_found' | 'generic' };
+
+/** The API's `details.event`, narrowed against the contract's OWN set (never a hand-written list). */
+function asEventIssue(value: unknown): EventIssue | null {
+  return typeof value === 'string' && EVENT_ISSUE_SET.has(value) ? (value as EventIssue) : null;
+}
+
+/** The shared refusal mapping for every write action below. */
+function eventWriteRefusal(error: unknown): EventWriteResult {
+  if (error instanceof ApiClientError) {
+    if (error.status === 404) return { ok: false, code: 'not_found' };
+    const issue = asEventIssue((error.details as { event?: unknown } | undefined)?.event);
+    if (issue) return { ok: false, code: issue };
+  }
+  // Shape only: a title or a URL is never logged (Pitfall 12).
+  console.error('events.write_failed', { error: String(error) });
+  return { ok: false, code: 'generic' };
+}
+
+/**
+ * Which of the TWO bare 404s this was (the communities 05-09 rule): the API answers ONE 404 for a
+ * missing event and for a missing NEW cover, deliberately (D-23). On a create there is no event id
+ * to have missed, so a 404 on a body carrying a cover is the cover. On an update the event is
+ * re-read: still there means the 404 was the cover. The re-read is outside any catch, so its
+ * `redirect()` on an expired session throws as it must.
+ */
+async function coverAwareRefusal(
+  result: EventWriteResult,
+  submittedCoverAssetId: string | null,
+  eventId: string | null,
+): Promise<EventWriteResult> {
+  if (result.ok || result.code !== 'not_found' || submittedCoverAssetId === null) return result;
+  if (eventId === null) return { ok: false, code: 'cover_invalid' };
+  const event = await loadEvent(eventId);
+  return event.status === 'ok' ? { ok: false, code: 'cover_invalid' } : result;
+}
+
+/** The first closed code a failed parse carries, the route `defaultHook`'s own lookup. */
+function parseRefusal(issues: { message: string }[]): EventWriteResult {
+  const issue = issues.map((problem) => asEventIssue(problem.message)).find(Boolean);
+  return { ok: false, code: issue ?? 'generic' };
+}
+
+/**
+ * `POST /v1/events` for the form (UI-D-212), in the three conventions of every write action here:
+ * the SAME `eventInputSchema` the API validates with runs first (a server action is a public
+ * endpoint); a refusal is a code, never copy; and `redirect()` sits OUTSIDE the try/catch (Next 16).
+ * The FORM navigates on success, so the toast lands on the new event's page.
+ */
+export async function createEventAction(input: unknown): Promise<EventWriteResult> {
+  const body = eventInputSchema.safeParse(input);
+  if (!body.success) return parseRefusal(body.error.issues);
+
+  let refusal: string | null = null;
+  let result: EventWriteResult = { ok: false, code: 'generic' };
+  try {
+    const event = await createEvent(body.data);
+    result = { ok: true, eventId: event.id };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) result = eventWriteRefusal(error);
+  }
+
+  if (refusal) redirect(refusal);
+  result = await coverAwareRefusal(result, body.data.coverAssetId ?? null, null);
+  if (result.ok) revalidatePath('/eventos');
+  return result;
+}
+
+/** `PUT /v1/events/{id}`: the whole-event replacement, with the same schema and the same rules. */
+export async function updateEventAction(
+  eventId: string,
+  input: unknown,
+): Promise<EventWriteResult> {
+  const body = eventInputSchema.safeParse(input);
+  if (!body.success || typeof eventId !== 'string' || eventId.length === 0) {
+    return body.success ? { ok: false, code: 'generic' } : parseRefusal(body.error.issues);
+  }
+
+  let refusal: string | null = null;
+  let result: EventWriteResult = { ok: false, code: 'generic' };
+  try {
+    const event = await updateEvent(eventId, body.data);
+    result = { ok: true, eventId: event.id };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) result = eventWriteRefusal(error);
+  }
+
+  if (refusal) redirect(refusal);
+  result = await coverAwareRefusal(result, body.data.coverAssetId ?? null, eventId);
+  if (result.ok) {
+    revalidatePath('/eventos');
+    revalidatePath(`/eventos/${eventId}`);
+  }
+  return result;
+}
+
+/** The status write shared by cancel and reactivate: one `PATCH`, one refusal mapping. */
+async function statusAction(
+  eventId: string,
+  status: 'active' | 'cancelled',
+): Promise<EventWriteResult> {
+  if (typeof eventId !== 'string' || eventId.length === 0) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: EventWriteResult = { ok: false, code: 'generic' };
+  try {
+    const event = await setEventStatus(eventId, status);
+    result = { ok: true, eventId: event.id };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) result = eventWriteRefusal(error);
+  }
+
+  if (refusal) redirect(refusal);
+  if (result.ok) {
+    revalidatePath('/eventos');
+    revalidatePath(`/eventos/${eventId}`);
+  }
+  return result;
+}
+
+/** Cancel (D-214): refused by the API once the event has ended (`event_ended`). */
+export async function cancelEventAction(eventId: string): Promise<EventWriteResult> {
+  return statusAction(eventId, 'cancelled');
+}
+
+/** Reactivate (D-214): refused by the API once the event has started (`reactivate_started`). */
+export async function reactivateEventAction(eventId: string): Promise<EventWriteResult> {
+  return statusAction(eventId, 'active');
 }

@@ -3,7 +3,7 @@
 import type { EventPeriod } from '@tria/module-events/contracts';
 import { EventPoster } from '@tria/module-events/ui';
 import { Button, EmptyState, InfiniteScroll, PullToRefresh, Skeleton } from '@tria/ui';
-import { CalendarDays, History, TriangleAlert } from 'lucide-react';
+import { CalendarDays, History, Plus, TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { EventPosterView } from '@/lib/events-view';
@@ -19,6 +19,11 @@ export interface EventsListProps {
   tenantName: string;
   /** Which chip this is. The PAGE decides it and remounts this component per period. */
   period: EventPeriod;
+  /**
+   * The composed `events.event.manage` permission (06-04): the Próximos empty state then speaks to
+   * the manager and carries the brand "Criar evento" link beside the title-row control (D-77).
+   */
+  canManage?: boolean;
 }
 
 /** The geometry of a real poster: a 4/5 rounded block (UI-D-216). */
@@ -55,7 +60,7 @@ export function EventsSkeleton() {
  * is formatted and no clock is read here (UI-D-203). Ordering is the server's, never restated.
  *
  * Four states: an unreadable first page (the generic error card with a retry), an empty period (its
- * own named state; the manager body and CTA arrive with the create control in 06-04), the grid, and
+ * own named state; a manager gets its own body and the brand "Criar evento" link), the grid, and
  * the load-more failure. The first two posters load eagerly, the rest lazily.
  */
 export function EventsList({
@@ -64,6 +69,7 @@ export function EventsList({
   initialError,
   tenantName,
   period,
+  canManage = false,
 }: EventsListProps) {
   const t = useTranslations('events');
 
@@ -166,7 +172,23 @@ export function EventsList({
           icon={CalendarDays}
           data-testid="events-empty-upcoming"
           title={t('empty.upcoming.title')}
-          body={t('empty.upcoming.body', { tenant: tenantName })}
+          body={
+            canManage
+              ? t('empty.upcoming.bodyManager')
+              : t('empty.upcoming.body', { tenant: tenantName })
+          }
+          action={
+            canManage ? (
+              <a
+                href="/eventos/novo"
+                data-events-empty-create
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+              >
+                <Plus aria-hidden size={16} />
+                {t('actions.create')}
+              </a>
+            ) : undefined
+          }
         />
       </div>
     );

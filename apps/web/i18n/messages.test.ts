@@ -910,3 +910,122 @@ describe('06-03 — events detail strings and placeholders', () => {
     );
   });
 });
+
+/**
+ * 06-04 — the admin's form, confirmations, toasts and manage card (UI-SPEC Copywriting Contract,
+ * "Form", the destructive / non-destructive confirm rows and "Manage card"), pinned verbatim. The
+ * discard confirm keeps the one-word "Descartar" (sketch 006 message (e), approved as drawn), and the
+ * zone helper interpolates the `Intl` name the server computes.
+ */
+describe('06-04 — events form, confirm and manage strings', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.actions.create', 'Criar evento'],
+    ['events.empty.upcoming.bodyManager', 'Crie o primeiro evento para convidar os membros.'],
+    ['events.manage.title', 'Gerenciar evento'],
+    ['events.manage.edit', 'Editar evento'],
+    ['events.reactivate.action', 'Reativar evento'],
+    ['events.form.titleCreate', 'Novo evento'],
+    ['events.form.titleEdit', 'Editar evento'],
+    ['events.form.close', 'Fechar'],
+    ['events.form.submitCreate', 'Criar evento'],
+    ['events.form.submitCreating', 'Criando…'],
+    ['events.form.submitEdit', 'Salvar alterações'],
+    ['events.form.submitSaving', 'Salvando…'],
+    ['events.form.cover.label', 'Capa'],
+    ['events.form.cover.add', 'Adicionar capa'],
+    ['events.form.cover.change', 'Trocar capa'],
+    ['events.form.cover.remove', 'Remover capa'],
+    ['events.form.name.label', 'Nome do evento'],
+    ['events.form.name.placeholder', 'Ex.: Encontro anual de associados'],
+    ['events.form.description.label', 'Descrição'],
+    [
+      'events.form.description.placeholder',
+      'Conte o que vai acontecer, para quem é e o que levar.',
+    ],
+    ['events.form.when.title', 'Quando'],
+    ['events.form.when.startDate', 'Data de início'],
+    ['events.form.when.startTime', 'Hora de início'],
+    ['events.form.when.endDate', 'Data de término'],
+    ['events.form.when.endTime', 'Hora de término'],
+    ['events.form.format.label', 'Formato'],
+    ['events.form.format.inPerson', 'Presencial'],
+    ['events.form.format.online', 'Online'],
+    ['events.form.venue.label', 'Nome do local'],
+    ['events.form.venue.placeholder', 'Ex.: Auditório da sede'],
+    ['events.form.address.label', 'Endereço'],
+    ['events.form.address.placeholder', 'Rua, número, bairro e cidade'],
+    ['events.form.url.label', 'Link da transmissão'],
+    ['events.form.url.placeholder', 'https://'],
+    ['events.form.url.helper', 'Os membros entram pelo app. O link não aparece para eles.'],
+    [
+      'events.form.editNote',
+      'Mudanças não são avisadas aos membros. Quem já respondeu continua com a mesma resposta.',
+    ],
+    ['events.form.cancel', 'Cancelar evento'],
+    [
+      'events.form.cancelledLocked',
+      'Este evento foi cancelado e não pode mais ser reativado, porque o horário de início já passou.',
+    ],
+    ['events.form.errors.save', 'Não foi possível salvar. Revise os campos e tente novamente.'],
+    ['events.form.errors.nameRequired', 'Dê um nome para o evento.'],
+    ['events.form.errors.startRequired', 'Informe a data e a hora de início.'],
+    ['events.form.errors.endRequired', 'Informe a data e a hora de término.'],
+    ['events.form.errors.endBeforeStart', 'O término precisa ser depois do início.'],
+    ['events.form.errors.venueRequired', 'Informe o nome do local.'],
+    ['events.form.errors.addressRequired', 'Informe o endereço.'],
+    ['events.form.errors.urlRequired', 'Informe o link da transmissão.'],
+    ['events.form.errors.urlInvalid', 'Use um link que comece com https://.'],
+    ['events.confirm.cancel.title', 'Cancelar evento?'],
+    [
+      'events.confirm.cancel.body',
+      'O evento continua na lista com o selo Cancelado. A confirmação, o check-in e o link ficam desativados, e ninguém é avisado automaticamente.',
+    ],
+    ['events.confirm.cancel.confirm', 'Cancelar evento'],
+    ['events.confirm.cancel.dismiss', 'Manter evento'],
+    ['events.confirm.discard.titleCreate', 'Descartar evento?'],
+    ['events.confirm.discard.titleEdit', 'Descartar alterações?'],
+    ['events.confirm.discard.body', 'As informações preenchidas serão perdidas.'],
+    ['events.confirm.discard.confirm', 'Descartar'],
+    ['events.confirm.discard.dismiss', 'Continuar editando'],
+    ['events.confirm.reactivate.title', 'Reativar evento?'],
+    [
+      'events.confirm.reactivate.body',
+      'A confirmação e o check-in voltam a funcionar, e as respostas anteriores continuam valendo.',
+    ],
+    ['events.confirm.reactivate.confirm', 'Reativar evento'],
+    ['events.confirm.reactivate.dismiss', 'Manter cancelado'],
+    ['events.toasts.created', 'Evento criado.'],
+    ['events.toasts.saved', 'Alterações salvas.'],
+    ['events.toasts.cancelled', 'Evento cancelado.'],
+    ['events.toasts.reactivated', 'Evento reativado.'],
+    ['events.errors.cancel', 'Não foi possível cancelar o evento. Tente novamente.'],
+    ['events.errors.reactivate', 'Não foi possível reativar o evento. Tente novamente.'],
+    ['events.errors.reactivateStarted', 'Não é possível reativar um evento que já começou.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('the cover helper and the zone helper carry their placeholders and format', async () => {
+    expect(String(lookup('events.form.cover.helper'))).toContain('{tenant}');
+    expect(String(lookup('events.form.when.zone'))).toContain('{zone}');
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+    expect(t('form.cover.helper', { tenant: 'TRIA Demo' })).toBe(
+      'A capa é opcional. Sem ela, usamos as cores de TRIA Demo.',
+    );
+    expect(t('form.when.zone', { zone: 'Horário Padrão de Brasília' })).toBe(
+      'Fuso horário do evento: Horário Padrão de Brasília',
+    );
+  });
+});

@@ -1,10 +1,16 @@
 import {
   EVENT_PAGE_SIZE,
   type EventDetail,
+  type EventEdit,
+  type EventInput,
   type EventPage,
   type EventPeriod,
+  type EventStatus,
+  type EventSummary,
   eventDetailSchema,
+  eventEditSchema,
   eventPageSchema,
+  eventSummarySchema,
   type RsvpAnswer,
   type RsvpResult,
   rsvpResultSchema,
@@ -128,4 +134,86 @@ export async function putRsvp(eventId: string, answer: RsvpAnswer): Promise<Rsvp
   });
   if (!res.ok) throw await apiError(res);
   return rsvpResultSchema.parse(await res.json());
+}
+
+/* ── EVENT-01's admin half (06-04): create, the edit read, replace, cancel / reactivate ────────── */
+
+/**
+ * `POST /v1/events`. The body is the admin's WALL CLOCK (`{ date, time }` pairs in the tenant's
+ * zone); the API converts it inside the insert, so nothing here touches a timezone. A refusal is
+ * thrown as an `ApiClientError` carrying `details.event`, which `createEventAction` maps to a key.
+ */
+export async function createEvent(input: EventInput): Promise<EventSummary> {
+  const res = await apiFetch('/v1/events', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return eventSummarySchema.parse(await res.json());
+}
+
+/** `loadEventForEdit`'s answer, the `loadEvent` union over the edit shape. */
+export type EventEditResult =
+  | { status: 'ok'; event: EventEdit }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/events/{eventId}/edit` (manage only): the event with its instants converted back to the
+ * TENANT's wall clock by the database, plus the admin-only meeting URL. The web never converts a
+ * timezone. A 404, a 400 (not a uuid) and a 403 (no manage permission: the route already checked it,
+ * so this only happens on a race with a role change) collapse into `not-found`, the one screen.
+ */
+export async function loadEventForEdit(eventId: string): Promise<EventEditResult> {
+  let path: string | null = null;
+  let result: EventEditResult = { status: 'error' };
+  try {
+    const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/edit`);
+    if (res.ok) {
+      result = { status: 'ok', event: eventEditSchema.parse(await res.json()) };
+    } else if (res.status === 404 || res.status === 400) {
+      result = { status: 'not-found' };
+    } else {
+      const error = await apiError(res);
+      path = bootstrapRedirectPath(error);
+      if (!path && res.status === 403) result = { status: 'not-found' };
+      if (!path && res.status !== 403) {
+        console.error('events.edit_read_failed', { status: res.status, code: error.code });
+      }
+    }
+  } catch (error) {
+    console.error('events.edit_read_failed', { error: String(error) });
+  }
+
+  if (path) redirect(path);
+  return result;
+}
+
+/**
+ * `PUT /v1/events/{eventId}`: the whole-event replacement (D-214) with the create's own body. The
+ * answer is the member-facing summary, which has no URL key.
+ */
+export async function updateEvent(eventId: string, input: EventInput): Promise<EventSummary> {
+  const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return eventSummarySchema.parse(await res.json());
+}
+
+/**
+ * `PATCH /v1/events/{eventId} { status }`: cancel (`cancelled`) or reactivate (`active`). The API
+ * decides WHEN (`409 event_ended` / `reactivate_started`); this call never consults the clock.
+ */
+export async function setEventStatus(eventId: string, status: EventStatus): Promise<EventSummary> {
+  const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return eventSummarySchema.parse(await res.json());
 }

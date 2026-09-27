@@ -1,14 +1,24 @@
+import { EVENT_PERMISSIONS } from '@tria/module-events/contracts';
 import { EventHero, EventInfoGrid } from '@tria/module-events/ui';
-import { Card, EmptyState, PageHeader, StatusPill } from '@tria/ui';
-import { CalendarX2, CircleAlert, CircleCheck, Navigation } from 'lucide-react';
+import { Card, EmptyState, PageHeader, SectionTitle, StatusPill } from '@tria/ui';
+import {
+  CalendarX2,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  Navigation,
+  Pencil,
+} from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadEvent } from '@/lib/events';
 import { type EventDetailView, eventActionState, eventDetailView } from '@/lib/events-view';
 import { EventActions } from './EventActions';
 import { EventDescription } from './EventDescription';
 import { EventRefresh } from './EventRefresh';
+import { ReactivateEventControl } from './ReactivateEventControl';
 
 /**
  * `/eventos/[eventId]` (EVENT-02, UI-D-204) — the event's detail page, reached from its poster.
@@ -34,6 +44,12 @@ import { EventRefresh } from './EventRefresh';
  *
  * **The location is a link, never an embed** (D-203, T-06-18): an `<a>` to the universal maps search
  * URL, opened by the member's tap in a new context. No iframe, no static map, no SDK.
+ *
+ * **06-04 — the manager's doors (UI-D-211).** Below the hero card, `SectionTitle` "Gerenciar evento"
+ * and a `Card` of link rows, each gated on its own composed PERMISSION (never a role): "Editar evento"
+ * on `events.event.manage` (06-07 adds "Participantes" above it). No permission, no section. In the
+ * cancelled banner, the same permission plus "before the start" (from THIS request's instant) adds the
+ * outline "Reativar evento". Cancel itself lives only at the bottom of the edit form.
  */
 export default async function EventPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
@@ -69,6 +85,8 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   // ONE clock read for the whole page: every relative label comes from the same instant.
   const nowMs = Date.now();
   const view = eventDetailView(result.event, { tz: bootstrap.tenant.timezone, nowMs, t });
+  const canManage = bootstrap.permissions.includes(EVENT_PERMISSIONS.manage);
+  const canReactivate = canManage && view.cancelled && nowMs < Date.parse(result.event.startsAt);
 
   return (
     <div className="mx-auto w-full max-w-[680px] pb-6">
@@ -101,7 +119,14 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
               coverAlt={view.hero.coverAlt}
             />
             <div className="flex flex-col gap-4 p-4">
-              {view.banner ? <EventBanner banner={view.banner} /> : null}
+              {view.banner ? (
+                <EventBanner
+                  banner={view.banner}
+                  action={
+                    canReactivate ? <ReactivateEventControl eventId={result.event.id} /> : null
+                  }
+                />
+              ) : null}
               {view.description.length > 0 ? (
                 <EventDescription
                   text={view.description}
@@ -116,13 +141,42 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
             </div>
           </Card>
         </div>
+        {canManage ? (
+          <section aria-labelledby="event-manage-title" data-event-manage>
+            <SectionTitle id="event-manage-title" className="mt-6 mb-2 px-4">
+              {t('manage.title')}
+            </SectionTitle>
+            <Card className="mx-4">
+              <a
+                href={`/eventos/${encodeURIComponent(result.event.id)}/editar`}
+                data-event-manage-edit
+                className="flex min-h-14 items-center gap-3 px-4 text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
+              >
+                <Pencil aria-hidden size={20} className="shrink-0 text-text-secondary" />
+                <span className="min-w-0 flex-1 truncate text-sm font-bold">
+                  {t('manage.edit')}
+                </span>
+                <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
+              </a>
+            </Card>
+          </section>
+        ) : null}
       </EventRefresh>
     </div>
   );
 }
 
-/** The banner at the top of the card body: cancelled (danger, UI-D-202) or checked in (UI-D-207). */
-function EventBanner({ banner }: { banner: NonNullable<EventDetailView['banner']> }) {
+/**
+ * The banner at the top of the card body: cancelled (danger, UI-D-202) or checked in (UI-D-207). The
+ * `action` slot carries the manager's "Reativar evento" on a cancelled event before its start.
+ */
+function EventBanner({
+  banner,
+  action,
+}: {
+  banner: NonNullable<EventDetailView['banner']>;
+  action?: ReactNode;
+}) {
   const cancelled = banner.kind === 'cancelled';
   const Icon = cancelled ? CalendarX2 : CircleCheck;
   return (
@@ -151,6 +205,7 @@ function EventBanner({ banner }: { banner: NonNullable<EventDetailView['banner']
         >
           {banner.body}
         </p>
+        {action ? <div className="mt-3 flex">{action}</div> : null}
       </div>
     </div>
   );

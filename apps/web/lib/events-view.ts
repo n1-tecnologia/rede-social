@@ -62,6 +62,24 @@ function tenantDaysUntil(iso: string, timeZone: string, fromMs: number): number 
   return Math.round(diff / 86_400_000);
 }
 
+/**
+ * The form's timezone helper (UI-D-212): the tenant zone's GENERIC long name in pt-BR, from the
+ * `Intl` time-zone-name option below. For `America/Sao_Paulo` Node 24 prints "Horário Padrão de Brasília"
+ * (the research correction to the UI-SPEC's "Horário de Brasília"; sketch 006 message (f) accepted
+ * it). Computed on the server and passed to the form as a string, so no client render formats it. An
+ * unknown zone falls back to the IANA id rather than throwing.
+ */
+export function tenantZoneLabel(timeZone: string): string {
+  try {
+    const part = formatter('pt-BR', timeZone, { timeZoneName: 'longGeneric' })
+      .formatToParts(new Date(0))
+      .find((piece) => piece.type === 'timeZoneName');
+    return part?.value ?? timeZone;
+  } catch {
+    return timeZone;
+  }
+}
+
 /** The tenant-local year of an instant. */
 const tenantYear = (iso: string | number, timeZone: string) =>
   tenantDayKey(iso, timeZone).slice(0, 4);

@@ -39,7 +39,8 @@
     "empty": {
       "upcoming": {
         "title": "Nada por aqui ainda",
-        "body": "Os próximos eventos de {tenant} vão aparecer aqui."
+        "body": "Os próximos eventos de {tenant} vão aparecer aqui.",
+        "bodyManager": "Crie o primeiro evento para convidar os membros."
       },
       "past": {
         "title": "Nenhum evento passado",
@@ -51,7 +52,10 @@
       "generic": "Não foi possível carregar os eventos. Tente novamente.",
       "retry": "Tentar novamente",
       "loadMore": "Não foi possível carregar mais eventos.",
-      "cancelled": "Este evento foi cancelado."
+      "cancelled": "Este evento foi cancelado.",
+      "cancel": "Não foi possível cancelar o evento. Tente novamente.",
+      "reactivate": "Não foi possível reativar o evento. Tente novamente.",
+      "reactivateStarted": "Não é possível reativar um evento que já começou."
     },
     "count": {
       "confirmed": "{count, plural, =0 {Ninguém confirmou ainda} one {# confirmado} other {# confirmados}}",
@@ -107,6 +111,108 @@
         "failed": "Não foi possível salvar sua resposta. Tente novamente.",
         "closed": "As confirmações deste evento encerraram quando ele começou."
       }
+    },
+    "actions": {
+      "create": "Criar evento"
+    },
+    "manage": {
+      "title": "Gerenciar evento",
+      "edit": "Editar evento"
+    },
+    "reactivate": {
+      "action": "Reativar evento"
+    },
+    "form": {
+      "titleCreate": "Novo evento",
+      "titleEdit": "Editar evento",
+      "close": "Fechar",
+      "submitCreate": "Criar evento",
+      "submitCreating": "Criando…",
+      "submitEdit": "Salvar alterações",
+      "submitSaving": "Salvando…",
+      "cover": {
+        "label": "Capa",
+        "add": "Adicionar capa",
+        "change": "Trocar capa",
+        "remove": "Remover capa",
+        "helper": "A capa é opcional. Sem ela, usamos as cores de {tenant}."
+      },
+      "name": {
+        "label": "Nome do evento",
+        "placeholder": "Ex.: Encontro anual de associados"
+      },
+      "description": {
+        "label": "Descrição",
+        "placeholder": "Conte o que vai acontecer, para quem é e o que levar."
+      },
+      "when": {
+        "title": "Quando",
+        "startDate": "Data de início",
+        "startTime": "Hora de início",
+        "endDate": "Data de término",
+        "endTime": "Hora de término",
+        "zone": "Fuso horário do evento: {zone}"
+      },
+      "format": {
+        "label": "Formato",
+        "inPerson": "Presencial",
+        "online": "Online"
+      },
+      "venue": {
+        "label": "Nome do local",
+        "placeholder": "Ex.: Auditório da sede"
+      },
+      "address": {
+        "label": "Endereço",
+        "placeholder": "Rua, número, bairro e cidade"
+      },
+      "url": {
+        "label": "Link da transmissão",
+        "placeholder": "https://",
+        "helper": "Os membros entram pelo app. O link não aparece para eles."
+      },
+      "editNote": "Mudanças não são avisadas aos membros. Quem já respondeu continua com a mesma resposta.",
+      "cancel": "Cancelar evento",
+      "cancelledLocked": "Este evento foi cancelado e não pode mais ser reativado, porque o horário de início já passou.",
+      "errors": {
+        "save": "Não foi possível salvar. Revise os campos e tente novamente.",
+        "nameRequired": "Dê um nome para o evento.",
+        "startRequired": "Informe a data e a hora de início.",
+        "endRequired": "Informe a data e a hora de término.",
+        "endBeforeStart": "O término precisa ser depois do início.",
+        "venueRequired": "Informe o nome do local.",
+        "addressRequired": "Informe o endereço.",
+        "urlRequired": "Informe o link da transmissão.",
+        "urlInvalid": "Use um link que comece com https://.",
+        "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra."
+      }
+    },
+    "confirm": {
+      "cancel": {
+        "title": "Cancelar evento?",
+        "body": "O evento continua na lista com o selo Cancelado. A confirmação, o check-in e o link ficam desativados, e ninguém é avisado automaticamente.",
+        "confirm": "Cancelar evento",
+        "dismiss": "Manter evento"
+      },
+      "discard": {
+        "titleCreate": "Descartar evento?",
+        "titleEdit": "Descartar alterações?",
+        "body": "As informações preenchidas serão perdidas.",
+        "confirm": "Descartar",
+        "dismiss": "Continuar editando"
+      },
+      "reactivate": {
+        "title": "Reativar evento?",
+        "body": "A confirmação e o check-in voltam a funcionar, e as respostas anteriores continuam valendo.",
+        "confirm": "Reativar evento",
+        "dismiss": "Manter cancelado"
+      }
+    },
+    "toasts": {
+      "created": "Evento criado.",
+      "saved": "Alterações salvas.",
+      "cancelled": "Evento cancelado.",
+      "reactivated": "Evento reativado."
     }
   }
 }
