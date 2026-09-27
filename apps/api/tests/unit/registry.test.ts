@@ -62,9 +62,9 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     }
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
     // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
-    // `stories` and 05.3-01 added `reels`. The list is sorted so a new entry is one line, and this
+    // `stories`, 05.3-01 added `reels` and 06-01 added `events`. The list is sorted so a new entry is one line, and this
     // assertion is what makes a silently-dropped registration fail rather than pass.
-    expect(keys.sort()).toEqual(['communities', 'feed', 'reels', 'stories']);
+    expect(keys.sort()).toEqual(['communities', 'events', 'feed', 'reels', 'stories']);
     // D-55 (amends D-40): the feed contributes a HOME SLOT and no navigation tab, so Phases 5 and 6
     // keep the tab budget they are planning against. A nav entry here is a regression, not a feature.
     expect(MODULE_REGISTRY.feed?.nav).toBeUndefined();
@@ -84,6 +84,15 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       chrome: 'media',
     });
     expect(MODULE_REGISTRY.reels?.requires).toEqual(['feed']);
+    // D-55 / UI-D-215: `events` spends the Eventos TAB at order 40, after Reels' 30. It declares no
+    // home slot yet: the "Próximo evento" card lands with its renderer in 06-08.
+    expect(MODULE_REGISTRY.events?.nav).toMatchObject({
+      placement: 'tab',
+      href: '/eventos',
+      order: 40,
+      icon: 'calendar-days',
+    });
+    expect(MODULE_REGISTRY.events?.home).toBeUndefined();
   });
 
   it('2. defineModule accepts a manifest with only a key, and it lists without nav (MOD-01 empty)', () => {

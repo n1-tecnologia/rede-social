@@ -137,6 +137,9 @@ export const meRoutes = me
             slug: tenants.slug,
             displayName: tenants.displayName,
             branding: tenants.branding,
+            // Phase 6 (locked): every events string is formatted in the TENANT's timezone, never the
+            // device's, so the bootstrap carries the column the web pins `Intl.DateTimeFormat` to.
+            timezone: tenants.timezone,
           })
           .from(tenants)
           .where(eq(tenants.id, ctx.tenantId))
@@ -179,6 +182,7 @@ export const meRoutes = me
           displayName: tenant.displayName,
           // D-25: the whole jsonb, resolved — every color key present, `{}` becomes the neutral brand.
           branding: resolveBranding(tenant.branding),
+          timezone: tenant.timezone,
         },
         // Enabled keys from `tenant_modules`, decorated by the registry and sorted by nav order.
         modules: enabledModulesForBootstrap(flags.keys, flags.settings),

@@ -3,6 +3,7 @@ import type { AppEnv } from '@tria/core/server/auth/context';
 import { flushEventsAfterHandler } from '@tria/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@tria/core/server/http/api-error';
 import { communitiesRoutes } from '@tria/module-communities/server';
+import { eventsRoutes } from '@tria/module-events/server';
 import { feedRoutes } from '@tria/module-feed/server';
 import { storiesRoutes } from '@tria/module-stories/server';
 import { logger } from './http/logger';
@@ -80,7 +81,13 @@ const routes = app
   // removes the order-5 home slot from the bootstrap, so `/inicio` closes up — no migration, no
   // edit here (MOD-04, UI-D-25). It declares NO nav entry: the publish door is the strip's own
   // circle (D-80), not a fourth tab.
-  .route('/v1/stories', storiesRoutes);
+  .route('/v1/stories', storiesRoutes)
+  // Same shape once more (06-01): the events module carries its own
+  // `requireAuth` + `requireModule('events')` chain plus a per-route
+  // `requirePermission('events.event.manage')` on the write
+  // (packages/modules/events/server/routes.ts). Turning the module off 404s every route below and
+  // removes the Eventos tab from the bootstrap — no migration, no edit here (MOD-04, D-55).
+  .route('/v1/events', eventsRoutes);
 
 export type AppType = typeof routes;
 export { app };

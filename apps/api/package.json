@@ -23,6 +23,7 @@
     "@tria/contracts": "workspace:*",
     "@tria/core": "workspace:*",
     "@tria/module-communities": "workspace:*",
+    "@tria/module-events": "workspace:*",
     "@tria/module-feed": "workspace:*",
     "@tria/module-reels": "workspace:*",
     "@tria/module-stories": "workspace:*",

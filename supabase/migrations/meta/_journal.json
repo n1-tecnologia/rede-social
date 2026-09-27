@@ -239,6 +239,13 @@
       "when": 1790448107060,
       "tag": "20260926184147_reels_module",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790520798121,
+      "tag": "20260927145318_events",
+      "breakpoints": true
     }
   ]
 }

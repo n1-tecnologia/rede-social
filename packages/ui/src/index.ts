@@ -45,7 +45,7 @@ export { Avatar, type AvatarProps, type AvatarSize } from './primitives/Avatar';
 export { Badge, type BadgeProps } from './primitives/Badge';
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './primitives/Button';
 export { Card, type CardProps } from './primitives/Card';
-export { Chip, type ChipProps } from './primitives/Chip';
+export { Chip, type ChipProps, chipBase } from './primitives/Chip';
 export { EmptyState, type EmptyStateProps } from './primitives/EmptyState';
 export {
   FileDropZone,

@@ -25,6 +25,10 @@ export const bootstrapSchema = z.object({
     displayName: z.string(),
     // D-25 structured brand; the API answers it RESOLVED (`resolveBranding`), so every key is present.
     branding: tenantBrandingSchema,
+    // Phase 6 (locked): the IANA zone every date/time string is formatted in (`tenants.timezone`,
+    // `America/Sao_Paulo` by default). The device's zone never enters. The API must deploy before the
+    // web, because the web now requires this key.
+    timezone: z.string(),
   }),
   modules: z.array(
     z.object({

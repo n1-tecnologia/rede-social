@@ -1,0 +1,48 @@
+{
+  "name": "@tria/module-events",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Events module (EVENT-01..06): the tenant's events with a timezone-aware start and end, in person or online, the admin-only event_secrets store (meeting URL, check-in code), the upcoming/past keyset lists and the Eventos nav tab (D-55).",
+  "exports": {
+    "./module": "./module.ts",
+    "./contracts": "./contracts/index.ts",
+    "./server": "./server/index.ts",
+    "./ui": "./ui/index.ts",
+    "./db": "./db/schema.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
+    "@tria/contracts": "workspace:*",
+    "@tria/core": "workspace:*",
+    "@tria/ui": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.7",
+    "lucide-react": "1.46.0",
+    "pino": "10.3.1",
+    "zod": "4.6.2"
+  },
+  "peerDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@tria/config": "workspace:*",
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "happy-dom": "20.14.5",
+    "motion": "13.3.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "vitest": "5.0.0"
+  }
+}

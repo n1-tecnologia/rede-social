@@ -1,0 +1,32 @@
+{
+  "events": {
+    "nav": "Eventos",
+    "list": {
+      "title": "Eventos",
+      "subtitle": "Confirme presença e faça check-in no dia.",
+      "regionUpcoming": "Próximos eventos de {tenant}"
+    },
+    "poster": {
+      "label": "{title}, {when}"
+    },
+    "cover": {
+      "alt": "Capa do evento {title}"
+    },
+    "state": {
+      "cancelled": "Cancelado",
+      "ended": "Encerrado"
+    },
+    "when": {
+      "now": "Agora",
+      "today": "Hoje",
+      "tomorrow": "Amanhã",
+      "inDays": "{count, plural, one {Em # dia} other {Em # dias}}",
+      "at": "{date} · {time}",
+      "liveUntil": "Acontecendo agora · até {time}",
+      "range": "{start} a {end}"
+    },
+    "place": {
+      "online": "Online"
+    }
+  }
+}

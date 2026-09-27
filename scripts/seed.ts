@@ -6,7 +6,7 @@
  * `tenant_modules` rows and their primary, verified `tenant_domains` rows, plus TRIA's `super_admin`
  * in `platform_admins`. Safe to re-run. Passwords come from env only, never from git.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -445,6 +445,148 @@ const SEED_COMMUNITIES = [
     status: 'archived' as const,
   },
 ] as const;
+
+/**
+ * 06-01 (EVENT-01, EVENT-02) — SEVEN events per tenant, identical-looking on both sides (§(j)), each
+ * with its `event_secrets` row. Every shape the Eventos list must render has a fixture that does NOT
+ * depend on a test writing one first:
+ *
+ *   0. upcoming, in person, WITH a cover (the gallery post's first image), in 3 days, for 2 h;
+ *   1. upcoming, ONLINE, in 6 days (its meeting URL lives in `event_secrets` only);
+ *   2. IN PROGRESS and MULTI-DAY, in person: started 1 day ago, ends in 2 days. Long spans on
+ *      purpose (Pitfall 7): the seed runs long before any e2e, so an "in progress" fixture measured
+ *      in minutes would have ended by the time a spec reads it;
+ *   3. past, in person, ended 5 days ago;
+ *   4. upcoming and CANCELLED, in 4 days (D-201: it stays in Próximos with its pill);
+ *   5. past and CANCELLED, ended 10 days ago;
+ *   6. upcoming, in person, NO cover, a 120-character title and a 60-character venue: the E03
+ *      long-text backstop and the D-69 gradient fixture, in 5 days.
+ *
+ * Ids live in the `…000000000e01` range, free of every earlier fixture. The instants are offsets
+ * from ONE clock read rounded down to the hour, so the demo reads "19:00"-style times rather than
+ * "14:37", and no two events share a start (the tie the keyset must break is the API test's own).
+ */
+const SEED_EVENT_IDS: Record<string, readonly string[]> = {
+  'tria-demo': [1, 2, 3, 4, 5, 6, 7].map((n) => `0d000000-0000-4000-8000-000000000e0${n}`),
+  'tria-lab': [1, 2, 3, 4, 5, 6, 7].map((n) => `0e000000-0000-4000-8000-000000000e0${n}`),
+};
+
+/** EXACTLY 120 characters (`EVENT_MAX_TITLE`): the poster must clamp it to two lines at 320px. */
+export const SEED_LONG_EVENT_TITLE =
+  'Encontro regional de voluntarios, lideres de grupo e parceiros para planejar juntos as acoes do proximo semestre inteiro';
+/** EXACTLY 60 characters: the poster's place line must truncate it to one line. */
+export const SEED_LONG_EVENT_VENUE = 'Centro de Convencoes Professor Joaquim Nabuco, Auditorio 12B';
+
+/** The venue-code alphabet (`EVENT_CHECKIN_CODE_ALPHABET`), restated: the seed may not import a module. */
+const SEED_CHECKIN_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const seedCheckinCode = (): string =>
+  Array.from(
+    { length: 4 },
+    () => SEED_CHECKIN_ALPHABET[randomInt(SEED_CHECKIN_ALPHABET.length)],
+  ).join('');
+
+type SeedEvent = {
+  title: string;
+  description: string;
+  format: 'in_person' | 'online';
+  venueName: string | null;
+  address: string | null;
+  /** Online only; `{slug}` is replaced by the tenant slug. */
+  meetingUrl: string | null;
+  /** Index into the gallery post's images, or null for the gradient fallback. */
+  coverIndex: number | null;
+  /** Offsets in HOURS from the rounded clock. */
+  startsInHours: number;
+  endsInHours: number;
+  cancelled: boolean;
+};
+
+export const SEED_EVENTS: readonly SeedEvent[] = [
+  {
+    title: 'Encontro de boas-vindas',
+    description: 'Um fim de tarde para conhecer quem chegou agora e rever quem ja esta por aqui.',
+    format: 'in_person',
+    venueName: 'Auditorio da sede',
+    address: 'Rua das Flores, 100 - Centro, Sao Paulo - SP',
+    meetingUrl: null,
+    coverIndex: 0,
+    startsInHours: 72,
+    endsInHours: 74,
+    cancelled: false,
+  },
+  {
+    title: 'Live de perguntas e respostas',
+    description: 'A diretoria responde, ao vivo, as perguntas enviadas pelos membros.',
+    format: 'online',
+    venueName: null,
+    address: null,
+    meetingUrl: 'https://meet.example.test/seed-{slug}',
+    coverIndex: null,
+    startsInHours: 144,
+    endsInHours: 146,
+    cancelled: false,
+  },
+  {
+    title: 'Semana de integracao',
+    description: 'Tres dias de oficinas, conversas e atividades abertas a todos os membros.',
+    format: 'in_person',
+    venueName: 'Espaco de eventos da comunidade',
+    address: 'Avenida Paulista, 1000 - Bela Vista, Sao Paulo - SP',
+    meetingUrl: null,
+    coverIndex: 1,
+    startsInHours: -24,
+    endsInHours: 48,
+    cancelled: false,
+  },
+  {
+    title: 'Mutirao de primavera',
+    description: 'O mutirao que reuniu voluntarios para cuidar da praca do bairro.',
+    format: 'in_person',
+    venueName: 'Praca da Matriz',
+    address: 'Praca da Matriz, s/n - Centro, Sao Paulo - SP',
+    meetingUrl: null,
+    coverIndex: 2,
+    startsInHours: -122,
+    endsInHours: -120,
+    cancelled: false,
+  },
+  {
+    title: 'Oficina de fotografia',
+    description: 'Uma oficina pratica de fotografia com celular. Cancelada por falta de sala.',
+    format: 'in_person',
+    venueName: 'Sala 3 da sede',
+    address: 'Rua das Flores, 100 - Centro, Sao Paulo - SP',
+    meetingUrl: null,
+    coverIndex: 1,
+    startsInHours: 96,
+    endsInHours: 98,
+    cancelled: true,
+  },
+  {
+    title: 'Cafe com a diretoria',
+    description: 'Um cafe que acabou nao acontecendo.',
+    format: 'in_person',
+    venueName: 'Cafeteria da esquina',
+    address: 'Rua das Flores, 120 - Centro, Sao Paulo - SP',
+    meetingUrl: null,
+    coverIndex: 0,
+    startsInHours: -242,
+    endsInHours: -240,
+    cancelled: true,
+  },
+  {
+    title: SEED_LONG_EVENT_TITLE,
+    description: 'Um titulo e um local propositalmente longos para os testes de recorte.',
+    format: 'in_person',
+    venueName: SEED_LONG_EVENT_VENUE,
+    address: 'Rua Joaquim Nabuco, 2000 - Boa Viagem, Recife - PE',
+    meetingUrl: null,
+    coverIndex: null,
+    startsInHours: 120,
+    endsInHours: 123,
+    cancelled: false,
+  },
+];
 
 /**
  * 05-05 (STORY-01, STORY-03) — FIVE stories per tenant, identical-looking on both sides (§(j)).
@@ -1636,6 +1778,48 @@ for (const t of SEED_TENANTS) {
         }
       }
 
+      // 06-01 (EVENT-01, EVENT-02): the tenant's events and their `event_secrets` rows. Raw SQL in
+      // the admin lane for the same reason the communities are (the seed may not depend on a
+      // module package), and written HERE because the covers reuse the gallery post's images. Both
+      // halves of each event go in ONE transaction: the deferred FKs are checked at its commit.
+      const eventIds = SEED_EVENT_IDS[t.slug];
+      if (eventIds) {
+        // ONE clock read for the batch, rounded down to the hour (see SEED_EVENTS).
+        const eventHour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+        const at = (hours: number) => new Date(eventHour + hours * 3_600_000).toISOString();
+        await withAdminTx(async (tx) => {
+          for (const [index, event] of SEED_EVENTS.entries()) {
+            const id = eventIds[index];
+            const coverAssetId =
+              event.coverIndex === null ? null : mediaIds.images[event.coverIndex];
+            await tx.execute(sql`
+              insert into public.events
+                (id, tenant_id, created_by_user_id, title, description, cover_asset_id, format,
+                 venue_name, address, starts_at, ends_at, status, cancelled_at)
+              values (
+                ${id}::uuid, ${tenantId}::uuid, ${authorUserId}::uuid, ${event.title},
+                ${event.description}, ${coverAssetId}::uuid, ${event.format},
+                ${event.venueName}, ${event.address},
+                ${at(event.startsInHours)}::timestamptz, ${at(event.endsInHours)}::timestamptz,
+                ${event.cancelled ? 'cancelled' : 'active'},
+                ${event.cancelled ? at(-1) : null}::timestamptz
+              )
+              on conflict (id) do nothing`);
+            await tx.execute(sql`
+              insert into public.event_secrets
+                (event_id, tenant_id, event_format, checkin_code, meeting_url)
+              values (
+                ${id}::uuid, ${tenantId}::uuid, ${event.format}, ${seedCheckinCode()},
+                ${event.meetingUrl?.replace('{slug}', t.slug) ?? null}
+              )
+              on conflict (event_id) do nothing`);
+          }
+        });
+        console.log(
+          `seed: tenant ${t.slug} — ${SEED_EVENTS.length} events (2 past, 1 in progress multi-day, 1 online, 2 cancelled, 1 long-title without a cover)`,
+        );
+      }
+
       // 05-05 (STORY-01, STORY-03): the tenant's stories, on REAL `purpose: 'story'` assets at the
       // story ladder — so the circle's `srcSet` is exercised instead of stubbed — plus one asset
       // deliberately left `processing` for the strip's readiness filter to exclude.
@@ -1967,9 +2151,10 @@ await withAdminTx(async (tx) => {
   await tx.execute(sql`analyze public.feed_post_media`);
   await tx.execute(sql`analyze public.feed_link_previews`);
   await tx.execute(sql`analyze public.communities`);
+  await tx.execute(sql`analyze public.events`);
 });
 console.log(
-  'seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media, feed_link_previews, communities',
+  'seed: analyze on feed_posts, feed_comments, feed_likes, feed_post_media, feed_link_previews, communities, events',
 );
 
 console.log(`seed: hosts — platform=${PLATFORM_HOST} tria-demo=${DEMO_HOST} tria-lab=${LAB_HOST}`);
