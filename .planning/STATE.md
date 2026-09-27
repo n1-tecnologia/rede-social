@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Events
 status: executing
-stopped_at: Completed 06-04-PLAN.md
-last_updated: "2026-09-27T18:54:26.852Z"
+stopped_at: Completed 06-05-PLAN.md
+last_updated: "2026-09-27T19:28:17.699Z"
 last_activity: 2026-09-27
-last_activity_desc: "06-04 complete: GET /v1/events/{id}/edit, replacement PUT, guarded cancel/reactivate PATCH, event.updated/cancelled/reactivated, EventForm at /eventos/novo and /editar, the title-row create control and manage card"
-state_head: 024330ca2402ec9c7dc907338f2a96daba397888
+last_activity_desc: "06-05 complete: event_checkin_attempts, SECURITY DEFINER app.events_check_in (outcomes, 5-per-15-min guess bound), POST /v1/events/{id}/check-in, event.checked_in, the /eventos/{id}/check-in boarding-pass ticket and the Fazer check-in CTA"
+state_head: b8cb92908960b0a1da7f76257f64563b7d14c1e6
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 98
-  completed_plans: 90
+  completed_plans: 91
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 6 (Events) — EXECUTING
-Plan: 4 of 9 complete (06-01, 06-02, 06-03, 06-04); 06-05 next
-Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair and the event form waits on 01.1
-Last activity: 2026-09-27 — 06-04 complete: the manage-only edit read in tenant wall clock, PUT /v1/events/{id} (whole-event replacement, format switch through the deferred FK, is-distinct-from no-op), PATCH /v1/events/{id} cancel/reactivate, the three Phase 7 events, EventForm at /eventos/novo and /eventos/[eventId]/editar, the /eventos create control and the Gerenciar evento card; EVENT-01 stays Pending until 06-09
+Plan: 5 of 9 complete (06-01, 06-02, 06-03, 06-04, 06-05); 06-06 next
+Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair, the event form and the check-in ticket waits on 01.1
+Last activity: 2026-09-27 — 06-05 complete: EVENT-04 in person. `event_checkin_attempts` (self-select, no write policy), the SECURITY DEFINER `app.events_check_in` that compares the venue code inside Postgres and RETURNS its refusals so a wrong guess commits (5 per member per event per 15 min), walk-ins, `POST /v1/events/{id}/check-in` mapped after the transaction, `event.checked_in`, pgTAP 142, the ported boarding-pass ticket at /eventos/[eventId]/check-in and the in-person "Fazer check-in" CTA; EVENT-04 stays Pending until 06-06/06-08/06-09
 
-Progress: [██████████████████░░] 90/98 plans ([░░░░░░░░░░] 0%)
+Progress: [██████████████████░░] 91/98 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -150,6 +150,7 @@ Progress: [██████████████████░░] 90/98 p
 | Phase 06 P01 | 49 min | 3 tasks | 54 files |
 | Phase 06 P03 | 164min (~40min active) | 3 tasks | 44 files |
 | Phase 06 P04 | 25 min | 3 tasks | 31 files |
+| Phase 06 P05 | 29 min | 2 tasks | 36 files |
 
 ## Accumulated Context
 
@@ -474,6 +475,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-04: PUT /v1/events/{id} is a whole-event replacement answering the member-facing summary (no URL); only the manage-guarded edit read carries meetingUrl
 - [Phase 06]: 06-04: no-op detection is two is-distinct-from UPDATEs after a for-update lock; a URL-only change still emits event.updated with timesChanged false
 - [Phase 06]: 06-04: the edit form never prefills the end (the stored end is the admin's choice); cancel/reactivate from the form land on the detail, from the banner they refresh
+- [Phase 06]: 06-05: app.events_check_in (SECURITY DEFINER, owner postgres, search_path '') RETURNS every refusal as an outcome and the service throws only after withTenantTx resolved, so a wrong guess commits; the 5-per-15-min bound lives in event_checkin_attempts, which has no write policy
+- [Phase 06]: 06-05: only wrong codes spend the guess bound; an already-present member re-submitting answers already (original stamp) before the counter is read, and a racing second check-in re-reads and answers already
+- [Phase 06]: 06-05: the ticket Data cell prints the date without the weekday (the contract date is cut at 320px); the cover overline keeps it; the not-open-yet {when} fillers are catalog keys (checkin.opensAt/opensOn) and the done line is formatted by the server action
 
 ### Pending Todos
 
@@ -531,6 +535,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T18:54:26.750Z
-Stopped at: Completed 06-04-PLAN.md
+Last session: 2026-09-27T19:27:36.146Z
+Stopped at: Completed 06-05-PLAN.md
 Resume file: None
