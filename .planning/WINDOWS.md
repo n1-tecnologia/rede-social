@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 36
+open_count: 35
 waived_count: 0
-fixed_count: 17
+fixed_count: 18
 total_count: 53
-last_updated: 2026-09-27T15:36:43.992Z
+last_updated: 2026-09-27T16:04:42.800Z
 ---
 
 # Broken Windows Ledger
@@ -66,7 +66,7 @@ last_updated: 2026-09-27T15:36:43.992Z
 | 49 | 05.3 | unrun-verify | apps/web/e2e/reels.spec.ts |  | UI E03 populated (phone UAT, blocked until Phase 01.1): a diagonal swipe changes video or lane never both, two quick swipes never read as a double-tap like, a tap pauses after ~300 ms and a double tap likes without pausing | open |  | 2026-09-26T22:42:29.338Z |  |
 | 50 | 05.3 | unrun-verify | apps/web/components/reels/ReelVideo.tsx |  | UI E04 loading (real Mux + phone UAT, blocked until Phase 01.1): swiping to a loaded video shows its first frame or poster with no black flash (neighbour pre-mount, token pre-mint); the fake provider cannot stream | open |  | 2026-09-26T22:42:29.407Z |  |
 | 51 | 05.3 | unrun-verify | packages/modules/reels/ui/ReelRail.tsx |  | UI E06 populated (plan 04 lift, phone UAT, blocked until Phase 01.1): rail, caption and lane labels stay legible over a bright video frame, judged against sketch 005 | open |  | 2026-09-26T22:42:29.475Z |  |
-| 52 | 6 | stub | apps/web/lib/events-view.ts |  | Poster href /eventos/{id} resolves to not-found until 06-03 adds the detail route | open |  | 2026-09-27T15:36:43.923Z |  |
+| 52 | 6 | stub | apps/web/lib/events-view.ts |  | Poster href /eventos/{id} resolves to not-found until 06-03 adds the detail route | fixed |  | 2026-09-27T15:36:43.923Z | 2026-09-27T16:04:42.800Z |
 | 53 | 6 | stub | apps/web/app/(app)/eventos/EventsList.tsx |  | Empty Próximos renders only the member body; manager body and Criar evento CTA arrive with 06-04 | open |  | 2026-09-27T15:36:43.992Z |  |
 
 ````json
@@ -690,10 +690,10 @@ last_updated: 2026-09-27T15:36:43.992Z
     "file": "apps/web/lib/events-view.ts",
     "line": null,
     "description": "Poster href /eventos/{id} resolves to not-found until 06-03 adds the detail route",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-27T15:36:43.923Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-27T16:04:42.800Z"
   },
   {
     "id": 53,
