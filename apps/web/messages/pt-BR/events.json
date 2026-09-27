@@ -4,7 +4,13 @@
     "list": {
       "title": "Eventos",
       "subtitle": "Confirme presença e faça check-in no dia.",
-      "regionUpcoming": "Próximos eventos de {tenant}"
+      "regionUpcoming": "Próximos eventos de {tenant}",
+      "regionPast": "Eventos passados de {tenant}",
+      "filter": {
+        "label": "Filtrar eventos",
+        "upcoming": "Próximos",
+        "past": "Passados"
+      }
     },
     "poster": {
       "label": "{title}, {when}"
@@ -27,6 +33,22 @@
     },
     "place": {
       "online": "Online"
+    },
+    "empty": {
+      "upcoming": {
+        "title": "Nada por aqui ainda",
+        "body": "Os próximos eventos de {tenant} vão aparecer aqui."
+      },
+      "past": {
+        "title": "Nenhum evento passado",
+        "body": "Os eventos que já aconteceram ficam guardados aqui."
+      }
+    },
+    "errors": {
+      "title": "Algo deu errado",
+      "generic": "Não foi possível carregar os eventos. Tente novamente.",
+      "retry": "Tentar novamente",
+      "loadMore": "Não foi possível carregar mais eventos."
     }
   }
 }

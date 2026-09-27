@@ -1,23 +1,42 @@
-import { EventPoster } from '@tria/module-events/ui';
+import type { EventPeriod } from '@tria/module-events/contracts';
+import { Chip } from '@tria/ui';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadEvents } from '@/lib/events';
 import { eventPosterView } from '@/lib/events-view';
+import { EventsList } from './EventsList';
 
 /**
- * `/eventos` (EVENT-02) — the tenant's events, reached from the `Eventos` BottomNav/rail tab the
- * module's manifest declares (D-55, UI-D-215).
+ * `/eventos` (EVENT-02, D-200) — the tenant's events, reached from the `Eventos` BottomNav/rail tab
+ * the module's manifest declares (D-55, UI-D-215).
  *
- * Server-rendered from `GET /v1/events`, so the first paint already carries page 1. Every string is
- * built on the server by `lib/events-view.ts` in the TENANT's timezone (`bootstrap.tenant.timezone`)
- * from ONE request instant, so no client render reads the clock (UI-D-203).
+ * **Two chips, two keysets (UI-D-200).** `Próximos` (`/eventos`) is every event that has not ENDED,
+ * so one in progress stays here until it ends; `Passados` (`/eventos?periodo=passados`) is every
+ * ended event, most recent first. Cancelled events stay in both (D-201). The chips are `Chip` LINKS
+ * read here on the server, for every member, so a chip switch, a refresh, back and a shared link all
+ * land on the same list, and `EventsList` is keyed by the period so a switch starts from page 1.
  *
- * **`PageHeader`-less on purpose** (UI-D-200): a tab destination has nothing to go back to, so the
- * 24/700 heading and its subtitle sit in the column itself, the `/comunidades` shape.
+ * **D-93: a bad `?periodo=` is silent.** `past` is selected only when the value is EXACTLY the single
+ * string `passados`; an array, a re-cased or unknown value, or no value lands on Próximos with no
+ * error. The web translates its own pt-BR URL value and sends the API's closed `period` enum.
+ *
+ * Every string is built on the server by `lib/events-view.ts` in the TENANT's timezone
+ * (`bootstrap.tenant.timezone`) from ONE request instant, so no client render reads the clock
+ * (UI-D-203). `PageHeader`-less on purpose: a tab destination has nothing to go back to.
  */
-export default async function EventsPage() {
-  const [bootstrap, t] = await Promise.all([requireBootstrap(), getTranslations('events')]);
-  const page = await loadEvents({ period: 'upcoming' });
+export default async function EventsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ periodo?: string | string[] }>;
+}) {
+  const [bootstrap, t, params] = await Promise.all([
+    requireBootstrap(),
+    getTranslations('events'),
+    searchParams,
+  ]);
+
+  const period: EventPeriod = params.periodo === 'passados' ? 'past' : 'upcoming';
+  const page = await loadEvents({ period });
   const tz = bootstrap.tenant.timezone;
   // ONE clock read for the whole page: every relative label is computed from the same instant.
   const nowMs = Date.now();
@@ -32,14 +51,23 @@ export default async function EventsPage() {
         <p className="mt-1 text-sm font-normal text-text-secondary">{t('list.subtitle')}</p>
       </div>
 
-      <section
-        aria-label={t('list.regionUpcoming', { tenant: bootstrap.tenant.displayName })}
-        className="grid grid-cols-1 gap-4 px-4 pb-6 sm:grid-cols-2"
-      >
-        {posters.map((poster, index) => (
-          <EventPoster key={poster.id} {...poster} eager={index < 2} />
-        ))}
-      </section>
+      <nav aria-label={t('list.filter.label')} className="flex gap-2 px-4 pb-3">
+        <Chip href="/eventos" active={period === 'upcoming'}>
+          {t('list.filter.upcoming')}
+        </Chip>
+        <Chip href="/eventos?periodo=passados" active={period === 'past'}>
+          {t('list.filter.past')}
+        </Chip>
+      </nav>
+
+      <EventsList
+        key={period}
+        initialItems={posters}
+        initialCursor={page?.nextCursor ?? null}
+        initialError={page === null}
+        tenantName={bootstrap.tenant.displayName}
+        period={period}
+      />
     </div>
   );
 }

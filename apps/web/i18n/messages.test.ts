@@ -745,3 +745,69 @@ describe('05.3-08 — the reels catalog and its placeholders', () => {
     expect(lookup('reels.empty.cta')).toBeUndefined();
   });
 });
+
+/**
+ * 06-01 — the `events` catalog's list strings (UI-SPEC Copywriting Contract, "List, poster and
+ * Início"). A deleted brace would not fail typecheck — the call site would pass a value nobody reads
+ * — so each placeholder is pinned here, and the ICU plural is FORMATTED, not just read.
+ */
+describe('06 — events list strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.nav', 'Eventos'],
+    ['events.list.title', 'Eventos'],
+    ['events.list.subtitle', 'Confirme presença e faça check-in no dia.'],
+    ['events.list.filter.label', 'Filtrar eventos'],
+    ['events.list.filter.upcoming', 'Próximos'],
+    ['events.list.filter.past', 'Passados'],
+    ['events.state.cancelled', 'Cancelado'],
+    ['events.state.ended', 'Encerrado'],
+    ['events.when.now', 'Agora'],
+    ['events.when.today', 'Hoje'],
+    ['events.when.tomorrow', 'Amanhã'],
+    ['events.place.online', 'Online'],
+    ['events.empty.upcoming.title', 'Nada por aqui ainda'],
+    ['events.empty.past.title', 'Nenhum evento passado'],
+    ['events.empty.past.body', 'Os eventos que já aconteceram ficam guardados aqui.'],
+    ['events.errors.loadMore', 'Não foi possível carregar mais eventos.'],
+    ['events.errors.retry', 'Tentar novamente'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['events.list.regionUpcoming', ['{tenant}']],
+    ['events.list.regionPast', ['{tenant}']],
+    ['events.empty.upcoming.body', ['{tenant}']],
+    ['events.poster.label', ['{title}', '{when}']],
+    ['events.cover.alt', ['{title}']],
+    ['events.when.at', ['{date}', '{time}']],
+    ['events.when.liveUntil', ['{time}']],
+    ['events.when.range', ['{start}', '{end}']],
+    ['events.when.inDays', ['{count, plural']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('events.when.inDays is an ICU plural: "Em 1 dia" / "Em 5 dias"', async () => {
+    const { createTranslator } = await import('next-intl');
+    // The catalog is loaded as an untyped tree, so the translator is narrowed to the call shape.
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+    expect(t('when.inDays', { count: 1 })).toBe('Em 1 dia');
+    expect(t('when.inDays', { count: 5 })).toBe('Em 5 dias');
+    expect(t('poster.label', { title: 'Encontro', when: 'seg., 12 de out. · 19:00' })).toBe(
+      'Encontro, seg., 12 de out. · 19:00',
+    );
+  });
+});

@@ -1,4 +1,12 @@
-import { type EventPage, type EventSummary } from '@tria/module-events/contracts';
+import { subscribe } from '@tria/core/server/events/bus';
+import { moduleFlags } from '@tria/core/server/modules/flags-cache';
+import { encodeCursor } from '@tria/core/server/paging';
+import {
+  EVENT_MAX_PAGE_SIZE,
+  type EventPage,
+  type EventPublished,
+  type EventSummary,
+} from '@tria/module-events/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -12,6 +20,13 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
  * conversion inside Postgres, both tables in one transaction (the deferred FKs are checked at its
  * commit) and the keyset read.
  *
+ * `events list and create` is the battery around it: both keysets walked one row at a time (with a
+ * deliberate `starts_at` tie broken by `id`), the in-progress and cancelled seeded events in the right
+ * list, the clamps and the closed `period` enum, the permission guard, every input refusal on the
+ * wire, the secrets table holding the URL, the wall clock converted in the TENANT's zone (and
+ * following it when it changes), idempotency's create half, the cover rule, the after-commit event
+ * and the module flag.
+ *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order), and both hooks sweep this
  * file's own rows by title prefix so a crashed run cannot poison the next one.
  */
@@ -20,7 +35,7 @@ type Envelope = {
   error: { code: string; message?: string; details?: unknown; requestId?: string };
 };
 
-const tokens = { demoAdmin: '', demoMember: '' };
+const tokens = { demoAdmin: '', demoMember: '', labMember: '' };
 const tenantIds = { demo: '', lab: '' };
 
 /** The prefix every event THIS FILE writes carries, so the sweep can be exact. */
@@ -84,6 +99,7 @@ beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
   tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+  tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
   const rows = await adminSql<{ id: string; slug: string }[]>`
     select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
   for (const row of rows) {
@@ -91,11 +107,19 @@ beforeAll(async () => {
     if (row.slug === 'tria-lab') tenantIds.lab = row.id;
   }
   await sweep();
+  unsubscribe = subscribe('event.published', async (payload) => {
+    published.push(payload);
+  });
 });
 
 afterAll(async () => {
+  unsubscribe();
   await sweep();
 });
+
+/** Every `event.published` this file observed, collected through the REAL bus. */
+const published: EventPublished[] = [];
+let unsubscribe: () => void = () => {};
 
 describe('events tracer', () => {
   it('an admin creates an event and a member of the tenant sees it in the upcoming list', async () => {
@@ -131,5 +155,338 @@ describe('events tracer', () => {
     const upcoming = await walk(tokens.demoMember, 'upcoming', 5);
     const seen = upcoming.find((event) => event.id === created.id);
     expect(seen).toEqual(created);
+  });
+});
+
+/** `POST /v1/events` on the demo host. */
+const post = (token: string, body: unknown) =>
+  request('/v1/events', token, {
+    method: 'POST',
+    headers: { 'x-tenant-host': HOSTS.demo },
+    body: JSON.stringify(body),
+  });
+
+/** A valid in-person body, `days` tenant-local days from today at 19:00–21:00. */
+const inPerson = (suffix: string, days = 10) => ({
+  title: `${TEST_TITLE_PREFIX} ${suffix}`,
+  format: 'in_person',
+  venueName: 'Auditorio da sede',
+  address: 'Rua das Flores, 100',
+  start: { date: tenantDate(days), time: '19:00' },
+  end: { date: tenantDate(days), time: '21:00' },
+});
+
+const envelope = async (res: Response) => ((await res.json()) as Envelope).error;
+
+/** The demo tenant's live events of one period, in the order the statement orders them. */
+async function dbOrder(period: 'upcoming' | 'past'): Promise<string[]> {
+  const rows =
+    period === 'upcoming'
+      ? await adminSql<{ id: string }[]>`
+          select id from public.events
+           where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and ends_at > now()
+           order by starts_at asc, id asc`
+      : await adminSql<{ id: string }[]>`
+          select id from public.events
+           where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and ends_at <= now()
+           order by ends_at desc, id desc`;
+  return rows.map((row) => row.id);
+}
+
+/** What `scripts/seed.ts` writes (`SEED_EVENTS`), by title, for both tenants. */
+const SEEDED = {
+  inProgress: 'Semana de integracao',
+  upcomingCancelled: 'Oficina de fotografia',
+  pastCancelled: 'Cafe com a diretoria',
+  pastInPerson: 'Mutirao de primavera',
+} as const;
+
+describe('events list and create', () => {
+  it('1. the upcoming walk at limit=1 visits every event once, in (starts_at, id) order, a tie broken by id', async () => {
+    // A deliberate tie the test owns: two events with the SAME starts_at, both halves in one
+    // statement each (the deferred keys are checked at the autocommit).
+    const tieAt = new Date(Date.now() + 20 * 86_400_000).toISOString();
+    for (const n of [1, 2]) {
+      await adminSql`
+        with e as (
+          insert into public.events (tenant_id, created_by_user_id, title, format, venue_name, address,
+                                     starts_at, ends_at)
+          select ${tenantIds.demo}::uuid, created_by_user_id, ${`${TEST_TITLE_PREFIX} empate ${n}`},
+                 'in_person', 'Sede', 'Rua A, 1', ${tieAt}::timestamptz,
+                 ${tieAt}::timestamptz + interval '2 hours'
+            from public.events where tenant_id = ${tenantIds.demo}::uuid limit 1
+          returning id, tenant_id, format
+        )
+        insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code)
+        select id, tenant_id, format, 'K7QM' from e`;
+    }
+
+    const walked = await walk(tokens.demoMember, 'upcoming', 1);
+    const ids = walked.map((event) => event.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(await dbOrder('upcoming'));
+
+    const tie = walked.filter((event) => event.title.startsWith(`${TEST_TITLE_PREFIX} empate`));
+    expect(tie).toHaveLength(2);
+    expect(tie[0]?.startsAt).toBe(tie[1]?.startsAt);
+    const [first, second] = tie.map((event) => event.id);
+    expect((first ?? '') < (second ?? '')).toBe(true);
+    // Adjacent in the walk: the page boundary fell between them and neither was skipped or repeated.
+    expect(ids.indexOf(second ?? '') - ids.indexOf(first ?? '')).toBe(1);
+  });
+
+  it('2. the past walk runs most recently ended first', async () => {
+    const walked = await walk(tokens.demoMember, 'past', 1);
+    const ids = walked.map((event) => event.id);
+    expect(ids).toEqual(await dbOrder('past'));
+    const ends = walked.map((event) => event.endsAt);
+    expect([...ends].sort().reverse()).toEqual(ends);
+    expect(walked.map((event) => event.title)).toContain(SEEDED.pastInPerson);
+  });
+
+  it('3. the in-progress event is upcoming, never past; both cancelled events stay in their lists', async () => {
+    const upcoming = await walk(tokens.demoMember, 'upcoming', 25);
+    const past = await walk(tokens.demoMember, 'past', 25);
+    const titles = (list: EventSummary[]) => list.map((event) => event.title);
+
+    expect(titles(upcoming)).toContain(SEEDED.inProgress);
+    expect(titles(past)).not.toContain(SEEDED.inProgress);
+
+    const upcomingCancelled = upcoming.find((event) => event.title === SEEDED.upcomingCancelled);
+    expect(upcomingCancelled?.status).toBe('cancelled');
+    const pastCancelled = past.find((event) => event.title === SEEDED.pastCancelled);
+    expect(pastCancelled?.status).toBe('cancelled');
+  });
+
+  it('4. limit clamps both ways, a hostile cursor degrades to page 1, and period is a closed enum', async () => {
+    expect((await page(tokens.demoMember, '?period=upcoming&limit=0')).items).toHaveLength(1);
+    const wide = await page(tokens.demoMember, '?period=upcoming&limit=100000');
+    expect(wide.items.length).toBeLessThanOrEqual(EVENT_MAX_PAGE_SIZE);
+    expect(wide.items.length).toBeGreaterThan(1);
+
+    const first = await page(tokens.demoMember, '?period=upcoming&limit=2');
+    for (const hostile of [
+      'not-a-cursor',
+      Buffer.from('{"v":9}').toString('base64url'),
+      encodeCursor({ n: '2026-01-01T00:00:00.000000Z', id: 'not-a-uuid' }),
+    ]) {
+      const again = await page(
+        tokens.demoMember,
+        `?period=upcoming&limit=2&cursor=${encodeURIComponent(hostile)}`,
+      );
+      expect(again.items.map((event) => event.id)).toEqual(first.items.map((event) => event.id));
+    }
+
+    for (const bad of ['PAST', 'soon', 'passados']) {
+      const res = await request(`/v1/events?period=${bad}`, tokens.demoMember, {
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      expect(res.status, bad).toBe(400);
+      expect((await envelope(res)).code).toBe('VALIDATION_FAILED');
+    }
+  });
+
+  it('5. creating is a permission: a member is 403, the admin is 201', async () => {
+    const member = await post(tokens.demoMember, inPerson('membro'));
+    expect(member.status).toBe(403);
+    expect((await envelope(member)).code).toBe('FORBIDDEN');
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.events where title = ${`${TEST_TITLE_PREFIX} membro`}`;
+    expect(row?.n).toBe(0);
+
+    const admin = await post(tokens.demoAdmin, inPerson('admin'));
+    expect(admin.status).toBe(201);
+  });
+
+  it('6. every input refusal reaches the wire as its details.event code', async () => {
+    const online = {
+      title: `${TEST_TITLE_PREFIX} recusa`,
+      format: 'online',
+      meetingUrl: 'https://meet.example.test/x',
+      start: { date: tenantDate(10), time: '19:00' },
+      end: { date: tenantDate(10), time: '21:00' },
+    };
+    const cases: [unknown, string][] = [
+      [{ ...inPerson('recusa'), title: '   ' }, 'name_required'],
+      [{ ...inPerson('recusa'), end: { date: tenantDate(10), time: '19:00' } }, 'end_before_start'],
+      [{ ...inPerson('recusa'), venueName: '' }, 'location_required'],
+      [{ ...inPerson('recusa'), meetingUrl: 'https://meet.example.test/x' }, 'location_required'],
+      [{ ...online, meetingUrl: null }, 'url_required'],
+      [{ ...online, venueName: 'Sede' }, 'url_required'],
+      [{ ...online, meetingUrl: 'http://meet.example.test/x' }, 'url_invalid'],
+      [{ ...online, meetingUrl: 'javascript:alert(1)' }, 'url_invalid'],
+    ];
+    for (const [body, expected] of cases) {
+      const res = await post(tokens.demoAdmin, body);
+      expect(res.status, expected).toBe(400);
+      const error = await envelope(res);
+      expect(error.code).toBe('VALIDATION_FAILED');
+      expect(error.details).toEqual({ event: expected });
+    }
+    // An unknown key (a forged tenant) fails loudly, never as a machine code.
+    const forged = await post(tokens.demoAdmin, { ...inPerson('recusa'), tenantId: tenantIds.lab });
+    expect(forged.status).toBe(400);
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.events where title = ${`${TEST_TITLE_PREFIX} recusa`}`;
+    expect(row?.n).toBe(0);
+  });
+
+  it('7. an online create stores the URL in event_secrets only, and the response carries none', async () => {
+    const res = await post(tokens.demoAdmin, {
+      title: `${TEST_TITLE_PREFIX} online`,
+      format: 'online',
+      meetingUrl: 'https://meet.example.test/segredo',
+      start: { date: tenantDate(10), time: '19:00' },
+      end: { date: tenantDate(10), time: '21:00' },
+    });
+    expect(res.status).toBe(201);
+    const text = await res.text();
+    expect(text).not.toContain('meet.example.test');
+    const created = JSON.parse(text) as EventSummary;
+    expect(created.format).toBe('online');
+    expect(created.venueName).toBeNull();
+
+    const [secret] = await adminSql<{ meeting_url: string | null; event_format: string }[]>`
+      select meeting_url, event_format from public.event_secrets where event_id = ${created.id}::uuid`;
+    expect(secret).toEqual({
+      meeting_url: 'https://meet.example.test/segredo',
+      event_format: 'online',
+    });
+
+    // …and the member's list item for it carries no URL either.
+    const listed = (await walk(tokens.demoMember, 'upcoming', 25)).find((e) => e.id === created.id);
+    expect(JSON.stringify(listed)).not.toContain('meet.example.test');
+  });
+
+  it('8. the wall clock is converted in the TENANT zone, and follows the zone when it changes', async () => {
+    const date = tenantDate(12);
+    const saoPaulo = (await (
+      await post(tokens.demoAdmin, inPerson('fuso sp', 12))
+    ).json()) as EventSummary;
+    expect(saoPaulo.startsAt).toBe(`${date}T22:00:00.000000Z`);
+
+    try {
+      await adminSql`update public.tenants set timezone = 'America/Manaus' where id = ${tenantIds.demo}::uuid`;
+      const manaus = (await (
+        await post(tokens.demoAdmin, inPerson('fuso manaus', 12))
+      ).json()) as EventSummary;
+      expect(manaus.startsAt).toBe(`${date}T23:00:00.000000Z`);
+    } finally {
+      await adminSql`update public.tenants set timezone = 'America/Sao_Paulo' where id = ${tenantIds.demo}::uuid`;
+    }
+  });
+
+  it('9. a start already in the past is accepted and lands in Passados (planning decision 7)', async () => {
+    const res = await post(tokens.demoAdmin, {
+      ...inPerson('passado'),
+      start: { date: tenantDate(-3), time: '19:00' },
+      end: { date: tenantDate(-3), time: '21:00' },
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as EventSummary;
+    const past = await walk(tokens.demoMember, 'past', 25);
+    expect(past.map((event) => event.id)).toContain(created.id);
+    const upcoming = await walk(tokens.demoMember, 'upcoming', 25);
+    expect(upcoming.map((event) => event.id)).not.toContain(created.id);
+  });
+
+  it('10. idempotency, create half: two identical bodies create two events with two codes', async () => {
+    const body = inPerson('duplicado');
+    const a = await post(tokens.demoAdmin, body);
+    const b = await post(tokens.demoAdmin, body);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    const ids = [((await a.json()) as EventSummary).id, ((await b.json()) as EventSummary).id];
+    expect(ids[0]).not.toBe(ids[1]);
+    const rows = await adminSql<{ event_id: string }[]>`
+      select event_id from public.event_secrets where event_id = any(${ids}::uuid[])`;
+    expect(rows).toHaveLength(2);
+  });
+
+  it('11. a foreign cover is a bare 404; a feed post image of this tenant is cover_invalid', async () => {
+    const [foreign] = await adminSql<{ id: string }[]>`
+      select id from public.media_assets where tenant_id = ${tenantIds.lab}::uuid limit 1`;
+    const [postAsset] = await adminSql<{ id: string }[]>`
+      select id from public.media_assets
+       where tenant_id = ${tenantIds.demo}::uuid and purpose = 'post' and kind = 'image'
+         and status = 'ready' and deleted_at is null limit 1`;
+    expect(foreign?.id).toBeTruthy();
+    expect(postAsset?.id).toBeTruthy();
+
+    const miss = await post(tokens.demoAdmin, { ...inPerson('capa'), coverAssetId: foreign?.id });
+    expect(miss.status).toBe(404);
+    const missError = await envelope(miss);
+    expect(missError.code).toBe('NOT_FOUND');
+    expect(Object.hasOwn(missError, 'details')).toBe(false);
+
+    const invalid = await post(tokens.demoAdmin, {
+      ...inPerson('capa'),
+      coverAssetId: postAsset?.id,
+    });
+    expect(invalid.status).toBe(400);
+    expect((await envelope(invalid)).details).toEqual({ event: 'cover_invalid' });
+
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.events where title = ${`${TEST_TITLE_PREFIX} capa`}`;
+    expect(row?.n).toBe(0);
+  });
+
+  it('12. event.published is delivered exactly once per create, with the exact key set', async () => {
+    const before = published.length;
+    const res = await post(tokens.demoAdmin, inPerson('evento publicado'));
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as EventSummary;
+    const mine = published.slice(before).filter((payload) => payload.eventId === created.id);
+    expect(mine).toHaveLength(1);
+    expect(Object.keys(mine[0] ?? {}).sort()).toEqual([
+      'actorUserId',
+      'endsAt',
+      'eventId',
+      'format',
+      'startsAt',
+      'tenantId',
+    ]);
+    expect(mine[0]).toMatchObject({
+      tenantId: tenantIds.demo,
+      format: 'in_person',
+      startsAt: created.startsAt,
+      endsAt: created.endsAt,
+    });
+    // A refused create publishes nothing.
+    const refusedBefore = published.length;
+    await post(tokens.demoAdmin, { ...inPerson('evento publicado'), title: '' });
+    expect(published.length).toBe(refusedBefore);
+  });
+
+  it('13. MOD-04: with events off for tria-lab, the routes are 404 MODULE_DISABLED and the tab is gone', async () => {
+    const lab = async () =>
+      request('/v1/events', tokens.labMember, { headers: { 'x-tenant-host': HOSTS.lab } });
+    const labKeys = async () => {
+      const res = await request('/v1/me/bootstrap', tokens.labMember, {
+        headers: { 'x-tenant-host': HOSTS.lab },
+      });
+      return ((await res.json()) as { modules: { key: string }[] }).modules.map((m) => m.key);
+    };
+
+    // Positive control: seeded, the lab member lists and has the tab.
+    expect((await lab()).status).toBe(200);
+    expect(await labKeys()).toContain('events');
+
+    try {
+      await adminSql`
+        update public.tenant_modules set enabled = false
+         where tenant_id = ${tenantIds.lab}::uuid and module_key = 'events'`;
+      moduleFlags.invalidate(tenantIds.lab);
+      const off = await lab();
+      expect(off.status).toBe(404);
+      expect((await envelope(off)).code).toBe('MODULE_DISABLED');
+      expect(await labKeys()).not.toContain('events');
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${tenantIds.lab}::uuid and module_key = 'events'`;
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+    expect((await lab()).status).toBe(200);
   });
 });

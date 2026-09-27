@@ -38,11 +38,12 @@ import { ensureWorker } from './worker';
  * the feed, which is what 02-16 recorded Phase 4 would do: the whole chain — panel switch → flag →
  * member bootstrap within the flags TTL → `/v1/feed` 200/404 → the home slot appearing and
  * disappearing — now runs through the PANEL on a real module, with no SQL shortcut. A provisioned
- * tenant gets every default module, so the nav reads ['Início', 'Comunidades', 'Reels', 'Perfil']:
- * the FEED ships a home slot and no tab (D-55), `communities` ships a tab (D-40, 05-01) and `reels`
- * a tab that REQUIRES the feed (D-121/D-123, 05.3-01). With the feed off the Reels tab therefore
- * leaves too while its own flag stays on, and it returns with the feed — an assertion, not an
- * absence.
+ * tenant gets every default module, so the nav reads
+ * ['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']: the FEED ships a home slot and no tab
+ * (D-55), `communities` ships a tab (D-40, 05-01), `reels` a tab that REQUIRES the feed
+ * (D-121/D-123, 05.3-01) and `events` the Eventos tab (D-55, 06-01). With the feed off the Reels
+ * tab therefore leaves too while its own flag stays on, and it returns with the feed — an
+ * assertion, not an absence.
  *
  * Hosts are `<slug>.localhost`: the BROWSER resolves them to loopback (RFC 6761) and GoTrue honours
  * their `redirectTo` locally; NODE does not resolve them, so every Node-side call (API, Mailpit,
@@ -613,7 +614,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     // D-19 (reference module off) + D-40: the two kernel tabs plus the `communities` and `reels`
     // manifests' own entries, which every newly provisioned tenant gets with the default module set
     // (05-01, 05.3-01).
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']);
     // RENDERED brand colour on the active item (02-14 alias scoping inside [data-brand-root]).
     await expect.poll(() => activeNavColor(page)).toBe(hexToRgb(PRIMARY_2));
 
@@ -768,7 +769,13 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect(feedRegion(memberPage)).toBeVisible();
       expect(await modulesOf()).toContain('feed');
       expect((await feedApi()).status).toBe(200);
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
+      expect(await navLabels(memberPage)).toEqual([
+        'Início',
+        'Comunidades',
+        'Reels',
+        'Eventos',
+        'Perfil',
+      ]);
 
       // (b) Panel path: Feed off → the stored flag, the member's bootstrap, the API and the home
       // slot all follow, within the flags TTL and with no redeploy. The FEED itself ships a home
@@ -790,7 +797,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       expect((await feedApi()).code).toBe('MODULE_DISABLED');
       await memberPage.goto(`${origin}/inicio`);
       // D-121: the feed-requiring Reels tab left with the feed; its own flag was never touched.
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Perfil']);
+      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Eventos', 'Perfil']);
       expect(await getTenantModuleFlag(slug, 'reels')).toBe(true);
       await expect(visibleNav(memberPage).getByRole('link', { name: 'Feed' })).toHaveCount(0);
       await expect(feedRegion(memberPage)).toHaveCount(0); // the slot is gone, no redeploy
@@ -806,7 +813,13 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect.poll(async () => (await feedApi()).status, { timeout: 35_000 }).toBe(200);
       await memberPage.goto(`${origin}/inicio`);
       await expect(feedRegion(memberPage)).toBeVisible();
-      expect(await navLabels(memberPage)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
+      expect(await navLabels(memberPage)).toEqual([
+        'Início',
+        'Comunidades',
+        'Reels',
+        'Eventos',
+        'Perfil',
+      ]);
     } finally {
       await setTenantModuleFlag(slug, 'feed', true);
       await memberContext.close();

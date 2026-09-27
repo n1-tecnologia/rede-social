@@ -79,6 +79,9 @@ const REQUIRED_KEYS = [
   // `/stories/[storyId]`, and must resolve to its own page, never to the deep link (Pitfall 7).
   '/(app)/stories/destaques/page',
   '/(app)/comunidades/[communityId]/destaques/page',
+  // Phase 6: the Eventos tab. It reads the session, the tenant's timezone and the request instant
+  // per request (relative labels such as "Hoje" and "Agora"), so it may never be prerendered.
+  '/(app)/eventos/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

@@ -147,12 +147,14 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     // `communities` declared `nav.order: 20` (D-40: the tab the feed deliberately left unspent) and
     // moved to the HEAD of the list. That move is the ordering rule working, not a regression: a key
     // with a nav entry sorts ahead of every key without one, whatever its letter. 05.3-01 added
-    // `reels` with `nav.order: 30` (D-123), so it sorts right after `communities` for the same reason.
+    // `reels` with `nav.order: 30` (D-123), so it sorts right after `communities` for the same reason,
+    // and 06-01 added `events` with `nav.order: 40` (D-55, UI-D-215): after reels, ahead of every
+    // manifest-less key.
     expect(demoBody.modules.map((m) => m.key)).toEqual([
       'communities',
       'reels',
-      'chat',
       'events',
+      'chat',
       'feed',
       'notifications',
       'stories',
@@ -174,6 +176,19 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
           href: '/reels',
           order: 30,
           chrome: 'media',
+        });
+        expect(m.home).toBeUndefined();
+        continue;
+      }
+      if (m.key === 'events') {
+        // 06-01 (D-55, UI-D-215): the Eventos tab, the manifest's entry verbatim. No home slot yet
+        // (the Início card lands with its renderer in 06-08).
+        expect(m.nav).toEqual({
+          placement: 'tab',
+          label: 'Eventos',
+          icon: 'calendar-days',
+          href: '/eventos',
+          order: 40,
         });
         expect(m.home).toBeUndefined();
         continue;
@@ -202,8 +217,13 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     expect(admin.permissions).toContain('tenant.manage');
     expect(admin.permissions).toContain('content.publish');
 
+    // 06-01: `events` grants the manage and attendance-read permissions to the admin only.
+    expect(admin.permissions).toContain('events.event.manage');
+    expect(admin.permissions).toContain('events.attendance.read');
+
+    // …and a member only answers and checks in: the one module permission a V1 member holds.
     const member = (await (await bootstrap(tokens.demoMember)).json()) as BootstrapBody;
-    expect(member.permissions).toEqual([]);
+    expect(member.permissions).toEqual(['events.attendance.respond']);
   });
 
   it('3. empty: a tenant with zero tenant_modules rows gets modules: []', async () => {
@@ -396,7 +416,8 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
     expect(enabled.status).toBe(200);
     expect(await enabled.json()).toEqual({ ok: true });
     const lab = (await (await bootstrap(tokens.labMember)).json()) as BootstrapBody;
-    expect(lab.modules.map((m) => m.key)).toEqual(['reels', 'chat', 'events', 'feed']);
+    // `events` (nav order 40) now sorts ahead of the manifest-less `chat` (06-01).
+    expect(lab.modules.map((m) => m.key)).toEqual(['reels', 'events', 'chat', 'feed']);
 
     // Back off: the very next request is refused again.
     const off = await putModule(labId, 'chat', false);

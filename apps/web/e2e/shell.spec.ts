@@ -86,10 +86,17 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     }
 
     const nav = visibleNav(page, mobile);
-    // 05-01 / 05.3-01: tria-demo has the `communities` (order 20) and `reels` (order 30) modules, so
-    // their manifests' tabs sit between the two kernel entries. The lab case below reads
-    // Início · Reels · Perfil — the pair is the communities flag, rendered.
-    expect(await navLinkNames(nav)).toEqual(['Início', 'Comunidades', 'Reels', 'Perfil']);
+    // 05-01 / 05.3-01 / 06-01: tria-demo has the `communities` (order 20), `reels` (order 30) and
+    // `events` (order 40) modules, so their manifests' tabs sit between the two kernel entries. The
+    // lab case below reads Início · Reels · Eventos · Perfil — the pair is the communities flag,
+    // rendered.
+    expect(await navLinkNames(nav)).toEqual([
+      'Início',
+      'Comunidades',
+      'Reels',
+      'Eventos',
+      'Perfil',
+    ]);
     await expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page');
 
     // D-42: the enabled module's home slot renders; the "Em breve" card does not. Since 04-10 that
@@ -127,7 +134,8 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     const nav = visibleNav(page, mobile);
     // Scoped to the NAV: the lab feed carries 04-05's seeded link posts, whose auto-linked URLs are
     // links too — a page-wide count would read those as tabs and fail for the wrong reason.
-    expect(await navLinkNames(nav)).toEqual(['Início', 'Reels', 'Perfil']);
+    // 06-01: tria-lab has `events` on (D-17), so the Eventos tab sits after Reels (order 40).
+    expect(await navLinkNames(nav)).toEqual(['Início', 'Reels', 'Eventos', 'Perfil']);
     // UI-D-20: a module DID contribute a slot here, so the kernel placeholder must be absent and
     // the feed widget must be what fills the home column instead.
     await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);

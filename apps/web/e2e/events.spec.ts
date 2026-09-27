@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import eventMessages from '../messages/pt-BR/events.json' with { type: 'json' };
+import { closeEventsAdmin, readEventInstants } from './events-admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -21,7 +22,31 @@ test.use({ serviceWorkers: 'block' });
 const SEEDED = {
   /** Upcoming, in person, with a cover, in 3 days. */
   upcomingInPerson: 'Encontro de boas-vindas',
+  /** In progress and multi-day: started a day ago, ends in two. The head of Próximos. */
+  inProgress: 'Semana de integracao',
+  /** Upcoming and cancelled, WITH a cover (so the grayscale branch is the photo's). */
+  upcomingCancelled: 'Oficina de fotografia',
+  /** Ended 5 days ago, and ended 10 days ago (cancelled): Passados, most recent first. */
+  pastRecent: 'Mutirao de primavera',
+  pastOlder: 'Cafe com a diretoria',
+  /** `SEED_LONG_EVENT_TITLE` (120 characters) and `SEED_LONG_EVENT_VENUE` (60), no cover. */
+  longTitle:
+    'Encontro regional de voluntarios, lideres de grupo e parceiros para planejar juntos as acoes do proximo semestre inteiro',
+  longVenue: 'Centro de Convencoes Professor Joaquim Nabuco, Auditorio 12B',
+  tenantName: 'TRIA Demo',
 } as const;
+
+/** The tenant's zone, exactly what `bootstrap.tenant.timezone` carries for tria-demo. */
+const TENANT_ZONE = 'America/Sao_Paulo';
+
+/** `19:00` in `timeZone`, the formatter `lib/events-view.ts` uses. */
+const clock = (iso: string, timeZone: string) =>
+  new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(iso));
 
 /** Escapes a literal for a `RegExp`. */
 const literal = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -50,5 +75,168 @@ test.describe('events tracer', () => {
       .getByRole('link', { name: new RegExp(`^${literal(SEEDED.upcomingInPerson)}, `) });
     await expect(poster).toBeVisible();
     await expect(poster).toHaveAttribute('href', /^\/eventos\/[0-9a-f-]{36}$/);
+  });
+});
+
+/** Every poster link in the list region, in DOM (= server) order. */
+const posters = (page: Page): Locator => page.locator('main').getByTestId('event-poster');
+
+/** The poster whose accessible name starts with `title`. */
+const posterFor = (page: Page, title: string): Locator =>
+  page.locator('main').getByRole('link', { name: new RegExp(`^${literal(title)}, `) });
+
+test.describe('events lista', () => {
+  test.afterAll(async () => {
+    await closeEventsAdmin();
+  });
+
+  test('Próximos opens on the in-progress event, with "Agora" and the live overline', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/eventos`);
+
+    const chips = page.getByRole('navigation', { name: E.list.filter.label });
+    await expect(chips.getByRole('link')).toHaveCount(2);
+    await expect(chips.getByRole('link', { name: E.list.filter.upcoming })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(
+      page.getByRole('region', {
+        name: E.list.regionUpcoming.replace('{tenant}', SEEDED.tenantName),
+      }),
+    ).toBeVisible();
+
+    const { endsAt } = await readEventInstants('tria-demo', SEEDED.inProgress);
+    const first = posters(page).first();
+    await expect(first.getByTestId('event-poster-title')).toHaveText(SEEDED.inProgress);
+    await expect(first.getByTestId('event-poster-pill')).toHaveText(E.when.now);
+    await expect(first.getByTestId('event-poster-overline')).toHaveText(
+      E.when.liveUntil.replace('{time}', clock(endsAt, TENANT_ZONE)),
+    );
+  });
+
+  test('a cancelled event stays in Próximos with the Cancelado pill and a grayscale photo', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/eventos`);
+
+    const cancelled = posterFor(page, SEEDED.upcomingCancelled);
+    await expect(cancelled.getByTestId('event-poster-pill')).toHaveText(E.state.cancelled);
+    const media = cancelled.getByTestId('event-cover-media');
+    await expect(media).toBeVisible();
+    const filter = await media.evaluate((element) => getComputedStyle(element).filter);
+    expect(filter).toContain('grayscale');
+
+    // Positive control: an active event's photo is NOT desaturated.
+    const active = posterFor(page, SEEDED.upcomingInPerson).getByTestId('event-cover-media');
+    expect(await active.evaluate((element) => getComputedStyle(element).filter)).not.toContain(
+      'grayscale',
+    );
+  });
+
+  test('Passados lists the ended events, most recently ended first', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/eventos`);
+
+    await page
+      .getByRole('navigation', { name: E.list.filter.label })
+      .getByRole('link', { name: E.list.filter.past })
+      .click();
+    await expect(page).toHaveURL(/\/eventos\?periodo=passados$/);
+    await expect(
+      page.getByRole('region', { name: E.list.regionPast.replace('{tenant}', SEEDED.tenantName) }),
+    ).toBeVisible();
+
+    const titles = await posters(page).getByTestId('event-poster-title').allTextContents();
+    expect(titles).toContain(SEEDED.pastRecent);
+    expect(titles).toContain(SEEDED.pastOlder);
+    expect(titles.indexOf(SEEDED.pastRecent)).toBeLessThan(titles.indexOf(SEEDED.pastOlder));
+    // An event in progress has not ended, so it is never here.
+    expect(titles).not.toContain(SEEDED.inProgress);
+    await expect(posterFor(page, SEEDED.pastRecent).getByTestId('event-poster-pill')).toHaveText(
+      E.state.ended,
+    );
+  });
+
+  test('an unknown ?periodo= lands on Próximos silently (D-93)', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    for (const value of ['xyz', 'PASSADOS', 'passados&periodo=passados']) {
+      await page.goto(`${hosts.demo}/eventos?periodo=${value}`);
+      await expect(
+        page
+          .getByRole('navigation', { name: E.list.filter.label })
+          .getByRole('link', { name: E.list.filter.upcoming }),
+      ).toHaveAttribute('aria-current', 'page');
+      await expect(posterFor(page, SEEDED.inProgress)).toBeVisible();
+    }
+  });
+
+  test('E03 long text: at 320px the title stops at two lines and the venue truncates', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/eventos`);
+
+    const poster = posterFor(page, SEEDED.longTitle);
+    await poster.scrollIntoViewIfNeeded();
+    // The cover-less branch: the D-69 gradient carries the text.
+    await expect(poster.getByTestId('event-cover-fallback')).toBeVisible();
+
+    const title = poster.getByTestId('event-poster-title');
+    await expect(title).toHaveText(SEEDED.longTitle);
+    const titleBox = await title.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+    }));
+    // Clamped: the text overflows the box, and the box is two lines tall.
+    expect(titleBox.scrollHeight).toBeGreaterThan(titleBox.clientHeight);
+    expect(titleBox.clientHeight).toBeLessThanOrEqual(Math.ceil(titleBox.lineHeight * 2) + 1);
+
+    const venue = poster.getByTestId('event-poster-place').locator('span');
+    await expect(venue).toHaveText(SEEDED.longVenue);
+    const venueBox = await venue.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(venueBox.scrollWidth).toBeGreaterThan(venueBox.clientWidth);
+
+    // The overline stays whole, inside the 4/5 box.
+    const box = await poster.boundingBox();
+    const overline = await poster.getByTestId('event-poster-overline').boundingBox();
+    expect(box && overline).toBeTruthy();
+    if (box && overline) {
+      expect(overline.y).toBeGreaterThanOrEqual(box.y);
+      expect(overline.y + overline.height).toBeLessThanOrEqual(box.y + box.height);
+      expect(box.height / box.width).toBeCloseTo(5 / 4, 1);
+    }
+  });
+
+  test.describe('on a device in another timezone', () => {
+    test.use({ timezoneId: 'America/Manaus' });
+
+    test('the overline shows the TENANT wall clock, not the device one', async ({ page }) => {
+      await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+      await page.goto(`${hosts.demo}/eventos`);
+
+      const { startsAt } = await readEventInstants('tria-demo', SEEDED.upcomingInPerson);
+      const tenantTime = clock(startsAt, TENANT_ZONE);
+      const deviceTime = clock(startsAt, 'America/Manaus');
+      expect(tenantTime).not.toBe(deviceTime);
+      // The device really is in Manaus (the control), and the poster still reads São Paulo.
+      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(
+        'America/Manaus',
+      );
+      const overline = posterFor(page, SEEDED.upcomingInPerson).getByTestId(
+        'event-poster-overline',
+      );
+      await expect(overline).toContainText(tenantTime);
+      await expect(overline).not.toContainText(deviceTime);
+    });
   });
 });
