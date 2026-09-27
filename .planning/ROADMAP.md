@@ -502,7 +502,7 @@ Plans:
 
 **Wave 6** *(gap closure — the FAILED truth 6 of `05.3-VERIFICATION.md`)*
 
-- [ ] 05.3-10-PLAN.md — CR-01 / REELS-07: per-post like and comment-count state promoted to `ReelsHost` so a like or comment survives the ±1 mount window, lane changes and the same post in two lanes (remount matrix + e6 swipe-away-and-back step); plus WR-01 (capture-phase release on the pager stack), WR-02 (player keyed on its playback credential) and WR-03 (function replacements in the live region), each with a regression
+- [x] 05.3-10-PLAN.md — CR-01 / REELS-07: per-post like and comment-count state promoted to `ReelsHost` so a like or comment survives the ±1 mount window, lane changes and the same post in two lanes (remount matrix + e6 swipe-away-and-back step); plus WR-01 (capture-phase release on the pager stack), WR-02 (player keyed on its playback credential) and WR-03 (function replacements in the live region), each with a regression
 
 ### Phase 6: Events
 
