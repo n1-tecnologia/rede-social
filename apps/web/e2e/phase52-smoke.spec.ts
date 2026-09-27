@@ -15,6 +15,8 @@ import {
   deleteStoriesByCaptionPrefix,
   envValue,
   hasStoryView,
+  memberVisibleHighlightStoryIds,
+  memberVisibleStoryIds,
   setStoryViews,
 } from './admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
@@ -570,13 +572,30 @@ test.describe('Phase 05.2 smoke — the UAT replay (CONTEXT <specifics>)', () =>
 
   test('5. a member finds the migrated Destaques still holding the seeded pinned stories, the expired one first', async ({
     page,
-  }) => {
-    // The member's own read of the migrated highlight: both seeded pins survive as items (D-116).
+  }, testInfo) => {
+    // The member's own read of the migrated highlight: every seeded pin whose STORY still exists
+    // survives as an item (D-116). The seeded story VIDEO may not exist any more:
+    // `deleteTenantVideoAssets` (media-video.spec, phase3-smoke.spec, both earlier in a full run)
+    // hard-deletes it with the rest of the demo video library. So this asks the database which
+    // seeded stories a member can still be shown (the `activeReadyStoryCount` rule, 05-05) instead
+    // of assuming the seed is intact. The condition is on the story, not on the item: a live pinned
+    // story missing from the highlight still fails here. On a fresh seed both pins are asserted.
+    const seededPins = [SEEDED.expiredStoryId, SEEDED.videoStoryId];
+    const livePins = await memberVisibleStoryIds(seededPins);
+    // The EXPIRED pin is an image; nothing in the suite removes it, so it must always be live.
+    expect(livePins).toContain(SEEDED.expiredStoryId);
+    if (!livePins.includes(SEEDED.videoStoryId)) {
+      testInfo.annotations.push({
+        type: 'seeded story video absent',
+        description: `${SEEDED.videoStoryId} was removed by deleteTenantVideoAssets earlier in this run; its pin is not asserted`,
+      });
+    }
     const items = await highlightItems(users.demoMember, SEEDED.destaquesId);
     const ids = items.map((item) => item.id);
-    expect(ids).toContain(SEEDED.expiredStoryId);
-    expect(ids).toContain(SEEDED.videoStoryId);
+    for (const pin of livePins) expect(ids).toContain(pin);
     expect(ids[0]).toBe(SEEDED.expiredStoryId);
+    // …and the API's read is exactly the database's member-visible items, in play order.
+    expect(ids).toEqual(await memberVisibleHighlightStoryIds(SEEDED.destaquesId));
 
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.communityId}`);

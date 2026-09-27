@@ -317,6 +317,44 @@ export async function activeReadyStoryCount(tenantSlug: string): Promise<number>
 }
 
 /**
+ * Which of `storyIds` a MEMBER can still be shown: the story is not removed and its asset is `ready`
+ * (the stories service's `MEMBER_VISIBLE`, verbatim). A row that no longer exists is simply absent.
+ *
+ * Same reason as `activeReadyStoryCount`: `deleteTenantVideoAssets` (called by `media-video.spec.ts`
+ * and `phase3-smoke.spec.ts`, both of which run before `phase52-smoke.spec.ts`) hard-deletes the
+ * seeded story VIDEO, so a spec that expects a seeded story must first ask whether it still exists.
+ * Conditioning on the STORY (not on a highlight item) keeps the item assertion honest: a story that
+ * exists but lost its item is still a failure.
+ */
+export async function memberVisibleStoryIds(storyIds: readonly string[]): Promise<string[]> {
+  const rows = await sql()<{ id: string }[]>`
+    select s.id
+      from public.stories s
+      join public.media_assets a on a.id = s.media_asset_id
+     where s.id = any(${storyIds as string[]}::uuid[])
+       and s.deleted_at is null
+       and a.status = 'ready'`;
+  return rows.map((row) => row.id);
+}
+
+/**
+ * The highlight's member-visible story ids in the order the viewer plays them (`published_at, id`),
+ * read from the database: the items read's predicate, verbatim.
+ */
+export async function memberVisibleHighlightStoryIds(highlightId: string): Promise<string[]> {
+  const rows = await sql()<{ id: string }[]>`
+    select s.id
+      from public.story_highlight_items i
+      join public.stories s on s.id = i.story_id and s.tenant_id = i.tenant_id
+      join public.media_assets a on a.id = s.media_asset_id
+     where i.highlight_id = ${highlightId}::uuid
+       and s.deleted_at is null
+       and a.status = 'ready'
+     order by s.published_at, s.id`;
+  return rows.map((row) => row.id);
+}
+
+/**
  * Hard-deletes the stories a spec wrote, by caption prefix, together with the assets they name
  * (05-05).
  *
