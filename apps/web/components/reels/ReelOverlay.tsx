@@ -23,6 +23,14 @@ import { announcedCount } from '@/lib/reels-count';
  * and a refusal reverts and raises the generic toast (UI-D-93d). The rail's heart and the page's
  * double tap share this ONE engine, so there is one request in flight per page.
  *
+ * **The settled pair is the host's, not this page's** (CR-01). The pager unmounts this component
+ * whenever its page leaves the ±1 window, so the engine here is only the in-flight optimistic
+ * layer: `onLike`/`onUnlike` are the host's wrappers, which record the server's pair in the host's
+ * per-post map, and `view` arrives already carrying that pair. A remounted page therefore starts
+ * from the last known state, and the heart and the double tap act on it. The engine's re-seed on a
+ * changed seed (`useOptimisticLike`) is a no-op on a page that stays mounted, because the host
+ * records the same pair the engine has just accepted.
+ *
  * **The binder.** The pager's double tap reaches the host, not this component, so the page
  * registers a binder through `bind`: `likeOnly` calls the engine's toggle ONLY while the post is
  * not liked — a double tap never unlikes — and `bumpComments` applies the comment sheet's session

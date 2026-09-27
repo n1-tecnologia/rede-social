@@ -6,6 +6,7 @@ import {
   type CommentSheetProps,
   type CountTemplates,
   type LikeOutcome,
+  type LikeState,
 } from '@tria/module-feed/ui';
 import {
   REELS_BUFFERING_DELAY_MS,
@@ -92,6 +93,19 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  * resolves after a lane change is written to ITS lane only. `onLaneStep` reaches the pager only
  * with two or more lanes (D-120).
  *
+ * **Per-post interaction state (CR-01).** The pager unmounts every page outside the ±1 window, so
+ * what the viewer did to a post cannot live in that page. This host owns each post's settled like
+ * pair (the server's `{ liked, likeCount }` from the feed's like action) for the visit, in every
+ * lane, keyed by post id, and seeds every mounted page from it (`withInteraction`): a page that
+ * leaves the window and comes back, a lane left and re-selected, and the same post in "Todos" and
+ * in its community lane all show the one state. The like engine in each page is only the in-flight
+ * optimistic layer. Only the LATEST request per post is recorded (`likeSeq`, the engine's own
+ * `requestId` rule), so a stale answer never re-seeds a page into a state the viewer left, and an
+ * answer that lands after its page unmounted is still recorded. A refusal records nothing. For the
+ * rest of the visit the host's entry wins over any later lane read of the same post (a read can
+ * predate the like); the map is never persisted, dies with this component, and the next visit
+ * starts from the server.
+ *
  * **No watch tracking.** Nothing here records what a member watched: no view, watch-time or
  * completion event exists. The only writes are the feed's own like and comment actions.
  */
@@ -165,6 +179,22 @@ type LaneState = {
   /** The last load-more failed: the prefetch stands down and the next end-swipe retries. */
   moreFailed: boolean;
 };
+
+/** What the viewer did to one post during this visit (CR-01): the settled like pair, the count. */
+type ReelInteraction = { like?: LikeState; commentCount?: number };
+
+/**
+ * A post's view as the viewer last saw it: the SAME object when the visit has no entry for it (a
+ * post nobody touched re-renders nothing), else a copy carrying the host's pair and count.
+ */
+function withInteraction(view: ReelView, entry: ReelInteraction | undefined): ReelView {
+  if (entry === undefined) return view;
+  return {
+    ...view,
+    ...(entry.like ? { viewerLiked: entry.like.liked, likeCount: entry.like.likeCount } : {}),
+    ...(entry.commentCount === undefined ? {} : { commentCount: entry.commentCount }),
+  };
+}
 
 const ALL = 'all';
 const PANEL_ID = 'reels-panel';
@@ -240,6 +270,15 @@ export function ReelsHost({
   const [activeLane, setActiveLane] = useState(ALL);
   const [index, setIndex] = useState(0);
   const [instantKey, setInstantKey] = useState(0);
+
+  /**
+   * CR-01: each post's settled like pair and comment count for THIS visit, keyed by the post id
+   * string exactly as the feed API returns it, so one post in two lanes is one entry. Like `soundOn`,
+   * it dies with the host and is never persisted.
+   */
+  const [interactions, setInteractions] = useState<Record<string, ReelInteraction>>({});
+  /** The number of the latest like request per post: only that request's answer is recorded. */
+  const likeSeq = useRef(new Map<string, number>());
 
   const lane = laneStates[activeLane] ?? EMPTY_LANE;
   const items = lane.items;
@@ -647,6 +686,28 @@ export function ReelsHost({
     toast.show({ tone: 'error', message: genericError });
   }, [toast, genericError]);
 
+  /**
+   * The feed's like action, remembered (CR-01). Only an `ok` answer to the post's LATEST request is
+   * written into the map, whether or not its page is still mounted; a refusal writes nothing and
+   * the outcome goes back unchanged, so the page's engine reverts exactly as the card's does. A
+   * rejection is not caught: it must reach the engine.
+   */
+  const trackLike = useCallback(
+    async (postId: string, nextLiked: boolean): Promise<LikeOutcome> => {
+      const seq = (likeSeq.current.get(postId) ?? 0) + 1;
+      likeSeq.current.set(postId, seq);
+      const outcome = nextLiked ? await onLike(postId) : await onUnlike(postId);
+      if (outcome.ok && likeSeq.current.get(postId) === seq) {
+        const settled: LikeState = { liked: outcome.liked, likeCount: outcome.likeCount };
+        setInteractions((map) => ({ ...map, [postId]: { ...map[postId], like: settled } }));
+      }
+      return outcome;
+    },
+    [onLike, onUnlike],
+  );
+  const onLikeTracked = useCallback((postId: string) => trackLike(postId, true), [trackLike]);
+  const onUnlikeTracked = useCallback((postId: string) => trackLike(postId, false), [trackLike]);
+
   const overlayLabels = useMemo<ReelOverlayLabels>(
     () => ({
       railAuthor: labels.railAuthor,
@@ -771,12 +832,12 @@ export function ReelsHost({
     if (!view) return null;
     return (
       <ReelOverlay
-        view={view}
+        view={withInteraction(view, interactions[view.id])}
         current={state.current}
         locale={locale}
         labels={overlayLabels}
-        onLike={onLike}
-        onUnlike={onUnlike}
+        onLike={onLikeTracked}
+        onUnlike={onUnlikeTracked}
         onComment={onComment}
         onShare={onShare}
         onError={onLikeError}

@@ -459,6 +459,25 @@ test.describe('05.3 Reels', () => {
     // A double tap never also pauses (UI-D-86): no play badge came up.
     await expect(page.getByTestId('reels-play-badge')).toHaveCount(0);
 
+    // CR-01: the like survives its page leaving the ±1 window. Two videos on, page 0 holds no
+    // heart at all; coming back, it is remounted from the host's per-post state and reads liked,
+    // first as a neighbour, then as the current page — and a remount sends nothing.
+    await drag(page, -100);
+    await expectVideo(page, 2);
+    await drag(page, -100);
+    await expectVideo(page, 3);
+    await expect(page.locator('[data-reel-page="0"] [data-like-state]')).toHaveCount(0);
+    await drag(page, 100);
+    await expectVideo(page, 2);
+    await expect(page.locator('[data-reel-page="0"] [data-like-state]')).toHaveAttribute(
+      'data-like-state',
+      'liked',
+    );
+    await drag(page, 100);
+    await expectVideo(page, 1);
+    await expect(heart).toHaveAttribute('data-like-state', 'liked');
+    expect(likeRequests).toBe(1);
+
     // Planning decision 3 of plan 01: back to Início THROUGH THE TAB, the same post reads liked.
     await nav(page, mobile).getByRole('link', { name: NAV.home }).click();
     await expect(page).toHaveURL(/\/inicio$/);

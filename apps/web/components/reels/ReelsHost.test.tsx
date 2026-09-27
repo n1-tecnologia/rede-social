@@ -900,3 +900,60 @@ describe('ReelsHost — the comment sheet over Reels (UI-D-90, D-59, D-82)', () 
     expect(currentPage().querySelector('[data-reel-count="comment"]')?.textContent).toBe('1');
   });
 });
+
+/* ── Per-post interaction state across remounts (CR-01, D-128, REELS-07) ─────────────────────── */
+
+/** Page `k` of the active lane's pager (it holds no overlay outside the ±1 window). */
+function pageAt(k: number): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-reel-page="${k}"]`);
+}
+
+/** Page `k`'s heart, found through the DOM because a neighbour page is `aria-hidden`. */
+function heartOn(k: number): HTMLElement | null {
+  return pageAt(k)?.querySelector<HTMLElement>('[data-like-state]') ?? null;
+}
+
+/** The drawn rail count of page `k` (`''` draws nothing, UI-D-87). */
+function countOn(k: number, which: 'like' | 'comment'): string | null | undefined {
+  return pageAt(k)?.querySelector(`[data-reel-count="${which}"]`)?.textContent;
+}
+
+describe('ReelsHost — per-post interaction state across remounts (CR-01)', () => {
+  it('CR-01: a like survives its page leaving the ±1 window and coming back', async () => {
+    const like = vi.fn(async () => ({ ok: true, liked: true, likeCount: 1 }) as const);
+    const unlike = vi.fn(async () => ({ ok: true, liked: false, likeCount: 0 }) as const);
+    renderHost({ onLike: like, onUnlike: unlike });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(like).toHaveBeenCalledTimes(1);
+
+    // Two pages away: page 0 holds no overlay at all (the boundary, REELS_MOUNT_RADIUS + 1).
+    await press('ArrowDown');
+    await press('ArrowDown');
+    expect(position()).toBe('Vídeo 3, de Autora 3');
+    expect(heartOn(0)).toBeNull();
+
+    // One page away: page 0 is mounted again, as an inert neighbour, from the host's state.
+    await press('ArrowUp');
+    expect(heartOn(0)?.getAttribute('aria-pressed')).toBe('true');
+    expect(heartOn(0)?.getAttribute('data-like-state')).toBe('liked');
+    expect(countOn(0, 'like')).toBe('1');
+    expect(pageAt(0)?.hasAttribute('inert')).toBe(true);
+    expect(pageAt(0)?.getAttribute('aria-hidden')).toBe('true');
+
+    // Current again: a double tap acts on the host's state and sends nothing (D-128) …
+    await press('ArrowUp');
+    await act(async () => {
+      pagerProps.at(-1)?.onDoubleTap();
+    });
+    await flush();
+    expect(like).toHaveBeenCalledTimes(1);
+    // … and the rail's heart reads "unlike" and sends exactly one unlike.
+    fireEvent.click(screen.getByRole('button', { name: f('actions.unlike') }));
+    await flush();
+    expect(unlike).toHaveBeenCalledTimes(1);
+    expect(unlike).toHaveBeenCalledWith(postId(1));
+  });
+});
