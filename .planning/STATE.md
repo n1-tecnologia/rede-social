@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Events
 status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-09-27T18:25:49.308Z"
+stopped_at: Completed 06-04-PLAN.md
+last_updated: "2026-09-27T18:54:26.852Z"
 last_activity: 2026-09-27
-last_activity_desc: "06-03 complete: event_attendances + guard trigger, GET/PUT RSVP API, /eventos/[eventId] detail, SegmentedControl RSVP pair; sketch 006 approved (provisional) 2026-09-27"
-state_head: 24c4fe3d41872fa2a26cfbfe3c2988bc7d7de0cc
+last_activity_desc: "06-04 complete: GET /v1/events/{id}/edit, replacement PUT, guarded cancel/reactivate PATCH, event.updated/cancelled/reactivated, EventForm at /eventos/novo and /editar, the title-row create control and manage card"
+state_head: 024330ca2402ec9c7dc907338f2a96daba397888
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 98
-  completed_plans: 89
+  completed_plans: 90
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 6 (Events) — EXECUTING
-Plan: 3 of 9 complete (06-01, 06-02, 06-03); Wave 3 next (06-04)
-Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair waits on 01.1
-Last activity: 2026-09-27 — 06-03 complete: event_attendances + app.event_attendance_guard(), GET /v1/events/{id} and PUT /v1/events/{id}/rsvp, /eventos/[eventId] detail page, @tria/ui SegmentedControl and the EventActions RSVP island; EVENT-02/EVENT-03 stay Pending until 06-08/06-09
+Plan: 4 of 9 complete (06-01, 06-02, 06-03, 06-04); 06-05 next
+Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair and the event form waits on 01.1
+Last activity: 2026-09-27 — 06-04 complete: the manage-only edit read in tenant wall clock, PUT /v1/events/{id} (whole-event replacement, format switch through the deferred FK, is-distinct-from no-op), PATCH /v1/events/{id} cancel/reactivate, the three Phase 7 events, EventForm at /eventos/novo and /eventos/[eventId]/editar, the /eventos create control and the Gerenciar evento card; EVENT-01 stays Pending until 06-09
 
-Progress: [██████████████████░░] 89/98 plans ([░░░░░░░░░░] 0%)
+Progress: [██████████████████░░] 90/98 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -149,6 +149,7 @@ Progress: [██████████████████░░] 89/98 p
 | Phase 06 P02 | 18min | 2 tasks | 3 files |
 | Phase 06 P01 | 49 min | 3 tasks | 54 files |
 | Phase 06 P03 | 164min (~40min active) | 3 tasks | 44 files |
+| Phase 06 P04 | 25 min | 3 tasks | 31 files |
 
 ## Accumulated Context
 
@@ -470,6 +471,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-03: optimistic RSVP press is an override keyed to the server answer it replaced ({value, from}), so success holds the new answer until the refresh lands; attendance_locked toasts the generic failure and refreshes
 - [Phase 06]: 06-03: sketch 006 approval (provisional) was written into its README by the orchestrator on Igor's instruction ('aprovo pode continuar'), commit 239bd88; the executor only re-ran the precondition grep
 - [Phase 06]: 06-03: EVENT-02 and EVENT-03 stay Pending: requirements.ready-ids 0/2 because 06-08 and 06-09 also declare them
+- [Phase 06]: 06-04: PUT /v1/events/{id} is a whole-event replacement answering the member-facing summary (no URL); only the manage-guarded edit read carries meetingUrl
+- [Phase 06]: 06-04: no-op detection is two is-distinct-from UPDATEs after a for-update lock; a URL-only change still emits event.updated with timesChanged false
+- [Phase 06]: 06-04: the edit form never prefills the end (the stored end is the admin's choice); cancel/reactivate from the form land on the detail, from the banner they refresh
 
 ### Pending Todos
 
@@ -527,6 +531,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T18:25:26.663Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-09-27T18:54:26.750Z
+Stopped at: Completed 06-04-PLAN.md
 Resume file: None
