@@ -255,6 +255,39 @@ export async function moveEventStartSeconds(eventId: string, seconds: number): P
      where id = ${eventId}::uuid`;
 }
 
+/**
+ * 06-09: moves BOTH ends of an event relative to the DATABASE's `now()` (negative = the past), in one
+ * statement so `events_window_chk` sees the new pair. The phase smoke's "over time" step: an event
+ * the admin created for next week is, a moment later, an event that ended an hour ago, and the
+ * member's Passados has to list it (the guard trigger polices attendance writes only).
+ */
+export async function moveEventWindow(
+  eventId: string,
+  startsInMinutes: number,
+  endsInMinutes: number,
+): Promise<void> {
+  await sql()`
+    update public.events
+       set starts_at = now() + make_interval(mins => ${startsInMinutes}),
+           ends_at = now() + make_interval(mins => ${endsInMinutes}),
+           updated_at = now()
+     where id = ${eventId}::uuid`;
+}
+
+/**
+ * 06-09: sets a tenant's `tenants.timezone` and returns the value it replaced, so the caller can put
+ * it back in a `finally`. The bootstrap reads the column on every request (no cache), which is what
+ * lets the phase smoke switch the seeded tenant to `America/Manaus` for one reload.
+ */
+export async function setTenantTimezone(slug: string, timeZone: string): Promise<string> {
+  const before = await sql()<{ timezone: string }[]>`
+    select timezone from public.tenants where slug = ${slug}`;
+  const previous = before[0]?.timezone;
+  if (!previous) throw new Error(`no tenant ${slug}`);
+  await sql()`update public.tenants set timezone = ${timeZone} where slug = ${slug}`;
+  return previous;
+}
+
 /** 06-08: cancels an event through the superuser connection (the admin UI is 06-04's spec). */
 export async function cancelEventNow(eventId: string): Promise<void> {
   await sql()`
