@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Events
 status: executing
-stopped_at: Completed 06-06-PLAN.md
-last_updated: "2026-09-27T19:58:08.078Z"
+stopped_at: Completed 06-07-PLAN.md
+last_updated: "2026-09-27T20:26:08.081Z"
 last_activity: 2026-09-27
-last_activity_desc: "06-06 complete: SECURITY DEFINER app.events_enter (D-207 gate at click time, online check-in inside the window, URL only on forward/recorded/already), POST /v1/events/{id}/enter, event.checked_in via online, the /eventos/{id}/entrar route handler (prefetch and RSC 204, 303 to the stored https URL) and aviso refusal page, the online action-zone rows, calendar links that survive a login, and the production-build prefetch proof"
-state_head: 93cd2c2c95a2bf3db03cbc81b46b4d54dcd6c088
+last_activity_desc: "06-07 complete: EVENT-05 Participantes. Three literal keyset chips (confirmed = going only, present with walk-ins, not_going) over their named indexes, one summary read with pendingConfirmedCount vs confirmedCount and the admin-only door code, D-217 regeneration (always a new code, online refused), the /eventos/{id}/participantes screen with the code card, counted chips, walk-in tags and removed members, and the manage-card Participantes row"
+state_head: d1e4c7a2d3f715ebb74d048b61b4bc5d2f56393d
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 98
-  completed_plans: 92
+  completed_plans: 93
   percent: 0
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 6 (Events) — EXECUTING
-Plan: 6 of 9 complete (06-01, 06-02, 06-03, 06-04, 06-05, 06-06); 06-07 next
-Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair, the event form, the check-in ticket and the online Entrar / calendar hand-off waits on 01.1
-Last activity: 2026-09-27 — 06-06 complete: EVENT-04 online. `app.events_enter` (SECURITY DEFINER, the 06-05 posture) decides the D-207 gate at the instant of the tap: `forward` before the window after a Vou (nothing recorded), `confirm_first` otherwise, `recorded` (checked_in / walk_in via online) or `already` inside the window, `ended` / `cancelled`; the meeting URL leaves the database only on the three passing outcomes. `POST /v1/events/{id}/enter`, `event.checked_in` via online, pgTAP 142 facts 12-20, the `/eventos/{id}/entrar` route handler (204 to prefetch and RSC fetches, 303 to the stored https URL with no-store + no-referrer, never a destination from the request), the `/entrar/aviso` refusal page, the online action-zone rows, `isContinuablePath` widened for calendar links, and `events-prefetch.spec.ts` on the production build; EVENT-04 stays Pending until 06-08/06-09
+Plan: 7 of 9 complete (06-01, 06-02, 06-03, 06-04, 06-05, 06-06, 06-07); 06-08 next
+Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair, the event form, the check-in ticket, the online Entrar / calendar hand-off and Participantes (E11 chip overflow, the code at arm's length) waits on 01.1
+Last activity: 2026-09-27 — 06-07 complete: EVENT-05. `GET /v1/events/{id}/attendance` (three literal keysets: `confirmed` = going only, `present` = checked_in + walk_in with `walkIn`, `not_going`; in-lane 404 first; the list value never bound; a tampered cursor instant degrades to page 1) and `/attendance/summary` (pendingConfirmedCount vs confirmedCount, Pitfall 11; the in-person code through `event_secrets_staff_all`) under the literal `events.attendance.read`; `POST /v1/events/{id}/checkin-code` under `events.event.manage` (two distinct candidates, always a new code, online refused). pgTAP 141 plan 26 pins both chip plans by index name. `/eventos/{id}/participantes` (notFound() without the permission): the code card first, three counted chips that scroll at 320px, rows with the Sem confirmação tag in Presentes and Membro removido, paging/refresh, Gerar novo código behind a danger confirm; the detail's manage card gains the Participantes row. Open pilot question: should support_tenant see the code and list? EVENT-05 stays Pending until 06-08/06-09 (shared requirement)
 
-Progress: [███████████████████░] 92/98 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 93/98 plans (Phase 6: 7/9)
 
 ## Performance Metrics
 
@@ -152,6 +152,7 @@ Progress: [███████████████████░] 92/98 p
 | Phase 06 P04 | 25 min | 3 tasks | 31 files |
 | Phase 06 P05 | 29 min | 2 tasks | 36 files |
 | Phase 06 P06 | 25 min | 2 tasks | 29 files |
+| Phase 06 P07 | 23min | 2 tasks | 28 files |
 
 ## Accumulated Context
 
@@ -482,6 +483,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-06: app.events_enter (SECURITY DEFINER, 06-05 posture) forwards WITHOUT recording before the window for a going or already-present member, answers confirm_first otherwise, records checked_in/walk_in via online inside the window, and releases the meeting URL only on forward/recorded/already
 - [Phase 06]: 06-06: /eventos/{id}/entrar answers 204 no-store to Sec-Purpose/Purpose prefetch, Next-Router-Prefetch AND any RSC fetch — a server action's redirect() makes the Next server fetch the target with RSC: 1 and follow its redirects, which recorded the check-in server-side and made the deployment GET the admin-supplied meeting URL; every future side-effecting or externally-redirecting route handler must do the same
 - [Phase 06]: 06-06: isContinuablePath accepts /eventos/{uuid} and /eventos/{uuid}/entrar (lowercase only), so a logged-out calendar tap lands in the meeting after login, counted; Playwright routes only the first url of a redirect chain, so arrival at the meeting host is proved by the navigation request and redirectedFrom()
+- [Phase 06]: 06-07: regeneration is refused (bare 404) for an online event, and the new code never travels to the client; the control refreshes and the RSC summary read shows it
+- [Phase 06]: 06-07: support_tenant keeps no access to the door code or the attendee list in V1 (RESEARCH open question 1); widening is one manifest line plus one ALTER POLICY on event_secrets_staff_all, asked at the pilot UAT
+- [Phase 06]: 06-07: a keyset cursor's instant is regex-checked before ::timestamptz (a tampered n degrades to page 1); listEvents still has the latent gap
 
 ### Pending Todos
 
@@ -539,6 +543,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T19:57:50.120Z
-Stopped at: Completed 06-06-PLAN.md
+Last session: 2026-09-27T20:26:07.974Z
+Stopped at: Completed 06-07-PLAN.md
 Resume file: None

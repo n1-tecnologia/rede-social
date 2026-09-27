@@ -517,7 +517,7 @@ Plans:
   3. `admin_tenant` can see the attendance list per event with confirmed vs checked-in status.
   4. Member can add an event to their calendar via .ics download and a Google Calendar link.
 
-**Plans**: 6/9 plans executed
+**Plans**: 7/9 plans executed
 
 Plans:
 
@@ -544,7 +544,7 @@ Plans:
 
 **Wave 6**
 
-- [ ] 06-07-PLAN.md — `Participantes`: three keyset chips with counts, walk-in tag, the door code and its regeneration
+- [x] 06-07-PLAN.md — `Participantes`: three keyset chips with counts, walk-in tag, the door code and its regeneration
 
 **Wave 7**
 
@@ -674,7 +674,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
-| 6. Events | 6/9 | In Progress|  |
+| 6. Events | 7/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
