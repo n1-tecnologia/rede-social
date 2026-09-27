@@ -111,7 +111,10 @@ test.describe('the Comunidades tab and the /comunidades list (COMM-02, COMM-03)'
     // changed. It is reached by its catalog label (`communities.nav`), so a copy drift fails here.
     const tab = page.locator('nav').getByRole('link', { name: C.nav }).first();
     await expect(tab).toBeVisible();
-    await tab.click();
+    // Dispatched AT the tab: under `next dev` the dev overlay's `<nextjs-portal>` can sit over the
+    // phone BottomNav and intercept a coordinate click (06-01 deviation 8, 06-09). The tab is
+    // visible; its navigation is what this asserts.
+    await tab.dispatchEvent('click');
     await expect(page).toHaveURL(/\/comunidades$/);
 
     // The screen's only Title-role heading, plus the proto subheading beneath it.

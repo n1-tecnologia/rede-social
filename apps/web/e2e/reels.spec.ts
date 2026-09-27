@@ -279,7 +279,9 @@ test.describe('05.3 Reels', () => {
     // Every visit starts muted (D-126).
     await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toBeVisible();
 
-    await nav(page, mobile).getByRole('link', { name: NAV.home }).click();
+    // Dispatched AT the tab: under `next dev` the dev overlay's `<nextjs-portal>` sits over the
+    // phone BottomNav's first tab and intercepts a coordinate click (06-01 deviation 8, 06-09).
+    await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
     await expect(page).toHaveURL(/\/inicio$/);
     if (mobile) {
       await expect(page.locator('header:visible')).toHaveCount(1);
@@ -402,7 +404,9 @@ test.describe('05.3 Reels', () => {
 
     // D-126: the sound state lives for the visit. Leaving through the tab and coming back is a new
     // visit — muted, at video 1 of "Todos" (the guard against a route kept alive, RESEARCH A8).
-    await nav(page, mobile).getByRole('link', { name: NAV.home }).click();
+    // Dispatched AT the tab: under `next dev` the dev overlay's `<nextjs-portal>` sits over the
+    // phone BottomNav's first tab and intercepts a coordinate click (06-01 deviation 8, 06-09).
+    await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
     await expect(page).toHaveURL(/\/inicio$/);
     await nav(page, mobile).getByRole('link', { name: R.nav }).click();
     await expect(page).toHaveURL(/\/reels$/);
@@ -479,7 +483,9 @@ test.describe('05.3 Reels', () => {
     expect(likeRequests).toBe(1);
 
     // Planning decision 3 of plan 01: back to Início THROUGH THE TAB, the same post reads liked.
-    await nav(page, mobile).getByRole('link', { name: NAV.home }).click();
+    // Dispatched AT the tab: under `next dev` the dev overlay's `<nextjs-portal>` sits over the
+    // phone BottomNav's first tab and intercepts a coordinate click (06-01 deviation 8, 06-09).
+    await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
     await expect(page).toHaveURL(/\/inicio$/);
     const card = page.getByRole('article').filter({ hasText: caption });
     await expect(card.locator('[data-like-state]').first()).toHaveAttribute(

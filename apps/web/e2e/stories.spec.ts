@@ -1718,7 +1718,11 @@ test.describe('the Início manage screen (D-109, UI-D-72..76)', () => {
       .getByRole('button', { name: H.manage.edit.replace('{title}', RENAMED) })
       .click();
     await expect(editSheet(page)).toBeVisible();
-    await editSheet(page).getByRole('button', { name: H.edit.delete }).click();
+    // Dispatched AT the element: under `next dev` on the phone project, Next's dev overlay
+    // (`<nextjs-portal>`) intercepts the coordinate click on this button, the artifact 06-01 recorded
+    // for the BottomNav (06-09, closing the 06-08 deferred item). The button is visible; its handler is
+    // what this step exercises.
+    await editSheet(page).getByRole('button', { name: H.edit.delete }).dispatchEvent('click');
     const confirm = page.getByRole('dialog', { name: H.confirmDelete.title });
     await expect(confirm).toBeVisible();
     await expect(confirm.getByRole('button', { name: H.confirmDelete.cancel })).toBeVisible();
