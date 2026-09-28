@@ -4,9 +4,51 @@ Everything the pipeline reads, by name, per environment. Plans 01-10 (GitHub + V
 (Supabase + GCP) create exactly what is listed here — nothing more, nothing less. If a name is not in
 this file, no workflow reads it.
 
-Pipeline files: `.github/workflows/ci.yml`, `deploy-api.yml`, `seed-prod.yml`,
-`keepalive-staging.yml`, `apps/web/vercel.json`, `apps/api/Dockerfile`,
-`scripts/check-static-routes.sh` (build-output gate, Phase 2).
+Pipeline files: `.github/workflows/ci.yml`, `deploy-api.yml`, `apps/web/vercel.json`,
+`apps/api/Dockerfile`, `scripts/check-static-routes.sh` (build-output gate, Phase 2).
+
+## Decisions (2026-09-28)
+
+These deviate from the Phase 01.1 roadmap text (two Supabase projects, staging on every pull
+request, the old `main` default branch) and supersede the staging parts of D-11/D-15; the roadmap
+itself is not edited here.
+
+- **Production only, no staging.** No staging Supabase project, no `api-staging`/`worker-staging`
+  Cloud Run services, no `staging` GitHub environment. Pull requests run `ci.yml` only (its own
+  throwaway local Supabase stack) and get a Vercel Preview from the Git integration;
+  `deploy-api.yml` has no pull_request trigger and no staging job; `keepalive-staging.yml` was
+  removed.
+- **Production branch is `master`** (the Vercel Git integration tracks it); `ci.yml` and
+  `deploy-api.yml` trigger on it and the production job checks `refs/heads/master`.
+- **`PLATFORM_HOST` = `rede-social-woad.vercel.app`** (no custom domain yet). The hosted auth
+  `site_url` and the single explicit redirect entry
+  `https://rede-social-woad.vercel.app/auth/confirm**` live in `supabase/config.toml`
+  `[remotes.production.auth]` (WR-09), and `otp_expiry = 86400` in
+  `[remotes.production.auth.email]`.
+- **E-mail / Resend deferred.** The Send Email Hook is disabled on the hosted project by
+  `[remotes.production.auth.hook.send_email]` `enabled = false`, so hosted GoTrue never calls the
+  local hook URL and the push needs no `SEND_EMAIL_HOOK_SECRETS`. Until Resend lands the hosted
+  project uses Supabase's default e-mail service and `RESEND_API_KEY` is not needed; when it lands,
+  `docs/deploy/auth-mail.md` applies to production only (its staging column/block does not).
+- **Production gate.** One required reviewer on the GitHub environment `production`. The
+  repository is public (owner `n1-tecnologia`), so protected environments are available and the
+  `workflow_dispatch` fallback is not needed.
+- **Identifiers** (not secrets):
+  - Supabase: project `rede-social`, ref `qjjhtduxquvlfppybpqq`, region `sa-east-1`, pooler
+    `aws-0-sa-east-1`.
+  - GCP: project `api-dere-social` (number `253040968821`), region `southamerica-east1`; service
+    accounts `rede-social-deploy` (Actions) / `rede-social-runtime` (Cloud Run); Workload Identity
+    pool `github` with provider `repo`.
+  - Vercel: project `prj_oPNJ2NKXw4j2RkAN4gtC8vbmqyZa` (team `n1-tecnologia`, Root Directory
+    `apps/web`, functions region `gru1`).
+- **One-time bootstrap from the developer machine (2026-09-28).** The first
+  `supabase db push --include-roles`, the `api_user` login password, and the super_admin created
+  directly (Auth user + `platform_admins` row, no tenants). This is the single recorded exception to
+  "Migrations never run from a developer machine"; every later migration goes through
+  `deploy-api.yml`. `seed-prod.yml` was removed for the same reason: `pnpm db:seed` creates the demo
+  tenants, and production must only ever hold the super_admin.
+- **GCP billing blocks Cloud Run.** At the time of writing the billing account is closed, so the
+  `api` and `worker` services cannot be deployed until billing is restored.
 
 ## Documents
 
@@ -21,20 +63,23 @@ Pipeline files: `.github/workflows/ci.yml`, `deploy-api.yml`, `seed-prod.yml`,
 
 ## Environments (D-11, D-15)
 
-| | Local | PR / staging | Production |
-|---|---|---|---|
-| Trigger | `supabase start` + `pnpm dev` | any pull request | push to `main` (after approval) |
-| Web | `localhost:3000` | Vercel **Preview** (per-PR URL) | Vercel **Production** (`app.seusistema.com`) |
-| API | `localhost:8787` | Cloud Run `api-staging` | Cloud Run `api` |
-| Worker | same process (`ROLE=worker`) | Cloud Run `worker-staging` | Cloud Run `worker` |
-| Database | Supabase CLI stack | Supabase `rede-social-staging` | Supabase `rede-social-prod` |
-| Seed | `pnpm db:seed` | automatic (staging job) | manual `seed-prod.yml` only (D-14) |
-| GCP region | — | `southamerica-east1` | `southamerica-east1` |
-| Supabase region | — | `sa-east-1` | `sa-east-1` |
+| | Local | Production |
+|---|---|---|
+| Trigger | `supabase start` + `pnpm dev` | push to `master` (after the `production` approval) |
+| Web | `localhost:3000` | Vercel **Production** (`rede-social-woad.vercel.app`) |
+| API | `localhost:8787` | Cloud Run `api` |
+| Worker | same process (`ROLE=worker`) | Cloud Run `worker` |
+| Database | Supabase CLI stack | Supabase `rede-social` (`qjjhtduxquvlfppybpqq`) |
+| Seed | `pnpm db:seed` | none: super_admin only, created once by hand (Decisions 2026-09-28), never `pnpm db:seed` |
+| GCP region | — | `southamerica-east1` |
+| Supabase region | — | `sa-east-1` |
+
+Pull requests run `ci.yml` only and get a Vercel Preview; there is no staging environment
+(Decisions 2026-09-28).
 
 One Artifact Registry repository, `rede-social`, in `southamerica-east1`; the image is
 `southamerica-east1-docker.pkg.dev/<GCP_PROJECT_ID>/rede-social/api:<sha>` and serves both Cloud Run
-services of both environments (`ROLE=api` / `ROLE=worker`, D-18).
+services (`ROLE=api` / `ROLE=worker`, D-18).
 
 ## GitHub repository variables (not secret)
 
@@ -44,39 +89,32 @@ services of both environments (`ROLE=api` / `ROLE=worker`, D-18).
 | `DEPLOY_SA` | `rede-social-deploy@<project>.iam.gserviceaccount.com` | `deploy-api.yml` (the identity Actions impersonates) |
 | `RUNTIME_SA` | `rede-social-runtime@<project>.iam.gserviceaccount.com` | `deploy-api.yml` — passed as `--service-account=` on **every** `deploy-cloudrun@v3` step. This is the account Cloud Run *runs as*; it holds `roles/secretmanager.secretAccessor`, so without it the mounted Secret Manager values are unreadable and the service crashes on boot. Created in 01-11. |
 | `GCP_PROJECT_ID` | `rede-social-471200` | `deploy-api.yml` (image reference) |
-| `API_STAGING_URL` | `https://api-staging-xxxx.southamerica-east1.run.app` | `keepalive-staging.yml` |
 
-## GitHub environment variables (not secret) — `staging` and `production`
+## GitHub environment variables (not secret) — `production`
 
-Consumed by the seed steps so the seeded tenants register their real hostnames in `tenant_domains`
-instead of the `*.localhost` defaults (D-24). Values are set in 01-11.
+No workflow reads any since 2026-09-28: the seed steps that read `PLATFORM_HOST`,
+`TENANT_DEMO_HOST` and `TENANT_LAB_HOST` were removed with the staging job and the production seed
+workflow. The web app and the API read `PLATFORM_HOST` from their own runtime env (the Vercel and
+Cloud Run tables below).
 
-| Name | staging | production |
-|---|---|---|
-| `PLATFORM_HOST` | staging platform host | `app.seusistema.com` |
-| `TENANT_DEMO_HOST` | `demo-staging.seusistema.com` | `demo.seusistema.com` |
-| `TENANT_LAB_HOST` | `lab-staging.seusistema.com` | `lab.seusistema.com` |
+## GitHub environment secrets — `production`
 
-## GitHub environment secrets — `staging` and `production`
-
-Same names in both environments, different values. Environment-scoped so a job that does not declare
-`environment:` cannot read them, and fork pull requests get none (the workflows use `pull_request`,
-never `pull_request_target`).
+Environment-scoped to `production`, so a job that does not declare `environment: production` cannot
+read them, and fork pull requests get none (`ci.yml` uses `pull_request`, never
+`pull_request_target`).
 
 | Name | Used for |
 |---|---|
 | `SUPABASE_ACCESS_TOKEN` | `supabase link` / `db push` / `config push` |
-| `SUPABASE_PROJECT_ID` | project ref of `rede-social-staging` / `rede-social-prod` |
+| `SUPABASE_PROJECT_ID` | project ref of `rede-social` (`qjjhtduxquvlfppybpqq`) |
 | `SUPABASE_DB_PASSWORD` | `supabase db push` (the project's `postgres` password) |
 | `SUPABASE_SESSION_POOLER_URL` | `psql` URL (session pooler, port 5432) for the `alter role` step |
-| `API_DB_PASSWORD` | password set on `api_user` after `db push --include-roles`; the same value is inside the `api-database-url-*` Secret Manager secrets |
-| `SUPABASE_URL` | seed step (`https://<ref>.supabase.co`) |
-| `SUPABASE_SERVICE_KEY` | seed step (service role key — never reaches the browser) |
-| `DATABASE_URL` | seed step (`api_user` through the pooler) |
-| `RESEND_API_KEY` | `supabase config push` (Custom SMTP, D-13) |
-| `SEED_PASSWORD` | initial password of the seeded tenant users |
-| `SUPER_ADMIN_EMAIL` | `superadmin@rede-social.test` |
-| `SUPER_ADMIN_PASSWORD` | initial `super_admin` password |
+| `API_DB_PASSWORD` | password set on `api_user` after `db push --include-roles`; the same value is inside the `api-database-url-prod` Secret Manager secret |
+| `RESEND_API_KEY` | `supabase config push` (Custom SMTP, D-13) — not needed while e-mail is deferred |
+
+`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATABASE_URL`, `SEED_PASSWORD`, `SUPER_ADMIN_EMAIL` and
+`SUPER_ADMIN_PASSWORD` were read only by the removed seed steps; the super_admin was created by hand
+(Decisions 2026-09-28).
 
 ## GCP Secret Manager secrets (mounted into Cloud Run)
 
@@ -84,10 +122,6 @@ Readable by `RUNTIME_SA` only. Names are referenced literally in `deploy-api.yml
 
 | Secret | Mounted as | Service |
 |---|---|---|
-| `api-database-url-staging` | `DATABASE_URL` | `api-staging`, `worker-staging` |
-| `worker-database-url-staging` | `BOSS_DATABASE_URL` | `worker-staging` (session pooler, port 5432) |
-| `supabase-service-key-staging` | `SUPABASE_SERVICE_KEY` | both staging services |
-| `supabase-url-staging` | `SUPABASE_URL` | both staging services |
 | `api-database-url-prod` | `DATABASE_URL` | `api`, `worker` |
 | `worker-database-url-prod` | `BOSS_DATABASE_URL` | `worker` |
 | `supabase-service-key-prod` | `SUPABASE_SERVICE_KEY` | both production services |
@@ -112,14 +146,14 @@ Root Directory `apps/web`; Build Command `turbo build`; Ignored Build Step
 
 | Variable | Preview | Production |
 |---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | staging project URL | production project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | staging publishable key | production publishable key |
-| `API_URL` | `api-staging` Cloud Run URL | `api` Cloud Run URL |
-| `PLATFORM_HOST` | *(unset — every Preview host is a generic host, D-21)* | `app.seusistema.com` |
+| `NEXT_PUBLIC_SUPABASE_URL` | not provisioned (no staging project) | production project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | not provisioned (no staging project) | production publishable key |
+| `API_URL` | not provisioned (no staging project) | `api` Cloud Run URL |
+| `PLATFORM_HOST` | *(unset — every Preview host is a generic host, D-21)* | `rede-social-woad.vercel.app` |
 
 No `SITE_URL` anywhere: every absolute URL, including the password-recovery `redirect_to`, is derived
 from the request origin (D-22). Only publishable keys ever reach Vercel — the service key lives in
-Secret Manager and GitHub environment secrets.
+Secret Manager only.
 
 **Password-recovery origin (WR-09).** `apps/web/app/(auth)/esqueci-senha/actions.ts` builds the
 `redirect_to` from `X-Forwarded-Host`/`Host`, but honours it only when `proxy.ts` classified the host
@@ -131,9 +165,11 @@ independent guard and must therefore be an **explicit per-domain list**
 never a wildcard host such as `https://**`. Since 02-09 (D-34) the per-domain
 `https://<host>/auth/confirm**` entries are **added by the API when a custom domain verifies and
 removed when it is detached** (`AUTH_ALLOW_LIST=supabase`, Management API `PATCH …/config/auth`
-`uri_allow_list`, one entry per host, never a wildcard); the platform host entry stays in
-`config.toml`. The list must still be **reviewed after every `supabase config push`**: a push
-re-applies `[auth] additional_redirect_urls` from `config.toml` and can drop the runtime entries.
+`uri_allow_list`, one entry per host, never a wildcard); the platform host entry
+(`https://rede-social-woad.vercel.app/auth/confirm**`) lives in `config.toml` under
+`[remotes.production.auth]`. The list must still be **reviewed after every `supabase config push`**:
+a push re-applies `[auth] additional_redirect_urls` from `config.toml` and can drop the runtime
+entries.
 After each push open every verified domain in the platform panel and press "Verificar agora" — it
 re-adds the entry idempotently (Phase 8 adds a reconcile command that does this for every host).
 
@@ -154,7 +190,7 @@ below (Phase 01.1).
 Variables read by the **`api` and `worker`** Cloud Run services (both run the same image; the
 worker runs the poller, the API answers "Verificar agora"):
 
-| Variable | staging | production | Source |
+| Variable | staging (not provisioned) | production | Source |
 |---|---|---|---|
 | `DOMAIN_PROVIDER` | `fake` (Preview deployments carry no customer domains) | `vercel` | plain env |
 | `VERCEL_TOKEN` | — | Secret Manager `vercel-token-prod` | Vercel → Team Settings → Tokens (team-scoped token) |
@@ -162,8 +198,8 @@ worker runs the poller, the API answers "Verificar agora"):
 | `VERCEL_TEAM_ID` | — | team id | Vercel → Team Settings → General; plain env |
 | `AUTH_ALLOW_LIST` | `local` | `supabase` | plain env |
 | `SUPABASE_PAT` | — | Secret Manager `supabase-pat-prod` | Supabase → Account → Access Tokens: a **dedicated** token with `auth:write` — not the CI `SUPABASE_ACCESS_TOKEN` |
-| `SUPABASE_PROJECT_REF` | — | `rede-social-prod` reference id | same value as the GitHub secret `SUPABASE_PROJECT_ID`; plain env |
-| `PLATFORM_HOST` | staging platform host | `app.seusistema.com` | now also read by the API so an attach of the platform host is refused (`400 { host: "platform_host" }`) |
+| `SUPABASE_PROJECT_REF` | — | `qjjhtduxquvlfppybpqq` (project `rede-social`) | same value as the GitHub secret `SUPABASE_PROJECT_ID`; plain env |
+| `PLATFORM_HOST` | staging platform host | `rede-social-woad.vercel.app` | now also read by the API so an attach of the platform host is refused (`400 { host: "platform_host" }`) |
 
 `assertProductionEnv()` (kernel `env.ts`) refuses `DOMAIN_PROVIDER=vercel` / `AUTH_ALLOW_LIST=supabase`
 without their credentials at boot, so a half-configured revision fails its startup probe instead of
@@ -184,7 +220,7 @@ rewrite.
 Variables read by the **`api` and `worker`** Cloud Run services (both run the same image; the API
 answers the webhook and mints upload targets, the worker applies the events):
 
-| Variable | staging | production | Source |
+| Variable | staging (not provisioned) | production | Source |
 |---|---|---|---|
 | `VIDEO_PROVIDER` | `fake` | `mux` (only after the runbook item below) | plain env |
 | `MUX_TOKEN_ID` | — | Secret Manager `mux-token-id-prod` | Mux → Settings → Access Tokens (Video read+write) |
@@ -294,10 +330,10 @@ the dashboard at account creation** (step 1 of the runbook).
 
 ## Supabase hosted auth settings (Phase 2)
 
-**Email OTP Expiration = 86400** (24 h) on the hosted projects — Dashboard → Authentication →
-Emails, or `[remotes.<env>.auth.email] otp_expiry = 86400` in `supabase/config.toml` pushed by
-`supabase config push` — so a first `admin_tenant` can open the invite link within a day of the
-domain verifying (02-10). The local stack keeps `otp_expiry = 3600` (`[auth.email]`), which the
+**Email OTP Expiration = 86400** (24 h) on the hosted project — Dashboard → Authentication →
+Emails, or `[remotes.production.auth.email] otp_expiry = 86400`, committed in `supabase/config.toml`
+on 2026-09-28 and applied by the next `supabase config push` — so a first `admin_tenant` can open
+the invite link within a day of the domain verifying (02-10). The local stack keeps `otp_expiry = 3600` (`[auth.email]`), which the
 e2e suite never approaches. The Send Email Hook values (secret, transport, rotation) live in
 `docs/deploy/auth-mail.md`.
 
@@ -382,14 +418,16 @@ that disappears (`route moved or renamed — update REQUIRED_KEYS`) is also a fa
 - `scripts/check-static-routes.sh` against a Vercel build (`vercel build` locally, then
   `NEXT_DIR=apps/web/.next bash scripts/check-static-routes.sh`, or the deployment's `.next`) —
   CI proves the identical `next build` on the runner; the Vercel parity run is the hosted step.
-- Staging smoke on the platform-owned seed hosts (D-24: `TENANT_DEMO_HOST` / `TENANT_LAB_HOST`) with
+- *Not runnable as written while production-only (no staging, no seed tenants in production —
+  Decisions 2026-09-28).* Staging smoke on the platform-owned seed hosts (D-24: `TENANT_DEMO_HOST` / `TENANT_LAB_HOST`) with
   `PLAYWRIGHT_BASE_URL=https://<TENANT_DEMO_HOST>` (+ `PLAYWRIGHT_API_URL` for the by-host reads):
   `branding.spec.ts`'s remote-capable tests are the ones without `isRemote` skips.
-- `otp_expiry = 86400` on the hosted projects (section above).
+- `otp_expiry = 86400` on the hosted project — now committed as `[remotes.production.auth.email]`
+  in `supabase/config.toml`; it lands with the next `supabase config push` (section above).
 
 ## Production gate (D-12)
 
-Three conditions must hold **on the same `main` SHA** before a single production migration runs:
+Three conditions must hold **on the same `master` SHA** before a single production migration runs:
 
 1. `checks` — `deploy-api.yml` calls `./.github/workflows/ci.yml` as a job (`workflow_call`), so the
    lint (+ UI literal guard), typecheck/build/unit, build-output gate, boundary, lane-guard, pgTAP,
@@ -397,39 +435,42 @@ Three conditions must hold **on the same `main` SHA** before a single production
 2. `build` — the image for that SHA is in Artifact Registry.
 3. `production` — one required reviewer approves the GitHub Environment (configured in 01-10).
 
-`migrate-and-deploy-prod` declares `needs: [checks, build]`, so a **direct push to `main` by an
+`migrate-and-deploy-prod` declares `needs: [checks, build]`, so a **direct push to `master` by an
 admin goes through the same `checks` job**; branch protection is a convenience, not the gate. Inside
 the job the order is fixed: migrations → API → worker. `concurrency: deploy-<ref>` with
 `cancel-in-progress: false` means two pushes queue instead of migrating in parallel.
 
 If the GitHub plan blocks protected environments on a private repository (RESEARCH §Pitfall 5), use
 the commented `workflow_dispatch` fallback in `deploy-api.yml`: the manual dispatch *is* the
-approval, `needs: [checks, build]` stays.
+approval, `needs: [checks, build]` stays. Not needed: the repository is public and `production` has
+a required reviewer (Decisions 2026-09-28).
 
 **Production is never a promoted preview.** `NEXT_PUBLIC_*` values are inlined at build time, so a
-Preview build carries staging Supabase URLs and keys forever; promoting it would point production
-users at the staging database. Production is always a fresh build of `main`.
+Preview build carries the Preview environment's values forever; promoting it would ship them to
+production users. Production is always a fresh build of `master`.
 
 ## Runbook
 
-**Staging is paused (Supabase Free plan).** Free projects pause after a week of inactivity. Unpause
-in the Supabase dashboard (`rede-social-staging` → Restore), then re-run `keepalive-staging.yml`
-manually. The cron (`0 9 * * 1,4`) hits `/v1/health?deep=1`, which runs `select 1` through `api_user`,
-so normal weeks never reach the timer.
+**Production is paused (Supabase Free plan).** Free projects pause after a week of inactivity.
+There is no keepalive workflow for production (the staging one was removed with staging); restore
+it in the Supabase dashboard (`rede-social` → Restore).
 
 **Rotate the `api_user` password.** Change `API_DB_PASSWORD` in the environment secrets, update the
 matching `api-database-url-*` / `worker-database-url-*` Secret Manager versions, then re-run the
 deploy workflow: the `alter role api_user with login password` step and the new secret version land
 together. Never edit the role by hand in the dashboard without updating the secrets.
 
-**Seed production.** Actions → *Seed production* → *Run workflow*. It is idempotent, so a second run
-is safe. It is the only path that writes seed data to production (D-14).
+**Never seed production.** Production holds only the super_admin, created by hand on 2026-09-28
+(Decisions 2026-09-28). `pnpm db:seed` creates the demo tenants and must never run against it;
+tenants are created from the platform panel.
 
 **Roll back an API release.** `gcloud run services update-traffic api --to-revisions=<previous>=100
 --region=southamerica-east1`. Migrations are not rolled back — write forward-compatible migrations.
 
 **Migrations never run from a developer machine.** `supabase db push` against a remote project is a
-workflow step only; locally use `pnpm db:reset`.
+workflow step only; locally use `pnpm db:reset`. The single exception is the one-time bootstrap of
+2026-09-28 (the first `supabase db push --include-roles` and the `api_user` password, see
+Decisions); every later migration goes through `deploy-api.yml`.
 
 **Attach a real customer domain end-to-end (hosted proof, deferred from Phase 2 to the Phase 01.1
 runbook).** The Vercel and Supabase Management adapters ship unit-tested against the documented
