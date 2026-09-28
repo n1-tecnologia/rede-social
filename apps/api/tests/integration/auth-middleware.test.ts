@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { TENANT_HOST_HEADER } from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
+import { TENANT_HOST_HEADER } from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
 import { generateKeyPair, importJWK, type JWK, SignJWT } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -19,7 +19,7 @@ type Envelope = { error: { code: string; message: string; details?: { tenantName
 
 const PASSWORD = 'Segredo123';
 const stamp = Date.now();
-const MEMBER = `e2e-auth-${stamp}@tria-demo.local`;
+const MEMBER = `e2e-auth-${stamp}@rede-demo.local`;
 const SUSPENDED_MEMBER = `e2e-auth-susp-${stamp}@suspended.local`;
 const SUSPENDED_SLUG = `e2e-susp-${stamp}`.slice(0, 40);
 
@@ -82,7 +82,7 @@ async function localSigningKey(): Promise<{
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
 
-  memberId = await createMember(MEMBER, 'tria-demo');
+  memberId = await createMember(MEMBER, 'rede-demo');
   memberToken = await signInAs(MEMBER, PASSWORD);
 
   // A tenant of its own, so flipping `tenants.status` cannot disturb the seeded tenants.
@@ -113,9 +113,9 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
     expect(res.status).toBe(403);
     const body = (await res.json()) as Envelope;
     expect(body.error.code).toBe('MEMBERSHIP_BLOCKED');
-    expect(body.error.details?.tenantName).toBe('TRIA Demo');
+    expect(body.error.details?.tenantName).toBe('Rede Demo');
     // Only the member's own tenant may appear anywhere in the body (D-09 prohibition).
-    expect(JSON.stringify(body)).not.toContain('TRIA Lab');
+    expect(JSON.stringify(body)).not.toContain('Rede Lab');
     expect(JSON.stringify(body)).not.toContain('Comunidade Suspensa');
 
     await setStatus(MEMBER, 'active');
@@ -150,7 +150,7 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
     const body = (await res.json()) as Envelope;
     expect(body.error.code).toBe('TENANT_HOST_MISMATCH');
     expect(body.error).not.toHaveProperty('details');
-    expect(JSON.stringify(body)).not.toContain('TRIA');
+    expect(JSON.stringify(body)).not.toContain('Rede Social');
   });
 
   it('c. a member of a SUSPENDED tenant gets TENANT_SUSPENDED (D-32), distinct from a blocked member', async () => {
@@ -196,7 +196,7 @@ describe('requireAuth — AUTH-06 blocking, TENANT-01 host, token rejection', ()
       expect(res.status).toBe(403);
       const body = (await res.json()) as Envelope;
       expect(body.error.code).toBe('MEMBERSHIP_INVITED');
-      expect(body.error.details?.tenantName).toBe('TRIA Demo');
+      expect(body.error.details?.tenantName).toBe('Rede Demo');
       // The two onboarding routes stay reachable: bootstrap (above) and accept-invite (its own
       // handler answers — here a 400 for the empty body, never the 403 of the scope rule).
       const accept = await api.request('/v1/me/accept-invite', {

@@ -1,4 +1,4 @@
-import { STORY_PERMISSIONS } from '@tria/module-stories/contracts';
+import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';

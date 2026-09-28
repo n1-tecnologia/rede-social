@@ -119,9 +119,9 @@ status: all_fixed
 - `pnpm db:reset && pnpm db:seed`, then `pnpm supabase test db`: 17 files, 518 tests, PASS.
 - `pnpm db:generate`: "No schema changes, nothing to migrate".
 - API integration: `events-checkin` (16), `events-attendance`, `isolation`, `events-admin`, `events` and `feed-query-budget` all pass.
-- `@tria/module-events` vitest: 89/89. `@tria/web` vitest: 942/942. API, module and web typecheck are clean. Biome is clean on every touched file. `scripts/check-ui-literals.sh` reports OK.
-- `VIDEO_PROVIDER=fake pnpm --filter @tria/web exec playwright test events.spec.ts` on a fresh reset and seed: 51 passed and 27 skipped (the skips are project-scoped by design). The first run caught the `maxlength="4"` pin, fixed in f41d960.
-- Cleanup: only `tria-demo` and `tria-lab` tenants remain, and nothing is listening on :3000, :3100, :8787, :8788 or :8790.
+- `@rede-social/module-events` vitest: 89/89. `@rede-social/web` vitest: 942/942. API, module and web typecheck are clean. Biome is clean on every touched file. `scripts/check-ui-literals.sh` reports OK.
+- `VIDEO_PROVIDER=fake pnpm --filter @rede-social/web exec playwright test events.spec.ts` on a fresh reset and seed: 51 passed and 27 skipped (the skips are project-scoped by design). The first run caught the `maxlength="4"` pin, fixed in f41d960.
+- Cleanup: only `rede-demo` and `rede-lab` tenants remain, and nothing is listening on :3000, :3100, :8787, :8788 or :8790.
 
 ## Out of scope (Info)
 

@@ -14,7 +14,7 @@ import {
   likeResultSchema,
   REPLIES_PAGE_SIZE,
   type UpdatePost,
-} from '@tria/module-feed/contracts';
+} from '@rede-social/module-feed/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';

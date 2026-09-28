@@ -15,7 +15,7 @@ export type ConsentLabels = {
 
 /**
  * The two D-03 / AUTH-04 consent rows: the tenant's rules (`#acceptRules`, with the "ver regras"
- * sheet) and TRIA's terms (`#acceptTerms`, with the legal links). Both unchecked by default, both
+ * sheet) and the platform's terms (`#acceptTerms`, with the legal links). Both unchecked by default, both
  * `required` — the browser refuses the submit without them and the action re-validates (`z.literal(true)`).
  * 44px-tall rows with a 20px brand-accented checkbox and a 14px wrapping label (UI-SPEC). The caller
  * supplies the hidden `rulesVersion` / `termsVersion` inputs and interpolates `{tenant}` into the

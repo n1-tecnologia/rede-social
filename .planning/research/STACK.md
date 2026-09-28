@@ -1,7 +1,7 @@
 # Stack Research
 
 **Domain:** Multi-tenant, white-label community / social-network SaaS (mobile-first PWA + responsive desktop)
-**Project:** TRIA Rede Social
+**Project:** Rede Social
 **Researched:** 2026-09-11
 **Confidence:** MEDIUM overall (every version verified against the npm registry on 2026-09-11; every architectural claim verified against current official docs; comparative/community claims tagged LOW)
 
@@ -149,7 +149,7 @@ supabase init && supabase start
 ### 1. PWA: service worker, installability, Web Push (Next 16 + Turbopack)
 
 - **Service worker:** `@serwist/turbopack` (`withSerwist(nextConfig)`), `app/sw.ts` with `defaultCache` runtime strategies, navigation preload, and an `/~offline` fallback page. Precache only the app shell; feed/media are network-first with short cache. Register the SW from a client component (`navigator.serviceWorker.register('/serwist/sw.js', { updateViaCache: 'none' })` as in the official guide) and serve it with `Cache-Control: no-store` via `headers()` in `next.config.ts`.
-- **Manifest:** keep a neutral `app/manifest.ts` (TRIA default) for the unauthenticated shell, and a **per-tenant manifest route** `app/m/[tenantSlug]/manifest.webmanifest/route.ts` that returns `name`, `short_name`, `theme_color`, `background_color`, `icons` from the tenant record. In the authenticated root layout, `generateMetadata` returns `manifest: '/m/<slug>/manifest.webmanifest'` and `icons: {...tenant icon URLs}`. `start_url: '/'` and `scope: '/'` stay identical (single origin; a user belongs to one tenant). Set `id: '/?tenant=<slug>'` so the OS treats tenants as distinct apps if a device ever installs two. Because Next caches `manifest.ts`/`icon.tsx` route handlers by default, put tenant data behind a route handler with `export const dynamic = 'force-dynamic'` (or `revalidateTag('tenant-<id>')` on branding change) rather than reading cookies inside `manifest.ts`.
+- **Manifest:** keep a neutral `app/manifest.ts` (Rede Social default) for the unauthenticated shell, and a **per-tenant manifest route** `app/m/[tenantSlug]/manifest.webmanifest/route.ts` that returns `name`, `short_name`, `theme_color`, `background_color`, `icons` from the tenant record. In the authenticated root layout, `generateMetadata` returns `manifest: '/m/<slug>/manifest.webmanifest'` and `icons: {...tenant icon URLs}`. `start_url: '/'` and `scope: '/'` stay identical (single origin; a user belongs to one tenant). Set `id: '/?tenant=<slug>'` so the OS treats tenants as distinct apps if a device ever installs two. Because Next caches `manifest.ts`/`icon.tsx` route handlers by default, put tenant data behind a route handler with `export const dynamic = 'force-dynamic'` (or `revalidateTag('tenant-<id>')` on branding change) rather than reading cookies inside `manifest.ts`.
 - **Icons:** generate `favicon.ico`, `icon-192.png`, `icon-512.png` (maskable), `apple-icon-180.png` from the tenant logo with `sharp` when `super_admin`/`admin_tenant` uploads branding; store in a public `branding` bucket; reference them from the manifest and `generateMetadata().icons`. Do not rely on `app/icon.tsx` for tenant icons (favicon cannot be generated and the convention is static-by-default).
 - **Installability:** valid manifest + HTTPS is enough; do **not** build on `beforeinstallprompt` (not on iOS). Ship the official-guide `InstallPrompt` pattern: detect `display-mode: standalone` and show an iOS "Share → Add to Home Screen" coach mark.
 - **Web Push:** `pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` only after a user gesture (iOS requires it); POST the subscription to the API (`/notifications/push-subscriptions`); API sends with `web-push` from the worker. iOS 16.4+ supports push only for Home-Screen-installed PWAs, so the notification-permission UI must be gated behind "installed" on iOS. Keep VAPID keys in Secret Manager / Vercel env (`NEXT_PUBLIC_VAPID_PUBLIC_KEY` on web, private key only in API).
@@ -165,7 +165,7 @@ supabase init && supabase start
   1. Middleware sets `c.set('auth', { userId, tenantId, role })` from verified claims; every service call receives it explicitly (never from the request body).
   2. Every tenant table has `tenant_id uuid not null` + composite indexes `(tenant_id, created_at desc)`; repository helpers always add `eq(table.tenantId, ctx.tenantId)`.
   3. **RLS is enforced even though the API is the only client:** the API connects as a dedicated non-superuser role (see 3) and wraps each request in `db.transaction(async tx => { await tx.execute(sql\`select set_config('request.jwt.claims', ${claimsJson}, true); set local role authenticated;\`); ... })`. Policies use `(auth.jwt()->>'tenant_id')::uuid = tenant_id`. A forgotten `where` then returns zero rows instead of another tenant's data.
-- **`super_admin`** platform-panel routes use a separate `set local role service_role` branch (or a `tria_admin` role with `bypassrls`) behind an explicit `requireSuperAdmin()` guard and audit log.
+- **`super_admin`** platform-panel routes use a separate `set local role service_role` branch (or a `rede_admin` role with `bypassrls`) behind an explicit `requireSuperAdmin()` guard and audit log.
 - **Cloud Run settings:** HTTP/1 request/response bodies cap at 32 MiB, so **uploads never pass through the API** (signed direct-to-Storage instead). Concurrency 80–200, CPU always-allocated only for the worker service, min-instances 1 for the API in production to avoid cold-start latency on chat.
 
 ### 3. ORM, migrations, RLS ownership
@@ -208,7 +208,7 @@ supabase init && supabase start
     --color-background: var(--brand-bg);
     --color-foreground: var(--brand-fg);
   }
-  :root { --brand-primary: oklch(0.55 0.2 260); /* TRIA defaults */ }
+  :root { --brand-primary: oklch(0.55 0.2 260); /* Rede Social defaults */ }
   ```
   `@theme inline` makes `bg-primary` compile to the *value* `var(--brand-primary)` so overriding `--brand-*` at runtime just works.
 - After login, the authenticated layout (server component) reads the tenant and renders `<html style={{ '--brand-primary': tenant.colors.primary, ... }}>` (or a `<style>` block) plus `<meta name="theme-color">`. No client flash: it is server-rendered on first HTML. Store colors as OKLCH or hex + derived foreground (compute contrast server-side with a tiny WCAG helper and persist both).

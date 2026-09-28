@@ -6,7 +6,7 @@
 
 ## How to read this file
 
-- Feature tables are scoped to **TRIA V1 as described in PROJECT.md**: admin-only publishing, members consume/react, support chat, PWA, pt-BR. Where the market expects something V1 deliberately omits, it is flagged rather than silently dropped.
+- Feature tables are scoped to **Rede Social V1 as described in PROJECT.md**: admin-only publishing, members consume/react, support chat, PWA, pt-BR. Where the market expects something V1 deliberately omits, it is flagged rather than silently dropped.
 - "Table stakes" here means *what a tenant's members will notice is missing in the first week*, not everything Circle ships.
 - Complexity is for a Next.js + Node/TS API + Supabase stack per PROJECT.md constraints.
 
@@ -20,9 +20,9 @@ Features users assume exist. Missing these = product feels incomplete.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Per-tenant logo, primary/secondary colors, favicon, display name applied everywhere after login | This *is* the product's core value. Every white-label comparable (Bettermode, Disciple, Mighty Pro, Subsplash) leads with it; Skool is regularly abandoned for "minimal branding". | MEDIUM | Store as a `tenant_branding` record (colors, logo URL, favicon URL, name); apply via CSS variables at app shell. Must also cover PWA manifest (name/icons/theme_color) — a single-URL PWA means manifest must be served per tenant (dynamic `manifest` route keyed on the session) or you get TRIA-branded icons on the home screen. |
+| Per-tenant logo, primary/secondary colors, favicon, display name applied everywhere after login | This *is* the product's core value. Every white-label comparable (Bettermode, Disciple, Mighty Pro, Subsplash) leads with it; Skool is regularly abandoned for "minimal branding". | MEDIUM | Store as a `tenant_branding` record (colors, logo URL, favicon URL, name); apply via CSS variables at app shell. Must also cover PWA manifest (name/icons/theme_color) — a single-URL PWA means manifest must be served per tenant (dynamic `manifest` route keyed on the session) or you get Rede Social-branded icons on the home screen. |
 | Public sign-up link per tenant that lands the user in the right tenant | Circle "invitation link", Mighty "invite link", Skool group link — everyone onboards via a shareable URL. | LOW | `app.seusistema.com/join/<tenant-slug-or-token>`. Link should survive the login/register round-trip (store intent in cookie/query). Rotatable token so a leaked link can be revoked. |
-| Email + password auth with password recovery | Baseline. | LOW | Supabase Auth. Password-reset email must be branded per tenant or it leaks "TRIA" to members — treat email templates as part of branding. |
+| Email + password auth with password recovery | Baseline. | LOW | Supabase Auth. Password-reset email must be branded per tenant or it leaks "Rede Social" to members — treat email templates as part of branding. |
 | Minimal onboarding: set photo + bio on first login | Circle/Mighty force or nudge profile completion; empty avatars make a community look dead. | LOW | Optional-but-nudged, not blocking. |
 | Feature modules toggled per tenant drive navigation | Explicitly in scope; also how Circle/Bettermode "spaces" avoid showing empty sections. | LOW | Flags read once at session bootstrap; navigation renders from flags. Hide, do not just disable. |
 | Strict tenant isolation (no cross-tenant leakage in any list, search, notification, chat, storage URL) | Core value ("zero leakage"). | HIGH | Not a UI feature but a feature-level acceptance criterion for *every* module. RLS + tenant_id on every table + tenant check in API middleware. Storage buckets/paths must be tenant-prefixed and signed. |
@@ -115,7 +115,7 @@ Features users assume exist. Missing these = product feels incomplete.
 | Admin blocks a member (loses access) | In scope. Circle "remove + ban", Kajabi/Tumblr "remove + ban to prevent rejoining". | LOW | Must also invalidate the session (Supabase: ban user / revoke refresh tokens) and prevent re-signup via the public link with the same email. |
 | Member can **report** a comment/post with a reason | Circle, Mighty, Kajabi, BuddyBoss all have it; Apple Guideline 1.2 makes report + block + 24h response the industry baseline for UGC. Even in V1 (admin-only posts) **comments are UGC**, so this applies. Missing report = no channel for members to flag abuse other than support chat. | LOW | `reports` table + admin queue view. Cheap; do it in V1. |
 | Moderation log (who deleted/blocked what, when, why) | Bettermode, Kajabi, Reddit, Discord all surface an audit log; the tenant admin is accountable for actions taken by moderators/support. | LOW | Append-only table written by the moderation service. |
-| Published contact / terms + community rules shown at sign-up | Apple 1.2 requires EULA with no-tolerance clause; also needed for LGPD consent. | LOW | Tenant-editable "regras da comunidade" text + TRIA terms/privacy links. |
+| Published contact / terms + community rules shown at sign-up | Apple 1.2 requires EULA with no-tolerance clause; also needed for LGPD consent. | LOW | Tenant-editable "regras da comunidade" text + Rede Social terms/privacy links. |
 
 #### Admin / tenant panel
 
@@ -128,7 +128,7 @@ Features users assume exist. Missing these = product feels incomplete.
 | Event attendance list (confirmed vs checked-in) + CSV export | In scope; Mighty exports RSVP CSV. | LOW | |
 | Reports queue | Pairs with report feature. | LOW | |
 | Basic analytics: member count and growth, active members (7d/30d), posts/likes/comments counts, top posts, event RSVP/check-in rates | Circle ships analytics on all plans; Bettermode "Reports"; Subsplash "content analytics". Admins need to justify the subscription to their own board. | MEDIUM | V1 can be counters over existing tables; no data warehouse. Pick 6-8 numbers and a date range. |
-| TRIA platform panel (`super_admin`): create tenant, set initial branding, toggle modules, create first admin, view tenant list/status | In scope. | MEDIUM | Impersonation ("ver como este tenant") is a huge support time-saver; log every impersonation. |
+| Rede Social platform panel (`super_admin`): create tenant, set initial branding, toggle modules, create first admin, view tenant list/status | In scope. | MEDIUM | Impersonation ("ver como este tenant") is a huge support time-saver; log every impersonation. |
 
 #### PWA / mobile
 
@@ -148,8 +148,8 @@ Features that set the product apart. Not required, but valuable. Aligned with th
 |---------|-------------------|------------|-------|
 | **Admin broadcast stories ("status" model)** — treat stories as WhatsApp-Status-style announcements from the organization, with view counts and reply-as-comment | No community SaaS competitor has stories; Brazilian members already live in WhatsApp Status/Instagram Stories daily. Positioned as "the organization's daily status" (admin-only) it avoids the Fleets/LinkedIn failure mode (which was *member* ephemeral content nobody wanted to make). Gives the admin a low-effort daily touchpoint that beats a feed post for urgency. | MEDIUM | Make it succeed: show the admin per-story view counts and viewer list; allow re-sharing a story into a post; allow pinning to a community (Highlights). Do **not** open member stories in V2 without evidence. |
 | **Self check-in with a check-in window** (no QR hardware) | Circle/Mighty have no check-in; church apps need scanners or kiosks. A "Fazer check-in" button that is enabled only from T-1h to T+2h (and optionally within N km of the venue via geolocation) gives the admin a real attendance list with zero hardware — differentiating for schools, churches, associations. | MEDIUM | Time window LOW; geofence adds MEDIUM (permission prompt, GPS jitter, indoor). Ship time-window first; add an admin "marcar presença" override for members without phones; keep QR as a V1.x option (admin shows a rotating QR on a screen, member scans). |
-| **Feature flags per tenant with navigation that reshapes itself** | Circle forces one type per space; Skool forces one shape for all. Tenants that only want feed+events get a two-tab app that feels purpose-built. | LOW | Already in scope; the differentiator is treating it as a product surface in the TRIA panel, not a config file. |
-| **Branded end-to-end, including manifest, home-screen icon, splash, push sender name, and emails** | Mighty only gives a standalone branded app on Pro (enterprise) tiers; Disciple charges to remove its logo. TRIA giving full white-label at every tier is a selling point. Push notifications that show the tenant's name/icon rather than "app.seusistema.com" are the visible proof. | MEDIUM | Push notification `icon`/`badge`/`title` per tenant; email sender display-name per tenant. |
+| **Feature flags per tenant with navigation that reshapes itself** | Circle forces one type per space; Skool forces one shape for all. Tenants that only want feed+events get a two-tab app that feels purpose-built. | LOW | Already in scope; the differentiator is treating it as a product surface in the Rede Social panel, not a config file. |
+| **Branded end-to-end, including manifest, home-screen icon, splash, push sender name, and emails** | Mighty only gives a standalone branded app on Pro (enterprise) tiers; Disciple charges to remove its logo. Rede Social giving full white-label at every tier is a selling point. Push notifications that show the tenant's name/icon rather than "app.seusistema.com" are the visible proof. | MEDIUM | Push notification `icon`/`badge`/`title` per tenant; email sender display-name per tenant. |
 | **Support chat as a first-class tenant role** | Circle/Skool have DMs but no "support inbox" concept; institutions want a help desk, not a social DM. | MEDIUM | Already in scope. Add canned replies and "resolved" state in V1.x. |
 | **Deep-link sharing that lands inside the branded app after login** | Turns every WhatsApp forward into a re-engagement loop into the tenant's own app rather than a public web page; keeps content private (institutions care). | LOW | Already in scope. Add OG title/image on the login interstitial (without content) so the WhatsApp preview still looks branded. |
 | **Grouped, low-noise notifications by default** | Skool's noisiest complaint; be quiet by default and loud on what matters (event reminders, support replies). | LOW | Cheap and visible. |
@@ -183,7 +183,7 @@ Features that seem good but create problems — or that PROJECT.md already exclu
     └──required by──> [Per-tenant PWA manifest/icons]
     └──required by──> [Branded auth emails]
     └──required by──> [Feature flags -> navigation]
-    └──required by──> [TRIA platform panel: create tenant]
+    └──required by──> [Rede Social platform panel: create tenant]
 
 [Auth + public sign-up link]
     └──required by──> [Member profile]
@@ -262,7 +262,7 @@ Minimum viable product — what's needed to validate the concept with one pilot 
 
 - [ ] Tenant record + branding (logo, colors, favicon, name) + per-tenant manifest — the core value; nothing else matters if it does not feel like the tenant's app
 - [ ] Feature flags per tenant driving bottom navigation — required to sell "modular"
-- [ ] TRIA platform panel: create tenant, set branding, toggle modules, create first admin — required to onboard the pilot at all
+- [ ] Rede Social platform panel: create tenant, set branding, toggle modules, create first admin — required to onboard the pilot at all
 - [ ] Public sign-up link, email/password auth, password recovery (branded emails) — required to get members in
 - [ ] Profile (photo, bio), view others, simple member list with "hide me" — social baseline + LGPD-friendly
 - [ ] Media pipeline (images multi, video with caps, files, link/YouTube unfurl) — prerequisite for all content
@@ -286,7 +286,7 @@ Features to add once core is working.
 - [ ] Typing indicator, canned replies, "resolved" state, assignment in support inbox — when more than one support agent is active
 - [ ] Keyword blocklist per tenant for comments — when first moderation incident occurs
 - [ ] Email channel adapter for notifications (digest) — when push opt-in on iOS proves low
-- [ ] Tenant impersonation in TRIA panel with audit log — as soon as TRIA supports more than 2 tenants
+- [ ] Tenant impersonation in Rede Social panel with audit log — as soon as Rede Social supports more than 2 tenants
 - [ ] Contrast validation + palette auto-derivation improvements in branding editor — after first tenant picks bad colors
 - [ ] Re-share a story into a feed post; story archive for admin — when admins ask to keep good stories
 - [ ] Weekly activity digest (in-app/push) — retention lever once content volume exists
@@ -310,7 +310,7 @@ Features to defer until product-market fit is established.
 |---------|------------|---------------------|----------|
 | Tenant branding + per-tenant manifest | HIGH | MEDIUM | P1 |
 | Feature flags -> navigation | HIGH | LOW | P1 |
-| TRIA platform panel (create tenant) | HIGH | MEDIUM | P1 |
+| Rede Social platform panel (create tenant) | HIGH | MEDIUM | P1 |
 | Sign-up link + auth + branded recovery | HIGH | LOW | P1 |
 | Media pipeline (images/video/files/unfurl) | HIGH | HIGH | P1 |
 | Feed with likes/comments/replies/pin/share | HIGH | MEDIUM | P1 |
@@ -330,7 +330,7 @@ Features to defer until product-market fit is established.
 | Typing indicator, canned replies, assignment | MEDIUM | MEDIUM | P2 |
 | Keyword blocklist | MEDIUM | LOW | P2 |
 | Email digest channel | MEDIUM | MEDIUM | P2 |
-| Tenant impersonation | MEDIUM (TRIA ops) | LOW | P2 |
+| Tenant impersonation | MEDIUM (Rede Social ops) | LOW | P2 |
 | Member posting / member chat | HIGH (V2) | HIGH | P3 |
 | Custom domains, WhatsApp, reactions, gamification, LMS, live | LOW-MEDIUM | HIGH | P3 |
 
@@ -410,5 +410,5 @@ Confidence per classify-confidence seam: unverified single web source = LOW; cro
 - https://getstream.io/blog/in-app-chat/ ; https://ably.com/blog/live-chat-features ; https://sendbird.com/learn/what-is-in-app-chat
 
 ---
-*Feature research for: multi-tenant white-label community / branded social-app SaaS (TRIA Rede Social)*
+*Feature research for: multi-tenant white-label community / branded social-app SaaS (Rede Social)*
 *Researched: 2026-09-11*

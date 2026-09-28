@@ -1,4 +1,4 @@
-import { ToastProvider } from '@tria/ui';
+import { ToastProvider } from '@rede-social/ui';
 import type { CSSProperties, ReactNode } from 'react';
 import { BottomNav } from './BottomNav';
 import { DesktopRail } from './DesktopRail';
@@ -7,7 +7,7 @@ import { ScrollRoot } from './ScrollRoot';
 import { TopBar } from './TopBar';
 
 export interface AppShellProps {
-  /** Tenant identity from the bootstrap (D-26) — or the neutral name on TRIA's own platform host. */
+  /** Tenant identity from the bootstrap (D-26) — or the neutral name on the platform's own platform host. */
   brand: { displayName: string; logoUrl: string | null };
   /** `buildNav(bootstrap.modules, labels)` — never a hard-coded list (MOD-04). */
   nav: ShellNav;

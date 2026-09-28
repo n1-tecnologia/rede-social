@@ -1,18 +1,18 @@
-import { subscribe } from '@tria/core/server/events/bus';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
-import { encodeCursor } from '@tria/core/server/paging';
+import { subscribe } from '@rede-social/core/server/events/bus';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { encodeCursor } from '@rede-social/core/server/paging';
 import {
   EVENT_MAX_PAGE_SIZE,
   type EventPage,
   type EventPublished,
   type EventSummary,
   type NextEvent,
-} from '@tria/module-events/contracts';
+} from '@rede-social/module-events/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
- * `@tria/module-events` end to end against the live local stack and the real seed (06-01) — the
+ * `@rede-social/module-events` end to end against the live local stack and the real seed (06-01) — the
  * Phase 6 tracer, proved rather than asserted.
  *
  * `events tracer`: an admin's `POST /v1/events` (a wall-clock start in the TENANT's timezone) answers
@@ -98,14 +98,14 @@ async function sweep(): Promise<void> {
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
   await sweep();
   unsubscribe = subscribe('event.published', async (payload) => {
@@ -469,7 +469,7 @@ describe('events list and create', () => {
     expect(published.length).toBe(refusedBefore);
   });
 
-  it('13. MOD-04: with events off for tria-lab, the routes are 404 MODULE_DISABLED and the tab is gone', async () => {
+  it('13. MOD-04: with events off for rede-lab, the routes are 404 MODULE_DISABLED and the tab is gone', async () => {
     const lab = async () =>
       request('/v1/events', tokens.labMember, { headers: { 'x-tenant-host': HOSTS.lab } });
     const labKeys = async () => {
@@ -510,7 +510,7 @@ describe('events list and create', () => {
  */
 describe('next', () => {
   const SLUG = `e2e-next-${Date.now()}`.slice(0, 40);
-  const MEMBER = `member-${SLUG}@tria-test.local`;
+  const MEMBER = `member-${SLUG}@rede-social-test.local`;
   const PASSWORD = 'Segredo123';
   let tenantId = '';
   let userId = '';

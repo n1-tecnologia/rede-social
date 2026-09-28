@@ -1,8 +1,8 @@
 import http from 'node:http';
-import { sqlClient } from '@tria/core/db';
-import { stopBoss } from '@tria/core/server/jobs/boss';
-import { FEED_UNFURL_QUEUE, type FeedPost } from '@tria/module-feed/contracts';
-import { feedUnfurlJob } from '@tria/module-feed/server';
+import { sqlClient } from '@rede-social/core/db';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { FEED_UNFURL_QUEUE, type FeedPost } from '@rede-social/module-feed/contracts';
+import { feedUnfurlJob } from '@rede-social/module-feed/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -35,8 +35,8 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
  * timing-dependent.
  */
 
-const DEMO_ADMIN = 'admin@tria-demo.local';
-const LAB_ADMIN = 'admin@tria-lab.local';
+const DEMO_ADMIN = 'admin@rede-demo.local';
+const LAB_ADMIN = 'admin@rede-lab.local';
 
 const tokens = { demoAdmin: '', labAdmin: '' };
 const tenantIds = { demo: '', lab: '' };
@@ -134,10 +134,10 @@ beforeAll(async () => {
   ]);
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
   if (!tenantIds.demo || !tenantIds.lab) throw new Error('the two demo tenants are not seeded');
 });

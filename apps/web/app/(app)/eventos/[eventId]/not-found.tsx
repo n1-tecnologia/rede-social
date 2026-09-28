@@ -1,4 +1,4 @@
-import { EmptyState } from '@tria/ui';
+import { EmptyState } from '@rede-social/ui';
 import { CalendarX2 } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';

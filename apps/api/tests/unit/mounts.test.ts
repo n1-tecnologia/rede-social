@@ -1,4 +1,4 @@
-import type { ModuleKey } from '@tria/contracts';
+import type { ModuleKey } from '@rede-social/contracts';
 import { describe, expect, it } from 'vitest';
 import { app } from '../../src/app';
 import { MODULE_REGISTRY, permissionsFor } from '../../src/modules/registry';

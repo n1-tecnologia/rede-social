@@ -75,7 +75,7 @@ never `pull_request_target`).
 | `DATABASE_URL` | seed step (`api_user` through the pooler) |
 | `RESEND_API_KEY` | `supabase config push` (Custom SMTP, D-13) |
 | `SEED_PASSWORD` | initial password of the seeded tenant users |
-| `SUPER_ADMIN_EMAIL` | `ferramentas@triacompany.com.br` |
+| `SUPER_ADMIN_EMAIL` | `superadmin@rede-social.test` |
 | `SUPER_ADMIN_PASSWORD` | initial `super_admin` password |
 
 ## GCP Secret Manager secrets (mounted into Cloud Run)
@@ -251,7 +251,7 @@ boots first answers `POST /v1/media/uploads` with a 500 against a bucket that do
   (widened for the fake provider's two video mimes by `20260922020621_media_bucket_video.sql`).
   **The two must agree**: the API's 413 threshold and its accepted mime list are pinned to the
   bucket's own `file_size_limit` (50 MiB) and `allowed_mime_types` (exactly the `MEDIA_LIMITS` union
-  in `@tria/contracts/media`), and `supabase/tests/070-media-bucket.sql` pins that set so neither a
+  in `@rede-social/contracts/media`), and `supabase/tests/070-media-bucket.sql` pins that set so neither a
   widening nor a narrowing passes silently. `supabase config push` does **not** create buckets.
 - **The `unaccent` and `pg_trgm` extensions**, created into schema `extensions` by
   `20260921190227_member_profiles_search.sql` together with the `app.imm_unaccent(text)` IMMUTABLE
@@ -305,7 +305,7 @@ e2e suite never approaches. The Send Email Hook values (secret, transport, rotat
 
 The private `media` bucket (03-01) accepts `image/jpeg`, `image/png`, `image/webp`,
 `application/pdf`, `video/mp4` and `video/quicktime` — exactly the union of `MEDIA_LIMITS` in
-`@tria/contracts/media`, pinned as a set by `supabase/tests/070-media-bucket.sql`. The two video
+`@rede-social/contracts/media`, pinned as a set by `supabase/tests/070-media-bucket.sql`. The two video
 entries exist for `VIDEO_PROVIDER=fake`, which stores its bytes there; with `VIDEO_PROVIDER=mux` the
 vendor owns the object and nothing mints a Storage URL for a video at all. The bucket stays PRIVATE,
 caps files at 50 MiB and carries zero `storage.objects` policies.
@@ -334,7 +334,7 @@ runs (`.github/workflows/ci.yml`, single `checks` job, D-12):
 8. `pnpm e2e` — Playwright against the dev servers on `mobile-chromium` (iPhone 14),
    `pixel-chromium` (Pixel 7; only `branding.spec.ts` and `phase2-smoke.spec.ts`) and
    `desktop-chromium`;
-9. `pnpm --filter @tria/web e2e:pwa` — 02-11's suite against a **production build** on :3100
+9. `pnpm --filter @rede-social/web e2e:pwa` — 02-11's suite against a **production build** on :3100
    (manifest per tenant, service worker, offline fallback, `display-mode` mirror).
 
 **Smoke only — `pnpm verify:smoke` (~10 min).** `branding.spec.ts` (criterion 1 on the seed
@@ -344,20 +344,20 @@ shell → alias 308 → suspend/reactivate → module toggle → branded recover
 `recovery.spec.ts`, then the `@tracer` half of the PWA suite. Use it after a change that touches
 branding, the panel, the proxy or the mail path; `pnpm verify` before a phase seals or a PR opens.
 Never filter Playwright through `pnpm e2e -- <spec>` — pnpm forwards the `--` and Playwright then
-runs the whole suite; the scripts call `pnpm --filter @tria/web exec playwright test <spec>`.
+runs the whole suite; the scripts call `pnpm --filter @rede-social/web exec playwright test <spec>`.
 
 **Prerequisites.** `pnpm supabase start` (pinned CLI, Docker), `pnpm db:reset`,
 `bash scripts/local-env.sh --write` (writes `apps/api/.env.local` and `apps/web/.env.local` with
 `MAIL_TRANSPORT=local`, `DOMAIN_PROVIDER=fake`, `AUTH_ALLOW_LIST=local`), `pnpm db:seed` (also
 derives the seed tenants' icon sets), Chromium via
-`pnpm --filter @tria/web exec playwright install chromium`. The smoke spawns its own
+`pnpm --filter @rede-social/web exec playwright install chromium`. The smoke spawns its own
 `ROLE=worker` on :8790 for icon derivation and stops it afterwards; a running one is reused. Mail
 is read from Mailpit (`http://127.0.0.1:54324`). Expect ~60 s waits inside the smoke: the web
 host cache (`apps/web/lib/tenant-host.ts`, 60 s TTL) is what a brand or status change has to
 outlive before the served HTML follows; the spec polls and annotates the observed delay.
 
 **Build-output gate — `scripts/check-static-routes.sh`** (`pnpm check:static-routes`, after
-`pnpm --filter @tria/web build`). Reads `apps/web/.next/prerender-manifest.json` and
+`pnpm --filter @rede-social/web build`). Reads `apps/web/.next/prerender-manifest.json` and
 `app-path-routes-manifest.json`: every authenticated or host-branded route (`(app)/`, `(auth)/`,
 `(platform)/`, `/m/[slug]/manifest.webmanifest`, `/~offline`) must be dynamic; the only static
 output allowed is Next's `/_*` internals and `/serwist/*` (02-11 prerenders the service-worker
@@ -382,7 +382,7 @@ that disappears (`route moved or renamed — update REQUIRED_KEYS`) is also a fa
 - `scripts/check-static-routes.sh` against a Vercel build (`vercel build` locally, then
   `NEXT_DIR=apps/web/.next bash scripts/check-static-routes.sh`, or the deployment's `.next`) —
   CI proves the identical `next build` on the runner; the Vercel parity run is the hosted step.
-- Staging smoke on the TRIA-owned seed hosts (D-24: `TENANT_DEMO_HOST` / `TENANT_LAB_HOST`) with
+- Staging smoke on the platform-owned seed hosts (D-24: `TENANT_DEMO_HOST` / `TENANT_LAB_HOST`) with
   `PLAYWRIGHT_BASE_URL=https://<TENANT_DEMO_HOST>` (+ `PLAYWRIGHT_API_URL` for the by-host reads):
   `branding.spec.ts`'s remote-capable tests are the ones without `isRemote` skips.
 - `otp_expiry = 86400` on the hosted projects (section above).

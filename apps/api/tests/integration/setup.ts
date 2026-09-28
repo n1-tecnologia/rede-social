@@ -5,8 +5,8 @@ export { app as api } from '../../src/app';
 
 /** Seed tenants' hosts (D-24), same defaults as scripts/seed.ts. */
 export const HOSTS = {
-  demo: process.env.TENANT_DEMO_HOST ?? 'tria-demo.localhost',
-  lab: process.env.TENANT_LAB_HOST ?? 'tria-lab.localhost',
+  demo: process.env.TENANT_DEMO_HOST ?? 'rede-demo.localhost',
+  lab: process.env.TENANT_LAB_HOST ?? 'rede-lab.localhost',
 };
 
 export const SEED_PASSWORD = process.env.SEED_PASSWORD ?? '';
@@ -31,7 +31,7 @@ export async function signInAs(email: string, password: string): Promise<string>
 
 /**
  * GoTrue admin API for throwaway fixtures (service key). Built here on purpose instead of importing
- * `@tria/core/server/supabase-admin`, which Biome restricts to the kernel's admin lane.
+ * `@rede-social/core/server/supabase-admin`, which Biome restricts to the kernel's admin lane.
  */
 export function authAdmin() {
   return createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_KEY'), {
@@ -63,8 +63,8 @@ export async function uploadAvatar(
   opts: { purpose?: 'avatar' | 'post'; bytes?: Buffer } = {},
 ): Promise<string> {
   const { app } = await import('../../src/app');
-  const { encodeJpeg } = await import('@tria/core/server/media/variants');
-  const { deriveVariantsJob } = await import('@tria/core/server/media/derive-job');
+  const { encodeJpeg } = await import('@rede-social/core/server/media/variants');
+  const { deriveVariantsJob } = await import('@rede-social/core/server/media/derive-job');
 
   const body =
     opts.bytes ??

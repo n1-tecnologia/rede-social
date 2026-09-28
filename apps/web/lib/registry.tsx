@@ -1,10 +1,10 @@
-import type { Bootstrap, ModuleKey } from '@tria/contracts';
-import type { HomeSlot } from '@tria/core/ui';
-import { NextEventCard } from '@tria/module-events/ui';
-import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
-import type { PostCardLabels, PostMenuLabels } from '@tria/module-feed/ui';
-import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@tria/module-stories/contracts';
-import { EmptyState } from '@tria/ui';
+import type { Bootstrap, ModuleKey } from '@rede-social/contracts';
+import type { HomeSlot } from '@rede-social/core/ui';
+import { NextEventCard } from '@rede-social/module-events/ui';
+import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
+import type { PostCardLabels, PostMenuLabels } from '@rede-social/module-feed/ui';
+import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
+import { EmptyState } from '@rede-social/ui';
 import { TriangleAlert, Video } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
@@ -100,7 +100,7 @@ export function postCardLabels(tf: Translator): PostCardLabels {
 
 /**
  * The overflow menu's label block (04-09) — chosen HERE for the same reason `postCardLabels` is:
- * `@tria/module-feed` ships no language (PWA-03), and `/inicio` and `/post/[postId]` must offer the
+ * `@rede-social/module-feed` ships no language (PWA-03), and `/inicio` and `/post/[postId]` must offer the
  * identical rows. "Copiar link" is deliberately the `share` namespace's own string, not a second
  * copy under `menu`: the row and the action row's share control are one handler resolving one url,
  * and two catalog keys for one affordance is exactly how those two drift apart.
@@ -215,7 +215,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
 
 /**
  * Everything D-59's comment surface needs, composed HERE for the same reason every other label
- * block is: `@tria/module-feed` ships no language (PWA-03) and knows no route table (MOD-02).
+ * block is: `@rede-social/module-feed` ships no language (PWA-03) and knows no route table (MOD-02).
  *
  * **Both containers read this one block** (04-08): the `CommentSheet` over the feed adds its own
  * `title` at the call site, and `/post/[postId]` spreads the rest straight into the INLINE

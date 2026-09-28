@@ -55,8 +55,8 @@ vi.mock('next-intl', () => ({
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh }) }));
 
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 

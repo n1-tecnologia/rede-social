@@ -1,5 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi';
-import { apiErrorEnvelopeSchema, normalizeHost, TENANT_HOST_HEADER } from '@tria/contracts';
+import { apiErrorEnvelopeSchema, normalizeHost, TENANT_HOST_HEADER } from '@rede-social/contracts';
 import {
   mediaAssetSchema,
   mediaListQuerySchema,
@@ -8,9 +8,9 @@ import {
   mediaStartBodySchema,
   mediaStartSchema,
   mediaVariantParamSchema,
-} from '@tria/contracts/media';
-import { requireAuth } from '@tria/core/server/auth/require-auth';
-import { publicWebOrigin } from '@tria/core/server/env';
+} from '@rede-social/contracts/media';
+import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { publicWebOrigin } from '@rede-social/core/server/env';
 import {
   completeUpload,
   deleteAsset,
@@ -18,7 +18,7 @@ import {
   playbackTokens,
   serveVariant,
   startUpload,
-} from '@tria/core/server/media/service';
+} from '@rede-social/core/server/media/service';
 import { createOpenApiApp } from '../http/openapi';
 
 /**

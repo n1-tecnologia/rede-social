@@ -1,5 +1,5 @@
 -- media_bucket_video (03-06, MEDIA-03): widen the PRIVATE `media` bucket's mime allow-list to the
--- two video mimes `@tria/contracts/media` already accepts (`MEDIA_LIMITS.video.*.mimes`), so the
+-- two video mimes `@rede-social/contracts/media` already accepts (`MEDIA_LIMITS.video.*.mimes`), so the
 -- allow-list is exactly the union of the contract's kinds: jpeg/png/webp (images), pdf (files),
 -- mp4/quicktime (video).
 --

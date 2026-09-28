@@ -25,7 +25,7 @@ plan_head_before: 8e08bd93d2a85058dff868e9dc9dbb6eb47e8beb
 
 # Tech tracking
 tech-stack:
-  added: []          # postgres 3.4.9 promoted to a root devDependency (already in the stack via @tria/core)
+  added: []          # postgres 3.4.9 promoted to a root devDependency (already in the stack via @rede-social/core)
   patterns:
     - "Spike-as-test: the pooler proof is a vitest file (`pnpm spike:supavisor`, scripts/vitest.config.ts) that CI can re-run, not a throwaway script; it is parameterised only by SPIKE_DATABASE_URL so local, staging-transaction and staging-session runs are the same file"
     - "Contingency chain inside the spike: a LOOPBACK :54329 target retries `api_user.<project-ref>` and then the direct port 54322, printing every refusal; an explicit non-local URL never falls back, so a staging pooler refusal is a hard failure"
@@ -149,7 +149,7 @@ status: complete
 
 ## Accomplishments
 
-- **TENANT-03 proven under connection reuse.** `pnpm spike:supavisor` runs three cases green: 40 interleaved lanes (alternating `tria-demo` / `tria-lab`) on a `postgres.js` pool of `max: 2` — every lane reports `current_user = 'authenticated'`, its own `app.tenant_id()` and exactly one visible `tenants` row (policy `id = app.tenant_id()`); four bare probes after the batch report `current_user = 'api_user'` and an empty `request.jwt.claims`; a bare `select count(*) from public.tenants` raises `42501` (`permission denied for table tenants`, A2 confirmed); a lane that aborts on malformed claims (`22P02`) leaves the next lanes on both pooled connections correct and the connections clean.
+- **TENANT-03 proven under connection reuse.** `pnpm spike:supavisor` runs three cases green: 40 interleaved lanes (alternating `rede-demo` / `rede-lab`) on a `postgres.js` pool of `max: 2` — every lane reports `current_user = 'authenticated'`, its own `app.tenant_id()` and exactly one visible `tenants` row (policy `id = app.tenant_id()`); four bare probes after the batch report `current_user = 'api_user'` and an empty `request.jwt.claims`; a bare `select count(*) from public.tenants` raises `42501` (`permission denied for table tenants`, A2 confirmed); a lane that aborts on malformed claims (`22P02`) leaves the next lanes on both pooled connections correct and the connections clean.
 - **Timing/throughput (A2 record):** 40 interleaved lanes on `max: 2` in **39 ms (~1023 lanes/s)** against the local stack.
 - **`pnpm guard:lanes` installed and proven in both directions:** exit 0 on the committed tree, exit 1 on a tampered copy of `tenant-tx.ts` in the scratch dir — it printed both offending lines (`set_config('request.jwt.claims', ${claims}, false)` and `set role authenticated`).
 - **The fallback is a configuration switch.** `packages/core/db/README.md` documents the two lanes and who may import each, the `DATABASE_URL` shape per environment (local 54329 / current 54322 contingency, staging transaction 6543, worker session 5432, migrations), the exact procedure if the staging Supavisor run fails (change only `DATABASE_URL` to port 5432, keep `prepare: false` and every line of `withTenantTx`), and why fallback #2 (per-request PostgREST client with the user JWT) is **not** recommended.
@@ -257,7 +257,7 @@ None — local stack only. The staging run of `pnpm spike:supavisor` (plan 01-12
 ## Next Phase Readiness
 
 - **01-08 (isolation suite):** the four new tenant tables must each gain a case in `020-tenant-isolation.sql`; `010-rls-coverage.sql` already passes them, and it should additionally assert zero policies on `platform_admins` (see Threat Flags).
-- **01-09 (CI):** `ci.yml` must run `pnpm guard:lanes` and `pnpm spike:supavisor` (the latter after `pnpm db:seed`, since the spike resolves `tria-demo` / `tria-lab` ids).
+- **01-09 (CI):** `ci.yml` must run `pnpm guard:lanes` and `pnpm spike:supavisor` (the latter after `pnpm db:seed`, since the spike resolves `rede-demo` / `rede-lab` ids).
 - **01-12 (staging):** run `SPIKE_DATABASE_URL=postgres://api_user.<ref>:<pw>@aws-0-sa-east-1.pooler.supabase.com:6543/postgres pnpm spike:supavisor` before the production gate and record the result in `packages/core/db/README.md`'s run-schedule table. This is the authoritative transaction-pooler proof.
 - **01-06:** `requireSuperAdmin()` reads `platform_admins` through `withAdminTx`; the table and its deny-by-default posture are ready.
 - **Phase 7:** the chat/notification shapes are fixed; the open question is whether `chat_conversations` gains a `status` column (and a widened one-support-per-member index) or keeps one support thread per member for the tenant's lifetime.

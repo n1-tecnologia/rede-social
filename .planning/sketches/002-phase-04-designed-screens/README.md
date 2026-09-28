@@ -52,7 +52,7 @@ cor, hierarquia e texto — não de renderização de webfont.
 Controles no topo (chrome do mockup, fora do produto):
 
 - **Tema escuro / Tema claro** — alterna `data-theme` no `<html>`, exatamente como o cookie
-  `tria_theme` faz no app.
+  `rede_theme` faz no app.
 - **Cor primária / Cor secundária** e os presets — escrevem as cinco variáveis `--brand-*` do jeito
   que `brandStyleVars()` escreve no servidor, incluindo a derivação do par escuro e do texto
   sobre a cor primária. O readout à direita mostra os quatro valores derivados.

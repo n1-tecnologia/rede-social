@@ -92,7 +92,7 @@ coverage:
         ref: "pnpm test:integration -- platform-domains jobs worker (16 files, 180 tests)"
         status: pass
       - kind: unit
-        ref: "pnpm --filter @tria/core test (15 files, 117 tests) && pnpm --filter @tria/api test (3 files, 15 tests)"
+        ref: "pnpm --filter @rede-social/core test (15 files, 117 tests) && pnpm --filter @rede-social/api test (3 files, 15 tests)"
         status: pass
     human_judgment: false
 
@@ -165,7 +165,7 @@ None - plan executed exactly as written.
 - Two acceptance-criterion grep counts needed interpretation, no behaviour change:
   - `grep -c "DomainProviderError('unavailable', 503)" fake.ts` was 2 because the docblock repeated the literal; the docblock was reworded ("a `DomainProviderError` of kind `unavailable` with status 503") so the throw site is the single match (count = 1).
   - `grep -c "deadline passed; poller stopped" domains.ts` is 2, not 1: the pre-existing 02-09 message `'verification deadline passed; poller stopped'` (failed-check expiry branch) also contains the substring. The plan-named new message `'provider check failed; deadline passed; poller stopped'` appears exactly once; the old message was left alone (out of scope, pinned by 02-09 semantics).
-- `pnpm --filter @tria/core test -- domains-fake` and `pnpm test:integration -- platform-domains` run their whole suites (filter args are not forwarded by these scripts, as 02-09 noted) — both were green, so the gates hold as written.
+- `pnpm --filter @rede-social/core test -- domains-fake` and `pnpm test:integration -- platform-domains` run their whole suites (filter args are not forwarded by these scripts, as 02-09 noted) — both were green, so the gates hold as written.
 
 ## Known Stubs
 

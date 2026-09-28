@@ -13,7 +13,7 @@ requires:
   - phase: 02-12
     provides: createTenantAction 400 mapping (slug 'taken' → field error), NewTenantForm rendering t(`new.errors.${key}`), the "server actions return catalog KEYS" rule, platform-tenants.spec.ts (slugsFor / suffixFor / signInSuperAdmin)
   - phase: 02-16
-    provides: pnpm verify as the local exit gate; the `pnpm --filter @tria/web exec playwright test <spec>` rule; the 60 s web host cache polling convention
+    provides: pnpm verify as the local exit gate; the `pnpm --filter @rede-social/web exec playwright test <spec>` rule; the 60 s web host cache polling convention
   - phase: 02-17, 02-18
     provides: CR-01/WR-01 and WR-05/WR-06/WR-07 closures whose suites the exit gate re-runs together with this plan
 provides:
@@ -37,7 +37,7 @@ tech-stack:
   added: []
   patterns:
     - "Refusal reason → catalog key: a client component maps a closed set of API reason codes to catalog strings and falls back to the generic copy for anything else; nothing from the response body is rendered raw"
-    - "View-only derived state: a UI-only status (`refused`) is computed in the server page from contract fields (status + sentAt) and exists only in the web view type, never in @tria/contracts"
+    - "View-only derived state: a UI-only status (`refused`) is computed in the server page from contract fields (status + sentAt) and exists only in the web view type, never in @rede-social/contracts"
     - "Field-error accumulation from a 400 envelope: build fieldErrors incrementally from every documented detail key, then merge issues[] without overriding a more specific key"
 
 key-files:
@@ -85,7 +85,7 @@ coverage:
     requirement: ROLE-03
     verification:
       - kind: unit
-        ref: "pnpm --filter @tria/web typecheck (labels.reasons typed as Partial<Record<'email_in_use' | 'user_in_other_tenant', string>>; reasonCopy narrows before lookup) + grep 'labels.resendFailed' fallback kept"
+        ref: "pnpm --filter @rede-social/web typecheck (labels.reasons typed as Partial<Record<'email_in_use' | 'user_in_other_tenant', string>>; reasonCopy narrows before lookup) + grep 'labels.resendFailed' fallback kept"
         status: pass
       - kind: integration
         ref: "apps/api/tests/integration/invites.test.ts#refusals > R2 (409 email_in_use envelope the button consumes) — pnpm test:integration 187/187"
@@ -130,9 +130,9 @@ status: complete
 ## Accomplishments
 
 - **WR-03 panel half:** `createTenantAction` maps the API's `400 VALIDATION_FAILED { adminEmail: 'in_use' }` (02-19) to `fieldErrors.adminEmail = 'emailInUse'`; the 400 branch now accumulates `slug: 'slugTaken'`, `adminEmail: 'emailInUse'` and `issues[]` independently (a specific key is never overridden by `issues[]`). `NewTenantForm` needed no change — it already renders `t(\`new.errors.${key}\`)` for any `CreateFieldError`.
-- **WR-02/WR-03 panel half:** `InviteView.status` gains the view-only `'refused'` state (`inviteTone.refused = 'danger'`, label `inviteRefused`), derived in the Admins page from `raw.status === 'expired' && raw.sentAt === null` (02-19 D-A). The refused row keeps "Reenviar convite" enabled; `ResendInviteButton` takes `labels.reasons` and toasts the reason copy for the two documented refusals, `labels.resendFailed` otherwise. The API and `@tria/contracts` are untouched (prohibition honoured).
+- **WR-02/WR-03 panel half:** `InviteView.status` gains the view-only `'refused'` state (`inviteTone.refused = 'danger'`, label `inviteRefused`), derived in the Admins page from `raw.status === 'expired' && raw.sentAt === null` (02-19 D-A). The refused row keeps "Reenviar convite" enabled; `ResendInviteButton` takes `labels.reasons` and toasts the reason copy for the two documented refusals, `labels.resendFailed` otherwise. The API and `@rede-social/contracts` are untouched (prohibition honoured).
 - **PWA-03:** four catalog keys added next to their siblings (`new.errors.emailInUse`, `admins.inviteRefused`, `admins.resendEmailInUse`, `admins.resendUserInOtherTenant`), UTF-8 literal accents; `check-ui-literals.sh` OK.
-- **Proof:** `platform-tenants.spec.ts` case 8 (seeded `member@tria-lab.local` as adminEmail → field error, values kept, still on `/plataforma/novo`, `getTenantModuleFlag(slug, 'feed')` null; slug `e2e-recusado-*` added to `slugsFor` for `afterAll`) and `invite.spec.ts` case 4 (create → `createMember` in `tria-lab` → attach + verify → invite `expired` with `sentAt` null → refused pill, "Convite expirado" count 0, resend enabled, `user_in_other_tenant` toast, `membershipForEmail` still `{ member, active }`, invite still `expired`). Both green on desktop and mobile inside the full suite.
+- **Proof:** `platform-tenants.spec.ts` case 8 (seeded `member@rede-lab.local` as adminEmail → field error, values kept, still on `/plataforma/novo`, `getTenantModuleFlag(slug, 'feed')` null; slug `e2e-recusado-*` added to `slugsFor` for `afterAll`) and `invite.spec.ts` case 4 (create → `createMember` in `rede-lab` → attach + verify → invite `expired` with `sentAt` null → refused pill, "Convite expirado" count 0, resend enabled, `user_in_other_tenant` toast, `membershipForEmail` still `{ member, active }`, invite still `expired`). Both green on desktop and mobile inside the full suite.
 - **Exit gate:** the union of the affected suites and then the full `pnpm verify` one-shot — green (details below).
 
 ## Task Commits
@@ -165,10 +165,10 @@ All commands ran from the repo root on 2026-09-17 against the running local stac
 | A2 | `pnpm turbo typecheck test` | 0 | 3 s (turbo cache) | unit **288**: ui 34, core 119 (16 files), contracts 57, api 15, web 63 (9 files); module-example 0 (`--passWithNoTests`) — ≥ 278 + the 02-17/02-18 files |
 | B | `rm -rf apps/api/dist && pnpm boundaries && pnpm boundaries:negative` | 0 / 0 | 1 s | 337 files / 7 packages, no issues; negative fixture rejected by both layers. **`apps/api/dist` was present (stale) and removed first** |
 | C | `pnpm test:integration` | 0 | 28 s | **16 files / 187 tests** (the acceptance figure: 176 + 11 new `it` blocks from 02-17/02-19) |
-| D | `pnpm --filter @tria/web exec playwright test invite.spec.ts platform-tenants.spec.ts platform-domains.spec.ts platform-branding.spec.ts phase2-smoke.spec.ts --project=desktop-chromium` | 0 | 6 min 22 s | **25 passed / 3 skipped** (the three skips are the phone-viewport-only guards: platform-branding 4-5, platform-tenants 6) |
+| D | `pnpm --filter @rede-social/web exec playwright test invite.spec.ts platform-tenants.spec.ts platform-domains.spec.ts platform-branding.spec.ts phase2-smoke.spec.ts --project=desktop-chromium` | 0 | 6 min 22 s | **25 passed / 3 skipped** (the three skips are the phone-viewport-only guards: platform-branding 4-5, platform-tenants 6) |
 | E | `DOCKER_CONFIG=/tmp/dockercfg pnpm verify` — **second attempt, the recorded one-shot** | **0** | **17 min 30 s** (14:16:34Z → 14:34:04Z) | see the step table below |
 
-Task 2's own gate (`pnpm --filter @tria/web exec playwright test platform-tenants.spec.ts invite.spec.ts --project=desktop-chromium`) ran earlier: exit 0, 37 s, 11 passed / 1 skipped (case 6 phone-only).
+Task 2's own gate (`pnpm --filter @rede-social/web exec playwright test platform-tenants.spec.ts invite.spec.ts --project=desktop-chromium`) ran earlier: exit 0, 37 s, 11 passed / 1 skipped (case 6 phone-only).
 
 ### `pnpm verify` one-shot (11 steps, 02-16 composition) — GREEN
 
@@ -184,7 +184,7 @@ Task 2's own gate (`pnpm --filter @tria/web exec playwright test platform-tenant
 | `pnpm test:integration` | **16 files / 187 tests passed** |
 | `pnpm spike:supavisor` | 1 file / 3 tests passed |
 | `pnpm e2e` (three projects, 212 tests) | **174 passed / 38 skipped / 0 failed**, 16.4 min — the skips are the PWA spec's production-build-only cases (`@tracer/@offline/@install`, annotated as in 02-16) and the viewport-scoped guards; cases 8 and 4 green on both `mobile-chromium` and `desktop-chromium` |
-| `pnpm --filter @tria/web e2e:pwa` (production build, 48 tests) | **45 passed / 3 skipped**, 17.3 s (the standalone-install backstop skips of 02-11) |
+| `pnpm --filter @rede-social/web e2e:pwa` (production build, 48 tests) | **45 passed / 3 skipped**, 17.3 s (the standalone-install backstop skips of 02-11) |
 
 **First attempt (not the recorded run):** `pnpm verify` exited 1 at `pnpm turbo typecheck build test` with `WARNING IO error: No space left on device (os error 28)` — the disk was at 96 % (533 MiB free) because the repo's gitignored `.turbo/cache` had grown to 14 GB (plus a 2 GB stale `apps/web/.next`). Both caches were pruned (`rm -rf .turbo/cache apps/web/.next`; 16 GiB free afterwards, 13 GiB after the run), nothing tracked changed, and the one-shot was re-run. This is an **environment finding, not a gap-closure regression**: no test, build or lint step failed on code. Recorded as a deviation below.
 

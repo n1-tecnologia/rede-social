@@ -36,7 +36,7 @@ tech-stack:
     - "Tenant-lane reads of memberships go through membershipOfRecord(ctx) — the predicate is greppable and never user_id alone"
     - "Request-path fetches to the API carry AbortSignal.timeout with a tight budget (2 s on the interactive path vs 10 s in the API-side adapters); a timeout is a lookup failure, cached for the error TTL, never a different answer"
     - "Client hooks that await server actions wrap the whole body in try + catch (no finally) and route every rejection through the existing fail() reset with a catalog key; the raw error goes to console.error only"
-    - "apps/web hook tests: `// @vitest-environment happy-dom` + renderHook, with next-intl's useTranslations mocked to return the key and @tria/ui's useToast mocked through a vi.hoisted spy; partial vi.mock keeps real helpers (classifyFile/resolveMime) and stubs only the XHR PUT"
+    - "apps/web hook tests: `// @vitest-environment happy-dom` + renderHook, with next-intl's useTranslations mocked to return the key and @rede-social/ui's useToast mocked through a vi.hoisted spy; partial vi.mock keeps real helpers (classifyFile/resolveMime) and stubs only the XHR PUT"
     - "RED evidence for vitest: run with --reporter=tap-flat and append the node:test trailer (# tests/# pass/# fail) computed from the ok/not ok lines so `gsd_run check tdd-red-evidence` can classify the run"
 
 key-files:
@@ -163,12 +163,12 @@ Every `<verify>` command of the plan was run and was green:
 
 | Command | Result |
 |---|---|
-| `pnpm --filter @tria/core test -- membership-scope` | 16 files / 119 tests passed (whole core suite) |
-| `pnpm --filter @tria/core typecheck && lint` | green (94 files) |
-| `pnpm --filter @tria/api typecheck && lint && test` | green (45 files; 3 files / 15 tests) |
+| `pnpm --filter @rede-social/core test -- membership-scope` | 16 files / 119 tests passed (whole core suite) |
+| `pnpm --filter @rede-social/core typecheck && lint` | green (94 files) |
+| `pnpm --filter @rede-social/api typecheck && lint && test` | green (45 files; 3 files / 15 tests) |
 | `pnpm test:integration -- bootstrap invites` | 16 files / 180 tests passed (whole integration suite, twice: after Task 1 and at plan end) |
-| `pnpm --filter @tria/web test -- tenant-host proxy` / `pnpm --filter @tria/web test` | 9 files / 63 tests passed (tenant-host 3, LogoUpload 4, proxy 11 unchanged) |
-| `pnpm --filter @tria/web typecheck && lint` | green (`next typegen` + tsc; Biome 170 files) |
+| `pnpm --filter @rede-social/web test -- tenant-host proxy` / `pnpm --filter @rede-social/web test` | 9 files / 63 tests passed (tenant-host 3, LogoUpload 4, proxy 11 unchanged) |
+| `pnpm --filter @rede-social/web typecheck && lint` | green (`next typegen` + tsc; Biome 170 files) |
 | `bash scripts/check-ui-literals.sh` | OK — no pt-BR/hex literal added to a `.tsx` |
 | devDependency check (`node -e …`) | both versions pinned |
 
@@ -195,11 +195,11 @@ Every `<verify>` command of the plan was run and was green:
 ### Auto-fixed Issues
 
 **1. [Rule 3 - Blocking] Typed the `onCompleted` mock so `tsc` accepts the hook props**
-- **Found during:** Task 3 (GREEN gate `pnpm --filter @tria/web typecheck`)
+- **Found during:** Task 3 (GREEN gate `pnpm --filter @rede-social/web typecheck`)
 - **Issue:** `vi.fn()` without a signature is `Mock<Procedure | Constructable>`, not assignable to `(view: BrandingView) => void`
 - **Fix:** `vi.fn<(view: BrandingView) => void>()` (test file only)
 - **Files modified:** apps/web/components/platform/LogoUpload.test.ts
-- **Verification:** `pnpm --filter @tria/web typecheck` green
+- **Verification:** `pnpm --filter @rede-social/web typecheck` green
 - **Committed in:** b452118
 
 **2. [Rule 1 - Bug] Reworded the catch comment that contained the word "finally"**
@@ -211,7 +211,7 @@ Every `<verify>` command of the plan was run and was green:
 - **Committed in:** b452118
 
 **3. [Rule 3 - Blocking] Biome formatting of the two new test files / the re-indented hook**
-- **Found during:** Tasks 2 and 3 (`pnpm --filter @tria/web lint`)
+- **Found during:** Tasks 2 and 3 (`pnpm --filter @rede-social/web lint`)
 - **Issue:** the formatter wanted the `it(…, 10_000)` call and the try-block re-indentation on its own lines
 - **Fix:** `biome format --write`; whitespace only
 - **Files modified:** apps/web/lib/tenant-host.test.ts (in da1b83d), apps/web/components/platform/LogoUpload.tsx + LogoUpload.test.ts (in b452118)

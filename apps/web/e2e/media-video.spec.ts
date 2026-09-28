@@ -26,9 +26,9 @@ import { ensureWorker } from './worker';
  * playback stay the two known-blocked Phase 01.1 UAT lines recorded in `docs/DEPLOY.md`.
  */
 
-const DEMO_SLUG = 'tria-demo';
+const DEMO_SLUG = 'rede-demo';
 /** A throwaway `support_tenant`: the seeded set has no support user, and E7 needs all three roles. */
-const SUPPORT_EMAIL = 'support-media@tria-demo.local';
+const SUPPORT_EMAIL = 'support-media@rede-demo.local';
 /** 186 KiB of real H.264 — see `e2e/fixtures/README.md` for the AVFoundation generator. */
 const SAMPLE_MP4 = fileURLToPath(new URL('./fixtures/sample.mp4', import.meta.url));
 

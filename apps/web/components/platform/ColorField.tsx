@@ -1,7 +1,7 @@
 'use client';
 
-import { hexColorSchema, NEUTRAL_BRAND } from '@tria/contracts/branding';
-import { Input } from '@tria/ui';
+import { hexColorSchema, NEUTRAL_BRAND } from '@rede-social/contracts/branding';
+import { Input } from '@rede-social/ui';
 import { useState } from 'react';
 
 export interface ColorFieldProps {

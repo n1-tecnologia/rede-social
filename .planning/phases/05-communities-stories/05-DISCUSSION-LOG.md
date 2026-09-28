@@ -146,7 +146,7 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Keyset paging, same envelope | Reuses paging.ts and @tria/ui InfiniteScroll | ✓ |
+| Keyset paging, same envelope | Reuses paging.ts and @rede-social/ui InfiniteScroll | ✓ |
 | Unpaged, single query | Less code, no ceiling | |
 | You decide | | |
 

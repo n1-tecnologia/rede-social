@@ -1,7 +1,7 @@
 begin;
 -- 100-module-example-removal.sql — the standing regression guard for D-19 / MOD-03 (plan 04-10).
 --
--- 04-10 deleted the throwaway reference module `@tria/module-example`. The source tree no longer
+-- 04-10 deleted the throwaway reference module `@rede-social/module-example`. The source tree no longer
 -- mentions it, but the SOURCE TREE is not where a resurrection would hurt: the damage would be a
 -- future migration re-creating `example_items` or re-widening `tenant_modules_key_chk`, and until
 -- this file existed the whole pgTAP suite would have stayed green through it. The removal was only

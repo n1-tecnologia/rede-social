@@ -9,7 +9,7 @@ import { resolveHostTenant } from './tenant-host';
  * module-level cache from bleeding between tests.
  */
 vi.mock('@/lib/env', () => ({
-  env: { API_URL: 'http://api.test', PLATFORM_HOST: 'tria.test' },
+  env: { API_URL: 'http://api.test', PLATFORM_HOST: 'rede-social.test' },
 }));
 
 const fetchMock = vi.fn();

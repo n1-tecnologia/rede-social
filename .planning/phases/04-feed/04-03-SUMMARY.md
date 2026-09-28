@@ -7,7 +7,7 @@ tags: [feed, likes, comments, replies, triggers, constraints, keyset, domain-eve
 requires:
   - phase: 04-feed
     plan: 01
-    provides: "`@tria/module-feed` with `feed_posts`, the keyset idiom, the one-hydrated-statement rule + its CI budget, the after-commit event shape, and the `withTenantTx` tenant lane"
+    provides: "`@rede-social/module-feed` with `feed_posts`, the keyset idiom, the one-hydrated-statement rule + its CI budget, the after-commit event shape, and the `withTenantTx` tenant lane"
   - phase: 03-media-pipeline-member-profiles
     provides: "the ONE keyset cursor envelope (`packages/core/server/paging.ts`) and the `member_profiles` join the comment projection hydrates from"
   - phase: 02-tenant-shell-branding-platform-panel
@@ -285,7 +285,7 @@ Recorded in the frontmatter `key-decisions`. The three that will be quoted most 
 **2. [Rule 1 - Bug] The 200-row EXPLAIN fixture in `scripts/seed.ts` broke 04-01's cursor walk**
 
 - **Found during:** Task 3 (the RED run)
-- **Issue:** the plan asks for the EXPLAIN volume fixture to be seeded, "at least 200 posts … in ONE tenant". Seeding it into `tria-demo` pushed the seeded posts off the first feed page and broke `feed.test.ts` tests 2 and 3 (the cursor walk and the concurrent-insert walk), and would have broken `feed.spec.ts`'s ordering assertions the same way. Moving it to `tria-lab` only moves the damage — `feed.spec.ts` asserts the lab member sees the newest seeded *lab* post.
+- **Issue:** the plan asks for the EXPLAIN volume fixture to be seeded, "at least 200 posts … in ONE tenant". Seeding it into `rede-demo` pushed the seeded posts off the first feed page and broke `feed.test.ts` tests 2 and 3 (the cursor walk and the concurrent-insert walk), and would have broken `feed.spec.ts`'s ordering assertions the same way. Moving it to `rede-lab` only moves the damage — `feed.spec.ts` asserts the lab member sees the newest seeded *lab* post.
 - **Fix:** `090-feed.sql` now builds and `analyze`s its own 250-post / 250-root / 250-reply fixture inside its own rolled-back transaction, immediately before the EXPLAIN block and after the reconciliation assertions. The seed keeps the small per-tenant interaction fixture and the closing `analyze`. As a bonus the pgTAP file goes back to re-running identically against a seeded OR an empty database, like its siblings.
 - **Files modified:** `scripts/seed.ts`, `supabase/tests/090-feed.sql`
 - **Verification:** `pnpm test:integration` 343 passed (25 files); `pnpm supabase test db` 172 assertions green; `playwright test feed.spec.ts` 6 passed.
@@ -376,4 +376,4 @@ None — no external service configuration required.
 - All 15 `key-files` entries verified present on disk (`[ -f ]`).
 - All 4 commits verified present in `git log --oneline --all`: `183d2f4`, `3c37d88`, `bd9be48`, `3a3bbba`.
 - `commits: 4` MEASURED with `git rev-list --count 50c5894..HEAD`, not narrated.
-- Plan-level `<verification>` re-run at close-out: `@tria/module-feed` typecheck + lint green and 9 tests passed; `@tria/api` typecheck + lint green; `pnpm boundaries` → "Checked 444 files in 8 packages, no issues found"; `pnpm db:generate` → "No schema changes, nothing to migrate" with a clean `git status --porcelain -- supabase/migrations`; `pnpm db:reset && pnpm db:seed && pnpm supabase test db` → Result: PASS (172 assertions, 10 files) from a cold stack; `pnpm test:integration` → 343 passed (25 files); `playwright test feed.spec.ts` → 6 passed.
+- Plan-level `<verification>` re-run at close-out: `@rede-social/module-feed` typecheck + lint green and 9 tests passed; `@rede-social/api` typecheck + lint green; `pnpm boundaries` → "Checked 444 files in 8 packages, no issues found"; `pnpm db:generate` → "No schema changes, nothing to migrate" with a clean `git status --porcelain -- supabase/migrations`; `pnpm db:reset && pnpm db:seed && pnpm supabase test db` → Result: PASS (172 assertions, 10 files) from a cold stack; `pnpm test:integration` → 343 passed (25 files); `playwright test feed.spec.ts` → 6 passed.

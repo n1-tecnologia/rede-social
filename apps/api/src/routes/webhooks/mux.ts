@@ -1,5 +1,5 @@
-import { recordProviderEvent } from '@tria/core/server/media/video/inbox';
-import { videoProvider } from '@tria/core/server/media/video/index';
+import { recordProviderEvent } from '@rede-social/core/server/media/video/inbox';
+import { videoProvider } from '@rede-social/core/server/media/video/index';
 import { createOpenApiApp } from '../../http/openapi';
 
 /**

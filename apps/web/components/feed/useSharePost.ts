@@ -1,13 +1,13 @@
 'use client';
 
-import { type PostShareTarget, sharePost } from '@tria/module-feed/ui';
-import { useToast } from '@tria/ui';
+import { type PostShareTarget, sharePost } from '@rede-social/module-feed/ui';
+import { useToast } from '@rede-social/ui';
 import { useCallback } from 'react';
 
 /**
  * THE composition point for FEED-07's share (UI-SPEC E16): it binds the browser's real surfaces to
  * `sharePost` and owns the four-result branch table. The module component raises the event; nothing
- * inside `@tria/module-feed` decides what a share outcome MEANS, and nothing inside it holds a
+ * inside `@rede-social/module-feed` decides what a share outcome MEANS, and nothing inside it holds a
  * catalog string (PWA-03).
  *
  * | Result        | What happens here          | Why |

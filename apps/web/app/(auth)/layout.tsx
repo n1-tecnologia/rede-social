@@ -1,4 +1,4 @@
-import { brandStyleVars } from '@tria/contracts';
+import { brandStyleVars } from '@rede-social/contracts';
 import type { Metadata, Viewport } from 'next';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
@@ -9,7 +9,7 @@ import { AuthBrand } from './AuthBrand';
  * Public pages, branded per HOST before any session exists (TENANT-02, roadmap criterion 1, UI-SPEC
  * Auth Pages Contract): the five `--brand-*` variables sit on `<main>` and the tenant's logo (or its
  * display name, D-26) is server-rendered on the first HTML, so there is no default-brand flash
- * (Pitfall 2). Platform and generic hosts keep the neutral TRIA wordmark and the neutral variables.
+ * (Pitfall 2). Platform and generic hosts keep the neutral platform wordmark and the neutral variables.
  *
  * Only token utilities are used (D-41 consumer): under `<html data-theme="dark">` the ground becomes
  * the dark `--theme-bg` and the brand CTA switches to `--brand-primary-dark` without any change here.

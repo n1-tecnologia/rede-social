@@ -4,7 +4,7 @@ import {
   type PlatformTenantsQuery,
   platformTenantDetailSchema,
   platformTenantsSchema,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { z } from 'zod';

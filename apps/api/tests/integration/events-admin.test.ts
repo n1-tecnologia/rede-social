@@ -1,4 +1,4 @@
-import { subscribe } from '@tria/core/server/events/bus';
+import { subscribe } from '@rede-social/core/server/events/bus';
 import type {
   EventCancelled,
   EventEdit,
@@ -6,7 +6,7 @@ import type {
   EventReactivated,
   EventSummary,
   EventUpdated,
-} from '@tria/module-events/contracts';
+} from '@rede-social/module-events/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -51,7 +51,7 @@ const tenantIds = { demo: '', lab: '' };
 /** The prefix every event THIS FILE writes carries, so the sweep can be exact. */
 const TEST_TITLE_PREFIX = 'Evento de gestao';
 
-/** 06-01's seeded upcoming event #1 in tria-lab (`scripts/seed.ts` SEED_EVENT_IDS). */
+/** 06-01's seeded upcoming event #1 in rede-lab (`scripts/seed.ts` SEED_EVENT_IDS). */
 const LAB_EVENT = '0e000000-0000-4000-8000-000000000e01';
 
 const MEETING_URL = 'https://meet.example.test/gestao-sala';
@@ -167,7 +167,7 @@ async function seedCover(label: string): Promise<string> {
        variant_widths, filename, ready_at)
     select ${tenantIds.demo}::uuid, u.id, 'image', 'cover', 'ready', 'supabase', 'image/webp',
            262144, 1600, 1000, '{320,640,960,1280}'::int[], ${`06-04-${label}`}, now()
-      from public.users u where u.email = 'admin@tria-demo.local'
+      from public.users u where u.email = 'admin@rede-demo.local'
     returning id`;
   if (!row) throw new Error(`could not seed the ${label} cover`);
   coverAssets.push(row.id);
@@ -188,13 +188,13 @@ let stops: (() => void)[] = [];
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
   await sweep();
   stops = [
@@ -335,7 +335,7 @@ describe('events admin', () => {
     const [row] = await adminSql<{ status: string }[]>`
       select a.status from public.event_attendances a
         join public.users u on u.id = a.user_id
-       where a.event_id = ${created.id}::uuid and u.email = 'member@tria-demo.local'`;
+       where a.event_id = ${created.id}::uuid and u.email = 'member@rede-demo.local'`;
     expect(row?.status).toBe('going');
     const detail = await request(`/v1/events/${created.id}`, tokens.demoMember);
     expect(((await detail.json()) as EventSummary).confirmedCount).toBe(1);

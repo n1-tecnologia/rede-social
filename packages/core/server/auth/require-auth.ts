@@ -1,4 +1,4 @@
-import { normalizeHost, TENANT_HOST_HEADER } from '@tria/contracts';
+import { normalizeHost, TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { createMiddleware } from 'hono/factory';
 import { type JWTPayload, jwtVerify } from 'jose';
 import { ApiError } from '../http/api-error';
@@ -43,7 +43,7 @@ const INVITED_ALLOWED_PATHS = new Set(['/v1/me/bootstrap', '/v1/me/accept-invite
  * wrong host still gets MEMBERSHIP_BLOCKED; an `invited` membership passes the membership checks
  * (D-29: accept-invite runs in the tenant lane) but, AFTER the host check, may reach only the two
  * onboarding routes — an invited admin holds a session from the invite link without having accepted
- * the tenant rules and TRIA's terms yet, so every other route answers 403 MEMBERSHIP_INVITED (a
+ * the tenant rules and the platform's terms yet, so every other route answers 403 MEMBERSHIP_INVITED (a
  * cross-tenant host still answers TENANT_HOST_MISMATCH first). The host header can only DENY a
  * session (403 TENANT_HOST_MISMATCH); the tenant of record is always the membership (TENANT-01,
  * D-23). `Host`/`X-Forwarded-Host` are never read.

@@ -61,7 +61,7 @@ describe('tokens.css — dark variant and @theme inline aliases', () => {
 });
 
 describe('tokens.css — neutral fallback brand and the two theme layers', () => {
-  it('carries the neutral TRIA brand fallback and the light neutrals on :root (and explicit light scopes)', () => {
+  it('carries the neutral platform brand fallback and the light neutrals on :root (and explicit light scopes)', () => {
     const root = block(':root');
     expect(root).toContain('--brand-primary: #2e6fd0');
     expect(root).toContain('--brand-secondary: #5b9cf8');

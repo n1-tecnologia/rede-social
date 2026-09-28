@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TRIA — Fase 05.2 · Destaques de stories (mockup estático para revisão do time de design)</title>
+<title>Rede Social — Fase 05.2 · Destaques de stories (mockup estático para revisão do time de design)</title>
 <style>
 /* =====================================================================================
    0. NENHUM ASSET EXTERNO. Um arquivo, zero rede: nenhuma fonte remota, nenhum script
@@ -153,7 +153,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
 .page-header h1 { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* =====================================================================================
-   4. PRIMITIVAS @tria/ui — mesmas medidas, escritas em CSS puro
+   4. PRIMITIVAS @rede-social/ui — mesmas medidas, escritas em CSS puro
    ===================================================================================== */
 .icon-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--theme-text); flex: none; }
 .icon-btn:hover { background: var(--theme-bg-hover); }
@@ -381,17 +381,17 @@ button.hrow:hover { background: var(--theme-bg-hover); }
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
   <!-- o logo do tenant é uma IMAGEM, não um token: um wordmark largo (o formato mais comum de logo) -->
-  <symbol id="logo-wordmark" viewBox="0 0 120 40"><rect x="0" y="10" width="20" height="20" rx="6" fill="var(--brand-primary)"/><text x="26" y="27" font-family="Manrope, system-ui, sans-serif" font-size="16" font-weight="700" fill="var(--brand-primary)">TRIA Demo</text></symbol>
+  <symbol id="logo-wordmark" viewBox="0 0 120 40"><rect x="0" y="10" width="20" height="20" rx="6" fill="var(--brand-primary)"/><text x="26" y="27" font-family="Manrope, system-ui, sans-serif" font-size="16" font-weight="700" fill="var(--brand-primary)">Rede Demo</text></symbol>
 </svg>
 
 <!-- ============ barra do mockup (não é superfície do produto) ============ -->
 <div class="toolbar" role="region" aria-label="Controles do mockup">
-  <span class="brandname">TRIA · Fase 05.2 <small>Destaques de stories · as sete superfícies sem protótipo · 05.2-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <span class="brandname">Rede Social · Fase 05.2 <small>Destaques de stories · as sete superfícies sem protótipo · 05.2-UI-SPEC.md · tokens reais de @rede-social/ui</small></span>
   <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
   <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
   <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
   <span>
-    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">Rede Social (neutro)</button>
     <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
     <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
     <button class="preset" type="button" data-p="#b91c1c" data-s="#f87171">Vermelho</button>
@@ -427,11 +427,11 @@ button.hrow:hover { background: var(--theme-bg-hover); }
         <div class="body" style="padding-bottom:120px">
           <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
             <div style="width:64px;height:64px;border-radius:16px;background:var(--theme-bg-secondary);display:grid;place-items:center"><svg style="width:48px;height:48px"><use href="#logo-wordmark"/></svg></div>
-            <h1 class="t24b" style="margin:0">Bem-vindo(a) à TRIA Demo</h1>
+            <h1 class="t24b" style="margin:0">Bem-vindo(a) à Rede Demo</h1>
           </div>
           <div class="strip" role="list" aria-label="Stories">
             <span class="strip-item" role="listitem"><a href="#s6" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="disc"><svg class="i i-28"><use href="#i-user"/></svg></span><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></a><span class="label">Seu story</span></span>
-            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de TRIA Demo. Há stories novos."><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">TRIA Demo</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de Rede Demo. Há stories novos."><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">Rede Demo</span></span>
             <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Protocolos"><span class="ring neutral"><span class="disc cover" role="img" aria-label="Capa do destaque Protocolos"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Protocolos</span></span>
             <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Anatomia"><span class="ring neutral"><span class="disc cover" role="img" aria-label="Capa do destaque Anatomia"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Anatomia</span></span>
             <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Bastidores"><span class="ring neutral"><span class="disc mono">B</span></span></button><span class="label">Bastidores</span></span>
@@ -442,7 +442,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
           <div class="card" style="margin:12px 16px 0">
             <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;min-width:0">
               <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
-              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
             </div>
             <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
           </div>
@@ -463,10 +463,10 @@ button.hrow:hover { background: var(--theme-bg-hover); }
         <div class="body" style="padding-bottom:120px">
           <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
             <div style="width:64px;height:64px;border-radius:16px;background:var(--theme-bg-secondary);display:grid;place-items:center"><svg style="width:48px;height:48px"><use href="#logo-wordmark"/></svg></div>
-            <h1 class="t24b" style="margin:0">Bem-vindo(a) à TRIA Demo</h1>
+            <h1 class="t24b" style="margin:0">Bem-vindo(a) à Rede Demo</h1>
           </div>
           <div class="strip" role="list" aria-label="Stories">
-            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de TRIA Demo"><span class="ring neutral"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">TRIA Demo</span></span>
+            <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de Rede Demo"><span class="ring neutral"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">Rede Demo</span></span>
             <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Protocolos"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Protocolos</span></span>
             <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Anatomia"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Anatomia</span></span>
             <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Bastidores"><span class="ring neutral"><span class="disc mono">B</span></span></button><span class="label">Bastidores</span></span>
@@ -475,7 +475,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
           <div class="card" style="margin:12px 16px 0">
             <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;min-width:0">
               <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
-              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
             </div>
             <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
           </div>
@@ -496,9 +496,9 @@ button.hrow:hover { background: var(--theme-bg-hover); }
         <div class="body">
           <p class="anno" style="padding-top:16px"><strong>UI-D-60 — logo do tenant.</strong> Disco em <code>bg-bg-secondary</code>; o logo é <code>object-contain</code> dentro de uma caixa centrada de 48×48, então um wordmark largo aparece inteiro, nunca recortado.</p>
           <div class="strip" role="list" aria-label="Variações do círculo do tenant">
-            <span class="strip-item" role="listitem"><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span><span class="label">TRIA Demo</span></span>
+            <span class="strip-item" role="listitem"><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span><span class="label">Rede Demo</span></span>
             <span class="strip-item" role="listitem"><span class="ring"><span class="disc logo"><span class="logo-box"><svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="0" fill="#ffffff"/><circle cx="24" cy="24" r="12" fill="var(--brand-primary)"/></svg></span></span></span><span class="label">Clínica Vida</span></span>
-            <span class="strip-item" role="listitem"><span class="ring"><span class="disc mono">T</span></span><span class="label">TRIA Demo</span></span>
+            <span class="strip-item" role="listitem"><span class="ring"><span class="disc mono">T</span></span><span class="label">Rede Demo</span></span>
           </div>
           <p class="anno">1 · wordmark largo, inteiro. 2 · logo quadrado com fundo branco: os 8px de respiro evitam que o branco encoste no anel. 3 · <strong>sem logo</strong>: o disco <code>--brand-gradient</code> com a primeira letra do nome, 16/700 em <code>--brand-on-primary</code> — o mesmo monograma do destaque sem capa ("B" de Bastidores), um só componente.</p>
           <div class="rule" style="margin:16px"></div>
@@ -546,7 +546,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
         <p class="t12 ter" style="margin:0 0 12px">UI-D-47 carregado — desktop: geometria idêntica dentro da coluna de 680px. Sem setas, sem máscara de fade. Admin com story não visto.</p>
         <div class="strip" role="list" aria-label="Stories" style="background:var(--theme-bg);border-radius:12px">
           <span class="strip-item" role="listitem"><a href="#s6" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="disc"><svg class="i i-28"><use href="#i-user"/></svg></span><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></a><span class="label">Seu story</span></span>
-          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de TRIA Demo. Há stories novos."><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">TRIA Demo</span></span>
+          <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir stories de Rede Demo. Há stories novos."><span class="ring"><span class="disc logo"><span class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span></span></span></button><span class="label">Rede Demo</span></span>
           <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Protocolos"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Protocolos</span></span>
           <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Anatomia"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Anatomia</span></span>
           <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Bastidores"><span class="ring neutral"><span class="disc mono">B</span></span></button><span class="label">Bastidores</span></span>
@@ -574,7 +574,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
         <div class="body">
           <div style="height:144px;background:var(--brand-gradient)" aria-hidden="true"></div>
           <div style="padding:0 16px 16px">
-            <h2 class="t24b" style="margin:16px 0 0">Coral TRIA</h2>
+            <h2 class="t24b" style="margin:16px 0 0">Coral Rede Social</h2>
             <p class="t14 sec" style="margin:8px 0 0">Fotos, bastidores e o calendário do coral.</p>
           </div>
           <div class="section-title">Destaques</div>
@@ -582,7 +582,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
             <span class="strip-item" role="listitem"><a href="#s6" aria-label="Publicar um story"><span class="ring neutral own-wrap"><span class="disc"><svg class="i i-28"><use href="#i-user"/></svg></span><span class="own-badge"><svg class="i i-16"><use href="#i-plus"/></svg></span></span></a><span class="label">Seu story</span></span>
             <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Ensaios"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Ensaios</span></span>
             <span class="strip-item" role="listitem"><button type="button" aria-label="Abrir destaque Destaques"><span class="ring neutral"><span class="disc cover"><svg class="i i-28"><use href="#i-image"/></svg></span></span></button><span class="label">Destaques</span></span>
-            <span class="strip-item" role="listitem"><a href="#s3" aria-label="Gerenciar destaques de Coral TRIA"><span class="ring dashed"><span class="disc glyph"><svg class="i i-20"><use href="#i-pencil"/></svg></span></span></a><span class="label">Gerenciar</span></span>
+            <span class="strip-item" role="listitem"><a href="#s3" aria-label="Gerenciar destaques de Coral Rede Social"><span class="ring dashed"><span class="disc glyph"><svg class="i i-20"><use href="#i-pencil"/></svg></span></span></a><span class="label">Gerenciar</span></span>
           </div>
           <div class="rule"></div>
           <p class="anno" style="padding-top:12px">"Destaques" é o destaque criado pela migração a partir dos stories que antes estavam presos a esta comunidade (D-116). A fileira toda é neutra, exceto o selo do "+".</p>
@@ -596,7 +596,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
         <div class="body">
           <div style="height:144px;background:var(--brand-gradient)" aria-hidden="true"></div>
           <div style="padding:0 16px 16px">
-            <h2 class="t24b" style="margin:16px 0 0">Coral TRIA</h2>
+            <h2 class="t24b" style="margin:16px 0 0">Coral Rede Social</h2>
             <p class="t14 sec" style="margin:8px 0 0">Fotos, bastidores e o calendário do coral.</p>
           </div>
           <div class="section-title">Destaques</div>
@@ -1140,9 +1140,9 @@ button.hrow:hover { background: var(--theme-bg-hover); }
             <div class="hrow"><span class="thumb32 mono">A</span><span class="htitle">Aulas</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Aulas, Início"></span></div>
             <div class="group-label">Avisos da diretoria</div>
             <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Assembleias</span><span class="switch" role="switch" aria-checked="true" aria-label="Destacar em Assembleias, Avisos da diretoria"></span></div>
-            <div class="group-label">Coral TRIA</div>
-            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Ensaios, Coral TRIA"></span></div>
-            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Destaques</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Destaques, Coral TRIA"></span></div>
+            <div class="group-label">Coral Rede Social</div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Ensaios, Coral Rede Social"></span></div>
+            <div class="hrow"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Destaques</span><span class="switch" role="switch" aria-checked="false" aria-label="Destacar em Destaques, Coral Rede Social"></span></div>
           </div>
         </div>
       </div>
@@ -1198,8 +1198,8 @@ button.hrow:hover { background: var(--theme-bg-hover); }
             <button class="hrow" type="button" aria-label="Publicar no destaque Protocolos, Início"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Protocolos</span></button>
             <button class="hrow" type="button" aria-label="Publicar no destaque Bastidores, Início"><span class="thumb32 mono">B</span><span class="htitle">Bastidores</span></button>
             <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
-            <div class="group-label">Coral TRIA</div>
-            <button class="hrow" type="button" aria-label="Publicar no destaque Ensaios, Coral TRIA"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span></button>
+            <div class="group-label">Coral Rede Social</div>
+            <button class="hrow" type="button" aria-label="Publicar no destaque Ensaios, Coral Rede Social"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span></button>
             <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
             <div class="group-label">Voluntariado</div>
             <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
@@ -1229,8 +1229,8 @@ button.hrow:hover { background: var(--theme-bg-hover); }
             <button class="hrow" type="button" aria-label="Publicar no destaque Protocolos, Início"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Protocolos</span></button>
             <button class="hrow" type="button" aria-label="Publicar no destaque Bastidores, Início"><span class="thumb32 mono">B</span><span class="htitle">Bastidores</span></button>
             <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
-            <div class="group-label">Coral TRIA</div>
-            <button class="hrow" type="button" aria-label="Publicar no destaque Ensaios, Coral TRIA"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span></button>
+            <div class="group-label">Coral Rede Social</div>
+            <button class="hrow" type="button" aria-label="Publicar no destaque Ensaios, Coral Rede Social"><span class="thumb32"><svg class="i i-16"><use href="#i-image"/></svg></span><span class="htitle">Ensaios</span></button>
             <button class="hrow" type="button"><span class="thumb32 dashed"><svg class="i i-16"><use href="#i-plus"/></svg></span><span class="htitle t14b">Novo destaque</span></button>
           </div>
         </div>
@@ -1369,7 +1369,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
           <span class="veil" aria-hidden="true"></span>
           <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
           <div class="composer-bottom">
-            <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Coral TRIA · Ensaios</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
+            <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Coral Rede Social · Ensaios</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
             <div class="cap-line">
               <textarea aria-label="Legenda">Trecho do coral no encerramento.</textarea>
               <span class="btn brand">Publicar</span>
@@ -1377,7 +1377,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
           </div>
         </div>
       </div>
-      <p class="caption">Chega <strong>preenchida com o primeiro destaque da comunidade</strong>, dito na linha antes de "Publicar". Publicar → <code>/comunidades/{id}</code>, toast "Story publicado no destaque Ensaios de Coral TRIA.". Num destaque do início: "Início · Protocolos" → <code>/inicio</code>, "Story publicado no destaque Protocolos.".</p>
+      <p class="caption">Chega <strong>preenchida com o primeiro destaque da comunidade</strong>, dito na linha antes de "Publicar". Publicar → <code>/comunidades/{id}</code>, toast "Story publicado no destaque Ensaios de Coral Rede Social.". Num destaque do início: "Início · Protocolos" → <code>/inicio</code>, "Story publicado no destaque Protocolos.".</p>
     </div>
 
     <div class="frame-wrap">
@@ -1426,7 +1426,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
           <div class="media"><span class="frame"><svg class="i i-40"><use href="#i-image"/></svg></span></div>
           <span class="veil" aria-hidden="true"></span>
           <button class="v-icon scrim" type="button" aria-label="Fechar" style="position:absolute;top:calc(var(--safe-top) + 8px);left:12px;z-index:3"><svg class="i i-20"><use href="#i-x"/></svg></button>
-          <div class="alert-card" role="alert"><svg class="i i-20"><use href="#i-alert"/></svg><span>A comunidade Coral TRIA foi arquivada e o story não foi publicado. Escolha outro destaque ou publique sem destaque.</span></div>
+          <div class="alert-card" role="alert"><svg class="i i-20"><use href="#i-alert"/></svg><span>A comunidade Coral Rede Social foi arquivada e o story não foi publicado. Escolha outro destaque ou publique sem destaque.</span></div>
           <div class="composer-bottom">
             <button class="dest-row" type="button" aria-haspopup="dialog"><span class="dl">Destaque</span><span class="dv">Nenhum</span><svg class="i i-18 dc"><use href="#i-chev-r"/></svg></button>
             <div class="cap-line">
@@ -1459,7 +1459,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
           <div class="bars" aria-hidden="true"><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:38%"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span></div>
           <div class="vhead">
             <span class="vavatar logo"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span>
-            <span class="who"><span class="t14b trunc" style="display:block">TRIA Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 6 h</span></span>
+            <span class="who"><span class="t14b trunc" style="display:block">Rede Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 6 h</span></span>
             <button class="v-icon scrim" type="button" aria-label="Ativar som"><svg class="i i-20"><use href="#i-mute"/></svg></button>
             <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
           </div>
@@ -1473,10 +1473,10 @@ button.hrow:hover { background: var(--theme-bg-hover); }
               <button class="v-pill" type="button"><svg class="i i-16"><use href="#i-bookmark-plus"/></svg>Destacar</button>
             </div>
           </div>
-          <p class="sr-only" aria-live="polite">TRIA Demo: story 3 de 5</p>
+          <p class="sr-only" aria-live="polite">Rede Demo: story 3 de 5</p>
         </div>
       </div>
-      <p class="caption">Cabeçalho do grupo do tenant: logo + nome de exibição + tempo relativo (como hoje). A região viva anuncia "TRIA Demo: story 3 de 5". Membros não recebem o nó "Destacar".</p>
+      <p class="caption">Cabeçalho do grupo do tenant: logo + nome de exibição + tempo relativo (como hoje). A região viva anuncia "Rede Demo: story 3 de 5". Membros não recebem o nó "Destacar".</p>
     </div>
 
     <div class="frame-wrap">
@@ -1552,7 +1552,7 @@ button.hrow:hover { background: var(--theme-bg-hover); }
           <div class="bars" aria-hidden="true"><span><i style="width:100%"></i></span><span><i style="width:100%"></i></span><span><i style="width:38%"></i></span><span><i style="width:0"></i></span><span><i style="width:0"></i></span></div>
           <div class="vhead">
             <span class="vavatar logo"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></span>
-            <span class="who"><span class="t14b trunc" style="display:block">TRIA Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 6 h</span></span>
+            <span class="who"><span class="t14b trunc" style="display:block">Rede Demo</span><span class="t12" style="display:block;color:rgba(255,255,255,0.75)">há 6 h</span></span>
             <button class="v-icon" type="button" aria-label="Fechar"><svg class="i i-20"><use href="#i-x"/></svg></button>
           </div>
         </div>

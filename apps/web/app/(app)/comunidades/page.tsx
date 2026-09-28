@@ -1,5 +1,8 @@
-import { COMMUNITY_PERMISSIONS, type CommunityStatus } from '@tria/module-communities/contracts';
-import { Chip } from '@tria/ui';
+import {
+  COMMUNITY_PERMISSIONS,
+  type CommunityStatus,
+} from '@rede-social/module-communities/contracts';
+import { Chip } from '@rede-social/ui';
 import { Plus } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';

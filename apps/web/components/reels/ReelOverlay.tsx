@@ -8,8 +8,8 @@ import {
   linkify,
   type PostShareTarget,
   useOptimisticLike,
-} from '@tria/module-feed/ui';
-import { compactCount, ReelCaption, ReelRail } from '@tria/module-reels/ui';
+} from '@rede-social/module-feed/ui';
+import { compactCount, ReelCaption, ReelRail } from '@rede-social/module-reels/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReelView } from '@/lib/reels';
 import { announcedCount } from '@/lib/reels-count';

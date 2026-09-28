@@ -1,6 +1,6 @@
 'use client';
 
-import { chipBase, cn } from '@tria/ui';
+import { chipBase, cn } from '@rede-social/ui';
 import { CalendarX2, Check, MapPin, Video } from 'lucide-react';
 import { EventCover } from './EventCover';
 

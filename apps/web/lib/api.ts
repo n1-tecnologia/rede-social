@@ -1,5 +1,5 @@
-import type { AppType } from '@tria/api/types';
-import { TENANT_HOST_HEADER } from '@tria/contracts';
+import type { AppType } from '@rede-social/api/types';
+import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { hc } from 'hono/client';
 import { env } from '@/lib/env';
 import { createClient } from '@/lib/supabase/server';

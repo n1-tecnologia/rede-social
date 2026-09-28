@@ -1,5 +1,5 @@
-import { FEED_CAPTION_TRUNCATE_AT } from '@tria/module-feed/contracts';
-import { EmptyState, PageHeader } from '@tria/ui';
+import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
+import { EmptyState, PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';

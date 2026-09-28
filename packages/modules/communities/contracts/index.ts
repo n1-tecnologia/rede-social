@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * The module's published contract surface (`@tria/module-communities/contracts`). Both the API and
+ * The module's published contract surface (`@rede-social/module-communities/contracts`). Both the API and
  * the web app import from here — the same Zod schema validates the query in Hono, the body in the
  * route and the page payload in `apps/web/lib/communities.ts`, so there is exactly one definition of
  * what a community is (MOD-01).
@@ -18,7 +18,7 @@ export const COMMUNITY_MAX_PAGE_SIZE = 25;
 
 /**
  * The longest cursor this endpoint will look at — the `FEED_MAX_CURSOR_LENGTH` rule restated. The
- * envelope (`@tria/core/server/paging`) is a base64url JSON object carrying an ISO timestamp and a
+ * envelope (`@rede-social/core/server/paging`) is a base64url JSON object carrying an ISO timestamp and a
  * uuid, so 512 characters is already generous; the bound exists so a megabyte of "cursor" is refused
  * before it is decoded.
  */
@@ -258,7 +258,7 @@ export interface CommunityArchived {
  * the kernel knowing modules exist. Anything that imports this file gets `emit`/`subscribe` typed
  * for them.
  */
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'community.created': CommunityCreated;
     'community.updated': CommunityUpdated;

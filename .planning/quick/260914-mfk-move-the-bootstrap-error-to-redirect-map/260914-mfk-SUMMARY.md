@@ -40,7 +40,7 @@ key-files:
 key-decisions:
   - "Redirect mapping lives once per loader (bootstrapRedirectPath, platformRedirectPath) on top of one shared loadOrRedirect(); the layout and pages own no try/catch"
   - "Unknown envelope codes and 5xx still rethrow the original ApiClientError (never a silent render of the private shell)"
-  - "Seeded member@tria-demo.local was found `blocked` in the local DB before this task; restored to `active` (seed default) as an environment fix, not a code change"
+  - "Seeded member@rede-demo.local was found `blocked` in the local DB before this task; restored to `active` (seed default) as an environment fix, not a code change"
 
 patterns-established:
   - "Pattern: screens under app/(app) call requireBootstrap() / requirePlatformTenants(); getBootstrap()/getPlatformTenants() stay cache()d and are not called from screens"
@@ -85,7 +85,7 @@ coverage:
         ref: "Task 2 grep gates: 'auth/blocked' once in lib/bootstrap.ts (non-comment) and nowhere under app/(app); layout imports neither redirect nor ApiClientError; getBootstrap/getPlatformTenants still `= cache(`"
         status: pass
       - kind: other
-        ref: "pnpm --filter @tria/web typecheck && pnpm --filter @tria/web lint"
+        ref: "pnpm --filter @rede-social/web typecheck && pnpm --filter @rede-social/web lint"
         status: pass
     human_judgment: false
 
@@ -162,9 +162,9 @@ e2e result line (`e2e-full.log`): `34 passed (27.7s)`, Playwright exit code 0.
 
 ### Auto-fixed Issues
 
-**1. [Rule 3 - Blocking] Seeded `member@tria-demo.local` was `blocked` in the local DB before this task**
-- **Found during:** Task 3 (first full-suite run: 26 passed, 8 failed — `example.spec` #2, `host-mismatch.spec` #1-3, `login.spec` #3 and #5, `logout.spec`, `session.spec` — every one of them a login as the seeded demo member that landed on `/acesso-suspenso?t=TRIA+Demo`)
-- **Issue:** `public.memberships` had `status = 'blocked'`, `blocked_at = null` for `member@tria-demo.local`. Not caused by this task: `blocked.spec.ts` only mutates the throwaway member it creates and always writes `blocked_at = now()`; the null `blocked_at` points at an earlier manual/UAT session. `scripts/seed.ts` inserts memberships with `onConflictDoNothing()`, so re-seeding would not have repaired it either.
+**1. [Rule 3 - Blocking] Seeded `member@rede-demo.local` was `blocked` in the local DB before this task**
+- **Found during:** Task 3 (first full-suite run: 26 passed, 8 failed — `example.spec` #2, `host-mismatch.spec` #1-3, `login.spec` #3 and #5, `logout.spec`, `session.spec` — every one of them a login as the seeded demo member that landed on `/acesso-suspenso?t=Rede Social+Demo`)
+- **Issue:** `public.memberships` had `status = 'blocked'`, `blocked_at = null` for `member@rede-demo.local`. Not caused by this task: `blocked.spec.ts` only mutates the throwaway member it creates and always writes `blocked_at = now()`; the null `blocked_at` points at an earlier manual/UAT session. `scripts/seed.ts` inserts memberships with `onConflictDoNothing()`, so re-seeding would not have repaired it either.
 - **Fix:** `update public.memberships set status='active', blocked_at=null` for that one user (restores the seed default). Environment/test-data fix only; no source file changed.
 - **Files modified:** none
 - **Verification:** second full run `34 passed`, exit 0; `web-after.log` still 0 `ApiClientError` lines across both runs. The first run's output is kept as `e2e-full-run1-seed-member-blocked.log` in the scratchpad.

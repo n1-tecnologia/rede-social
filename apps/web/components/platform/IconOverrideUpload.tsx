@@ -1,7 +1,7 @@
 'use client';
 
-import { BRANDING_MAX_BYTES } from '@tria/contracts/branding';
-import { Button, ConfirmDialog, FileDropZone, SectionTitle, useToast } from '@tria/ui';
+import { BRANDING_MAX_BYTES } from '@rede-social/contracts/branding';
+import { Button, ConfirmDialog, FileDropZone, SectionTitle, useToast } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import type { removeIconOverrideAction } from '@/app/(platform)/plataforma/tenants/[id]/marca/actions';

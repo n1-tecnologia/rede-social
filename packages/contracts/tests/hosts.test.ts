@@ -5,7 +5,7 @@ import { createBoundedTtlCache, isRegistrableHost, normalizeHost } from '../src/
 
 describe('isRegistrableHost — the tenant_domains_host_chk predicate', () => {
   it('accepts what the database would store', () => {
-    for (const host of ['tria-demo.localhost', 'comunidade.cliente.com.br', 'a.b', '127.0.0.1']) {
+    for (const host of ['rede-demo.localhost', 'comunidade.cliente.com.br', 'a.b', '127.0.0.1']) {
       expect(isRegistrableHost(host)).toBe(true);
     }
   });
@@ -23,7 +23,7 @@ describe('isRegistrableHost — the tenant_domains_host_chk predicate', () => {
       expect(isRegistrableHost(host)).toBe(false);
     }
     // normalizeHost lower-cases and strips the port, so the pair is what callers actually run.
-    expect(isRegistrableHost(normalizeHost('TRIA-DEMO.LOCALHOST:3000') ?? '')).toBe(true);
+    expect(isRegistrableHost(normalizeHost('REDE-DEMO.LOCALHOST:3000') ?? '')).toBe(true);
   });
 });
 

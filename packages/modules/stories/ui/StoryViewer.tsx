@@ -1,6 +1,6 @@
 'use client';
 
-import { IconButton, useFocusTrap, useMediaQuery } from '@tria/ui';
+import { IconButton, useFocusTrap, useMediaQuery } from '@rede-social/ui';
 import { Loader2, Play, Volume2, VolumeX, X } from 'lucide-react';
 import {
   type ReactNode,
@@ -177,7 +177,7 @@ export interface StoryViewerProps {
    * A node rendered INSIDE the dialog, above everything else — 05-07's `CommentSheet`.
    *
    * It is INJECTED rather than imported for the reason the action row is: `CommentSheet` lives in
-   * `@tria/module-feed` and `turbo boundaries` denies a `module -> module` package edge (MOD-02),
+   * `@rede-social/module-feed` and `turbo boundaries` denies a `module -> module` package edge (MOD-02),
    * so the composition happens in `apps/web`, which may reach both. 05-06 resolved the identical
    * edge for `LikeButton` the same way.
    *

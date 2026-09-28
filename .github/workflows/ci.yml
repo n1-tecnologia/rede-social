@@ -34,7 +34,7 @@ jobs:
       # (fork pull requests receive none either — plain `pull_request`, never `pull_request_target`).
       SEED_PASSWORD: ci-only-Segredo123
       SUPER_ADMIN_PASSWORD: ci-only-SuperSegredo123
-      SUPER_ADMIN_EMAIL: ferramentas@triacompany.com.br
+      SUPER_ADMIN_EMAIL: superadmin@rede-social.test
       # Send Email Hook secret, ci-only: `supabase start`/`db reset`/`test db` below run the setup-cli
       # binary directly (scripts/supabase.sh does not apply), every CLI command validates the
       # `[auth.hook.send_email]` block, and scripts/local-env.sh writes this exported value into
@@ -96,14 +96,14 @@ jobs:
         run: pnpm spike:supavisor
 
       - name: Install Chromium for Playwright
-        run: pnpm --filter @tria/web exec playwright install --with-deps chromium
+        run: pnpm --filter @rede-social/web exec playwright install --with-deps chromium
       - name: End-to-end (iPhone 14, Pixel 7, desktop — dev servers)
         run: pnpm e2e
       # Production build required: `@serwist/turbopack` empties the precache in `next dev` (02-11).
       # playwright.pwa.config.ts builds and starts the app on port 3100 and inherits the base
       # config's report knobs, so the two Playwright runs keep separate report/trace folders.
       - name: End-to-end PWA (production build — iPhone 14, Pixel 7, desktop)
-        run: pnpm --filter @tria/web e2e:pwa
+        run: pnpm --filter @rede-social/web e2e:pwa
         env:
           PLAYWRIGHT_REPORT_DIR: playwright-report-pwa
           PLAYWRIGHT_OUTPUT_DIR: test-results-pwa

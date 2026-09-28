@@ -1,12 +1,12 @@
-import { avatarUrlFor } from '@tria/contracts/profiles';
-import type { FeedComment, FeedPost, PostMediaItem } from '@tria/module-feed/contracts';
+import { avatarUrlFor } from '@rede-social/contracts/profiles';
+import type { FeedComment, FeedPost, PostMediaItem } from '@rede-social/module-feed/contracts';
 import type {
   AttachmentDescriptor,
   CommentView,
   PostCardMediaView,
   PostCardView,
   PostMediaImage,
-} from '@tria/module-feed/ui';
+} from '@rede-social/module-feed/ui';
 import type { getTranslations } from 'next-intl/server';
 import { VideoPlayer } from '@/components/media/VideoPlayer';
 
@@ -20,7 +20,7 @@ import { VideoPlayer } from '@/components/media/VideoPlayer';
  * exists to prevent, one layer up. Registry imports the actions and the actions import this, so
  * there is no cycle and exactly one mapping.
  *
- * Everything locale- or route-shaped lives HERE rather than in the module package: `@tria/module-feed`
+ * Everything locale- or route-shaped lives HERE rather than in the module package: `@rede-social/module-feed`
  * ships no language (PWA-03) and knows no route table (MOD-02).
  *
  * The only VALUE this file imports from the module is nothing at all — the module types are
@@ -72,8 +72,8 @@ export { relativeFrom };
 
 /**
  * Byte sizes in pt-BR ("1,2 MB"). The FORMATTING lives here rather than inside the module for the
- * same reason the timestamps do: `@tria/module-feed` ships no language (PWA-03), and a locale baked
- * into a reusable package would travel to every other TRIA project that installs it.
+ * same reason the timestamps do: `@rede-social/module-feed` ships no language (PWA-03), and a locale baked
+ * into a reusable package would travel to every other Rede Social project that installs it.
  *
  * Binary units, one decimal, and `null` when the stored size is unknown — the row then renders the
  * type ALONE, never a dangling separator (UI-SPEC E07/partial).
@@ -221,7 +221,7 @@ export function postCardBase(
     createdAtRelative: relativeFrom(post.createdAt, now),
     /**
      * D-71 / UI-D-36 — "em {Comunidade}", composed HERE for the same two reasons `profileHref` and
-     * `shareUrl` are: `@tria/module-feed` knows no route table (MOD-02) and ships no language
+     * `shareUrl` are: `@rede-social/module-feed` knows no route table (MOD-02) and ships no language
      * (PWA-03). The module receives a finished string and a finished href and renders them; it
      * never learns the word "em" or the shape of `/comunidades/{id}`.
      *

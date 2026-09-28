@@ -14,7 +14,7 @@ import {
   eventQuerySchema,
   type RsvpAnswer,
   rsvpSchema,
-} from '@tria/module-events/contracts';
+} from '@rede-social/module-events/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

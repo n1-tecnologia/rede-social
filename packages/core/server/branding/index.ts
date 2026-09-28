@@ -8,7 +8,7 @@ import { registerJobQueues } from '../jobs/boss';
  * the job wrapper is `./derive-icons-job.ts` (imports the service — service -> job direction only,
  * so it is deliberately NOT re-exported from this barrel).
  *
- * Imported as `@tria/core/server/branding/index` from outside the kernel (the `./server/*` export
+ * Imported as `@rede-social/core/server/branding/index` from outside the kernel (the `./server/*` export
  * maps to a file, not a directory).
  */
 

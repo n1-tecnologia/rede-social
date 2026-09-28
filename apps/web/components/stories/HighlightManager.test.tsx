@@ -78,8 +78,8 @@ vi.mock('motion/react', async () => {
   };
 });
 
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 
@@ -118,7 +118,7 @@ vi.mock('@/components/media/useSignedUpload', () => ({
 }));
 
 const { STORY_HIGHLIGHT_MAX_ITEMS, STORY_HIGHLIGHT_MAX_PER_PLACE } = await import(
-  '@tria/module-stories/contracts'
+  '@rede-social/module-stories/contracts'
 );
 const { HighlightManager } = await import('./HighlightManager');
 

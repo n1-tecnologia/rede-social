@@ -1,11 +1,11 @@
-import { subscribe } from '@tria/core/server/events/bus';
+import { subscribe } from '@rede-social/core/server/events/bus';
 import type {
   CheckinResult,
   EnterResult,
   EventCheckedIn,
   EventDetail,
   EventSummary,
-} from '@tria/module-events/contracts';
+} from '@rede-social/module-events/contracts';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -165,16 +165,16 @@ const received: EventCheckedIn[] = [];
 let unsubscribe: () => void = () => {};
 
 const EMAILS = {
-  demoMember: 'member@tria-demo.local',
-  joao: 'joao.goncalves@tria-demo.local',
-  iris: 'iris.munoz@tria-demo.local',
-  rafael: 'rafael.teixeira@tria-demo.local',
-  sofia: 'sofia.davila@tria-demo.local',
+  demoMember: 'member@rede-demo.local',
+  joao: 'joao.goncalves@rede-demo.local',
+  iris: 'iris.munoz@rede-demo.local',
+  rafael: 'rafael.teixeira@rede-demo.local',
+  sofia: 'sofia.davila@rede-demo.local',
 } as const;
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
   for (const [key, email] of Object.entries(EMAILS)) {
     tokens[key as keyof typeof EMAILS] = await signInAs(email, SEED_PASSWORD);
   }
@@ -184,7 +184,7 @@ beforeAll(async () => {
     userIds[key] = users.find((row) => row.email === email)?.id ?? '';
   }
   const [tenant] = await adminSql<{ id: string }[]>`
-    select id from public.tenants where slug = 'tria-demo'`;
+    select id from public.tenants where slug = 'rede-demo'`;
   demoTenantId = tenant?.id ?? '';
   await sweep();
   unsubscribe = subscribe('event.checked_in', async (payload) => {

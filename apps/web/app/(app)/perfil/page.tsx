@@ -1,5 +1,5 @@
-import { iconFor } from '@tria/core/ui';
-import { Card, EmptyState, PageHeader } from '@tria/ui';
+import { iconFor } from '@rede-social/core/ui';
+import { Card, EmptyState, PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';

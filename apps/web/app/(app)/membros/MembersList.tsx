@@ -1,6 +1,6 @@
 'use client';
 
-import type { MemberProfile } from '@tria/contracts/profiles';
+import type { MemberProfile } from '@rede-social/contracts/profiles';
 import {
   Button,
   Card,
@@ -9,7 +9,7 @@ import {
   SearchBar,
   Skeleton,
   useDebounce,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import { CircleAlert, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';

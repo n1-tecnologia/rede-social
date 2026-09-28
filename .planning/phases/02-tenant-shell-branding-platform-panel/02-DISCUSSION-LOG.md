@@ -73,7 +73,7 @@ Questions were asked in pt-BR (user's working language); options are summarised 
 | Option | Description | Selected |
 |--------|-------------|----------|
 | Automatic on primary-domain verification (Recommended) | E-mail collected at creation, "Convite pendente — aguardando domínio"; sent when the primary domain verifies; "Reenviar convite" always available; immediate if a verified domain exists | ✓ |
-| Manual only via "Enviar convite" | No automation; TRIA must remember to come back | |
+| Manual only via "Enviar convite" | No automation; Rede Social must remember to come back | |
 | Immediate, link on the platform domain | Opens an exception to D-21 | |
 
 **User's choice:** Automatic on verification
@@ -133,13 +133,13 @@ Questions were asked in pt-BR (user's working language); options are summarised 
 
 **User's choice:** Send Email Hook → API → Resend
 
-### Sender name and TRIA signature?
+### Sender name and Rede Social signature?
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Sender = tenant name; discreet "via TRIA" footer (Recommended) | From `{Tenant} <no-reply@mail.…>`, tenant logo/name/color in body, small footer "Enviado pela plataforma TRIA" | ✓ |
-| Sender = tenant name; no TRIA mention | Total white-label; no hint of the operator | |
-| Sender = "{Tenant} via TRIA" | Marketplace style; clutters the From field | |
+| Sender = tenant name; discreet "via Rede Social" footer (Recommended) | From `{Tenant} <no-reply@mail.…>`, tenant logo/name/color in body, small footer "Enviado pela plataforma Rede Social" | ✓ |
+| Sender = tenant name; no Rede Social mention | Total white-label; no hint of the operator | |
+| Sender = "{Tenant} via Rede Social" | Marketplace style; clutters the From field | |
 
 **User's choice:** Tenant sender + discreet footer
 **Notes:** Accepted by moving on: only verified hosts resolve in `proxy.ts`; removing a domain removes it from Vercel and the allow-list; local/dev uses a fake provider adapter that verifies immediately.
@@ -195,7 +195,7 @@ Questions were asked in pt-BR (user's working language); options are summarised 
 - Shape of the public brand answer (extend `hostTenantSchema` vs sibling route) and its caching/invalidation.
 - Domain-provider adapter interface, Supabase Management API allow-list call, secret placement, TXT challenge, polling cadence, job idempotency.
 - Send-email hook path, signature verification, template engine, local mail transport, persisted derived colors for e-mail.
-- Registry extensions (`nav.placement`, home slots, settings rows), `@tria/ui` token layout, which extra primitives to port now.
+- Registry extensions (`nav.placement`, home slots, settings rows), `@rede-social/ui` token layout, which extra primitives to port now.
 - Contrast algorithm and thresholds (warn + confirm on failure).
 - Suspended-tenant envelope code and copy; platform panel URL space; list filters.
 - Service-worker strategy, offline page, update prompt; theme cookie; invite expiry.

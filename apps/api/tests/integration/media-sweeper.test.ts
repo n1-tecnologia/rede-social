@@ -1,13 +1,16 @@
-import { sqlClient } from '@tria/core/db';
-import { stopBoss } from '@tria/core/server/jobs/boss';
-import { MEDIA_SWEEP_BATCH } from '@tria/core/server/media/limits';
+import { sqlClient } from '@rede-social/core/db';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { MEDIA_SWEEP_BATCH } from '@rede-social/core/server/media/limits';
 import {
   MEDIA_SWEEP_QUEUE,
   MEDIA_SWEEP_SINGLETON,
   sweepOrphansJob,
-} from '@tria/core/server/media/sweep-job';
-import { encodeJpeg } from '@tria/core/server/media/variants';
-import { fakeVideoInternals, resetFakeVideoInternals } from '@tria/core/server/media/video/fake';
+} from '@rede-social/core/server/media/sweep-job';
+import { encodeJpeg } from '@rede-social/core/server/media/variants';
+import {
+  fakeVideoInternals,
+  resetFakeVideoInternals,
+} from '@rede-social/core/server/media/video/fake';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
@@ -28,7 +31,7 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  * the second guard, since nothing another file created seconds ago can be 24 hours old.
  */
 
-const MEMBER_EMAIL = 'member@tria-demo.local';
+const MEMBER_EMAIL = 'member@rede-demo.local';
 
 const PHOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect width="640" height="480" fill="#0ea5e9"/><circle cx="320" cy="240" r="140" fill="#f59e0b"/></svg>`;
 
@@ -167,8 +170,8 @@ beforeAll(async () => {
   memberToken = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
   const [tenant] = await adminSql<
     { id: string }[]
-  >`select id from public.tenants where slug = 'tria-demo'`;
-  if (!tenant) throw new Error('the tria-demo tenant is not seeded');
+  >`select id from public.tenants where slug = 'rede-demo'`;
+  if (!tenant) throw new Error('the rede-demo tenant is not seeded');
   demoTenantId = tenant.id;
   PHOTO_JPEG = await encodeJpeg(Buffer.from(PHOTO_SVG));
   await clearSweepJobs();

@@ -1,11 +1,11 @@
-import type { PlatformTenantDetail } from '@tria/contracts';
+import type { PlatformTenantDetail } from '@rede-social/contracts';
 import {
   type BrandColors,
   type BrandIconUrls,
   type ContrastReport,
   iconsUpToDate,
   resolveBranding,
-} from '@tria/contracts/branding';
+} from '@rede-social/contracts/branding';
 
 /**
  * What the Marca tab renders (02-14): the tenant's brand as the panel needs it — every gap of the

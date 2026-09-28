@@ -1,4 +1,4 @@
-import { publicTenantSchema, slugSchema } from '@tria/contracts';
+import { publicTenantSchema, slugSchema } from '@rede-social/contracts';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -13,7 +13,7 @@ import { UnavailableCard } from '../../UnavailableCard';
 import { signup } from './actions';
 
 /**
- * Public sign-up (AUTH-01, AUTH-04, D-01 as amended by D-22), on `@tria/ui` since 02-08 with the
+ * Public sign-up (AUTH-01, AUTH-04, D-01 as amended by D-22), on `@rede-social/ui` since 02-08 with the
  * Phase 1 fields, ids, hidden inputs and action untouched.
  *
  * The page ALWAYS receives a slug param: on a tenant domain `proxy.ts` rewrites `/cadastro` to

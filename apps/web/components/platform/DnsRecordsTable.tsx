@@ -1,12 +1,12 @@
 'use client';
 
-import { IconButton, useToast } from '@tria/ui';
+import { IconButton, useToast } from '@rede-social/ui';
 import { Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * One DNS instruction as the card renders it — declared HERE because client files never import the
- * `@tria/contracts` barrel; `lib/platform-domains.ts` maps the server-parsed `dnsRecordSchema`
+ * `@rede-social/contracts` barrel; `lib/platform-domains.ts` maps the server-parsed `dnsRecordSchema`
  * objects into this shape.
  */
 export type DnsRecordView = {

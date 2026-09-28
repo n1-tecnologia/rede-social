@@ -1,4 +1,4 @@
-import type { ApiErrorEnvelope, ErrorCode } from '@tria/contracts';
+import type { ApiErrorEnvelope, ErrorCode } from '@rede-social/contracts';
 import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 

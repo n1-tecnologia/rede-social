@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@tria/ui';
+import { cn } from '@rede-social/ui';
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,

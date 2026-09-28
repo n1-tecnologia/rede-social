@@ -37,4 +37,4 @@ export async function withTenantTx<T>(
 
 // The admin lane (`withAdminTx`, `set local role service_role`) lives ONLY in `./admin-tx.ts`, whose
 // entry point Biome restricts to the kernel. It must never be defined or re-exported here: this file
-// is the public `@tria/core/db/tenant-tx` every module imports (phase-1 review CR-03).
+// is the public `@rede-social/core/db/tenant-tx` every module imports (phase-1 review CR-03).

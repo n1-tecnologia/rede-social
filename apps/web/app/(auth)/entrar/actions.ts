@@ -1,6 +1,6 @@
 'use server';
 
-import { loginSchema } from '@tria/contracts';
+import { loginSchema } from '@rede-social/contracts';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { CONTINUE_COOKIE, safeContinuePath } from '@/lib/continue-path';

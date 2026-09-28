@@ -1,7 +1,7 @@
 # Prototype Map: `reference/frontend-design` → modular monorepo
 
 **Analysis Date:** 2026-09-11
-**Source:** `/Users/igorvboas/Library/Developer/TRIA/rede_social/reference/frontend-design` (read-only; git HEAD `05f68b1`)
+**Source:** `./reference/frontend-design` (read-only; git HEAD `05f68b1`)
 **Decision context:** the prototype is the visual/UX source of truth. It is NOT refactored in place; screens and components are ported into `packages/core/ui`, `packages/ui` and `packages/modules/<feature>/ui` as each vertical phase is built (see `.planning/research/ARCHITECTURE.md`, "Recommended Project Structure").
 
 The prototype is a single-tenant demo for one creator ("Dr. Igor Alves", facial-harmonization clinic). It is a consumption-only app: the creator publishes, members consume. That matches V1's "admin publishes, members consume" model well, but the data model underneath is an Instagram-style social graph plus an LMS and a ticketing/support desk, not the tenant/community model in `REQUIREMENTS.md`.

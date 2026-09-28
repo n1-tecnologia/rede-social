@@ -80,7 +80,7 @@ coverage:
         ref: "packages/modules/reels/tests/reels-pager.test.tsx#WR-05: a non-primary pointerdown on the video never takes over the first pointer's gesture"
         status: pass
       - kind: e2e
-        ref: "VIDEO_PROVIDER=fake pnpm --filter @tria/web exec playwright test reels.spec.ts (28 passed, 6 skipped)"
+        ref: "VIDEO_PROVIDER=fake pnpm --filter @rede-social/web exec playwright test reels.spec.ts (28 passed, 6 skipped)"
         status: pass
     human_judgment: false
   - id: D3
@@ -158,11 +158,11 @@ Measured: `git rev-list --count e9afe9e..HEAD` = 5.
 
 **RED** was observed before any fix and committed in `5024091`:
 
-- `pnpm --filter @tria/web exec vitest run components/reels/ReelsHost.test.tsx -t "WR-04"` exited 1: 2 failed, 37 skipped.
+- `pnpm --filter @rede-social/web exec vitest run components/reels/ReelsHost.test.tsx -t "WR-04"` exited 1: 2 failed, 37 skipped.
   - CR-01 (h) failed at `ReelsHost.test.tsx:1274` (after the ±2 round trip) with `expected 'unliked' to be 'liked'`.
   - CR-01 (i) failed at `:1313` with `expected 'unliked' to be 'liked'`.
   - Every assertion before the round trip passed. The mounted page was already right, and only the remounted page read the stale server view.
-- `pnpm --filter @tria/module-reels exec vitest run tests/reels-pager.test.tsx -t "WR-05"` exited 1: 3 failed, 46 skipped.
+- `pnpm --filter @rede-social/module-reels exec vitest run tests/reels-pager.test.tsx -t "WR-05"` exited 1: 3 failed, 46 skipped.
   - Case 1: `expected [ [ 'lane', -1 ] ] to deeply equal []` after finger 2's release (the verifier's reproduction).
   - Case 2: `expected 'translateY(calc(0% + 0px))' to contain '-35px'`, because the second pointer's cancel reset the drag.
   - Case 3: `expected 'translateY(calc(0% + 70px))' to contain '-35px'`, because the non-primary press replaced the origin.
@@ -184,12 +184,12 @@ Commit types follow the plan's quick precedent (`test(...)` then `fix(...)`), no
 
 | Gate | Result |
 |------|--------|
-| `pnpm --filter @tria/module-reels test` | 7 files, 126 passed |
-| `pnpm --filter @tria/module-reels typecheck` / `lint` | exit 0 / exit 0 (22 files) |
-| `pnpm --filter @tria/web exec vitest run components/reels` | 2 files, 68 passed |
-| `pnpm --filter @tria/web typecheck` / `lint` | exit 0 / exit 0 (295 files) |
+| `pnpm --filter @rede-social/module-reels test` | 7 files, 126 passed |
+| `pnpm --filter @rede-social/module-reels typecheck` / `lint` | exit 0 / exit 0 (22 files) |
+| `pnpm --filter @rede-social/web exec vitest run components/reels` | 2 files, 68 passed |
+| `pnpm --filter @rede-social/web typecheck` / `lint` | exit 0 / exit 0 (295 files) |
 | `bash scripts/check-ui-literals.sh` | OK |
-| `VIDEO_PROVIDER=fake pnpm --filter @tria/web exec playwright test reels.spec.ts` | 28 passed, 6 skipped (1.4 min; about 11 GiB free before the run) |
+| `VIDEO_PROVIDER=fake pnpm --filter @rede-social/web exec playwright test reels.spec.ts` | 28 passed, 6 skipped (1.4 min; about 11 GiB free before the run) |
 | `git diff --stat e9afe9e..HEAD -- apps packages .planning/phases` | exactly the 10 `files_modified` |
 | 05.3-VERIFICATION.md, 05.3-UAT.md, package.json files, pnpm-lock.yaml, supabase/ | unchanged since e9afe9e |
 

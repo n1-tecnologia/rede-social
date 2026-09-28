@@ -27,7 +27,7 @@
  * both protocol-relative URLs in a browser), no scheme, no control characters. Anything else is
  * discarded and the login lands on `/inicio` as it always did.
  */
-export const CONTINUE_COOKIE = 'tria_continue';
+export const CONTINUE_COOKIE = 'rede_continue';
 
 /** Ten minutes: long enough to type a password, short enough that a stale bounce cannot resurface. */
 export const CONTINUE_MAX_AGE_S = 600;

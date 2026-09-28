@@ -23,7 +23,7 @@ created: "2026-09-21"
 |----------|-------|
 | **Framework** | Vitest 5.0.0 (unit + integration), pgTAP via `supabase test db` (CLI 2.117.0), Playwright 1.63.0 (e2e) |
 | **Config file** | per-package `vitest.config.ts`; `apps/web/playwright.config.ts`; `supabase/tests/*.sql` |
-| **Quick run command** | `pnpm --filter @tria/core test` |
+| **Quick run command** | `pnpm --filter @rede-social/core test` |
 | **Full suite command** | `pnpm verify` (the local exit gate; `ci.yml` mirrors it step for step) |
 | **Estimated runtime** | ~1050 seconds full suite (Phase 2 baseline: 17m30s); quick run seconds-scale |
 

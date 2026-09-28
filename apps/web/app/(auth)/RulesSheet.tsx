@@ -1,10 +1,10 @@
 'use client';
 
-import { BottomSheet, Button, useMediaQuery } from '@tria/ui';
+import { BottomSheet, Button, useMediaQuery } from '@rede-social/ui';
 import { useState } from 'react';
 
 /**
- * The tenant's rules behind the "ver regras" trigger (D-03), on `@tria/ui` `BottomSheet`: a sheet on
+ * The tenant's rules behind the "ver regras" trigger (D-03), on `@rede-social/ui` `BottomSheet`: a sheet on
  * phones, the centred `max-w-[480px]` card from `md` up (`desktopCard`). The sheet owns
  * `role="dialog"`, `aria-modal`, Escape, backdrop tap and the focus trap (02-02); the text scrolls
  * inside it (80% of `--screen-h`). Shared by `/cadastro` and `/aceitar-convite` (02-10).

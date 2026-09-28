@@ -52,7 +52,7 @@ export const resendTransport: MailTransport = {
           html: message.html,
           text: message.text,
           replyTo: message.replyTo,
-          headers: { 'X-Tria-Action': message.meta.actionType },
+          headers: { 'X-Rede-Action': message.meta.actionType },
         },
         { idempotencyKey: message.idempotencyKey },
       ),

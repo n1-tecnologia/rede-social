@@ -5,7 +5,7 @@ import {
   normalizeHost,
   type TenantDomain,
   type TenantDomainsList,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantDomains, tenants } from '../../db/schema';

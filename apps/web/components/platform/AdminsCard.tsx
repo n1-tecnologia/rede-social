@@ -1,4 +1,4 @@
-import { Avatar, Card, SectionTitle, StatusPill } from '@tria/ui';
+import { Avatar, Card, SectionTitle, StatusPill } from '@rede-social/ui';
 import type { ReactNode } from 'react';
 
 export type InviteView = {

@@ -1,5 +1,5 @@
-import { moduleLogger } from '@tria/core/server/logging';
-import { defineModule } from '@tria/core/server/modules/manifest';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { FEED_PERMISSIONS } from './contracts/index';
 import { feedUnfurlJob } from './server/jobs';
 

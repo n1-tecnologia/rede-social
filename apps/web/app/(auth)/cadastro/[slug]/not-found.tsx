@@ -1,4 +1,4 @@
-import { EmptyState } from '@tria/ui';
+import { EmptyState } from '@rede-social/ui';
 import { SearchX } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { LinkButton } from '../../LinkButton';

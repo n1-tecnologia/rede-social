@@ -1,7 +1,7 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
-import { cn, StatusPill } from '@tria/ui';
+import { MediaImage } from '@rede-social/core/ui';
+import { cn, StatusPill } from '@rede-social/ui';
 import { Bookmark } from 'lucide-react';
 
 /**

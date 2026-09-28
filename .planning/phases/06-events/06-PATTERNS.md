@@ -40,14 +40,14 @@
 | `apps/web/lib/continue-path.ts:32-34` | utility | - | itself | exact |
 | `apps/web/messages/pt-BR/events.json` (+ index, RE-READ) | config | - | `messages/pt-BR/communities.json` | exact |
 | `apps/web/e2e/{events.spec.ts,events-admin.ts,phase6-smoke.spec.ts}`, `shell.spec.ts` (RE-READ) | test | - | communities e2e spec + `e2e/admin.ts` | exact |
-| `apps/{api,web}/package.json` (RE-READ), seed (RE-READ) | config | - | `@tria/module-communities` lines | exact |
+| `apps/{api,web}/package.json` (RE-READ), seed (RE-READ) | config | - | `@rede-social/module-communities` lines | exact |
 
 ## Pattern Assignments
 
 ### `packages/modules/events/module.ts` (analog `packages/modules/communities/module.ts`)
 ```ts
-import { moduleLogger } from '@tria/core/server/logging';
-import { defineModule } from '@tria/core/server/modules/manifest';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { COMMUNITY_PERMISSIONS } from './contracts/index';
 const log = moduleLogger('module-communities');
 export const communitiesModule = defineModule({
@@ -65,7 +65,7 @@ Events: `key: 'events'`, `icon: 'calendar-days'` (already in `ICONS`), `href: '/
 
 ### `contracts/index.ts` — EventMap merge (communities contracts L256-267)
 ```ts
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'community.created': CommunityCreated;
     ...
@@ -77,8 +77,8 @@ Also copy the `COMMUNITY_ISSUE_SET` pattern (refinement messages are machine cod
 ### `db/schema.ts` (analog communities schema L1-106)
 Imports:
 ```ts
-import { tenantIsolationPolicy } from '@tria/core/db/rls';
-import { mediaAssets, tenants, users } from '@tria/core/db/schema';
+import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
+import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import { check, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 ```
@@ -110,11 +110,11 @@ Rules: tenant-first indexes; `.desc().nullsFirst()` when desc (upcoming list is 
 ### `server/routes.ts` (analog communities routes L1-60)
 ```ts
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import type { AppEnv } from '@tria/core/server/auth/context';
-import { requireAuth } from '@tria/core/server/auth/require-auth';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { requireModule } from '@tria/core/server/modules/require-module';
-import { permissionsForRequest, requirePermission } from '@tria/core/server/rbac/permissions';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
+import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { requireModule } from '@rede-social/core/server/modules/require-module';
+import { permissionsForRequest, requirePermission } from '@rede-social/core/server/rbac/permissions';
 
 const communities = new OpenAPIHono<AppEnv>({
   defaultHook: (result) => {
@@ -131,8 +131,8 @@ communities.use('*', requireAuth, requireModule('communities'));
 Writes: `requirePermission('events.event.manage')` per route (never `requireRole`). State/time refusals → `ApiError(409, 'CONFLICT', { event: <code> })`.
 
 ### `server/service.ts` (analog communities service)
-- Every function `withTenantTx(ctx, (tx) => …)` (`import { type Tx, withTenantTx } from '@tria/core/db/tenant-tx'`, L1, L167).
-- Paging: `decodeCursor`/`encodeCursor` from `@tria/core/server/paging` (L6, L202); add `keysetComparison('asc')`.
+- Every function `withTenantTx(ctx, (tx) => …)` (`import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx'`, L1, L167).
+- Paging: `decodeCursor`/`encodeCursor` from `@rede-social/core/server/paging` (L6, L202); add `keysetComparison('asc')`.
 - Emit only after tx resolves (L421-435):
 ```ts
 created = await withTenantTx(ctx, (tx) => insertCommunity(tx, ctx, input, slug));
@@ -176,7 +176,7 @@ Copy: `set search_path = ''`, fully-qualified names, `--> statement-breakpoint`,
 `begin; ... plan(N); ... finish(); rollback;` with numbered facts in the header, each assertion paired with a positive control; index usage pinned by name via EXPLAIN. Helpers in `000-helpers.sql` (`tests.as_tenant`). Number 130 assumes 05.2 takes 120 — RE-READ. `020-tenant-isolation.sql` currently `plan(100)` — recount.
 
 ### `apps/api` wiring (RE-READ)
-`app.ts:5` `import { communitiesRoutes } from '@tria/module-communities/server';` and `:75` `.route('/v1/communities', communitiesRoutes)` → add `.route('/v1/events', eventsRoutes)`. `registry.ts:12,27` → `events: eventsModule`. `registry.test.ts:53` `expect(keys.sort()).toEqual(['communities', 'feed', 'stories'])` gains `events` (+ 05.3 key).
+`app.ts:5` `import { communitiesRoutes } from '@rede-social/module-communities/server';` and `:75` `.route('/v1/communities', communitiesRoutes)` → add `.route('/v1/events', eventsRoutes)`. `registry.ts:12,27` → `events: eventsModule`. `registry.test.ts:53` `expect(keys.sort()).toEqual(['communities', 'feed', 'stories'])` gains `events` (+ 05.3 key).
 
 ### Bootstrap timezone
 `packages/contracts/src/bootstrap.ts:22-28`:
@@ -233,7 +233,7 @@ import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from 're
 import { cn } from '../cn';
 export interface TabsProps { items: TabItem[]; value: string; onChange: (key: string) => void; label: string; ... }
 ```
-Reuse roving tabindex + Arrow/Home/End handling; use `role="radiogroup"`/`radio` per UI-SPEC; export from the `@tria/ui` barrel; test under `packages/ui/tests/`.
+Reuse roving tabindex + Arrow/Home/End handling; use `role="radiogroup"`/`radio` per UI-SPEC; export from the `@rede-social/ui` barrel; test under `packages/ui/tests/`.
 
 ## Shared Patterns
 - **Guard chain:** `requireAuth → requireModule('events') → requirePermission(...)` (communities routes).

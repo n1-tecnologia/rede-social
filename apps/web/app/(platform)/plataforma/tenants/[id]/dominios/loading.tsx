@@ -1,4 +1,4 @@
-import { Card, Skeleton } from '@tria/ui';
+import { Card, Skeleton } from '@rede-social/ui';
 
 /**
  * Domínios tab loading (E16/loading): the attach-form geometry (label + 44 px input + button) and

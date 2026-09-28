@@ -1,7 +1,7 @@
 'use client';
 
-import { EVENT_CHECKIN_CODE_LENGTH } from '@tria/module-events/contracts';
-import { Button, Input, useMediaQuery } from '@tria/ui';
+import { EVENT_CHECKIN_CODE_LENGTH } from '@rede-social/module-events/contracts';
+import { Button, Input, useMediaQuery } from '@rede-social/ui';
 import { Check } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useRouter } from 'next/navigation';

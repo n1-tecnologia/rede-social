@@ -1,4 +1,4 @@
-import { PageHeader } from '@tria/ui';
+import { PageHeader } from '@rede-social/ui';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';

@@ -1,6 +1,6 @@
 'use client';
 
-import { Card, cn } from '@tria/ui';
+import { Card, cn } from '@rede-social/ui';
 import { MapPin } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { EventCover } from './EventCover';

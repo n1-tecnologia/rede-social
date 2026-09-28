@@ -1,10 +1,16 @@
-import { deriveBrandColors, hexColorSchema, LIGHT_BG, NAVY, NEUTRAL_BRAND } from '@tria/contracts';
+import {
+  deriveBrandColors,
+  hexColorSchema,
+  LIGHT_BG,
+  NAVY,
+  NEUTRAL_BRAND,
+} from '@rede-social/contracts';
 
 /**
  * The one e-mail layout (D-38): table-based, inline styles, a 600 px card on the neutral light
  * background, the tenant's logo (as-is) or its display name as text in the header (D-26), a CTA in
  * the PERSISTED `colors.primary` / `colors.onPrimary` (no `color-mix` in e-mail, D-25), a plain-text
- * alternative and the small muted "Enviado pela plataforma TRIA" footer. No TRIA logo anywhere.
+ * alternative and the small muted "Enviado pela plataforma Rede Social" footer. No Rede Social logo anywhere.
  *
  * Environment-free and dependency-light on purpose (RESEARCH rejected react-email): every
  * interpolation goes through `escapeHtml`, the logo is emitted only as an `<img>` whose URL passed
@@ -28,7 +34,7 @@ const MUTED = '#6b7280';
 const CARD_BG = '#ffffff';
 const BORDER = '#e5e7eb';
 const FONT = "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-const FOOTER = 'Enviado pela plataforma TRIA';
+const FOOTER = 'Enviado pela plataforma Rede Social';
 const COPY_HINT = 'Se o botão não funcionar, copie e cole este endereço no navegador:';
 
 /** Escapes only `& < > " '` — accents stay literal UTF-8 (the D-38 encoding edge). */

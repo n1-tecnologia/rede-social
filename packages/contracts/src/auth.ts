@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 /**
  * Tenant slug: lowercase letters, digits and hyphens only, 3-40 chars. Deliberately NO normalisation
- * anywhere (D-01/V5): `Tria-Demo` is not a slug, it is a miss — two spellings must never alias one
+ * anywhere (D-01/V5): `Rede-Demo` is not a slug, it is a miss — two spellings must never alias one
  * tenant. Mirrors the `tenants_slug_chk` CHECK on the table.
  */
 export const slugSchema = z.string().regex(/^[a-z0-9-]{3,40}$/);
@@ -35,7 +35,7 @@ export const signupBodySchema = z.object({
   password: passwordSchema,
   consents: z.object({
     tenantRulesVersion: z.number().int().positive(),
-    triaTermsVersion: z.number().int().positive(),
+    platformTermsVersion: z.number().int().positive(),
   }),
 });
 export type SignupBody = z.infer<typeof signupBodySchema>;

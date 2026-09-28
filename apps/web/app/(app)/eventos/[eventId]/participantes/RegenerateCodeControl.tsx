@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, ConfirmDialog, useToast } from '@tria/ui';
+import { Button, ConfirmDialog, useToast } from '@rede-social/ui';
 import { RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';

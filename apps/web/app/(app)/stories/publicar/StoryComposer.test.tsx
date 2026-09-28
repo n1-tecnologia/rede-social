@@ -84,8 +84,8 @@ vi.mock('next-intl', () => ({
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh: vi.fn() }) }));
 
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 
@@ -107,13 +107,13 @@ vi.mock('@/components/media/useSignedUpload', () => ({
   },
 }));
 
-const { MEDIA_LIMITS } = await import('@tria/contracts/media');
+const { MEDIA_LIMITS } = await import('@rede-social/contracts/media');
 const {
   STORY_HIGHLIGHT_MAX_ITEMS,
   STORY_HIGHLIGHT_MAX_PER_PLACE,
   STORY_HIGHLIGHT_MAX_TITLE,
   STORY_MAX_CAPTION,
-} = await import('@tria/module-stories/contracts');
+} = await import('@rede-social/module-stories/contracts');
 const { StoryComposer } = await import('./StoryComposer');
 
 /** Drives the captured `onCompleted` / `onHandedToProvider` seam for one kind. */

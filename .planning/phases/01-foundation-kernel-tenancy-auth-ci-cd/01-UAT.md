@@ -13,7 +13,7 @@ updated: 2026-09-14T21:30:08Z
 ## Tests
 
 ### 1. AUTH-04 consent controls on /cadastro (judgment-tier prohibition, plan 01-04)
-expected: Open http://tria-demo.localhost:3000/cadastro on a phone-sized viewport. Two separate, visibly UNCHECKED checkboxes (community rules; TRIA terms + privacy), neither pre-checked, not merged, not collapsed/hidden. Submitting with either unchecked is refused (browser `required` + API 400 VALIDATION_FAILED). Non-authoritative LLM-judge verdict: HONORED (cadastro/[slug]/page.tsx:99-112; signup.spec.ts:96-97; signup.test.ts #6).
+expected: Open http://rede-demo.localhost:3000/cadastro on a phone-sized viewport. Two separate, visibly UNCHECKED checkboxes (community rules; Rede Social terms + privacy), neither pre-checked, not merged, not collapsed/hidden. Submitting with either unchecked is refused (browser `required` + API 400 VALIDATION_FAILED). Non-authoritative LLM-judge verdict: HONORED (cadastro/[slug]/page.tsx:99-112; signup.spec.ts:96-97; signup.test.ts #6).
 result: pass
 
 ### 2. AUTH-06 suspension disclosure (judgment-tier prohibition, plan 01-05)

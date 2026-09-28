@@ -1,5 +1,5 @@
-import { EVENT_PERMISSIONS, type EventPeriod } from '@tria/module-events/contracts';
-import { Chip } from '@tria/ui';
+import { EVENT_PERMISSIONS, type EventPeriod } from '@rede-social/module-events/contracts';
+import { Chip } from '@rede-social/ui';
 import { Plus } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';

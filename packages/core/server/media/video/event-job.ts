@@ -1,4 +1,4 @@
-import type { MediaPurpose } from '@tria/contracts/media';
+import type { MediaPurpose } from '@rede-social/contracts/media';
 import { and, eq, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { withAdminTx } from '../../../db/admin-tx';

@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, ConfirmDialog, useToast } from '@tria/ui';
+import { Button, ConfirmDialog, useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';

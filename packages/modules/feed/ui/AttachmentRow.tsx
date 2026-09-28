@@ -1,6 +1,6 @@
 'use client';
 
-import { mediaVariantUrl } from '@tria/contracts/media';
+import { mediaVariantUrl } from '@rede-social/contracts/media';
 import { Download, FileText, Loader2 } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 

@@ -1,4 +1,4 @@
-import { Skeleton } from '@tria/ui';
+import { Skeleton } from '@rede-social/ui';
 
 /**
  * `/membros/[membershipId]` loading (UI-SPEC E3/loading): the 80px avatar circle, a name bar and two

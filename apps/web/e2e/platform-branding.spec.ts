@@ -20,7 +20,7 @@ import { ensureWorker } from './worker';
 test.describe.configure({ mode: 'serial', timeout: 180_000 });
 test.skip(isRemote, 'local stack only');
 
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD: string = (() => {
   const value = process.env.SUPER_ADMIN_PASSWORD;
   if (!value) {
@@ -50,7 +50,7 @@ let context: BrowserContext;
 let page: Page;
 let stopWorker: () => Promise<void> = async () => {};
 
-const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/tria-lab.svg', import.meta.url));
+const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/rede-lab.svg', import.meta.url));
 const SQUARE_SVG = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#dc2626"/></svg>',
 );

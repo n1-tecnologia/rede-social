@@ -90,8 +90,8 @@ as mesmas medidas de tipo.
 
 Controles no topo (chrome do mockup, fora do produto):
 
-- **Tema escuro / Tema claro** — alterna `data-theme` no `<html>`, como o cookie `tria_theme`.
-- **Cor primária / Cor secundária** e quatro presets (TRIA neutro, Demo roxo, Lab verde, Vermelho)
+- **Tema escuro / Tema claro** — alterna `data-theme` no `<html>`, como o cookie `rede_theme`.
+- **Cor primária / Cor secundária** e quatro presets (Rede Social neutro, Demo roxo, Lab verde, Vermelho)
   — escrevem as cinco variáveis `--brand-*` como `brandStyleVars()` faz no servidor, incluindo o par
   escuro e a tinta sobre a cor primária. O readout mostra os valores derivados.
 - Os links de seção pulam para cada uma das sete superfícies.

@@ -7,8 +7,8 @@ import {
   feedQuerySchema,
   repliesQuerySchema,
   updatePostSchema,
-} from '@tria/module-feed/contracts';
-import type { CommentView, PostCardView } from '@tria/module-feed/ui';
+} from '@rede-social/module-feed/contracts';
+import type { CommentView, PostCardView } from '@rede-social/module-feed/ui';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

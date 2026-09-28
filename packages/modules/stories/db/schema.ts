@@ -1,5 +1,5 @@
-import { tenantIsolationPolicy } from '@tria/core/db/rls';
-import { mediaAssets, tenants, users } from '@tria/core/db/schema';
+import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
+import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
   check,
@@ -156,7 +156,7 @@ export const stories = pgTable(
  * `resolveHighlightPlace` seam, not this shape.
  *
  * **`community_id` carries no drizzle `.references()`, and that is not an omission** —
- * `public.communities` lives in `@tria/module-communities/db`, and reaching it from here is the
+ * `public.communities` lives in `@rede-social/module-communities/db`, and reaching it from here is the
  * `module -> module` package edge `turbo boundaries` denies (MOD-02). The foreign key is REAL: `story_highlights_community_fk` (`on delete cascade`) is hand-written SQL in the table's own
  * migration, and `120-story-highlights.sql` asserts it with a 23503 and a positive control.
  *

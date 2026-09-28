@@ -21,7 +21,7 @@ test.describe('AUTH-05 — device-local logout', () => {
     const responseB = await pageB.goto(`${baseURL}/inicio`);
     expect(responseB?.status()).toBe(200);
     await expect(pageB).toHaveURL(/\/inicio$/);
-    await expect(pageB.getByRole('heading', { level: 1 })).toContainText('TRIA Demo');
+    await expect(pageB.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
 
     await deviceA.close();
     await deviceB.close();

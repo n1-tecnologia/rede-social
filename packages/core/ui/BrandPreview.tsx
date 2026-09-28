@@ -1,5 +1,5 @@
-import { brandStyleVars, deriveBrandColors } from '@tria/contracts/branding';
-import { Button, Card, cn } from '@tria/ui';
+import { brandStyleVars, deriveBrandColors } from '@rede-social/contracts/branding';
+import { Button, Card, cn } from '@rede-social/ui';
 import { Bell, Home, User } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -38,7 +38,7 @@ export type BrandPreviewProps = {
  *
  * Presentational and server-safe: no hooks, every string a prop, no import of the kernel's server or
  * database code (Biome override on `packages/core/ui/**`). It renders ONLY the colours, logo and
- * display name it receives — never a TRIA mark and never the neutral fallback when colours are
+ * display name it receives — never a Rede Social mark and never the neutral fallback when colours are
  * given — so the platform panel (02-14) and Phase 8's `admin_tenant` editor reuse it unchanged. The
  * brand aliases (`bg-brand`, `text-on-brand`, …) resolve inside each frame because `tokens.css`
  * re-declares them on `[data-brand-scope]` (Layer 1b).

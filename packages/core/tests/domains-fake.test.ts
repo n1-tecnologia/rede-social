@@ -16,7 +16,7 @@ describe('fake domain provider', () => {
       {
         type: 'CNAME',
         name: 'comunidade.cliente.test',
-        value: 'fake.tria-dns.test',
+        value: 'fake.rede-social-dns.test',
         purpose: 'routing',
       },
     ]);

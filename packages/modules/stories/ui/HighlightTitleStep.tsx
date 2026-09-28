@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Input } from '@tria/ui';
+import { Button, Input } from '@rede-social/ui';
 import { ChevronLeft } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 

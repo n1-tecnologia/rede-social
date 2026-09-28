@@ -1,4 +1,4 @@
-import { FEED_PERMISSIONS } from '@tria/module-feed/contracts';
+import { FEED_PERMISSIONS } from '@rede-social/module-feed/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ComposerForm } from '@/app/(app)/criar/ComposerForm';

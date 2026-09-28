@@ -1,5 +1,5 @@
-import { hostTenantSchema } from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
+import { hostTenantSchema } from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS } from './setup';
 
@@ -8,8 +8,8 @@ import { adminSql, api, HOSTS } from './setup';
  * route consume it. Every case uses its OWN throwaway host so the 60 s positive/negative cache in
  * `resolveTenantHost` never hands one case another case's answer (the cache is keyed by host only).
  *
- * The verified/unverified/alias cases attach throwaway `tenant_domains` rows to the seeded tria-lab
- * tenant and never touch `tenants`; the suspended case owns a throwaway tenant so tria-lab's status
+ * The verified/unverified/alias cases attach throwaway `tenant_domains` rows to the seeded rede-lab
+ * tenant and never touch `tenants`; the suspended case owns a throwaway tenant so rede-lab's status
  * is never flipped under a dev server sharing this database.
  */
 
@@ -28,11 +28,11 @@ const byHost = (h: string) =>
 
 beforeAll(async () => {
   const [lab] = await adminSql<{ id: string }[]>`
-    select id from public.tenants where slug = 'tria-lab'`;
+    select id from public.tenants where slug = 'rede-lab'`;
   labId = lab?.id ?? '';
   if (!labId) throw new Error('seed missing: run pnpm db:seed');
 
-  // Unverified alias (1), verified alias (2) on tria-lab.
+  // Unverified alias (1), verified alias (2) on rede-lab.
   await adminSql`
     insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
     values (${labId}::uuid, ${host(1)}, false, null),
@@ -75,8 +75,8 @@ describe('GET /v1/public/tenants/by-host — verified-only, brand-carrying, prim
     );
     const body = hostTenantSchema.parse(raw);
     expect(body).toMatchObject({
-      slug: 'tria-lab',
-      displayName: 'TRIA Lab',
+      slug: 'rede-lab',
+      displayName: 'Rede Lab',
       status: 'active',
       isPrimary: true,
       primaryHost: HOSTS.lab,
@@ -87,14 +87,14 @@ describe('GET /v1/public/tenants/by-host — verified-only, brand-carrying, prim
     expect(body.branding.colors.primary).toBe('#0f766e');
     expect(body.branding.colors.secondary).toBe('#14b8a6');
     expect(body.branding.colors.onPrimary).toBe('#ffffff');
-    expect(body.branding.logoUrl).toBe('/seed-logos/tria-lab.svg');
+    expect(body.branding.logoUrl).toBe('/seed-logos/rede-lab.svg');
   });
 
   it('3. a verified NON-primary alias resolves with isPrimary false and names the primary (D-35)', async () => {
     const res = await byHost(host(2));
     expect(res.status).toBe(200);
     const body = hostTenantSchema.parse(await res.json()) as ByHost;
-    expect(body.slug).toBe('tria-lab');
+    expect(body.slug).toBe('rede-lab');
     expect(body.isPrimary).toBe(false);
     expect(body.primaryHost).toBe(HOSTS.lab);
     expect(body.branding.colors.primary).toBe('#0f766e');
@@ -115,7 +115,7 @@ describe('GET /v1/public/tenants/by-host — verified-only, brand-carrying, prim
   });
 
   it('5. a verified host of a tenant with branding {} answers the neutral brand (TENANT-02/empty)', async () => {
-    // tria-lab has a brand; the assertion is on the resolver's behaviour for a row inserted WITHOUT
+    // rede-lab has a brand; the assertion is on the resolver's behaviour for a row inserted WITHOUT
     // colors, so it uses the suspended throwaway tenant's shape checked in (4) as the positive and a
     // fresh empty-brand tenant here.
     const slug = `hosts-empty-${RUN}`.slice(0, 40);
@@ -140,7 +140,7 @@ describe('GET /v1/public/tenants/by-host — verified-only, brand-carrying, prim
 
   it('6. the answer never names another tenant (adjacency: same colors would still be keyed by host)', async () => {
     const text = await (await byHost(HOSTS.lab)).text();
-    expect(text).not.toContain('tria-demo');
+    expect(text).not.toContain('rede-demo');
     expect(text).not.toContain('#7c3aed');
   });
 });

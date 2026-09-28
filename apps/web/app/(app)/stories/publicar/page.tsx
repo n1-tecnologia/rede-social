@@ -1,5 +1,5 @@
-import type { HighlightList } from '@tria/module-stories/contracts';
-import { STORY_PERMISSIONS } from '@tria/module-stories/contracts';
+import type { HighlightList } from '@rede-social/module-stories/contracts';
+import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { type ComposerSelection, StoryComposer } from '@/app/(app)/stories/publicar/StoryComposer';

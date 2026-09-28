@@ -509,8 +509,8 @@ select hasnt_table(
   'public', 'story_community_pins',
   'HIGHLIGHT-05 / D-116: the pin table is gone — a highlight item is the one representation of a curated story'
 );
--- The seeded demo community `Destaques` (scripts/seed.ts `SEED_HIGHLIGHT_IDS['tria-demo'].community`)
--- and the seeded EXPIRED story (`SEED_STORY_IDS['tria-demo'][3]`, published 30 hours ago), read
+-- The seeded demo community `Destaques` (scripts/seed.ts `SEED_HIGHLIGHT_IDS['rede-demo'].community`)
+-- and the seeded EXPIRED story (`SEED_STORY_IDS['rede-demo'][3]`, published 30 hours ago), read
 -- through `getHighlight`'s MEMBER items statement verbatim in shape — no expiry predicate.
 select case
   when exists (select 1 from public.story_highlights

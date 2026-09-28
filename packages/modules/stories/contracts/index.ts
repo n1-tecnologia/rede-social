@@ -1,8 +1,8 @@
-import { MEDIA_STATUSES } from '@tria/contracts/media';
+import { MEDIA_STATUSES } from '@rede-social/contracts/media';
 import { z } from 'zod';
 
 /**
- * The module's published contract surface (`@tria/module-stories/contracts`). Both the API and the
+ * The module's published contract surface (`@rede-social/module-stories/contracts`). Both the API and the
  * web app import from here — the same Zod schema validates the query in Hono, the body in the route
  * and the page payload in `apps/web/lib/stories.ts`, so there is exactly one definition of what a
  * story is (MOD-01).
@@ -19,7 +19,7 @@ export const STORY_MAX_PAGE_SIZE = 25;
 
 /**
  * The longest cursor this endpoint will look at — the `COMMUNITY_MAX_CURSOR_LENGTH` rule restated.
- * The envelope (`@tria/core/server/paging`) is a base64url JSON object carrying an ISO timestamp and
+ * The envelope (`@rede-social/core/server/paging`) is a base64url JSON object carrying an ISO timestamp and
  * a uuid, so 512 characters is already generous; the bound exists so a megabyte of "cursor" is
  * refused before it is decoded.
  */
@@ -280,7 +280,7 @@ export type StoryUnliked = StoryLiked;
  * the kernel knowing modules exist. Anything that imports this file gets `emit`/`subscribe` typed
  * for them.
  */
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'story.published': StoryPublished;
     'story.deleted': StoryDeleted;
@@ -294,7 +294,7 @@ declare module '@tria/contracts' {
 /* ── Story comments (STORY-05, D-82, D-83) ─────────────────────────────────────────────────────── */
 
 /**
- * The comment cap, restated here rather than imported from `@tria/module-feed/contracts` for the
+ * The comment cap, restated here rather than imported from `@rede-social/module-feed/contracts` for the
  * reason `storyLikeResultSchema` is restated: `turbo boundaries` denies a `module -> module` package
  * edge (MOD-02). The VALUE is deliberately the same as `FEED_MAX_COMMENT` — a member typing into the
  * same sheet must hit the same ceiling — and it is measured in UTF-16 code units at both ends, so an
@@ -773,7 +773,7 @@ export interface HighlightDeleted {
   actorUserId: string;
 }
 
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'highlight.created': HighlightCreated;
     'highlight.updated': HighlightUpdated;

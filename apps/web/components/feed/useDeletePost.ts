@@ -1,6 +1,6 @@
 'use client';
 
-import { useToast } from '@tria/ui';
+import { useToast } from '@rede-social/ui';
 import { useCallback } from 'react';
 import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
 
@@ -8,7 +8,7 @@ import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
  * THE composition point for FEED-03's soft delete (UI-SPEC E18/loading, E18/error).
  *
  * It exists for the same one reason `useSharePost` does: the outcome branch is a TOAST, `useToast`
- * is a hook, and a server component cannot hold one. Nothing inside `@tria/module-feed` decides
+ * is a hook, and a server component cannot hold one. Nothing inside `@rede-social/module-feed` decides
  * what a delete outcome means and nothing inside it holds a catalog string (PWA-03) — the module's
  * `PostMenu` only knows that the promise it awaits either settles or rejects.
  *

@@ -2,7 +2,7 @@ import { pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { users } from './users';
 
 /**
- * ROLE-01: `super_admin` is TRIA's platform role, NOT a tenant role — it never appears in
+ * ROLE-01: `super_admin` is the platform's platform role, NOT a tenant role — it never appears in
  * `memberships.role` (whose CHECK allows only `admin_tenant | support_tenant | member`).
  *
  * RLS is enabled with **no policy at all**, deliberately: `authenticated` (the tenant lane) can

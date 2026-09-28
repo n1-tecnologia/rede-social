@@ -1,11 +1,11 @@
-import { subscribe } from '@tria/core/server/events/bus';
+import { subscribe } from '@rede-social/core/server/events/bus';
 import type {
   EventDetail,
   EventPage,
   EventRsvp,
   EventSummary,
   RsvpResult,
-} from '@tria/module-events/contracts';
+} from '@rede-social/module-events/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -158,17 +158,17 @@ let unsubscribe: () => void = () => {};
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
   const [member] = await adminSql<{ id: string }[]>`
-    select id from public.users where email = 'member@tria-demo.local'`;
+    select id from public.users where email = 'member@rede-demo.local'`;
   userIds.demoMember = member?.id ?? '';
   await sweep();
   unsubscribe = subscribe('event.rsvp', async (payload) => {
@@ -318,7 +318,7 @@ describe('events rsvp', () => {
       select u.id from public.users u
         join public.memberships m on m.user_id = u.id
        where m.tenant_id = ${tenantIds.demo}::uuid
-         and u.email <> 'member@tria-demo.local'
+         and u.email <> 'member@rede-demo.local'
        order by u.email
        limit 4`;
     expect(people).toHaveLength(4);

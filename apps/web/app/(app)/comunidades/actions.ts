@@ -8,9 +8,9 @@ import {
   communityQuerySchema,
   createCommunitySchema,
   updateCommunitySchema,
-} from '@tria/module-communities/contracts';
-import { feedQuerySchema } from '@tria/module-feed/contracts';
-import type { PostCardView } from '@tria/module-feed/ui';
+} from '@rede-social/module-communities/contracts';
+import { feedQuerySchema } from '@rede-social/module-feed/contracts';
+import type { PostCardView } from '@rede-social/module-feed/ui';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

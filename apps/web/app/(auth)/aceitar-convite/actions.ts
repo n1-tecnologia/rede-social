@@ -1,6 +1,6 @@
 'use server';
 
-import { acceptInviteFormSchema } from '@tria/contracts';
+import { acceptInviteFormSchema } from '@rede-social/contracts';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';

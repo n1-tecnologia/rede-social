@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { MEMBERS_PAGE_SIZE } from '@tria/contracts/profiles';
+import { MEMBERS_PAGE_SIZE } from '@rede-social/contracts/profiles';
 import { closeAdmin, membershipIdFor, stubUnfetchableAvatar } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 import {
@@ -18,7 +18,7 @@ import {
  * `/membros/[membershipId]`, on the phone (`mobile-chromium`, an iPhone 14 preset) and on the
  * desktop.
  *
- * Everything here runs against the SEEDED `tria-demo` community, which `scripts/seed.ts` fills with
+ * Everything here runs against the SEEDED `rede-demo` community, which `scripts/seed.ts` fills with
  * names that actually need folding (`João Gonçalves`, `Íris Muñoz`) — a search suite over ASCII-only
  * data would prove nothing about `app.imm_unaccent`. Nothing in this file writes: it only reads the
  * directory, so the shared seed stays exactly as it was.
@@ -28,9 +28,9 @@ import {
 const SEEDED = {
   goncalves: 'João Gonçalves',
   goncalvesBio: 'Organizo os encontros de sábado.',
-  goncalvesEmail: 'joao.goncalves@tria-demo.local',
+  goncalvesEmail: 'joao.goncalves@rede-demo.local',
   munoz: 'Íris Muñoz',
-  admin: 'Admin TRIA Demo',
+  admin: 'Admin Rede Demo',
   noBio: 'Ana Paula Ferreira',
 } as const;
 
@@ -163,13 +163,13 @@ test.describe('PROF-02 — another member at /membros/[membershipId]', () => {
     // no role word, no follow or message affordance.
     const main = page.locator('main');
     await expect(main.getByText(SEEDED.goncalvesEmail)).toHaveCount(0);
-    await expect(main.getByText(/@tria-demo\.local/)).toHaveCount(0);
+    await expect(main.getByText(/@rede-demo\.local/)).toHaveCount(0);
     await expect(main.getByText(/^(Administrador|Membro|Suporte)$/)).toHaveCount(0);
     await expect(main.getByRole('button', { name: /Seguir|Mensagem/ })).toHaveCount(0);
   });
 
   test("the caller's own membershipId redirects to /perfil (UI-D-03)", async ({ page }) => {
-    const own = await membershipIdFor(users.demoMember, 'tria-demo');
+    const own = await membershipIdFor(users.demoMember, 'rede-demo');
 
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`/membros/${own}`);
@@ -181,7 +181,7 @@ test.describe('PROF-02 — another member at /membros/[membershipId]', () => {
 
 /**
  * The directory's STATES (03-05 Task 2), against a THROWAWAY community big enough to have a real
- * second page. The seeded `tria-demo` has nine members, so the keyset button never appears there —
+ * second page. The seeded `rede-demo` has nine members, so the keyset button never appears there —
  * a paging bug would ship invisibly. Here the tenant has 27 active members, one blocked, one
  * soft-deleted and an admin, all created and torn down by `members-admin.ts`.
  *
@@ -402,7 +402,7 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   test('every miss is ONE screen that never names the other community (D-23, TENANT-04)', async ({
     page,
   }) => {
-    const foreign = await membershipIdFor(users.labMember, 'tria-lab');
+    const foreign = await membershipIdFor(users.labMember, 'rede-lab');
     const misses = [
       ['an unknown uuid', '11111111-1111-4111-8111-111111111111'],
       ['an id that is not a uuid at all', 'nao-e-um-id'],
@@ -429,8 +429,8 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
 
       // The screen never tells the member WHY, and never names the community they reached into.
       const text = (await page.locator('body').innerText()).toLowerCase();
-      expect(text).not.toContain('tria-lab');
-      expect(text).not.toContain('membro tria lab');
+      expect(text).not.toContain('rede-lab');
+      expect(text).not.toContain('membro rede-social lab');
       expect(text).not.toContain('bloquead');
       expect(text).not.toContain(big.blocked.displayName.toLowerCase());
       expect(text).not.toContain(big.softDeleted.displayName.toLowerCase());

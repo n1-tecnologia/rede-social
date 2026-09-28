@@ -11,7 +11,7 @@ import { proxy } from './proxy';
 vi.mock('@/lib/env', () => ({
   env: {
     API_URL: 'http://api.test',
-    PLATFORM_HOST: 'tria.test',
+    PLATFORM_HOST: 'rede-social.test',
     NEXT_PUBLIC_SUPABASE_URL: 'http://sb.test',
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'pk',
   },
@@ -164,10 +164,10 @@ describe('proxy.ts — PWA PUBLIC entries (02-11, T-02-77)', () => {
     resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
   });
 
-  it('9. the tenant manifest, the reserved _tria manifest, the SW script and /~offline are public', async () => {
+  it('9. the tenant manifest, the reserved _rede manifest, the SW script and /~offline are public', async () => {
     for (const path of [
-      '/m/tria-demo/manifest.webmanifest',
-      '/m/_tria/manifest.webmanifest',
+      '/m/rede-demo/manifest.webmanifest',
+      '/m/_rede/manifest.webmanifest',
       '/serwist/sw.js',
       '/~offline',
     ]) {
@@ -186,9 +186,9 @@ describe('proxy.ts — PWA PUBLIC entries (02-11, T-02-77)', () => {
   });
 
   it('11. the anchored manifest entry refuses a traversal suffix and an upper-case slug (class stays lower-case)', async () => {
-    // `/m/tria-demo/manifest.webmanifest/../inicio` normalises to `/m/tria-demo/inicio`.
+    // `/m/rede-demo/manifest.webmanifest/../inicio` normalises to `/m/rede-demo/inicio`.
     const traversal = await proxy(
-      request('http://primary.example/m/tria-demo/manifest.webmanifest/../inicio', {
+      request('http://primary.example/m/rede-demo/manifest.webmanifest/../inicio', {
         host: 'primary.example',
       }),
     );
@@ -196,7 +196,7 @@ describe('proxy.ts — PWA PUBLIC entries (02-11, T-02-77)', () => {
     expect(traversal.headers.get('location')).toBe('http://primary.example/entrar');
 
     const upper = await proxy(
-      request('http://primary.example/m/Tria_Demo/manifest.webmanifest', {
+      request('http://primary.example/m/Rede_Demo/manifest.webmanifest', {
         host: 'primary.example',
       }),
     );

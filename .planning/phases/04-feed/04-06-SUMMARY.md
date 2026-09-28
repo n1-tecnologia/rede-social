@@ -178,7 +178,7 @@ coverage:
     requirement: FEED-02
     verification:
       - kind: integration
-        ref: "pnpm --filter @tria/web build && bash scripts/check-static-routes.sh && pnpm boundaries"
+        ref: "pnpm --filter @rede-social/web build && bash scripts/check-static-routes.sh && pnpm boundaries"
         status: pass
     human_judgment: false
   - id: D13
@@ -222,7 +222,7 @@ status: complete
 - **`FeedList` became the four-state widget.** Pull-to-refresh replaces page 1, the sentinel appends, a refused page keeps every loaded card and offers a retry at the sentinel, the two empty variants and the first-load error are the rest. Every string is still a prop; the module reads no catalog.
 - **One mapping for every page.** `apps/web/lib/feed-view.tsx` turns `FeedPost` into `PostCardView` for both the server-rendered first page and the load-more server action, so the time zone, the injected `VideoPlayer` element and the profile route cannot drift between page 1 and page 2.
 - **A real mobile browser proves it.** 26 e2e cases across the two projects: three real pages walked by the sentinel, a synthesised touch pull, a `dblclick` on the gallery strip, two intercepted server-action failures, the 320px overflow and truncation backstops, and both empty-state variants against a throwaway tenant with nothing published.
-- **The assigned deferred item is closed.** `shell.spec.ts`'s tria-lab case now asserts the registered feed slot instead of the `Em breve` placeholder.
+- **The assigned deferred item is closed.** `shell.spec.ts`'s rede-lab case now asserts the registered feed slot instead of the `Em breve` placeholder.
 
 ## Task Commits
 
@@ -279,12 +279,12 @@ No REFACTOR commit: the GREEN implementation of `meta.ts` was already the shape 
 - **Verification:** the same e2e case, now asserting exactly `pageSize * 2` after the retry
 - **Committed in:** `dd0987f`
 
-**3. [Rule 1 - Bug] `shell.spec.ts`'s tria-lab case had a SECOND wrong assertion, not just the `Em breve` one**
+**3. [Rule 1 - Bug] `shell.spec.ts`'s rede-lab case had a SECOND wrong assertion, not just the `Em breve` one**
 - **Found during:** Task 3 (fixing the assigned deferred item)
 - **Issue:** `page.getByRole('link', { name: 'Exemplo' })` was expected to be absent, but Playwright's `name` option is a case-insensitive SUBSTRING match by default, and 04-05's seeded link posts auto-link `https://noticias.exemplo.invalid/…` and `https://sem-metadados.exemplo.invalid/…`. Two captions on the lab feed therefore read as "Exemplo" links. This assertion — not the `Em breve` one — was the first line to fail, which is why the deferred note's diagnosis was incomplete.
 - **Fix:** scoped to the nav tree with `exact: true`; `#exemplo` still covers "the widget is absent anywhere on the page".
 - **Files modified:** `apps/web/e2e/shell.spec.ts`
-- **Verification:** `pnpm --filter @tria/web exec playwright test shell.spec.ts` — 10 passed, both projects
+- **Verification:** `pnpm --filter @rede-social/web exec playwright test shell.spec.ts` — 10 passed, both projects
 - **Committed in:** `dd0987f`
 
 ### Planned work adjusted
@@ -300,7 +300,7 @@ No REFACTOR commit: the GREEN implementation of `meta.ts` was already the shape 
 **5. [Rule 3 - Blocker] `apps/web/lib/feed-view.tsx` added (not in `files_modified`)**
 - **Found during:** Task 2
 - **Issue:** the plan asks the load-more action to build the same view the home slot builds, but putting the mapper in `lib/registry.tsx` creates a `registry -> feed-actions -> registry` cycle across a `'use server'` boundary.
-- **Resolution:** a third module both import. It imports only TYPES from `@tria/module-feed/ui`, so `lib/registry.tsx` remains the single composition point that imports a module's `ui` package for real (D-42, verified by `pnpm boundaries`).
+- **Resolution:** a third module both import. It imports only TYPES from `@rede-social/module-feed/ui`, so `lib/registry.tsx` remains the single composition point that imports a module's `ui` package for real (D-42, verified by `pnpm boundaries`).
 - **Committed in:** `13d6cfe`
 
 ---
@@ -324,8 +324,8 @@ None — the plan's `<threat_model>` covers every surface this plan added. T-04-
 
 | Gate | Commit | Evidence |
 |------|--------|----------|
-| RED | `823a853` (`test(04-06)`) | `pnpm --filter @tria/module-feed test` exited 1 with **24 failing tests, all in `tests/meta.test.ts`, all on assertions for the planned behaviour** (`expected [] to deeply equal [ 'REL' ]` etc.). `gsd-tools check tdd-red-evidence` returned `RED_EVIDENCE_OK` / `target_test_failed` for target test `buildPostMeta (UI-D-21: the 18-case zero/one/many cross-product) > a brand-new post is its relative time and nothing else`. Counts (91 tests / 67 pass / 24 fail) were normalised from the real Vitest run through a throwaway `/tmp` TAP scratchpad — Vitest emits no `node --test` TAP trailer — and nothing of that scratchpad was committed. |
-| GREEN | `ad8ebd8` (`feat(04-06)`) | `pnpm --filter @tria/module-feed test` — 91 passed. |
+| RED | `823a853` (`test(04-06)`) | `pnpm --filter @rede-social/module-feed test` exited 1 with **24 failing tests, all in `tests/meta.test.ts`, all on assertions for the planned behaviour** (`expected [] to deeply equal [ 'REL' ]` etc.). `gsd-tools check tdd-red-evidence` returned `RED_EVIDENCE_OK` / `target_test_failed` for target test `buildPostMeta (UI-D-21: the 18-case zero/one/many cross-product) > a brand-new post is its relative time and nothing else`. Counts (91 tests / 67 pass / 24 fail) were normalised from the real Vitest run through a throwaway `/tmp` TAP scratchpad — Vitest emits no `node --test` TAP trailer — and nothing of that scratchpad was committed. |
+| GREEN | `ad8ebd8` (`feat(04-06)`) | `pnpm --filter @rede-social/module-feed test` — 91 passed. |
 | REFACTOR | — (none) | The GREEN implementation already had the shape the test described; an empty refactor commit would be noise. Recorded here rather than faked. |
 
 Only Task 1 carried `tdd="true"`. Tasks 2 and 3 are `type="auto"` and were committed once each.
@@ -356,4 +356,4 @@ None — no external service configuration required.
 
 ## Self-Check: PASSED
 
-All 7 created files exist on disk; all 4 task commits (`823a853`, `ad8ebd8`, `13d6cfe`, `dd0987f`) are in the log. Plan-level verification re-run at close-out: `@tria/module-feed` typecheck/lint/test (91 passed, `tests/meta.test.ts` named), `@tria/web` typecheck/lint/build, `check-ui-literals`, `check-static-routes`, `pnpm boundaries`, `supabase test db` (199 tests), and `playwright test feed.spec.ts` (23 passed / 3 skipped-by-project, 28.5s — inside the T2 five-minute ceiling) plus `shell.spec.ts` (10 passed).
+All 7 created files exist on disk; all 4 task commits (`823a853`, `ad8ebd8`, `13d6cfe`, `dd0987f`) are in the log. Plan-level verification re-run at close-out: `@rede-social/module-feed` typecheck/lint/test (91 passed, `tests/meta.test.ts` named), `@rede-social/web` typecheck/lint/build, `check-ui-literals`, `check-static-routes`, `pnpm boundaries`, `supabase test db` (199 tests), and `playwright test feed.spec.ts` (23 passed / 3 skipped-by-project, 28.5s — inside the T2 five-minute ceiling) plus `shell.spec.ts` (10 passed).

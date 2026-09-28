@@ -19,7 +19,7 @@ provides:
   - "packages/core/server/media/* kernel area: keys, limits, inspect, variants, storage, service, derive-job"
   - "kernel.media-derive-variants queue (singletonKey = assetId, policy short) registered in the worker"
   - "the PRIVATE media bucket (50 MiB, jpeg/png/webp/pdf, zero storage.objects policies)"
-  - "@tria/contracts/media — the client-safe contract the web pick-time gate and every later module reuse"
+  - "@rede-social/contracts/media — the client-safe contract the web pick-time gate and every later module reuse"
 affects: [03-02, 03-03, 03-04, 03-05, 03-06, 03-07, 03-08, phase-04-feed, phase-05-stories, phase-06-events]
 
 actuals:
@@ -73,7 +73,7 @@ key-files:
 
 key-decisions:
   - "The original object carries NO extension — the whole key space is derivable, which is what delivers R-05's zero DB reads on the serving hot path"
-  - "`@tria/contracts/media` is a package SUBPATH export, not a root-barrel re-export: the frozen `src/index.ts` stays byte-identical"
+  - "`@rede-social/contracts/media` is a package SUBPATH export, not a root-barrel re-export: the frozen `src/index.ts` stays byte-identical"
   - "`NOT_IMPLEMENTED` added to ERROR_CODES so the 03-06 video seam is a named, tested 501 rather than a silent gap or a misused code"
   - "Job-lifecycle admin writes (terminal `failed`, deferred re-arm) live in derive-job.ts, not in the broker service — the service stays about brokering"
   - "Quota read + insert run in ONE admin transaction with no row lock: a soft quota, so a millisecond-scale overshoot is cheaper than serialising a tenant's uploads"
@@ -247,7 +247,7 @@ Each task was committed atomically:
 ## Decisions Made
 
 - **Extension-less original key.** The plan's own decision, implemented: `original` rather than `original.<ext>`, so the serving route needs no row.
-- **`@tria/contracts/media` as a package subpath.** The plan asked for the contract to be reachable while `packages/contracts/src/index.ts` stayed byte-identical (an explicit acceptance criterion). `src/index.ts` is a hand-written list of `export *` lines, not a wildcard, so a subpath export — the `./branding` precedent — is the only way to satisfy both.
+- **`@rede-social/contracts/media` as a package subpath.** The plan asked for the contract to be reachable while `packages/contracts/src/index.ts` stayed byte-identical (an explicit acceptance criterion). `src/index.ts` is a hand-written list of `export *` lines, not a wildcard, so a subpath export — the `./branding` precedent — is the only way to satisfy both.
 - **`NOT_IMPLEMENTED` is a real error code.** The plan prescribes `ApiError(501, 'NOT_IMPLEMENTED', { media: 'video_provider_missing' })`; `ERROR_CODES` had no such member. Adding it (after `NOT_FOUND`, leaving the `MEMBERSHIP_BLOCKED`/`TENANT_SUSPENDED` adjacency the contracts test pins) keeps the 03-06 seam honest instead of overloading `VALIDATION_FAILED`.
 - **Job lifecycle lives with the job.** `markDerivationFailed` and the deferred re-arm are admin-lane writes about the *job*, not about brokering, so they sit in `derive-job.ts`. This also satisfies the plan's lane grep verbatim and keeps the service → job import direction intact.
 - **Quota is a soft ceiling.** Read and insert share one admin transaction, with no `for update`: the arbiter is a ceiling, not a balance, so a millisecond-scale overshoot under concurrency is far cheaper than serialising every upload of a tenant behind a row lock. Documented in the function's docblock.
@@ -257,9 +257,9 @@ Each task was committed atomically:
 
 ### Auto-fixed Issues
 
-**1. [Rule 3 - Blocking] `@tria/contracts/media` exported as a package subpath, not through the root barrel**
+**1. [Rule 3 - Blocking] `@rede-social/contracts/media` exported as a package subpath, not through the root barrel**
 - **Found during:** Task 1 (contracts)
-- **Issue:** The plan's action text says the new file is "re-exported by the existing `export *` barrel — do NOT edit `packages/contracts/src/index.ts`", but that barrel is a hand-written list of per-module `export *` lines; without editing it the module is unreachable. The acceptance criterion (`git diff --quiet -- packages/contracts/src/index.ts`) and the 03-04 handoff (`from '@tria/contracts/media'`) both point at the subpath instead.
+- **Issue:** The plan's action text says the new file is "re-exported by the existing `export *` barrel — do NOT edit `packages/contracts/src/index.ts`", but that barrel is a hand-written list of per-module `export *` lines; without editing it the module is unreachable. The acceptance criterion (`git diff --quiet -- packages/contracts/src/index.ts`) and the 03-04 handoff (`from '@rede-social/contracts/media'`) both point at the subpath instead.
 - **Fix:** Added `"./media": "./src/media.ts"` to `packages/contracts/package.json` exports (the existing `./branding` precedent). `src/index.ts` is untouched.
 - **Files modified:** packages/contracts/package.json
 - **Verification:** `git diff --quiet -- packages/contracts/src/index.ts` exits 0; every consumer typechecks
@@ -283,10 +283,10 @@ Each task was committed atomically:
 
 **4. [Rule 3 - Blocking] `encodeJpeg` exported from `variants.ts` for cross-package fixtures**
 - **Found during:** Task 1 (integration tracer)
-- **Issue:** The plan requires a 900×600 **JPEG** fixture "generated in-test through `deriveVariants`/sharp re-exported from `@tria/core/server/media/variants`", but `deriveVariants` only emits WebP and the api package has no `sharp` dependency (and must not gain one).
+- **Issue:** The plan requires a 900×600 **JPEG** fixture "generated in-test through `deriveVariants`/sharp re-exported from `@rede-social/core/server/media/variants`", but `deriveVariants` only emits WebP and the api package has no `sharp` dependency (and must not gain one).
 - **Fix:** Added `encodeJpeg(input, quality)` to `variants.ts` — the server-side twin of R-12's browser re-encode, documented as the fixture helper, following the 02-13 `deriveIconSet`/`readPixel` precedent of kernel helpers the api suite probes with.
 - **Files modified:** packages/core/server/media/variants.ts
-- **Verification:** both suites build their JPEG fixtures through it; `@tria/api` still has no `sharp` dependency
+- **Verification:** both suites build their JPEG fixtures through it; `@rede-social/api` still has no `sharp` dependency
 - **Committed in:** `928def3`
 
 **5. [Rule 1 - Design correction] Job-lifecycle admin writes moved into `derive-job.ts`**
@@ -320,7 +320,7 @@ Each task was committed atomically:
 
 ## Issues Encountered
 
-- **`pnpm db:generate` names migrations randomly.** The first run produced `20260921182401_nappy_namorita.sql`, which the plan's `ls supabase/migrations/*_media_assets.sql` gate would not match. Deleted the file, its snapshot and the journal entry, then regenerated with `drizzle-kit generate --name=media_assets`. (`pnpm db:generate -- --name=…` does not forward the flag through the pnpm recursive-exec wrapper; `pnpm --filter @tria/api exec drizzle-kit generate --name=…` does.)
+- **`pnpm db:generate` names migrations randomly.** The first run produced `20260921182401_nappy_namorita.sql`, which the plan's `ls supabase/migrations/*_media_assets.sql` gate would not match. Deleted the file, its snapshot and the journal entry, then regenerated with `drizzle-kit generate --name=media_assets`. (`pnpm db:generate -- --name=…` does not forward the flag through the pnpm recursive-exec wrapper; `pnpm --filter @rede-social/api exec drizzle-kit generate --name=…` does.)
 - **A stale API listener on port 8787** left over from an earlier integration run was being reused by `global-setup`. Killed it so the final gate ran against a freshly started process.
 
 ## Known Stubs

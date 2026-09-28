@@ -7,22 +7,22 @@ tags: [shell, navigation, registry, theme, cookie, nextjs, react, playwright, ha
 # Dependency graph
 requires:
   - phase: 02-01
-    provides: "@tria/contracts/branding (resolveBranding, brandStyleVars, THEME_COOKIE), bootstrap.tenant.branding, [data-brand-root] convention, seed brands"
+    provides: "@rede-social/contracts/branding (resolveBranding, brandStyleVars, THEME_COOKIE), bootstrap.tenant.branding, [data-brand-root] convention, seed brands"
   - phase: 02-02
-    provides: "@tria/ui primitives (Avatar, Badge, Button, Card, EmptyState, PageHeader, SectionTitle, StatusPill, Switch, ToastProvider, ScrollContainerContext), tokens.css (.app-scroll, .glass-bar, --safe-*, --screen-h, --nav-height, --theme-chip)"
+    provides: "@rede-social/ui primitives (Avatar, Badge, Button, Card, EmptyState, PageHeader, SectionTitle, StatusPill, Switch, ToastProvider, ScrollContainerContext), tokens.css (.app-scroll, .glass-bar, --safe-*, --screen-h, --nav-height, --theme-chip)"
   - phase: 02-03
-    provides: "@tria/core/ui entry with TenantLogo, Biome lane forbidding server/db imports, happy-dom .tsx tests in packages/core/tests"
+    provides: "@rede-social/core/ui entry with TenantLogo, Biome lane forbidding server/db imports, happy-dom .tsx tests in packages/core/tests"
   - phase: 02-04
     provides: "per-namespace pt-BR catalog + deterministic loader, scripts/check-ui-literals.sh, D-33 design-review approval of #desktop-shell-home and #settings"
   - phase: 01-06/01-07
     provides: "ModuleManifest/ModuleNav, MODULE_REGISTRY + enabledModulesForBootstrap, GET /v1/me/bootstrap, the example module and its ExampleWidget"
 provides:
   - "Registry extension (additive): ModuleNav.placement ('tab'|'topbar'), ModuleNav.badge ('unreadNotifications'|'unreadConversations'), ModuleManifest.home: { order }[]; bootstrapSchema mirrors both; enabledModulesForBootstrap emits home; example manifest declares home: [{ order: 90 }] with its nav object untouched"
-  - "@tria/core/ui: buildNav / isNavItemActive / activeTabKey / iconFor (nav.ts), AppShell, TopBar, BottomNav, DesktopRail, ScrollRoot, HomeSlots, ThemeToggle (+ TenantLogo from 02-03); data attributes [data-brand-root], [data-shell-nav=bottom|rail], main#app-scroll.app-scroll, SVG filter #liquid-glass"
+  - "@rede-social/core/ui: buildNav / isNavItemActive / activeTabKey / iconFor (nav.ts), AppShell, TopBar, BottomNav, DesktopRail, ScrollRoot, HomeSlots, ThemeToggle (+ TenantLogo from 02-03); data attributes [data-brand-root], [data-shell-nav=bottom|rail], main#app-scroll.app-scroll, SVG filter #liquid-glass"
   - "apps/web/lib/registry.tsx — the web composition point: WEB_MODULE_REGISTRY (module key → home-slot renderers), moduleLabelResolver(t) via t.has('<key>.nav'), homeSlotsFor(bootstrap) with Promise.allSettled and a per-slot generic error card"
   - "(app)/layout.tsx on AppShell for tenant hosts (brand + nav from the bootstrap only) and the platform host (neutral brand, single 'Tenants' tab → /plataforma, no redirect); generateViewport with viewportFit cover + themeColor = tenant primary"
   - "Kernel pages: /inicio (TenantLogo + 'Bem-vindo(a) à {tenant}' + HomeSlots / 'Em breve' card), /configuracoes (theme toggle, Em breve rows, version, Sair; Preferências + Sair on the platform host), /perfil (avatar, name, e-mail, role pill, settings row; platform → /inicio)"
-  - "Theme (D-41): root layout renders <html data-theme> from the tria_theme cookie (strict 'dark' allow-list), setTheme server action (z.enum, Path=/, SameSite=Lax, Max-Age 31536000, Secure in prod, not HttpOnly), ThemeToggle synced across instances through <html data-theme>"
+  - "Theme (D-41): root layout renders <html data-theme> from the rede_theme cookie (strict 'dark' allow-list), setTheme server action (z.enum, Path=/, SameSite=Lax, Max-Age 31536000, Secure in prod, not HttpOnly), ThemeToggle synced across instances through <html data-theme>"
   - "logout hardened: a rejected signOut lands on /configuracoes?erro=sair → ActionToast (generic error) through the shell's ToastProvider; scope 'local' unchanged (D-08)"
   - "apps/web/app/error.tsx — neutral generic error boundary (EmptyState + outline 'Tentar novamente' → reset())"
   - "Catalog: app.nav.{home,profile,mainNav,notifications,support,theme,settings,openProfile}, app.home.{welcome,soonTitle,soonBody}, app.error.{title,body,retry}, app.settings.*, app.profile.*, example.nav"
@@ -45,7 +45,7 @@ tech-stack:
     - "Home slots: the manifest declares { order } positions, the web composition point (apps/web/lib/registry.tsx) supplies the renderer per key/index, Promise.allSettled isolates a failing slot"
     - "One shell, both trees: AppShell renders TopBar+BottomNav (md:hidden) and DesktopRail (hidden md:flex) around ONE ScrollRoot; children render once; brand vars and [data-brand-root] on the shell root"
     - "Theme = cookie → <html data-theme> on the first HTML; the client toggle mutates the attribute and every ThemeToggle reads it through useSyncExternalStore + MutationObserver (single source of truth)"
-    - "Module labels resolve from the module's own catalog namespace (<key>.nav) before the manifest label; every shell string reaches @tria/core/ui as a prop (PWA-03)"
+    - "Module labels resolve from the module's own catalog namespace (<key>.nav) before the manifest label; every shell string reaches @rede-social/core/ui as a prop (PWA-03)"
 
 key-files:
   created:
@@ -91,7 +91,7 @@ key-decisions:
   - "[data-shell-nav='rail'] sits on the rail's <nav> (the labelled landmark), not the <aside>; visibility assertions work either way and the tests read the aria-label from the same node"
   - "The BottomNav scroll listener is registered with { capture: true, passive: true } (react-best-practices client-passive-event-listeners); collapse-to-single-button and media mode were not ported, as planned"
   - "logout treats a returned signOut error as a failure (throw → ?erro=sair); supabase-js already swallows session-missing 401/403/404, so only real transport failures reach the toast"
-  - "example.spec.ts's TRIA Lab h1 swap was applied in Task 1 (not Task 3) because Task 1's verify chain runs that spec and the failure was a direct consequence of the D-42 heading"
+  - "example.spec.ts's Rede Lab h1 swap was applied in Task 1 (not Task 3) because Task 1's verify chain runs that spec and the failure was a direct consequence of the D-42 heading"
 
 patterns-established:
   - "Adding a module tab/slot/home widget = manifest nav.placement/badge/home + one WEB_MODULE_REGISTRY entry; no shell code changes"
@@ -102,17 +102,17 @@ requirements-completed: [UI-03, MOD-04, PWA-03]
 
 coverage:
   - id: D1
-    description: "Both seed tenants render their own registry-driven shell at 390px (TopBar + BottomNav) and 1280px (rail + column) from the bootstrap alone: logo, --brand-primary, tabs of ENABLED modules (demo Início · Exemplo · Perfil, lab Início · Perfil), the example home slot vs the Em breve card, no cross-tenant hex or TRIA mark, children rendered once"
+    description: "Both seed tenants render their own registry-driven shell at 390px (TopBar + BottomNav) and 1280px (rail + column) from the bootstrap alone: logo, --brand-primary, tabs of ENABLED modules (demo Início · Exemplo · Perfil, lab Início · Perfil), the example home slot vs the Em breve card, no cross-tenant hex or Rede Social mark, children rendered once"
     requirement: UI-03
     verification:
       - kind: e2e
-        ref: "apps/web/e2e/shell.spec.ts#tria-demo: logo, brand, Início · Exemplo · Perfil, the example home slot, one tree visible (mobile-chromium + desktop-chromium)"
+        ref: "apps/web/e2e/shell.spec.ts#rede-demo: logo, brand, Início · Exemplo · Perfil, the example home slot, one tree visible (mobile-chromium + desktop-chromium)"
         status: pass
       - kind: e2e
-        ref: "apps/web/e2e/shell.spec.ts#tria-lab: no Exemplo tab, no #exemplo, the \"Em breve\" card, the lab brand (both projects)"
+        ref: "apps/web/e2e/shell.spec.ts#rede-lab: no Exemplo tab, no #exemplo, the \"Em breve\" card, the lab brand (both projects)"
         status: pass
       - kind: unit
-        ref: "packages/core/tests/app-shell.test.tsx (9 cases: logo fallback text, <img> ×2 and no TRIA, children once, BottomNav aria, disabled module absent, topbar slot + badge, HomeSlots)"
+        ref: "packages/core/tests/app-shell.test.tsx (9 cases: logo fallback text, <img> ×2 and no Rede Social, children once, BottomNav aria, disabled module absent, topbar slot + badge, HomeSlots)"
         status: pass
     human_judgment: false
   - id: D2
@@ -130,7 +130,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D3
-    description: "Light/dark theme (D-41): toggling on /configuracoes flips <html data-theme>, persists tria_theme (not HttpOnly, SameSite=Lax), the server HTML already says dark with JavaScript disabled, the rail switch stays in step"
+    description: "Light/dark theme (D-41): toggling on /configuracoes flips <html data-theme>, persists rede_theme (not HttpOnly, SameSite=Lax), the server HTML already says dark with JavaScript disabled, the rail switch stays in step"
     requirement: UI-03
     verification:
       - kind: e2e
@@ -160,7 +160,7 @@ coverage:
     description: "Every authenticated route is dynamic (root layout reads cookies()): /inicio, /configuracoes, /perfil absent from prerender-manifest routes; Phase 1 flows still pass against the new shell"
     verification:
       - kind: other
-        ref: "pnpm --filter @tria/web build + node check over apps/web/.next/prerender-manifest.json (routes = ['/_global-error'])"
+        ref: "pnpm --filter @rede-social/web build + node check over apps/web/.next/prerender-manifest.json (routes = ['/_global-error'])"
         status: pass
       - kind: e2e
         ref: "pnpm e2e — 86 passed on mobile-chromium + desktop-chromium (login, logout, session, signup, recovery, blocked, host-mismatch, example, platform, branding, shell)"
@@ -180,7 +180,7 @@ status: complete
 
 # Phase 02 Plan 07: Registry-Driven Branded App Shell Summary
 
-**Responsive `AppShell` in `@tria/core/ui` (prototype TopBar + glass BottomNav on the phone, 240px rail + 680px column on desktop) whose brand, tabs, TopBar slots and home widgets come only from `GET /v1/me/bootstrap` through the additive `nav.placement` / `nav.badge` / `home[]` registry extension; `/inicio` welcome + home slots, `/configuracoes` with a flash-free cookie-backed dark mode and "Sair", `/perfil` as the tab target — proven on both seed tenants at 390px and 1280px with the full e2e suite green.**
+**Responsive `AppShell` in `@rede-social/core/ui` (prototype TopBar + glass BottomNav on the phone, 240px rail + 680px column on desktop) whose brand, tabs, TopBar slots and home widgets come only from `GET /v1/me/bootstrap` through the additive `nav.placement` / `nav.badge` / `home[]` registry extension; `/inicio` welcome + home slots, `/configuracoes` with a flash-free cookie-backed dark mode and "Sair", `/perfil` as the tab target — proven on both seed tenants at 390px and 1280px with the full e2e suite green.**
 
 ## Performance
 
@@ -195,7 +195,7 @@ status: complete
 - Registry extended without breaking anything: `ModuleNav.placement/badge`, `ModuleManifest.home`, the bootstrap schema mirror, `enabledModulesForBootstrap` spreading `home`, the example manifest declaring `home: [{ order: 90 }]` with its `nav` object byte-identical (integration suite 119/119).
 - `buildNav` makes navigation a pure function of the enabled-module list (kernel Início/Perfil unconditional, MOD-04): the demo tenant reads Início · Exemplo · Perfil, the lab tenant Início · Perfil, and toggling a module changes the tabs with no shell code (02-16's smoke target).
 - The shell reproduces the prototype's `--safe-*` / scroll-root contract (`main#app-scroll`, `ScrollContainerContext`, `#liquid-glass` mounted once, `--nav-height: 0px` on desktop) with both trees rendered and CSS-switched at `md`, children rendered exactly once.
-- Dark mode with no flash: `tria_theme` → `<html data-theme>` on the first HTML (asserted with JavaScript disabled), `ThemeToggle` instances synchronised through the DOM attribute, `meta[name=theme-color]` updated from tokens.
+- Dark mode with no flash: `rede_theme` → `<html data-theme>` on the first HTML (asserted with JavaScript disabled), `ThemeToggle` instances synchronised through the DOM attribute, `meta[name=theme-color]` updated from tokens.
 - Phase 1 e2e repaired for the D-42 home (`signOut()` fixture, `/perfil` facts, `toContainText`), root error boundary added, every guard green: `pnpm lint` + literal guard, `pnpm boundaries`, `turbo lint typecheck test` 21/21, web build with all authenticated routes dynamic, `pnpm e2e` 86/86 on both projects.
 
 ## Task Commits
@@ -250,7 +250,7 @@ See `key-decisions` in the frontmatter. Design-review deltas: `02-UI-SPEC.md` ha
 
 **2. [Rule 1 - Bug] `example.spec.ts` lab `h1` assertion repaired in Task 1**
 - **Found during:** Task 1 verify (`example.spec.ts` case 3 failed on the D-42 heading)
-- **Fix:** `toHaveText('TRIA Lab')` → `toContainText('TRIA Lab')` (the exact swap Task 3 prescribes, applied one task early so Task 1's verify chain is honest).
+- **Fix:** `toHaveText('Rede Lab')` → `toContainText('Rede Lab')` (the exact swap Task 3 prescribes, applied one task early so Task 1's verify chain is honest).
 - **Committed in:** `9751bc5`
 
 **3. [Rule 2 - Catalog shape] `app.home` string → `app.nav.home`**
@@ -267,11 +267,11 @@ See `key-decisions` in the frontmatter. Design-review deltas: `02-UI-SPEC.md` ha
 
 ---
 
-**Total deviations:** 3 auto-fixed (2 bugs, 1 catalog shape) + 3 documented. **Impact on plan:** none on scope; no new third-party packages (only the workspace dependency `@tria/core` in `apps/web`).
+**Total deviations:** 3 auto-fixed (2 bugs, 1 catalog shape) + 3 documented. **Impact on plan:** none on scope; no new third-party packages (only the workspace dependency `@rede-social/core` in `apps/web`).
 
 ## Issues Encountered
 
-- `pnpm e2e -- shell.spec.ts …` forwards the `--` to Playwright, which then ran the whole suite (12 min). Use `pnpm --filter @tria/web exec playwright test <spec>` for a scoped run.
+- `pnpm e2e -- shell.spec.ts …` forwards the `--` to Playwright, which then ran the whole suite (12 min). Use `pnpm --filter @rede-social/web exec playwright test <spec>` for a scoped run.
 - The gsd `tdd-red-evidence` classifier expects node:test TAP; vitest's nested `tap` reporter reads as "zero tests discovered". `--reporter=tap-flat` plus the summary trailer classifies correctly.
 
 ## Known Stubs
@@ -291,7 +291,7 @@ None beyond the plan's register: no new endpoint, auth path or schema; the new s
 
 ## Human verification notes (end-of-phase, D7)
 
-- Phone (390px): TopBar with the seed logo + name, floating glass BottomNav (Início · Exemplo · Perfil on tria-demo) that shrinks after ~20px of downward scroll and restores on upward scroll; `/configuracoes` rows; `/perfil` avatar block.
+- Phone (390px): TopBar with the seed logo + name, floating glass BottomNav (Início · Exemplo · Perfil on rede-demo) that shrinks after ~20px of downward scroll and restores on upward scroll; `/configuracoes` rows; `/perfil` avatar block.
 - Desktop (1280px): 240px rail (logo, Início/Perfil rows, bottom group Configurações / Tema / Sair), centred 680px column, no TopBar/BottomNav; settings groups inside a Card.
 - Dark mode on both: flip "Tema escuro", reload — no light flash; the glass bar and rail repaint.
 - Backstop truths (long display name): rename a seed tenant to a 40-character name via the 02-05 `PATCH /v1/platform/tenants/{id}` and check TopBar truncation, the two-line welcome heading and the rail's `line-clamp-2`.

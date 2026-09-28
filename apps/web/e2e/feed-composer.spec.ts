@@ -84,7 +84,7 @@ const cardFor = (page: Page, caption: string) =>
 
 test.afterAll(async () => {
   await deleteFeedPostsLike(PREFIX);
-  await deletePostAssetsSince('tria-demo', startedAt);
+  await deletePostAssetsSince('rede-demo', startedAt);
   await closeAdmin();
 });
 
@@ -147,7 +147,7 @@ test.describe('FEED-01 / E14 — publishing from a phone', () => {
       // the same way the server interpolates it.
       await expect(composer.caption(page)).toHaveAttribute(
         'placeholder',
-        feed.composer.captionPlaceholder.replace('{tenant}', 'TRIA Demo'),
+        feed.composer.captionPlaceholder.replace('{tenant}', 'Rede Demo'),
       );
 
       await composer.caption(page).fill(caption);
@@ -165,7 +165,7 @@ test.describe('FEED-01 / E14 — publishing from a phone', () => {
       await expect(composer.exclusive(page)).toHaveText(feed.composer.mediaHelper);
 
       // The worker has to have derived the ladder before an image may be published (04-04).
-      await waitForReadyPostImages('tria-demo', since, 2);
+      await waitForReadyPostImages('rede-demo', since, 2);
 
       await publish.click();
       await expect(page).toHaveURL(/\/post\/[0-9a-f-]{36}$/, { timeout: 30_000 });
@@ -188,7 +188,7 @@ test.describe('FEED-03 / E03 + E18 — the overflow menu, the edit marker and th
 
     const caption = `${PREFIX} publicacao para editar`;
     const edited = `${caption} atualizada`;
-    await createFeedPostAs(users.demoAdmin, 'tria-demo', caption);
+    await createFeedPostAs(users.demoAdmin, 'rede-demo', caption);
 
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     const card = cardFor(page, caption);
@@ -230,7 +230,7 @@ test.describe('FEED-03 / E03 + E18 — the overflow menu, the edit marker and th
     test.skip(testInfo.project.name !== 'mobile-chromium', 'one project is enough for the flow');
 
     const caption = `${PREFIX} publicacao para excluir`;
-    await createFeedPostAs(users.demoAdmin, 'tria-demo', caption);
+    await createFeedPostAs(users.demoAdmin, 'rede-demo', caption);
 
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     const card = cardFor(page, caption);

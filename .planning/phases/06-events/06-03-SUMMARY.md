@@ -15,7 +15,7 @@ provides:
   - "GET /v1/events/{id} (viewer state + D-219 counts, no other member's identity) and PUT /v1/events/{id}/rsvp (one upsert, 409 codes by constraint name, event.rsvp after commit)"
   - "counts and viewer state on every /v1/events list item, still one statement"
   - "/eventos/[eventId]: header pill, 16/10 hero, banners, clamped description, info grid, Abrir no Maps, loading, not-found"
-  - "@tria/ui SegmentedControl (role=group, aria-pressed, no arrow-key writes)"
+  - "@rede-social/ui SegmentedControl (role=group, aria-pressed, no arrow-key writes)"
   - "EventActions island: the RSVP rows of the action zone, optimistic press, refusal toasts, boundary refresh"
   - "rsvpEventAction / putRsvp / eventActionState; rsvp.* and errors.cancelled catalog keys"
   - "seeded answers and check-ins in both tenants; e2e helpers insertEvent({description}), tenantIdBySlug, deleteEventsByTitlePrefix, moveEventStart"
@@ -128,7 +128,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D4
-    description: "@tria/ui SegmentedControl: role=group named by the question, aria-pressed options with one shared selected style, focus movement never calls onChange, disabled keeps the stored answer, busy sets aria-busy"
+    description: "@rede-social/ui SegmentedControl: role=group named by the question, aria-pressed options with one shared selected style, focus movement never calls onChange, disabled keeps the stored answer, busy sets aria-busy"
     requirement: "EVENT-03"
     verification:
       - kind: unit
@@ -183,7 +183,7 @@ status: complete
 - **The attendance row and its guard (Task 1).** One `event_attendances` row per member per event with the D-216 status set. The member lane can write only its own `going`/`not_going` (RLS). `app.event_attendance_guard()` reads the event `FOR SHARE` and refuses, by constraint name, these writes from every writer: an answer at or after `starts_at`, a write on a cancelled event, a status change on a checked-in row, a check-in outside its window, a moved row, and an unknown event.
 - **The API (Task 1).** `GET /v1/events/{id}` returns the viewer's state and the D-219 counts, and nobody else's identity. `PUT /v1/events/{id}/rsvp` is one upsert with repeat-no-write and emits `event.rsvp` after commit only when the answer changed. The list gets counts in the same single statement.
 - **The detail page (Task 2).** A port of the prototype: header pill, 16/10 hero, cancelled and checked-in banners, clamped description, info grid in the tenant timezone, `Abrir no Maps` as a plain link, loading and one not-found screen.
-- **The RSVP pair (Task 3).** The new `@tria/ui` `SegmentedControl`, plus the `EventActions` island for the RSVP rows of the action-zone contract. A tap presses optimistically and marks the group busy. On success the page refreshes with no toast. On a refusal the press reverts and a toast names the cause (`encerraram`, `cancelado`, generic); a race also refreshes. One timer refreshes the page at the next boundary within 24 h. `rsvpEventAction` and `putRsvp` carry the write.
+- **The RSVP pair (Task 3).** The new `@rede-social/ui` `SegmentedControl`, plus the `EventActions` island for the RSVP rows of the action-zone contract. A tap presses optimistically and marks the group busy. On success the page refreshes with no toast. On a refusal the press reverts and a toast names the cause (`encerraram`, `cancelado`, generic); a race also refreshes. One timer refreshes the page at the next boundary within 24 h. `rsvpEventAction` and `putRsvp` carry the write.
 
 ## Task Commits
 
@@ -266,7 +266,7 @@ See `key-decisions` in the frontmatter. In short:
 
 **5. [Rule 3 - Blocking] Seed mix adapted to three named members**
 - **Found during:** Task 1
-- **Issue:** tria-lab has three named members, not the number the plan's mix assumed.
+- **Issue:** rede-lab has three named members, not the number the plan's mix assumed.
 - **Fix:** The same mix in both tenants:
   - named0: `going` on #1, `checked_in` on #3;
   - named1: `going` on #1, `walk_in` on #4;
@@ -327,7 +327,7 @@ See `key-decisions` in the frontmatter. In short:
 - **Issue:** Lint failed, but UI-D-206 fixes the markup as `<div role="group">`, and the plan's acceptance grep pins `role="group"`.
 - **Fix:** A scoped `biome-ignore` with the rationale: a `<fieldset>` needs a `<legend>` and brings its own min-width and border quirks inside a grid.
 - **Files modified:** `packages/ui/src/primitives/SegmentedControl.tsx`
-- **Verification:** `pnpm --filter @tria/ui lint` is clean.
+- **Verification:** `pnpm --filter @rede-social/ui lint` is clean.
 - **Committed in:** `5567c84`
 
 **16. [Rule 3 - Blocking] The web workspace has no jest-dom**
@@ -375,10 +375,10 @@ See `key-decisions` in the frontmatter. In short:
 - `pnpm db:generate` shows no schema changes, and `git status -- supabase/migrations` is clean.
 - `pnpm db:reset && pnpm db:seed`: PASS. `pnpm supabase test db`: 16 files, 426 tests, PASS.
 - `pnpm test:integration` (the whole folder, once): 32 files, 551 tests, PASS. This covers events, events-rsvp, isolation and feed-query-budget.
-- `pnpm --filter @tria/ui test`: 82 passed. `pnpm --filter @tria/module-events test`: 38 passed. `vitest run lib/events-view i18n "app/(app)/eventos"`: 329 passed.
-- `pnpm --filter @tria/web build`: PASS, with `/eventos` and `/eventos/[eventId]` dynamic (ƒ). `check-static-routes.sh`: 44 guarded routes, 0 offenders.
+- `pnpm --filter @rede-social/ui test`: 82 passed. `pnpm --filter @rede-social/module-events test`: 38 passed. `vitest run lib/events-view i18n "app/(app)/eventos"`: 329 passed.
+- `pnpm --filter @rede-social/web build`: PASS, with `/eventos` and `/eventos/[eventId]` dynamic (ƒ). `check-static-routes.sh`: 44 guarded routes, 0 offenders.
 - `VIDEO_PROVIDER=fake playwright test events.spec.ts`: 28 passed, 4 skipped (the phone-only E03/E04 and `events rsvp` cases on desktop). This covers the `events tracer`, `events lista`, `events detalhe` and `events rsvp` describes.
-- Typecheck and lint are clean for `@tria/ui` and `@tria/web`, and `check-ui-literals.sh` passes.
+- Typecheck and lint are clean for `@rede-social/ui` and `@rede-social/web`, and `check-ui-literals.sh` passes.
 - The Task 3 acceptance greps all pass:
   - `role="group"` appears 1 time and `aria-pressed` 2 times;
   - `ArrowRight|ArrowLeft` appears 0 times outside comments;

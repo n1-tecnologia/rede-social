@@ -28,7 +28,7 @@
 | `packages/boundary-fixture/package.json` (negative MOD-02 fixture) | test | static | RESEARCH §Validation Architecture MOD-02 row | shape |
 | `legal/termos-de-uso.md`, `legal/politica-de-privacidade.md` (front-matter `version:`) | doc | static | CONTEXT D-03; RESEARCH §Security "Consent tampering" | none |
 
-### `@tria/contracts` (`packages/contracts`)
+### `@rede-social/contracts` (`packages/contracts`)
 
 | New File | Role | Data Flow | Analog | Match |
 |---|---|---|---|---|
@@ -39,7 +39,7 @@
 | `events.ts` (`EventMap`) | schema | static | RESEARCH §Pattern 9 last bullet | none |
 | `index.ts` (re-exports + `export type { AppType }`) | config | static | RESEARCH §"Hono app composition" line 846 | shape |
 
-### `@tria/core` (`packages/core`) — kernel
+### `@rede-social/core` (`packages/core`) — kernel
 
 | New File | Role | Data Flow | Analog | Match |
 |---|---|---|---|---|
@@ -70,7 +70,7 @@
 | `server/http/{request-id,logger}.ts` (pino, `tenant_id`/`user_id`/`request_id`) | middleware | request-response | none (CONTEXT discretion) | none |
 | `docs/SCHEMA-CONVENTIONS.md` | doc | static | PITFALLS §9 (referenced in RESEARCH §Recommended Project Structure) | none |
 
-### `@tria/module-example` (`packages/modules/example`) — throwaway template (D-19)
+### `@rede-social/module-example` (`packages/modules/example`) — throwaway template (D-19)
 
 | New File | Role | Data Flow | Analog | Match |
 |---|---|---|---|---|
@@ -83,7 +83,7 @@
 | `contracts/index.ts` (Zod item schema) | schema | transform | none | none |
 | `ui/ExampleWidget.tsx` (server component fed by RSC fetch) | component | request-response | none | none |
 
-### `@tria/api` (`apps/api`)
+### `@rede-social/api` (`apps/api`)
 
 | New File | Role | Data Flow | Analog | Match |
 |---|---|---|---|---|
@@ -96,10 +96,10 @@
 | `src/routes/health.ts` (`GET /v1/health` → `select 1`) | route | request-response | RESEARCH §Pitfall 4 | none |
 | `drizzle.config.ts` | config | static | RESEARCH §Code Examples "drizzle.config.ts" | exact |
 | `tsup.config.ts` (`dts: false`) | config | static | RESEARCH §Pitfall 3 | shape |
-| `Dockerfile` (`turbo prune @tria/api --docker`, `node:24-slim`) | config | static | CLAUDE.md §7 "Docker" bullet | shape |
+| `Dockerfile` (`turbo prune @rede-social/api --docker`, `node:24-slim`) | config | static | CLAUDE.md §7 "Docker" bullet | shape |
 | `tests/integration/{setup,bootstrap,isolation,modules,signup,auth-middleware}.test.ts` | test | request-response | RESEARCH §Validation Architecture "Phase Requirements → Test Map"; spike file for Vitest+postgres setup shape | shape |
 
-### `@tria/web` (`apps/web`)
+### `@rede-social/web` (`apps/web`)
 
 | New File | Role | Data Flow | Analog | Match |
 |---|---|---|---|---|
@@ -108,7 +108,7 @@
 | `lib/supabase/client.ts` | config | request-response | Supabase example `examples/auth/nextjs/lib/supabase/client.ts` (RESEARCH §Sources) — not needed for Phase 1 forms; create only if a client component needs it | none |
 | `lib/api.ts` (`hc<AppType>(API_URL, { headers: { Authorization } })`) | utility | request-response | RESEARCH §Pattern 5 bullet "Calling the API from RSC/server actions" | shape |
 | `lib/env.ts` (`@t3-oss/env-nextjs`) | config | static | none | none |
-| `app/(auth)/layout.tsx` | page | static | none (neutral TRIA chrome) | none |
+| `app/(auth)/layout.tsx` | page | static | none (neutral platform chrome) | none |
 | `app/(auth)/entrar/page.tsx` | page | request-response | copy tone: prototype `app/(auth)/login/page.tsx` (gitignored, see note) | reference only |
 | `app/(auth)/cadastro/[slug]/page.tsx` | page | request-response | copy tone: prototype `app/(auth)/register/page.tsx` (drop `username`, drop confirm-password; add two consent checkboxes per D-03) | reference only |
 | `app/(auth)/cadastro/[slug]/not-found.tsx` | page | static | none | none |
@@ -191,12 +191,12 @@ Copy the whole excerpt. Non-negotiables: JWKS created once at module level; `mem
 Envelope contract every client screen depends on:
 
 ```ts
-{ error: { code, message, details?, requestId } }   // code ∈ ERROR_CODES (@tria/contracts)
+{ error: { code, message, details?, requestId } }   // code ∈ ERROR_CODES (@rede-social/contracts)
 ```
 
 ### `apps/api/src/app.ts` route composition (config) — RESEARCH §"Hono app composition and RPC export"
 
-Chained `.route()` calls so `export type AppType = typeof routes` carries every route for `hc<AppType>()`; `@tria/contracts` re-exports the type. Mount order: `/v1/public` (no auth) → `/v1/me` (`requireAuth`) → `/v1/example` (`requireAuth, requireModule('example')`) → `/v1/platform` (`requireAuth, requireSuperAdmin()`).
+Chained `.route()` calls so `export type AppType = typeof routes` carries every route for `hc<AppType>()`; `@rede-social/contracts` re-exports the type. Mount order: `/v1/public` (no auth) → `/v1/me` (`requireAuth`) → `/v1/example` (`requireAuth, requireModule('example')`) → `/v1/platform` (`requireAuth, requireSuperAdmin()`).
 
 ### `apps/web/proxy.ts` and `lib/supabase/server.ts` (middleware/config) — RESEARCH §Pattern 5
 
@@ -239,10 +239,10 @@ All four exist as complete files in RESEARCH; copy verbatim and fill in the elid
 **Source:** RESEARCH §Pattern 1 `withAdminTx` + `server/supabase-admin.ts`. Import-restricted by Biome pattern (RESEARCH §Pattern 7 item 3); pgTAP proves the tenant lane never runs as `service_role`.
 
 ### Error handling (apply to: all API routes/middleware and the web `(app)/layout.tsx`)
-**Source:** RESEARCH §Pattern 10. Throw `ApiError(status, code, details?)`; never `c.json({ error: '…' })` ad hoc. Web switches on `error.code` from `@tria/contracts` (`MEMBERSHIP_BLOCKED` → signOut local + `/acesso-suspenso?t=`; `NO_MEMBERSHIP` → "conta sem comunidade" pointing to `/cadastro/{cookie}`).
+**Source:** RESEARCH §Pattern 10. Throw `ApiError(status, code, details?)`; never `c.json({ error: '…' })` ad hoc. Web switches on `error.code` from `@rede-social/contracts` (`MEMBERSHIP_BLOCKED` → signOut local + `/acesso-suspenso?t=`; `NO_MEMBERSHIP` → "conta sem comunidade" pointing to `/cadastro/{cookie}`).
 
 ### Validation (apply to: all API routes with bodies, all web forms)
-**Source:** RESEARCH §Pattern 4 step 2. One Zod schema per flow in `@tria/contracts`, consumed by `@hono/zod-openapi` on the API and `@hookform/resolvers`/manual `safeParse` in server actions. Password `min(8)` in both places plus `minimum_password_length = 8` in `config.toml`.
+**Source:** RESEARCH §Pattern 4 step 2. One Zod schema per flow in `@rede-social/contracts`, consumed by `@hono/zod-openapi` on the API and `@hookform/resolvers`/manual `safeParse` in server actions. Password `min(8)` in both places plus `minimum_password_length = 8` in `config.toml`.
 
 ### Module boundary (apply to: every `packages/modules/*`, `apps/web`, `packages/core`)
 **Source:** RESEARCH §Pattern 7 (three layers). `turbo.json` tags `module` / `kernel` / `contracts` / `app`; package `exports` without `./src/*`; Biome `noRestrictedImports` patterns. `packages/boundary-fixture` is the CI negative test.

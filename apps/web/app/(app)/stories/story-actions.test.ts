@@ -1,4 +1,4 @@
-import { STORY_SEEN_BATCH_MAX } from '@tria/module-stories/contracts';
+import { STORY_SEEN_BATCH_MAX } from '@rede-social/module-stories/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,7 +29,7 @@ import { markStoriesSeenAction } from './story-actions';
 vi.mock('@/lib/env', () => ({
   env: {
     API_URL: 'http://api.test',
-    PLATFORM_HOST: 'tria.test',
+    PLATFORM_HOST: 'rede-social.test',
     NEXT_PUBLIC_SUPABASE_URL: 'http://supabase.test',
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test-key',
   },

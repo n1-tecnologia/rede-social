@@ -1,6 +1,6 @@
 'use client';
 
-import { Avatar, cn, IconButton } from '@tria/ui';
+import { Avatar, cn, IconButton } from '@rede-social/ui';
 import { Heart, Trash2 } from 'lucide-react';
 import { linkify } from './linkify';
 import type { CountTemplates } from './meta';

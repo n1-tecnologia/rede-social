@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TRIA — Fase 05.3 · Reels (mockup estático para revisão do time de design)</title>
+<title>Rede Social — Fase 05.3 · Reels (mockup estático para revisão do time de design)</title>
 <style>
 /* =====================================================================================
    0. NENHUM ASSET EXTERNO. Um arquivo, zero rede: nenhuma fonte remota, nenhum script
@@ -161,7 +161,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
 .phone.narrow { width: 320px; height: 568px; }
 
 /* =====================================================================================
-   4. PRIMITIVAS @tria/ui usadas dentro do escopo escuro (EmptyState, Button, Avatar, Toast)
+   4. PRIMITIVAS @rede-social/ui usadas dentro do escopo escuro (EmptyState, Button, Avatar, Toast)
    ===================================================================================== */
 .btn { height: 44px; padding: 0 20px; border-radius: 12px; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .btn.brand { background: var(--brand-accent); color: var(--brand-on-accent); }
@@ -318,17 +318,17 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
   <!-- o logo do tenant é uma IMAGEM, não um token: um wordmark largo -->
-  <symbol id="logo-wordmark" viewBox="0 0 120 40"><rect x="0" y="10" width="20" height="20" rx="6" fill="var(--brand-primary)"/><text x="26" y="27" font-family="Manrope, system-ui, sans-serif" font-size="16" font-weight="700" fill="var(--brand-primary)">TRIA Demo</text></symbol>
+  <symbol id="logo-wordmark" viewBox="0 0 120 40"><rect x="0" y="10" width="20" height="20" rx="6" fill="var(--brand-primary)"/><text x="26" y="27" font-family="Manrope, system-ui, sans-serif" font-size="16" font-weight="700" fill="var(--brand-primary)">Rede Demo</text></symbol>
 </svg>
 
 <!-- ============ barra do mockup (não é superfície do produto) ============ -->
 <div class="toolbar" role="region" aria-label="Controles do mockup">
-  <span class="brandname">TRIA · Fase 05.3 <small>Reels · as seis superfícies sem protótipo · 05.3-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <span class="brandname">Rede Social · Fase 05.3 <small>Reels · as seis superfícies sem protótipo · 05.3-UI-SPEC.md · tokens reais de @rede-social/ui</small></span>
   <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
   <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
   <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
   <span>
-    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">Rede Social (neutro)</button>
     <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
     <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
     <button class="preset" type="button" data-p="#b91c1c" data-s="#f87171">Vermelho</button>
@@ -405,7 +405,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
             <button class="lane" role="tab" type="button" aria-selected="false">Aulas</button>
             <button class="lane" role="tab" type="button" aria-selected="true" aria-label="Associação de Moradores e Amigos do Bairro Jardim das Flores">Associação de Moradores e Amigos do Bairro Jardim das Flores</button>
             <button class="lane" role="tab" type="button" aria-selected="false">Voluntariado</button>
-            <button class="lane" role="tab" type="button" aria-selected="false">Coral TRIA</button>
+            <button class="lane" role="tab" type="button" aria-selected="false">Coral Rede Social</button>
             <button class="lane" role="tab" type="button" aria-selected="false">Mentoria em grupo</button>
           </div></div></div>
           <button class="sound" type="button" aria-label="Ativar som"><svg class="i i-20"><use href="#i-mute"/></svg></button>
@@ -441,13 +441,13 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
           <button class="sound" type="button" aria-label="Silenciar"><svg class="i i-20"><use href="#i-vol"/></svg></button>
           <div class="ticks" aria-hidden="true"><i class="more"></i><i></i><i></i><i class="on"></i><i></i><i></i><i class="more"></i></div>
           <div class="rail">
-            <a class="av-link" href="#s2" aria-label="Ver o perfil de TRIA Demo"><span class="av photo"></span></a>
+            <a class="av-link" href="#s2" aria-label="Ver o perfil de Rede Demo"><span class="av photo"></span></a>
             <div class="slot"><button class="rb" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-28"><use href="#i-heart"/></svg></button><span class="cnt" aria-hidden="true">312</span></div>
             <div class="slot"><button class="rb" type="button" aria-label="Comentar"><svg class="i i-28"><use href="#i-chat"/></svg></button><span class="cnt" aria-hidden="true">12</span></div>
             <div class="slot"><button class="rb" type="button" aria-label="Compartilhar"><svg class="i i-28"><use href="#i-send"/></svg></button></div>
           </div>
           <div class="cap">
-            <a class="author" href="#s3">TRIA Demo</a>
+            <a class="author" href="#s3">Rede Demo</a>
             <div class="textbox"><p class="text clamp">Bastidores da gravação de ontem.</p></div>
           </div>
         </section>
@@ -649,14 +649,14 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
           <div class="cap">
             <a class="author" href="#s3">Roberth Resende</a>
             <a class="chiplink" href="#s3" aria-label="Ver a comunidade Energia de Rainha"><span class="chip">Energia de Rainha</span></a>
-            <p class="text open">Ela passou seis meses pedindo desculpa por existir. Hoje ela negocia olhando no olho. A virada começou numa conversa de dez minutos, e o roteiro completo está no material da aula de terça: <a class="lk" href="#s3">tria.app/aulas/negociacao-terca</a>
+            <p class="text open">Ela passou seis meses pedindo desculpa por existir. Hoje ela negocia olhando no olho. A virada começou numa conversa de dez minutos, e o roteiro completo está no material da aula de terça: <a class="lk" href="#s3">rede-social.app/aulas/negociacao-terca</a>
 
 Três perguntas antes de aceitar a primeira proposta:
 1. O que eu perco se disser não?
 2. Quem mais precisa aprovar isso?
 3. Qual é o prazo real, e quem o definiu?
 
-Inscrições para a próxima turma: <a class="lk" href="#s3">tria.app/turmas/energia-de-rainha-2026</a>
+Inscrições para a próxima turma: <a class="lk" href="#s3">rede-social.app/turmas/energia-de-rainha-2026</a>
 Material complementar e a gravação completa ficam na comunidade até o fim do mês. <button class="less" type="button" aria-expanded="true">menos</button></p>
           </div>
         </section>
@@ -684,13 +684,13 @@ Material complementar e a gravação completa ficam na comunidade até o fim do 
           <button class="sound" type="button" aria-label="Ativar som"><svg class="i i-20"><use href="#i-mute"/></svg></button>
           <div class="ticks" aria-hidden="true"><i></i><i></i><i class="on"></i><i></i><i></i><i></i><i class="more"></i></div>
           <div class="rail">
-            <a class="av-link" href="#s2" aria-label="Ver o perfil de TRIA Demo"><span class="av photo"></span></a>
+            <a class="av-link" href="#s2" aria-label="Ver o perfil de Rede Demo"><span class="av photo"></span></a>
             <div class="slot"><button class="rb" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-28"><use href="#i-heart"/></svg></button><span class="cnt" aria-hidden="true">57</span></div>
             <div class="slot"><button class="rb" type="button" aria-label="Comentar"><svg class="i i-28"><use href="#i-chat"/></svg></button><span class="cnt" aria-hidden="true">4</span></div>
             <div class="slot"><button class="rb" type="button" aria-label="Compartilhar"><svg class="i i-28"><use href="#i-send"/></svg></button></div>
           </div>
           <div class="cap">
-            <a class="author" href="#s3">TRIA Demo</a>
+            <a class="author" href="#s3">Rede Demo</a>
             <div class="textbox"><p class="text clamp">Publicação do tenant, sem comunidade: nome e legenda, sem chip.</p></div>
           </div>
         </section>
@@ -800,13 +800,13 @@ Material complementar e a gravação completa ficam na comunidade até o fim do 
           <button class="badge" type="button" aria-label="Reproduzir vídeo"><svg class="i"><use href="#i-play"/></svg></button>
           <div class="ticks" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i class="more"></i></div>
           <div class="rail">
-            <a class="av-link" href="#s2" aria-label="Ver o perfil de TRIA Demo"><span class="av photo"></span></a>
+            <a class="av-link" href="#s2" aria-label="Ver o perfil de Rede Demo"><span class="av photo"></span></a>
             <div class="slot"><button class="rb" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-28"><use href="#i-heart"/></svg></button><span class="cnt" aria-hidden="true">2,5 mil</span></div>
             <div class="slot"><button class="rb" type="button" aria-label="Comentar"><svg class="i i-28"><use href="#i-chat"/></svg></button><span class="cnt" aria-hidden="true">31</span></div>
             <div class="slot"><button class="rb" type="button" aria-label="Compartilhar"><svg class="i i-28"><use href="#i-send"/></svg></button></div>
           </div>
           <div class="cap">
-            <a class="author" href="#s3">TRIA Demo</a>
+            <a class="author" href="#s3">Rede Demo</a>
             <div class="textbox"><p class="text clamp">O encontro anual, gravado em 16:9.</p></div>
           </div>
         </section>
@@ -876,7 +876,7 @@ Material complementar e a gravação completa ficam na comunidade até o fim do 
             <div class="empty">
               <span class="circle"><svg class="i i-28"><use href="#i-film"/></svg></span>
               <h3>Nenhum vídeo ainda</h3>
-              <p>Os vídeos publicados por TRIA Demo vão aparecer aqui.</p>
+              <p>Os vídeos publicados por Rede Demo vão aparecer aqui.</p>
             </div>
           </div>
         </section>
@@ -899,7 +899,7 @@ Material complementar e a gravação completa ficam na comunidade até o fim do 
             <div class="empty">
               <span class="circle"><svg class="i i-28"><use href="#i-film"/></svg></span>
               <h3>Nenhum vídeo ainda</h3>
-              <p>Os vídeos publicados por TRIA Demo vão aparecer aqui.</p>
+              <p>Os vídeos publicados por Rede Demo vão aparecer aqui.</p>
               <a class="btn brand" href="#s5">Criar publicação</a>
             </div>
           </div>
@@ -1020,13 +1020,13 @@ Material complementar e a gravação completa ficam na comunidade até o fim do 
           <button class="sound" type="button" aria-label="Ativar som"><svg class="i i-20"><use href="#i-mute"/></svg></button>
           <div class="ticks" aria-hidden="true"><i class="more"></i><i></i><i></i><i></i><i></i><i></i><i class="on"></i></div>
           <div class="rail">
-            <a class="av-link" href="#s2" aria-label="Ver o perfil de TRIA Demo"><span class="av photo"></span></a>
+            <a class="av-link" href="#s2" aria-label="Ver o perfil de Rede Demo"><span class="av photo"></span></a>
             <div class="slot"><button class="rb" type="button" aria-label="Curtir" aria-pressed="false"><svg class="i i-28"><use href="#i-heart"/></svg></button><span class="cnt" aria-hidden="true">95</span></div>
             <div class="slot"><button class="rb" type="button" aria-label="Comentar"><svg class="i i-28"><use href="#i-chat"/></svg></button><span class="cnt" aria-hidden="true">3</span></div>
             <div class="slot"><button class="rb" type="button" aria-label="Compartilhar"><svg class="i i-28"><use href="#i-send"/></svg></button></div>
           </div>
           <div class="cap">
-            <a class="author" href="#s3">TRIA Demo</a>
+            <a class="author" href="#s3">Rede Demo</a>
             <div class="textbox"><p class="text clamp">O último vídeo carregado da lista.</p></div>
           </div>
         </section>
@@ -1058,7 +1058,7 @@ Material complementar e a gravação completa ficam na comunidade até o fim do 
       <div class="desktop">
         <aside class="drail">
           <div class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></div>
-          <div class="display-name">TRIA Demo</div>
+          <div class="display-name">Rede Demo</div>
           <nav aria-label="Navegação principal">
             <a class="rail-item" href="#s6"><svg class="i i-22"><use href="#i-home"/></svg>Início</a>
             <a class="rail-item" href="#s6"><svg class="i i-22"><use href="#i-users"/></svg>Comunidades</a>
@@ -1112,7 +1112,7 @@ Material complementar e a gravação completa ficam na comunidade até o fim do 
       <div class="desktop short">
         <aside class="drail">
           <div class="logo-box"><svg aria-hidden="true"><use href="#logo-wordmark"/></svg></div>
-          <div class="display-name">TRIA Demo</div>
+          <div class="display-name">Rede Demo</div>
           <nav aria-label="Navegação principal">
             <a class="rail-item" href="#s6"><svg class="i i-22"><use href="#i-home"/></svg>Início</a>
             <a class="rail-item" href="#s6"><svg class="i i-22"><use href="#i-users"/></svg>Comunidades</a>
@@ -1128,7 +1128,7 @@ Material complementar e a gravação completa ficam na comunidade até o fim do 
                 <div class="empty">
                   <span class="circle"><svg class="i i-28"><use href="#i-film"/></svg></span>
                   <h3>Nenhum vídeo ainda</h3>
-                  <p>Os vídeos publicados por TRIA Demo vão aparecer aqui.</p>
+                  <p>Os vídeos publicados por Rede Demo vão aparecer aqui.</p>
                   <a class="btn brand" href="#s6">Criar publicação</a>
                 </div>
               </div>

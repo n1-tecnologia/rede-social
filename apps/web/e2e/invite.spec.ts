@@ -27,7 +27,7 @@ import { throwawayOrigin } from './tenant-fixtures';
 
 test.describe.configure({ timeout: 180_000 });
 
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD: string = (() => {
   const value = process.env.SUPER_ADMIN_PASSWORD;
   if (!value) {
@@ -398,7 +398,7 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
       primary: '#0e7490',
       secondary: '#67e8f9',
     });
-    await createMember(adminEmail, 'Throwaway-123456', 'tria-lab');
+    await createMember(adminEmail, 'Throwaway-123456', 'rede-lab');
     await attachAndVerify(token, id, host);
     const refused = await waitForInviteStatus(token, id, 'expired');
     expect(refused.sentAt).toBeNull();

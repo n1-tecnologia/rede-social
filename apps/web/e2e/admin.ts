@@ -266,7 +266,7 @@ export async function deleteTenantVideoAssets(tenantSlug: string): Promise<void>
   // assertions measure — anything left behind is an off-by-one in those counts.
   //
   // The consequence is deliberate: the seeded video POST in THIS tenant loses its media row, which
-  // is why `feed-media.spec.ts` reads the video case from tria-lab, a tenant no spec resets.
+  // is why `feed-media.spec.ts` reads the video case from rede-lab, a tenant no spec resets.
   await sql()`
     delete from public.feed_post_media m
      using public.media_assets a, public.tenants t

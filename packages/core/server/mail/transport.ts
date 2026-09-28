@@ -59,7 +59,7 @@ export function formatMailbox({ name, email }: MailAddress): string {
   return safeName ? `"${safeName}" <${email}>` : email;
 }
 
-/** `m***@tria-demo.local` — enough to correlate a log line, never the address itself. */
+/** `m***@rede-demo.local` — enough to correlate a log line, never the address itself. */
 export function maskEmail(email: string): string {
   const at = email.indexOf('@');
   if (at <= 0) return '***';

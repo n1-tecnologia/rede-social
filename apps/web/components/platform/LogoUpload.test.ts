@@ -15,8 +15,8 @@ import { type UploadActions, useSignedUpload } from './LogoUpload';
 const { toast } = vi.hoisted(() => ({ toast: { show: vi.fn() } }));
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 vi.mock('@/lib/upload', async (orig) => ({

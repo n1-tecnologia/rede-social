@@ -1,13 +1,13 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
+import { MediaImage } from '@rede-social/core/ui';
 import {
   CommentSheet,
   type CommentSheetProps,
   LikeButton,
   useOptimisticLike,
-} from '@tria/module-feed/ui';
-import { STORY_HIGHLIGHT_MAX_ITEMS } from '@tria/module-stories/contracts';
+} from '@rede-social/module-feed/ui';
+import { STORY_HIGHLIGHT_MAX_ITEMS } from '@rede-social/module-stories/contracts';
 import {
   HighlightSheet,
   type HighlightSheetPlace,
@@ -16,8 +16,8 @@ import {
   StoryViewer,
   type StoryViewerGroup,
   type StoryViewerItem,
-} from '@tria/module-stories/ui';
-import { Avatar, IconButton, useToast } from '@tria/ui';
+} from '@rede-social/module-stories/ui';
+import { Avatar, IconButton, useToast } from '@rede-social/ui';
 import { BookmarkPlus, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -40,7 +40,7 @@ import { StoryVideo } from './StoryVideo';
  * The app-tier shell around `StoryViewer` (05-06) — the `FeedSurface` split, one module later.
  *
  * **Why this file exists at all.** Three of the viewer's parts cannot live in a module: the
- * `LikeButton` belongs to `@tria/module-feed` and `turbo boundaries` denies a `module -> module`
+ * `LikeButton` belongs to `@rede-social/module-feed` and `turbo boundaries` denies a `module -> module`
  * package edge; the playback token comes from an app-scoped server action; and the failure toast
  * needs `useToast`, which is a hook a server component cannot hold. So the viewer takes the media
  * and the action row as NODES and this file builds them. Every decision that can be made on the
@@ -62,7 +62,7 @@ import { StoryVideo } from './StoryVideo';
  * the one element that asked, and never rides in the strip's payload (D-44, T-05-34).
  *
  * **D-82's comment sheet is composed here for the same boundary reason** (05-07): `CommentSheet`
- * belongs to `@tria/module-feed`, the viewer to `@tria/module-stories`, and a `module -> module`
+ * belongs to `@rede-social/module-feed`, the viewer to `@rede-social/module-stories`, and a `module -> module`
  * package edge is denied. The viewer takes the sheet as an `overlay` NODE and its open state feeds
  * the `externallyPaused` prop 05-06 left wired and unfed — so "the story waits while you type" is
  * one prop at the composition point rather than a second pause mechanism.

@@ -35,7 +35,7 @@ import { ensureWorker } from './worker';
  */
 
 test.describe.configure({ mode: 'serial', timeout: 300_000 });
-test.skip(isRemote, 'local stack only (seeded tria-demo, the local worker, Storage fixtures)');
+test.skip(isRemote, 'local stack only (seeded rede-demo, the local worker, Storage fixtures)');
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
 /** The SAME iPhone capture the kernel unit suite pins — the phone case the goal actually names. */
@@ -45,16 +45,16 @@ const LARGE = `${FIXTURES}large.jpg`;
 /** 186 KiB of real H.264 — see `e2e/fixtures/README.md` for the AVFoundation generator. */
 const SAMPLE_MP4 = `${FIXTURES}sample.mp4`;
 
-const DEMO_SLUG = 'tria-demo';
-const SEEDED = { displayName: 'Membro TRIA Demo', bio: null } as const;
-const NEW_NAME = 'Membro TRIA Demo';
+const DEMO_SLUG = 'rede-demo';
+const SEEDED = { displayName: 'Membro Rede Demo', bio: null } as const;
+const NEW_NAME = 'Membro Rede Demo';
 const NEW_BIO = 'Venho aos encontros de sábado.';
 
 /** What the seed writes for the member the search must find (`scripts/seed.ts`). */
 const GONCALVES = {
   name: 'João Gonçalves',
   bio: 'Organizo os encontros de sábado.',
-  email: 'joao.goncalves@tria-demo.local',
+  email: 'joao.goncalves@rede-demo.local',
 } as const;
 
 let stopWorker: (() => Promise<void>) | null = null;
@@ -199,7 +199,7 @@ test.describe('03-08 — the Phase 3 goal walked on a phone', () => {
     // A name and a bio and NOTHING else: no e-mail (D-46) and no role word (D-45).
     const main = page.locator('main');
     await expect(main.getByText(GONCALVES.email)).toHaveCount(0);
-    await expect(main.getByText(/@tria-demo\.local/)).toHaveCount(0);
+    await expect(main.getByText(/@rede-demo\.local/)).toHaveCount(0);
     await expect(main.getByText(/^(Administrador|Membro|Suporte)$/)).toHaveCount(0);
   });
 

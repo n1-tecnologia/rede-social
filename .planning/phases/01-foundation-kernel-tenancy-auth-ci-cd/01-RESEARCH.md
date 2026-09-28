@@ -12,7 +12,7 @@
 #### Sign-up link and consent
 - **D-01:** Public sign-up link is `/cadastro/{slug}` (e.g. `app.seusistema.com/cadastro/igor-alves`). Login lives at `/entrar` with no slug. All public auth routes use pt-BR paths (`/entrar`, `/cadastro/{slug}`, `/esqueci-senha`, `/redefinir-senha`). — **Reversibility:** costly — once the pilot tenant shares its link on WhatsApp, changing the URL shape requires permanent redirects.
 - **D-02:** Sign-up form collects **name, e-mail, password** only. No username (not in the data model), no confirm-password field (use a show-password toggle instead). Photo and bio are collected in the Phase 3 first-access nudge, not here.
-- **D-03:** Consent is **two separate checkboxes**: (a) "Li e aceito as regras da comunidade {tenant}" opening a bottom sheet with the tenant's rules text; (b) "Aceito os Termos de Uso e a Política de Privacidade da TRIA". Each acceptance is recorded in a `consent_records` table with `tenant_id`, `user_id`, `kind` (`tenant_rules` | `tria_terms`), `text_version`, `accepted_at`, `ip`. TRIA terms/privacy text lives as versioned markdown in the repo; tenant rules live in a column on `tenants` (`rules_text`, `rules_version`), editable by `admin_tenant` in Phase 8. — **Reversibility:** one-way — consent records are LGPD evidence; the table shape and versioning must be right from the first real sign-up.
+- **D-03:** Consent is **two separate checkboxes**: (a) "Li e aceito as regras da comunidade {tenant}" opening a bottom sheet with the tenant's rules text; (b) "Aceito os Termos de Uso e a Política de Privacidade da plataforma". Each acceptance is recorded in a `consent_records` table with `tenant_id`, `user_id`, `kind` (`tenant_rules` | `platform_terms`), `text_version`, `accepted_at`, `ip`. Rede Social terms/privacy text lives as versioned markdown in the repo; tenant rules live in a column on `tenants` (`rules_text`, `rules_version`), editable by `admin_tenant` in Phase 8. — **Reversibility:** one-way — consent records are LGPD evidence; the table shape and versioning must be right from the first real sign-up.
 - **D-04:** **No e-mail confirmation** in the pilot: Supabase autoconfirm on, the user is signed in immediately after sign-up. E-mail confirmation becomes a per-tenant toggle later (deferred). If the e-mail already exists in `auth.users` (same or other tenant), the API answers with a generic pt-BR message "Este e-mail já está cadastrado. Entre com sua senha." plus a link to `/entrar`; a cross-tenant duplicate is logged internally as a V2 multi-tenant signal. V1 keeps one membership per user (ROLE-02).
 
 #### Session, login, logout and blocking
@@ -24,17 +24,17 @@
 - **D-10:** Password recovery: `/esqueci-senha` always answers "Se existir uma conta com este e-mail, enviamos um link" (no account enumeration). The e-mail link opens `/redefinir-senha`, which sets the new password and signs the user in. Password policy: **minimum 8 characters**, no symbol/case rules, simple strength indicator; same rule at sign-up.
 
 #### Environments, branches, seed and e-mail
-- **D-11:** Branch model: rename `master` -> **`main`** and create the repository under the `tria-company` GitHub organisation. **`main` = production**; **every PR = Vercel Preview + Cloud Run `api-staging` / `worker-staging`** pointing at the staging Supabase project. Only `main` and PR branches exist.
+- **D-11:** Branch model: rename `master` -> **`main`** and create the repository under the `n1-tecnologia` GitHub organisation. **`main` = production**; **every PR = Vercel Preview + Cloud Run `api-staging` / `worker-staging`** pointing at the staging Supabase project. Only `main` and PR branches exist.
 - **D-12:** Production deploy after merge to `main`: Vercel publishes the web app automatically; the GCP workflow runs lint/typecheck/tests/pgTAP, then pauses at a `migrate-and-deploy-prod` job behind a GitHub Environment named `production` requiring **one manual approval**. Order inside the job: Supabase migrations -> API -> worker.
-- **D-13:** Outbound auth e-mails (recovery, and confirmation once enabled) go through **Resend configured as Supabase Custom SMTP** on both projects (free tier, verified sending subdomain such as `mail.seusistema.com`, credentials in secrets / `config.toml`). Templates are neutral TRIA in this phase; tenant-branded e-mails are Phase 2. Rationale: Supabase's built-in SMTP only delivers to project team members and is rate-limited, so recovery would not work for real members.
-- **D-14:** Tenants and the platform admin are created by an **idempotent TypeScript seed script** (`pnpm db:seed`): tenant `tria-demo` (pilot stand-in) and tenant `tria-lab` (isolation counterpart), one `admin_tenant` and one `member` in each, plus the `super_admin` from `SUPER_ADMIN_EMAIL` (ferramentas@triacompany.com.br) with an initial password from env. Runs automatically for local and staging; for production it is run once through a manual `workflow_dispatch`. Passwords and e-mails never live in migrations or git.
+- **D-13:** Outbound auth e-mails (recovery, and confirmation once enabled) go through **Resend configured as Supabase Custom SMTP** on both projects (free tier, verified sending subdomain such as `mail.seusistema.com`, credentials in secrets / `config.toml`). Templates are neutral platform in this phase; tenant-branded e-mails are Phase 2. Rationale: Supabase's built-in SMTP only delivers to project team members and is rate-limited, so recovery would not work for real members.
+- **D-14:** Tenants and the platform admin are created by an **idempotent TypeScript seed script** (`pnpm db:seed`): tenant `rede-demo` (pilot stand-in) and tenant `rede-lab` (isolation counterpart), one `admin_tenant` and one `member` in each, plus the `super_admin` from `SUPER_ADMIN_EMAIL` (superadmin@rede-social.test) with an initial password from env. Runs automatically for local and staging; for production it is run once through a manual `workflow_dispatch`. Passwords and e-mails never live in migrations or git.
 - **D-15:** Regions and naming (accepted defaults): GCP `southamerica-east1`, Supabase `sa-east-1`; projects named `rede-social-staging` and `rede-social-prod`; staging web URL is the Vercel Preview URL. Secrets in GCP Secret Manager (API/worker) and Vercel env (web, publishable keys only); WIF, no JSON keys.
 
 #### Module registry and kernel
 - **D-16:** **Toggleable modules** (rows in `tenant_modules`): `feed`, `communities`, `stories`, `events`, `chat`, `notifications`. **Kernel, always on, no flag**: tenancy, auth, profiles, media, moderation, platform. The registry ships all six toggleable keys in Phase 1 (before the modules exist) so `/me/bootstrap` and `requireModule` are testable now. — **Reversibility:** costly — making a kernel capability toggleable later means a new flag row, a guard on every route and a navigation change.
-- **D-17:** A newly created tenant gets **all six toggleable modules enabled by default** (super_admin disables what is not wanted). Seed: `tria-demo` all six on; `tria-lab` only `feed` + `events`, so the isolation suite exercises the disabled-module 404 from Phase 1.
-- **D-18:** npm scope **`@tria/*`** with layout `apps/{web,api}` and `packages/{core,contracts,ui,config,modules/*}` (e.g. `@tria/core`, `@tria/contracts`, `@tria/ui`, `@tria/module-feed`). The worker runs from the **same `apps/api` image with `ROLE=worker`**; there is no `apps/worker`. — **Reversibility:** costly — renaming the scope or moving packages touches every import and every CI path filter.
-- **D-19:** The "module template" is a **real, throwaway `@tria/module-example`**: one table with `tenant_id` + RLS, a GET/POST route behind `requireModule('example')`, one domain event, one pg-boss job and a minimal UI component mounted on `/inicio`. It proves the package layout, boundary lint, isolation suite and disabled-module 404 end to end. It is removed in Phase 4 when feed replaces it. (`example` is a seventh registry key that exists only until Phase 4; it must not be enabled for real tenants.)
+- **D-17:** A newly created tenant gets **all six toggleable modules enabled by default** (super_admin disables what is not wanted). Seed: `rede-demo` all six on; `rede-lab` only `feed` + `events`, so the isolation suite exercises the disabled-module 404 from Phase 1.
+- **D-18:** npm scope **`@rede-social/*`** with layout `apps/{web,api}` and `packages/{core,contracts,ui,config,modules/*}` (e.g. `@rede-social/core`, `@rede-social/contracts`, `@rede-social/ui`, `@rede-social/module-feed`). The worker runs from the **same `apps/api` image with `ROLE=worker`**; there is no `apps/worker`. — **Reversibility:** costly — renaming the scope or moving packages touches every import and every CI path filter.
+- **D-19:** The "module template" is a **real, throwaway `@rede-social/module-example`**: one table with `tenant_id` + RLS, a GET/POST route behind `requireModule('example')`, one domain event, one pg-boss job and a minimal UI component mounted on `/inicio`. It proves the package layout, boundary lint, isolation suite and disabled-module 404 end to end. It is removed in Phase 4 when feed replaces it. (`example` is a seventh registry key that exists only until Phase 4; it must not be enabled for real tenants.)
 
 ### Claude's Discretion
 - Exact shape of `/me/bootstrap` (follow ARCHITECTURE.md Pattern 3: user, membership, tenant + branding, enabled modules in nav order, permissions, counters; counters may be zeros in Phase 1).
@@ -62,8 +62,8 @@
 |----|-------------------------------|------------------|
 | TENANT-01 | Single deployment at one URL; tenant resolved from the user's account after login, not the hostname | Pattern 2 (auth middleware resolves membership per request via `app.membership_for_user()`), Pattern 5 (`proxy.ts` never inspects hostname; `tenant_slug` cookie is display-only) |
 | TENANT-03 | Every tenant-owned row has `tenant_id`; API runs tenant requests under an RLS-subject role (no service-role key for user traffic) | Pattern 1 (`withTenantTx`: `set_config(..., true)` + `SET LOCAL ROLE authenticated` on the Supavisor transaction pooler), `api_user` role design, Wave-0 spike, pgTAP "every `tenant_id` table has RLS" test |
-| TENANT-05 | Automated two-tenant isolation suite | Validation Architecture: pgTAP suite in `supabase/tests/`, Vitest API integration suite seeded with `tria-demo`/`tria-lab` |
-| MOD-01 | Monorepo; each feature is a self-contained package (schema, API, UI) | Recommended Project Structure (D-18), `@tria/module-example` layout, drizzle-kit multi-glob schema, migration folder convention |
+| TENANT-05 | Automated two-tenant isolation suite | Validation Architecture: pgTAP suite in `supabase/tests/`, Vitest API integration suite seeded with `rede-demo`/`rede-lab` |
+| MOD-01 | Monorepo; each feature is a self-contained package (schema, API, UI) | Recommended Project Structure (D-18), `@rede-social/module-example` layout, drizzle-kit multi-glob schema, migration folder convention |
 | MOD-02 | Kernel package; modules depend only on kernel + published contracts, enforced by lint/dependency rules | Pattern 7 (three-layer boundary enforcement: package `exports` + `turbo boundaries` tags + Biome `noRestrictedImports` patterns) |
 | ROLE-01 | Four roles; roles stored per tenant membership | Schema sketch (`memberships.role` check constraint, `platform_admins` table) |
 | ROLE-02 | Identity != membership; one membership per user in V1 via a droppable constraint | Schema sketch (`memberships_one_tenant_per_user_v1` unique index), `auth.users` mirror trigger |
@@ -71,7 +71,7 @@
 | AUTH-01 | Public sign-up link per tenant; user becomes `member`; link survives register/login round-trip | Pattern 4 (sign-up sequence: server action -> API admin lane -> `signInWithPassword`), `tenant_slug` cookie set in `proxy.ts` |
 | AUTH-02 | E-mail + password sign-up/login via the Next.js server; stays logged in across restarts | Pattern 5 (`@supabase/ssr` server client + `proxy.ts` `updateSession` with `getClaims()`), `config.toml` `jwt_expiry`/refresh rotation |
 | AUTH-03 | Password recovery via e-mail link | Pattern 6 (`resetPasswordForEmail` -> `/auth/confirm` `verifyOtp` -> `/redefinir-senha` `updateUser`), Resend custom SMTP settings |
-| AUTH-04 | Accept tenant rules + TRIA terms at sign-up, recorded with timestamp | `consent_records` schema, terms markdown versioning, API inserts consents in the same transaction as the membership |
+| AUTH-04 | Accept tenant rules + Rede Social terms at sign-up, recorded with timestamp | `consent_records` schema, terms markdown versioning, API inserts consents in the same transaction as the membership |
 | AUTH-05 | Log out from any page | `signOut({ scope: 'local' })` in a server action; verified semantics |
 | AUTH-06 | API verifies Supabase JWT via JWKS and resolves tenant/role/status per request from the DB | Pattern 2 (jose `createRemoteJWKSet`, ES256 key migration steps, no per-request cache of membership status) |
 | PWA-04 | GitHub is source of truth; pushes deploy web to Vercel and API/worker to Cloud Run with preview/staging and production | Pattern 8 (Vercel Git integration + `turbo-ignore`; `ci.yml`, `deploy-api.yml` with WIF, `deploy-cloudrun@v3`, `supabase db push`); GitHub Environment plan caveat |
@@ -81,7 +81,7 @@
 
 Phase 1 is the most expensive-to-change slice of the product: the tenant lane, the identity/membership split, the module registry and the CI/CD topology are all one-way doors. The good news is that every piece is now documented by its vendor in the exact shape this project needs. Supabase's own docs describe Supavisor transaction mode as "anything that depends on session state doesn't survive between transactions" and tell you to run `set`/`reset` "inside the transaction that needs them" — which is precisely the `set_config(..., true)` + `SET LOCAL ROLE authenticated` lane from ARCHITECTURE.md Pattern 1. Drizzle documents the same transaction pattern and ships `authenticatedRole`/`serviceRole`/`authUid` helpers; pg-boss 12 ships a `fromDrizzle(tx, sql)` adapter so a job can be enqueued atomically inside that same transaction; `@supabase/ssr`'s official Next.js example already uses `proxy.ts` + `getClaims()`; and `jose`'s `createRemoteJWKSet` is the pattern Supabase itself documents for backend verification.
 
-Three things the planner must not assume from the stack table: (1) drizzle-orm **0.45.2** exposes `pgTable(...).enableRLS()`, not `.withRLS()` (that name belongs to the newer docs line) — adding a `pgPolicy` enables RLS automatically anyway; (2) the `tria-company` GitHub account is a **User**, not an Organisation, and GitHub only allows protected Environments (required reviewers, D-12) on private repos for **Team orgs or Pro users** — the approval gate needs a plan decision or a fallback; (3) the Supabase **Free plan caps active projects at 2 and pauses projects after 1 week of inactivity**, so `rede-social-staging` + `rede-social-prod` consume the whole quota and staging needs a keep-alive.
+Three things the planner must not assume from the stack table: (1) drizzle-orm **0.45.2** exposes `pgTable(...).enableRLS()`, not `.withRLS()` (that name belongs to the newer docs line) — adding a `pgPolicy` enables RLS automatically anyway; (2) the `n1-tecnologia` GitHub account is a **User**, not an Organisation, and GitHub only allows protected Environments (required reviewers, D-12) on private repos for **Team orgs or Pro users** — the approval gate needs a plan decision or a fallback; (3) the Supabase **Free plan caps active projects at 2 and pauses projects after 1 week of inactivity**, so `rede-social-staging` + `rede-social-prod` consume the whole quota and staging needs a keep-alive.
 
 **Primary recommendation:** Bootstrap in this order — monorepo + toolchain smoke (TS 7 / Biome / Vitest 5 / `turbo boundaries`) → core schema + `api_user` role + RLS helpers → **Wave-0 Supavisor spike** (Vitest against local PgBouncer transaction mode and the staging pooler) → auth middleware + tenant lane + `requireModule` + `/me/bootstrap` → `@supabase/ssr` auth screens → example module → isolation suite → CI/CD. Keep the session-mode pooler (port 5432) as the documented fallback switch, not a rewrite to PostgREST.
 
@@ -92,7 +92,7 @@ Directives extracted from `.claude/CLAUDE.md` that bind this phase (treated as l
 | # | Directive | Effect on Phase 1 plans |
 |---|-----------|------------------------|
 | C1 | Next.js on Vercel (mobile-first PWA); backend Hono/Node on Cloud Run; all business logic through the API. Exactly two frontend→Supabase exceptions: `@supabase/ssr` auth in the Next server, and read-only Realtime Broadcast | Sign-up **provisioning** goes through the API; login/refresh/recovery/logout via `@supabase/ssr`; no `supabase-js` data calls in the browser |
-| C2 | Modularity: kernel + self-contained module packages, boundary rules (MOD-01..05) | `@tria/core`, `@tria/contracts`, `@tria/module-example`; boundary enforcement is a build-failing check |
+| C2 | Modularity: kernel + self-contained module packages, boundary rules (MOD-01..05) | `@rede-social/core`, `@rede-social/contracts`, `@rede-social/module-example`; boundary enforcement is a build-failing check |
 | C3 | Supabase Free plan for the pilot | Two projects max, 200 Realtime connections, projects pause after inactivity |
 | C4 | GitHub source of truth, automated deploys to Vercel + GCP; WIF, no JSON keys | `ci.yml`, `deploy-api.yml`; Vercel Git integration |
 | C5 | Multi-tenant from day one, RLS defense in depth; schema V2-safe | `memberships`, `platform_admins`, `tenant_modules`, chat/notification stubs, conventions doc |
@@ -130,7 +130,7 @@ Directives extracted from `.claude/CLAUDE.md` that bind this phase (treated as l
 | `typescript` | 7.0.2 | Typecheck (`tsc -b`) | Locked; see TS 7 tooling note in Pitfalls |
 | `hono` + `@hono/node-server` | 4.13.7 / 2.1.1 | API on Cloud Run | Locked. `AppType` RPC export pattern verified `[CITED: hono.dev/docs/guides/rpc]` |
 | `@hono/zod-openapi` | 1.6.3 | OpenAPI from Zod 4 schemas | Peer `zod ^4`, `hono >=4.10` (CLAUDE.md) |
-| `zod` | 4.6.2 | Contracts, validation | Shared `@tria/contracts` |
+| `zod` | 4.6.2 | Contracts, validation | Shared `@rede-social/contracts` |
 | `drizzle-orm` / `drizzle-kit` | 0.45.2 / 0.31.10 | Schema, RLS policies, migrations | `pgPolicy`, `enableRLS()`, `drizzle-orm/supabase` roles verified in installed typings `[VERIFIED: drizzle-orm@0.45.2 pg-core/table.d.ts:22, supabase/rls.d.ts:1-3,151,209-210]`; `'supabase'` migration prefix present in drizzle-kit 0.31.10 bundle `[VERIFIED: drizzle-kit@0.31.10 api.js]` |
 | `postgres` (postgres.js) | 3.4.9 | DB driver | `prepare?: boolean` option verified `[VERIFIED: postgres@3.4.9 types/index.d.ts:666]`; use `{ prepare: false }` on port 6543 |
 | `jose` | 6.2.12 | JWKS verification | Pattern shown in Supabase docs `[CITED: supabase.com/docs/guides/auth/jwts]` |
@@ -173,10 +173,10 @@ Directives extracted from `.claude/CLAUDE.md` that bind this phase (treated as l
 corepack enable && corepack use pnpm@12.4.1
 pnpm add -Dw turbo@2.10.12 @biomejs/biome@2.5.13 typescript@7.0.2 vitest@5.0.0 @vitest/coverage-v8@5.0.0 tsx@4.23.13 supabase@2.117.0 @playwright/test@1.63.0
 # apps/web
-pnpm --filter @tria/web add next@16.3.5 react@19.3.0 react-dom@19.3.0 @supabase/ssr@0.12.7 @supabase/supabase-js@2.116.0 @t3-oss/env-nextjs@0.13.11 next-intl@4.14.4 react-hook-form@7.87.0 @hookform/resolvers@5.9.1 zod@4.6.2
+pnpm --filter @rede-social/web add next@16.3.5 react@19.3.0 react-dom@19.3.0 @supabase/ssr@0.12.7 @supabase/supabase-js@2.116.0 @t3-oss/env-nextjs@0.13.11 next-intl@4.14.4 react-hook-form@7.87.0 @hookform/resolvers@5.9.1 zod@4.6.2
 # apps/api
-pnpm --filter @tria/api add hono@4.13.7 @hono/node-server@2.1.1 @hono/zod-openapi@1.6.3 zod@4.6.2 jose@6.2.12 drizzle-orm@0.45.2 postgres@3.4.9 pg-boss@12.31.0 @supabase/supabase-js@2.116.0 pino@10.3.1 pino-http@11.0.0 @t3-oss/env-core@0.13.11
-pnpm --filter @tria/api add -D drizzle-kit@0.31.10 tsup@8.5.1
+pnpm --filter @rede-social/api add hono@4.13.7 @hono/node-server@2.1.1 @hono/zod-openapi@1.6.3 zod@4.6.2 jose@6.2.12 drizzle-orm@0.45.2 postgres@3.4.9 pg-boss@12.31.0 @supabase/supabase-js@2.116.0 pino@10.3.1 pino-http@11.0.0 @t3-oss/env-core@0.13.11
+pnpm --filter @rede-social/api add -D drizzle-kit@0.31.10 tsup@8.5.1
 ```
 
 **Version verification:** all versions above come from `npm view <pkg> version` run on 2026-09-11 (see Package Legitimacy Audit). `next` moved from 16.3.4 (CLAUDE.md) to 16.3.5 today; everything else matches the pinned table.
@@ -265,12 +265,12 @@ No package in this list has a postinstall script other than `msw` (`npm view <pk
 
 ### Recommended Project Structure
 
-Follows D-18 (`@tria/*`, no `apps/worker`) and ARCHITECTURE.md §Recommended Project Structure.
+Follows D-18 (`@rede-social/*`, no `apps/worker`) and ARCHITECTURE.md §Recommended Project Structure.
 
 ```
 rede_social/
 ├── apps/
-│   ├── web/                              # @tria/web — Next.js 16 (Vercel)
+│   ├── web/                              # @rede-social/web — Next.js 16 (Vercel)
 │   │   ├── app/(auth)/entrar/page.tsx    # + cadastro/[slug], esqueci-senha, redefinir-senha, acesso-suspenso
 │   │   ├── app/(auth)/actions.ts         # server actions: login, signup(→API), forgot, reset, logout
 │   │   ├── app/auth/confirm/route.ts     # verifyOtp(token_hash, type) → redirect next
@@ -280,15 +280,15 @@ rede_social/
 │   │   ├── lib/api.ts                    # hc<AppType>(API_URL, { headers: { Authorization } })
 │   │   ├── proxy.ts                      # updateSession + tenant_slug cookie + public-route allow-list
 │   │   └── messages/pt-BR.json           # next-intl catalog (auth copy from D-01..D-10)
-│   └── api/                              # @tria/api — Hono on Cloud Run; ROLE=api|worker
+│   └── api/                              # @rede-social/api — Hono on Cloud Run; ROLE=api|worker
 │       ├── src/main.ts                   # ROLE switch: serve() or boss.work()
 │       ├── src/app.ts                    # composes core routes + enabled module routes; export type AppType
 │       ├── src/http/{error,logger,request-id}.ts
 │       ├── drizzle.config.ts             # schema globs from packages/core + packages/modules/*; out: ../../supabase/migrations
-│       ├── Dockerfile                    # turbo prune @tria/api --docker; node:24-slim
+│       ├── Dockerfile                    # turbo prune @rede-social/api --docker; node:24-slim
 │       └── tsup.config.ts                # dts: false
 ├── packages/
-│   ├── core/                             # @tria/core — kernel (NOT a module)
+│   ├── core/                             # @rede-social/core — kernel (NOT a module)
 │   │   ├── db/schema/{tenants,users,memberships,platform-admins,tenant-modules,consent-records,chat-stubs,notification-stubs}.ts
 │   │   ├── db/{client.ts,tenant-tx.ts,admin-tx.ts,rls.ts}   # withTenantTx / withAdminTx / app.tenant_id() sql helper
 │   │   ├── server/auth/{jwks.ts,require-auth.ts,context.ts}
@@ -299,11 +299,11 @@ rede_social/
 │   │   ├── server/jobs/boss.ts           # pg-boss instance, fromDrizzle helper, queue registry
 │   │   ├── server/http/api-error.ts      # ApiError + envelope
 │   │   └── docs/SCHEMA-CONVENTIONS.md    # Foundation deliverable (PITFALLS §9)
-│   ├── contracts/                        # @tria/contracts — Zod schemas, ModuleKey, error codes, AppType re-export
-│   ├── ui/                               # @tria/ui — empty shell in Phase 1 (Phase 2 ports prototype)
-│   ├── config/                           # @tria/config — tsconfig bases, biome.json base, vitest base
+│   ├── contracts/                        # @rede-social/contracts — Zod schemas, ModuleKey, error codes, AppType re-export
+│   ├── ui/                               # @rede-social/ui — empty shell in Phase 1 (Phase 2 ports prototype)
+│   ├── config/                           # @rede-social/config — tsconfig bases, biome.json base, vitest base
 │   └── modules/
-│       └── example/                      # @tria/module-example (throwaway, D-19)
+│       └── example/                      # @rede-social/module-example (throwaway, D-19)
 │           ├── package.json              # exports: ./contracts ./server ./ui ./db (no deep imports); turbo.json tags: ["module"]
 │           ├── module.ts                 # ModuleManifest { key: 'example', nav, jobs, events }
 │           ├── db/schema.ts              # example_items (tenant_id + RLS policy)
@@ -484,7 +484,7 @@ Mounting: `app.route('/v1/example', exampleRoutes.use(requireAuth, requireModule
 ### Pattern 4: Sign-up sequence (AUTH-01, AUTH-04, D-01..D-04)
 
 1. `GET /cadastro/{slug}` (RSC): fetch `GET /v1/public/tenants/{slug}` (display name, `rules_text`, `rules_version`); `proxy.ts` already set `tenant_slug` cookie (1 year, `SameSite=Lax`). Unknown slug → 404 page.
-2. Server action `signup(formData)` validates with the shared Zod schema (`name`, `email`, `password.min(8)`, `acceptRules`, `acceptTerms` both `literal(true)`), then calls `POST /v1/public/signup/{slug}` with `{ name, email, password, consents: { tenantRulesVersion, triaTermsVersion } }` and the client IP (`x-forwarded-for` first hop) — the API is the only party allowed to bind identity to tenant (C1).
+2. Server action `signup(formData)` validates with the shared Zod schema (`name`, `email`, `password.min(8)`, `acceptRules`, `acceptTerms` both `literal(true)`), then calls `POST /v1/public/signup/{slug}` with `{ name, email, password, consents: { tenantRulesVersion, platformTermsVersion } }` and the client IP (`x-forwarded-for` first hop) — the API is the only party allowed to bind identity to tenant (C1).
 3. API (`withAdminTx`): 
    - `supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { name } })` — server-only, service key `[CITED: supabase.com/docs/reference/javascript/auth-admin-createuser]`. Duplicate e-mail → map GoTrue's error to `409 EMAIL_ALREADY_REGISTERED` (pt-BR copy from D-04) and `logger.warn({ event: 'signup.duplicate_email', existingTenantId })` as the V2 signal.
    - `public.users` row is created by the `on_auth_user_created` trigger (Supabase's documented `handle_new_user` pattern `[CITED: supabase.com/docs/guides/auth/managing-user-data]`); then insert `memberships (tenant_id, user_id, role='member', status='active')` and two `consent_records` rows in one transaction. If the DB transaction fails after `createUser` succeeded, compensate with `auth.admin.deleteUser(id)` and return 500 (rare; log loudly).
@@ -562,11 +562,11 @@ Flow from Supabase docs `[CITED: supabase.com/docs/guides/auth/passwords]`:
 4. `/redefinir-senha` (now authenticated): server action `await supabase.auth.updateUser({ password })` → the session created by `verifyOtp` remains → `redirect('/inicio')`. This satisfies "sets the new password and signs the user in".
 5. Password policy: `minimum_password_length = 8` in `config.toml` (default is 6 `[VERIFIED: config.toml line 175]`) and Zod `min(8)` on both forms; keep `password_requirements = ""`.
 
-E-mail delivery: built-in provider "will refuse to deliver messages to addresses that are not part of the project's team" and is limited to 2/hour; custom SMTP starts at 30/hour, adjustable `[CITED: supabase.com/docs/guides/auth/auth-smtp]`. Resend settings: host `smtp.resend.com`, port `465`, user `resend`, password = API key, verified domain required `[CITED: resend.com/docs/send-with-supabase-smtp]`. In `config.toml`: `[auth.email.smtp] enabled = true, host = "smtp.resend.com", port = 465, user = "resend", pass = "env(RESEND_API_KEY)", admin_email = "no-reply@mail.seusistema.com", sender_name = "TRIA"`; apply to hosted projects with `supabase config push` (command exists: "Pushes local config.toml to the linked project" `[VERIFIED: supabase config push --help]`; that it applies SMTP + templates is `[ASSUMED]` — verify on staging). Redirect allow-list: add `https://*-<vercel-team-slug>.vercel.app/**` for previews and the exact production URL `[CITED: supabase.com/docs/guides/auth/redirect-urls]`.
+E-mail delivery: built-in provider "will refuse to deliver messages to addresses that are not part of the project's team" and is limited to 2/hour; custom SMTP starts at 30/hour, adjustable `[CITED: supabase.com/docs/guides/auth/auth-smtp]`. Resend settings: host `smtp.resend.com`, port `465`, user `resend`, password = API key, verified domain required `[CITED: resend.com/docs/send-with-supabase-smtp]`. In `config.toml`: `[auth.email.smtp] enabled = true, host = "smtp.resend.com", port = 465, user = "resend", pass = "env(RESEND_API_KEY)", admin_email = "no-reply@mail.seusistema.com", sender_name = "Rede Social"`; apply to hosted projects with `supabase config push` (command exists: "Pushes local config.toml to the linked project" `[VERIFIED: supabase config push --help]`; that it applies SMTP + templates is `[ASSUMED]` — verify on staging). Redirect allow-list: add `https://*-<vercel-team-slug>.vercel.app/**` for previews and the exact production URL `[CITED: supabase.com/docs/guides/auth/redirect-urls]`.
 
 ### Pattern 7: Module boundary enforcement (MOD-02) — three layers, build-failing
 
-1. **Package `exports` + pnpm strictness.** Each `@tria/module-*` package.json exports only `./contracts`, `./server`, `./ui`, `./db`, `./module`; no `./src/*` deep paths. A module cannot import a sibling unless it is a declared dependency (pnpm's isolated `node_modules`).
+1. **Package `exports` + pnpm strictness.** Each `@rede-social/module-*` package.json exports only `./contracts`, `./server`, `./ui`, `./db`, `./module`; no `./src/*` deep paths. A module cannot import a sibling unless it is a declared dependency (pnpm's isolated `node_modules`).
 2. **`turbo boundaries` tags** (locked stack; experimental). Root `turbo.json`:
    ```json
    { "boundaries": { "tags": {
@@ -574,10 +574,10 @@ E-mail delivery: built-in provider "will refuse to deliver messages to addresses
        "kernel": { "dependencies": { "deny": ["module", "app"] } },
        "app":    { "dependencies": { "allow": ["kernel", "contracts", "module"] } } } } }
    ```
-   with per-package `turbo.json` `{ "tags": ["module"] }` etc. Boundaries also flags "importing a file outside of the package's directory" and undeclared dependencies, applied transitively `[CITED: turborepo.dev/docs/reference/boundaries]`. Wire `turbo boundaries` into `ci.yml` and the `lint` pipeline. Because a module may consume another module's **contracts** (MOD-02), publish those as a separate tiny package tag `contracts` (e.g. `@tria/module-feed-contracts`) when the need first arises (Phase 4); in Phase 1 the only cross-module contract surface is `@tria/contracts`.
-3. **Biome `noRestrictedImports` patterns** as a second net inside `packages/modules/*` via `overrides`: `"patterns": [{ "group": ["@tria/module-*/src/**", "@tria/core/src/**", "../../../core/**"], "message": "Import published entry points only" }]` and, everywhere except `packages/core/server/{tenancy,platform,seed}`, `{ "group": ["@tria/core/db/admin-tx", "@tria/core/server/supabase-admin"], "message": "Admin lane is kernel-only" }` `[CITED: biomejs.dev/linter/rules/no-restricted-imports — patterns since v2.2.0]`.
+   with per-package `turbo.json` `{ "tags": ["module"] }` etc. Boundaries also flags "importing a file outside of the package's directory" and undeclared dependencies, applied transitively `[CITED: turborepo.dev/docs/reference/boundaries]`. Wire `turbo boundaries` into `ci.yml` and the `lint` pipeline. Because a module may consume another module's **contracts** (MOD-02), publish those as a separate tiny package tag `contracts` (e.g. `@rede-social/module-feed-contracts`) when the need first arises (Phase 4); in Phase 1 the only cross-module contract surface is `@rede-social/contracts`.
+3. **Biome `noRestrictedImports` patterns** as a second net inside `packages/modules/*` via `overrides`: `"patterns": [{ "group": ["@rede-social/module-*/src/**", "@rede-social/core/src/**", "../../../core/**"], "message": "Import published entry points only" }]` and, everywhere except `packages/core/server/{tenancy,platform,seed}`, `{ "group": ["@rede-social/core/db/admin-tx", "@rede-social/core/server/supabase-admin"], "message": "Admin lane is kernel-only" }` `[CITED: biomejs.dev/linter/rules/no-restricted-imports — patterns since v2.2.0]`.
 
-Also enforce `apps/web` never depends on `@tria/core` server/db entry points (only `@tria/contracts` and module `ui` exports) — a `web` tag with `dependencies.deny: ["kernel-server"]` if core is split into `@tria/core` (server) and `@tria/core-ui`; simplest is to make `@tria/core` export `./ui` separately and deny `./server`/`./db` via the Biome pattern in `apps/web`.
+Also enforce `apps/web` never depends on `@rede-social/core` server/db entry points (only `@rede-social/contracts` and module `ui` exports) — a `web` tag with `dependencies.deny: ["kernel-server"]` if core is split into `@rede-social/core` (server) and `@rede-social/core-ui`; simplest is to make `@rede-social/core` export `./ui` separately and deny `./server`/`./db` via the Biome pattern in `apps/web`.
 
 ### Pattern 8: CI/CD topology (PWA-04, D-11, D-12, D-15)
 
@@ -593,7 +593,7 @@ Also enforce `apps/web` never depends on `@tria/core` server/db entry points (on
 - pg-boss creates the `pgboss` schema on `start()` and needs `CREATE` on the database; alternatively run migrations via its CLI (`pg-boss migrate`, `pg-boss plans migrate --dry-run`) and manage the schema yourself `[CITED: pgboss.io/install]` `[VERIFIED: pg-boss@12.31.0 dist/cli.js usage text; `migrate?: boolean`, `schema?: string`, `max?: number` in dist/types.d.ts]`. **Do:** generate the SQL with `pnpm pg-boss plans migrate --dry-run` into a `--custom` Supabase migration (applied by CI as `postgres`), add `grant usage on schema pgboss to api_user; grant all on all tables/sequences in schema pgboss to api_user; alter default privileges …`, and construct `new PgBoss({ connectionString, schema: 'pgboss', migrate: false, max: 2 })`. Bump the migration when pg-boss's schema version changes ("you will need to monitor future releases for schema changes").
 - Transactional enqueue: `boss.send('example.process', payload, { db: fromDrizzle(tx, sql) })` inside `withTenantTx`; "When the ORM transaction is rolled back … all pg-boss operations executed through the adapter are rolled back as well"; the Drizzle adapter needs drizzle's `sql` tag and supports postgres-js `[CITED: pgboss.io/api/adapters]`. Queues must be created (`boss.createQueue`) at worker/API start for each `JobDefinition` in the registry.
 - Worker connection: the worker polls continuously; use the **session** pooler (port 5432, `api_user.<ref>`) with `max: 2` for the pg-boss pool `[ASSUMED: pg-boss polling is safe on transaction mode too, but session mode avoids any pooler edge case]`. Jobs that touch tenant data call `withTenantTx` with a synthetic ctx built from the job payload's `tenantId` (RLS still applies).
-- Domain event bus: `packages/core/server/events/bus.ts` — typed `EventMap` in `@tria/contracts`, handlers registered by module manifests, dispatched **after commit** (collect events on `ctx.events`, flush after `withTenantTx` resolves). The example module emits `example.item.created` and a handler enqueues the job; this proves MOD-03's shape without building the notifications consumer.
+- Domain event bus: `packages/core/server/events/bus.ts` — typed `EventMap` in `@rede-social/contracts`, handlers registered by module manifests, dispatched **after commit** (collect events on `ctx.events`, flush after `withTenantTx` resolves). The example module emits `example.item.created` and a handler enqueues the job; this proves MOD-03's shape without building the notifications consumer.
 
 ### Pattern 10: Error envelope (discretion) and Hono wiring
 
@@ -616,7 +616,7 @@ app.onError((err, c) => {
 });
 ```
 
-Envelope: `{ error: { code, message, details?, requestId } }` with the HTTP status; `code` is the stable contract (D-09). Put `ERROR_CODES` in `@tria/contracts` so the web app switches on it.
+Envelope: `{ error: { code, message, details?, requestId } }` with the HTTP status; `code` is the stable contract (D-09). Put `ERROR_CODES` in `@rede-social/contracts` so the web app switches on it.
 
 ### Anti-Patterns to Avoid
 - **Service role / `postgres` role for tenant traffic** (PITFALLS §1): the tenant lane uses `api_user` + `SET LOCAL ROLE authenticated`; pgTAP `030-lanes.sql` asserts `current_user = 'authenticated'` inside the lane and that `api_user` alone sees zero rows.
@@ -680,7 +680,7 @@ Envelope: `{ error: { code, message, details?, requestId } }` with the HTTP stat
 **How to avoid:** a scheduled GitHub Action (`schedule: cron '0 9 * * 1,4'`) that hits `GET /v1/health` on `api-staging` (which runs a `select 1`) keeps staging warm `[ASSUMED: any DB activity resets the inactivity timer]`; document "unpause in dashboard" in the runbook.
 
 ### Pitfall 5: GitHub plan blocks the D-12 approval gate
-**What goes wrong:** `tria-company` is a **User** account (`gh api users/tria-company` → `"type": "User"` `[VERIFIED: GitHub API this session]`), not an organisation; private-repo Environments need GitHub Pro (user) or Team (org).
+**What goes wrong:** `n1-tecnologia` is a **User** account (`gh api users/n1-tecnologia` → `"type": "User"` `[VERIFIED: GitHub API this session]`), not an organisation; private-repo Environments need GitHub Pro (user) or Team (org).
 **How to avoid:** decide (Open Question 1) before writing `deploy-api.yml`; fallback keeps the job order but triggers `migrate-and-deploy-prod` by `workflow_dispatch` (manual = approval) instead of `environment:` rules.
 
 ### Pitfall 6: `api_user` has no table privileges / no `SET ROLE` right
@@ -741,7 +741,7 @@ export const memberships = pgTable('memberships', {
 ]).enableRLS();
 ```
 
-Tables in the same style: `tenants` (id, slug unique, display_name, branding jsonb, rules_text, rules_version int, plan, status, timezone, created_at — policy: `id = app.tenant_id()` for select), `users` (id references `auth.users` on delete cascade, email, name, created_at — mirrored by trigger; policy: `id = (select auth.uid())` or same-tenant via membership), `platform_admins` (user_id pk — **no** `authenticated` policy; admin lane only), `tenant_modules` (tenant_id, module_key, enabled, settings jsonb, updated_at, pk(tenant_id, module_key)), `consent_records` (id, tenant_id, user_id, kind check in ('tenant_rules','tria_terms'), text_version, accepted_at, ip inet, user_agent — insert via admin lane at sign-up; select policy same tenant + own user), stubs `chat_conversations`, `chat_participants`, `chat_messages` (with `seq bigint`), `notifications` (tenant_id, user_id, kind, payload jsonb, read_at) — all with `tenant_id` + policy so the pgTAP coverage test passes from day one.
+Tables in the same style: `tenants` (id, slug unique, display_name, branding jsonb, rules_text, rules_version int, plan, status, timezone, created_at — policy: `id = app.tenant_id()` for select), `users` (id references `auth.users` on delete cascade, email, name, created_at — mirrored by trigger; policy: `id = (select auth.uid())` or same-tenant via membership), `platform_admins` (user_id pk — **no** `authenticated` policy; admin lane only), `tenant_modules` (tenant_id, module_key, enabled, settings jsonb, updated_at, pk(tenant_id, module_key)), `consent_records` (id, tenant_id, user_id, kind check in ('tenant_rules','platform_terms'), text_version, accepted_at, ip inet, user_agent — insert via admin lane at sign-up; select policy same tenant + own user), stubs `chat_conversations`, `chat_participants`, `chat_messages` (with `seq bigint`), `notifications` (tenant_id, user_id, kind, payload jsonb, read_at) — all with `tenant_id` + policy so the pgTAP coverage test passes from day one.
 
 ### drizzle.config.ts
 
@@ -843,7 +843,7 @@ const routes = app
   .route('/v1/me', meRoutes.use(requireAuth))              // bootstrap
   .route('/v1/example', exampleRoutes.use(requireAuth, requireModule('example')))
   .route('/v1/platform', platformRoutes.use(requireAuth, requireSuperAdmin()));
-export type AppType = typeof routes;   // re-exported by @tria/contracts for hc<AppType>()
+export type AppType = typeof routes;   // re-exported by @rede-social/contracts for hc<AppType>()
 export default app;
 ```
 
@@ -874,7 +874,7 @@ jobs:
         with: { version: 2.117.0 }
       - run: supabase start && supabase db reset          # applies supabase/migrations
       - run: supabase test db                             # pgTAP in supabase/tests
-      - run: pnpm db:seed && pnpm --filter @tria/api test:integration   # two-tenant API suite against local stack
+      - run: pnpm db:seed && pnpm --filter @rede-social/api test:integration   # two-tenant API suite against local stack
         env: { DATABASE_URL: postgres://api_user:postgres@127.0.0.1:54329/postgres }   # local PgBouncer, transaction mode
 ```
 
@@ -915,7 +915,7 @@ async function ensureUser(email: string, password: string, name: string) {
   const existing = list.users.find((u) => u.email === email); if (!existing) throw error; return existing.id;
 }
 await withAdminTx(async (tx) => {
-  for (const t of [{ slug: 'tria-demo', modules: REAL_TENANT_DEFAULT_MODULES }, { slug: 'tria-lab', modules: ['feed', 'events'] }]) {
+  for (const t of [{ slug: 'rede-demo', modules: REAL_TENANT_DEFAULT_MODULES }, { slug: 'rede-lab', modules: ['feed', 'events'] }]) {
     const [tenant] = await tx.insert(tenants).values({ slug: t.slug, displayName: t.slug, rulesText: '…', rulesVersion: 1 }).onConflictDoUpdate({ target: tenants.slug, set: { displayName: t.slug } }).returning();
     for (const key of TOGGLEABLE_MODULES) await tx.insert(tenantModules).values({ tenantId: tenant.id, moduleKey: key, enabled: t.modules.includes(key) }).onConflictDoUpdate({ target: [tenantModules.tenantId, tenantModules.moduleKey], set: { enabled: t.modules.includes(key) } });
     for (const [role, suffix] of [['admin_tenant', 'admin'], ['member', 'member']] as const) {
@@ -923,7 +923,7 @@ await withAdminTx(async (tx) => {
       await tx.insert(memberships).values({ tenantId: tenant.id, userId, role }).onConflictDoNothing();
     }
   }
-  const superId = await ensureUser(env.SUPER_ADMIN_EMAIL, env.SUPER_ADMIN_PASSWORD, 'TRIA');
+  const superId = await ensureUser(env.SUPER_ADMIN_EMAIL, env.SUPER_ADMIN_PASSWORD, 'Rede Social');
   await tx.insert(platformAdmins).values({ userId: superId }).onConflictDoNothing();
 });
 ```
@@ -953,7 +953,7 @@ await withAdminTx(async (tx) => {
 | A4 | The `postgres` role on hosted projects has `CREATEROLE` so `roles.sql`/migrations can create `api_user` | Pattern 1 | Role must be created via dashboard SQL editor once; document |
 | A5 | `tsup --dts` breaks under TS 7.0 (needs the JS API); everything else in the toolchain does not | Pitfall 3 | Bootstrap smoke task detects; fallback TS 6 alias |
 | A6 | pg-boss worker polling works through the pooler; session mode chosen to be safe | Pattern 9 | Worker connects direct/session; no data-model impact |
-| A7 | `tria-company` GitHub account is on the Free plan (plan field not readable with current token scopes) | Pitfall 5 / OQ1 | If Pro, D-12 works as written |
+| A7 | `n1-tecnologia` GitHub account is on the Free plan (plan field not readable with current token scopes) | Pitfall 5 / OQ1 | If Pro, D-12 works as written |
 | A8 | `supabase config push` applies `[auth.email.smtp]`, templates and `additional_redirect_urls` to the linked hosted project | Pattern 6 | Configure via dashboard once per project instead |
 | A9 | Any DB activity resets the Free-plan inactivity timer (keep-alive cron) | Pitfall 4 | Staging pauses; manual unpause |
 | A10 | postgres.js pins one server connection for the whole `sql.begin()`/Drizzle transaction | Pattern 1 | Spike would fail immediately — visible |
@@ -969,13 +969,13 @@ await withAdminTx(async (tx) => {
 
 Every question below is answered by a planned task (planning pass of 2026-09-11); none blocks execution. The resolving plan/task is marked on each item.
 
-1. **GitHub plan / account shape for D-11 and D-12** — **RESOLVED by 01-10 Task 1** (`checkpoint:decision`: org-team / user-pro / free-dispatch / public-repo) **and 01-10 Task 3** (repo under `tria-company`, `main`, environments; the `workflow_dispatch` fallback is recorded in `docs/DEPLOY.md` if protection rules are unavailable).
-   - What we know: `tria-company` is a User account (not an org) with private repos (`Agent-post-auton`, `Agent-Roberth`); protected Environments on private repos need Pro (user) or Team (org).
-   - What's unclear: current plan of `tria-company`; whether TRIA wants a real organisation.
-   - Recommendation: create a GitHub **organisation** `tria-company-org` (or upgrade the user to Pro) before the CI plan; otherwise implement the prod gate as `workflow_dispatch` and record the deviation from D-12.
+1. **GitHub plan / account shape for D-11 and D-12** — **RESOLVED by 01-10 Task 1** (`checkpoint:decision`: org-team / user-pro / free-dispatch / public-repo) **and 01-10 Task 3** (repo under `n1-tecnologia`, `main`, environments; the `workflow_dispatch` fallback is recorded in `docs/DEPLOY.md` if protection rules are unavailable).
+   - What we know: `n1-tecnologia` is a User account (not an org) with private repos (`Agent-post-auton`, `Agent-Roberth`); protected Environments on private repos need Pro (user) or Team (org).
+   - What's unclear: current plan of `n1-tecnologia`; whether Rede Social wants a real organisation.
+   - Recommendation: create a GitHub **organisation** `n1-tecnologia-org` (or upgrade the user to Pro) before the CI plan; otherwise implement the prod gate as `workflow_dispatch` and record the deviation from D-12.
 2. **Vercel team** — **RESOLVED by 01-10 Task 2** (human-action: team slug confirmed) **and 01-11 Task 2** (project linked, env vars, domain; the slug feeds the staging redirect allow-list in `supabase/config.toml`). Original question: CLI is logged in as `hiperautomacao` with team `PSW` only. Which Vercel team hosts `rede-social`? Team slug also defines the preview URL pattern for the Supabase redirect allow-list.
-3. **GCP project** — **RESOLVED by 01-10 Task 2** (`gcloud auth login ferramentas@triacompany.com.br`, project id + billing confirmed) **and 01-11 Task 1** (APIs, Artifact Registry, service accounts, WIF, Secret Manager). Original question: `gcloud` active account belongs to an unrelated project; `ferramentas@triacompany.com.br` is credentialed but its token needs re-auth (`gcloud auth login`). Which GCP project/billing account hosts Cloud Run, Artifact Registry, Secret Manager and the WIF pool?
-4. **Supabase organisation** — **RESOLVED by 01-10 Task 2** (TRIA org named/created, access token provided) **and 01-10 Task 3** (`rede-social-staging`/`rede-social-prod` created in `sa-east-1`). Original question: only "igor.vboas@gmail.com's Org" exists (0 projects). Create a TRIA org (Free) for `rede-social-staging`/`rede-social-prod` so ownership is not personal.
+3. **GCP project** — **RESOLVED by 01-10 Task 2** (`gcloud auth login superadmin@rede-social.test`, project id + billing confirmed) **and 01-11 Task 1** (APIs, Artifact Registry, service accounts, WIF, Secret Manager). Original question: `gcloud` active account belongs to an unrelated project; `superadmin@rede-social.test` is credentialed but its token needs re-auth (`gcloud auth login`). Which GCP project/billing account hosts Cloud Run, Artifact Registry, Secret Manager and the WIF pool?
+4. **Supabase organisation** — **RESOLVED by 01-10 Task 2** (Rede Social org named/created, access token provided) **and 01-10 Task 3** (`rede-social-staging`/`rede-social-prod` created in `sa-east-1`). Original question: only "igor.vboas@gmail.com's Org" exists (0 projects). Create a Rede Social org (Free) for `rede-social-staging`/`rede-social-prod` so ownership is not personal.
 5. **Resend domain** — **RESOLVED by 01-10 Task 2** (DNS control for `seusistema.com` confirmed) **and 01-11 Tasks 2–3** (Resend domain + sending key created; SPF/DKIM and the `app.` CNAME added and verified at the human checkpoint). Original question: who controls DNS for `seusistema.com` (for `mail.seusistema.com` SPF/DKIM) and the `app.seusistema.com` A/CNAME for Vercel?
 6. **Local pooler for the spike** — **RESOLVED as two runs: 01-03 Task 1** (local PgBouncer transaction mode, `pnpm spike:supavisor`, LOCAL-settings guard, fallback doc) **and 01-12 Task 1 step 4** (staging Supavisor `:6543`, with the `:5432` session-pooler fallback applied via Secret Manager and recorded in `docs/DEPLOY.md` if it fails). Original question: `config.toml [db.pooler]` is PgBouncer, not Supavisor; the spike must also run against the staging Supavisor URL (needs staging project first). Plan the spike as two runs.
 
@@ -989,8 +989,8 @@ Every question below is answered by a planned task (planning pass of 2026-09-11)
 | Supabase CLI | local stack, migrations, pgTAP | ✓ (old) | 2.90.0 (pinned 2.117.0) | `brew upgrade supabase` or run via `pnpm supabase` |
 | Docker daemon | `supabase start`, `test db` | ✗ (Docker Desktop installed, daemon not running) | Docker 29.3.1 client | `open -a Docker` first task |
 | psql | role password step, ad-hoc checks | ✓ | 18.3 | — |
-| gh CLI | repo/org setup, Actions | ✓ | 2.87.3; accounts igorvboas (active), tria-company | switch with `gh auth switch -u tria-company` |
-| gcloud | WIF pool, Cloud Run, Secret Manager | ✓ (wrong account active; TRIA account token expired) | SDK 565.0.0 | `gcloud auth login ferramentas@triacompany.com.br` |
+| gh CLI | repo/org setup, Actions | ✓ | 2.87.3; accounts igorvboas (active), n1-tecnologia | switch with `gh auth switch -u n1-tecnologia` |
+| gcloud | WIF pool, Cloud Run, Secret Manager | ✓ (wrong account active; Rede Social account token expired) | SDK 565.0.0 | `gcloud auth login superadmin@rede-social.test` |
 | Vercel CLI | project link, env | ✓ | 53.2.0 (user hiperautomacao, team PSW) | `vercel teams switch` / new team |
 | turbo, biome, tsc, pg_prove | build/lint/test | ✗ global (expected) | — | installed as workspace devDependencies; `pg_prove` runs inside Supabase's container |
 | Context7 / ctx7 | docs lookup | ✗ | — | WebFetch on official docs (used this session) |
@@ -1007,20 +1007,20 @@ Every question below is answered by a planned task (planning pass of 2026-09-11)
 | Framework | Vitest 5.0.0 (unit + API integration), pgTAP via `supabase test db` (CLI 2.117.0), Playwright 1.63.0 (auth smoke), `turbo boundaries` + Biome 2.5.13 (MOD-02) |
 | Config file | none yet — Wave 0 creates `packages/config/vitest.base.ts`, per-package `vitest.config.ts` (Vitest 5 no longer walks up directories), `playwright.config.ts` in `apps/web`, `supabase/tests/` |
 | Quick run command | `pnpm turbo test --filter=...[HEAD^1]` (per package: `pnpm vitest run`) |
-| Full suite command | `pnpm turbo lint typecheck boundaries test && supabase test db && pnpm --filter @tria/api test:integration && pnpm --filter @tria/web e2e` |
+| Full suite command | `pnpm turbo lint typecheck boundaries test && supabase test db && pnpm --filter @rede-social/api test:integration && pnpm --filter @rede-social/web e2e` |
 
 ### Phase Requirements → Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| TENANT-01 | Bootstrap resolves tenant from membership, ignores hostname/cookie | integration | `pnpm --filter @tria/api vitest run tests/integration/bootstrap.test.ts` | ❌ Wave 0 |
+| TENANT-01 | Bootstrap resolves tenant from membership, ignores hostname/cookie | integration | `pnpm --filter @rede-social/api vitest run tests/integration/bootstrap.test.ts` | ❌ Wave 0 |
 | TENANT-03 | Every `tenant_id` table has RLS + policy; lane runs as `authenticated`, not service role | pgTAP | `supabase test db supabase/tests/010-rls-coverage.sql supabase/tests/030-lanes.sql` | ❌ Wave 0 |
 | TENANT-03 | Supavisor lane keeps/clears settings per transaction | integration (spike) | `pnpm vitest run scripts/spike-supavisor.test.ts` (local pooler + staging URL) | ❌ Wave 0 |
 | TENANT-05 | Two-tenant isolation: list/detail on example module, disabled-module 404, blocked 403 | pgTAP + integration | `supabase test db supabase/tests/020-tenant-isolation.sql` + `vitest run tests/integration/isolation.test.ts` | ❌ Wave 0 |
-| MOD-01 | Example module package has db/server/contracts/ui and mounts | build + unit | `pnpm turbo build --filter=@tria/module-example` | ❌ Wave 0 |
-| MOD-02 | Cross-module internal import fails the build | lint | `pnpm turbo boundaries lint` with a fixture package that must fail (negative test in CI: `! turbo boundaries --filter=@tria/boundary-fixture`) | ❌ Wave 0 |
+| MOD-01 | Example module package has db/server/contracts/ui and mounts | build + unit | `pnpm turbo build --filter=@rede-social/module-example` | ❌ Wave 0 |
+| MOD-02 | Cross-module internal import fails the build | lint | `pnpm turbo boundaries lint` with a fixture package that must fail (negative test in CI: `! turbo boundaries --filter=@rede-social/boundary-fixture`) | ❌ Wave 0 |
 | ROLE-01/02 | Role check constraint, one-membership unique index, `platform_admins` separate | pgTAP | `supabase test db supabase/tests/040-schema-conventions.sql` | ❌ Wave 0 |
-| ROLE-06 | `requireModule` 404 on `tria-lab` for `chat`; `requireRole` 403 | integration | `vitest run tests/integration/modules.test.ts` | ❌ Wave 0 |
-| AUTH-01/04 | Sign-up via `/cadastro/tria-demo` creates member + 2 consent rows with timestamps; duplicate e-mail → 409 | integration + e2e | `vitest run tests/integration/signup.test.ts`; `playwright test auth.spec.ts --project=mobile-chromium` | ❌ Wave 0 |
+| ROLE-06 | `requireModule` 404 on `rede-lab` for `chat`; `requireRole` 403 | integration | `vitest run tests/integration/modules.test.ts` | ❌ Wave 0 |
+| AUTH-01/04 | Sign-up via `/cadastro/rede-demo` creates member + 2 consent rows with timestamps; duplicate e-mail → 409 | integration + e2e | `vitest run tests/integration/signup.test.ts`; `playwright test auth.spec.ts --project=mobile-chromium` | ❌ Wave 0 |
 | AUTH-02 | Login persists across browser restart (`storageState` reuse) | e2e | `playwright test session.spec.ts` | ❌ Wave 0 |
 | AUTH-03 | Recovery link → `/auth/confirm` → `/redefinir-senha` → signed in | e2e against local stack (Inbucket/Mailpit at `supabase status` URL) | `playwright test recovery.spec.ts` | ❌ Wave 0 |
 | AUTH-05 | Logout clears cookies; other device session unaffected | e2e | `playwright test logout.spec.ts` | ❌ Wave 0 |
@@ -1079,7 +1079,7 @@ Every question below is answered by a planned task (planning pass of 2026-09-11)
 - npm registry (`npm view … version/time/engines/peerDependencies`), 2026-09-11 — every version in Standard Stack
 - Installed typings: `drizzle-orm@0.45.2` (`pg-core/table.d.ts:22` `enableRLS`, `pg-core/policies.d.ts:6-11` `PgPolicyConfig`, `supabase/rls.d.ts` exports), `drizzle-kit@0.31.10` (`'supabase'` prefix), `pg-boss@12.31.0` (`dist/index.d.ts:114` adapters, `dist/types.d.ts` options, `dist/cli.js` usage), `postgres@3.4.9` (`types/index.d.ts:666` `prepare`), `msw@2.15.0` postinstall script
 - `supabase init` generated `config.toml` (CLI 2.90.0): `[auth]` lines 150-224, `[db.pooler]` lines 38-48; `supabase config push --help`, `supabase db push --help`, `supabase test db --help`
-- GitHub API: `examples/auth/nextjs/{proxy.ts,lib/supabase/proxy.ts,lib/supabase/server.ts,lib/supabase/client.ts}` (raw), `apps/docs/content/guides/auth/server-side/creating-a-client.mdx` (raw), latest release tags for all Actions, `users/tria-company` type
+- GitHub API: `examples/auth/nextjs/{proxy.ts,lib/supabase/proxy.ts,lib/supabase/server.ts,lib/supabase/client.ts}` (raw), `apps/docs/content/guides/auth/server-side/creating-a-client.mdx` (raw), latest release tags for all Actions, `users/n1-tecnologia` type
 - https://supabase.com/docs/guides/database/connecting-to-postgres — Supavisor modes, unsupported features, custom role username
 - https://supabase.com/docs/guides/database/postgres/row-level-security — testing with `set local role`, performance, bypassrls
 - https://supabase.com/docs/guides/auth/signing-keys and /jwts — ES256 migration, JWKS caching, jose example

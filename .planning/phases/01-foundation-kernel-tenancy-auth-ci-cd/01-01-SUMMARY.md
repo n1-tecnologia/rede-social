@@ -7,13 +7,13 @@ tags: [pnpm, turborepo, biome, typescript-7, hono, zod-openapi, drizzle, postgre
 # Dependency graph
 requires: []
 provides:
-  - "@tria/* pnpm 12 + Turborepo 2.10 monorepo (config, contracts, core, ui, api) with boundary tags and Biome noRestrictedImports lanes"
+  - "@rede-social/* pnpm 12 + Turborepo 2.10 monorepo (config, contracts, core, ui, api) with boundary tags and Biome noRestrictedImports lanes"
   - "Local Supabase stack config (ES256 signing keys, transaction pooler, pt-BR recovery template, localhost redirect globs)"
   - "Kernel: env, postgres.js client (prepare:false), withTenantTx / withAdminTx lanes, tenantIsolationPolicy, schema tenants/users/memberships/tenant_domains with RLS"
   - "Auth: jose JWKS verification (ES256, issuer + audience), requireAuth with per-request membership lookup, blocked check and host/membership match (403 TENANT_HOST_MISMATCH)"
   - "API: GET /v1/health, GET /v1/public/tenants/by-host, GET /v1/me/bootstrap, stable error envelope, VALIDATION_FAILED default hook"
   - "SQL: api_user role, app schema helpers, app.membership_for_user (security definer), lane grants + anon revoke, auth.users -> public.users mirror; four migrations applied only by the Supabase CLI"
-  - "Idempotent seed (tria-demo / tria-lab, admin + member each, primary verified tenant_domains from TENANT_*_HOST) and eleven in-process integration cases"
+  - "Idempotent seed (rede-demo / rede-lab, admin + member each, primary verified tenant_domains from TENANT_*_HOST) and eleven in-process integration cases"
 affects: [01-02, 01-03, 01-04, 01-05, 01-06, 01-07, 01-08, 01-09, 01-12, phase-2-domains]
 
 # Actuals (#2632) — same estimateTokens scale as the plan's estimate (chars/4 over the realized diff)
@@ -171,7 +171,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D8
-    description: "D-14 / D-24 seed: tria-demo and tria-lab with admin + member each, primary verified hosts from TENANT_*_HOST, idempotent second run, PLATFORM_HOST guard"
+    description: "D-14 / D-24 seed: rede-demo and rede-lab with admin + member each, primary verified hosts from TENANT_*_HOST, idempotent second run, PLATFORM_HOST guard"
     verification:
       - kind: integration
         ref: "apps/api/tests/integration/bootstrap.test.ts#11. a second run exits 0 and leaves tenant_domains unchanged with one primary per tenant"
@@ -186,7 +186,7 @@ status: complete
 
 # Phase 01 Plan 01: Toolchain bring-up and tracer (JWT -> JWKS -> membership -> RLS lane -> bootstrap) Summary
 
-**@tria/* monorepo on pnpm 12 / Turborepo / Biome / TS 7 plus the Walking Skeleton spine: a real GoTrue ES256 token for a seeded `tria-demo` member reaches `GET /v1/me/bootstrap` through jose JWKS verification, `app.membership_for_user()` and `withTenantTx` (bound `set_config` + `SET LOCAL ROLE authenticated` as `api_user`), with `tenant_domains` + `x-tenant-host` re-resolution (403 `TENANT_HOST_MISMATCH`) and the public `by-host` lookup, proven by eleven in-process integration cases.**
+**@rede-social/* monorepo on pnpm 12 / Turborepo / Biome / TS 7 plus the Walking Skeleton spine: a real GoTrue ES256 token for a seeded `rede-demo` member reaches `GET /v1/me/bootstrap` through jose JWKS verification, `app.membership_for_user()` and `withTenantTx` (bound `set_config` + `SET LOCAL ROLE authenticated` as `api_user`), with `tenant_domains` + `x-tenant-host` re-resolution (403 `TENANT_HOST_MISMATCH`) and the public `by-host` lookup, proven by eleven in-process integration cases.**
 
 ## Performance
 
@@ -200,17 +200,17 @@ status: complete
 
 - Runnable monorepo: `pnpm turbo typecheck lint build` exits 0 (11 tasks) with TypeScript 7.0.2 native `tsc`, Biome 2.5.13, tsup 8.5.1 (`dts: false`); Turborepo `boundaries.tags` (`module`, `kernel`, `contracts`, `app`, `tooling`) and Biome `noRestrictedImports` overrides (published entry points only, admin lane kernel-only, web import rules) are in place.
 - Local Supabase stack (CLI 2.117.0, Postgres 17.6) with ES256 signing keys: the JWKS endpoint returns one `EC`/`P-256`/`ES256` key; transaction pooler enabled; pt-BR recovery template; `http://*.localhost:3000/**` redirect glob; minimum password 8; autoconfirm on.
-- Kernel (`@tria/core`): `withTenantTx` / `withAdminTx` lanes, `tenantIsolationPolicy`, schema `tenants` / `users` / `memberships` / `tenant_domains` with `pgPolicy` + `.enableRLS()`, `JWKS`, `requireAuth`, `membershipForUser`, `resolveTenantHost` (60 s positive + negative cache), `ApiError` + `errorEnvelope` (pt-BR), `supabaseAdmin`.
+- Kernel (`@rede-social/core`): `withTenantTx` / `withAdminTx` lanes, `tenantIsolationPolicy`, schema `tenants` / `users` / `memberships` / `tenant_domains` with `pgPolicy` + `.enableRLS()`, `JWKS`, `requireAuth`, `membershipForUser`, `resolveTenantHost` (60 s positive + negative cache), `ApiError` + `errorEnvelope` (pt-BR), `supabaseAdmin`.
 - SQL applied only by the Supabase CLI: `api_user` (`nologin nobypassrls noinherit`, granted `authenticated` + `service_role`), `citext`, `app.tenant_id()/user_id()/tenant_role()`, `app.membership_for_user()` (security definer, `order by joined_at limit 1`), lane grants + `anon` revoke, `auth.users -> public.users` mirror trigger.
 - API: `GET /v1/health` (no DB), `GET /v1/public/tenants/by-host` (registered first, `Cache-Control: no-store`, `slug` + `displayName` only), `GET /v1/me/bootstrap` inside the tenant lane, `app.onError` envelope, zod validation failures -> 400 `VALIDATION_FAILED`.
-- Seed (`pnpm db:seed`): `tria-demo` / `tria-lab`, admin + member each (`SEED_PASSWORD` from env), primary verified `tenant_domains` rows from `TENANT_DEMO_HOST` / `TENANT_LAB_HOST` with demotion of a renamed primary, `PLATFORM_HOST` guard; second run is a no-op.
+- Seed (`pnpm db:seed`): `rede-demo` / `rede-lab`, admin + member each (`SEED_PASSWORD` from env), primary verified `tenant_domains` rows from `TENANT_DEMO_HOST` / `TENANT_LAB_HOST` with demotion of a renamed primary, `PLATFORM_HOST` guard; second run is a no-op.
 - Eleven integration cases pass from a clean database (`pnpm db:reset && pnpm db:seed && vitest run tests/integration`): JWKS + envelope (1-3), TENANT-03 adjacency / empty / NOINHERIT (4-6), D-23 host match (7-9), D-20 public lookup (10), D-24 idempotency (11).
 
 ## Task Commits
 
 Each task was committed atomically:
 
-1. **Task 1: Toolchain bring-up and @tria monorepo scaffold** - `e2cb59f` (chore)
+1. **Task 1: Toolchain bring-up and @rede-social monorepo scaffold** - `e2cb59f` (chore)
 2. **Task 2: Tracer - seeded member's Supabase JWT reaches GET /v1/me/bootstrap** - `2b2991e` (feat)
 
 **Plan metadata:** see the `docs(01-01)` commit that follows this SUMMARY.
@@ -300,7 +300,7 @@ Each task was committed atomically:
 |------|---------|------|----------------------|
 | `apps/api/src/routes/me.ts` | `modules: []`, `permissions: []` | bootstrap returns no modules/permissions | plan 01-06 fills them from `tenant_modules` + the module registry (D-16/D-17) |
 | `apps/api/src/routes/me.ts` | `counters: { unreadNotifications: 0, unreadConversations: 0 }` | zero counters | Phase 7 (notifications / chat) |
-| `packages/ui/src/index.ts` | `UI_PACKAGE = '@tria/ui'` | placeholder export | Phase 2 ports the prototype components |
+| `packages/ui/src/index.ts` | `UI_PACKAGE = '@rede-social/ui'` | placeholder export | Phase 2 ports the prototype components |
 
 These stubs are specified by the plan and do not block this plan's goal (the tracer never reads them).
 
@@ -320,7 +320,7 @@ None - no external service configuration required (local stack only; `SEED_PASSW
 
 ## Next Phase Readiness
 
-- The spine is proven end-to-end; plan 01-02 can scaffold `@tria/web` and put the browser login slice on `GET /v1/me/bootstrap`, forwarding `x-tenant-host` from `proxy.ts`.
+- The spine is proven end-to-end; plan 01-02 can scaffold `@rede-social/web` and put the browser login slice on `GET /v1/me/bootstrap`, forwarding `x-tenant-host` from `proxy.ts`.
 - Plan 01-03's Supavisor spike must retry the local pooler (`SPIKE_DATABASE_URL`) and record the same errors if the local tenant stays unaddressable; the hosted pooler run in 01-12 is the authoritative TENANT-03 proof.
 - Local developer loop: `pnpm supabase start`, `bash scripts/local-env.sh > apps/api/.env.local`, `pnpm db:reset`, `SEED_PASSWORD=... pnpm db:seed`, `SEED_PASSWORD=... pnpm test:integration`. On this machine prefix Docker/Supabase commands with `DOCKER_CONFIG=/tmp/dockercfg` while the Desktop credential helper misbehaves.
 

@@ -2,8 +2,8 @@ import { expect, type Page, test } from '@playwright/test';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 
 /**
- * PWA-01 against a PRODUCTION build (playwright.pwa.config.ts → `pnpm --filter @tria/web e2e:pwa`).
- * baseURL = the tria-demo tenant host on :3100. Runs on iphone-chromium (iPhone 14), pixel-chromium
+ * PWA-01 against a PRODUCTION build (playwright.pwa.config.ts → `pnpm --filter @rede-social/web e2e:pwa`).
+ * baseURL = the rede-demo tenant host on :3100. Runs on iphone-chromium (iPhone 14), pixel-chromium
  * (Pixel 7) and desktop-chromium.
  *
  * Tags: `@tracer` (manifest, head links, SW served + controlling, standalone emulation, public
@@ -11,11 +11,11 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
  */
 test.skip(
   process.env.PWA_PROD !== '1',
-  'run with pnpm --filter @tria/web e2e:pwa (production build)',
+  'run with pnpm --filter @rede-social/web e2e:pwa (production build)',
 );
 
-const DEMO_MANIFEST = '/m/tria-demo/manifest.webmanifest';
-const ICON_SRC = /^(\/icons\/tria-|.*\/storage\/v1\/object\/public\/branding\/)/;
+const DEMO_MANIFEST = '/m/rede-demo/manifest.webmanifest';
+const ICON_SRC = /^(\/icons\/rede-social-|.*\/storage\/v1\/object\/public\/branding\/)/;
 
 async function waitForController(page: Page): Promise<void> {
   await page.evaluate(() => navigator.serviceWorker.ready);
@@ -33,11 +33,11 @@ test.describe('PWA-01 — installable tenant shell (tracer)', () => {
     expect(res.headers()['cache-control']).toContain('no-store');
 
     const body = await res.json();
-    expect(body.name).toBe('TRIA Demo');
+    expect(body.name).toBe('Rede Demo');
     expect(body.short_name.length).toBeLessThanOrEqual(12);
     expect(body.theme_color).toBe('#7c3aed');
     expect(body.background_color).toBe('#f5f7fb');
-    expect(body.id).toBe('/?tenant=tria-demo');
+    expect(body.id).toBe('/?tenant=rede-demo');
     expect(body.start_url).toBe('/');
     expect(body.scope).toBe('/');
     expect(body.display).toBe('standalone');
@@ -64,7 +64,7 @@ test.describe('PWA-01 — installable tenant shell (tracer)', () => {
     await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute('href', ICON_SRC);
     await expect(page.locator('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute(
       'content',
-      'TRIA Demo',
+      'Rede Demo',
     );
   });
 
@@ -140,7 +140,7 @@ test.describe('PWA-01 — installable tenant shell (tracer)', () => {
     expect(inicio.headers().location).toMatch(/\/entrar$/);
     expect((await request.get('/serwist/sw.js')).status()).toBe(200);
     expect((await request.get(DEMO_MANIFEST)).status()).toBe(200);
-    expect(hosts.demo).toContain('tria-demo');
+    expect(hosts.demo).toContain('rede-demo');
   });
 });
 
@@ -235,7 +235,7 @@ test.describe('PWA-01 — offline fallback and caching contract', () => {
 });
 
 const INSTALL_TITLE = 'Adicione à Tela de Início';
-const NEUTRAL_ICON = /^\/icons\/tria-/;
+const NEUTRAL_ICON = /^\/icons\/rede-social-/;
 const BUCKET_ICON = /\/storage\/v1\/object\/public\/branding\//;
 
 test.describe('PWA-01 — second tenant, cross-host isolation, neutral fallback, unmounted hint', () => {
@@ -244,30 +244,30 @@ test.describe('PWA-01 — second tenant, cross-host isolation, neutral fallback,
     page,
   }) => {
     test.skip(isRemote, 'local stack only');
-    const res = await request.get(`${hosts.lab}/m/tria-lab/manifest.webmanifest`);
+    const res = await request.get(`${hosts.lab}/m/rede-lab/manifest.webmanifest`);
     expect(res.status()).toBe(200);
     const body = await res.json();
-    expect(body.name).toBe('TRIA Lab');
+    expect(body.name).toBe('Rede Lab');
     expect(body.theme_color).toBe('#0f766e');
-    expect(body.id).toBe('/?tenant=tria-lab');
+    expect(body.id).toBe('/?tenant=rede-lab');
 
     await page.goto(`${hosts.lab}/entrar`);
     await expect(page.locator('link[rel="manifest"]')).toHaveAttribute(
       'href',
-      '/m/tria-lab/manifest.webmanifest',
+      '/m/rede-lab/manifest.webmanifest',
     );
     await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#0f766e');
   });
 
-  test('cross-host manifests are refused (T-02-71); _tria answers only on non-tenant hosts', {
+  test('cross-host manifests are refused (T-02-71); _rede answers only on non-tenant hosts', {
     tag: ['@install'],
   }, async ({ request }) => {
     test.skip(isRemote, 'local stack only');
     const refused = [
-      `${hosts.demo}/m/tria-lab/manifest.webmanifest`,
-      `${hosts.generic}/m/tria-demo/manifest.webmanifest`,
-      `${hosts.platform}/m/tria-demo/manifest.webmanifest`,
-      `${hosts.demo}/m/_tria/manifest.webmanifest`,
+      `${hosts.demo}/m/rede-lab/manifest.webmanifest`,
+      `${hosts.generic}/m/rede-demo/manifest.webmanifest`,
+      `${hosts.platform}/m/rede-demo/manifest.webmanifest`,
+      `${hosts.demo}/m/_rede/manifest.webmanifest`,
       `${hosts.demo}/m/not%20a%20slug/manifest.webmanifest`,
     ];
     for (const url of refused) {
@@ -280,22 +280,22 @@ test.describe('PWA-01 — second tenant, cross-host isolation, neutral fallback,
       expect(res.headers()['content-type'] ?? '', url).not.toContain('manifest+json');
     }
 
-    const neutral = await request.get(`${hosts.generic}/m/_tria/manifest.webmanifest`);
+    const neutral = await request.get(`${hosts.generic}/m/_rede/manifest.webmanifest`);
     expect(neutral.status()).toBe(200);
     const body = await neutral.json();
-    expect(body.name).toBe('TRIA');
-    expect(body.id).toBe('/?tenant=_tria');
+    expect(body.name).toBe('Rede Social');
+    expect(body.id).toBe('/?tenant=_rede');
     for (const icon of body.icons as { src: string }[]) expect(icon.src).toMatch(NEUTRAL_ICON);
 
-    const platform = await request.get(`${hosts.platform}/m/_tria/manifest.webmanifest`);
+    const platform = await request.get(`${hosts.platform}/m/_rede/manifest.webmanifest`);
     expect(platform.status()).toBe(200);
-    expect((await platform.json()).name).toBe('TRIA');
+    expect((await platform.json()).name).toBe('Rede Social');
   });
 
   test('the neutral icon set is served cookie-less as image/png', { tag: ['@install'] }, async ({
     request,
   }) => {
-    for (const path of ['/icons/tria-192.png', '/icons/tria-maskable-512.png']) {
+    for (const path of ['/icons/rede-social-192.png', '/icons/rede-social-maskable-512.png']) {
       const res = await request.get(path);
       expect(res.status(), path).toBe(200);
       expect(res.headers()['content-type'], path).toContain('image/png');

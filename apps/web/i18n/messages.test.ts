@@ -10,7 +10,7 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const catalogDir = fileURLToPath(new URL('../messages/pt-BR/', import.meta.url));
 
 function catalog(files: Record<string, unknown>): string {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tria-messages-'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'rede-social-messages-'));
   for (const [name, body] of Object.entries(files)) {
     writeFileSync(path.join(dir, name), typeof body === 'string' ? body : JSON.stringify(body));
   }
@@ -20,14 +20,14 @@ function catalog(files: Record<string, unknown>): string {
 describe('loadMessages (PWA-03: one pt-BR catalog assembled from per-namespace files)', () => {
   it('returns the union of the file root keys; dotted files deep-merge into their namespace', () => {
     const dir = catalog({
-      'common.json': { common: { appName: 'TRIA' } },
-      'platform.json': { platform: { title: 'Plataforma TRIA', tenants: 'Tenants' } },
+      'common.json': { common: { appName: 'Rede Social' } },
+      'platform.json': { platform: { title: 'Plataforma Rede Social', tenants: 'Tenants' } },
       'platform.list.json': { platform: { list: { newTenant: 'Novo tenant' } } },
     });
     expect(loadMessages(dir)).toEqual({
-      common: { appName: 'TRIA' },
+      common: { appName: 'Rede Social' },
       platform: {
-        title: 'Plataforma TRIA',
+        title: 'Plataforma Rede Social',
         tenants: 'Tenants',
         list: { newTenant: 'Novo tenant' },
       },
@@ -47,7 +47,7 @@ describe('loadMessages (PWA-03: one pt-BR catalog assembled from per-namespace f
 
   it('throws naming both files when two files declare the same leaf path', () => {
     const dir = catalog({
-      'platform.json': { platform: { title: 'Plataforma TRIA' } },
+      'platform.json': { platform: { title: 'Plataforma Rede Social' } },
       'platform.list.json': { platform: { title: 'Tenants' } },
     });
     expect(() => loadMessages(dir)).toThrow(
@@ -646,7 +646,7 @@ describe('05.2-10 — the seen ring’s accessible names', () => {
 
 describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
   function run(files: Record<string, string>): { status: number | null; out: string } {
-    const dir = mkdtempSync(path.join(tmpdir(), 'tria-literals-'));
+    const dir = mkdtempSync(path.join(tmpdir(), 'rede-social-literals-'));
     for (const [name, body] of Object.entries(files)) {
       mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
       writeFileSync(path.join(dir, name), body);
@@ -905,8 +905,8 @@ describe('06-03 — events detail strings and placeholders', () => {
     expect(t('checkin.doneOn', { date: 'seg., 12 de out.', time: '18:40' })).toBe(
       'Realizado em seg., 12 de out., às 18:40',
     );
-    expect(t('notFound.body', { tenant: 'TRIA Demo' })).toBe(
-      'Este link não existe mais ou não é de TRIA Demo.',
+    expect(t('notFound.body', { tenant: 'Rede Demo' })).toBe(
+      'Este link não existe mais ou não é de Rede Demo.',
     );
   });
 });
@@ -1021,8 +1021,8 @@ describe('06-04 — events form, confirm and manage strings', () => {
       key: string,
       values?: Record<string, string | number>,
     ) => string;
-    expect(t('form.cover.helper', { tenant: 'TRIA Demo' })).toBe(
-      'A capa é opcional. Sem ela, usamos as cores de TRIA Demo.',
+    expect(t('form.cover.helper', { tenant: 'Rede Demo' })).toBe(
+      'A capa é opcional. Sem ela, usamos as cores de Rede Demo.',
     );
     expect(t('form.when.zone', { zone: 'Horário Padrão de Brasília' })).toBe(
       'Fuso horário do evento: Horário Padrão de Brasília',

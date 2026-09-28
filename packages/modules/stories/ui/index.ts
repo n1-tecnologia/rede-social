@@ -1,4 +1,4 @@
-/** `@tria/module-stories/ui` — the only surface `apps/web` may import from this module. */
+/** `@rede-social/module-stories/ui` — the only surface `apps/web` may import from this module. */
 
 export {
   type HighlightEditCover,

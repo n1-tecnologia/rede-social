@@ -22,8 +22,8 @@ last_updated: 2026-09-27T18:46:11.297Z
 | 5 | 01 | stub | packages/core/db/schema/chat-stubs.ts |  | Chat stub tables have no triggers, Realtime wiring or routes — intentional shape-only Foundation deliverable, resolved by Phase 7 | open |  | 2026-09-12T21:16:10.084Z |  |
 | 6 | 01 | stub | packages/core/db/schema/notification-stubs.ts |  | notifications stub has no producer or fan-out worker — resolved by Phase 7 | open |  | 2026-09-12T21:16:10.151Z |  |
 | 7 | 01 | unrun-verify | .github/workflows/ci.yml |  | ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01 | fixed |  | 2026-09-12T21:34:49.618Z | 2026-09-13T16:00:54.291Z |
-| 8 | 01 | stub | apps/api/src/modules/registry.ts |  | MODULE_REGISTRY is empty until 01-07 registers @tria/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels | fixed |  | 2026-09-13T14:52:56.229Z | 2026-09-13T16:00:54.360Z |
-| 9 | 01 | stub | packages/modules/example/module.ts |  | throwaway reference module @tria/module-example (D-19) — must be deleted with its table and registry entry in Phase 4 | fixed | removed in 04-10 (6f7631c refactor + 5e74cac drop migration); to_regclass('public.example_items') is NULL and tenant_modules has 0 'example' rows | 2026-09-13T15:21:32.750Z | 2026-09-23T06:10:00.000Z |
+| 8 | 01 | stub | apps/api/src/modules/registry.ts |  | MODULE_REGISTRY is empty until 01-07 registers @rede-social/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels | fixed |  | 2026-09-13T14:52:56.229Z | 2026-09-13T16:00:54.360Z |
+| 9 | 01 | stub | packages/modules/example/module.ts |  | throwaway reference module @rede-social/module-example (D-19) — must be deleted with its table and registry entry in Phase 4 | fixed | removed in 04-10 (6f7631c refactor + 5e74cac drop migration); to_regclass('public.example_items') is NULL and tenant_modules has 0 'example' rows | 2026-09-13T15:21:32.750Z | 2026-09-23T06:10:00.000Z |
 | 10 | 02 | stub | apps/web/app/(app)/configuracoes/page.tsx |  | Settings rows 'Editar perfil' and 'Notificações' are static placeholders with an 'Em breve' pill (D-42); Phase 3 wires profile edit, Phase 7 wires push | open |  | 2026-09-16T23:53:19.085Z |  |
 | 11 | 03 | deviation | apps/web/app/(app)/perfil/page.tsx |  | The /perfil 'Membros' row points at /membros, which 03-05 lands in the next wave — a known one-wave dead link | fixed |  | 2026-09-22T00:37:02.401Z | 2026-09-22T01:40:51.643Z |
 | 12 | 03 | unrun-verify | packages/core/server/media/video/mux.ts |  | The Mux adapter (createDirectUpload, webhooks.unwrap, signPlaybackId, assets.delete) is written and typed but has NEVER run against a real Mux account — no account exists and Phase 01.1 is deferred. Every proof in 03-06 runs against VIDEO_PROVIDER=fake. Closed by the docs/DEPLOY.md Phase 01.1 Mux runbook. | open |  | 2026-09-22T02:20:03.090Z |  |
@@ -35,8 +35,8 @@ last_updated: 2026-09-27T18:46:11.297Z
 | 18 | 04 | stub | packages/modules/feed/ui/FeedList.tsx |  | The admin empty-state CTA renders only when the host passes createHref; 04-05 supplies it with /criar | fixed |  | 2026-09-22T15:43:33.463Z | 2026-09-23T03:43:30.108Z |
 | 19 | 04 | unrun-verify | .planning/sketches/002-phase-04-designed-screens/index.html |  | D-33 / UI-04 design review of the six [designed] Phase 4 surfaces is unrun: the sketch README frontmatter is still status: pending / approved: false. 04-04, 04-05 and 04-09 code against it. | open |  | 2026-09-22T16:05:15.396Z |  |
 | 20 | 04 | deviation | apps/api/tests/integration/media.test.ts |  | media.test.ts still sweeps EVERY Storage object under <tenant>/media/, so running the API suite leaves the seeded gallery posts with rows but no bytes — the cards then render MediaImage's neutral box. The DB rows are preserved (04-04 narrowed those deletes); the object sweep is not. | open |  | 2026-09-22T19:22:13.680Z |  |
-| 21 | 04 | deviation | apps/web/e2e/admin.ts |  | deleteTenantVideoAssets is a TOTAL reset, so after media-video.spec.ts runs the tria-demo seeded video post keeps media_kind='video' with zero media rows until the next db:seed. feed-media.spec.ts reads the video case from tria-lab because of it. | open |  | 2026-09-22T19:22:13.761Z |  |
-| 22 | 04 | deviation | apps/web/e2e/shell.spec.ts | 111 | PRE-EXISTING (04-01, not 04-04): shell.spec still expects the 'Em breve' card on tria-lab /inicio, but tria-lab has the feed module enabled since 04-01, so the feed home slot renders and HomeSlots never shows 'Em breve'. Fails deterministically on a fresh seed; feed.spec asserts the contradicting truth. | fixed |  | 2026-09-22T19:58:25.383Z | 2026-09-23T01:46:14.345Z |
+| 21 | 04 | deviation | apps/web/e2e/admin.ts |  | deleteTenantVideoAssets is a TOTAL reset, so after media-video.spec.ts runs the rede-demo seeded video post keeps media_kind='video' with zero media rows until the next db:seed. feed-media.spec.ts reads the video case from rede-lab because of it. | open |  | 2026-09-22T19:22:13.761Z |  |
+| 22 | 04 | deviation | apps/web/e2e/shell.spec.ts | 111 | PRE-EXISTING (04-01, not 04-04): shell.spec still expects the 'Em breve' card on rede-lab /inicio, but rede-lab has the feed module enabled since 04-01, so the feed home slot renders and HomeSlots never shows 'Em breve'. Fails deterministically on a fresh seed; feed.spec asserts the contradicting truth. | fixed |  | 2026-09-22T19:58:25.383Z | 2026-09-23T01:46:14.345Z |
 | 23 | 04 | stub | packages/modules/feed/db/schema.ts |  | feed_link_previews.image_asset_id is null in V1 by decision — the preview card renders body-only; the image branch is grep-pinned but unexercised by any seeded or runtime row | open |  | 2026-09-23T01:14:50.647Z |  |
 | 24 | 04 | unrun-verify | apps/web/e2e/feed.spec.ts |  | The >999 meta-row backstop (UI-SPEC E02 overflow/long-text) is pinned only as a STRING by packages/modules/feed/tests/meta.test.ts, never as pixels: supabase/tests/090-feed.sql reconciles every post's like_count against its live feed_likes rows, so a four-digit seeded count would need 1000+ auth users and a hand-written counter would turn that assertion red. The abbreviated row has never been rendered at 320px. | open |  | 2026-09-23T01:46:35.102Z |  |
 | 25 | 04 | stub | apps/web/lib/registry.tsx | 162 | Viewer's optimistic comment row carries profileHref: null — the bootstrap has no membershipId; bounded to a pending row's lifetime, intentional | open |  | 2026-09-23T02:30:01.337Z |  |
@@ -61,7 +61,7 @@ last_updated: 2026-09-27T18:46:11.297Z
 | 44 | 05.2 | stub | apps/web/lib/story-view.ts | 346 | Inicio highlight circles are inert static spans (no accessible name, no onOpen) until plan 05.2-05 makes the viewer group-aware | fixed |  | 2026-09-25T21:56:21.623Z | 2026-09-25T22:30:47.123Z |
 | 45 | 05.2 | stub | apps/web/components/stories/StoryViewerHost.tsx | 514 | The Destacar sheet's empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the story deep link's not-found screen | fixed |  | 2026-09-25T22:53:35.615Z | 2026-09-26T00:20:16.618Z |
 | 46 | 05.2 | stub | apps/web/app/(app)/stories/meus/StoryHistoryList.tsx | 450 | Highlight sheet empty-state CTA links to /stories/destaques, which plan 05.2-09 creates; until then it resolves to the not-found screen | fixed |  | 2026-09-25T23:10:22.646Z | 2026-09-26T00:20:16.686Z |
-| 47 | 05.3 | stub | packages/modules/reels/package.json |  | @tria/module-reels exports ./ui -> ./ui/index.ts, which plan 05.3-05 creates; nothing imports it yet | fixed |  | 2026-09-26T19:02:52.627Z | 2026-09-26T20:36:02.619Z |
+| 47 | 05.3 | stub | packages/modules/reels/package.json |  | @rede-social/module-reels exports ./ui -> ./ui/index.ts, which plan 05.3-05 creates; nothing imports it yet | fixed |  | 2026-09-26T19:02:52.627Z | 2026-09-26T20:36:02.619Z |
 | 48 | 05.3 | unrun-verify | apps/web/e2e/reels.spec.ts |  | UI E04 populated (phone UAT, blocked until Phase 01.1): on an iPhone standalone PWA and Android Chrome the first video autoplays muted, sound stays on across swipes after 'Ativar som', a refused unmuted play falls back to muted with the icon flipped | open |  | 2026-09-26T22:42:29.269Z |  |
 | 49 | 05.3 | unrun-verify | apps/web/e2e/reels.spec.ts |  | UI E03 populated (phone UAT, blocked until Phase 01.1): a diagonal swipe changes video or lane never both, two quick swipes never read as a double-tap like, a tap pauses after ~300 ms and a double tap likes without pausing | open |  | 2026-09-26T22:42:29.338Z |  |
 | 50 | 05.3 | unrun-verify | apps/web/components/reels/ReelVideo.tsx |  | UI E04 loading (real Mux + phone UAT, blocked until Phase 01.1): swiping to a loaded video shows its first frame or poster with no black flash (neighbour pre-mount, token pre-mint); the fake provider cannot stream | open |  | 2026-09-26T22:42:29.407Z |  |
@@ -161,7 +161,7 @@ last_updated: 2026-09-27T18:46:11.297Z
     "phase": "01",
     "file": "apps/api/src/modules/registry.ts",
     "line": null,
-    "description": "MODULE_REGISTRY is empty until 01-07 registers @tria/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels",
+    "description": "MODULE_REGISTRY is empty until 01-07 registers @rede-social/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels",
     "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-13T14:52:56.229Z",
@@ -173,7 +173,7 @@ last_updated: 2026-09-27T18:46:11.297Z
     "phase": "01",
     "file": "packages/modules/example/module.ts",
     "line": null,
-    "description": "throwaway reference module @tria/module-example (D-19) — must be deleted with its table and registry entry in Phase 4",
+    "description": "throwaway reference module @rede-social/module-example (D-19) — must be deleted with its table and registry entry in Phase 4",
     "status": "fixed",
     "reason": "removed in 04-10 (6f7631c refactor + 5e74cac drop migration); to_regclass('public.example_items') is NULL and tenant_modules has 0 'example' rows",
     "recorded_at": "2026-09-13T15:21:32.750Z",
@@ -317,7 +317,7 @@ last_updated: 2026-09-27T18:46:11.297Z
     "phase": "04",
     "file": "apps/web/e2e/admin.ts",
     "line": null,
-    "description": "deleteTenantVideoAssets is a TOTAL reset, so after media-video.spec.ts runs the tria-demo seeded video post keeps media_kind='video' with zero media rows until the next db:seed. feed-media.spec.ts reads the video case from tria-lab because of it.",
+    "description": "deleteTenantVideoAssets is a TOTAL reset, so after media-video.spec.ts runs the rede-demo seeded video post keeps media_kind='video' with zero media rows until the next db:seed. feed-media.spec.ts reads the video case from rede-lab because of it.",
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-22T19:22:13.761Z",
@@ -329,7 +329,7 @@ last_updated: 2026-09-27T18:46:11.297Z
     "phase": "04",
     "file": "apps/web/e2e/shell.spec.ts",
     "line": 111,
-    "description": "PRE-EXISTING (04-01, not 04-04): shell.spec still expects the 'Em breve' card on tria-lab /inicio, but tria-lab has the feed module enabled since 04-01, so the feed home slot renders and HomeSlots never shows 'Em breve'. Fails deterministically on a fresh seed; feed.spec asserts the contradicting truth.",
+    "description": "PRE-EXISTING (04-01, not 04-04): shell.spec still expects the 'Em breve' card on rede-lab /inicio, but rede-lab has the feed module enabled since 04-01, so the feed home slot renders and HomeSlots never shows 'Em breve'. Fails deterministically on a fresh seed; feed.spec asserts the contradicting truth.",
     "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-22T19:58:25.383Z",
@@ -629,7 +629,7 @@ last_updated: 2026-09-27T18:46:11.297Z
     "phase": "05.3",
     "file": "packages/modules/reels/package.json",
     "line": null,
-    "description": "@tria/module-reels exports ./ui -> ./ui/index.ts, which plan 05.3-05 creates; nothing imports it yet",
+    "description": "@rede-social/module-reels exports ./ui -> ./ui/index.ts, which plan 05.3-05 creates; nothing imports it yet",
     "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-26T19:02:52.627Z",

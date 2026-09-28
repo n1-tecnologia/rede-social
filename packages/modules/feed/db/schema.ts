@@ -1,5 +1,5 @@
-import { tenantIsolationPolicy } from '@tria/core/db/rls';
-import { mediaAssets, tenants, users } from '@tria/core/db/schema';
+import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
+import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
   check,
@@ -36,7 +36,7 @@ import {
  *    reads it with NO predicate at all (D-73). See the third index below for why that needed a
  *    third index rather than the two Phase 4 built. The FOREIGN KEY is declared in
  *    `supabase/migrations/*_feed_communities.sql` as hand-written SQL rather than as a drizzle
- *    `.references(() => communities.id)`: `communities` belongs to `@tria/module-communities`, and
+ *    `.references(() => communities.id)`: `communities` belongs to `@rede-social/module-communities`, and
  *    a `module -> module` package dependency is denied by `turbo.json`'s boundary allowlist
  *    (MOD-02). The constraint is real either way — the database enforces it, `090-feed.sql` and the
  *    integration suite assert it — and drizzle never diffs it away, because the constraint is not
@@ -302,7 +302,7 @@ export const feedPostMedia = pgTable(
  * 2. **`story_id` carries its real foreign key since 05-05**, and the constraint is declared in
  *    `*_stories.sql` as HAND-WRITTEN SQL rather than as a `.references(() => stories.id)` here.
  *    That is not a shortcut: a column-level reference would force
- *    `"@tria/module-stories": "workspace:*"` into this package, and `turbo boundaries` denies a
+ *    `"@rede-social/module-stories": "workspace:*"` into this package, and `turbo boundaries` denies a
  *    `module -> module` package edge (`turbo.json`'s `module.dependencies.allow` is
  *    `["kernel", "contracts", "tooling"]`). The same resolution 05-03 reached for
  *    `feed_posts_community_fk`. `feed_comments_target_chk` still pins "exactly one target", so
@@ -409,7 +409,7 @@ export const feedComments = pgTable(
     // run forward in time; a post's ROOT comments run backward because that list is a ranking of
     // threads and a story has no threads. Serving an `asc` order from a `DESC NULLS FIRST` index is
     // a backward scan, and the keyset comparison the cursor envelope carries (`<` for `desc`, `>`
-    // for `asc` — `keysetComparison` in `@tria/core/server/paging`) cannot page one: page 2 would
+    // for `asc` — `keysetComparison` in `@rede-social/core/server/paging`) cannot page one: page 2 would
     // silently repeat or skip rows. One index, one direction, one comparison (Pitfall 8).
     //
     // `deleted_at is null` is IN the predicate here, unlike the post index: the story list has no

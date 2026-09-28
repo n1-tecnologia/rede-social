@@ -166,10 +166,10 @@ beforeAll(async () => {
     connect_timeout: 10,
   });
   const rows = await admin<{ slug: string; id: string }[]>`
-    select slug, id::text as id from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select slug, id::text as id from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   const bySlug = new Map(rows.map((r) => [r.slug, r.id]));
-  tenantA = process.env.TENANT_A ?? bySlug.get('tria-demo') ?? '';
-  tenantB = process.env.TENANT_B ?? bySlug.get('tria-lab') ?? '';
+  tenantA = process.env.TENANT_A ?? bySlug.get('rede-demo') ?? '';
+  tenantB = process.env.TENANT_B ?? bySlug.get('rede-lab') ?? '';
   if (!tenantA || !tenantB || tenantA === tenantB) {
     throw new Error(
       'spike needs two distinct seeded tenants (run `SEED_PASSWORD=... pnpm db:seed`) or TENANT_A/TENANT_B',

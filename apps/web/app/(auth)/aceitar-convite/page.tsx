@@ -1,4 +1,4 @@
-import { publicTenantSchema } from '@tria/contracts';
+import { publicTenantSchema } from '@rede-social/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { acceptInviteRedirectPath, getBootstrap, loadOrRedirect } from '@/lib/bootstrap';

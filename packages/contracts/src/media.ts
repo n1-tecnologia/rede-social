@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Media broker contract (MEDIA-01, MEDIA-02, TENANT-04).
  *
- * Pure module — no node imports — so client components may import it through `@tria/contracts/media`
+ * Pure module — no node imports — so client components may import it through `@rede-social/contracts/media`
  * for the pick-time UX gate (`classifyMediaFile`, `mediaAcceptFor`), exactly as `apps/web/lib/upload.ts`
  * uses `classifyFile`/`BRANDING_MAX_BYTES` today. It is deliberately NOT re-exported from
  * `./index.ts`: the root barrel has been frozen since Phase 2 wave 2.

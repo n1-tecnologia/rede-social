@@ -56,13 +56,13 @@ describe('AppShell (UI-03, D-39, D-26)', () => {
     expect(container.querySelectorAll('img')).toHaveLength(0);
   });
 
-  it('with a logo it renders <img alt=displayName> twice (TopBar + rail) and never a bare "TRIA"', () => {
+  it('with a logo it renders <img alt=displayName> twice (TopBar + rail) and never a bare "Rede Social"', () => {
     const { container } = render(
       shell({ brand: { displayName: 'Associação São José', logoUrl: '/logo.svg' } }),
     );
     const imgs = container.querySelectorAll('img[alt="Associação São José"]');
     expect(imgs).toHaveLength(2);
-    expect(screen.queryByText('TRIA', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('Rede Social', { exact: true })).not.toBeInTheDocument();
   });
 
   it('renders the children exactly once and owns the scroll root', () => {

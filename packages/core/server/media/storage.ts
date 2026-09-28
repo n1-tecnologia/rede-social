@@ -1,4 +1,4 @@
-import { MEDIA_BUCKET } from '@tria/contracts/media';
+import { MEDIA_BUCKET } from '@rede-social/contracts/media';
 import type { Logger } from 'pino';
 import { supabaseAdmin } from '../supabase-admin';
 

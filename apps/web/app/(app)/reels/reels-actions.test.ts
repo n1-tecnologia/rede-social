@@ -1,5 +1,5 @@
-import type { MediaPlayback } from '@tria/contracts/media';
-import { REELS_MINT_MAX_IDS } from '@tria/module-reels/contracts';
+import type { MediaPlayback } from '@rede-social/contracts/media';
+import { REELS_MINT_MAX_IDS } from '@rede-social/module-reels/contracts';
 import { redirect } from 'next/navigation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
@@ -29,7 +29,7 @@ import { loadReelsPageAction, mintReelPlaybackAction } from './reels-actions';
 vi.mock('@/lib/env', () => ({
   env: {
     API_URL: 'http://api.test',
-    PLATFORM_HOST: 'tria.test',
+    PLATFORM_HOST: 'rede-social.test',
     NEXT_PUBLIC_SUPABASE_URL: 'http://supabase.test',
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test-key',
   },

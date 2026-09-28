@@ -1,12 +1,12 @@
-import { avatarUrlFor } from '@tria/contracts/profiles';
-import type { CommentView } from '@tria/module-feed/ui';
+import { avatarUrlFor } from '@rede-social/contracts/profiles';
+import type { CommentView } from '@rede-social/module-feed/ui';
 import {
   type HighlightSummary,
   STORY_MAX_PAGE_SIZE,
   type StoryComment,
   type StorySummary,
-} from '@tria/module-stories/contracts';
-import type { StoryStripCircle } from '@tria/module-stories/ui';
+} from '@rede-social/module-stories/contracts';
+import type { StoryStripCircle } from '@rede-social/module-stories/ui';
 import { relativeFrom } from '@/lib/relative-time';
 
 /**

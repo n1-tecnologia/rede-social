@@ -5,13 +5,13 @@ updated: 2026-09-11
 
 # Termos de Uso
 
-Versão do piloto TRIA. Ao criar uma conta você concorda com os termos abaixo.
+Versão do piloto. Ao criar uma conta você concorda com os termos abaixo.
 
 ## 1. Objeto
 
-A TRIA fornece uma plataforma de comunidade white-label. Cada organização (aqui chamada de
+A Rede Social fornece uma plataforma de comunidade white-label. Cada organização (aqui chamada de
 "comunidade") contrata a plataforma e define o conteúdo, as regras e a moderação do seu próprio
-espaço. A TRIA fornece a tecnologia; a comunidade responde pelo que publica e pelo relacionamento
+espaço. A Rede Social fornece a tecnologia; a comunidade responde pelo que publica e pelo relacionamento
 com as pessoas que dela participam.
 
 ## 2. Conta
@@ -25,13 +25,13 @@ qualquer momento, conforme as regras que ela mesma publica.
 
 ## 3. Conteúdo
 
-Você mantém a titularidade do conteúdo que envia e concede à TRIA e à sua comunidade uma licença
+Você mantém a titularidade do conteúdo que envia e concede à Rede Social e à sua comunidade uma licença
 não exclusiva para armazenar, exibir e distribuir esse conteúdo dentro da própria comunidade, com a
 finalidade de operar o serviço.
 
 É proibido publicar conteúdo ilegal, ofensivo, discriminatório, que viole direitos de terceiros ou
 que exponha dados pessoais de outras pessoas sem autorização. Conteúdo que viole estas regras pode
-ser removido pela comunidade ou pela TRIA.
+ser removido pela comunidade ou pela plataforma.
 
 ## 4. Dados pessoais
 
@@ -40,7 +40,7 @@ Termos e é aceita no mesmo ato.
 
 ## 5. Disponibilidade e limitação
 
-O serviço é fornecido no estado em que se encontra durante o período piloto. A TRIA busca manter a
+O serviço é fornecido no estado em que se encontra durante o período piloto. A Rede Social busca manter a
 plataforma disponível e íntegra, mas não garante operação ininterrupta nem ausência de falhas.
 
 ## 6. Alterações
@@ -51,4 +51,4 @@ estava em vigor naquele momento.
 
 ## 7. Contato
 
-Dúvidas sobre estes Termos: privacidade@tria.app.br.
+Dúvidas sobre estes Termos: privacidade@rede-social.app.br.

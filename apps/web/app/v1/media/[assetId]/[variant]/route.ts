@@ -1,4 +1,4 @@
-import { mediaVariantParamSchema } from '@tria/contracts/media';
+import { mediaVariantParamSchema } from '@rede-social/contracts/media';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 

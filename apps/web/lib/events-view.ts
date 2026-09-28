@@ -1,4 +1,4 @@
-import { avatarUrlFor } from '@tria/contracts/profiles';
+import { avatarUrlFor } from '@rede-social/contracts/profiles';
 import {
   type AttendanceList,
   type Attendee,
@@ -7,7 +7,7 @@ import {
   type EventDetail,
   type EventSummary,
   type RsvpAnswer,
-} from '@tria/module-events/contracts';
+} from '@rede-social/module-events/contracts';
 import type { getTranslations } from 'next-intl/server';
 
 /**

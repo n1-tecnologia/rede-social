@@ -1,7 +1,10 @@
 'use client';
 
-import type { MediaPlayback } from '@tria/contracts/media';
-import { REELS_AUTOPLAY_CHECK_MS, REELS_COVER_MAX_RATIO } from '@tria/module-reels/contracts';
+import type { MediaPlayback } from '@rede-social/contracts/media';
+import {
+  REELS_AUTOPLAY_CHECK_MS,
+  REELS_COVER_MAX_RATIO,
+} from '@rede-social/module-reels/contracts';
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 

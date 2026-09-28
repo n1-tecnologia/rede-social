@@ -91,7 +91,7 @@ key-decisions:
   - "The invited scope lives in requireAuth as an allow-list of two mounted paths checked after the host check (host mismatch still wins); the bootstrap stays a 200 with membership.status = 'invited' and the web guard lives in requireBootstrap(), so no (app) segment changed"
   - "acceptInvite marks tenant_invites by user_id OR citext e-mail (a row whose back-reference was never set still flips) and replays as 'already_active' with zero writes when the membership is already active; anything else (blocked, missing) is 409 not_invited"
   - "A pending invite is resendable from the panel once a verified primary host exists (delegated to sendPendingInvites); without one the button is disabled with the helper and the API answers 409 no_verified_primary — the panel never guesses"
-  - "Integration cases that read the GoTrue-originated first mail attach *.localhost hosts instead of the plan's .cliente.test: GoTrue only honours a redirectTo inside additional_redirect_urls (http://*.localhost:3000/** locally); a foreign host produces a neutral 'TRIA' mail linking to http://localhost:3000?token_hash=… with no /auth/confirm"
+  - "Integration cases that read the GoTrue-originated first mail attach *.localhost hosts instead of the plan's .cliente.test: GoTrue only honours a redirectTo inside additional_redirect_urls (http://*.localhost:3000/** locally); a foreign host produces a neutral 'Rede Social' mail linking to http://localhost:3000?token_hash=… with no /auth/confirm"
   - "Single catalog namespace acceptInvite (file acceptInvite.json) with an expired.* group, per the outline; UI-SPEC's invite/inviteExpired names are left for 02-16's catalog audit"
 
 patterns-established:
@@ -172,7 +172,7 @@ status: complete
 
 # Phase 02 Plan 10: First-Admin Onboarding and Invite Lifecycle Summary
 
-**The first admin now gets in: GoTrue's branded invite lands on `/auth/confirm?type=invite` on the tenant's own host, `/aceitar-convite` (branded by the 02-08 layout) takes the password through Supabase and both D-03 consents through `POST /v1/me/accept-invite` — one admin transaction that flips the membership `invited → active`, writes the two `consent_records` rows and marks the invite `accepted` — and lands on `/inicio`; invited sessions are confined to the two onboarding routes (`403 MEMBERSHIP_INVITED` elsewhere, `requireBootstrap()` routes them back); expired, consumed or superseded links land on `/convite-expirado`; and TRIA can list and resend invites from the Admins tab (`generateLink` + the kernel mail transport, supersession proven), with 409s for accepted invites and tenants without a verified host.**
+**The first admin now gets in: GoTrue's branded invite lands on `/auth/confirm?type=invite` on the tenant's own host, `/aceitar-convite` (branded by the 02-08 layout) takes the password through Supabase and both D-03 consents through `POST /v1/me/accept-invite` — one admin transaction that flips the membership `invited → active`, writes the two `consent_records` rows and marks the invite `accepted` — and lands on `/inicio`; invited sessions are confined to the two onboarding routes (`403 MEMBERSHIP_INVITED` elsewhere, `requireBootstrap()` routes them back); expired, consumed or superseded links land on `/convite-expirado`; and Rede Social can list and resend invites from the Admins tab (`generateLink` + the kernel mail transport, supersession proven), with 409s for accepted invites and tenants without a verified host.**
 
 ## Performance
 
@@ -232,7 +232,7 @@ status: complete
 
 **1. [Rule 1 - Bug] Integration cases 9/13 used `*.localhost` hosts instead of the plan's `inv-<random>.cliente.test`**
 - **Found during:** Task 2 (RED run — case 9 failed on "no token_hash in the mail" instead of the resend status)
-- **Issue:** GoTrue only honours an `inviteUserByEmail` `redirectTo` inside `additional_redirect_urls` (`http://*.localhost:3000/**` locally). For a `.cliente.test` host it silently falls back to the site URL: the hook receives `redirect_to = http://localhost:3000`, resolves no tenant (neutral "TRIA" mail) and the link has no `/auth/confirm` — so the first mail could never be asserted and no `token_hash` could be extracted for the supersession case.
+- **Issue:** GoTrue only honours an `inviteUserByEmail` `redirectTo` inside `additional_redirect_urls` (`http://*.localhost:3000/**` locally). For a `.cliente.test` host it silently falls back to the site URL: the hook receives `redirect_to = http://localhost:3000`, resolves no tenant (neutral "Rede Social" mail) and the link has no `/auth/confirm` — so the first mail could never be asserted and no `token_hash` could be extracted for the supersession case.
 - **Fix:** the resend-lifecycle tenant and the case-13 tenant attach `<slug>.localhost` hosts (the same shape the e2e uses); the tracer/edge fixtures that never read a mail keep `.cliente.test`.
 - **Files modified:** `apps/api/tests/integration/invites.test.ts`
 - **Verification:** case 9 then failed on the intended assertion (`expected 404 to be 200`) in RED and passes in GREEN with the branded first mail (`type=invite`, `/auth/confirm?next=/aceitar-convite`)
@@ -252,7 +252,7 @@ status: complete
 ## Issues Encountered
 
 - **API dev server on 8787:** the leftover `tsx watch` process (pid 93310) reloads on every source change, so it was current for both the integration suite (the `globalSetup` reused it) and Playwright; it was left running as found.
-- **`pnpm test:integration -- invites`** still runs the whole suite (02-05 note); single files were run with `pnpm --filter @tria/api exec vitest run tests/integration/<file>`.
+- **`pnpm test:integration -- invites`** still runs the whole suite (02-05 note); single files were run with `pnpm --filter @rede-social/api exec vitest run tests/integration/<file>`.
 - **RED evidence format:** the gate parses node-test TAP summaries; Vitest was run with `--reporter=tap-flat` and the `# tests / # pass / # fail` lines were appended from its own `ok`/`not ok` count before `check tdd-red-evidence` (verdict `RED_EVIDENCE_OK`).
 - **`[auth.rate_limit] email_sent = 2`** did not interfere: every GoTrue-originated first invite goes to a throwaway address, and resends bypass GoTrue's mailer entirely (no `over_email_send_rate_limit` seen across the integration and e2e runs).
 
@@ -265,8 +265,8 @@ status: complete
 
 ## Human-check notes (for `/gsd-verify-work`, `human_verify_mode: end-of-phase`)
 
-- **Branded invite mail:** open Mailpit (`http://127.0.0.1:54324`), search `to:e2e-invite.local` — the newest two "Convite para administrar Associação São José …" messages are the GoTrue-originated first send and the kernel-transport resend for the same address; both should show the amber (`#b45309`) accent/CTA, the tenant name as `<h1>` text (no logo), "Aceitar convite" and the "Enviado pela plataforma TRIA" footer. Rendering in Gmail/Apple Mail is not exercised locally.
-- **Accept screen look:** run `pnpm --filter @tria/web exec playwright test invite.spec.ts --headed` (or create a tenant from `/plataforma/novo`, attach `<slug>.localhost`, "Verificar agora", open the Mailpit link) and compare with the `accept-invite` mockup: brand block, 24/700 heading naming the tenant (two centred lines for a 40+ character name on the phone), e-mail sub-line, password field with the eye and the three-segment meter, two 44 px consent rows, one brand CTA.
+- **Branded invite mail:** open Mailpit (`http://127.0.0.1:54324`), search `to:e2e-invite.local` — the newest two "Convite para administrar Associação São José …" messages are the GoTrue-originated first send and the kernel-transport resend for the same address; both should show the amber (`#b45309`) accent/CTA, the tenant name as `<h1>` text (no logo), "Aceitar convite" and the "Enviado pela plataforma Rede Social" footer. Rendering in Gmail/Apple Mail is not exercised locally.
+- **Accept screen look:** run `pnpm --filter @rede-social/web exec playwright test invite.spec.ts --headed` (or create a tenant from `/plataforma/novo`, attach `<slug>.localhost`, "Verificar agora", open the Mailpit link) and compare with the `accept-invite` mockup: brand block, 24/700 heading naming the tenant (two centred lines for a 40+ character name on the phone), e-mail sub-line, password field with the eye and the three-segment meter, two 44 px consent rows, one brand CTA.
 - **Expired screen:** the consumed link → `/convite-expirado` — icon circle, "Convite expirado", the body line, a single outline "Voltar para login".
 - **Admins tab:** `/plataforma/tenants/<id>/admins` for a fresh tenant without a domain → "Convite pendente — aguardando domínio", disabled "Reenviar convite" + helper; after a verified host → enabled; after acceptance → "Aceito em …", no button, the admin row (e-mail in the name slot until Phase 3 profiles).
 

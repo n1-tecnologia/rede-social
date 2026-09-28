@@ -23,7 +23,7 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  *
  * The two witnesses:
  *
- *   ENABLED  — on the seeded `tria-demo`, a member signing in lands on `/inicio`, sees the feed
+ *   ENABLED  — on the seeded `rede-demo`, a member signing in lands on `/inicio`, sees the feed
  *              widget carrying the tenant's own seeded posts, finds NO feed tab in the navigation
  *              (D-55: the feed is a home slot, so Phases 5-6 keep their tab budget), and a seeded
  *              post's `/post/{id}` page renders.
@@ -53,7 +53,7 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  */
 
 test.describe.configure({ mode: 'serial', timeout: 300_000 });
-test.skip(isRemote, 'local stack only (seeded tria-demo, a throwaway tenant, direct DB fixtures)');
+test.skip(isRemote, 'local stack only (seeded rede-demo, a throwaway tenant, direct DB fixtures)');
 test.use({ serviceWorkers: 'block' });
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -97,7 +97,7 @@ async function answer(api: ApiFetch, path: string, host: string) {
 }
 
 test.beforeAll(async ({ browser: _browser }, testInfo) => {
-  demoPostId = await feedPostIdFor(seededFeed.newest, 'tria-demo');
+  demoPostId = await feedPostIdFor(seededFeed.newest, 'rede-demo');
 
   // The project name rides the slug so the two Playwright projects never provision the same host
   // concurrently; the run stamp is what keeps a fresh session off a deleted tenant's cached host.

@@ -1,4 +1,4 @@
-import type { EventDetail } from '@tria/module-events/contracts';
+import type { EventDetail } from '@rede-social/module-events/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   buildIcs,
@@ -133,7 +133,7 @@ describe('buildIcs', () => {
     expect(lines[0]).toBe('BEGIN:VCALENDAR');
     expect(lines).toContain('VERSION:2.0');
     expect(lines).toContain(`PRODID:${ICS_PRODID}`);
-    expect(ICS_PRODID).toBe('-//TRIA//Rede Social//PT-BR');
+    expect(ICS_PRODID).toBe('-//Rede Social//PT-BR');
     expect(lines).toContain('CALSCALE:GREGORIAN');
     expect(lines).toContain('METHOD:PUBLISH');
     expect(lines.filter((line) => line === 'BEGIN:VEVENT')).toHaveLength(1);

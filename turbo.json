@@ -3,13 +3,7 @@
   "globalEnv": ["CI", "NODE_ENV"],
   // Spike-only inputs (`pnpm spike:supavisor`, plan 01-03/01-12). They never feed a turbo task, so
   // they are passed through instead of hashed; declaring them keeps Biome's noUndeclaredEnvVars quiet.
-  "globalPassThroughEnv": [
-    "SPIKE_*",
-    "TENANT_A",
-    "TENANT_B",
-    "SEED_PASSWORD",
-    "SUPER_ADMIN_*"
-  ],
+  "globalPassThroughEnv": ["SPIKE_*", "TENANT_A", "TENANT_B", "SEED_PASSWORD", "SUPER_ADMIN_*"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -50,13 +44,13 @@
   },
   // MOD-02 layer 1 of 3 (the other two are Biome `noRestrictedImports` and the module package's own
   // `exports` map). `pnpm boundaries:negative` proves this layer still bites, by requiring
-  // @tria/boundary-fixture — a `module`-tagged package that depends on an `app` and on another
+  // @rede-social/boundary-fixture — a `module`-tagged package that depends on an `app` and on another
   // module — to FAIL `turbo boundaries`.
   //
   // `contracts` and `tooling` carry no rule block on purpose (01-08). turbo 2.10.12 mis-attributes
   // `dependencies` edges for those two leaf tags: with a rule on either of them it reports
-  // `@tria/config` — a package whose package.json and lockfile importer declare ZERO workspace
-  // dependencies — as depending on both @tria/core and @tria/contracts, so any rule written there
+  // `@rede-social/config` — a package whose package.json and lockfile importer declare ZERO workspace
+  // dependencies — as depending on both @rede-social/core and @rede-social/contracts, so any rule written there
   // fails on the correct graph and teaches nothing. Both packages are leaves (contracts depends only
   // on zod, config on nothing), so the layer loses no real coverage: what a module or an app may
   // reach is still stated below, and the import-level lanes are Biome's job.

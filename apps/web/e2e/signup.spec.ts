@@ -5,7 +5,7 @@ import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
 
 /**
  * AUTH-01 / AUTH-04 sign-up on a phone viewport (`mobile-chromium`, iPhone 14).
- * `baseURL` is the tria-demo TENANT host, where the public link is `/cadastro` with no slug (D-22).
+ * `baseURL` is the rede-demo TENANT host, where the public link is `/cadastro` with no slug (D-22).
  */
 
 /**
@@ -20,7 +20,7 @@ let counter = 0;
 
 function uniqueEmail(): string {
   counter += 1;
-  const email = `e2e+${Date.now()}-${counter}@tria-demo.local`;
+  const email = `e2e+${Date.now()}-${counter}@rede-demo.local`;
   createdEmails.push(email);
   return email;
 }
@@ -90,7 +90,7 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.goto('/cadastro');
     await expect(page).toHaveURL(/\/cadastro$/);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Criar conta');
-    await expect(page.getByText('TRIA Demo').first()).toBeVisible();
+    await expect(page.getByText('Rede Demo').first()).toBeVisible();
 
     // AUTH-04: both consents start unchecked, and the form does not submit without them.
     await expect(page.locator('#acceptRules')).not.toBeChecked();
@@ -102,7 +102,7 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     // D-03: the rules bottom sheet shows the tenant's own rules text.
     await page.getByRole('button', { name: 'ver regras' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByRole('dialog')).toContainText('Regras da comunidade TRIA Demo');
+    await expect(page.getByRole('dialog')).toContainText('Regras da comunidade Rede Demo');
     await page.getByRole('button', { name: 'Fechar' }).click();
 
     await page.locator('#acceptRules').check();
@@ -110,7 +110,7 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.getByRole('button', { name: 'Cadastrar' }).click();
 
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
       timeout: 20_000,
     });
     // D-42: the new member's own identity lives on the profile page, not on the home — and since
@@ -133,7 +133,7 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
 
     await signOut(page);
-    await expect(page.getByText('Comunidade: TRIA Demo')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Comunidade: Rede Demo')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveAttribute(
       'href',
       '/cadastro',
@@ -146,7 +146,7 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.locator('#password').fill(PASSWORD);
     await page.getByRole('button', { name: 'Entrar' }).click();
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
       timeout: 20_000,
     });
   });
@@ -167,16 +167,16 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     ).toBeVisible();
 
     const body = (await page.locator('body').innerText()).toLowerCase();
-    expect(body).not.toContain('tria-lab');
-    expect(body).not.toContain('tria lab');
+    expect(body).not.toContain('rede-lab');
+    expect(body).not.toContain('rede-social lab');
   });
 
-  test('4. D-22: the host wins — /cadastro/tria-lab on the tria-demo host lands on /cadastro', async ({
+  test('4. D-22: the host wins — /cadastro/rede-lab on the rede-demo host lands on /cadastro', async ({
     page,
   }) => {
-    await page.goto('/cadastro/tria-lab');
+    await page.goto('/cadastro/rede-lab');
     await expect(page).toHaveURL(/\/cadastro$/);
-    await expect(page.getByText('TRIA Demo').first()).toBeVisible();
+    await expect(page.getByText('Rede Demo').first()).toBeVisible();
   });
 
   test('5. D-10: the show-password toggle flips the input type and 7 characters are refused', async ({
@@ -204,11 +204,11 @@ test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
   }) => {
     test.skip(isRemote, 'local stack only');
 
-    await page.goto(`${hosts.generic}/cadastro/tria-demo`);
+    await page.goto(`${hosts.generic}/cadastro/rede-demo`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Criar conta');
-    await expect(page.getByText('TRIA Demo').first()).toBeVisible();
+    await expect(page.getByText('Rede Demo').first()).toBeVisible();
     const cookie = (await context.cookies()).find((c) => c.name === 'tenant_slug');
-    expect(cookie?.value).toBe('tria-demo');
+    expect(cookie?.value).toBe('rede-demo');
 
     const email = uniqueEmail();
     await fillSignup(page, email);
@@ -217,9 +217,9 @@ test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
 
     // D-06: on a generic host the COOKIE carries the tenant across the round trip.
     await signOut(page, hosts.generic);
-    await expect(page.getByText('Comunidade: TRIA Demo')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('Comunidade: Rede Demo')).toBeVisible({ timeout: 20_000 });
     const href = await page.getByRole('link', { name: 'Criar nova conta' }).getAttribute('href');
-    expect(href?.endsWith('/cadastro/tria-demo')).toBe(true);
+    expect(href?.endsWith('/cadastro/rede-demo')).toBe(true);
   });
 
   test('7. generic host: an unknown slug and a mixed-case slug are both "não encontrada"', async ({
@@ -230,8 +230,8 @@ test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
     await page.goto(`${hosts.generic}/cadastro/nao-existe`);
     await expect(page.getByText('Comunidade não encontrada.')).toBeVisible();
 
-    // Adjacency (T-04-07): slugs are lowercase-only, `Tria-Demo` is a miss, not an alias.
-    await page.goto(`${hosts.generic}/cadastro/Tria-Demo`);
+    // Adjacency (T-04-07): slugs are lowercase-only, `Rede-Demo` is a miss, not an alias.
+    await page.goto(`${hosts.generic}/cadastro/Rede-Demo`);
     await expect(page.getByText('Comunidade não encontrada.')).toBeVisible();
   });
 
@@ -241,7 +241,7 @@ test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
     await page.goto(`${hosts.platform}/cadastro`);
     await expect(page).toHaveURL(/\/entrar$/);
 
-    await page.goto(`${hosts.platform}/cadastro/tria-demo`);
+    await page.goto(`${hosts.platform}/cadastro/rede-demo`);
     await expect(page).toHaveURL(/\/entrar$/);
   });
 });

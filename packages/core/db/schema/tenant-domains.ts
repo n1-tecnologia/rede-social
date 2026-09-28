@@ -1,4 +1,4 @@
-import type { DnsRecord } from '@tria/contracts';
+import type { DnsRecord } from '@rede-social/contracts';
 import { sql } from 'drizzle-orm';
 import {
   boolean,

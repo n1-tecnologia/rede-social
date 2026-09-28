@@ -1,4 +1,4 @@
-import type { DnsRecord } from '@tria/contracts';
+import type { DnsRecord } from '@rede-social/contracts';
 import { type DomainCheck, type DomainProvider, DomainProviderError } from './types';
 
 /**
@@ -7,7 +7,7 @@ import { type DomainCheck, type DomainProvider, DomainProviderError } from './ty
  * e2e-testable without Vercel). Deterministic per host, no network, no state beyond call counters
  * and the set of hosts that already threw once:
  *
- *  - a subdomain (3+ labels) gets `CNAME <host> -> fake.tria-dns.test`, a 2-label apex gets
+ *  - a subdomain (3+ labels) gets `CNAME <host> -> fake.rede-social-dns.test`, a 2-label apex gets
  *    `A <host> -> 203.0.113.10` (TEST-NET-3, never routable);
  *  - a host containing `needs-txt` also gets the TXT ownership challenge at `_vercel.<apex>` and
  *    `addDomain` reports `ownershipVerified: false` for it — the panel's TXT step (02-15) and the
@@ -25,7 +25,7 @@ import { type DomainCheck, type DomainProvider, DomainProviderError } from './ty
  * The seed never reaches this adapter: seeded hosts are written verified directly (D-24).
  */
 
-const ROUTING_CNAME_TARGET = 'fake.tria-dns.test';
+const ROUTING_CNAME_TARGET = 'fake.rede-social-dns.test';
 const ROUTING_A_TARGET = '203.0.113.10';
 
 const counters = { addDomain: 0, getDnsRecords: 0, verify: 0, removeDomain: 0 };

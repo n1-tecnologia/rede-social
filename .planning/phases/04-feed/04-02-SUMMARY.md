@@ -7,12 +7,12 @@ tags: [ui, kernel-primitives, tokens, intersection-observer, gestures, design-ga
 # Dependency graph
 requires:
   - phase: 02-tenant-shell-branding-platform-panel
-    provides: "@tria/ui with tokens.css, ScrollContainerContext/useScrollContainer, Skeleton, useMediaQuery, the overlay conventions on motion/react, and the happy-dom + Testing Library harness"
+    provides: "@rede-social/ui with tokens.css, ScrollContainerContext/useScrollContainer, Skeleton, useMediaQuery, the overlay conventions on motion/react, and the happy-dom + Testing Library harness"
   - phase: 04-feed
     provides: "04-01's feed tracer settled the paging contract the sentinel has to agree with: GET /v1/feed REFUSES an over-large ?limit with 400 rather than clamping it"
 provides:
-  - "`InfiniteScroll` + `useInfiniteScroll` in @tria/ui: IntersectionObserver sentinel whose root comes from ScrollContainerContext (prop-overridable), with a ref-backed re-entrancy guard and a render contract that shows nothing once there is no next page"
-  - "`DoubleTapHeart` in @tria/ui: 300 ms double-tap window, 900 ms decorative burst, pointer-events-none overlay, reduced-motion branch"
+  - "`InfiniteScroll` + `useInfiniteScroll` in @rede-social/ui: IntersectionObserver sentinel whose root comes from ScrollContainerContext (prop-overridable), with a ref-backed re-entrancy guard and a render contract that shows nothing once there is no next page"
+  - "`DoubleTapHeart` in @rede-social/ui: 300 ms double-tap window, 900 ms decorative burst, pointer-events-none overlay, reduced-motion branch"
   - "the one Phase 4 token `--color-like` (#ef4444, both themes) with its text-/fill-/bg- utilities"
   - "sketch 002 — the D-33 / UI-04 static mockup package for the six [designed] Phase 4 surfaces, registered in the sketch manifest"
 affects: [04-04 attachment row, 04-05 link preview card, 04-06 FeedList wiring, 04-09 composer, 05 communities list, 07 notifications list]
@@ -26,7 +26,7 @@ plan_head_before: 9965b997e0fce69d6310313b69c637405ac2c577
 tech-stack:
   added: []
   patterns:
-    - "Kernel-first paging: the sentinel primitive lives in @tria/ui, not in the feed module, because Phase 5's community list and Phase 7's notification list need the identical thing"
+    - "Kernel-first paging: the sentinel primitive lives in @rede-social/ui, not in the feed module, because Phase 5's community list and Phase 7's notification list need the identical thing"
     - "Scroll-root injection: a scroll-aware primitive resolves its root from ScrollContainerContext with an explicit prop override, never from a document lookup — the coupling the context exists to remove"
     - "Ref-backed re-entrancy guard: the guard flips BEFORE the first await, because an observer callback can fire again before React commits the isLoading state"
     - "Controllable browser-API stubs in unit tests instead of polyfills: the test asserts on the options the hook passed to the constructor, which is exactly what a polyfill would hide"
@@ -176,7 +176,7 @@ status: complete
 
 # Phase 4 Plan 02: Kernel primitives and the D-33 design gate — Summary
 
-**`@tria/ui` gains the last unported prototype primitive (`InfiniteScroll`/`useInfiniteScroll`, rooted in the shell's scroll context rather than a document lookup), the `DoubleTapHeart` gesture, the single `--color-like` token, and the static mockup package the composer/link-card/attachment-row surfaces must pass before anyone codes them.**
+**`@rede-social/ui` gains the last unported prototype primitive (`InfiniteScroll`/`useInfiniteScroll`, rooted in the shell's scroll context rather than a document lookup), the `DoubleTapHeart` gesture, the single `--color-like` token, and the static mockup package the composer/link-card/attachment-row surfaces must pass before anyone codes them.**
 
 ## Performance
 
@@ -188,7 +188,7 @@ status: complete
 
 ## Accomplishments
 
-- **`useInfiniteScroll` + `InfiniteScroll` ship from `@tria/ui`.** The observer root is `useScrollContainer()?.current ?? null` with an explicit `root` prop override, so the primitive works inside the app shell's scrollport and outside it. The prototype's hardcoded element-id lookup is gone, and the acceptance gate greps for it. It lives in the kernel package rather than the feed module because Phase 5's community list and Phase 7's notification list need the identical thing.
+- **`useInfiniteScroll` + `InfiniteScroll` ship from `@rede-social/ui`.** The observer root is `useScrollContainer()?.current ?? null` with an explicit `root` prop override, so the primitive works inside the app shell's scrollport and outside it. The prototype's hardcoded element-id lookup is gone, and the acceptance gate greps for it. It lives in the kernel package rather than the feed module because Phase 5's community list and Phase 7's notification list need the identical thing.
 - **One page at a time, proven.** The re-entrancy guard is a ref that flips before the first `await`, not the `isLoading` state, because an IntersectionObserver callback can fire again before React commits. Two intersections while a page is pending call `onLoadMore` once; a rejection clears the flag without reaching render (the consumer owns its retry line).
 - **The render contract holds the E17 probes.** `hasMore: false` renders no DOM node at all — no terminal spacer, no "fim da lista" copy — and a page in flight renders exactly one fixed-height, `overflow-hidden` placeholder card, never two.
 - **`--color-like` is the one new token**, `#ef4444` in both themes, with `text-like` / `fill-like` / `bg-like` compiling from the theme block. It is its own value, not an alias of `--color-danger` and not the tenant accent — a Phase 8 destructive-palette change cannot move the heart, and a brand-coloured heart would lose a universally-read affordance.
@@ -276,7 +276,7 @@ No gate violations. Both RED phases were verified with `gsd-tools check tdd-red-
 - **Issue:** A `biome-ignore lint/a11y/noStaticElementInteractions` on the gesture wrapper suppressed a rule this config does not enable, and Biome reports an ineffective suppression as a warning.
 - **Fix:** Removed the suppression, kept the reasoning as a plain comment.
 - **Files modified:** `packages/ui/src/overlays/DoubleTapHeart.tsx`
-- **Verification:** `pnpm --filter @tria/ui lint` clean.
+- **Verification:** `pnpm --filter @rede-social/ui lint` clean.
 - **Committed in:** `dd4d7ec`.
 
 **5. [Rule 2 — Missing critical] The mockup drops sketch 001's remote webfont**
@@ -301,9 +301,9 @@ No gate violations. Both RED phases were verified with `gsd-tools check tdd-red-
 
 None beyond the deviations above. The full plan verification is green:
 
-- `pnpm --filter @tria/ui typecheck` — clean
-- `pnpm --filter @tria/ui lint` — clean (Biome, 43 files)
-- `pnpm --filter @tria/ui test` — **68 passed / 68**, 5 files, the summary naming both `infinite-scroll.test.tsx` and `double-tap-heart.test.tsx`
+- `pnpm --filter @rede-social/ui typecheck` — clean
+- `pnpm --filter @rede-social/ui lint` — clean (Biome, 43 files)
+- `pnpm --filter @rede-social/ui test` — **68 passed / 68**, 5 files, the summary naming both `infinite-scroll.test.tsx` and `double-tap-heart.test.tsx`
 - `bash scripts/check-ui-literals.sh` — OK
 - `grep -rc framer-motion packages/ui/src/` — 0 in every file
 

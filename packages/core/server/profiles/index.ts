@@ -3,7 +3,7 @@
  * flag). A PURE TENANT-LANE area: `profiles/**` is deliberately absent from the privileged-lane
  * allow-list in `biome.json`, so every read and write here runs under RLS.
  *
- * Imported as `@tria/core/server/profiles/index` from outside the kernel (the `./server/*` export
+ * Imported as `@rede-social/core/server/profiles/index` from outside the kernel (the `./server/*` export
  * maps to a file, not a directory).
  *
  * `./search` is the PURE half (query normalisation, `like` escaping, the opaque keyset cursor) and

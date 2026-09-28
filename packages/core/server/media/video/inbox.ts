@@ -9,7 +9,7 @@ import { MEDIA_PROVIDER_EVENT_QUEUE, type VideoProviderEvent } from './types';
  * enqueue the state change in the SAME admin transaction (MEDIA-03, R-03, T-03-38).
  *
  * It lives here rather than in the route because the admin transaction lane is kernel-only — Biome
- * refuses `@tria/core/db/admin-tx` outside `server/{tenancy,platform,media}` — and because it is the
+ * refuses `@rede-social/core/db/admin-tx` outside `server/{tenancy,platform,media}` — and because it is the
  * whole replay defence, which deserves one implementation a test can point at. The route stays what
  * it should be: read the raw body, verify the signature, call this, answer 2xx.
  *

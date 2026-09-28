@@ -2,8 +2,8 @@ import {
   type FeedPost,
   type VideoCommunities,
   videoCommunitiesSchema,
-} from '@tria/module-feed/contracts';
-import { REELS_PAGE_SIZE } from '@tria/module-reels/contracts';
+} from '@rede-social/module-feed/contracts';
+import { REELS_PAGE_SIZE } from '@rede-social/module-reels/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { apiFetch } from '@/lib/api';

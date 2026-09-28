@@ -1,7 +1,7 @@
-import { withTenantTx } from '@tria/core/db/tenant-tx';
-import type { RequestContext } from '@tria/core/server/auth/context';
-import { moduleLogger } from '@tria/core/server/logging';
-import type { JobDefinition } from '@tria/core/server/modules/manifest';
+import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import type { JobDefinition } from '@rede-social/core/server/modules/manifest';
 import { sql } from 'drizzle-orm';
 import ogs from 'open-graph-scraper';
 // undici's OWN fetch, NOT the global. The global `fetch` is Node's BUNDLED undici, a different

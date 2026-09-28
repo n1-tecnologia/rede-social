@@ -1,6 +1,6 @@
 'use client';
 
-import { BottomSheet } from '@tria/ui';
+import { BottomSheet } from '@rede-social/ui';
 import { CommentsList, type CommentsListProps } from './CommentsList';
 
 /**
@@ -16,7 +16,7 @@ import { CommentsList, type CommentsListProps } from './CommentsList';
  *
  * **The sheet's HEIGHT is the primitive's, unmodified** (UI-D-18). The prototype set its own
  * `0.7`; the shipped `BottomSheet` uses `0.8` and nothing here overrides it. One sheet geometry
- * across the app is exactly what `@tria/ui` exists to hold, and a per-caller override is the drift
+ * across the app is exactly what `@rede-social/ui` exists to hold, and a per-caller override is the drift
  * it exists to prevent — so there is deliberately no height class in this file.
  *
  * **Focus is the primitive's too**: `role="dialog"`, `aria-modal`, the focus trap, Escape and the

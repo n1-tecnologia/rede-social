@@ -4,8 +4,8 @@ import { mediaVariantUrl, PURPOSE_WIDTHS } from './media';
 /**
  * Member profile contract (PROF-01, PROF-02, TENANT-04).
  *
- * Pure module — no node imports — so client components may import it through `@tria/contracts/profiles`
- * for the edit form's counter and `maxLength` (03-04) exactly as `@tria/contracts/media` serves the
+ * Pure module — no node imports — so client components may import it through `@rede-social/contracts/profiles`
+ * for the edit form's counter and `maxLength` (03-04) exactly as `@rede-social/contracts/media` serves the
  * pick-time upload gate. It is deliberately NOT re-exported from `./index.ts`: the root barrel has
  * been frozen since Phase 2 wave 2, and `./media` established the subpath precedent.
  *
@@ -169,7 +169,7 @@ export type MemberProfile = z.infer<typeof memberProfileSchema>;
 
 /**
  * The `<img srcset>` for an avatar, built from `PURPOSE_WIDTHS.avatar` so the derived ladder and the
- * srcset can never drift: widening the avatar ladder in `@tria/contracts/media` widens this string
+ * srcset can never drift: widening the avatar ladder in `@rede-social/contracts/media` widens this string
  * automatically, and a width the worker never produced can never appear here.
  */
 export function avatarSrcSet(assetId: string): string {

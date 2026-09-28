@@ -217,7 +217,7 @@ export async function inspectBrandingImage(buf: Buffer, declaredMime: string): P
   });
 ```
 
-> **Lane difference — the one genuinely new part.** `platform/branding.ts` uses `withAdminTx` + `PlatformActor`. The media service is **tenant lane**: `withTenantTx(ctx, …)` + `membershipOfRecord(ctx)` (see `apps/api/src/routes/me.ts:92-99`). It still imports `supabaseAdmin` for Storage, which is why R-14 fixes it in `packages/core/server/media/*` — Biome (`biome.json:50-56`) confines `@tria/core/server/supabase-admin` to the kernel.
+> **Lane difference — the one genuinely new part.** `platform/branding.ts` uses `withAdminTx` + `PlatformActor`. The media service is **tenant lane**: `withTenantTx(ctx, …)` + `membershipOfRecord(ctx)` (see `apps/api/src/routes/me.ts:92-99`). It still imports `supabaseAdmin` for Storage, which is why R-14 fixes it in `packages/core/server/media/*` — Biome (`biome.json:50-56`) confines `@rede-social/core/server/supabase-admin` to the kernel.
 
 ---
 
@@ -481,7 +481,7 @@ Replace the hardcoded profile with a join on `member_profiles` (R-08). **The con
   (t) => [
     uniqueIndex('consent_records_tenant_user_kind_version_uq').on(t.tenantId, t.userId, t.kind, t.textVersion),
     index('consent_records_tenant_user_idx').on(t.tenantId, t.userId),
-    check('consent_records_kind_chk', sql`${t.kind} in ('tenant_rules','tria_terms')`),
+    check('consent_records_kind_chk', sql`${t.kind} in ('tenant_rules','platform_terms')`),
     pgPolicy('consent_records_self_select', {
       for: 'select',
       to: authenticatedRole,
@@ -692,7 +692,7 @@ Mount the two new tenant-lane routers and the webhook alongside the existing fiv
  * Tenant brand contract (TENANT-02, D-25/D-26/D-28/D-41).
  *
  * Pure module — no node imports — so client components may import it through
- * `@tria/contracts/branding` without pulling `legal.ts` (`node:fs`) into the bundle.
+ * `@rede-social/contracts/branding` without pulling `legal.ts` (`node:fs`) into the bundle.
  */
 ```
 

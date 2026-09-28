@@ -1,4 +1,4 @@
-import { EVENT_PERMISSIONS } from '@tria/module-events/contracts';
+import { EVENT_PERMISSIONS } from '@rede-social/module-events/contracts';
 import { notFound } from 'next/navigation';
 import { EventForm } from '@/app/(app)/eventos/EventForm';
 import { requireBootstrap } from '@/lib/bootstrap';

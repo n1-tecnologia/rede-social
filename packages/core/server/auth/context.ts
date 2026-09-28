@@ -1,7 +1,7 @@
-import type { DomainEventRecord, TenantRole } from '@tria/contracts';
+import type { DomainEventRecord, TenantRole } from '@rede-social/contracts';
 import type { Logger } from 'pino';
 
-// `DomainEventRecord` now lives in `@tria/contracts` (01-07) next to the `EventMap` modules augment.
+// `DomainEventRecord` now lives in `@rede-social/contracts` (01-07) next to the `EventMap` modules augment.
 export type { DomainEventRecord };
 
 /** Set by `requireAuth`. `tenantId` ALWAYS comes from the membership row, never from a host or cookie (TENANT-01). */

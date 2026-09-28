@@ -1,16 +1,16 @@
-import { createClient } from '@supabase/supabase-js';
-import * as contracts from '@tria/contracts';
+import * as contracts from '@rede-social/contracts';
 import {
   acceptInviteResponseSchema,
   apiErrorEnvelopeSchema,
   ERROR_CODES,
+  PLATFORM_TERMS_VERSION,
   platformTenantDetailSchema,
-  TRIA_TERMS_VERSION,
   tenantInviteSchema,
-} from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
-import { stopBoss } from '@tria/core/server/jobs/boss';
-import { isOneTenantPerUserViolation } from '@tria/core/server/platform/invites';
+} from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { isOneTenantPerUserViolation } from '@rede-social/core/server/platform/invites';
+import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -33,7 +33,7 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setu
  */
 
 const RUN = Date.now().toString(36);
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
 const MAILPIT_URL = (process.env.MAILPIT_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
 const INVITED_PASSWORD = 'Convite-Segredo-123';
@@ -75,7 +75,7 @@ const lane = (
 
 const envelope = async (res: Response) => ((await res.json()) as Envelope).error;
 
-const acceptBody = (rulesVersion = 1) => ({ rulesVersion, termsVersion: TRIA_TERMS_VERSION });
+const acceptBody = (rulesVersion = 1) => ({ rulesVersion, termsVersion: PLATFORM_TERMS_VERSION });
 
 async function tenantDetail(id: string) {
   const res = await platform(`/tenants/${id}`);
@@ -239,9 +239,9 @@ describe('tracer — the first admin accepts the invite (ROLE-03, D-29, D-03)', 
        where tenant_id = ${invited.tenantId}::uuid and user_id = ${invited.userId}::uuid
        order by kind`;
     expect(consents).toHaveLength(2);
-    expect(consents.map((c) => c.kind)).toEqual(['tenant_rules', 'tria_terms']);
+    expect(consents.map((c) => c.kind)).toEqual(['tenant_rules', 'platform_terms']);
     expect(consents[0]?.text_version).toBe(tenant?.rules_version ?? 1);
-    expect(consents[1]?.text_version).toBe(TRIA_TERMS_VERSION);
+    expect(consents[1]?.text_version).toBe(PLATFORM_TERMS_VERSION);
     for (const c of consents) {
       expect(c.ip).toBe('203.0.113.9');
       expect(c.user_agent).toBe('vitest');
@@ -419,7 +419,7 @@ describe('accept-invite edges — idempotent, concurrent, stale, cross-tenant (R
 
   it('7. a stale rulesVersion -> 400 VALIDATION_FAILED { consents: "stale" }; nothing written', async () => {
     const invited = await throwawayInvited('stale');
-    const res = await accept(invited, { rulesVersion: 2, termsVersion: TRIA_TERMS_VERSION });
+    const res = await accept(invited, { rulesVersion: 2, termsVersion: PLATFORM_TERMS_VERSION });
     expect(res.status).toBe(400);
     const err = await envelope(res);
     expect(err.code).toBe('VALIDATION_FAILED');
@@ -439,10 +439,10 @@ describe('accept-invite edges — idempotent, concurrent, stale, cross-tenant (R
     expect(await membershipStatus(invited.tenantId, invited.userId)).toBe('invited');
     expect(await consentCount(invited.tenantId, invited.userId)).toBe(0);
 
-    const memberToken = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+    const memberToken = await signInAs('member@rede-demo.local', SEED_PASSWORD);
     const [member] = await adminSql<{ tenant_id: string; user_id: string }[]>`
       select m.tenant_id, m.user_id from public.memberships m
-        join public.users u on u.id = m.user_id where u.email = 'member@tria-demo.local' limit 1`;
+        join public.users u on u.id = m.user_id where u.email = 'member@rede-demo.local' limit 1`;
     if (!member) throw new Error('seed member missing');
     const before = await consentCount(member.tenant_id, member.user_id);
     const replay = await lane(memberToken, '/v1/me/accept-invite', {
@@ -542,7 +542,7 @@ describe('resend lifecycle — list, resend, supersession, 409/404/403 (D-30)', 
     expect(foreign.status).toBe(404);
     expect((await envelope(foreign)).code).toBe('NOT_FOUND');
 
-    const memberToken = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+    const memberToken = await signInAs('member@rede-demo.local', SEED_PASSWORD);
     for (const [method, path] of [
       ['GET', `/v1/platform/tenants/${tenantId}/invites`],
       ['POST', `/v1/platform/tenants/${tenantId}/invites/${inviteId}/resend`],
@@ -646,11 +646,11 @@ async function insertVerifiedPrimary(tenantId: string, host: string): Promise<vo
     values (${tenantId}::uuid, ${host}, true, now(), 'verified')`;
 }
 
-/** An ACTIVE `member` row for `userId` in the seeded tria-lab tenant — the "other tenant". */
+/** An ACTIVE `member` row for `userId` in the seeded rede-lab tenant — the "other tenant". */
 async function membershipInLab(userId: string): Promise<void> {
   await adminSql`
     insert into public.memberships (tenant_id, user_id, role, status)
-    select id, ${userId}::uuid, 'member', 'active' from public.tenants where slug = 'tria-lab'`;
+    select id, ${userId}::uuid, 'member', 'active' from public.tenants where slug = 'rede-lab'`;
 }
 
 /** A confirmed auth identity for `email` with NO membership anywhere (createUser, no mail). */
@@ -722,7 +722,7 @@ describe('refusals — e-mail already on the platform (WR-02 / WR-03 / WR-04)', 
     const [lab] = await adminSql<{ status: string }[]>`
       select m.status from public.memberships m
         join public.tenants t on t.id = m.tenant_id
-       where t.slug = 'tria-lab' and m.user_id = ${userId}::uuid and m.deleted_at is null`;
+       where t.slug = 'rede-lab' and m.user_id = ${userId}::uuid and m.deleted_at is null`;
     expect(lab?.status).toBe('active');
   });
 

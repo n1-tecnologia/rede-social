@@ -1,8 +1,8 @@
-# Roadmap: TRIA Rede Social
+# Roadmap: Rede Social
 
 ## Overview
 
-TRIA Rede Social is a multi-tenant, white-label community PWA: one deployment, each organization reached on its own custom domain (the platform domain serves TRIA's `super_admin`), each organization's members see their own brand and only their own content. The roadmap follows the dependency spine the research identified (kernel + tenancy + auth -> branded shell + platform panel -> media broker + profiles) and then ships content modules in the order that lets each one reuse the conventions of the previous (feed establishes likes/comments/pagination/domain events; communities and stories build on posts; events introduce scheduled jobs). The realtime layer (notifications, Web Push, support chat) comes after all event producers exist, and the last phase gives the tenant admin their moderation and admin panel while running the pilot go-live gate. Eight phases, each a deployable vertical slice (schema + API + UI) except the unavoidable foundation phase, which still ends with a real login against a real tenant.
+Rede Social is a multi-tenant, white-label community PWA: one deployment, each organization reached on its own custom domain (the platform domain serves the platform's `super_admin`), each organization's members see their own brand and only their own content. The roadmap follows the dependency spine the research identified (kernel + tenancy + auth -> branded shell + platform panel -> media broker + profiles) and then ships content modules in the order that lets each one reuse the conventions of the previous (feed establishes likes/comments/pagination/domain events; communities and stories build on posts; events introduce scheduled jobs). The realtime layer (notifications, Web Push, support chat) comes after all event producers exist, and the last phase gives the tenant admin their moderation and admin panel while running the pilot go-live gate. Eight phases, each a deployable vertical slice (schema + API + UI) except the unavoidable foundation phase, which still ends with a real login against a real tenant.
 
 **Structure:** Vertical MVP slices (`PROJECT_MODE=mvp`). **Granularity:** standard (8 phases, 3-5 plans each). **Requirement coverage:** 79/79 v1 requirements mapped, each to exactly one phase.
 
@@ -52,7 +52,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Requirements**: TENANT-01, TENANT-03, TENANT-05, MOD-01, MOD-02, ROLE-01, ROLE-02, ROLE-06, AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, AUTH-06
 **Success Criteria** (what must be TRUE):
 
-  1. A user who signs up through tenant A's public sign-up link on tenant A's own domain (accepting A's community rules and TRIA's terms, recorded with a timestamp) becomes a `member` of tenant A, can log in with e-mail and password, stays logged in after closing and reopening the browser, can recover a forgotten password via e-mail link, and can log out; the sign-up link survives the register -> login round-trip.
+  1. A user who signs up through tenant A's public sign-up link on tenant A's own domain (accepting A's community rules and the platform's terms, recorded with a timestamp) becomes a `member` of tenant A, can log in with e-mail and password, stays logged in after closing and reopening the browser, can recover a forgotten password via e-mail link, and can log out; the sign-up link survives the register -> login round-trip.
   2. After login, `GET /me/bootstrap` returns the user's tenant, role and enabled modules resolved from their membership row (the hostname only selects the public shell; a session whose membership does not belong to the host's tenant gets 403 `TENANT_HOST_MISMATCH`); a member whose membership is set to blocked receives 401/403 on their very next API request without redeploy or re-login.
   3. The automated two-tenant isolation suite (pgTAP + API integration tests) passes: every tenant-owned table carries `tenant_id` with RLS enabled, the API's tenant lane runs under a non-service database role inside a per-request transaction, no list or detail endpoint returns another tenant's rows, and routes of a module disabled for the tenant return 404.
   4. The monorepo has a kernel package, a feature-module package template and lint/dependency rules that fail the build when a module imports another module's internals; the delivery pipeline exists as code (Cloud Run image for API + worker, `ci.yml` mirroring the local exit gate, `deploy-api.yml` with staging on PR and a gated production job, `docs/DEPLOY.md` listing every secret) and is validated locally (YAML, grep assertions, Docker build/run). Running it against real accounts is Phase 01.1.
@@ -62,11 +62,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 **Wave 1**
 
-- [x] 01-01-PLAN.md — Walking skeleton: toolchain + @tria monorepo scaffold (all packages except `apps/web`); tracer JWT → JWKS auth → membership → RLS tenant lane → `GET /v1/me/bootstrap`; `tenant_domains` + `GET /v1/public/tenants/by-host` + host/membership match (403 `TENANT_HOST_MISMATCH`) + seeded tenant hosts (D-20/D-23/D-24)
+- [x] 01-01-PLAN.md — Walking skeleton: toolchain + @rede-social monorepo scaffold (all packages except `apps/web`); tracer JWT → JWKS auth → membership → RLS tenant lane → `GET /v1/me/bootstrap`; `tenant_domains` + `GET /v1/public/tenants/by-host` + host/membership match (403 `TENANT_HOST_MISMATCH`) + seeded tenant hosts (D-20/D-23/D-24)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [x] 01-02-PLAN.md — `@tria/web` scaffold + browser login/logout slice: host → tenant resolution in proxy.ts (tenant / platform / generic hosts, D-20/D-21), `@supabase/ssr` session, pt-BR catalog, `/entrar` (tenant name from the host, D-22), `/inicio`, "Sair", Playwright on iPhone 14 against `tria-demo.localhost`
+- [x] 01-02-PLAN.md — `@rede-social/web` scaffold + browser login/logout slice: host → tenant resolution in proxy.ts (tenant / platform / generic hosts, D-20/D-21), `@supabase/ssr` session, pt-BR catalog, `/entrar` (tenant name from the host, D-22), `/inicio`, "Sair", Playwright on iPhone 14 against `rede-demo.localhost`
 - [x] 01-03-PLAN.md — Supavisor/PgBouncer lane spike + LOCAL-settings guard + fallback doc; `platform_admins`, chat/notification stubs, SCHEMA-CONVENTIONS.md
 - [x] 01-09-PLAN.md — Pipeline as code: Dockerfile (API + worker), ci.yml, deploy-api.yml (staging on PR, gated prod on main), seed-prod, keep-alive, DEPLOY.md
 
@@ -81,14 +81,14 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [x] 01-07-PLAN.md — `@tria/module-example` (D-19): table + guarded routes + typed event + transactional pg-boss job + worker role + widget on `/inicio`
+- [x] 01-07-PLAN.md — `@rede-social/module-example` (D-19): table + guarded routes + typed event + transactional pg-boss job + worker role + widget on `/inicio`
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
 - [x] 01-08-PLAN.md — Two-tenant isolation suite (pgTAP + API, incl. `tenant_domains` and "session of A on B's host → 403 `TENANT_HOST_MISMATCH`"), boundary negative fixture, [BLOCKING] clean `supabase db reset` + full suite
 
 **Research needed**: Supavisor transaction pooling with `set_config(..., true)` + `SET LOCAL ROLE authenticated` (verify with a spike before schema freeze; fallback is a per-request Supabase client with the user JWT); dedicated `api_user` role grants; pg-boss transactional enqueue with Drizzle; Supabase asymmetric signing keys + `@supabase/ssr` cookie flow in Next 16 `proxy.ts`; TypeScript 7 tooling at repo bootstrap.
-**Notes**: Auth routes in this phase are functional-minimal (plain forms); their visual port to the prototype's design lands in Phase 2 with the shared UI package. Chat and notification table stubs and the "schema conventions" doc are Foundation deliverables so later modules are reviewed against V2-safe shapes. Tenants are seeded by script/migration until the platform panel exists in Phase 2. Each tenant is served on its own custom domain (`tenant_domains`, host -> tenant lookup in `proxy.ts`); the platform domain hosts TRIA's `super_admin`; the seed tenants use TRIA-owned hostnames so staging/production smoke tests run on real tenant domains.
+**Notes**: Auth routes in this phase are functional-minimal (plain forms); their visual port to the prototype's design lands in Phase 2 with the shared UI package. Chat and notification table stubs and the "schema conventions" doc are Foundation deliverables so later modules are reviewed against V2-safe shapes. Tenants are seeded by script/migration until the platform panel exists in Phase 2. Each tenant is served on its own custom domain (`tenant_domains`, host -> tenant lookup in `proxy.ts`); the platform domain hosts the platform's `super_admin`; the seed tenants use platform-owned hostnames so staging/production smoke tests run on real tenant domains.
 
 ### Phase 01.1: Cloud Provisioning & First Release (INSERTED)
 
@@ -98,7 +98,7 @@ Plans:
 **Requirements**: PWA-04 (plus hosted evidence for TENANT-03 and AUTH-03: the staging Supavisor transaction-pooler spike and a real recovery e-mail through Resend)
 **Success Criteria** (what must be TRUE):
 
-  1. The account shape for D-11/D-12 is decided and recorded in `docs/DEPLOY.md`; the repository exists under `tria-company` with `main` protected and `staging`/`production` environments; two Supabase projects (`rede-social-staging`, `rede-social-prod`) exist and their credentials are GitHub environment secrets.
+  1. The account shape for D-11/D-12 is decided and recorded in `docs/DEPLOY.md`; the repository exists under `n1-tecnologia` with `main` protected and `staging`/`production` environments; two Supabase projects (`rede-social-staging`, `rede-social-prod`) exist and their credentials are GitHub environment secrets.
   2. GCP (Cloud Run prerequisites, Artifact Registry, Secret Manager, WIF), Vercel (project, Git integration, env vars, platform domain + two seed tenant domains) and Resend (domain + API key) are provisioned; per-remote Supabase auth/SMTP config with per-host redirect allow-lists is committed; DNS records exist.
   3. The first pull request produces a Vercel Preview and a staging deploy; the staging Supavisor spike passes (the authoritative transaction-pooler proof for TENANT-03); a remote Playwright smoke passes on the Preview URL; the merge to `main` goes through the production approval, the one-time production seed runs, and a real recovery e-mail arrives through Resend.
 
@@ -121,7 +121,7 @@ Plans:
 
 ### Phase 2: Tenant Shell, Branding & Platform Panel
 
-**Goal**: Members open their organization's own domain and see its branded, installable app on phone and desktop, branded already on the login page; TRIA can provision a tenant end-to-end (branding, modules, custom domain, first admin) from the platform panel on the platform domain without touching the database.
+**Goal**: Members open their organization's own domain and see its branded, installable app on phone and desktop, branded already on the login page; Rede Social can provision a tenant end-to-end (branding, modules, custom domain, first admin) from the platform panel on the platform domain without touching the database.
 **Mode:** mvp
 **Depends on**: Phase 1
 **Requirements**: TENANT-02, TENANT-06, TENANT-07, MOD-04, ROLE-03, ROLE-04, ROLE-05, UI-01, UI-03, UI-04, PWA-01, PWA-03
@@ -257,7 +257,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [x] 04-01-PLAN.md — Tracer: `@tria/module-feed` + `feed_posts` + keyset `GET /v1/feed` + permission-guarded create + `post.published` + the D-55 home slot
+- [x] 04-01-PLAN.md — Tracer: `@rede-social/module-feed` + `feed_posts` + keyset `GET /v1/feed` + permission-guarded create + `post.published` + the D-55 home slot
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -290,7 +290,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [x] 04-10-PLAN.md — D-19: remove `@tria/module-example`, the forward-only drop migration, the phase-4 smoke witness and the `pnpm verify` exit gate
+- [x] 04-10-PLAN.md — D-19: remove `@rede-social/module-example`, the forward-only drop migration, the phase-4 smoke witness and the `pnpm verify` exit gate
 
 ### Phase 5: Communities & Stories
 
@@ -314,7 +314,7 @@ Plans:
 
 **Wave 1**
 
-- [x] 05-01-PLAN.md — Tracer: `@tria/module-communities` + `communities`/`community_members` + keyset `GET /v1/communities` + permission-guarded create + the `Comunidades` tab and the `/comunidades` list
+- [x] 05-01-PLAN.md — Tracer: `@rede-social/module-communities` + `communities`/`community_members` + keyset `GET /v1/communities` + permission-guarded create + the `Comunidades` tab and the `/comunidades` list
 - [x] 05-02-PLAN.md — The D-33/UI-04 design gate: sketch 003 for the five prototype-less surfaces, plus UI-D-46's vocabulary amendment across ten shipped catalog rows
 
 **Wave 2** *(blocked on Wave 1)*
@@ -327,7 +327,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [x] 05-05-PLAN.md — STORY-01/STORY-03: `@tria/module-stories`, `stories` with its `expires_at` predicate, the order-5 strip home slot and the `/stories/publicar` flow
+- [x] 05-05-PLAN.md — STORY-01/STORY-03: `@rede-social/module-stories`, `stories` with its `expires_at` predicate, the order-5 strip home slot and the `/stories/publicar` flow
 
 **Wave 5** *(blocked on Wave 4)*
 
@@ -523,7 +523,7 @@ Plans:
 
 **Wave 1**
 
-- [x] 06-01-PLAN.md — Tracer: `@tria/module-events` with `events` + the role-gated `event_secrets`, wall-clock→UTC create, the Próximos/Passados keysets in the tenant timezone, `bootstrap.tenant.timezone`, the `Eventos` tab, pgTAP 130 + isolation, the seeded events
+- [x] 06-01-PLAN.md — Tracer: `@rede-social/module-events` with `events` + the role-gated `event_secrets`, wall-clock→UTC create, the Próximos/Passados keysets in the tenant timezone, `bootstrap.tenant.timezone`, the `Eventos` tab, pgTAP 130 + isolation, the seeded events
 - [x] 06-02-PLAN.md — The D-33 design gate: a sketch of the six prototype-less surfaces plus the three proto deltas, shipped `approved: false`
 
 **Wave 2** *(blocked on Wave 1; Task 3 blocked on the sketch approval)*
@@ -612,7 +612,7 @@ Plans:
 
 **UI hint**: yes — follow button and counts on the member profile/author, Explorar tab reusing the feed list, member composer.
 **Research needed**: Yes — the permission model becomes module-conditional (today permissions are a static role map in each `module.ts`); the Explorar query and its index (`follows` join vs. denormalised fan-out) under the feed-query budget.
-**Notes**: Open questions for discuss-phase: where else the follow button lives (post author header?); who may see someone's follower/following lists. Pending, not code: with `social` on, the tenant and TRIA host third-party content, so the terms of use / community rules accepted at sign-up (AUTH-01) may need new wording (LGPD, liability) — flag to the user before `social` is turned on for any tenant. Source: user requests 2026-09-25; numbered 05.3 until the MVP cut the same day moved the "Rede social" module after Phase 8.
+**Notes**: Open questions for discuss-phase: where else the follow button lives (post author header?); who may see someone's follower/following lists. Pending, not code: with `social` on, the tenant and Rede Social host third-party content, so the terms of use / community rules accepted at sign-up (AUTH-01) may need new wording (LGPD, liability) — flag to the user before `social` is turned on for any tenant. Source: user requests 2026-09-25; numbered 05.3 until the MVP cut the same day moved the "Rede social" module after Phase 8.
 
 Plans:
 

@@ -58,7 +58,7 @@
 | `Idempotency-Key` header on `emails.send` (keyed by GoTrue `webhook-id`) | INTEGRATE | RESEARCH A6 — falls back to the in-memory `webhook-id` LRU when the SDK/API rejects the header |
 | `emails.get` / `emails.update` / `emails.cancel` | OPT-OUT | not needed — auth mail is fire-and-forget under the hook's 5 s budget |
 | `emails.batch` | OPT-OUT | not needed yet — Phase 7 notification digests decide on batching |
-| `domains.*` (create/verify sending domains) | OPT-OUT | explicitly out of scope — per-tenant sending domains are V2 (CONTEXT.md Deferred Ideas); the single TRIA mail subdomain is provisioned in Phase 01.1 |
+| `domains.*` (create/verify sending domains) | OPT-OUT | explicitly out of scope — per-tenant sending domains are V2 (CONTEXT.md Deferred Ideas); the single Rede Social mail subdomain is provisioned in Phase 01.1 |
 | `audiences.*`, `contacts.*`, `broadcasts.*` | OPT-OUT | not needed — no marketing/newsletter surface in the product |
 | `apiKeys.*` | OPT-OUT | explicitly out of scope — keys live in GCP Secret Manager, managed by the Phase 01.1 runbook |
 | Inbound webhooks (`email.delivered`, `email.bounced`, …) | OPT-OUT | not needed yet — bounce handling is a Phase 7/8 item once notification mail exists |

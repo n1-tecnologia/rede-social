@@ -46,7 +46,7 @@ const WRITE_PREFIX = 'e2e comentario';
 const unique = () => `${WRITE_PREFIX} ${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
 /** The 40-character seeded member (04-06 fixture) — the comment-row half of the backstop. */
-const LONG_NAME_MEMBER = 'ana.carolina.vasconcellos@tria-demo.local';
+const LONG_NAME_MEMBER = 'ana.carolina.vasconcellos@rede-demo.local';
 
 function feedRegion(page: Page): Locator {
   return page.getByRole('region', { name: F.region });

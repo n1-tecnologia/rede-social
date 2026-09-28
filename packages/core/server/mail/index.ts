@@ -3,7 +3,7 @@ import {
   createBoundedTtlCache,
   deriveBrandColors,
   NEUTRAL_BRAND,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import { env, publicWebOrigin } from '../env';
 import { type Logger, moduleLogger } from '../logging';
 import {
@@ -63,7 +63,7 @@ const SEEN_TTL_MS = 15 * 60_000;
  * Brand facts for the template. Tenant: display name, the logo resolved to an absolute URL of the
  * tenant's primary host (seed logos are root-relative, uploads absolute) and filtered by
  * `safeHttpUrl` (http only when the web app itself is served over http), the PERSISTED
- * `colors.primary` / `colors.onPrimary` (D-25/D-41). Neutral: TRIA, no logo, the neutral pair.
+ * `colors.primary` / `colors.onPrimary` (D-25/D-41). Neutral: Rede Social, no logo, the neutral pair.
  */
 export function toMailBrand(
   resolution: MailTenantResolution,
@@ -87,7 +87,7 @@ export function toMailBrand(
     };
   }
   return {
-    displayName: 'TRIA',
+    displayName: 'Rede Social',
     logoUrl: null,
     primary: NEUTRAL_COLORS.primary,
     onPrimary: NEUTRAL_COLORS.onPrimary,

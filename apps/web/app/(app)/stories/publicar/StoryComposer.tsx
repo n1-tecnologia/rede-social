@@ -1,6 +1,6 @@
 'use client';
 
-import { MEDIA_LIMITS, mediaAcceptFor } from '@tria/contracts/media';
+import { MEDIA_LIMITS, mediaAcceptFor } from '@rede-social/contracts/media';
 import {
   STORY_HIGHLIGHT_MAX_ITEMS,
   STORY_HIGHLIGHT_MAX_PER_PLACE,
@@ -9,13 +9,20 @@ import {
   type StoryHighlightIssue,
   type StoryIssue,
   type StoryMediaKind,
-} from '@tria/module-stories/contracts';
+} from '@rede-social/module-stories/contracts';
 import {
   type HighlightSelection,
   HighlightSheet,
   type HighlightSheetPlace,
-} from '@tria/module-stories/ui';
-import { Button, ConfirmDialog, FileDropZone, IconButton, PageHeader, useToast } from '@tria/ui';
+} from '@rede-social/module-stories/ui';
+import {
+  Button,
+  ConfirmDialog,
+  FileDropZone,
+  IconButton,
+  PageHeader,
+  useToast,
+} from '@rede-social/ui';
 import { ChevronRight, Image as ImageIcon, Loader, Video, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';

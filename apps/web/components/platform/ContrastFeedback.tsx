@@ -1,7 +1,7 @@
 'use client';
 
-import type { ContrastReport } from '@tria/contracts/branding';
-import { StatusPill } from '@tria/ui';
+import type { ContrastReport } from '@rede-social/contracts/branding';
+import { StatusPill } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 
 export interface ContrastFeedbackProps {

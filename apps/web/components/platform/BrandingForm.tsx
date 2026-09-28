@@ -6,9 +6,9 @@ import {
   contrastReport,
   deriveBrandColors,
   hexColorSchema,
-} from '@tria/contracts/branding';
-import { BrandPreview, type BrandPreviewLabels } from '@tria/core/ui';
-import { Button, Card, SectionTitle, useToast } from '@tria/ui';
+} from '@rede-social/contracts/branding';
+import { BrandPreview, type BrandPreviewLabels } from '@rede-social/core/ui';
+import { Button, Card, SectionTitle, useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useMemo, useState, useTransition } from 'react';

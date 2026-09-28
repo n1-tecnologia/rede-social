@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, EmptyState, Skeleton, StatusPill } from '@tria/ui';
+import { Button, Card, EmptyState, Skeleton, StatusPill } from '@rede-social/ui';
 import { Building2, ChevronRight, Plus, SearchX } from 'lucide-react';
 import Link from 'next/link';
 import { useState, useTransition } from 'react';

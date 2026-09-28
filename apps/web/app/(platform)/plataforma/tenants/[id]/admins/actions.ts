@@ -1,6 +1,6 @@
 'use server';
 
-import { inviteParamsSchema, tenantInviteSchema } from '@tria/contracts';
+import { inviteParamsSchema, tenantInviteSchema } from '@rede-social/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';

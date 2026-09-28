@@ -1,13 +1,13 @@
 # Project Research Summary
 
-**Project:** TRIA Rede Social (white-label community platform)
+**Project:** Rede Social (white-label community platform)
 **Domain:** Multi-tenant, white-label community / branded social-app SaaS (single URL, mobile-first PWA, admin-publishes-everything in V1)
 **Researched:** 2026-09-11
 **Confidence:** MEDIUM
 
 ## Executive Summary
 
-TRIA Rede Social is a multi-tenant community SaaS in the Circle / Mighty Networks / Bettermode category, with two twists the comparables do not have: full white-label at every tier inside one URL (branding resolved from the logged-in account, not the hostname) and institution-grade features (admin broadcast stories, RSVP + self check-in, a support-desk chat role) aimed at Brazilian creators, churches, schools and associations. Experts build this shape as a **shared-schema Postgres with `tenant_id` on every row and RLS as defense in depth**, a **modular monolith API** (one deployable, feature modules by folder, per-tenant feature flags gating both routes and navigation), and a thin **Next.js BFF + renderer** that never owns business rules. The fixed stack (Next.js on Vercel, Node/TS API on Cloud Run, Supabase, GitHub CI/CD) fits this shape well; the research pinned concrete versions (Next 16.3, Hono 4.13, Drizzle 0.45, Supabase CLI 2.117, Serwist 9.5) and verified them against npm and official docs on 2026-09-11.
+Rede Social is a multi-tenant community SaaS in the Circle / Mighty Networks / Bettermode category, with two twists the comparables do not have: full white-label at every tier inside one URL (branding resolved from the logged-in account, not the hostname) and institution-grade features (admin broadcast stories, RSVP + self check-in, a support-desk chat role) aimed at Brazilian creators, churches, schools and associations. Experts build this shape as a **shared-schema Postgres with `tenant_id` on every row and RLS as defense in depth**, a **modular monolith API** (one deployable, feature modules by folder, per-tenant feature flags gating both routes and navigation), and a thin **Next.js BFF + renderer** that never owns business rules. The fixed stack (Next.js on Vercel, Node/TS API on Cloud Run, Supabase, GitHub CI/CD) fits this shape well; the research pinned concrete versions (Next 16.3, Hono 4.13, Drizzle 0.45, Supabase CLI 2.117, Serwist 9.5) and verified them against npm and official docs on 2026-09-11.
 
 The recommended approach is: build the **core kernel first** (tenants, users, `memberships`, RLS transaction lane, JWKS auth, module registry, `/me/bootstrap`), then **branding + PWA shell**, then a **media broker** (signed direct-to-Storage uploads, external video transcoding), then content modules in dependency order (feed -> communities -> stories -> events), then **notifications + Realtime**, **Web Push**, **chat**, **moderation/admin**, and **pilot hardening**. Each step is independently deployable and each establishes a convention the next reuses (nullable-FK likes/comments, keyset pagination, domain events -> worker jobs, id-only Broadcast signals).
 
@@ -58,7 +58,7 @@ Table stakes are "what a tenant's members notice missing in week one", scoped to
 **Must have (table stakes):**
 - Tenant branding (logo, colors, favicon, name) applied server-side incl. per-tenant PWA manifest/icons -- the product's core value
 - Feature flags per tenant driving bottom navigation *and* API 404s for disabled modules
-- TRIA platform panel: create tenant, branding, flags, first `admin_tenant`
+- Rede Social platform panel: create tenant, branding, flags, first `admin_tenant`
 - Public sign-up link per tenant, email/password + recovery, first-login photo/bio nudge, duplicate-email UX
 - Media pipeline: multi-image, capped video, files, link previews + YouTube/Vimeo oEmbed
 - Feed: chronological posts, like, comment, one-level reply, comment likes, **pin**, edit/delete, share deep link that survives login
@@ -172,7 +172,7 @@ Based on research, suggested phase structure (12 phases; each deployable and tes
 
 ### Phase 11: Moderation and Admin Panel
 **Rationale:** Data rules (soft delete, membership status, moderation log) exist since Foundation/Feed; the screens are thin but the feature set (report, log, analytics) is expected by tenant admins and is cheap.
-**Delivers:** Admin delete any comment/reply/story comment (soft, cascades to replies and notifications), block/unblock with Realtime + push revocation and sign-out, member management (list/search/role change/remove), member **report** action + admin reports queue + notification to admins, `moderation_log` append-only, tenant-editable community rules + TRIA terms shown at sign-up, event attendance views, 6-8 analytics counters with date range, support-role assignment, platform panel tenant list/status.
+**Delivers:** Admin delete any comment/reply/story comment (soft, cascades to replies and notifications), block/unblock with Realtime + push revocation and sign-out, member management (list/search/role change/remove), member **report** action + admin reports queue + notification to admins, `moderation_log` append-only, tenant-editable community rules + Rede Social terms shown at sign-up, event attendance views, 6-8 analytics counters with date range, support-role assignment, platform panel tenant list/status.
 **Avoids:** Pitfall 15 (moderation that doesn't take effect).
 
 ### Phase 12: Pilot Hardening
@@ -223,7 +223,7 @@ Phases with standard patterns (skip research-phase):
 - **Video vendor and cost model:** pricing figures in research are LOW confidence; verify on vendor pages at Media phase start. Decide whether the pilot tenant can defer video entirely if budget is tight.
 - **Realtime capacity beyond Pro (500 connections):** enough for the pilot; add-on pricing and the SSE fallback trigger point need numbers before tenant #2-#10.
 - **"New post to every member" notification strategy** (eager rows vs lazy render vs hourly collapse): decide in Phase 8 with pilot member count in hand.
-- **Branded auth emails:** Supabase templates are per project; V1 accepts a neutral TRIA template or uses the Send Email hook. Decide in Phase 2; cheap either way but visible to members.
+- **Branded auth emails:** Supabase templates are per project; V1 accepts a neutral platform template or uses the Send Email hook. Decide in Phase 2; cheap either way but visible to members.
 - **Events timezone model:** Brazil has multiple zones; store UTC + tenant timezone field; confirm pilot tenant's zone handling in Phase 7.
 - **TypeScript 7 tooling:** if any tool needs the TS JS API before 7.1 ships, alias to TS 6 per STACK.md fallback; check at repo bootstrap.
 - **LGPD scope for the pilot:** research covers mechanics (consent, deletion, export, logs), not legal review; flag for the user before pilot go-live.

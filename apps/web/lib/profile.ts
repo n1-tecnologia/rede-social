@@ -6,7 +6,7 @@ import {
   memberProfileSchema,
   type OwnProfile,
   ownProfileSchema,
-} from '@tria/contracts/profiles';
+} from '@rede-social/contracts/profiles';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
 import { apiFetch } from '@/lib/api';

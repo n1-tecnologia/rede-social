@@ -185,7 +185,7 @@ human_verification:
   - test: "Abrir `.planning/sketches/002-phase-04-designed-screens/index.html` no navegador, em claro e escuro e com pelo menos duas marcas de tenant, e percorrer os 5 pontos do `<human-check>` de 04-02 (linguagem do protótipo em `/criar` e `/post/[id]/editar`; FAB móvel x botão de cabeçalho no desktop; os quatro estados do cartão de prévia, com a variante YouTube/Vimeo lendo como 'abre externamente'; a linha de anexo com nome de 90 caracteres; as duas mensagens para o time de design no README)"
     expected: "Aprovação (ou aprovação provisória do product owner, precedente 02-04) registrada no frontmatter do README do sketch: `status`, `approved`, `approved_by`, `approved_at`, `approval_kind`, `changes_requested`"
     why_human: "Portão D-33 / UI-04: é um julgamento de design sobre pixels, não uma asserção programável. WINDOWS 19 e 28 — 04-04, 04-05 e 04-09 codificaram contra o desenho por decisão explícita do orquestrador, com a aprovação carregada para a UAT da fase."
-  - test: "Num iPhone real (Safari) e num Android real (Chrome), autenticado como membro de `tria-demo`, abrir uma publicação e tocar o controle de compartilhar; depois enviar o link para si mesmo, abri-lo deslogado e confirmar o retorno à publicação após o login"
+  - test: "Num iPhone real (Safari) e num Android real (Chrome), autenticado como membro de `rede-demo`, abrir uma publicação e tocar o controle de compartilhar; depois enviar o link para si mesmo, abri-lo deslogado e confirmar o retorno à publicação após o login"
     expected: "A folha de compartilhamento do SO abre carregando o link `/post/{id}` no host próprio do tenant; o link aberto deslogado passa pelo login e aterrissa na publicação"
     why_human: "`navigator.share()` abre uma superfície de nível de SO em que o Playwright não entra (WINDOWS 26). A metade desktop — copiar link e toast — ESTÁ automatizada em `apps/web/e2e/feed-share.spec.ts`."
   - test: "Nos mesmos aparelhos, dar um toque duplo na imagem de uma publicação e depois deslizar a galeria por todos os slides e voltar"
@@ -282,7 +282,7 @@ de `criar/actions.ts` como o plano 04-09 declarou (deriva de localização, não
 | Todos os 10 planos | — | `gsd_run query verify.key-links` | ✓ 39/40 WIRED | O único "não ligado" é o mesmo falso negativo de glob (`*_drop_example_module.sql`), verificado à mão |
 | `apps/web/lib/registry.tsx:116` (`feedHome`) | `apps/web/lib/feed.ts` (`loadFeed`) → `GET /v1/feed` | `Promise.all` no renderer do home slot | ✓ WIRED | Dados reais: `page.items.map(postCardView…)`; `initialItems` cai para `[]` só quando a carga falha, e `initialError` distingue os dois casos |
 | `apps/web/app/(app)/inicio/feed-actions.ts` | `packages/modules/feed/server/routes.ts` | server actions `'use server'` → `apiFetch` | ✓ WIRED | 13 actions exportadas cobrindo listar/curtir/comentar/responder/editar/apagar |
-| `apps/api/src/modules/registry.ts` | `@tria/module-feed/module` | `MODULE_REGISTRY.feed` + `subscribe()` + `registerJobQueues()` | ✓ WIRED | Único ponto de composição; remover um módulo é uma linha — demonstrado por 04-10 |
+| `apps/api/src/modules/registry.ts` | `@rede-social/module-feed/module` | `MODULE_REGISTRY.feed` + `subscribe()` + `registerJobQueues()` | ✓ WIRED | Único ponto de composição; remover um módulo é uma linha — demonstrado por 04-10 |
 | `packages/modules/feed/server/service.ts` (`createPost`) | `feed_link_previews` + fila `FEED_UNFURL_QUEUE` | `upsertLinkPreview` dentro da mesma transação | ✓ WIRED | `on conflict (tenant_id, url_hash) do nothing` com enfileiramento só na linha realmente criada |
 
 ### Data-Flow Trace (Level 4)
@@ -300,8 +300,8 @@ de `criar/actions.ts` como o plano 04-09 declarou (deriva de localização, não
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Eventos de domínio: enfileira após o commit, entrega uma vez, nada no rollback | `pnpm --filter @tria/module-feed exec vitest run tests/events.test.ts` | `Test Files 1 passed · Tests 9 passed` | ✓ PASS |
-| Suíte inteira do módulo feed (eventos, guarda SSRF, meta, media, share) | `pnpm --filter @tria/module-feed test` | `Test Files 5 passed (5) · Tests 99 passed (99)` | ✓ PASS |
+| Eventos de domínio: enfileira após o commit, entrega uma vez, nada no rollback | `pnpm --filter @rede-social/module-feed exec vitest run tests/events.test.ts` | `Test Files 1 passed · Tests 9 passed` | ✓ PASS |
+| Suíte inteira do módulo feed (eventos, guarda SSRF, meta, media, share) | `pnpm --filter @rede-social/module-feed test` | `Test Files 5 passed (5) · Tests 99 passed (99)` | ✓ PASS |
 | Resposta a uma resposta recusada pelo banco | `insert … parent_id = <resposta de depth 1>` no Postgres local | `ERROR: violates foreign key constraint "feed_comments_parent_fk"` (23503) | ✓ PASS |
 | Mentir sobre a profundidade (`depth = 2`) recusado pelo banco | `insert … depth 2, parent_depth 1` | `ERROR: violates check constraint "feed_comments_parent_shape_chk"` (23514) | ✓ PASS |
 | Curtida idempotente arbitrada pelo índice, não por código | `insert … on conflict do nothing` de uma curtida existente | `INSERT 0 0`, contagem antes = depois = 16 | ✓ PASS |
@@ -390,7 +390,7 @@ um Success Criterion; todos são registrados aqui para que a conclusão não os 
 | A-WR-01/02/03 | `packages/modules/feed/server/unfurl/guard.ts` | A deny-list IPv6 omite `ff00::/8`, `2002::/16` (6to4), `2001::/32` (Teredo) e `::/96`; os redirects são ilimitados (`redirect: 'follow'` = 20 hops) onde o `CLAUDE.md` especifica **≤3** | Não — o guarda de nível de socket inspeciona **cada hop**, então redirects ilimitados são preocupação de amplificação/DoS, não de bypass SSRF | ⚠️ WARNING — `maxRedirections: 3` no Agent é uma linha |
 | B-WR-06 | `apps/api/tests/integration/feed-query-budget.test.ts` | Os três orçamentos usam `toBeLessThanOrEqual`, então uma medição que pare de casar passa em 0 | Não. **Verificado nesta verificação:** o regex casa 34 formas de statement com 438 chamadas no buffer vivo, e `pg_stat_statements` está carregada — a medição não é vácua neste ambiente. O critério 4 fica ✓ VERIFIED, com a forma da asserção como dívida | ⚠️ WARNING — acrescentar um piso (`toBeGreaterThan(0)`) torna a guarda bidirecional |
 | B-WR-11 | `supabase/tests/**` | Nada no pgTAP afirma que a remoção de 04-10 realmente aconteceu | Não — confirmado por probe direto no banco nesta verificação | ℹ️ INFO |
-| C-WR-01 | `apps/web/proxy.ts:218-223` | `tria_continue` é escrito sem `secure`, contrariando a política do próprio repositório em `lib/supabase/cookie-options.ts`; `TENANT_SLUG_COOKIE` tem a mesma lacuna | Não | ⚠️ WARNING |
+| C-WR-01 | `apps/web/proxy.ts:218-223` | `rede_continue` é escrito sem `secure`, contrariando a política do próprio repositório em `lib/supabase/cookie-options.ts`; `TENANT_SLUG_COOKIE` tem a mesma lacuna | Não | ⚠️ WARNING |
 
 Caminho de fechamento recomendado pelo próprio review: `/gsd-code-review 04 --fix`, e
 `/gsd-secure-phase 04` (a fase ainda não tem `SECURITY.md` e `workflow.security_enforcement` está
@@ -398,7 +398,7 @@ ligado).
 
 ### Higiene do ledger
 
-`WINDOWS.md` linha 9 (`@tria/module-example` — "must be deleted with its table and registry entry in
+`WINDOWS.md` linha 9 (`@rede-social/module-example` — "must be deleted with its table and registry entry in
 Phase 4") ainda está com `status: open`, embora a remoção tenha sido confirmada em três frentes
 nesta verificação (grep do código-fonte, `to_regclass` no banco, `tenant_modules` vazio). É higiene
 de registro, não trabalho pendente — a linha deveria ser marcada `fixed` apontando para 04-10.
@@ -422,7 +422,7 @@ posteriores do designer são polimento, não blocker.
 
 #### 2. Folha de compartilhamento nativa em aparelho real
 
-**Test:** iPhone real (Safari) e Android real (Chrome), como membro de `tria-demo`: abrir uma
+**Test:** iPhone real (Safari) e Android real (Chrome), como membro de `rede-demo`: abrir uma
 publicação, tocar compartilhar; enviar o link para si, abrir deslogado.
 **Expected:** A folha do SO abre com o link `/post/{id}` no host próprio do tenant; o link aberto
 deslogado passa pelo login e aterrissa na publicação.

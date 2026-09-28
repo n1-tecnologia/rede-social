@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import type { Attendee, EventDetail, EventSummary } from '@tria/module-events/contracts';
+import type { Attendee, EventDetail, EventSummary } from '@rede-social/module-events/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';

@@ -1,9 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
   "root": true,
-  "extends": [
-    "./packages/config/biome.base.json"
-  ],
+  "extends": ["./packages/config/biome.base.json"],
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -17,9 +15,9 @@
   "files": {
     "includes": [
       "**",
-      "!.gsd/**",
-      "!.planning/**",
-      "!.claude/**",
+      "!.gsd",
+      "!.planning",
+      "!.claude",
       "!**/node_modules",
       "!**/dist",
       "!**/.next",
@@ -49,8 +47,8 @@
                 "patterns": [
                   {
                     "group": [
-                      "@tria/core/db/admin-tx",
-                      "@tria/core/server/supabase-admin"
+                      "@rede-social/core/db/admin-tx",
+                      "@rede-social/core/server/supabase-admin"
                     ],
                     "message": "Admin lane is kernel-only"
                   }
@@ -62,10 +60,7 @@
       }
     },
     {
-      "includes": [
-        "packages/modules/**",
-        "packages/boundary-fixture/**"
-      ],
+      "includes": ["packages/modules/**", "packages/boundary-fixture/**"],
       "linter": {
         "rules": {
           "style": {
@@ -75,34 +70,29 @@
                 "patterns": [
                   {
                     "group": [
-                      "@tria/module-*/server/*",
-                      "@tria/module-*/db/*",
-                      "@tria/module-*/ui/*",
-                      "@tria/module-*/contracts/*",
-                      "@tria/module-*/src/**",
-                      "@tria/core/src/**",
+                      "@rede-social/module-*/server/*",
+                      "@rede-social/module-*/db/*",
+                      "@rede-social/module-*/ui/*",
+                      "@rede-social/module-*/contracts/*",
+                      "@rede-social/module-*/src/**",
+                      "@rede-social/core/src/**",
                       "../../../core/**"
                     ],
                     "message": "Import published entry points only"
                   },
                   {
                     "group": [
-                      "@tria/core/db/admin-tx",
-                      "@tria/core/server/supabase-admin"
+                      "@rede-social/core/db/admin-tx",
+                      "@rede-social/core/server/supabase-admin"
                     ],
                     "message": "Admin lane is kernel-only"
                   },
                   {
-                    "group": [
-                      "@tria/core/db"
-                    ],
-                    "message": "A module reaches data only through withTenantTx (@tria/core/db/tenant-tx); the raw db/sqlClient could switch roles outside the lane guard"
+                    "group": ["@rede-social/core/db"],
+                    "message": "A module reaches data only through withTenantTx (@rede-social/core/db/tenant-tx); the raw db/sqlClient could switch roles outside the lane guard"
                   },
                   {
-                    "group": [
-                      "@tria/api",
-                      "@tria/api/*"
-                    ],
+                    "group": ["@rede-social/api", "@rede-social/api/*"],
                     "message": "A module may not import an app package"
                   }
                 ]
@@ -113,9 +103,7 @@
       }
     },
     {
-      "includes": [
-        "apps/web/**"
-      ],
+      "includes": ["apps/web/**"],
       "linter": {
         "rules": {
           "style": {
@@ -125,17 +113,17 @@
                 "patterns": [
                   {
                     "group": [
-                      "@tria/core/db/*",
-                      "@tria/core/server/*",
-                      "@tria/api/*",
-                      "!@tria/api/types"
+                      "@rede-social/core/db/*",
+                      "@rede-social/core/server/*",
+                      "@rede-social/api/*",
+                      "!@rede-social/api/types"
                     ],
                     "message": "Web imports contracts, module ui and API types only"
                   },
                   {
                     "group": [
-                      "@tria/core/db/admin-tx",
-                      "@tria/core/server/supabase-admin"
+                      "@rede-social/core/db/admin-tx",
+                      "@rede-social/core/server/supabase-admin"
                     ],
                     "message": "Admin lane is kernel-only"
                   }
@@ -147,17 +135,13 @@
       }
     },
     {
-      "includes": [
-        "packages/ui/src/styles/tokens.css"
-      ],
+      "includes": ["packages/ui/src/styles/tokens.css"],
       "formatter": {
         "enabled": false
       }
     },
     {
-      "includes": [
-        "packages/core/ui/**"
-      ],
+      "includes": ["packages/core/ui/**"],
       "linter": {
         "rules": {
           "style": {
@@ -171,9 +155,9 @@
                       "../db/**",
                       "../../server/**",
                       "../../db/**",
-                      "@tria/core/server/*",
-                      "@tria/core/db/*",
-                      "@tria/core/db"
+                      "@rede-social/core/server/*",
+                      "@rede-social/core/db/*",
+                      "@rede-social/core/db"
                     ],
                     "message": "Kernel UI is client-safe: no server or database imports"
                   }

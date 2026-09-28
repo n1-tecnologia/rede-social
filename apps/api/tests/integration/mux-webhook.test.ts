@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { createClient } from '@supabase/supabase-js';
-import { MEDIA_LIMITS } from '@tria/contracts/media';
-import { sqlClient } from '@tria/core/db';
-import { stopBoss } from '@tria/core/server/jobs/boss';
-import { MEDIA_TENANT_VIDEO_SECONDS_CEILING } from '@tria/core/server/media/limits';
-import { mediaProviderEventJob } from '@tria/core/server/media/video/event-job';
+import { MEDIA_LIMITS } from '@rede-social/contracts/media';
+import { sqlClient } from '@rede-social/core/db';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { MEDIA_TENANT_VIDEO_SECONDS_CEILING } from '@rede-social/core/server/media/limits';
+import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import {
   FAKE_VIDEO_SIGNATURE_HEADER,
   fakeVideoInternals,
   resetFakeVideoInternals,
   signFakeVideoWebhook,
-} from '@tria/core/server/media/video/fake';
-import type { VideoProviderEvent } from '@tria/core/server/media/video/types';
+} from '@rede-social/core/server/media/video/fake';
+import type { VideoProviderEvent } from '@rede-social/core/server/media/video/types';
+import { createClient } from '@supabase/supabase-js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
@@ -32,8 +32,8 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  * branch is reachable locally without a Mux secret.
  */
 
-const ADMIN_EMAIL = 'admin@tria-demo.local';
-const MEMBER_EMAIL = 'member@tria-demo.local';
+const ADMIN_EMAIL = 'admin@rede-demo.local';
+const MEMBER_EMAIL = 'member@rede-demo.local';
 const WEBHOOK_PATH = '/v1/webhooks/mux';
 
 /** A tiny but REAL mp4 container (ftyp + a minimal moov), enough for a Storage PUT to accept it. */
@@ -229,8 +229,8 @@ beforeAll(async () => {
   memberToken = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
   const [tenant] = await adminSql<
     { id: string }[]
-  >`select id from public.tenants where slug = 'tria-demo'`;
-  if (!tenant) throw new Error('the tria-demo tenant is not seeded');
+  >`select id from public.tenants where slug = 'rede-demo'`;
+  if (!tenant) throw new Error('the rede-demo tenant is not seeded');
   demoTenantId = tenant.id;
   await cleanup();
 });

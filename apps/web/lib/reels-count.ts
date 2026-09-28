@@ -1,9 +1,9 @@
-import type { CountTemplates } from '@tria/module-feed/ui';
+import type { CountTemplates } from '@rede-social/module-feed/ui';
 
 /**
  * The accessible count a Reel's rail announces (UI-D-87, E05 zero-one-many).
  *
- * The rail DRAWS the compact number ("8 mil", `compactCount` in `@tria/module-reels/ui`) and hides
+ * The rail DRAWS the compact number ("8 mil", `compactCount` in `@rede-social/module-reels/ui`) and hides
  * it from assistive technology; this is what the polite live region reads instead: the feed's own
  * full-number template, "8.000 curtidas" rather than "8 mil curtidas". The plural form is chosen from
  * the ORIGINAL count through `Intl.PluralRules`, exactly as the feed card's `formatCountLabel` does,

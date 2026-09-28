@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
+import type { StoryMediaControls } from '@rede-social/module-stories/ui';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import type { StoryMediaControls } from '@tria/module-stories/ui';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**

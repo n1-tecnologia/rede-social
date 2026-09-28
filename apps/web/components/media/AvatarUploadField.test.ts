@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
+
+import type { MediaAsset } from '@rede-social/contracts/media';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import type { MediaAsset } from '@tria/contracts/media';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { completeMediaUploadAction, startMediaUploadAction } from '@/app/(app)/perfil/actions';
 import { normaliseImage, uploadBytes } from '@/lib/upload';
@@ -40,8 +41,8 @@ vi.mock('next-intl', () => ({
   },
 }));
 
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 

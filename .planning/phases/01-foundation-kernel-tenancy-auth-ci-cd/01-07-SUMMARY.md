@@ -15,12 +15,12 @@ requires:
   - phase: 01-09
     provides: "Dockerfile with the ROLE=api/ROLE=worker switch that apps/api/src/worker.ts fills in"
 provides:
-  - "EventMap/DomainEventName/DomainEventRecord in @tria/contracts — the single declaration-merge point modules augment"
+  - "EventMap/DomainEventName/DomainEventRecord in @rede-social/contracts — the single declaration-merge point modules augment"
   - "Kernel event bus: emit collects on ctx.events, flush delivers after commit, a failing subscriber is logged not thrown"
   - "pg-boss wiring: createBoss (schema pgboss, migrate false), lazy API-side getBoss, enqueueInTx via fromDrizzle(tx, sql)"
   - "pgboss schema as a reviewed Supabase migration with api_user-only grants (authenticated revoked)"
   - "apps/api/src/worker.ts: ROLE=worker creates one queue per registry job and binds its handler, graceful SIGTERM stop"
-  - "@tria/module-example: the full module contract (table+RLS, guarded routes, service, job, event, UI) in one package"
+  - "@rede-social/module-example: the full module contract (table+RLS, guarded routes, service, job, event, UI) in one package"
   - "registerJobQueues/registeredJobQueues + AnyJobDefinition — the kernel holds queue names without importing a module"
   - "MODULE_REGISTRY composition side effects: event subscriptions and queue names registered at import time"
   - "ExampleWidget on /inicio with an admin-only create form, and the createExampleItem server action"
@@ -87,7 +87,7 @@ key-decisions:
   - "A17 confirmed: the adapter export is `fromDrizzle(tx, sql)` from `pg-boss` (dist/adapters/drizzle.d.ts); no fallback to a post-transaction enqueue was needed"
   - "ManifestJobs are payload-erased (`AnyJobDefinition`): a `JobDefinition<P>` handler is contravariant, so a typed module job cannot live in a `JobDefinition<unknown>[]` — the kernel genuinely does not know any module's payload shape"
   - "Queue names reach the kernel through `registerJobQueues`, called by the app-tier registry, so `boss.ts` never imports a module (MOD-02)"
-  - "pg-boss is a dependency of BOTH @tria/core and @tria/api: tsup bundles only @tria/* and externalises declared deps, so without the apps/api entry esbuild inlined pg-boss (and its CJS `pg`) and the built main.js died on `Dynamic require of \"events\"`"
+  - "pg-boss is a dependency of BOTH @rede-social/core and @rede-social/api: tsup bundles only @rede-social/* and externalises declared deps, so without the apps/api entry esbuild inlined pg-boss (and its CJS `pg`) and the built main.js died on `Dynamic require of \"events\"`"
 
 patterns-established:
   - "Module package: exports exactly ./module, ./contracts, ./server, ./ui, ./db — no deep paths, no ./src/*"
@@ -98,11 +98,11 @@ requirements-completed: [MOD-01, MOD-02, ROLE-06]
 
 coverage:
   - id: D1
-    description: "@tria/module-example is a self-contained package (schema, contracts, server, ui, db) exporting exactly five entry points and depending only on the kernel and @tria/contracts"
+    description: "@rede-social/module-example is a self-contained package (schema, contracts, server, ui, db) exporting exactly five entry points and depending only on the kernel and @rede-social/contracts"
     requirement: MOD-01
     verification:
       - kind: other
-        ref: "npx turbo boundaries --filter=@tria/module-example (7 files, no issues found)"
+        ref: "npx turbo boundaries --filter=@rede-social/module-example (7 files, no issues found)"
         status: pass
       - kind: other
         ref: "pnpm turbo typecheck lint (15/15 tasks, all workspaces)"
@@ -119,7 +119,7 @@ coverage:
         ref: "apps/api/tests/unit/registry.test.ts#1. every registered key equals its manifest key and is a known module key"
         status: pass
       - kind: other
-        ref: "npx turbo boundaries --filter=@tria/api (28 files, no issues found; kernel tag denies module/app)"
+        ref: "npx turbo boundaries --filter=@rede-social/api (28 files, no issues found; kernel tag denies module/app)"
         status: pass
     human_judgment: false
   - id: D3
@@ -168,11 +168,11 @@ coverage:
         status: pass
     human_judgment: false
   - id: D6
-    description: "Tenant isolation and stable ordering on the module's list: tria-lab rows are invisible to tria-demo by list and by id (404 NOT_FOUND), and created_at ties resolve by id desc on repeated calls"
+    description: "Tenant isolation and stable ordering on the module's list: rede-lab rows are invisible to rede-demo by list and by id (404 NOT_FOUND), and created_at ties resolve by id desc on repeated calls"
     requirement: MOD-01
     verification:
       - kind: integration
-        ref: "apps/api/tests/integration/example.test.ts#4. cross-tenant: tria-lab rows are invisible to tria-demo, by list and by id (T-07-02)"
+        ref: "apps/api/tests/integration/example.test.ts#4. cross-tenant: rede-lab rows are invisible to rede-demo, by list and by id (T-07-02)"
         status: pass
       - kind: integration
         ref: "apps/api/tests/integration/example.test.ts#5. TENANT-03 ordering is stable when created_at ties (created_at desc, id desc)"
@@ -215,7 +215,7 @@ status: complete
 
 # Phase 01 Plan 07: The Example Module — Kernel Bus, pg-boss and the Module Contract Summary
 
-**`@tria/module-example` proves the whole module contract end to end: an RLS-isolated table, routes behind `requireModule`/`requireRole`, a row and a pg-boss job written in ONE transaction, a typed `example.item.created` event delivered after commit, a `ROLE=worker` process of the same image that sets `processed_at` through the tenant lane, and a widget on `/inicio` that an admin writes to and a member only reads.**
+**`@rede-social/module-example` proves the whole module contract end to end: an RLS-isolated table, routes behind `requireModule`/`requireRole`, a row and a pg-boss job written in ONE transaction, a typed `example.item.created` event delivered after commit, a `ROLE=worker` process of the same image that sets `processed_at` through the tenant lane, and a widget on `/inicio` that an admin writes to and a member only reads.**
 
 ## Performance
 
@@ -231,7 +231,7 @@ status: complete
 - **pg-boss wired so the runtime never issues DDL.** The `pgboss` schema is a reviewed Supabase migration generated verbatim by `pg-boss plans create` (12.31.0); every `PgBoss` is constructed with `schema: 'pgboss', migrate: false`. `api_user` gets usage + DML + default privileges; `anon`/`authenticated` are revoked.
 - **The queue is invisible to the tenant lane.** Because `withTenantTx` runs as `authenticated` — which now holds nothing on `pgboss` — `enqueueInTx` switches to `api_user` for the enqueue only and restores the caller's role. Both switches are `LOCAL`, so the job insert still rolls back with the caller's write, and no tenant-lane code path can read another tenant's job payload.
 - **One image, two roles, proven live.** `apps/api/src/worker.ts` creates one queue per registry `JobDefinition` (idempotent, so concurrent worker boots converge) and binds its handler; SIGTERM stops it with `graceful: true`. Booted from the built `dist/main.js` with `ROLE=worker`, it logged `worker.started {queues:["example.process"]}`, drained a real `createItem` enqueue (`updated: 1`) and exited cleanly on SIGTERM. The `ROLE=api` branch still answers `/v1/health` with a closed-port `DATABASE_URL`.
-- **The module package contract is now a thing you can copy.** `@tria/module-example` exports exactly `./module`, `./contracts`, `./server`, `./ui`, `./db`; `turbo boundaries` reports no issues for it or for `apps/api`. Its routes carry their own `requireAuth -> requireModule('example') -> requireRole('admin_tenant')` chain, so the mount in `app.ts` is a bare `.route()` that cannot forget a guard. Its table ticks every line of the SCHEMA-CONVENTIONS new-module checklist.
+- **The module package contract is now a thing you can copy.** `@rede-social/module-example` exports exactly `./module`, `./contracts`, `./server`, `./ui`, `./db`; `turbo boundaries` reports no issues for it or for `apps/api`. Its routes carry their own `requireAuth -> requireModule('example') -> requireRole('admin_tenant')` chain, so the mount in `app.ts` is a bare `.route()` that cannot forget a guard. Its table ticks every line of the SCHEMA-CONVENTIONS new-module checklist.
 - **Jobs treat `tenantId` as data, not authority.** The handler re-enters the tenant lane with the payload's tenant; a mismatched tenant updates zero rows instead of another tenant's item (asserted, T-07-03).
 - **`/inicio` finally renders a module.** The widget appears only when `example` is in `bootstrap.modules`, and the form only when `permissions` includes `example.create` — both from the API, never from client-side reasoning. 01-06's open window (raw module keys, no manifest) is now closed for `example`, which renders as "Exemplo".
 - **21 new automated checks:** 5 kernel unit, 4 mount unit, 8 API integration, 3 Playwright cases on `mobile-chromium`, plus the registry test updated for the registered manifest.
@@ -239,7 +239,7 @@ status: complete
 ## Task Commits
 
 1. **Task 1: kernel event bus, pg-boss wiring, pgboss schema migration, ROLE=worker entry** — `e81a65f` (feat)
-2. **Task 2: @tria/module-example package, registry entry, mounts, integration tests** — `4e814f7` (feat)
+2. **Task 2: @rede-social/module-example package, registry entry, mounts, integration tests** — `4e814f7` (feat)
 3. **Task 3: ExampleWidget on /inicio, server action, e2e** — `d1f78d6` (feat)
 
 **Plan metadata:** see the `docs(01-07)` commit that follows this file.
@@ -264,7 +264,7 @@ status: complete
 2. **`pg-boss plans create` produced the DDL** (the CLI's `plans migrate` emits a from-version-0 script whose first statement probes `pgboss.version`, which does not exist yet). Only `BEGIN;`/`COMMIT;`, the two `SET LOCAL` timeouts and the advisory lock were stripped, since the Supabase CLI already wraps each migration in one transaction. The migration header records that a pg-boss upgrade means a NEW custom migration, never `migrate: true`.
 3. **Queue names travel app-tier → kernel, never the reverse.** `boss.ts` keeps a `Set<string>` filled by `registerJobQueues`, which `apps/api/src/modules/registry.ts` calls at import time. Had the kernel read `MODULE_REGISTRY` itself (as the plan's sketch implied), it would import the app tier and `turbo boundaries` would fail.
 4. **`routes` in the manifest is a lazy import, but `app.ts` mounts the eager export.** The chained `.route()` style is what makes `AppType` carry every route for `hc<AppType>()`; the lazy manifest entry keeps the worker from building an HTTP router it never serves. Both point at the same `exampleRoutes`.
-5. **The widget takes `canCreate` and all copy as props.** A module component that fetched its own data or reached for the kernel would make the web tier's import boundary unenforceable; this shape is what lets Biome keep `apps/web` restricted to `@tria/contracts` + module `ui`.
+5. **The widget takes `canCreate` and all copy as props.** A module component that fetched its own data or reached for the kernel would make the web tier's import boundary unenforceable; this shape is what lets Biome keep `apps/web` restricted to `@rede-social/contracts` + module `ui`.
 
 ## Deviations from Plan
 
@@ -280,7 +280,7 @@ status: complete
 
 **2. [Rule 3 - Blocking] `JobDefinition<P>` could not be stored in the manifest's `jobs` list**
 - **Found during:** Task 2
-- **Issue:** `jobs?: JobDefinition[]` means `JobDefinition<unknown>[]`; a handler parameter is contravariant, so `JobDefinition<ExampleProcessJob>` is not assignable and `tsc` failed in both `@tria/module-example` and `@tria/api`.
+- **Issue:** `jobs?: JobDefinition[]` means `JobDefinition<unknown>[]`; a handler parameter is contravariant, so `JobDefinition<ExampleProcessJob>` is not assignable and `tsc` failed in both `@rede-social/module-example` and `@rede-social/api`.
 - **Fix:** Added `AnyJobDefinition` (a deliberately payload-erased `JobDefinition<any>`, with a documented biome-ignore) to the kernel manifest and used it for `jobs` and in the worker. The module's own `JobDefinition<ExampleProcessJob>` stays typed at the definition site.
 - **Files modified:** `packages/core/server/modules/manifest.ts`, `apps/api/src/worker.ts`
 - **Verification:** `pnpm turbo typecheck lint` green across all 15 tasks.
@@ -288,7 +288,7 @@ status: complete
 
 **3. [Rule 3 - Blocking] The built `main.js` died with `Dynamic require of "events" is not supported`**
 - **Found during:** Task 1 (the DB-free-boot segment of `<verify>`)
-- **Issue:** tsup externalises declared dependencies and bundles everything else. With pg-boss declared only in `@tria/core`, esbuild inlined pg-boss **and its CJS `pg` dependency** into the ESM bundle, which then failed at the first `require`.
+- **Issue:** tsup externalises declared dependencies and bundles everything else. With pg-boss declared only in `@rede-social/core`, esbuild inlined pg-boss **and its CJS `pg` dependency** into the ESM bundle, which then failed at the first `require`.
 - **Fix:** Declared `pg-boss@12.31.0` in `apps/api` as well (the process that actually runs it). The bundle dropped from 2.04 MB to 880 KB and the built API booted.
 - **Files modified:** `apps/api/package.json`, `pnpm-lock.yaml`
 - **Verification:** `node apps/api/dist/main.js` with a closed-port `DATABASE_URL` answers `/v1/health` with `{"ok":true}`.
@@ -315,7 +315,7 @@ status: complete
 - **Issue:** The plan named four labels; the widget also renders a "processado" marker for items the worker has handled, and every UI string must live in the catalog.
 - **Fix:** Added the `example` namespace with five keys, including `processed`.
 - **Files modified:** `apps/web/messages/pt-BR.json`, `packages/modules/example/ui/ExampleWidget.tsx`
-- **Verification:** `pnpm --filter @tria/web typecheck lint`; e2e case 1.
+- **Verification:** `pnpm --filter @rede-social/web typecheck lint`; e2e case 1.
 - **Committed in:** `d1f78d6`
 
 ### Process deviation
@@ -333,7 +333,7 @@ status: complete
 
 ## Issues Encountered
 
-- **`pnpm boundaries` still fails at the script level** on `--filter='!@tria/boundary-fixture'` — the fixture package is owed by 01-08 and does not exist yet (known, pre-existing). Run directly, `npx turbo boundaries` reports **no issues for `@tria/module-example` or `@tria/api`** and 3 pre-existing tag-allowlist findings involving `@tria/config`/`@tria/contracts`/`@tria/core` (edges this plan did not create). **A13 is therefore confirmed: `turbo boundaries` works in turbo 2.10.12**; no `dependency-cruiser` fallback was needed.
+- **`pnpm boundaries` still fails at the script level** on `--filter='!@rede-social/boundary-fixture'` — the fixture package is owed by 01-08 and does not exist yet (known, pre-existing). Run directly, `npx turbo boundaries` reports **no issues for `@rede-social/module-example` or `@rede-social/api`** and 3 pre-existing tag-allowlist findings involving `@rede-social/config`/`@rede-social/contracts`/`@rede-social/core` (edges this plan did not create). **A13 is therefore confirmed: `turbo boundaries` works in turbo 2.10.12**; no `dependency-cruiser` fallback was needed.
 - **Two suites need `SUPER_ADMIN_PASSWORD`, which this environment does not hold**: `apps/api/tests/integration/modules.test.ts` (fails in `beforeAll`) and `bootstrap.test.ts` case 11 (runs `pnpm db:seed`), plus `apps/web/e2e/platform.spec.ts`. All three are 01-06 artifacts, untouched by this plan, and fail identically before it. Everything else is green: API 56 passing (8 of them this plan's), kernel 20/20, e2e 28/28 on `mobile-chromium` excluding the platform spec.
 - **`dist/` now contains chunks** (`main.js` + two chunk files) because the manifest's `routes` is a dynamic import. `pnpm deploy` copies the whole package directory and `CMD ["node", "dist/main.js"]` is unchanged, so 01-09's image is unaffected — worth knowing for 01-08's Docker smoke.
 
@@ -341,7 +341,7 @@ status: complete
 
 | Stub | File | Reason |
 |---|---|---|
-| The entire `@tria/module-example` package | `packages/modules/example/**` | **Intentional and planned (D-19):** a real but throwaway module whose only job is to prove the contract. Phase 4 deletes the package, the `example` registry entry, the `example_items` table and the `/inicio` widget when feed replaces it. Recorded in `.planning/WINDOWS.md`. |
+| The entire `@rede-social/module-example` package | `packages/modules/example/**` | **Intentional and planned (D-19):** a real but throwaway module whose only job is to prove the contract. Phase 4 deletes the package, the `example` registry entry, the `example_items` table and the `/inicio` widget when feed replaces it. Recorded in `.planning/WINDOWS.md`. |
 | `counters` still zero | `apps/api/src/routes/me.ts` | Unchanged from 01-01; notifications/chat counters are Phase 7 (existing window). |
 
 ## Threat Flags
@@ -365,4 +365,4 @@ None — no external service configuration. Local runs need `SEED_PASSWORD` (and
 
 ## Self-Check: PASSED
 
-All 21 `key-files.created` paths exist on disk; all three task commits (`e81a65f`, `4e814f7`, `d1f78d6`) are present in `git log`. Plan `<verification>` re-run at close-out: `bus.test.ts` 5/5 (kernel 20/20), `mounts.test.ts` 4/4 (API unit 11/11), `example.test.ts` 8/8, `example.spec.ts` 3/3 plus 25 other `mobile-chromium` cases, `pnpm guard:lanes` OK, `npx turbo boundaries` clean for `@tria/module-example` and `@tria/api`, `has_schema_privilege('api_user','pgboss','USAGE')` = `t`, and the built `ROLE=api` bundle answers `/v1/health` against a closed-port `DATABASE_URL`.
+All 21 `key-files.created` paths exist on disk; all three task commits (`e81a65f`, `4e814f7`, `d1f78d6`) are present in `git log`. Plan `<verification>` re-run at close-out: `bus.test.ts` 5/5 (kernel 20/20), `mounts.test.ts` 4/4 (API unit 11/11), `example.test.ts` 8/8, `example.spec.ts` 3/3 plus 25 other `mobile-chromium` cases, `pnpm guard:lanes` OK, `npx turbo boundaries` clean for `@rede-social/module-example` and `@rede-social/api`, `has_schema_privilege('api_user','pgboss','USAGE')` = `t`, and the built `ROLE=api` bundle answers `/v1/health` against a closed-port `DATABASE_URL`.

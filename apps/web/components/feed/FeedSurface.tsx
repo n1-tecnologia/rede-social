@@ -1,6 +1,6 @@
 'use client';
 
-import { FeedList, type FeedListProps, type PostMenuLabels } from '@tria/module-feed/ui';
+import { FeedList, type FeedListProps, type PostMenuLabels } from '@rede-social/module-feed/ui';
 import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
 import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';

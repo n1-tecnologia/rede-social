@@ -1,7 +1,7 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
-import { BottomSheet, Switch } from '@tria/ui';
+import { MediaImage } from '@rede-social/core/ui';
+import { BottomSheet, Switch } from '@rede-social/ui';
 import { Check, Plus } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { HighlightTitleStep } from './HighlightTitleStep';

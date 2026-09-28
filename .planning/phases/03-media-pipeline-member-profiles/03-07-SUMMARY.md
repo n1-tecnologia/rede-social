@@ -157,7 +157,7 @@ coverage:
     description: "Exactly one keyset cursor implementation exists in the repo: encodeCursor/decodeCursor moved to packages/core/server/paging.ts and profiles/search.ts re-exports them, with 03-03's unit suite unchanged and green"
     verification:
       - kind: unit
-        ref: "pnpm --filter @tria/core test -- profiles-search — 189 tests pass with no change to packages/core/tests/profiles-search.test.ts"
+        ref: "pnpm --filter @rede-social/core test -- profiles-search — 189 tests pass with no change to packages/core/tests/profiles-search.test.ts"
         status: pass
       - kind: other
         ref: "grep -vE '^[[:space:]]*(//|\\*|/\\*)' packages/core/server/profiles/search.ts | grep -c 'function encodeCursor' prints 0; the file contains `from '../paging'`"
@@ -411,7 +411,7 @@ checkpoint.
   exhaustive map over the union). `bootstrapRedirectPath`'s switch has a `default`, so no web branch
   needed changing.
 - **Files modified:** `packages/contracts/src/errors.ts`, `packages/core/server/http/api-error.ts`
-- **Verification:** `pnpm --filter @tria/contracts typecheck`, `@tria/core typecheck`, and the 409
+- **Verification:** `pnpm --filter @rede-social/contracts typecheck`, `@rede-social/core typecheck`, and the 409
   integration case.
 - **Committed in:** `86b4cbb`
 
@@ -520,17 +520,17 @@ owns and are never reachable from application code.
 
 | Gate | Result |
 |---|---|
-| `pnpm --filter @tria/contracts typecheck` | pass |
-| `pnpm --filter @tria/core typecheck` / `lint` | pass |
-| `pnpm --filter @tria/core test -- profiles-search` | 189 tests pass (the cursor lift changed nothing) |
-| `pnpm --filter @tria/api typecheck` / `lint` | pass |
-| `pnpm --filter @tria/web typecheck` / `lint` / `test` | pass (82 tests) |
+| `pnpm --filter @rede-social/contracts typecheck` | pass |
+| `pnpm --filter @rede-social/core typecheck` / `lint` | pass |
+| `pnpm --filter @rede-social/core test -- profiles-search` | 189 tests pass (the cursor lift changed nothing) |
+| `pnpm --filter @rede-social/api typecheck` / `lint` | pass |
+| `pnpm --filter @rede-social/web typecheck` / `lint` / `test` | pass (82 tests) |
 | `bash scripts/check-ui-literals.sh` | pass |
-| `pnpm --filter @tria/web build` | pass |
+| `pnpm --filter @rede-social/web build` | pass |
 | `bash scripts/check-static-routes.sh` | pass — `/configuracoes/midia` builds as `ƒ`, 0 offenders |
 | `pnpm boundaries` | pass — 414 files, 7 packages |
 | `pnpm test:integration -- media-playback members` | 295 tests pass across 21 files |
-| `pnpm --filter @tria/web exec playwright test media-video.spec.ts` | 34 pass (17 cases × 2 projects) |
+| `pnpm --filter @rede-social/web exec playwright test media-video.spec.ts` | 34 pass (17 cases × 2 projects) |
 | `grep -rln "@mux/mux-node"` over source | exactly `packages/core/server/media/video/mux.ts` |
 | `grep -rln "@mux/mux-player-react" apps/web/` | exactly `apps/web/components/media/VideoPlayer.tsx` |
 
@@ -545,7 +545,7 @@ by 03-06 in `docs/DEPLOY.md` and are unchanged.
 
 - **03-08 (sweeper + isolation suite + exit gate)** — lift the three cross-tenant cases from
   `media-playback.test.ts` (`describe('cross-tenant refusal …')`) into `isolation.test.ts`; they are
-  written against the seeded `tria-demo`/`tria-lab` pair that file already uses. The sweeper must call
+  written against the seeded `rede-demo`/`rede-lab` pair that file already uses. The sweeper must call
   `videoProvider.deleteAsset` for a collected video carrying a `provider_asset_id`. Two known-blocked
   UAT lines carry forward: the real Mux transcode and real-device HLS (windows 12), and the real
   poster/still (window 14).

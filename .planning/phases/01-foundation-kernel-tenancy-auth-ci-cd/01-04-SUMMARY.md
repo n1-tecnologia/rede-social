@@ -7,11 +7,11 @@ tags: [zod, supabase-auth, gotrue, drizzle, rls, lgpd, hono, next-app-router, pl
 # Dependency graph
 requires:
   - phase: 01-01
-    provides: kernel (withAdminTx, supabaseAdmin, ApiError/ERROR_CODES), tenants/users/memberships tables, publicRoutes with GET /v1/public/tenants/by-host, seeded tria-demo/tria-lab
+    provides: kernel (withAdminTx, supabaseAdmin, ApiError/ERROR_CODES), tenants/users/memberships tables, publicRoutes with GET /v1/public/tenants/by-host, seeded rede-demo/rede-lab
   - phase: 01-02
-    provides: "@tria/web shell — proxy.ts host resolution, getHostTenant/signupPath, HttpOnly session cookies, /entrar, SubmitButton, pt-BR catalog, e2e fixtures"
+    provides: "@rede-social/web shell — proxy.ts host resolution, getHostTenant/signupPath, HttpOnly session cookies, /entrar, SubmitButton, pt-BR catalog, e2e fixtures"
 provides:
-  - "@tria/contracts auth schemas (slug/password/login/forgot/reset/signup) shared by API, web forms and future plans"
+  - "@rede-social/contracts auth schemas (slug/password/login/forgot/reset/signup) shared by API, web forms and future plans"
   - versioned legal texts (packages/contracts/legal/*.md + readLegalDoc) with the one-consent-one-version invariant under test
   - consent_records table — append-only LGPD evidence, select-only RLS policy, DB-stamped accepted_at, inet ip
   - "signupMember(): autoconfirmed identity + membership + both consents in one admin-lane transaction with deleteUser compensation"
@@ -30,9 +30,9 @@ plan_head_before: c51bc0fc3c5cf9da50b043af62440e941ab96b9e
 
 # Tech tracking
 tech-stack:
-  added: [vitest 5.0.0 in @tria/contracts]
+  added: [vitest 5.0.0 in @rede-social/contracts]
   patterns:
-    - "Shared Zod contracts: one schema object in @tria/contracts validates the HTTP body (API) and the form (web server action); the form schema extends the body schema with z.literal(true) consents"
+    - "Shared Zod contracts: one schema object in @rede-social/contracts validates the HTTP body (API) and the form (web server action); the form schema extends the body schema with z.literal(true) consents"
     - "Append-only evidence tables: RLS enabled with a single select-only policy and no insert/update/delete policy — writes go exclusively through the admin lane"
     - "Compensating transaction: createUser (outside Postgres) then one withAdminTx for all DB rows; any failure after createUser deletes the auth identity so no orphan remains"
     - "Versioned legal texts as data: markdown front-matter version: N mirrored by a TypeScript constant, kept in sync by a unit test"
@@ -72,7 +72,7 @@ key-decisions:
   - "GoTrue duplicate e-mail is matched on THREE shapes, not one: error.code === 'email_exists', error.code === 'user_already_exists', or a message containing 'already been registered' (422). A fourth path exists for the race: when two sign-ups collide, the loser gets an opaque 'Database error creating new user' (500) from GoTrue's own unique index, so the handler re-queries auth.users by e-mail and reclassifies a confirmed hit as 409 — a genuine outage (no such user) still answers 500."
   - "The concurrency test was KEPT, not skipped: five parallel identical sign-ups reliably produce exactly one 201 and four 409s against the local stack, with one membership and two consent rows."
   - "proxy.ts resolves the host tenant from x-forwarded-host before host. Next re-requests the destination of a Server Action redirect() on the server's own origin (host: localhost:3000) and carries the browser-facing host in x-forwarded-host; reading host first classified every post-sign-up page as a generic host and silently dropped the tenant shell."
-  - "One consent, one version: the single tria_terms checkbox accepts both legal texts, so TRIA_PRIVACY_VERSION === TRIA_TERMS_VERSION is asserted by a unit test and editing either markdown must bump version: in both files and both constants."
+  - "One consent, one version: the single platform_terms checkbox accepts both legal texts, so PLATFORM_PRIVACY_VERSION === PLATFORM_TERMS_VERSION is asserted by a unit test and editing either markdown must bump version: in both files and both constants."
   - "consent_records carries no insert/update/delete policy at all — inserts happen in the admin lane, so the absence of a write policy is the tamper-resistance mechanism, not an oversight."
 
 patterns-established:
@@ -84,7 +84,7 @@ requirements-completed: [AUTH-01, AUTH-04, ROLE-02]
 
 coverage:
   - id: D1
-    description: "Shared auth Zod schemas in @tria/contracts (slug 3-40 lowercase, password min 8, signup body/form with literal-true consents) reused by the API and the web form"
+    description: "Shared auth Zod schemas in @rede-social/contracts (slug 3-40 lowercase, password min 8, signup body/form with literal-true consents) reused by the API and the web form"
     requirement: AUTH-01
     verification:
       - kind: integration
@@ -94,11 +94,11 @@ coverage:
         ref: "apps/api/tests/integration/signup.test.ts#4. boundary: slugs of 3 and 40 chars resolve; 2 and 41 are 404 TENANT_NOT_FOUND"
         status: pass
       - kind: integration
-        ref: "apps/api/tests/integration/signup.test.ts#5. adjacency: `Tria-Demo` is a miss, not an alias of `tria-demo`"
+        ref: "apps/api/tests/integration/signup.test.ts#5. adjacency: `Rede-Demo` is a miss, not an alias of `rede-demo`"
         status: pass
     human_judgment: false
   - id: D2
-    description: "Versioned legal texts (legal/*.md front-matter + readLegalDoc) with the one-consent-one-version invariant: TRIA_PRIVACY_VERSION === TRIA_TERMS_VERSION"
+    description: "Versioned legal texts (legal/*.md front-matter + readLegalDoc) with the one-consent-one-version invariant: PLATFORM_PRIVACY_VERSION === PLATFORM_TERMS_VERSION"
     requirement: AUTH-04
     verification:
       - kind: unit
@@ -171,7 +171,7 @@ coverage:
         ref: "apps/web/e2e/signup.spec.ts#2. register -> Sair -> login: the tenant survives the round trip through the HOST"
         status: pass
       - kind: e2e
-        ref: "apps/web/e2e/signup.spec.ts#4. D-22: the host wins — /cadastro/tria-lab on the tria-demo host lands on /cadastro"
+        ref: "apps/web/e2e/signup.spec.ts#4. D-22: the host wins — /cadastro/rede-lab on the rede-demo host lands on /cadastro"
         status: pass
       - kind: e2e
         ref: "apps/web/e2e/signup.spec.ts#6. generic host keeps /cadastro/{slug} and remembers the slug in a cookie"
@@ -188,7 +188,7 @@ coverage:
     requirement: AUTH-04
     verification:
       - kind: manual_procedural
-        ref: "curl http://tria-demo.localhost:3000/termos -> 200; /privacidade renders \"Versão 1\""
+        ref: "curl http://rede-demo.localhost:3000/termos -> 200; /privacidade renders \"Versão 1\""
         status: pass
     human_judgment: true
     rationale: "The pages render, but the CONTENT is placeholder pilot text written by the executor. A human (ideally with legal review) must sign off on the Termos de Uso and Política de Privacidade wording before a real member accepts them, since the accepted version number becomes LGPD evidence. The outputFileTracingIncludes effect is also only observable on a real Vercel build."
@@ -224,9 +224,9 @@ status: complete
 
 - **Sign-up API end-to-end.** `POST /v1/public/signup/{slug}` creates an autoconfirmed GoTrue identity, then writes the `member` membership and both `consent_records` rows in ONE `withAdminTx` transaction; any failure after `createUser` deletes the auth identity, so a partial sign-up can never leave an orphan login. Ten integration cases cover happy path, both password and slug boundaries, mixed-case adjacency, empty/stale input, idempotency, cross-tenant duplicates, forced-failure compensation and a five-way concurrency race.
 - **LGPD evidence that cannot be rewritten.** `consent_records` has RLS enabled with exactly one policy — a `select` for the owning user in the owning tenant. There is no insert, update or delete policy: writes exist only through the admin lane, `accepted_at` comes from the DB's own `now()`, `ip` is an `inet` from the trusted `X-Client-IP` hop, and `text_version` binds each row to a versioned markdown text whose constant is kept in sync by a unit test.
-- **Two explicit consents, never pre-checked.** `/cadastro` renders name, e-mail and a show/hide password field (no username, no confirm field) plus two separate unchecked required checkboxes: the tenant's rules (openable in a native `<dialog>` bottom sheet) and TRIA's terms + privacy policy (links to `/termos` and `/privacidade`). `grep defaultChecked` returns zero.
-- **The tenant survives the round trip both ways.** On a tenant domain the public link is `/cadastro` with no slug and the host is the sole authority — the server action ignores the hidden slug field, `/cadastro/tria-lab` on the tria-demo host lands back on `/cadastro`, and no `tenant_slug` cookie is involved. On generic hosts the D-01 `/cadastro/{slug}` path still works, sets the cookie, and `/entrar` shows "Comunidade: TRIA Demo" from it. The platform host redirects both paths to `/entrar`.
-- **Duplicate e-mails stay private.** A 409 `EMAIL_ALREADY_REGISTERED` carries no `details`; the page shows the generic pt-BR copy with a link to `/entrar`, and the e2e asserts the rendered body contains neither `tria-lab` nor `TRIA Lab`. The cross-tenant fact is logged server-side only as `signup.duplicate_email`.
+- **Two explicit consents, never pre-checked.** `/cadastro` renders name, e-mail and a show/hide password field (no username, no confirm field) plus two separate unchecked required checkboxes: the tenant's rules (openable in a native `<dialog>` bottom sheet) and the platform's terms + privacy policy (links to `/termos` and `/privacidade`). `grep defaultChecked` returns zero.
+- **The tenant survives the round trip both ways.** On a tenant domain the public link is `/cadastro` with no slug and the host is the sole authority — the server action ignores the hidden slug field, `/cadastro/rede-lab` on the rede-demo host lands back on `/cadastro`, and no `tenant_slug` cookie is involved. On generic hosts the D-01 `/cadastro/{slug}` path still works, sets the cookie, and `/entrar` shows "Comunidade: Rede Demo" from it. The platform host redirects both paths to `/entrar`.
+- **Duplicate e-mails stay private.** A 409 `EMAIL_ALREADY_REGISTERED` carries no `details`; the page shows the generic pt-BR copy with a link to `/entrar`, and the e2e asserts the rendered body contains neither `rede-lab` nor `Rede Lab`. The cross-tenant fact is logged server-side only as `signup.duplicate_email`.
 
 ## Task Commits
 
@@ -242,7 +242,7 @@ _Tasks 1 and 2 were committed by the session-1 executor before the user interrup
 ## Files Created/Modified
 
 - `packages/contracts/src/auth.ts` — `slugSchema` (`^[a-z0-9-]{3,40}$`), `passwordSchema` (min 8), `loginSchema`, `forgotSchema`, `resetSchema`, `signupBodySchema`, `signupFormSchema` (adds the two `z.literal(true)` consents), `publicTenantSchema`, `signupResponseSchema`
-- `packages/contracts/src/legal.ts` — `TRIA_TERMS_VERSION`, `TRIA_PRIVACY_VERSION`, `readLegalDoc()` (server-only, `node:fs`), plus the "one consent, one version" rule in the file header
+- `packages/contracts/src/legal.ts` — `PLATFORM_TERMS_VERSION`, `PLATFORM_PRIVACY_VERSION`, `readLegalDoc()` (server-only, `node:fs`), plus the "one consent, one version" rule in the file header
 - `packages/contracts/legal/{termos-de-uso,politica-de-privacidade}.md` — pt-BR pilot texts with `version: 1` front-matter
 - `packages/contracts/tests/legal.test.ts` + `vitest.config.ts` — keeps constants and markdown in lockstep
 - `packages/core/db/schema/consent-records.ts` — the table, its unique key and the single select-only policy
@@ -263,7 +263,7 @@ _Tasks 1 and 2 were committed by the session-1 executor before the user interrup
 
 - **The GoTrue duplicate error shape** (the plan asked for this explicitly): matched on `error.code === 'email_exists'`, `error.code === 'user_already_exists'`, or a message containing `already been registered` (HTTP 422). The race is a *fourth* shape — GoTrue's own unique index surfaces as an opaque `Database error creating new user` (500) — so the handler re-queries `auth.users` by e-mail and reclassifies a confirmed hit as 409 while a genuine outage (no such user) still answers 500. The log records `raced: true` for that path.
 - **The concurrency test was kept, not skipped.** Five parallel identical sign-ups against the local stack reliably yield exactly one 201 and four 409s, with one membership and two consent rows for the winner. The backstop truth in the plan is therefore covered by a real test.
-- **`TRIA_PRIVACY_VERSION === TRIA_TERMS_VERSION` is enforced by test**, so the single recorded `tria_terms` version number identifies both accepted texts.
+- **`PLATFORM_PRIVACY_VERSION === PLATFORM_TERMS_VERSION` is enforced by test**, so the single recorded `platform_terms` version number identifies both accepted texts.
 - **`consent_records` intentionally has no write policy.** Tamper-resistance comes from the absence of insert/update/delete policies combined with admin-lane-only writes.
 
 ## Deviations from Plan
@@ -272,7 +272,7 @@ _Tasks 1 and 2 were committed by the session-1 executor before the user interrup
 
 **1. [Rule 1 - Bug] `proxy.ts` resolved the host from `host` instead of `x-forwarded-host`, dropping the tenant after every Server Action redirect**
 
-- **Found during:** Task 3 (the register → `Sair` → login round trip failed: `/entrar` after sign-up showed the generic shell instead of "Comunidade: TRIA Demo")
+- **Found during:** Task 3 (the register → `Sair` → login round trip failed: `/entrar` after sign-up showed the generic shell instead of "Comunidade: Rede Demo")
 - **Issue:** When a Server Action calls `redirect()`, Next re-requests the destination through `proxy.ts` on the *server's own* origin (`host: localhost:3000`) and carries the browser-facing host in `x-forwarded-host`. Reading `host` first classified every post-action page as a generic host, so the tenant public shell silently disappeared for exactly the flow AUTH-01 is about.
 - **Fix:** `resolveHostTenant(forwardedHost || request.headers.get('host'))`, taking the first hop of `x-forwarded-host`. The comment records why trusting it is safe here: Vercel and Cloud Run overwrite a client-supplied value at the edge, and per D-20/D-23 the host only SELECTS the public shell — the API re-resolves it and can only DENY a session.
 - **Files modified:** `apps/web/proxy.ts`
@@ -291,10 +291,10 @@ _Tasks 1 and 2 were committed by the session-1 executor before the user interrup
 **3. [Rule 3 - Blocking] Test and catalog scaffolding the plan assumed already existed**
 
 - **Found during:** Tasks 1 and 2
-- **Issue:** `@tria/contracts` had no test runner (Vitest 5 no longer walks up for a config) and its `tsconfig.json` excluded `tests/`; the plan stated the `signup` pt-BR strings were "all already present", but `viewRules`, `closeRules`, `termsLink`, `privacyLink`, `invalid` and the whole `legal` namespace were missing.
-- **Fix:** added `vitest` 5.0.0 + `@tria/config` as dev dependencies with a `test` script and a package-local `vitest.config.ts`, widened the tsconfig `include`, and added the missing catalog keys.
+- **Issue:** `@rede-social/contracts` had no test runner (Vitest 5 no longer walks up for a config) and its `tsconfig.json` excluded `tests/`; the plan stated the `signup` pt-BR strings were "all already present", but `viewRules`, `closeRules`, `termsLink`, `privacyLink`, `invalid` and the whole `legal` namespace were missing.
+- **Fix:** added `vitest` 5.0.0 + `@rede-social/config` as dev dependencies with a `test` script and a package-local `vitest.config.ts`, widened the tsconfig `include`, and added the missing catalog keys.
 - **Files modified:** `packages/contracts/{package.json,tsconfig.json,vitest.config.ts}`, `pnpm-lock.yaml`, `apps/web/messages/pt-BR.json`
-- **Verification:** `pnpm --filter @tria/contracts exec vitest run` → 4 passed; `pnpm typecheck` and `pnpm lint` green across all 7 packages.
+- **Verification:** `pnpm --filter @rede-social/contracts exec vitest run` → 4 passed; `pnpm typecheck` and `pnpm lint` green across all 7 packages.
 - **Committed in:** `d257811` / `da24809`
 
 **4. [Rule 3 - Blocking] Stale comment on `/entrar` claiming its endpoint did not exist yet**
@@ -303,7 +303,7 @@ _Tasks 1 and 2 were committed by the session-1 executor before the user interrup
 - **Issue:** `entrar/page.tsx` carried "Plan 01-04 defines `GET /v1/public/tenants/{slug}`; until then any non-2xx simply means no hint" — the endpoint now exists, so the comment misdescribed live behaviour and the ledger entry stayed open.
 - **Fix:** rewrote the comment to state the endpoint exists and why the fetch stays deliberately loose and non-fatal; marked broken-window 3 fixed.
 - **Files modified:** `apps/web/app/(auth)/entrar/page.tsx`, `.planning/WINDOWS.md`
-- **Verification:** `pnpm --filter @tria/web lint` green; e2e case 6 proves the hint renders from the cookie on a generic host.
+- **Verification:** `pnpm --filter @rede-social/web lint` green; e2e case 6 proves the hint renders from the cookie on a generic host.
 - **Committed in:** `cca7d39`
 
 ---
@@ -314,7 +314,7 @@ _Tasks 1 and 2 were committed by the session-1 executor before the user interrup
 ## Issues Encountered
 
 - **The session-1 executor was interrupted by the user after Task 2**, leaving Task 3 written but uncommitted and unverified. Session 2 re-ran every acceptance criterion and `<verify>` block for Tasks 1 and 2 before touching Task 3 — all passed unchanged, so nothing was rewritten. Task 3's own verify then ran clean on the first attempt.
-- **`pnpm boundaries` fails** with `No package found with name '@tria/boundary-fixture'`. Pre-existing and out of scope: the fixture and `scripts/check-boundaries.sh` are already recorded as broken-window 7, owed by a sibling plan in this phase.
+- **`pnpm boundaries` fails** with `No package found with name '@rede-social/boundary-fixture'`. Pre-existing and out of scope: the fixture and `scripts/check-boundaries.sh` are already recorded as broken-window 7, owed by a sibling plan in this phase.
 
 ## Known Stubs
 
@@ -331,7 +331,7 @@ None — no external service configuration required. The suite runs against the 
 ## Next Phase Readiness
 
 - **Ready for 01-05** (`NO_MEMBERSHIP` / blocked-access screens): `signupMember`'s compensation already guarantees no orphan identity, so 01-05's screens are a safety net rather than a routine path. `PasswordField.tsx` exists at the path 01-05 Task 1 expects, so its stated fallback is unnecessary.
-- **`@tria/contracts` now owns `loginSchema`, `forgotSchema` and `resetSchema`** — 01-05's password-recovery pages should import them instead of writing local Zod objects.
+- **`@rede-social/contracts` now owns `loginSchema`, `forgotSchema` and `resetSchema`** — 01-05's password-recovery pages should import them instead of writing local Zod objects.
 - **Legal text is placeholder.** `termos-de-uso.md` and `politica-de-privacidade.md` are neutral pilot texts as the plan specified. Before a real member accepts them the wording needs a human (ideally legal) review; when it changes, bump `version:` in BOTH markdown files and BOTH constants together — the unit test enforces the pairing.
 - **`outputFileTracingIncludes` is unproven on Vercel.** The legal pages read markdown at request time from `packages/contracts/legal/`; only a real Vercel build confirms the tracing config ships it.
 

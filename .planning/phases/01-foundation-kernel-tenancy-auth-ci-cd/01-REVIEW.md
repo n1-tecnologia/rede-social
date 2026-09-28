@@ -162,7 +162,7 @@ Three things must be fixed before this phase can be considered shippable:
 
 1. The `ROLE=worker` process never binds a port, but `deploy-api.yml` deploys it as a Cloud Run **service**. Cloud Run's startup probe will fail and the worker revision will never become ready, in staging and production.
 2. GoTrue's own public sign-up is left enabled (`enable_signup = true`, confirmations off), so anyone with the publishable key can create identities that bypass the API's tenant + consent flow. Because `auth.users.email` is global, an attacker can pre-register a victim's e-mail and permanently lock them out of `POST /v1/public/signup` (409 with no recovery path).
-3. The "admin lane is kernel-only" Biome rule restricts `@tria/core/db/admin-tx`, but `withAdminTx` is exported from `@tria/core/db/tenant-tx` as well — the public entry point every module already imports. The single enforcement of the `service_role` boundary is bypassable with a one-line import change and no lint error.
+3. The "admin lane is kernel-only" Biome rule restricts `@rede-social/core/db/admin-tx`, but `withAdminTx` is exported from `@rede-social/core/db/tenant-tx` as well — the public entry point every module already imports. The single enforcement of the `service_role` boundary is bypassable with a one-line import change and no lint error.
 
 The warnings cluster around three themes: the event bus and job queue promise guarantees the code does not actually deliver (events flushed after a rolled-back handler; `singletonKey` provides no idempotency on a `standard` queue; the `finally` in `enqueueInTx` masks the real error), the public API accepting attacker-controlled inputs it treats as trusted (`X-Client-IP`, unbounded host cache keys, unlimited sign-up rate), and the `memberships` RLS policy being `FOR ALL` while every other core table is select-only in the tenant lane.
 
@@ -200,7 +200,7 @@ Push the same setting to the hosted projects (`supabase config push` already run
 ### CR-03: The admin-lane import restriction is bypassable — `withAdminTx` is exported from the unrestricted `tenant-tx` entry point
 
 **File:** `packages/core/db/tenant-tx.ts:42-47`, `packages/core/db/admin-tx.ts:1-2`, `packages/core/package.json` (`"./db/tenant-tx"` export), `biome.json:40-52`
-**Issue:** `withAdminTx` (which runs `SET LOCAL ROLE service_role`, bypassing every RLS policy) is defined and exported in `tenant-tx.ts`; `admin-tx.ts` merely re-exports it. Biome's `noRestrictedImports` only lists `@tria/core/db/admin-tx` and `@tria/core/server/supabase-admin`. `@tria/core/db/tenant-tx` is a public export that `packages/modules/example/server/service.ts:1` and `apps/api/src/routes/me.ts:4` already import. Any module or route can write `import { withAdminTx } from '@tria/core/db/tenant-tx'` and open the cross-tenant lane with no lint error, no boundary failure and nothing in `guard-local-settings.sh` to catch it (the switch is `LOCAL`). The comment in `tenant-tx.ts:39-40` and the SCHEMA/PLAN docs claim the lane is "importable ONLY from `server/{tenancy,platform}` and `scripts/`" — that claim is currently false, and the negative fixture (`packages/boundary-fixture`) only exercises the `admin-tx` path.
+**Issue:** `withAdminTx` (which runs `SET LOCAL ROLE service_role`, bypassing every RLS policy) is defined and exported in `tenant-tx.ts`; `admin-tx.ts` merely re-exports it. Biome's `noRestrictedImports` only lists `@rede-social/core/db/admin-tx` and `@rede-social/core/server/supabase-admin`. `@rede-social/core/db/tenant-tx` is a public export that `packages/modules/example/server/service.ts:1` and `apps/api/src/routes/me.ts:4` already import. Any module or route can write `import { withAdminTx } from '@rede-social/core/db/tenant-tx'` and open the cross-tenant lane with no lint error, no boundary failure and nothing in `guard-local-settings.sh` to catch it (the switch is `LOCAL`). The comment in `tenant-tx.ts:39-40` and the SCHEMA/PLAN docs claim the lane is "importable ONLY from `server/{tenancy,platform}` and `scripts/`" — that claim is currently false, and the negative fixture (`packages/boundary-fixture`) only exercises the `admin-tx` path.
 **Fix:** Move the implementation so the public entry point cannot leak it:
 ```ts
 // packages/core/db/admin-tx.ts — the ONLY definition
@@ -215,7 +215,7 @@ export async function withAdminTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
 }
 // packages/core/db/tenant-tx.ts — delete withAdminTx; export only Tx + withTenantTx
 ```
-Then add `import { withAdminTx } from '@tria/core/db/tenant-tx'` to `packages/boundary-fixture/src/index.ts` so `boundaries:negative` proves the hole is closed, and consider also restricting `@tria/core/db` (raw `db`/`sqlClient`) outside the kernel — a module could otherwise issue `db.execute(sql\`set_config('role', 'service_role', false)\`)`, which the lane guard's regex does not match.
+Then add `import { withAdminTx } from '@rede-social/core/db/tenant-tx'` to `packages/boundary-fixture/src/index.ts` so `boundaries:negative` proves the hole is closed, and consider also restricting `@rede-social/core/db` (raw `db`/`sqlClient`) outside the kernel — a module could otherwise issue `db.execute(sql\`set_config('role', 'service_role', false)\`)`, which the lane guard's regex does not match.
 
 ## Warnings
 

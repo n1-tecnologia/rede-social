@@ -1,11 +1,11 @@
-import { platformTenantsSchema, TENANT_HOST_HEADER } from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
-import type { AppEnv } from '@tria/core/server/auth/context';
-import { requireAuth } from '@tria/core/server/auth/require-auth';
-import { errorEnvelope } from '@tria/core/server/http/api-error';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
-import { requireModule } from '@tria/core/server/modules/require-module';
-import { requireRole } from '@tria/core/server/rbac/require-role';
+import { platformTenantsSchema, TENANT_HOST_HEADER } from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
+import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { errorEnvelope } from '@rede-social/core/server/http/api-error';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { requireModule } from '@rede-social/core/server/modules/require-module';
+import { requireRole } from '@rede-social/core/server/rbac/require-role';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -26,9 +26,9 @@ type BootstrapBody = {
   permissions: string[];
 };
 
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
-const PLATFORM_HOST = process.env.PLATFORM_HOST ?? 'tria.localhost';
+const PLATFORM_HOST = process.env.PLATFORM_HOST ?? 'rede-social.localhost';
 
 /** Same middleware stack as `apps/api/src/app.ts`, with two throwaway routes behind the guards. */
 const guarded = new Hono<AppEnv>();
@@ -63,7 +63,7 @@ const tenantIds = { demo: '', lab: '' };
 let emptyTenantId = '';
 let emptyUserId = '';
 const EMPTY_SLUG = `e2e-empty-${Date.now()}`.slice(0, 40);
-const EMPTY_MEMBER = `member-${EMPTY_SLUG}@tria-test.local`;
+const EMPTY_MEMBER = `member-${EMPTY_SLUG}@rede-social-test.local`;
 const EMPTY_PASSWORD = 'Segredo123';
 
 const bootstrap = (token: string, headers: Record<string, string> = {}) =>
@@ -94,17 +94,17 @@ beforeAll(async () => {
     throw new Error('SUPER_ADMIN_PASSWORD is required (same value as `pnpm db:seed`)');
   }
 
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
-  tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
-  tokens.labAdmin = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+  tokens.labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
+  tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
   tokens.superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
 
   // A tenant with NO tenant_modules rows at all (the ROLE-06 "empty" case).
@@ -137,7 +137,7 @@ afterAll(async () => {
 });
 
 describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () => {
-  it('1. tria-demo lists the seven seeded keys; tria-lab only reels + events + feed', async () => {
+  it('1. rede-demo lists the seven seeded keys; rede-lab only reels + events + feed', async () => {
     const demo = await bootstrap(tokens.demoMember);
     expect(demo.status).toBe(200);
     const demoBody = (await demo.json()) as BootstrapBody;
@@ -201,7 +201,7 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
       expect(m.settings).toEqual({});
     }
 
-    // D-17 pins tria-lab to exactly feed + events plus `reels`, which is on by default (D-122) —
+    // D-17 pins rede-lab to exactly feed + events plus `reels`, which is on by default (D-122) —
     // the disabled-module 404 below depends on chat, communities and notifications staying off.
     const lab = await bootstrap(tokens.labMember);
     expect(lab.status).toBe(200);
@@ -236,7 +236,7 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
 });
 
 describe('requireModule — 404 MODULE_DISABLED, and the fixed middleware order', () => {
-  it('4. enabled on tria-demo -> 200; disabled on tria-lab -> 404 MODULE_DISABLED', async () => {
+  it('4. enabled on rede-demo -> 200; disabled on rede-lab -> 404 MODULE_DISABLED', async () => {
     const enabled = await testRoute('chat', tokens.demoMember);
     expect(enabled.status).toBe(200);
     expect(await enabled.json()).toEqual({ ok: true });
@@ -305,13 +305,13 @@ describe('requireModule — 404 MODULE_DISABLED, and the fixed middleware order'
     moduleFlags.invalidate(labId);
     expect((await testRoute('chat', tokens.labMember)).status).toBe(200);
 
-    // Restore the seeded state (D-17: tria-lab has feed + events, plus reels by default — no chat).
+    // Restore the seeded state (D-17: rede-lab has feed + events, plus reels by default — no chat).
     await adminSql`update public.tenant_modules set enabled = false
                    where tenant_id = ${labId}::uuid and module_key = 'chat'`;
     moduleFlags.invalidate(labId);
     expect((await testRoute('chat', tokens.labMember)).status).toBe(404);
 
-    // Tenant isolation of the cache: tria-demo was never touched by any of this.
+    // Tenant isolation of the cache: rede-demo was never touched by any of this.
     expect((await testRoute('chat', tokens.demoMember)).status).toBe(200);
   });
 });
@@ -323,9 +323,9 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
     const body = platformTenantsSchema.parse(await res.json());
     const bySlug = new Map(body.tenants.map((t) => [t.slug, t]));
 
-    expect([...bySlug.keys()]).toContain('tria-demo');
-    expect([...bySlug.keys()]).toContain('tria-lab');
-    expect([...(bySlug.get('tria-demo')?.enabledModules ?? [])].sort()).toEqual([
+    expect([...bySlug.keys()]).toContain('rede-demo');
+    expect([...bySlug.keys()]).toContain('rede-lab');
+    expect([...(bySlug.get('rede-demo')?.enabledModules ?? [])].sort()).toEqual([
       'chat',
       'communities',
       'events',
@@ -334,12 +334,12 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
       'reels',
       'stories',
     ]);
-    expect([...(bySlug.get('tria-lab')?.enabledModules ?? [])].sort()).toEqual([
+    expect([...(bySlug.get('rede-lab')?.enabledModules ?? [])].sort()).toEqual([
       'events',
       'feed',
       'reels',
     ]);
-    expect(bySlug.get('tria-demo')?.status).toBe('active');
+    expect(bySlug.get('rede-demo')?.status).toBe('active');
   });
 
   it('10. a tenant admin is refused with 403 FORBIDDEN; no token is 401', async () => {
@@ -365,7 +365,7 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
     expect((JSON.parse(text) as Envelope).error.code).toBe('TENANT_HOST_MISMATCH');
     // The body must not say which community this address serves.
     expect((JSON.parse(text) as Envelope).error.details).toBeUndefined();
-    for (const needle of ['tria-demo', 'TRIA Demo']) expect(text).not.toContain(needle);
+    for (const needle of ['rede-demo', 'Rede Demo']) expect(text).not.toContain(needle);
 
     // The platform host itself is not registered in tenant_domains: a generic host, hence allowed.
     const onPlatformHost = await platformTenants(tokens.superAdmin, {
@@ -401,7 +401,7 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
   it('13. no restart, no manual invalidate: the API toggle flips requireModule on this instance immediately', async () => {
     const labId = tenantIds.lab;
 
-    // Warm the flags entry with the seeded state (D-17: chat is off on tria-lab)…
+    // Warm the flags entry with the seeded state (D-17: chat is off on rede-lab)…
     expect((await testRoute('chat', tokens.labMember)).status).toBe(404);
 
     // …then toggle it through the platform API. Unlike case 8 the test never calls
@@ -437,7 +437,7 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
        where tenant_id = ${labId}::uuid and module_key = 'chat'`;
     expect(row?.n).toBe('1');
 
-    // Cache isolation: tria-demo's entry was never touched.
+    // Cache isolation: rede-demo's entry was never touched.
     expect((await testRoute('chat', tokens.demoMember)).status).toBe(200);
 
     // A member has no say in the platform lane; the tenant's flags are unchanged by the attempt.

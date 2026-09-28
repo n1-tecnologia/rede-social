@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
+import { NEUTRAL_BRAND } from '@rede-social/contracts/branding';
 import { cleanup, render, screen } from '@testing-library/react';
-import { NEUTRAL_BRAND } from '@tria/contracts/branding';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BrandPreview, type BrandPreviewLabels } from '../ui';
 
@@ -61,7 +61,7 @@ describe('BrandPreview (UI-SPEC E12, D-25/D-26/D-41)', () => {
     expect(container.querySelectorAll('img')).toHaveLength(0);
   });
 
-  it('never shows the TRIA mark nor the neutral fallback hex when colours are given', () => {
+  it('never shows the Rede Social mark nor the neutral fallback hex when colours are given', () => {
     const { container } = render(
       <BrandPreview
         colors={colors}
@@ -70,7 +70,7 @@ describe('BrandPreview (UI-SPEC E12, D-25/D-26/D-41)', () => {
         labels={labels}
       />,
     );
-    expect(screen.queryByText('TRIA', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('Rede Social', { exact: true })).not.toBeInTheDocument();
     expect(container.innerHTML).not.toContain(NEUTRAL_BRAND.primary);
   });
 

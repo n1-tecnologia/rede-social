@@ -1,4 +1,4 @@
-/** `@tria/module-events/ui` — the only surface `apps/web` may import from this module. */
+/** `@rede-social/module-events/ui` — the only surface `apps/web` may import from this module. */
 export { AttendeeRow, type AttendeeRowProps } from './AttendeeRow';
 export { CheckinCodeCard, type CheckinCodeCardProps } from './CheckinCodeCard';
 export {

@@ -1,5 +1,5 @@
-import { slugSchema } from '@tria/contracts';
-import { LIGHT_BG, NEUTRAL_BRAND, type ResolvedBranding } from '@tria/contracts/branding';
+import { slugSchema } from '@rede-social/contracts';
+import { LIGHT_BG, NEUTRAL_BRAND, type ResolvedBranding } from '@rede-social/contracts/branding';
 import type { MetadataRoute } from 'next';
 
 /**
@@ -13,10 +13,10 @@ import type { MetadataRoute } from 'next';
  * passed `slugSchema` or equals the reserved neutral slug.
  */
 
-/** Reserved slug of TRIA's neutral manifest: an underscore cannot pass `slugSchema`, so no tenant collides. */
-export const NEUTRAL_MANIFEST_SLUG = '_tria';
+/** Reserved slug of the platform's neutral manifest: an underscore cannot pass `slugSchema`, so no tenant collides. */
+export const NEUTRAL_MANIFEST_SLUG = '_rede';
 export const MANIFEST_FILE = 'manifest.webmanifest';
-export const NEUTRAL_DISPLAY_NAME = 'TRIA';
+export const NEUTRAL_DISPLAY_NAME = 'Rede Social';
 /** UI-SPEC §PWA: `short_name` is the display name cut at 12 characters. */
 export const SHORT_NAME_MAX = 12;
 /** Where 02-13 writes the derived icon set inside the public bucket (keep in step with derive-icons). */
@@ -30,13 +30,13 @@ export type IconSet = {
   apple180: string;
 };
 
-/** TRIA's own mark (apps/web/public/icons): TRIA hosts, and tenants without derived icons yet. */
+/** the platform's own mark (apps/web/public/icons): Rede Social hosts, and tenants without derived icons yet. */
 export const NEUTRAL_ICONS: IconSet = {
-  favicon: '/icons/tria-48.png',
-  i192: '/icons/tria-192.png',
-  i512: '/icons/tria-512.png',
-  maskable512: '/icons/tria-maskable-512.png',
-  apple180: '/icons/tria-apple-180.png',
+  favicon: '/icons/rede-social-48.png',
+  i192: '/icons/rede-social-192.png',
+  i512: '/icons/rede-social-512.png',
+  maskable512: '/icons/rede-social-maskable-512.png',
+  apple180: '/icons/rede-social-apple-180.png',
 };
 
 /** `/m/<slug>/manifest.webmanifest`; `null` → the neutral manifest. */
@@ -131,7 +131,7 @@ export function buildManifest({
   };
 }
 
-/** TRIA's manifest for the platform and generic hosts. */
+/** the platform's manifest for the platform and generic hosts. */
 export function neutralManifest(): MetadataRoute.Manifest {
   return buildManifest({
     slug: NEUTRAL_MANIFEST_SLUG,

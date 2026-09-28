@@ -9,7 +9,7 @@ export * from './errors';
 export * from './events';
 export * from './hosts';
 export * from './invites';
-// SERVER-ONLY (`node:fs`): never import `@tria/contracts` from a client component that would pull this in.
+// SERVER-ONLY (`node:fs`): never import `@rede-social/contracts` from a client component that would pull this in.
 export * from './legal';
 export * from './modules';
 export * from './platform';

@@ -1,6 +1,6 @@
 'use client';
 
-import type { MediaAsset } from '@tria/contracts/media';
+import type { MediaAsset } from '@rede-social/contracts/media';
 import {
   BottomSheet,
   Button,
@@ -10,7 +10,7 @@ import {
   Skeleton,
   useMediaQuery,
   useToast,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import { CircleAlert, Film } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from 'react';

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
+import { MediaImage } from '@rede-social/core/ui';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MediaImage } from '@tria/core/ui';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORY_DURATION_MS } from '../contracts/index';
 import { StoryViewer, type StoryViewerItem, type StoryViewerLabels } from '../ui/StoryViewer';

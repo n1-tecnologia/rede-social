@@ -1,7 +1,7 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
-import { BottomSheet } from '@tria/ui';
+import { MediaImage } from '@rede-social/core/ui';
+import { BottomSheet } from '@rede-social/ui';
 import type { ReactNode } from 'react';
 
 /**

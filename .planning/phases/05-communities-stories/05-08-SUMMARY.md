@@ -205,10 +205,10 @@ Both TDD-marked tasks ran a full RED → GREEN cycle with machine-verified evide
 | Task | Gate | Commit | Status |
 |------|------|--------|--------|
 | 1 | RED | `d04a852` `test(05-08)` | Pass — `check tdd-red-evidence` returned **`RED_EVIDENCE_OK`** (`target_test_failed`) |
-| 1 | GREEN | `0b44f8a` `feat(05-08)` | Pass — 10/10 pin cases, 60 for `@tria/module-stories` |
+| 1 | GREEN | `0b44f8a` `feat(05-08)` | Pass — 10/10 pin cases, 60 for `@rede-social/module-stories` |
 | 1 | REFACTOR | — | Not performed; no cleanup was warranted |
 | 3 | RED | `ed592e6` `test(05-08)` | Pass — `check tdd-red-evidence` returned **`RED_EVIDENCE_OK`** (`target_test_failed`) |
-| 3 | GREEN | `bfe3129` `feat(05-08)` | Pass — 11/11 history-row, 11/11 pin-sheet, 82 for `@tria/module-stories` |
+| 3 | GREEN | `bfe3129` `feat(05-08)` | Pass — 11/11 history-row, 11/11 pin-sheet, 82 for `@rede-social/module-stories` |
 | 3 | REFACTOR | — | Not performed; `3ebcc5b` repaired the verify chain and a suite-order dependency, not the code |
 
 **Task 1 RED evidence, verbatim from the observed run:**
@@ -250,13 +250,13 @@ Both RED phases were valid on the first capture — neither returned `unexpected
 - **Issue:** the shared picker wraps each row in a `<button>`. Its docblock already anticipated "omitted, the rows are inert and only `trailing` acts", but the row was still rendered as a button — so the pin sheet would have nested one interactive element inside another: invalid per the HTML content model, two tab stops per row, and a tap on the switch bubbling into a row handler that should not exist.
 - **Fix:** `CommunityPickerSheet` renders the row as a plain flex container when `onSelect` is absent, with the identical class list so the two sheets stay pixel-identical. The "Publicar em" picker (which passes `onSelect`) is unchanged in both behaviour and markup. The reason is written into the component's docblock.
 - **Files modified:** `packages/modules/communities/ui/CommunityPickerSheet.tsx`
-- **Verification:** `@tria/module-communities` 19/19 still green; the pin sheet's row renders exactly the geometry UI-D-41's drawing shows.
+- **Verification:** `@rede-social/module-communities` 19/19 still green; the pin sheet's row renders exactly the geometry UI-D-41's drawing shows.
 - **Commit:** `bfe3129`
 
 **3. [Rule 3 - Blocker] `pnpm verify` could not pass as composed — the chain destroys its own e2e fixture**
 
 - **Found during:** Task 3, the FIRST full exit-gate run
-- **Issue:** six viewer-clock e2e cases timed out (`the first bar fills`, the tap/hold/swipe cases, the comment sheet). 05-07 had already recorded the cause as a standing environment fact — a `pnpm test:integration` pass leaves the demo tenant's fixed-id media assets with no `storage.objects` rows, so `MediaImage` never reports `load` and the clock never starts — but nobody had run the FULL chain, in which `test:integration` runs immediately before `e2e`. Confirmed rather than assumed: `select count(*) from public.media_assets where tenant='tria-demo' and kind='video'` returned **0** after the run.
+- **Issue:** six viewer-clock e2e cases timed out (`the first bar fills`, the tap/hold/swipe cases, the comment sheet). 05-07 had already recorded the cause as a standing environment fact — a `pnpm test:integration` pass leaves the demo tenant's fixed-id media assets with no `storage.objects` rows, so `MediaImage` never reports `load` and the clock never starts — but nobody had run the FULL chain, in which `test:integration` runs immediately before `e2e`. Confirmed rather than assumed: `select count(*) from public.media_assets where tenant='rede-demo' and kind='video'` returned **0** after the run.
 - **Fix:** `pnpm db:reset && pnpm db:seed` now sits between `spike:supavisor` and `e2e` in the `verify` script. The e2e suite legitimately requires a seeded database and the integration suite legitimately destroys part of it; making that explicit is what the standing environment fact prescribes, and CI runs the same chain.
 - **Files modified:** `package.json`
 - **Verification:** the six failures went to zero on the next run; the gate is now green end to end.
@@ -291,7 +291,7 @@ Both RED phases were valid on the first capture — neither returned `unexpected
 
 1. **The migration contains `create table "story_community_pins"`.** It contains `CREATE TABLE "story_community_pins"` — drizzle emits SQL keywords uppercase, and the generated half of the file is kept BYTE FOR BYTE so `pnpm db:generate` stays a provable no-op. The criterion holds case-insensitively; lowercasing the statement would have broken the property the two-half structure exists to guarantee.
 2. **"Re-export from the kernel's schema index."** Not done, and it cannot be: `packages/core/db/schema/index.ts` exports only KERNEL tables, because the kernel must not depend on a module (`turbo boundaries` denies `kernel -> module`). Module schemas are picked up by `apps/api/drizzle.config.ts`'s `packages/modules/*/db/schema.ts` glob instead — which is how `stories` itself has been wired since 05-05, and why the migration generated correctly with no index change at all.
-3. **`packages/modules/stories/ui/PinStorySheet.tsx` reads the community summary shape from `@tria/module-communities/contracts`.** It does not, and must not: the plan's own `key_links` names the edge `turbo boundaries` denies. The row shape is declared in this module's OWN contracts as `StoryPinCommunity` (and as `PinStoryCommunityRow` beside the component), and the list BODY is injected by `apps/web` — the identical resolution 05-03, 05-05, 05-06 and 05-07 each reached. The literal `CommunityPickerSheet` does appear in the file, as the name of the injected type (`CommunityPickerSheetBody`) and in the docblock explaining the injection.
+3. **`packages/modules/stories/ui/PinStorySheet.tsx` reads the community summary shape from `@rede-social/module-communities/contracts`.** It does not, and must not: the plan's own `key_links` names the edge `turbo boundaries` denies. The row shape is declared in this module's OWN contracts as `StoryPinCommunity` (and as `PinStoryCommunityRow` beside the component), and the list BODY is injected by `apps/web` — the identical resolution 05-03, 05-05, 05-06 and 05-07 each reached. The literal `CommunityPickerSheet` does appear in the file, as the name of the injected type (`CommunityPickerSheetBody`) and in the docblock explaining the injection.
 4. **The publish screen's trailing action was to be given its destination.** It already had it: 05-05 shipped `historyHref="/stories/meus"` deliberately, recording the then-dangling link as a known stub rather than hiding the control. This plan only had to create the destination, and `stories.spec.ts` now walks the door.
 
 **Total deviations:** 5 auto-fixed (2× Rule 1 bugs, 1× Rule 2 missing, 2× Rule 3 blockers) plus 6 documented additions and 4 recorded unmet criteria. **Impact:** net positive — deviation 3 in particular turned a gate that could never have passed into one that does, and deviations 1 and 4 were both caught by the e2e rather than by a unit test, which is exactly the division of labour the phase's test tiers are for.
@@ -325,12 +325,12 @@ None. Every file this plan touched sits inside the threat model the plan registe
 
 | Check | Result |
 |-------|--------|
-| `pnpm --filter @tria/module-stories typecheck && lint` | pass (26 files) |
-| `pnpm --filter @tria/module-stories test` | pass — 8 files, **82/82** (was 50) |
-| `pnpm --filter @tria/module-communities test` | pass — 19/19 |
-| `pnpm --filter @tria/web typecheck && lint` | pass (259 files) |
-| `pnpm --filter @tria/web test` | pass — 13 files, 112/112 |
-| `pnpm --filter @tria/api typecheck && lint` | pass |
+| `pnpm --filter @rede-social/module-stories typecheck && lint` | pass (26 files) |
+| `pnpm --filter @rede-social/module-stories test` | pass — 8 files, **82/82** (was 50) |
+| `pnpm --filter @rede-social/module-communities test` | pass — 19/19 |
+| `pnpm --filter @rede-social/web typecheck && lint` | pass (259 files) |
+| `pnpm --filter @rede-social/web test` | pass — 13 files, 112/112 |
+| `pnpm --filter @rede-social/api typecheck && lint` | pass |
 | `pnpm turbo run lint typecheck build test` | pass — 19 tasks |
 | `pnpm db:generate` against the committed migration | no-op ("No schema changes"); `git status --porcelain -- supabase/migrations` empty |
 | `pnpm db:reset && pnpm db:seed` | pass — 5 stories, 3 likes, 3 comments and **2 community pins (1 on the EXPIRED story)** per tenant |
@@ -341,7 +341,7 @@ None. Every file this plan touched sits inside the threat model the plan registe
 | `pnpm boundaries` | pass — 552 files, 9 packages, no issues |
 | `pnpm boundaries:negative` | pass — both layers reject the fixture |
 | `pnpm guard:lanes` | pass |
-| `pnpm --filter @tria/web exec playwright test stories.spec.ts comunidades.spec.ts phase5-smoke.spec.ts` | pass — **77 passed**, 11 skipped, all three files listed |
+| `pnpm --filter @rede-social/web exec playwright test stories.spec.ts comunidades.spec.ts phase5-smoke.spec.ts` | pass — **77 passed**, 11 skipped, all three files listed |
 | **`pnpm verify` (the phase exit gate)** | **PASS, exit 0** — 405 e2e passed / 69 skipped / **0 failed** (25.2 min), plus 45 PWA e2e passed / 3 skipped |
 
 ### The full-suite runs, reported honestly

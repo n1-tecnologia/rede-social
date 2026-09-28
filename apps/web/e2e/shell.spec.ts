@@ -21,7 +21,7 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
  * **The nav is the REGISTRY's, and since 05-01 it is no longer kernel-only.** `feed` deliberately
  * contributes a home slot and no tab (D-55); `communities` contributes a TAB at `nav.order: 20`
  * (D-40) and, since 05.3-01, `reels` a TAB at `nav.order: 30` (D-123, it requires `feed`). So
- * tria-demo (both modules on) shows Início · Comunidades · Reels · Perfil and tria-lab (reels on,
+ * rede-demo (both modules on) shows Início · Comunidades · Reels · Perfil and rede-lab (reels on,
  * communities off) shows Início · Reels · Perfil. The two seed tenants therefore
  * differ HERE as well — which makes this assertion a second witness for the module flag rather
  * than the sameness it used to be. What still separates the two tenants in
@@ -31,8 +31,8 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
  */
 
 const BRAND = {
-  demo: { primary: '#7c3aed', name: 'TRIA Demo' },
-  lab: { primary: '#0f766e', name: 'TRIA Lab' },
+  demo: { primary: '#7c3aed', name: 'Rede Demo' },
+  lab: { primary: '#0f766e', name: 'Rede Lab' },
 } as const;
 
 async function brandPrimary(page: Page): Promise<string> {
@@ -58,21 +58,21 @@ async function navLinkNames(nav: Locator): Promise<string[]> {
 }
 
 test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
-  test('tria-demo: logo, brand, Início · Perfil, the feed home slot, one tree visible', async ({
+  test('rede-demo: logo, brand, Início · Perfil, the feed home slot, one tree visible', async ({
     page,
   }, testInfo) => {
     const mobile = testInfo.project.name === 'mobile-chromium';
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à TRIA Demo');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à Rede Demo');
     expect(await brandPrimary(page)).toBe(BRAND.demo.primary);
     // The logo (as-is, D-26) renders in the visible chrome (TopBar on the phone, rail on desktop) and
     // on the home column; the hidden tree's copy is not counted.
     await expect(
-      page.locator(mobile ? 'header' : 'aside').locator('img[alt="TRIA Demo"]'),
+      page.locator(mobile ? 'header' : 'aside').locator('img[alt="Rede Demo"]'),
     ).toBeVisible();
-    await expect(page.locator('main img[alt="TRIA Demo"]')).toBeVisible();
-    await expect(page.locator('img[alt="TRIA Demo"]:visible')).toHaveCount(2);
+    await expect(page.locator('main img[alt="Rede Demo"]')).toBeVisible();
+    await expect(page.locator('img[alt="Rede Demo"]:visible')).toHaveCount(2);
 
     // Both trees are in the DOM; the breakpoint decides which one shows (D-39, no layout flash).
     await expect(page.locator('[data-shell-nav="bottom"]')).toHaveCount(1);
@@ -86,7 +86,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     }
 
     const nav = visibleNav(page, mobile);
-    // 05-01 / 05.3-01 / 06-01: tria-demo has the `communities` (order 20), `reels` (order 30) and
+    // 05-01 / 05.3-01 / 06-01: rede-demo has the `communities` (order 20), `reels` (order 30) and
     // `events` (order 40) modules, so their manifests' tabs sit between the two kernel entries. The
     // lab case below reads Início · Reels · Eventos · Perfil — the pair is the communities flag,
     // rendered.
@@ -111,30 +111,30 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await expect(page.locator('main.app-scroll')).toHaveCount(1);
     await expect(page.locator('main.app-scroll h1')).toHaveCount(1);
 
-    // TENANT-02 adjacency: the other tenant's brand never appears; no TRIA mark inside a tenant shell.
+    // TENANT-02 adjacency: the other tenant's brand never appears; no Rede Social mark inside a tenant shell.
     const html = await page.content();
     expect(html).not.toContain(BRAND.lab.primary);
     expect(html).not.toContain(BRAND.lab.name);
-    await expect(page.locator('[data-brand-root]').getByText('TRIA', { exact: true })).toHaveCount(
-      0,
-    );
-    await expect(page.locator('[data-brand-root] img[alt="TRIA"]')).toHaveCount(0);
+    await expect(
+      page.locator('[data-brand-root]').getByText('Rede Social', { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator('[data-brand-root] img[alt="Rede Social"]')).toHaveCount(0);
   });
 
-  test('tria-lab: the same tab set and the same slot shape, under a different brand', async ({
+  test('rede-lab: the same tab set and the same slot shape, under a different brand', async ({
     page,
   }, testInfo) => {
-    test.skip(isRemote, 'local stack only (needs the tria-lab host)');
+    test.skip(isRemote, 'local stack only (needs the rede-lab host)');
     const mobile = testInfo.project.name === 'mobile-chromium';
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
 
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à TRIA Lab');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à Rede Lab');
     expect(await brandPrimary(page)).toBe(BRAND.lab.primary);
 
     const nav = visibleNav(page, mobile);
     // Scoped to the NAV: the lab feed carries 04-05's seeded link posts, whose auto-linked URLs are
     // links too — a page-wide count would read those as tabs and fail for the wrong reason.
-    // 06-01: tria-lab has `events` on (D-17), so the Eventos tab sits after Reels (order 40).
+    // 06-01: rede-lab has `events` on (D-17), so the Eventos tab sits after Reels (order 40).
     expect(await navLinkNames(nav)).toEqual(['Início', 'Reels', 'Eventos', 'Perfil']);
     // UI-D-20: a module DID contribute a slot here, so the kernel placeholder must be absent and
     // the feed widget must be what fills the home column instead.
@@ -146,9 +146,9 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     const html = await page.content();
     expect(html).not.toContain(BRAND.demo.primary);
     expect(html).not.toContain(BRAND.demo.name);
-    await expect(page.locator('[data-brand-root]').getByText('TRIA', { exact: true })).toHaveCount(
-      0,
-    );
+    await expect(
+      page.locator('[data-brand-root]').getByText('Rede Social', { exact: true }),
+    ).toHaveCount(0);
   });
 
   test('D-41: dark theme from /configuracoes survives a JS-disabled reload (no flash) and a JS reload', async ({
@@ -167,7 +167,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
       await toggle.click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
       await expect(toggle).toHaveAttribute('aria-checked', 'true');
-      const cookie = (await context.cookies()).find((c) => c.name === 'tria_theme');
+      const cookie = (await context.cookies()).find((c) => c.name === 'rede_theme');
       expect(cookie?.value).toBe('dark');
       expect(cookie?.httpOnly).toBe(false);
       expect(cookie?.sameSite).toBe('Lax');

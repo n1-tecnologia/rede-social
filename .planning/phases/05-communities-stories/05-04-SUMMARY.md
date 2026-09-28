@@ -6,7 +6,7 @@ tags: [communities, community-page, form, archive, counters, triggers, D-67, D-6
 
 requires:
   - phase: 05-communities-stories
-    provides: "05-01's @tria/module-communities (the table, the contracts, the list route, CommunityCard and the Comunidades tab); 05-02's approved sketch 003 and the UI-D-46 vocabulary amendment; 05-03's listCommunityFeed, FeedList.suppressCommunity and the 400 { community: 'archived' } write branch"
+    provides: "05-01's @rede-social/module-communities (the table, the contracts, the list route, CommunityCard and the Comunidades tab); 05-02's approved sketch 003 and the UI-D-46 vocabulary amendment; 05-03's listCommunityFeed, FeedList.suppressCommunity and the 400 { community: 'archived' } write branch"
   - phase: 04-feed
     provides: "PostCard/FeedList/ComposeFab, the ONE cursor envelope, the /criar composer chrome and its discard flow, feed_posts with community_id and its foreign key"
   - phase: 03-media-profiles
@@ -373,20 +373,20 @@ None. Every file this plan touched sits inside the threat model the plan registe
 
 | Check | Result |
 |-------|--------|
-| `pnpm --filter @tria/module-communities typecheck && lint` | pass (18 files) |
-| `pnpm --filter @tria/module-communities test` | pass — 19/19 (3 files) |
-| `pnpm --filter @tria/module-feed test` | pass — 111/111 |
-| `pnpm --filter @tria/api typecheck && lint` | pass (60 files) |
-| `pnpm --filter @tria/web typecheck && lint` | pass (243 files) |
-| `pnpm --filter @tria/web build` | pass — all four community routes build as `ƒ` (dynamic) |
+| `pnpm --filter @rede-social/module-communities typecheck && lint` | pass (18 files) |
+| `pnpm --filter @rede-social/module-communities test` | pass — 19/19 (3 files) |
+| `pnpm --filter @rede-social/module-feed test` | pass — 111/111 |
+| `pnpm --filter @rede-social/api typecheck && lint` | pass (60 files) |
+| `pnpm --filter @rede-social/web typecheck && lint` | pass (243 files) |
+| `pnpm --filter @rede-social/web build` | pass — all four community routes build as `ƒ` (dynamic) |
 | `bash scripts/check-static-routes.sh` | pass — 36 guarded routes, 0 offenders |
 | `pnpm db:generate` against the committed migration | no-op ("No schema changes"), `git status --porcelain -- supabase/migrations` empty |
 | `pnpm db:reset && pnpm db:seed` | pass — 5 communities per tenant (1 archived), counters reconciled by the trigger |
 | `pnpm supabase test db` | pass — 12 files, **229** tests (was 211), `Result: PASS` |
 | `pnpm test:integration` | pass — 28 files, **408/408** |
-| `pnpm --filter @tria/web exec playwright test comunidades.spec.ts` | pass — **30/30** (mobile + desktop) |
-| `pnpm --filter @tria/web exec playwright test feed.spec.ts shell.spec.ts phase4-smoke.spec.ts` | pass — 41 passed, 3 skipped |
-| `pnpm --filter @tria/web exec playwright test phase2-smoke.spec.ts` | pass — 12 passed, 3 skipped |
+| `pnpm --filter @rede-social/web exec playwright test comunidades.spec.ts` | pass — **30/30** (mobile + desktop) |
+| `pnpm --filter @rede-social/web exec playwright test feed.spec.ts shell.spec.ts phase4-smoke.spec.ts` | pass — 41 passed, 3 skipped |
+| `pnpm --filter @rede-social/web exec playwright test phase2-smoke.spec.ts` | pass — 12 passed, 3 skipped |
 | `bash scripts/check-ui-literals.sh` | pass |
 | `pnpm boundaries` | pass — 507 files, 8 packages, no issues |
 | `pnpm boundaries:negative` | pass — both layers reject the fixture |
@@ -402,7 +402,7 @@ None outstanding. Two standing facts worth carrying forward:
 
 Ready for **05-05 onward**:
 
-- `CommunityCover` and `CommunityHeader` are exported from `@tria/module-communities/ui`; the header's `action`, `statusPill` and `note` slots are the seams a later plan fills without touching the component.
+- `CommunityCover` and `CommunityHeader` are exported from `@rede-social/module-communities/ui`; the header's `action`, `statusPill` and `note` slots are the seams a later plan fills without touching the component.
 - **The Destaques slot is one `const` away from working.** `apps/web/app/(app)/comunidades/[communityId]/page.tsx` already renders `SectionTitle` "Destaques" + the row + the hairline the moment `highlights` is non-null; 05-08 supplies the node and nothing else on that page changes.
 - `communities.post_count` and `communities.last_activity_at` are live database facts, so `/comunidades`' ordering is finally driven by real activity and the card's count is real.
 - The seed's archived community (`Mutirao de 2025 (encerrado)`, demo id `…c5`) is the fixture any later plan needs for a read-only container.

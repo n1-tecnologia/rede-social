@@ -1,6 +1,6 @@
 'use client';
 
-import { BottomSheet, ConfirmDialog } from '@tria/ui';
+import { BottomSheet, ConfirmDialog } from '@rede-social/ui';
 import { Link2, type LucideIcon, Pencil, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { PostShareTarget } from './PostCard';
@@ -8,7 +8,7 @@ import type { PostShareTarget } from './PostCard';
 /**
  * The post's "…" menu (UI-SPEC E03/populated) on the SHIPPED `BottomSheet` — the same sheet the
  * comment surface uses, at the same geometry (UI-D-18), because a second overlay primitive is the
- * drift `@tria/ui` exists to prevent.
+ * drift `@rede-social/ui` exists to prevent.
  *
  * **Two variants, one component, driven by DATA and never by a role.** `canManage` rides each post
  * from the API (the author predicate the write routes enforce), so the author/admin variant — edit,

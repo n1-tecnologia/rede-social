@@ -1,6 +1,6 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
+import { MediaImage } from '@rede-social/core/ui';
 import type { ReactNode } from 'react';
 
 /**

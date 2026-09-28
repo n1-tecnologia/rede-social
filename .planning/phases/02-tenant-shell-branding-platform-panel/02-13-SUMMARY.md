@@ -7,7 +7,7 @@ tags: [branding, platform, api, jobs, storage, sharp, png-to-ico, pwa-icons, pg-
 # Dependency graph
 requires:
   - phase: 02-tenant-shell-branding-platform-panel (02-01)
-    provides: "@tria/contracts/branding tenantBrandingSchema (iconUrl/iconUrls/iconVersion keys), deriveBrandColors, contrastReport, resolveBranding; resolveTenantHost cache + invalidateTenantHost; seed SVG wordmarks under apps/web/public/seed-logos"
+    provides: "@rede-social/contracts/branding tenantBrandingSchema (iconUrl/iconUrls/iconVersion keys), deriveBrandColors, contrastReport, resolveBranding; resolveTenantHost cache + invalidateTenantHost; seed SVG wordmarks under apps/web/public/seed-logos"
   - phase: 02-tenant-shell-branding-platform-panel (02-03)
     provides: "sharp@0.35.4 + png-to-ico@3.0.2 in packages/core (legitimacy gate passed in 02-02), custom-migration prefix `supabase`, pgTAP harness under supabase/tests"
   - phase: 02-tenant-shell-branding-platform-panel (02-05)
@@ -25,8 +25,8 @@ provides:
   - "packages/core/server/branding/{icons,upload,index,derive-icons-job}.ts — pure deriveIconSet / inspectBrandingImage / readPixel, key/id helpers with assertTenantKey, svgLooksUnsafe"
   - "packages/core/server/platform/branding.ts — startBrandingUpload, completeBrandingUpload, setBrandingColors, removeIconOverride, applyBrandColors (shared with updateTenant), deriveTenantIcons (optimistic iconVersion write → 'superseded'), uploadIconSet, requeueIconDerivation, invalidateAllTenantHosts, brandingInternals seam"
   - "Public `branding` bucket: [storage.buckets.branding] in supabase/config.toml (local) + 20260917021738_branding_bucket.sql (hosted, idempotent upsert) + pgTAP 060-branding-bucket.sql"
-  - "Seed: tria-demo and tria-lab at iconVersion 1 with faviconUrl + iconUrls derived from their seed SVGs (10 objects under <tenant>/branding/icons/1/), logoUrl still root-relative"
-  - "@tria/contracts/branding additions: BRANDING_UPLOAD_MIMES, BRANDING_MAX_BYTES, BRANDING_UPLOAD_KINDS, mimeToExtension, brandingUploadBodySchema, brandingUploadSchema, BRANDING_UPLOAD_ID_RE, brandingUploadIdSchema, brandingUploadParamsSchema, BRANDING_UPLOAD_ISSUES, brandingColorsBodySchema, contrastPasses, iconsUpToDate"
+  - "Seed: rede-demo and rede-lab at iconVersion 1 with faviconUrl + iconUrls derived from their seed SVGs (10 objects under <tenant>/branding/icons/1/), logoUrl still root-relative"
+  - "@rede-social/contracts/branding additions: BRANDING_UPLOAD_MIMES, BRANDING_MAX_BYTES, BRANDING_UPLOAD_KINDS, mimeToExtension, brandingUploadBodySchema, brandingUploadSchema, BRANDING_UPLOAD_ID_RE, brandingUploadIdSchema, brandingUploadParamsSchema, BRANDING_UPLOAD_ISSUES, brandingColorsBodySchema, contrastPasses, iconsUpToDate"
 affects: [02-14 Marca tab (consumes the four routes + details vocabulary + iconsUpToDate), 02-15 (panel tabs), 02-16 smoke (manifest icons per host, DEPLOY.md note about config.toml buckets being local-only), Phase 3 media pipeline (reuses the start → PUT → complete signed-upload shape), Phase 8 ADMIN-01 (reuses the endpoints under admin_tenant)]
 
 # Actuals (#2632) — chars/4 over the realized diff (git diff e7b8f60..HEAD, migration snapshot excluded)
@@ -132,7 +132,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D7
-    description: "Bucket + seed gate: db:generate no-op, db:reset applies *_branding_bucket.sql, db:seed derives icons for both seed tenants (idempotent, 10 objects), pgTAP 060 green, by-host answers for tria-demo/tria-lab carry distinct /icons/1/ URLs with the maskable served as image/png"
+    description: "Bucket + seed gate: db:generate no-op, db:reset applies *_branding_bucket.sql, db:seed derives icons for both seed tenants (idempotent, 10 objects), pgTAP 060 green, by-host answers for rede-demo/rede-lab carry distinct /icons/1/ URLs with the maskable served as image/png"
     requirement: "TENANT-02"
     verification:
       - kind: other
@@ -143,7 +143,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D8
-    description: "End-of-phase human check: on tria-demo.localhost and tria-lab.localhost the browser tab shows the derived favicon and `/m/<slug>/manifest.webmanifest` lists that host's /icons/1/ URLs (distinct per tenant); an installed PWA shows the maskable icon on the tenant's primary colour"
+    description: "End-of-phase human check: on rede-demo.localhost and rede-lab.localhost the browser tab shows the derived favicon and `/m/<slug>/manifest.webmanifest` lists that host's /icons/1/ URLs (distinct per tenant); an installed PWA shows the maskable icon on the tenant's primary colour"
     verification: []
     human_judgment: true
     rationale: "Favicon/manifest rendering and the maskable icon's look on a home screen are visual facts the API tests cannot see (human_verify_mode end-of-phase)"
@@ -173,7 +173,7 @@ status: complete
 - **D-25/D-41 colours**: one `applyBrandColors` path for PUT and PATCH; the report is evaluated in both modes before any write; low contrast answers 400 with the report unless `confirmLowContrast: true`; a confirmed save is audited with `lowContrastConfirmed: true`.
 - **Hard refusals with a stable `details.upload` vocabulary**: `not_an_image`, `format_mismatch`, `svg_unsafe`, `too_large` (object removed), `object_missing` (404); mime/size at start (400 / 413).
 - **Bucket everywhere**: `[storage.buckets.branding]` locally + an idempotent `storage.buckets` upsert migration for hosted projects, pinned by pgTAP; `pnpm db:generate` stays a no-op (no schema change — everything lives in the existing `tenants.branding` jsonb).
-- **Seed icons**: `tria-demo` and `tria-lab` carry distinct `/icons/1/` sets; `hosts.test.ts` strict-shape assertions still pass with non-null `iconUrls`.
+- **Seed icons**: `rede-demo` and `rede-lab` carry distinct `/icons/1/` sets; `hosts.test.ts` strict-shape assertions still pass with non-null `iconUrls`.
 
 ## Task Commits
 
@@ -222,8 +222,8 @@ status: complete
 
 **1. [Rule 3 - Blocking] `pnpm db:generate -- --custom --name=…` rejects the `--` separator**
 - **Found during:** Task 1 (custom migration)
-- **Issue:** `pnpm db:generate` wraps `pnpm --filter @tria/api exec drizzle-kit generate`; the extra `--` reaches drizzle-kit and fails with "Unrecognized options for command 'generate': --".
-- **Fix:** Ran `pnpm --filter @tria/api exec drizzle-kit generate --custom --name=branding_bucket` directly (same tool, same config, same journal).
+- **Issue:** `pnpm db:generate` wraps `pnpm --filter @rede-social/api exec drizzle-kit generate`; the extra `--` reaches drizzle-kit and fails with "Unrecognized options for command 'generate': --".
+- **Fix:** Ran `pnpm --filter @rede-social/api exec drizzle-kit generate --custom --name=branding_bucket` directly (same tool, same config, same journal).
 - **Files modified:** none beyond the generated migration + journal + snapshot.
 - **Verification:** `pnpm db:generate` afterwards prints "No schema changes"; `git status --porcelain -- supabase/migrations` empty after commit.
 - **Committed in:** `87cde0f`
@@ -257,12 +257,12 @@ status: complete
 ```
 pnpm db:generate                → "No schema changes, nothing to migrate"; git status --porcelain -- supabase/migrations: (empty)
 pnpm db:reset                   → Applying migration 20260917021738_branding_bucket.sql… Updating Storage bucket: branding … Finished
-pnpm db:seed                    → seed: tenant tria-demo icons derived (v1) → …/9feac769-…/branding/icons/1/icon-512.png
-                                  seed: tenant tria-lab  icons derived (v1) → …/1653aeae-…/branding/icons/1/icon-512.png
+pnpm db:seed                    → seed: tenant rede-demo icons derived (v1) → …/9feac769-…/branding/icons/1/icon-512.png
+                                  seed: tenant rede-lab  icons derived (v1) → …/1653aeae-…/branding/icons/1/icon-512.png
 pnpm db:seed (again)            → 2 × "icons derived (v1)"; storage.objects under %/branding/icons/1/% = 10 (idempotent)
 pnpm supabase test db           → 7 files, 98 tests, PASS (060-branding-bucket.sql ok)
-by-host tria-demo.localhost     → iconUrls.i512 …/icons/1/icon-512.png, faviconUrl …/icons/1/favicon.ico, maskable …/maskable-512.png (jq -e true)
-by-host tria-lab.localhost      → same shape, DIFFERENT tenant prefix (jq -e true)
+by-host rede-demo.localhost     → iconUrls.i512 …/icons/1/icon-512.png, faviconUrl …/icons/1/favicon.ico, maskable …/maskable-512.png (jq -e true)
+by-host rede-lab.localhost      → same shape, DIFFERENT tenant prefix (jq -e true)
 curl -sI <maskable512>          → Content-Type: image/png; cache-control: max-age=31536000
 psql pgboss.queue               → kernel.branding-derive-icons | short
 psql storage.buckets            → branding | t | 2097152
@@ -272,10 +272,10 @@ Exit gates: `pnpm lint` 7/7, `pnpm typecheck` 8/8, `pnpm build` green, core unit
 
 ## Human verification notes (end-of-phase)
 
-1. Open `http://tria-demo.localhost:3000/login` (and `tria-lab`): the tab favicon should be the tenant's derived `favicon.ico` (purple "TRIA Demo" wordmark vs. teal "TRIA Lab"), not TRIA's neutral icon.
-2. Fetch `/m/tria-demo/manifest.webmanifest`: `icons[].src` must be the three `/icons/1/` URLs the by-host answer carries (`icon-192.png`, `icon-512.png`, `maskable-512.png` with `purpose: maskable`); `tria-lab`'s manifest must list a different tenant prefix.
+1. Open `http://rede-demo.localhost:3000/login` (and `rede-lab`): the tab favicon should be the tenant's derived `favicon.ico` (purple "Rede Demo" wordmark vs. teal "Rede Lab"), not the platform's neutral icon.
+2. Fetch `/m/rede-demo/manifest.webmanifest`: `icons[].src` must be the three `/icons/1/` URLs the by-host answer carries (`icon-192.png`, `icon-512.png`, `maskable-512.png` with `purpose: maskable`); `rede-lab`'s manifest must list a different tenant prefix.
 3. Install the PWA on a phone: the home-screen icon is the wordmark centred on the tenant's primary colour (maskable), and the splash uses the same colour.
-4. In the panel (once 02-14 lands): upload a PNG logo → "Gerando ícones…" until the worker (`ROLE=worker pnpm --filter @tria/api dev`) runs → icons refresh; save `#ffff00 / #ffffaa` → the three contrast pills warn and "Salvar mesmo assim" is required.
+4. In the panel (once 02-14 lands): upload a PNG logo → "Gerando ícones…" until the worker (`ROLE=worker pnpm --filter @rede-social/api dev`) runs → icons refresh; save `#ffff00 / #ffffaa` → the three contrast pills warn and "Salvar mesmo assim" is required.
 
 ## User Setup Required
 

@@ -1,7 +1,7 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
-import { cn } from '@tria/ui';
+import { MediaImage } from '@rede-social/core/ui';
+import { cn } from '@rede-social/ui';
 import { ChevronRight, GripVertical } from 'lucide-react';
 import { Reorder, useDragControls, useReducedMotion } from 'motion/react';
 import {

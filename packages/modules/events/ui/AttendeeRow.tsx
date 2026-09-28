@@ -1,4 +1,4 @@
-import { Avatar } from '@tria/ui';
+import { Avatar } from '@rede-social/ui';
 import type { ReactNode } from 'react';
 
 export interface AttendeeRowProps {

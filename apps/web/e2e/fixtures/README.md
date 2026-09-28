@@ -29,7 +29,7 @@ function noise(bytes, seed) {
 }
 
 const side = 2048;
-for (const [name, quality, seed] of [['large', 92, 'tria-large'], ['huge', 100, 'tria-huge']]) {
+for (const [name, quality, seed] of [['large', 92, 'rede-social-large'], ['huge', 100, 'rede-social-huge']]) {
   const raw = noise(side * side * 3, seed);
   const jpeg = await sharp(raw, { raw: { width: side, height: side, channels: 3 } })
     .jpeg({ quality, chromaSubsampling: '4:4:4' })

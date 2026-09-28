@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 /**
  * 06-04 — the event form (UI-D-212, sketch 006 surface 1), against the REAL `events.json` and
  * `media.json` catalogs, so a copy drift fails here. Stubbed: the four server actions, the router,
- * the toast and the upload hook. Real: the form, the shared `eventInputSchema`, the `@tria/ui`
+ * the toast and the upload hook. Real: the form, the shared `eventInputSchema`, the `@rede-social/ui`
  * primitives (`SegmentedControl`, `ConfirmDialog`, `Input`) and `EventCover`.
  *
  * Claims:
@@ -67,8 +67,8 @@ vi.mock('next-intl', () => ({
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
 
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 
@@ -119,7 +119,7 @@ const alerts = () => document.querySelectorAll('[role="alert"]');
 const type = (id: string, value: string) => fireEvent.change(field(id), { target: { value } });
 
 function renderCreate() {
-  return render(<EventForm mode="create" tenantName="TRIA Demo" zoneLabel={ZONE} />);
+  return render(<EventForm mode="create" tenantName="Rede Demo" zoneLabel={ZONE} />);
 }
 
 /** Fills everything the Presencial side needs, with the start at 2026-10-12 19:00. */
@@ -276,7 +276,7 @@ describe('EventForm — edit', () => {
         mode="edit"
         eventId={EVENT_ID}
         initial={initial}
-        tenantName="TRIA Demo"
+        tenantName="Rede Demo"
         zoneLabel={ZONE}
         {...flags}
       />,

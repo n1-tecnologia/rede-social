@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, Input, useToast } from '@tria/ui';
+import { Button, Card, Input, useToast } from '@rede-social/ui';
 import { Globe } from 'lucide-react';
 import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';

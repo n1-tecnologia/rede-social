@@ -29,7 +29,7 @@ plan_head_before: 93c68f54814258095d8a351ee00fabf8be6b8fea
 tech-stack:
   added: []
   patterns:
-    - "Every tenant-app formatter takes the zone as a REQUIRED argument read from the server-parsed bootstrap (never from a request), so the type checker finds every caller; the platform panel's PANEL_TIME_ZONE stays TRIA's own"
+    - "Every tenant-app formatter takes the zone as a REQUIRED argument read from the server-parsed bootstrap (never from a request), so the type checker finds every caller; the platform panel's PANEL_TIME_ZONE stays the platform's own"
     - "Seed data that renders as calendar copy is anchored to a tenant-local wall-clock hour (noon of the seed day, computed in Postgres from the tenant's zone), never to floor(now, hour), so a seed run at any hour yields the same single-day shapes"
     - "A now-relative e2e fixture whose case measures local-day copy asks sameDayWindow for its window with the phase bounds it needs; the helper moves the window onto one local day or throws, and never bends the case"
     - "An e2e expectation about seeded rows that another spec may legitimately delete is read from the database with the service's own predicate (activeReadyStoryCount, memberVisibleStoryIds), not hard-coded"
@@ -88,10 +88,10 @@ coverage:
         ref: "apps/web/lib/feed-view.test.ts (7 tests: 2026-10-12T22:00Z is 19:00 in São Paulo and 18:00 in Manaus for cards and comments)"
         status: pass
       - kind: e2e
-        ref: "apps/web/e2e/phase6-smoke.spec.ts#8. the tenant clock reaches the feed: tria-demo switched to America/Manaus reads a post one hour earlier"
+        ref: "apps/web/e2e/phase6-smoke.spec.ts#8. the tenant clock reaches the feed: rede-demo switched to America/Manaus reads a post one hour earlier"
         status: pass
       - kind: other
-        ref: "grep -rn America/Sao_Paulo apps/web/{lib,components,app} minus tests and lib/platform.ts prints nothing; grep DEFAULT_TENANT_TIME_ZONE apps/web prints nothing; pnpm --filter @tria/web typecheck"
+        ref: "grep -rn America/Sao_Paulo apps/web/{lib,components,app} minus tests and lib/platform.ts prints nothing; grep DEFAULT_TENANT_TIME_ZONE apps/web prints nothing; pnpm --filter @rede-social/web typecheck"
         status: pass
     human_judgment: false
   - id: D2
@@ -166,7 +166,7 @@ status: complete
 
 - **Timezone everywhere (Task 1):** the pinned São Paulo formatter in `feed-view.tsx` and `MediaAssetRow`'s default are gone. `postCardView`, `commentView` and `MediaAssetRow` take the zone as a required argument, and every caller passes `bootstrap.tenant.timezone`. `feed-view.test.ts` proves 19:00 in São Paulo is 18:00 in Manaus, and phase6-smoke case 8 shows a real tenant switched to Manaus reading a post one hour earlier.
 - **§(l) Secrets inside a tenant:** covers the separate table behind `event_secrets_staff_all`, the outcome-returning definers `app.events_check_in` / `app.events_enter`, the deferrable-FK XOR (`event_secrets_event_fk`, `events_secrets_fk`, tested with `set constraints all immediate`), and the `app.event_attendance_guard()` 23514 trigger. Each pattern has its why and test rule, and the §(k) checklist points at the section.
-- **phase6-smoke.spec.ts:** ENABLED on tria-demo; DISABLED on a per-run throwaway (404 `MODULE_DISABLED`, no tab, no card, no error card); FLIP within the flags-cache window with the row untouched; the four criteria (admin create/edit/cancel from the phone, member sees it upcoming/cancelled/past; RSVP count, in-window code check-in, walk-in; confirmed vs present; `.ics` + Google `TEMPLATE`).
+- **phase6-smoke.spec.ts:** ENABLED on rede-demo; DISABLED on a per-run throwaway (404 `MODULE_DISABLED`, no tab, no card, no error card); FLIP within the flags-cache window with the row untouched; the four criteria (admin create/edit/cancel from the phone, member sees it upcoming/cancelled/past; RSVP count, in-window code check-in, walk-in; confirmed vs present; `.ics` + Google `TEMPLATE`).
 - **Exit gate green:** `pnpm verify` exited 0 on a reset and seeded database (details in D4 above), and `events-prefetch.spec.ts` passed on `iphone-chromium` in the production-build run.
 - **A real Phase 6 seed bug fixed:** a seed run after 22:00 São Paulo put the seeded upcoming event across midnight. The seed now anchors every event to the tenant-local noon.
 

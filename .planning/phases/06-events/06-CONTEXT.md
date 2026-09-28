@@ -10,7 +10,7 @@
 <domain>
 ## Phase Boundary
 
-Phase 6 adds the events module (`@tria/module-events`, registry key `events`, already in `TOGGLEABLE_MODULES` and `REAL_TENANT_DEFAULT_MODULES`). It covers EVENT-01..EVENT-06:
+Phase 6 adds the events module (`@rede-social/module-events`, registry key `events`, already in `TOGGLEABLE_MODULES` and `REAL_TENANT_DEFAULT_MODULES`). It covers EVENT-01..EVENT-06:
 
 - **Authoring (EVENT-01):** `admin_tenant` creates, edits and cancels an event from a phone. An event has a title, description, cover, a timezone-aware start and end, and exactly one of: a physical venue with an address, or an online link.
 - **Browsing (EVENT-02):** members see an `Eventos` tab split into upcoming and past, plus an event detail page. Times always render in the tenant's timezone.
@@ -48,7 +48,7 @@ Out of this phase:
   - `Eventos` is a BottomNav/rail **tab**: `nav: { placement: 'tab', … }` in the module manifest, driven by the module flag and never by data (D-77).
   - The Início card (D-202) is a `home` slot.
 - **Authorisation:** every write is guarded by `requirePermission('events.…')`, never `requireRole` (04-01). V1 grants the manage permission to `admin_tenant` only, through `defaultRolePermissions`.
-- **No new infrastructure:** covers go through the Phase 3 media broker (`useSignedUpload`, `GET /v1/media/{id}/{variant}`). Lists use the one keyset envelope (`packages/core/server/paging.ts`) and the `@tria/ui` `InfiniteScroll`.
+- **No new infrastructure:** covers go through the Phase 3 media broker (`useSignedUpload`, `GET /v1/media/{id}/{variant}`). Lists use the one keyset envelope (`packages/core/server/paging.ts`) and the `@rede-social/ui` `InfiniteScroll`.
 - **Attendance shape:** one attendance row per member per event, whose `status` column moves through transitions. There are no boolean pairs (roadmap Phase 6 Notes; SCHEMA-CONVENTIONS §(d).1).
 
 ### Eventos tab & detail page

@@ -13,7 +13,7 @@ provides:
   - "`PATCH` / `DELETE /v1/feed/posts/{postId}` behind `feed.post.manage`, with the author and live-row predicates in the statement"
   - "`updatePost` / `softDeletePost`, and the `post.edited` / `post.deleted` domain events"
   - "`ComposerForm` — one form component serving `/criar` and `/post/[postId]/editar`"
-  - "`PostMenu` (author/admin and member variants) and `ComposeFab`, both in `@tria/module-feed/ui`"
+  - "`PostMenu` (author/admin and member variants) and `ComposeFab`, both in `@rede-social/module-feed/ui`"
   - "`lib/feed-write.ts` — the post-write result vocabulary and refusal mapping shared by both action files"
 affects: [05-communities, 06-events, 08-moderation]
 
@@ -227,10 +227,10 @@ See `key-decisions` in the frontmatter. The two worth reading in full:
 **1. [Rule 3 - Blocker] A `'use server'` module cannot re-export another one**
 
 - **Found during:** Task 2
-- **Issue:** The plan asked `criar/actions.ts` to re-export `updatePostAction`/`deletePostAction`. Turbopack replaces a `'use server'` module's export list with the action registry it builds and drops `export { x } from '…'` on the way; `pnpm --filter @tria/web build` failed with `The export updatePostAction was not found in module … The module has no exports at all`.
+- **Issue:** The plan asked `criar/actions.ts` to re-export `updatePostAction`/`deletePostAction`. Turbopack replaces a `'use server'` module's export list with the action registry it builds and drops `export { x } from '…'` on the way; `pnpm --filter @rede-social/web build` failed with `The export updatePostAction was not found in module … The module has no exports at all`.
 - **Fix:** `ComposerForm` imports `updatePostAction` directly from `inicio/feed-actions.ts` — the SAME function the card's overflow menu calls, which is the property the re-export was there to protect. The reason is written into `criar/actions.ts` so nobody re-adds the line.
 - **Files modified:** `apps/web/app/(app)/criar/actions.ts`, `apps/web/app/(app)/criar/ComposerForm.tsx`
-- **Verification:** `pnpm --filter @tria/web build` exits 0
+- **Verification:** `pnpm --filter @rede-social/web build` exits 0
 - **Committed in:** `2879412`
 
 **2. [Rule 3 - Blocker] `PageHeader` could only draw a back chevron**
@@ -239,7 +239,7 @@ See `key-decisions` in the frontmatter. The two worth reading in full:
 - **Issue:** UI-SPEC §Composer contract specifies a leading 44×44 `X` "Fechar"; the shipped primitive hard-coded `ChevronLeft`.
 - **Fix:** Additive optional `backIcon` prop, defaulting to `ChevronLeft` — every existing caller is byte-identical.
 - **Files modified:** `packages/ui/src/primitives/PageHeader.tsx`
-- **Verification:** `pnpm --filter @tria/ui typecheck lint`, and every route using `PageHeader` still builds
+- **Verification:** `pnpm --filter @rede-social/ui typecheck lint`, and every route using `PageHeader` still builds
 - **Committed in:** `2879412`
 
 **3. [Rule 2 - Missing critical] A toast per picked photo**
@@ -308,7 +308,7 @@ None - no external service configuration required.
 
 ## Next Phase Readiness
 
-- The feed's requirement set is complete apart from 04-10's cleanup (deleting `@tria/module-example` and its table, D-19).
+- The feed's requirement set is complete apart from 04-10's cleanup (deleting `@rede-social/module-example` and its table, D-19).
 - Phase 8's moderation extends exactly what is here: `softDeletePost` keeps the row and every child row, `canManage` already rides the wire, and widening moderation means granting a permission and relaxing one predicate deliberately — not discovering the route was already open.
 - Phase 7 has two new events to build notification rows from (`post.edited`, `post.deleted`), both over-carrying `authorUserId` alongside `actorUserId` so a moderator delete needs no payload change.
 - **Carried to phase UAT:** the D-33 approval of sketch 002, the real-device upload paths (HEIC, TUS, a real vendor video), and the image-readiness window in WINDOWS #27.
@@ -318,7 +318,7 @@ None - no external service configuration required.
 - All ten `key-files.created` paths exist on disk.
 - `git log --oneline --all --grep="04-09"` returns the three task commits (`c61cd34`, `2879412`, `42bbd58`).
 - Re-ran every task's `<acceptance_criteria>`: all pass. One is a false positive as written — `grep -rcE "fetch\(.*storage|createSignedUploadUrl|tus" ComposerForm.tsx` prints 5 because `tus` is a substring of `status`/`MediaStatus`; the word-boundary form `grep -cE "createSignedUploadUrl|tus-js-client|\btus\b|uploadBytes|fetch\("` prints **0**, which is the criterion's actual intent (no upload code written here).
-- Re-ran the plan-level `<verification>`: `turbo typecheck lint` (17/17), `turbo test` (7/7), `check-ui-literals`, `check-static-routes`, `boundaries`, `pnpm --filter @tria/web build`, the integration file (11 passed) and the Playwright spec (5 passed, 0 skipped).
+- Re-ran the plan-level `<verification>`: `turbo typecheck lint` (17/17), `turbo test` (7/7), `check-ui-literals`, `check-static-routes`, `boundaries`, `pnpm --filter @rede-social/web build`, the integration file (11 passed) and the Playwright spec (5 passed, 0 skipped).
 
 ---
 *Phase: 04-feed*

@@ -1,4 +1,4 @@
-import type { EventDetail } from '@tria/module-events/contracts';
+import type { EventDetail } from '@rede-social/module-events/contracts';
 
 /**
  * EVENT-06 / D-211 — the calendar export, as pure server-side functions (RESEARCH §Pattern 8).
@@ -25,7 +25,7 @@ import type { EventDetail } from '@tria/module-events/contracts';
  */
 
 /** VCALENDAR `PRODID` (RFC 5545 §3.7.3): who produced the file. */
-export const ICS_PRODID = '-//TRIA//Rede Social//PT-BR';
+export const ICS_PRODID = '-//Rede Social//PT-BR';
 
 /** The Google link's `details` cap, in characters, so the URL stays bounded (T-06-54). */
 export const GOOGLE_DETAILS_MAX = 1000;

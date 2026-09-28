@@ -5,7 +5,7 @@ import {
   platformTenantDetailSchema,
   platformTenantsQuerySchema,
   setTenantStatusBodySchema,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

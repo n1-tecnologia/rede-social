@@ -231,18 +231,18 @@ status: complete
 ## Verification run
 
 - **Module and API.**
-  - `pnpm --filter @tria/module-events typecheck`, `lint` and `test` pass (67 tests).
-  - `pnpm --filter @tria/api typecheck`, `lint` and unit tests pass (19 tests).
+  - `pnpm --filter @rede-social/module-events typecheck`, `lint` and `test` pass (67 tests).
+  - `pnpm --filter @rede-social/api typecheck`, `lint` and unit tests pass (19 tests).
   - `pnpm boundaries` reports no issues.
 - **Migrations.** `pnpm db:generate` printed "No schema changes". After the commit, `git status -- supabase/migrations` is clean.
 - **Database.**
   - `pnpm db:reset && pnpm db:seed && pnpm supabase test db`: 17 files, 506 tests, PASS (142 plans 65).
-  - `pnpm --filter @tria/api exec vitest run tests/integration/events-checkin.test.ts`: 13 passed. `isolation.test.ts`: 27 passed. `pnpm test:integration` (the whole folder): 34 files, 573 tests passed.
+  - `pnpm --filter @rede-social/api exec vitest run tests/integration/events-checkin.test.ts`: 13 passed. `isolation.test.ts`: 27 passed. `pnpm test:integration` (the whole folder): 34 files, 573 tests passed.
 - **Web.**
-  - `pnpm --filter @tria/web typecheck` and `lint` pass.
+  - `pnpm --filter @rede-social/web typecheck` and `lint` pass.
   - `vitest run lib/continue-path "app/(app)/eventos" i18n lib/events-view`: 509 passed. The whole web unit suite: 36 files, 848 passed.
   - `check-ui-literals` is OK.
-  - `pnpm --filter @tria/web build` passes, with `/eventos/[eventId]/entrar` and `/entrar/aviso` dynamic (ƒ). `check-static-routes.sh`: 49 guarded routes, 0 offenders.
+  - `pnpm --filter @rede-social/web build` passes, with `/eventos/[eventId]/entrar` and `/entrar/aviso` dynamic (ƒ). `check-static-routes.sh`: 49 guarded routes, 0 offenders.
 - **Playwright.**
   - `-g "events entrar" --project=mobile-chromium`: 5 passed.
   - The whole `events.spec.ts` + `events-prefetch.spec.ts` on dev, both projects: 40 passed and 18 skipped (the phone-only cases on desktop, plus the prefetch spec self-skipping without `PWA_PROD`).

@@ -170,7 +170,7 @@
 - **Likes and comments schema** — nullable FKs + partial unique indexes versus separate tables, the reserved `story_id` slot, trigger-maintained counters, like-toggle idempotency, and whether "quem curtiu" exists at all.
 - **Feed query shape** — ordering expression and index, page size, and how the bounded-query-count check is expressed in CI.
 - **UI leftovers** — empty states, skeletons, whether the D-02 profile nudge stays above a populated feed, desktop composition under D-39, and the share implementation (`navigator.share` + copy fallback).
-- **Module layout** — `@tria/module-feed` against the example template, and the removal of `@tria/module-example` (D-19) with its registry key, seed rows and boundary-lint fixture.
+- **Module layout** — `@rede-social/module-feed` against the example template, and the removal of `@rede-social/module-example` (D-19) with its registry key, seed rows and boundary-lint fixture.
 - **Test strategy** — isolation suite extension, reply-depth negative test, cross-tenant deep-link 404, and mobile Playwright coverage for double-tap, sheet, infinite scroll and pull-to-refresh.
 
 ## Deferred Ideas

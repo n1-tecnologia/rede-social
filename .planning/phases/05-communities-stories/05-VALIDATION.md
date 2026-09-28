@@ -41,7 +41,7 @@ created: "2026-09-23"
 |----------|-------|
 | **Framework** | Vitest 5.0.0 (unit + integration), pgTAP via `supabase test db` (CLI 2.117.0), Playwright 1.63.0 (e2e) |
 | **Config file** | per-package `vitest.config.ts`; `apps/web/playwright.config.ts` + `playwright.pwa.config.ts`; `supabase/tests/*.sql` |
-| **Quick run command** | `pnpm --filter @tria/module-communities test && pnpm --filter @tria/module-stories test` (new packages) / `pnpm --filter @tria/api test` |
+| **Quick run command** | `pnpm --filter @rede-social/module-communities test && pnpm --filter @rede-social/module-stories test` (new packages) / `pnpm --filter @rede-social/api test` |
 | **Full suite command** | `pnpm verify` (the local exit gate; `ci.yml` mirrors it step for step) |
 | **Estimated runtime** | Phase 4 baseline ~21m51s (unit 512, pgTAP 195, integration 373, e2e 328); Phase 5 adds ~2 pgTAP files' worth and 3–4 specs |
 
@@ -49,7 +49,7 @@ created: "2026-09-23"
 
 ## Sampling Rate
 
-- **After every task commit:** `pnpm --filter @tria/module-communities test && pnpm --filter @tria/module-stories test && pnpm --filter @tria/api test` (T1, ≤ 60 s)
+- **After every task commit:** `pnpm --filter @rede-social/module-communities test && pnpm --filter @rede-social/module-stories test && pnpm --filter @rede-social/api test` (T1, ≤ 60 s)
 - **After every plan wave:** `pnpm lint && pnpm turbo typecheck test && pnpm supabase test db && pnpm test:integration` (T2, ≤ 5 min per task when filtered)
 - **Before `/gsd-verify-work`:** Full `pnpm verify` must be green (T3, run once, ≤ 25 min)
 
@@ -94,14 +94,14 @@ before then would be a fabricated result, not a validated one.
 | D-74 | 05-03 T1, 05-03 T3 | Turning `communities` off reverts the predicate; posts survive; re-enabling restores | integration | `npx vitest run tests/integration/communities.test.ts` (module-flag witness, both directions) | ⬜ pending |
 | STORY-01 | 05-05 T1, 05-05 T3 | Publish image and video stories with optional caption; `purpose: 'story'`; >60 s video ends `rejected`/`duration_too_long` | integration | `npx vitest run tests/integration/stories.test.ts` · existing `mux-webhook.test.ts` pattern | ⬜ pending |
 | STORY-02 | 05-05 T1, 05-06 T3, 05-07 T3 | Strip renders active stories newest-first; viewer advances, tap-navigates, holds-to-pause; comment sheet pauses it | e2e (mobile project) | `stories.spec.ts` | ⬜ pending |
-| STORY-02 | 05-06 T1 | Progress clock unit behaviour (pause/resume/skip preserves elapsed) | unit | `pnpm --filter @tria/module-stories test` (`story-clock.test.ts`) | ⬜ pending |
+| STORY-02 | 05-06 T1 | Progress clock unit behaviour (pause/resume/skip preserves elapsed) | unit | `pnpm --filter @rede-social/module-stories test` (`story-clock.test.ts`) | ⬜ pending |
 | STORY-03 | 05-05 T1, 05-05 T2 | Active/expired split under a controlled clock; the expired **row is retained** | pgTAP | `pnpm supabase test db` (`110-communities-stories.sql`) | ⬜ pending |
 | STORY-04 | 05-08 T1, 05-08 T2, 05-08 T3 | Pin/unpin; a pinned expired story still renders on the community page; unpin removes it | pgTAP + integration | `pnpm supabase test db` · `npx vitest run tests/integration/stories.test.ts` | ⬜ pending |
 | STORY-05 | 05-07 T1, 05-07 T2 | Reply to a story comment and like of a story comment refused by the **DB** (honest + lying), with positive controls | pgTAP | `pnpm supabase test db` (`110-communities-stories.sql`) | ⬜ pending |
 | STORY-05 | 05-07 T1, 05-07 T3 | The same two refusals at the **API**, as stable machine codes | integration | `npx vitest run tests/integration/stories.test.ts` | ⬜ pending |
 | Pitfall 1 | 05-07 T1, 05-07 T2 | The 3-valued CHECK hole is closed: `depth = 1` with `parent_depth` null is refused | pgTAP | `pnpm supabase test db` (`090-feed.sql` or `110-…`) | ⬜ pending |
 | TENANT-05 | 05-01 T2, 05-01 T3, 05-05 T2, 05-05 T3, 05-08 T2 | Cross-tenant: `communities`, `community_members`, `stories`, `story_community_pins` each see own rows and **zero** of tenant B, with identical-looking content | pgTAP + integration | `pnpm supabase test db` (`020-tenant-isolation.sql`) · `npx vitest run tests/integration/isolation.test.ts` | ⬜ pending |
-| MOD-03 | 05-01 T3, 05-05 T3 | New domain events typed, emitted after commit, once, none on rollback | unit | `pnpm --filter @tria/module-stories test` (`events.test.ts`) | ⬜ pending |
+| MOD-03 | 05-01 T3, 05-05 T3 | New domain events typed, emitted after commit, once, none on rollback | unit | `pnpm --filter @rede-social/module-stories test` (`events.test.ts`) | ⬜ pending |
 | MOD-04 | 05-01 T3, 05-05 T3, 05-08 T3 | Two modules mount/unmount by flag; a disabled module's routes 404 | integration | `npx vitest run tests/integration/isolation.test.ts` · `phase5-smoke.spec.ts` | ⬜ pending |
 | Query budget | 05-01 T3, 05-03 T3, 05-05 T3 | `/v1/communities` and `/v1/stories` each execute ≤ N statements per page, with a **floor** as well as a ceiling | integration | `npx vitest run tests/integration/feed-query-budget.test.ts` (extended) | ⬜ pending |
 | UI-01 / UI-04 | produced by 05-02 T1 + 05-02 T2; **gates** 05-04 T2, 05-05 T1, 05-05 T3, 05-06 T1, 05-08 T1, 05-08 T3 | Five prototype-less surfaces approved through the D-33 UI-SPEC + mockup | manual, machine-gated | the review itself is a human judgement, but its *outcome* is machine-read: each gated task's `precondition` runs `grep -q '^approved: true' .planning/sketches/003-phase-05-designed-screens/README.md` and halts while it is false, and 05-04 T2's `<automated>` chain re-asserts it as its first segment | ⬜ gate armed, review not run |
@@ -122,7 +122,7 @@ beside it, and 15/15 are claimed by a task.
 - [ ] `packages/modules/communities/{vitest.config.ts, package.json test script}` — new package has no runner → **05-01 T1**
 - [ ] `packages/modules/stories/{vitest.config.ts, package.json test script}` — new package has no runner → **05-05 T1**
 - [ ] `packages/modules/stories/tests/story-clock.test.ts` — the rAF progress clock's pause/resume/skip contract, with an injected clock (no timers in the assertion) → **05-06 T1**
-- [ ] `packages/modules/stories/tests/events.test.ts` — after-commit emission, once-only, none-on-rollback (the `@tria/module-feed/tests/events.test.ts` copy) → **05-05 T3**
+- [ ] `packages/modules/stories/tests/events.test.ts` — after-commit emission, once-only, none-on-rollback (the `@rede-social/module-feed/tests/events.test.ts` copy) → **05-05 T3**
 - [ ] `apps/api/tests/integration/communities.test.ts` — CRUD, archive semantics, COMM-04 write path, the D-74 module-flag witness in **both** directions → created **05-01 T3**, extended **05-03 T3** (D-74 + COMM-04) and **05-04 T3** (archive semantics)
 - [ ] `apps/api/tests/integration/stories.test.ts` — publish (image + video), expiry visibility, pin/unpin, story like/comment, and the two STORY-05 API refusals by machine code → created **05-05 T3**, extended **05-06 T2** (likes), **05-07 T3** (STORY-05 codes), **05-08 T2** (pins)
 - [ ] `supabase/tests/110-communities-stories.sql` — STORY-05 negatives + positive controls, the Pitfall-1 probe, the controlled-clock expiry pair, the pinned-survives-expiry case, counter reconciliation for `post_count` / `last_activity_at` / story counters, and an `EXPLAIN` block for the community list ordering → created **05-04 T3** (counters + EXPLAIN), extended **05-05 T2** (expiry), **05-06 T2** (like counters), **05-07 T2** (STORY-05 + Pitfall 1), **05-08 T2** (pin survives expiry)

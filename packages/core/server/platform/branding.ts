@@ -13,7 +13,7 @@ import {
   type ResolvedBranding,
   resolveBranding,
   type TenantBranding,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import { eq, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantDomains, tenants } from '../../db/schema';

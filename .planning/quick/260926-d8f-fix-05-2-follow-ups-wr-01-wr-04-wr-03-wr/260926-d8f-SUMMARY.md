@@ -74,7 +74,7 @@ Fixed five 05.2 findings, each with a test observed red before its fix. The high
 
 ## RED evidence (before each fix)
 
-- **Task 1**, `pnpm --filter @tria/api exec vitest run tests/integration/stories.test.ts -t "05.2-3[34] "` gave 2 failed / 74 skipped:
+- **Task 1**, `pnpm --filter @rede-social/api exec vitest run tests/integration/stories.test.ts -t "05.2-3[34] "` gave 2 failed / 74 skipped:
   - 05.2-33 failed at `expect(accepted.status).toBe(200)`: it received **400** (full) for a live story added to 100 rows holding 1 ghost.
   - 05.2-34 failed at `expect(removed.status).toBe(200)`: it received **404** when removing the ghost item.
 - **Task 2** (4 files): 4 failed files, 2 failed tests / 3 passed.
@@ -96,12 +96,12 @@ Fixed five 05.2 findings, each with a test observed red before its fix. The high
 | `vitest run tests/integration/stories.test.ts -t "05.2-3[0-9]"` (api) | 5 passed (05.2-30..34) |
 | `vitest run tests/integration/stories.test.ts -t "05.2-(9\|12\|29) "` (api) | 3 passed |
 | `vitest run tests/integration/isolation.test.ts -t "b7. highlights"` (api) | 1 passed |
-| `@tria/module-stories` typecheck + lint + test | pass; 135/135 |
-| `@tria/api` typecheck + lint; `pnpm --filter @tria/api test` (unit) | pass; 16/16 |
-| `@tria/web` typecheck + lint | pass |
+| `@rede-social/module-stories` typecheck + lint + test | pass; 135/135 |
+| `@rede-social/api` typecheck + lint; `pnpm --filter @rede-social/api test` (unit) | pass; 16/16 |
+| `@rede-social/web` typecheck + lint | pass |
 | `vitest run lib/seen-batch.test.ts app/api/stories/views/route.test.ts "app/(app)/stories/story-actions.test.ts" components/stories` (web) | 51/51 |
 | `vitest run components/stories "app/(app)/stories" lib/story-view.test.ts i18n/messages.test.ts` (web) | 337/337 |
-| `pnpm --filter @tria/web test` (all web unit) | 441/441 in 25 files |
+| `pnpm --filter @rede-social/web test` (all web unit) | 441/441 in 25 files |
 | `bash scripts/check-ui-literals.sh` | OK |
 | `TURBO_CACHE=local:r pnpm lint` | exit 0 |
 | `TURBO_CACHE=local:r pnpm boundaries` | no issues (580 files, 9 packages) |

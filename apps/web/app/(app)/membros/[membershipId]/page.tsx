@@ -1,4 +1,4 @@
-import { EmptyState, PageHeader } from '@tria/ui';
+import { EmptyState, PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

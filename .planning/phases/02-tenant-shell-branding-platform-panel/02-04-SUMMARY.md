@@ -8,7 +8,7 @@ tags: [i18n, next-intl, pt-bR, catalog, lint-guard, design-review, sketch, ui, t
 requires:
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 02
-    provides: "@tria/ui tokens.css (two-layer neutrals + tenant brand), brand utilities via @theme inline, Biome tailwind directives, happy-dom test shape"
+    provides: "@rede-social/ui tokens.css (two-layer neutrals + tenant brand), brand utilities via @theme inline, Biome tailwind directives, happy-dom test shape"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 01
     provides: "brandStyleVars()/deriveBrandColors and the contrast report the mockup's BrandPreview readout mirrors (D-41)"
@@ -29,7 +29,7 @@ affects: [02-07 AppShell + shell/home/settings namespaces, 02-08 auth pages + in
 # Tech tracking
 tech-stack:
   added:
-    - "vitest 5.0.0 as an @tria/web devDependency (web unit tests; e2e stays on Playwright)"
+    - "vitest 5.0.0 as an @rede-social/web devDependency (web unit tests; e2e stays on Playwright)"
   patterns:
     - "One catalog file per top-level namespace under apps/web/messages/pt-BR/; dotted filenames (platform.list.json) deep-merge into the parent namespace; the loader, not a human, detects collisions"
     - "next-intl fails loud: missing keys throw in dev/test, render as the dotted key in production"
@@ -76,7 +76,7 @@ key-decisions:
   - "check-ui-literals.sh scans with a small node script instead of rg/grep alternation so the three rules (hex in strings/classes, legacy classes, JSX diacritic text) and the catalog-file contract share one exclusion list and one report format"
   - "Derived brand tokens moved from :root-only var() indirections to a per-element rule: CSS custom properties resolve at declaration, so a nested [data-brand-root] scope could never recolour bg-brand otherwise (found by the mockup's brand picker, pre-existing from 02-02)"
   - "The Phase 1 interim `#ddd` hairline in (app)/layout.tsx became var(--theme-border) rather than an exclusion in the guard — the guard's first real hit was fixed, not allow-listed"
-  - "Mockup uses only Copywriting Contract strings and placeholder tenant names (TRIA Demo etc.); no seed e-mails or env values (T-02-14)"
+  - "Mockup uses only Copywriting Contract strings and placeholder tenant names (Rede Demo etc.); no seed e-mails or env values (T-02-14)"
 
 patterns-established:
   - "Namespace file per feature: `apps/web/messages/pt-BR/<namespace>.json` with `{ \"<namespace>\": {…} }` as its single root key"
@@ -97,7 +97,7 @@ coverage:
         ref: "pnpm e2e -- login.spec.ts (10/10 on both Playwright projects — strings resolve from the split catalog)"
         status: pass
       - kind: other
-        ref: "pnpm --filter @tria/web typecheck && build (green, ./messages/pt-BR/** traced)"
+        ref: "pnpm --filter @rede-social/web typecheck && build (green, ./messages/pt-BR/** traced)"
         status: pass
     human_judgment: false
   - id: D2
@@ -233,11 +233,11 @@ See `key-decisions` in the frontmatter. In short: the D-33 review is closed prov
 - **Committed in:** `8c18bfa`
 
 **2. [Rule 1 - Bug, pre-existing from 02-02] Derived brand tokens never reached a nested brand scope**
-- **Found during:** Task 2 (the mockup's brand picker: the nested `[data-brand-scope]` stayed TRIA blue `#2e6fd0` in a headless probe)
+- **Found during:** Task 2 (the mockup's brand picker: the nested `[data-brand-scope]` stayed Rede Social blue `#2e6fd0` in a headless probe)
 - **Issue:** `tokens.css` declared `--brand-accent`/`-on-accent`/`-hover`/`-soft`/`-gradient` as `var()` indirections on `:root` only; CSS custom properties resolve where declared, so they were computed once with the neutral brand and inherited resolved — a tenant's `--brand-*` on `[data-brand-root]` could never recolour `bg-brand` in the real app either.
 - **Fix:** additive per-element rule (`*`, plus `[data-theme="dark"] *` for the dark flip) so each element derives from its inherited `--brand-*`; the `:root`/dark fallbacks and the pinned token test untouched.
 - **Files modified:** `packages/ui/src/styles/tokens.css`
-- **Verification:** `@tria/ui` 33/33; web build emits the same `.bg-brand` utility; headless probe resolves the picked colour in the nested scope
+- **Verification:** `@rede-social/ui` 33/33; web build emits the same `.bg-brand` utility; headless probe resolves the picked colour in the nested scope
 - **Committed in:** `2fa1960`
 
 ### Out of scope (logged, not fixed)
@@ -264,7 +264,7 @@ None — the mockup is a planning artifact by design (static HTML, placeholder t
 
 1. **Designer review is still open.** The D-33 approval is the product owner's, provisional. Confirm a follow-up exists for the team's designer to review the platform-panel screens (`.planning/sketches/001-phase-02-designed-screens/index.html`) and that no wave-3 plan is blocked on it.
 2. **Missing-key behaviour (D3):** under `next dev`, render a page with a deliberately missing key → the render must throw; under `next build && next start` the dotted key must render instead.
-3. **Recovery e2e:** after restarting the local stack with the pinned CLI, `pnpm --filter @tria/web exec playwright test recovery.spec.ts` should be 7/7 (cases 3/5/7 currently fail on template drift, unrelated to this plan).
+3. **Recovery e2e:** after restarting the local stack with the pinned CLI, `pnpm --filter @rede-social/web exec playwright test recovery.spec.ts` should be 7/7 (cases 3/5/7 currently fail on template drift, unrelated to this plan).
 
 ## User Setup Required
 

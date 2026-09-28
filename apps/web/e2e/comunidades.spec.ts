@@ -18,7 +18,7 @@ const F = feedMessages.feed;
  * COMM-02 / COMM-03 / D-40 (plan 05-01): the `Comunidades` tab and the `/comunidades` list, on the
  * phone (`mobile-chromium`, an iPhone 14 preset) and on the desktop.
  *
- * Everything here runs against the SEEDED `tria-demo` community and writes nothing, so the shared
+ * Everything here runs against the SEEDED `rede-demo` community and writes nothing, so the shared
  * seed stays exactly as it was and the file is re-runnable in any order.
  *
  * `serviceWorkers: 'block'` is the 03-05 lesson, and it is load-bearing here for a second reason:
@@ -51,7 +51,7 @@ const SEEDED = {
    */
   archivedId: '0d000000-0000-4000-8000-0000000000c5',
   /**
-   * 05.2 / HIGHLIGHT-04: `SEED_COMMUNITY_IDS['tria-demo'][0]` — the community holding the seeded
+   * 05.2 / HIGHLIGHT-04: `SEED_COMMUNITY_IDS['rede-demo'][0]` — the community holding the seeded
    * community highlight `Destaques` (the EXPIRED story and an active one) — and
    * `SEED_COMMUNITY_IDS[1]`, which has no highlight at all. The pair is what makes the Destaques
    * assertions below say something: one renders the row and its `SectionTitle`, the other renders
@@ -61,8 +61,8 @@ const SEEDED = {
   withoutHighlightId: '0d000000-0000-4000-8000-0000000000c2',
   /** `SEED_HIGHLIGHT_TITLES.community`: the one seeded community highlight. */
   communityHighlight: 'Destaques',
-  /** `SEED_TENANTS['tria-demo'].displayName` — the tenant circle's name on Início, never here. */
-  tenantName: 'TRIA Demo',
+  /** `SEED_TENANTS['rede-demo'].displayName` — the tenant circle's name on Início, never here. */
+  tenantName: 'Rede Demo',
   /** The caption of the EXPIRED story `Destaques` holds — absent from `/inicio`, present here. */
   expiredCaption: 'Publicado ontem, ja fora da regua.',
 } as const;
@@ -636,7 +636,7 @@ test.describe("Destaques — the community's highlights (HIGHLIGHT-04, UI-D-64)"
     // 05.2-10 (D-105): the tenant circle RESUMES at the member's first unseen story, and the seed
     // marks the oldest one seen. This walk starts at index 0, so it starts from "nothing seen" —
     // and `stories.spec.ts`'s `afterAll` puts the seed's seen state back.
-    await setStoryViews(users.demoMember, 'tria-demo', []);
+    await setStoryViews(users.demoMember, 'rede-demo', []);
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.withHighlightId}`);
 
@@ -673,7 +673,7 @@ test.describe("Destaques — the community's highlights (HIGHLIGHT-04, UI-D-64)"
       if (index < count - 1) await page.keyboard.press('ArrowRight');
     }
     // Put the seed's seen state back (the member saw only the oldest active story, 05.2-10).
-    await setStoryViews(users.demoMember, 'tria-demo', ['0d000000-0000-4000-8000-0000000000d3']);
+    await setStoryViews(users.demoMember, 'rede-demo', ['0d000000-0000-4000-8000-0000000000d3']);
   });
 });
 
@@ -1033,16 +1033,16 @@ test.describe('05.2-09 — the community manage screen (D-109, UI-D-72, UI-D-80)
   const ST = storyMessages.stories;
   const H = ST.highlights;
   const ARCHIVED_FIXTURE = 'Teste Arquivo';
-  /** `SEED_COMMUNITY_IDS['tria-demo'][3]` — the 60-character `SEED_LONG_COMMUNITY_NAME`. */
+  /** `SEED_COMMUNITY_IDS['rede-demo'][3]` — the 60-character `SEED_LONG_COMMUNITY_NAME`. */
   const LONG_NAME_ID = '0d000000-0000-4000-8000-0000000000c4';
 
   test.beforeAll(async () => {
-    await deleteHighlightsByTitlePrefix('tria-demo', ARCHIVED_FIXTURE);
-    await insertHighlightFixture('tria-demo', SEEDED.archivedId, ARCHIVED_FIXTURE);
+    await deleteHighlightsByTitlePrefix('rede-demo', ARCHIVED_FIXTURE);
+    await insertHighlightFixture('rede-demo', SEEDED.archivedId, ARCHIVED_FIXTURE);
   });
 
   test.afterAll(async () => {
-    await deleteHighlightsByTitlePrefix('tria-demo', ARCHIVED_FIXTURE);
+    await deleteHighlightsByTitlePrefix('rede-demo', ARCHIVED_FIXTURE);
     await closeAdmin();
   });
 

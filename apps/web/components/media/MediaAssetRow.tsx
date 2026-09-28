@@ -1,7 +1,7 @@
 'use client';
 
-import type { MediaAsset } from '@tria/contracts/media';
-import { cn, StatusPill, type StatusTone } from '@tria/ui';
+import type { MediaAsset } from '@rede-social/contracts/media';
+import { cn, StatusPill, type StatusTone } from '@rede-social/ui';
 import { Camera, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { MediaImage } from '@/components/media/MediaImage';

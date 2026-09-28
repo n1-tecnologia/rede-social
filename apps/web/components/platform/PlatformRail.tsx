@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, cn, IconButton } from '@tria/ui';
+import { Button, cn, IconButton } from '@rede-social/ui';
 import { Building2, LogOut } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -19,7 +19,7 @@ const focusRing =
 /**
  * The panel's navigation chrome (D-33 mockup `tenant-list` / `platform-shell-mobile`): a sticky
  * 240 px rail on desktop (wordmark, "Tenants", theme slot, "Sair") and a 48 px top bar on the phone
- * (wordmark, Tenants chip, sign-out icon). Always the neutral TRIA brand — the panel never wears a
+ * (wordmark, Tenants chip, sign-out icon). Always the neutral platform brand — the panel never wears a
  * tenant's colours. Strings arrive as props (PWA-03); icons are decorative.
  */
 export function PlatformRail({ labels, signOutAction, themeSlot }: PlatformRailProps) {

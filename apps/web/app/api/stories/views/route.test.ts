@@ -1,4 +1,4 @@
-import { STORY_SEEN_BATCH_MAX } from '@tria/module-stories/contracts';
+import { STORY_SEEN_BATCH_MAX } from '@rede-social/module-stories/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { createClient } from '@/lib/supabase/server';
@@ -28,7 +28,7 @@ import { POST } from './route';
 vi.mock('@/lib/env', () => ({
   env: {
     API_URL: 'http://api.test',
-    PLATFORM_HOST: 'tria.test',
+    PLATFORM_HOST: 'rede-social.test',
     NEXT_PUBLIC_SUPABASE_URL: 'http://supabase.test',
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test-key',
   },
@@ -47,7 +47,7 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-const ORIGIN = 'http://tria-demo.localhost:3000';
+const ORIGIN = 'http://rede-demo.localhost:3000';
 const A = '0d000000-0000-4000-8000-0000000000d1';
 const B = '0d000000-0000-4000-8000-0000000000d2';
 
@@ -57,7 +57,7 @@ function uuid(n: number): string {
 
 function beacon(body: string, headers: Record<string, string | null> = {}): Request {
   const all: Record<string, string> = {
-    host: 'tria-demo.localhost:3000',
+    host: 'rede-demo.localhost:3000',
     origin: ORIGIN,
     'content-type': 'text/plain;charset=UTF-8',
   };
@@ -65,7 +65,7 @@ function beacon(body: string, headers: Record<string, string | null> = {}): Requ
     if (value === null) delete all[key];
     else all[key] = value;
   }
-  return new Request('http://tria-demo.localhost:3000/api/stories/views', {
+  return new Request('http://rede-demo.localhost:3000/api/stories/views', {
     method: 'POST',
     headers: all,
     body,
@@ -92,7 +92,7 @@ describe('POST /api/stories/views — the page-hide seen write (WR-07)', () => {
       expect(await res.text()).toBe('');
     }
     // Same host, another port or scheme-less trickery is still another origin.
-    expect((await POST(beacon(valid, { origin: 'http://tria-demo.localhost:4000' }))).status).toBe(
+    expect((await POST(beacon(valid, { origin: 'http://rede-demo.localhost:4000' }))).status).toBe(
       403,
     );
     expect(getClaims).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe('POST /api/stories/views — the page-hide seen write (WR-07)', () => {
   });
 
   it('R2. x-forwarded-host wins over host (the proxy.ts precedence)', async () => {
-    const forwarded = { host: 'localhost:3000', 'x-forwarded-host': 'tria-demo.localhost:3000' };
+    const forwarded = { host: 'localhost:3000', 'x-forwarded-host': 'rede-demo.localhost:3000' };
 
     const ok = await POST(beacon(valid, { ...forwarded, origin: ORIGIN }));
     expect(ok.status).toBe(204);

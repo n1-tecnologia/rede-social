@@ -1,5 +1,5 @@
 {
-  "name": "@tria/contracts",
+  "name": "@rede-social/contracts",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     "src",
     "legal"
   ],
-  "description": "Zod schemas, error codes, module keys and API types shared by every @tria app and module",
+  "description": "Zod schemas, error codes, module keys and API types shared by every @rede-social app and module",
   "exports": {
     ".": "./src/index.ts",
     "./branding": "./src/branding.ts",
@@ -23,7 +23,7 @@
     "zod": "4.6.2"
   },
   "devDependencies": {
-    "@tria/config": "workspace:*",
+    "@rede-social/config": "workspace:*",
     "@types/node": "24.13.4",
     "vitest": "5.0.0"
   }

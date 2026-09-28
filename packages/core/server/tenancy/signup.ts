@@ -1,5 +1,9 @@
 import { isIP } from 'node:net';
-import { type SignupBody, type SignupResponse, TRIA_TERMS_VERSION } from '@tria/contracts';
+import {
+  PLATFORM_TERMS_VERSION,
+  type SignupBody,
+  type SignupResponse,
+} from '@rede-social/contracts';
 import { eq, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { consentRecords, memberships, users } from '../../db/schema';
@@ -25,7 +29,7 @@ export type SignupInput = {
 type ConsentRow = {
   tenantId: string;
   userId: string;
-  kind: 'tenant_rules' | 'tria_terms';
+  kind: 'tenant_rules' | 'platform_terms';
   textVersion: number;
   ip: string | null;
   userAgent: string | null;
@@ -81,7 +85,14 @@ export const signupInternals = {
       await tx.insert(memberships).values({ tenantId, userId, role: 'member', status: 'active' });
       await signupInternals.consentInsert(tx, [
         { tenantId, userId, kind: 'tenant_rules', textVersion: rulesVersion, ip, userAgent },
-        { tenantId, userId, kind: 'tria_terms', textVersion: TRIA_TERMS_VERSION, ip, userAgent },
+        {
+          tenantId,
+          userId,
+          kind: 'platform_terms',
+          textVersion: PLATFORM_TERMS_VERSION,
+          ip,
+          userAgent,
+        },
       ]);
     });
   },
@@ -133,7 +144,7 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
 
   if (
     body.consents.tenantRulesVersion !== tenant.rulesVersion ||
-    body.consents.triaTermsVersion !== TRIA_TERMS_VERSION
+    body.consents.platformTermsVersion !== PLATFORM_TERMS_VERSION
   ) {
     throw new ApiError(400, 'VALIDATION_FAILED', { consents: 'stale' });
   }

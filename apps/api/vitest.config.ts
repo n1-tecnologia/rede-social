@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { vitestBase } from '@tria/config/vitest.base';
+import { vitestBase } from '@rede-social/config/vitest.base';
 import { defineConfig, mergeConfig } from 'vitest/config';
 
 /**

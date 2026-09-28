@@ -15,7 +15,7 @@ const envFile = fileURLToPath(new URL('.env.local', import.meta.url));
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 /**
- * `baseURL` is the tria-demo TENANT host (D-20). Chromium resolves every `*.localhost` name to loopback
+ * `baseURL` is the rede-demo TENANT host (D-20). Chromium resolves every `*.localhost` name to loopback
  * (RFC 6761), so no `/etc/hosts` entry is needed and the two seed tenants plus the platform host are
  * distinct origins with separate cookies. Readiness is probed on plain `localhost` (a generic host that
  * needs no API lookup); the Next dev server binds one port for all of them.
@@ -43,7 +43,7 @@ export default defineConfig({
   outputDir: OUTPUT_DIR,
   expect: { timeout: 10_000 },
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://tria-demo.localhost:3000',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://rede-demo.localhost:3000',
     trace: 'retain-on-failure',
   },
   projects: [
@@ -59,7 +59,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'pnpm --filter @tria/api dev',
+      command: 'pnpm --filter @rede-social/api dev',
       url: 'http://localhost:8787/v1/health',
       reuseExistingServer: true,
       cwd: repoRoot,

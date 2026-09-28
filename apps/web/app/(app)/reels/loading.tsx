@@ -1,4 +1,4 @@
-import { ReelsStage } from '@tria/module-reels/ui';
+import { ReelsStage } from '@rede-social/module-reels/ui';
 import { Loader2 } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 

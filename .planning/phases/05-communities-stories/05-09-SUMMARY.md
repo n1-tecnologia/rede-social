@@ -203,7 +203,7 @@ No REFACTOR commit: neither GREEN produced anything worth cleaning up, and a com
 
 **3. [Rule 1 - Bug] `apps/web/app/(app)/comunidades/actions.test.ts` is a file the plan did not list**
 - **Found during:** Task 3
-- **Issue:** Task 3 is `tdd="true"` and behaviour-adding (it edits source files), but the plan's `files_modified` named no test file, so there was nothing to go RED on. Its declared `<verify>` runs `pnpm --filter @tria/web test`, which implies a unit surface for this behaviour.
+- **Issue:** Task 3 is `tdd="true"` and behaviour-adding (it edits source files), but the plan's `files_modified` named no test file, so there was nothing to go RED on. Its declared `<verify>` runs `pnpm --filter @rede-social/web test`, which implies a unit surface for this behaviour.
 - **Fix:** Added the seven-case unit test. It is additive, mocks only `lib/communities` and `lib/env`, and exercises the real schemas and the real refusal mapping.
 - **Files modified:** `apps/web/app/(app)/comunidades/actions.test.ts` (new)
 - **Verification:** RED verified, then green; the whole web unit suite is 119/119.
@@ -219,15 +219,15 @@ Every gate in the plan's `<verification>` block was run and exits 0:
 
 | Gate | Result |
 |---|---|
-| `pnpm --filter @tria/module-communities typecheck && lint` | pass |
-| `pnpm --filter @tria/api typecheck && lint` | pass |
-| `pnpm --filter @tria/web typecheck && lint` | pass |
+| `pnpm --filter @rede-social/module-communities typecheck && lint` | pass |
+| `pnpm --filter @rede-social/api typecheck && lint` | pass |
+| `pnpm --filter @rede-social/web typecheck && lint` | pass |
 | `bash scripts/check-ui-literals.sh` | pass ("no hex/legacy-class/pt-BR literals in .tsx") |
 | `pnpm boundaries` | pass (552 files, 9 packages, no issues) |
 | `pnpm db:reset && pnpm db:seed && pnpm test:integration` | **479 passed / 29 files**, including b5 and 27-32 |
-| `pnpm --filter @tria/web test` | 119 passed / 14 files |
-| `pnpm --filter @tria/web build && bash scripts/check-static-routes.sh` | pass, **offenders: 0**, 39 guarded routes |
-| `pnpm --filter @tria/web exec playwright test comunidades.spec.ts` | **34 passed** (the shipped walk, unbroken) |
+| `pnpm --filter @rede-social/web test` | 119 passed / 14 files |
+| `pnpm --filter @rede-social/web build && bash scripts/check-static-routes.sh` | pass, **offenders: 0**, 39 guarded routes |
+| `pnpm --filter @rede-social/web exec playwright test comunidades.spec.ts` | **34 passed** (the shipped walk, unbroken) |
 | `git status --porcelain -- supabase/migrations …/db …/schema` | empty — no schema file, no migration |
 
 Source-level acceptance criteria (all met): `cover_invalid` appears 3× in the contract; `from media_assets` appears exactly **1×** in non-comment service code (one shared resolution); `resolveCoverAsset` appears **3×** (declaration + one call per write path); `app.tenant_id|withAdminTx|service_role` appears **0×** (the lookup stays in the tenant lane, T-05-42); `Object.hasOwn` appears 4× in `isolation.test.ts`; `cover_invalid` appears 7× in `communities.test.ts`; `coverInvalid` appears once in the catalog and once in the form, and zero pt-BR cover literals live in `.tsx`.
@@ -242,7 +242,7 @@ None. This plan adds no network endpoint, no auth path, no file-access pattern a
 
 ## Issues Encountered
 
-- **`pnpm test:integration -- isolation` does not filter.** The trailing argument is not forwarded as a vitest name filter, so the command runs all 29 integration files. That is a superset of what the plan asked for, so it was accepted rather than worked around; the targeted RED run used `pnpm --filter @tria/api exec vitest run tests/integration/isolation.test.ts -t "b5."` directly.
+- **`pnpm test:integration -- isolation` does not filter.** The trailing argument is not forwarded as a vitest name filter, so the command runs all 29 integration files. That is a superset of what the plan asked for, so it was accepted rather than worked around; the targeted RED run used `pnpm --filter @rede-social/api exec vitest run tests/integration/isolation.test.ts -t "b5."` directly.
 - **The `check tdd-red-evidence` checker consumes TAP, which Vitest does not emit.** Resolved with a throwaway JSON→TAP normaliser in the session scratchpad, deleted after use. Worth knowing before the next TDD plan in this repo.
 
 ## User Setup Required

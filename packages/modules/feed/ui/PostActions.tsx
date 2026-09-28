@@ -1,6 +1,6 @@
 'use client';
 
-import { IconButton } from '@tria/ui';
+import { IconButton } from '@rede-social/ui';
 import { MessageCircle, Send } from 'lucide-react';
 import { LikeButton } from './LikeButton';
 

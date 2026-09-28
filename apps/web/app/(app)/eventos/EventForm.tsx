@@ -1,6 +1,6 @@
 'use client';
 
-import { mediaAcceptFor, PURPOSE_WIDTHS } from '@tria/contracts/media';
+import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import {
   EVENT_DEFAULT_DURATION_MINUTES,
   EVENT_MAX_ADDRESS,
@@ -11,8 +11,8 @@ import {
   type EventFormat,
   eventInputSchema,
   type WallClock,
-} from '@tria/module-events/contracts';
-import { EventCover } from '@tria/module-events/ui';
+} from '@rede-social/module-events/contracts';
+import { EventCover } from '@rede-social/module-events/ui';
 import {
   Button,
   ConfirmDialog,
@@ -24,7 +24,7 @@ import {
   SegmentedControl,
   Textarea,
   useToast,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import { Image as ImageIcon, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';

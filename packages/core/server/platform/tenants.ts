@@ -13,7 +13,7 @@ import {
   type TenantStatus,
   TOGGLEABLE_MODULES,
   type UpdateTenantBody,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import {
   and,
   asc,
@@ -89,7 +89,7 @@ function isUniqueViolation(error: unknown, constraintNeedle: string): boolean {
 /**
  * ROLE-01 / ROLE-05: the cross-tenant read behind `GET /v1/platform/tenants`. It lives in the
  * kernel's platform lane because that is where the admin lane may be opened at all (Biome
- * `noRestrictedImports` confines `@tria/core/db/admin-tx` to `server/tenancy`, `server/platform`
+ * `noRestrictedImports` confines `@rede-social/core/db/admin-tx` to `server/tenancy`, `server/platform`
  * and `scripts/`) — a route file in `apps/api` must never reach past RLS on its own.
  *
  * Search (`q`) matches the display name OR the slug, case-insensitive substring; `status` filters;

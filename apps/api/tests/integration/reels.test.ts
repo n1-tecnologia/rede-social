@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { sqlClient } from '@tria/core/db';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
+import { sqlClient } from '@rede-social/core/db';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import {
   FEED_VIDEO_COMMUNITIES_CAP,
   type FeedPage,
   type FeedPost,
   type VideoCommunities,
-} from '@tria/module-feed/contracts';
+} from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -35,10 +35,10 @@ type BootstrapBody = {
   modules: { key: string; nav?: Record<string, unknown>; home?: unknown }[];
 };
 
-const DEMO_ADMIN = 'admin@tria-demo.local';
-const DEMO_MEMBER = 'member@tria-demo.local';
-const LAB_ADMIN = 'admin@tria-lab.local';
-const LAB_MEMBER = 'member@tria-lab.local';
+const DEMO_ADMIN = 'admin@rede-demo.local';
+const DEMO_MEMBER = 'member@rede-demo.local';
+const LAB_ADMIN = 'admin@rede-lab.local';
+const LAB_MEMBER = 'member@rede-lab.local';
 /** Every caption AND every community name this file writes starts with it (the crash sweep's key). */
 const CAPTION_PREFIX = 'Teste reels ';
 
@@ -219,9 +219,9 @@ beforeAll(async () => {
     signInAs(LAB_MEMBER, SEED_PASSWORD),
   ]);
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
-  tenantIds.demo = rows.find((row) => row.slug === 'tria-demo')?.id ?? '';
-  tenantIds.lab = rows.find((row) => row.slug === 'tria-lab')?.id ?? '';
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
+  tenantIds.demo = rows.find((row) => row.slug === 'rede-demo')?.id ?? '';
+  tenantIds.lab = rows.find((row) => row.slug === 'rede-lab')?.id ?? '';
   if (!tenantIds.demo || !tenantIds.lab) throw new Error('the seed tenants are not seeded');
   const [labRow] = await adminSql<{ enabled: boolean }[]>`
     select enabled from public.tenant_modules

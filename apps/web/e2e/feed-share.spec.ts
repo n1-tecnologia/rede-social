@@ -28,13 +28,13 @@ import { baseURL, hosts, isRemote, login, SEED_PASSWORD, seededFeed, users } fro
  */
 test.use({ serviceWorkers: 'block' });
 
-/** `https://{primaryHost}` — what `primaryHostOrigin()` composes for tria-demo (UI-SPEC E16). */
-const DEMO_SHARE_ORIGIN = 'https://tria-demo.localhost';
+/** `https://{primaryHost}` — what `primaryHostOrigin()` composes for rede-demo (UI-SPEC E16). */
+const DEMO_SHARE_ORIGIN = 'https://rede-demo.localhost';
 
 let demoPostId = '';
 
 test.beforeAll(async () => {
-  demoPostId = await feedPostIdFor(seededFeed.newest, 'tria-demo');
+  demoPostId = await feedPostIdFor(seededFeed.newest, 'rede-demo');
 });
 
 test.afterAll(async () => {
@@ -115,9 +115,9 @@ test.describe('FEED-07 — the shared post link', () => {
   test('4. another tenant and a removed post render the byte-identical not-found screen', async ({
     page,
   }) => {
-    test.skip(isRemote, 'local stack only — needs the tria-lab host and the admin connection');
+    test.skip(isRemote, 'local stack only — needs the rede-lab host and the admin connection');
 
-    // (a) A tria-lab member opening the tria-demo post id on the LAB host.
+    // (a) A rede-lab member opening the rede-demo post id on the LAB host.
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
     await page.goto(`${hosts.lab}/post/${demoPostId}`);
 
@@ -133,7 +133,7 @@ test.describe('FEED-07 — the shared post link', () => {
 
     // (b) The SAME member's own tenant, with the post carrying a soft-delete stamp. The seeded
     // posts are shared by the whole suite, so the stamp is cleared again in the finally block.
-    const labPostId = await feedPostIdFor(seededFeed.newest, 'tria-lab');
+    const labPostId = await feedPostIdFor(seededFeed.newest, 'rede-lab');
     await setFeedPostRemoved(labPostId, true);
     try {
       await page.goto(`${hosts.lab}/post/${labPostId}`);

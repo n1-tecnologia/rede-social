@@ -7,11 +7,11 @@ DIRECTLY caused by the current task's changes are auto-fixed).
 
 ### 1. ~~`apps/web/e2e/shell.spec.ts:111` contradicts `feed.spec.ts`~~ — FIXED in 04-06 (WINDOWS 22 closed)
 
-`shell.spec.ts` › "tria-lab: no Exemplo tab, no #exemplo, the 'Em breve' card, the lab brand"
-expects `HomeSlots`' "Em breve" placeholder on tria-lab's `/inicio`. Since 04-01 the lab tenant has
+`shell.spec.ts` › "rede-lab: no Exemplo tab, no #exemplo, the 'Em breve' card, the lab brand"
+expects `HomeSlots`' "Em breve" placeholder on rede-lab's `/inicio`. Since 04-01 the lab tenant has
 the `feed` module enabled (`scripts/seed.ts`: `modules: ['feed', 'events']`), so the feed home slot
 renders real cards and the placeholder is correctly absent — which is exactly what `feed.spec.ts` ›
-"a tria-lab member never sees the tria-demo feed" asserts in the opposite direction.
+"a rede-lab member never sees the rede-demo feed" asserts in the opposite direction.
 
 Fails deterministically on a fresh `db:reset && db:seed`, at HEAD and before 04-04's commits.
 Nothing in 04-04's diff touches the shell, the registry's module list or the lab tenant's flags.

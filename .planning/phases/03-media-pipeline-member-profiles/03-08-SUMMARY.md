@@ -293,7 +293,7 @@ These are recorded because the plan's own dispatch warned that an acceptance cri
 
 ## Issues Encountered
 
-- **`pnpm test:integration -- <filter>` runs the WHOLE suite** (vitest ORs the filters) — the prior-wave note holds. `pnpm --filter @tria/api exec vitest run tests/integration/<file>` is the way to run one file.
+- **`pnpm test:integration -- <filter>` runs the WHOLE suite** (vitest ORs the filters) — the prior-wave note holds. `pnpm --filter @rede-social/api exec vitest run tests/integration/<file>` is the way to run one file.
 - **The `pnpm verify` chain is strictly sequential and fails fast**, so a 1-second lint failure hides a 20-minute gate. Budget three attempts when a phase has not run the repo-level gate in a while.
 - **Disk:** `.turbo/cache` had grown to 3.7 GB and `apps/web/.next` to 511 MB against 10 GB free. Both were pruned before the gate (the 02-20 ENOSPC precedent). Neither is tracked.
 

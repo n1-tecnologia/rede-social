@@ -31,7 +31,7 @@ function call({
   query?: string;
   id?: string;
 } = {}) {
-  const request = new Request(`http://tria-demo.localhost:3000/eventos/${id}/entrar${query}`, {
+  const request = new Request(`http://rede-demo.localhost:3000/eventos/${id}/entrar${query}`, {
     headers,
   });
   return GET(request, { params: Promise.resolve({ eventId: id }) });

@@ -134,10 +134,10 @@ denied overwriting tracked files. RED-ness was therefore re-established determin
 | --- | --- | --- |
 | 1 | `pnpm lint` | exit 0 — 9/9 tasks; `check-ui-literals: OK` |
 | 2 | `pnpm turbo typecheck --force` | exit 0 — 10/10, **0 cached** |
-| 3 | `pnpm --filter @tria/web test` | exit 0 — 15 files, **128 passed** |
-| 4 | `pnpm --filter @tria/module-stories test` | exit 0 — 9 files, **89 passed** |
-| 5 | `pnpm --filter @tria/api test` | exit 0 — 3 files, **16 passed** |
-| 6 | `pnpm --filter @tria/api test:integration` | exit 0 — 29 files, **480 passed** |
+| 3 | `pnpm --filter @rede-social/web test` | exit 0 — 15 files, **128 passed** |
+| 4 | `pnpm --filter @rede-social/module-stories test` | exit 0 — 9 files, **89 passed** |
+| 5 | `pnpm --filter @rede-social/api test` | exit 0 — 3 files, **16 passed** |
+| 6 | `pnpm --filter @rede-social/api test:integration` | exit 0 — 29 files, **480 passed** |
 | 7 | `pnpm boundaries` | exit 0 — 556 files, 9 packages, no issues |
 
 Every count matches the SUMMARY's claim exactly. The integration run also confirms the verifier's

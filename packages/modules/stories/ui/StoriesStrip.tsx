@@ -1,6 +1,6 @@
 'use client';
 
-import { Skeleton } from '@tria/ui';
+import { Skeleton } from '@rede-social/ui';
 import { StoryCircle, type StoryCircleDisc, type StoryCircleRing } from './StoryCircle';
 
 /**

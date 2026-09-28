@@ -129,11 +129,11 @@ describe('resolveBranding — tenants.branding jsonb → complete brand', () => 
 
   it('passes logo and icon facts through untouched', () => {
     const resolved = resolveBranding({
-      logoUrl: '/seed-logos/tria-demo.svg',
+      logoUrl: '/seed-logos/rede-demo.svg',
       iconUrls: { i192: 'a', i512: 'b', maskable512: 'c', apple180: 'd' },
       iconVersion: 3,
     });
-    expect(resolved.logoUrl).toBe('/seed-logos/tria-demo.svg');
+    expect(resolved.logoUrl).toBe('/seed-logos/rede-demo.svg');
     expect(resolved.iconUrls).toEqual({ i192: 'a', i512: 'b', maskable512: 'c', apple180: 'd' });
     expect(resolved.iconVersion).toBe(3);
   });
@@ -164,11 +164,11 @@ describe('brandStyleVars — exactly the five --brand-* keys (T-02-03)', () => {
 
 describe('hostTenantSchema / hostBrandingSchema — strict public contract (T-02-04)', () => {
   const body = {
-    slug: 'tria-demo',
-    displayName: 'TRIA Demo',
+    slug: 'rede-demo',
+    displayName: 'Rede Demo',
     status: 'active',
     isPrimary: true,
-    primaryHost: 'tria-demo.localhost',
+    primaryHost: 'rede-demo.localhost',
     branding: toHostBranding(
       resolveBranding({ colors: { primary: '#7c3aed', secondary: '#a78bfa' } }),
     ),

@@ -1,5 +1,5 @@
 {
-  "name": "@tria/module-events",
+  "name": "@rede-social/module-events",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,9 +18,9 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "1.6.3",
-    "@tria/contracts": "workspace:*",
-    "@tria/core": "workspace:*",
-    "@tria/ui": "workspace:*",
+    "@rede-social/contracts": "workspace:*",
+    "@rede-social/core": "workspace:*",
+    "@rede-social/ui": "workspace:*",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.7",
     "lucide-react": "1.46.0",
@@ -34,7 +34,7 @@
   "devDependencies": {
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",
-    "@tria/config": "workspace:*",
+    "@rede-social/config": "workspace:*",
     "@types/node": "24.13.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

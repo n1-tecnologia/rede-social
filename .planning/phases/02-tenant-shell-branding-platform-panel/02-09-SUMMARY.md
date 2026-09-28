@@ -30,7 +30,7 @@ provides:
   - "packages/core/server/platform/domains.ts — listTenantDomains, attachDomain (platform-host / shape guards, citext idempotency, provider-before-row, one-primary + host unique-violation handling, compensation), checkDomain(domainId, actor, { source, tenantId? }) shared by route and job (single `update … where verified_at is null returning` winner; idempotent side effects: invalidateTenantHost → allow-list add under pg_advisory_xact_lock → sendPendingInvites), setPrimaryDomain (verified only, demote-then-promote in one tx), removeDomain (primary refused while aliases exist; provider → allow-list → row → cache), restartDomainVerification (expired only), rearmDomainVerification, dedupeDnsRecords"
   - "apps/api/src/routes/platform/domains.ts — domainsRoutes: GET/POST /tenants/{id}/domains, POST …/{domainId}/verify | /restart | /primary, DELETE …/{domainId} (204); chained on platformRoutes; no-store; platform.domains.* audit lines"
   - "apps/api/src/worker.ts — kernel jobs listed explicitly ([domainVerifyJob, ...module jobs]); registry untouched"
-  - "@tria/contracts — ERROR_CODES DOMAIN_IN_USE / DOMAIN_STATE_INVALID (+ pt-BR messages), tenantDomainsListSchema / TenantDomainsList, tenantDomainParamsSchema, DOMAIN_STATE_REASONS (not_verified | primary_with_aliases | expired | not_expired)"
+  - "@rede-social/contracts — ERROR_CODES DOMAIN_IN_USE / DOMAIN_STATE_INVALID (+ pt-BR messages), tenantDomainsListSchema / TenantDomainsList, tenantDomainParamsSchema, DOMAIN_STATE_REASONS (not_verified | primary_with_aliases | expired | not_expired)"
   - "Kernel: env.PLATFORM_HOST (optional), enqueueInTx opts.startAfter passthrough"
   - "Tests: apps/api/tests/integration/platform-domains.test.ts (16 cases), packages/core/tests/domains-{fake,vercel,allow-list}.test.ts (23 cases), supabase/tests/050-tenant-domains-invariants.sql (6)"
   - "docs/DEPLOY.md — 'Custom domains (TENANT-07, D-34)' section, Secret Manager rows vercel-token-prod / supabase-pat-prod, WR-09 amended, hosted-proof runbook item; 02-USER-SETUP.md"
@@ -253,9 +253,9 @@ plan_head_before: 2293938c58cef9fe793f07ce20f12e23553e35ca
 
 ## Issues Encountered
 
-- `pnpm --filter @tria/core test -- domains` and `pnpm test:integration -- <filters>` do not forward file filters (known from 02-01/02-05): the whole suites ran each time (core 96/96, integration 135/135), which is stronger than the filtered acceptance run. Single-file runs used `pnpm --filter <pkg> exec vitest run <file>`.
-- The `curl …/v1/openapi.json` acceptance check hit the developer's `pnpm --filter @tria/api dev` listener on 8787 (tsx watch), which had reloaded the new routes — all six operations present. The integration global setup reused that listener (`EADDRINUSE` path) for the GoTrue hook, as designed in 02-06.
-- The secret-file read guard prevented confirming `PLATFORM_HOST` / `DOMAIN_PROVIDER` names inside `apps/api/.env.local`; the integration run proved them (attach of `tria.localhost` answered `400 { host: 'platform_host' }`, the fake provider ran).
+- `pnpm --filter @rede-social/core test -- domains` and `pnpm test:integration -- <filters>` do not forward file filters (known from 02-01/02-05): the whole suites ran each time (core 96/96, integration 135/135), which is stronger than the filtered acceptance run. Single-file runs used `pnpm --filter <pkg> exec vitest run <file>`.
+- The `curl …/v1/openapi.json` acceptance check hit the developer's `pnpm --filter @rede-social/api dev` listener on 8787 (tsx watch), which had reloaded the new routes — all six operations present. The integration global setup reused that listener (`EADDRINUSE` path) for the GoTrue hook, as designed in 02-06.
+- The secret-file read guard prevented confirming `PLATFORM_HOST` / `DOMAIN_PROVIDER` names inside `apps/api/.env.local`; the integration run proved them (attach of `rede-social.localhost` answered `400 { host: 'platform_host' }`, the fake provider ran).
 
 ## User Setup Required
 

@@ -239,7 +239,7 @@ See `key-decisions` in the frontmatter. The two that most constrain later phases
 **3. [Rule 3 - Blocker] `feedUnfurlJob` was not reachable from the server barrel**
 
 - **Found during:** Task 3
-- **Issue:** the integration test imports `feedUnfurlJob` from `@tria/module-feed/server` (deep imports are blocked by Biome and the `exports` map), but `server/index.ts` did not re-export it.
+- **Issue:** the integration test imports `feedUnfurlJob` from `@rede-social/module-feed/server` (deep imports are blocked by Biome and the `exports` map), but `server/index.ts` did not re-export it.
 - **Fix:** added the export.
 - **Committed in:** `53fe13d`
 
@@ -289,4 +289,4 @@ Ready for 04-06. Two hand-offs worth naming:
 
 ## Self-Check: PASSED
 
-All 7 created files exist on disk; all 4 commits (`4104124`, `6988bc5`, `0dd687b`, `53fe13d`) resolve in `git log --all`. `pnpm db:generate` is a no-op with a clean `supabase/migrations` porcelain; `pnpm supabase test db` passes 199 tests; `pnpm test:integration` passes 366; the feed module's typecheck, lint and 65 unit tests, plus `@tria/api` and `@tria/web` typecheck, `check-ui-literals.sh` and `pnpm boundaries`, are all green.
+All 7 created files exist on disk; all 4 commits (`4104124`, `6988bc5`, `0dd687b`, `53fe13d`) resolve in `git log --all`. `pnpm db:generate` is a no-op with a clean `supabase/migrations` porcelain; `pnpm supabase test db` passes 199 tests; `pnpm test:integration` passes 366; the feed module's typecheck, lint and 65 unit tests, plus `@rede-social/api` and `@rede-social/web` typecheck, `check-ui-literals.sh` and `pnpm boundaries`, are all green.

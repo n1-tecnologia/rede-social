@@ -1,7 +1,7 @@
 'use client';
 
-import { MAX_BIO_LENGTH, MAX_DISPLAY_NAME_LENGTH } from '@tria/contracts/profiles';
-import { Button, Input, Textarea, useToast } from '@tria/ui';
+import { MAX_BIO_LENGTH, MAX_DISPLAY_NAME_LENGTH } from '@rede-social/contracts/profiles';
+import { Button, Input, Textarea, useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState, useTransition } from 'react';

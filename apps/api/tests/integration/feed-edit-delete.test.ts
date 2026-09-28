@@ -1,5 +1,5 @@
-import { sqlClient } from '@tria/core/db';
-import type { FeedPage, FeedPost } from '@tria/module-feed/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import type { FeedPage, FeedPost } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
 
@@ -34,12 +34,12 @@ type Envelope = {
   error: { code: string; message?: string; details?: Record<string, unknown>; requestId?: string };
 };
 
-const DEMO_ADMIN = 'admin@tria-demo.local';
-const DEMO_MEMBER = 'member@tria-demo.local';
-const LAB_ADMIN = 'admin@tria-lab.local';
+const DEMO_ADMIN = 'admin@rede-demo.local';
+const DEMO_MEMBER = 'member@rede-demo.local';
+const LAB_ADMIN = 'admin@rede-lab.local';
 
 /** The throwaway second admin: a real GoTrue identity with a real `admin_tenant` membership. */
-const SECOND_ADMIN_EMAIL = 'segundo-admin@tria-demo-04-09.local';
+const SECOND_ADMIN_EMAIL = 'segundo-admin@rede-demo-04-09.local';
 const SECOND_ADMIN_PASSWORD = 'segundo-admin-04-09-Aa1!';
 
 const tokens = { demoAdmin: '', demoMember: '', labAdmin: '', secondAdmin: '' };
@@ -108,10 +108,10 @@ beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
   if (!tenantIds.demo || !tenantIds.lab) throw new Error('the two demo tenants are not seeded');
 
@@ -257,7 +257,7 @@ describe('T-04-54 — holding the permission is not owning the post', () => {
   });
 
   it('answers 404 to an admin of ANOTHER tenant — they hold the permission, not the row', async () => {
-    const post = await createPost({ caption: 'Publicacao da tria-demo.' });
+    const post = await createPost({ caption: 'Publicacao da rede-demo.' });
 
     const edit = await patch(post.id, { caption: 'nao' }, tokens.labAdmin, HOSTS.lab);
     expect(edit.status).toBe(404);

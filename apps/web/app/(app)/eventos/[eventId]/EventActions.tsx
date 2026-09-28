@@ -1,7 +1,7 @@
 'use client';
 
-import { RSVP_ANSWERS, type RsvpAnswer } from '@tria/module-events/contracts';
-import { SegmentedControl, useToast } from '@tria/ui';
+import { RSVP_ANSWERS, type RsvpAnswer } from '@rede-social/module-events/contracts';
+import { SegmentedControl, useToast } from '@rede-social/ui';
 import { Lock, Video } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';

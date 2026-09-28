@@ -1,4 +1,4 @@
-import { sqlClient } from '@tria/core/db';
+import { sqlClient } from '@rede-social/core/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -131,11 +131,11 @@ let detailRootId = '';
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
-  token = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  adminToken = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
+  token = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  adminToken = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
 
   const [tenant] = await adminSql<{ id: string }[]>`
-    select id from public.tenants where slug = 'tria-demo'`;
+    select id from public.tenants where slug = 'rede-demo'`;
   tenantId = tenant?.id ?? '';
 
   const [author] = await adminSql<{ id: string }[]>`

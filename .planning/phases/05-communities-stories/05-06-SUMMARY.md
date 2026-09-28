@@ -6,7 +6,7 @@ tags: [stories, viewer, raf-clock, gestures, pager, likes, counters, history-api
 
 requires:
   - phase: 05-communities-stories
-    provides: "05-02's approved sketch 003 (the viewer is prototype-less, surface 2 of five); 05-05's @tria/module-stories package, StoryCircle's onOpen seam, GET /v1/stories/{storyId}, STORY_DURATION_MS and the feed_likes.story_id foreign key"
+    provides: "05-02's approved sketch 003 (the viewer is prototype-less, surface 2 of five); 05-05's @rede-social/module-stories package, StoryCircle's onOpen seam, GET /v1/stories/{storyId}, STORY_DURATION_MS and the feed_likes.story_id foreign key"
   - phase: 04-feed
     provides: "LikeButton + useOptimisticLike (the engine, not the button's private state), feed_likes with its target CHECK and the three partial unique indexes, app.feed_like_count() with the story branch explicitly reserved, and likePost/unlikePost as the toggle to copy"
   - phase: 03-media-profiles
@@ -23,7 +23,7 @@ provides:
   - "story.liked / story.unliked, declaration-merged into the kernel EventMap with the story author's id"
   - "The story branch of app.feed_like_count(), filling the slot Phase 4's own migration reserved"
   - "lib/relative-time.ts — the formatter, freed from feed-view.tsx's env-validating import chain"
-  - "MediaImage fit / onReady / onFailed; @tria/ui re-exports useFocusTrap; e2e cloneActiveStories"
+  - "MediaImage fit / onReady / onFailed; @rede-social/ui re-exports useFocusTrap; e2e cloneActiveStories"
 affects: [05-07, 05-08, 07-notifications]
 
 actuals:
@@ -389,7 +389,7 @@ Both TDD-marked tasks ran a full RED → GREEN cycle with machine-verified evide
 - **Issue:** `lib/story-view.ts` needs the relative-time formatter, which lived in `lib/feed-view.tsx`. That module imports `VideoPlayer`, which imports `fetchPlaybackTokenAction`, which imports `lib/api` → `lib/env` — and `@t3-oss/env-core` throws `Invalid environment variables` at import time under a unit test. The suite died in the loader, not in an assertion (`fixture_or_load_failure`).
 - **Fix:** `lib/relative-time.ts` now owns the formatter and `feed-view.tsx` imports and re-exports it, so every existing caller is unchanged and nothing needed touching at any call site.
 - **Files modified:** `apps/web/lib/relative-time.ts` (new), `apps/web/lib/feed-view.tsx`
-- **Verification:** `pnpm --filter @tria/web test` — 13 files, 108/108; `pnpm turbo run typecheck lint` green.
+- **Verification:** `pnpm --filter @rede-social/web test` — 13 files, 108/108; `pnpm turbo run typecheck lint` green.
 - **Commit:** `1765fdd`
 
 **2. [Rule 1 - Bug] `next-intl` FORMATS on read, and it took the whole `/inicio` home slot down**
@@ -422,10 +422,10 @@ Both TDD-marked tasks ran a full RED → GREEN cycle with machine-verified evide
 - **Issue:** two of the plan's truths need something the shipped component did not expose. UI-D-33 forbids cropping (`MediaImage` hard-codes `object-cover`), and "the clock does not start until the media reports it is loaded" needs a load signal. Forking an `<img>` into the viewer would have broken R-05 (every private image renders through `MediaImage`, so no signed Storage URL reaches the DOM).
 - **Fix:** three additive optional props. `onReady` also fires from the existing mount effect for a server-rendered image that is already decoded, which otherwise never fires `load` and would have left the clock paused forever on a cached story.
 - **Files modified:** `packages/core/ui/MediaImage.tsx`
-- **Verification:** `pnpm --filter @tria/core typecheck lint` green; every existing caller unchanged (`fit` defaults to `cover`).
+- **Verification:** `pnpm --filter @rede-social/core typecheck lint` green; every existing caller unchanged (`fit` defaults to `cover`).
 - **Commit:** `380245d`
 
-**6. [Rule 2 - Missing] `useFocusTrap` is now exported from `@tria/ui`**
+**6. [Rule 2 - Missing] `useFocusTrap` is now exported from `@rede-social/ui`**
 
 - **Found during:** Task 1
 - **Issue:** the hook `BottomSheet` and `ConfirmDialog` share was internal to the package. The viewer is the product's third modal and the UI-SPEC asks for the same trap, escape handling and focus restoration.
@@ -485,13 +485,13 @@ None. Every file this plan touched sits inside the threat model the plan registe
 
 | Check | Result |
 |-------|--------|
-| `pnpm --filter @tria/module-stories typecheck` | pass |
-| `pnpm --filter @tria/module-stories lint` | pass (20 files) |
-| `pnpm --filter @tria/module-stories test` | pass — 38/38 |
-| `pnpm --filter @tria/ui typecheck && lint` | pass (43 files) |
-| `pnpm --filter @tria/core typecheck && lint` | pass (123 files) |
-| `pnpm --filter @tria/web typecheck && lint` | pass (257 files) |
-| `pnpm --filter @tria/web test` | pass — 13 files, 108/108 |
+| `pnpm --filter @rede-social/module-stories typecheck` | pass |
+| `pnpm --filter @rede-social/module-stories lint` | pass (20 files) |
+| `pnpm --filter @rede-social/module-stories test` | pass — 38/38 |
+| `pnpm --filter @rede-social/ui typecheck && lint` | pass (43 files) |
+| `pnpm --filter @rede-social/core typecheck && lint` | pass (123 files) |
+| `pnpm --filter @rede-social/web typecheck && lint` | pass (257 files) |
+| `pnpm --filter @rede-social/web test` | pass — 13 files, 108/108 |
 | `pnpm turbo run lint typecheck` | pass — 19 tasks |
 | `pnpm turbo run test` | pass — 8 tasks |
 | `pnpm db:generate` against the committed migration | no-op ("No schema changes") |
@@ -499,11 +499,11 @@ None. Every file this plan touched sits inside the threat model the plan registe
 | `pnpm supabase test db` | pass — 12 files, **248 tests**, `Result: PASS` (was 245) |
 | `pnpm test:integration` | pass — 29 files, **440/440** |
 | `pnpm test:integration -- stories` | pass — 30/30 |
-| `pnpm --filter @tria/web build` | pass — `/stories/[storyId]` builds as ƒ (Dynamic) |
+| `pnpm --filter @rede-social/web build` | pass — `/stories/[storyId]` builds as ƒ (Dynamic) |
 | `bash scripts/check-static-routes.sh` | pass — 38 guarded routes, 0 offenders |
 | `bash scripts/check-ui-literals.sh` | pass |
-| `pnpm --filter @tria/web exec playwright test stories.spec.ts` | pass — 20 passed, 10 skipped |
-| `pnpm --filter @tria/web exec playwright test` (whole suite) | pass — **378 passed, 68 skipped, 0 failed** (21.7 min) |
+| `pnpm --filter @rede-social/web exec playwright test stories.spec.ts` | pass — 20 passed, 10 skipped |
+| `pnpm --filter @rede-social/web exec playwright test` (whole suite) | pass — **378 passed, 68 skipped, 0 failed** (21.7 min) |
 | `pnpm boundaries` | pass — 541 files, 9 packages, no issues |
 | `pnpm boundaries:negative` | pass — both layers reject the fixture |
 

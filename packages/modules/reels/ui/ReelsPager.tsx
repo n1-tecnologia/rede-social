@@ -1,6 +1,6 @@
 'use client';
 
-import { DoubleTapHeart, IconButton, useMediaQuery } from '@tria/ui';
+import { DoubleTapHeart, IconButton, useMediaQuery } from '@rede-social/ui';
 import { ChevronDown, ChevronUp, Loader2, Pause, Play } from 'lucide-react';
 import {
   type ReactNode,

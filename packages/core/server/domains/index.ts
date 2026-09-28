@@ -11,7 +11,7 @@ import { createVercelDomainProvider } from './vercel';
  * Configuration is read ONLY through the kernel `env` module, never through the raw Node
  * environment, so the selection is validated once and the secrets never leave this file's callers.
  *
- * Imported as `@tria/core/server/domains/index` from outside the kernel (the `./server/*` export
+ * Imported as `@rede-social/core/server/domains/index` from outside the kernel (the `./server/*` export
  * maps to a file, not a directory).
  */
 

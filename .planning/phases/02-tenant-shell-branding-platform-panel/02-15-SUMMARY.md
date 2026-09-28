@@ -17,7 +17,7 @@ requires:
     provides: "tenants/[id]/layout.tsx (header host link / 'Sem domínio', TenantTabs), the dominios/modulos stubs, lib/platform.ts (requirePlatformTenantDetail, formatPanelDate, platformRedirectPath), action conventions, platform.moduleNames/moduleDescriptions, e2e admin.ts helpers"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 02
-    provides: "@tria/ui Button, IconButton, Input, StatusPill, Card, SectionTitle, Skeleton, EmptyState, Switch, ConfirmDialog, useToast"
+    provides: "@rede-social/ui Button, IconButton, Input, StatusPill, Card, SectionTitle, Skeleton, EmptyState, Switch, ConfirmDialog, useToast"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 04
     provides: "per-namespace pt-BR catalog loader, scripts/check-ui-literals.sh, D-33 approved mockup sections tenant-page-dominios / tenant-page-modulos"
@@ -134,7 +134,7 @@ coverage:
     requirement: MOD-04
     verification:
       - kind: other
-        ref: "grep gates: no TOGGLEABLE_MODULES / REAL_TENANT_DEFAULT_MODULES in ModuleToggles.tsx; no '@tria/contracts' import in components/platform/*.tsx; e2e #6 getTenantModuleFlag(slug, 'example') === false"
+        ref: "grep gates: no TOGGLEABLE_MODULES / REAL_TENANT_DEFAULT_MODULES in ModuleToggles.tsx; no '@rede-social/contracts' import in components/platform/*.tsx; e2e #6 getTenantModuleFlag(slug, 'example') === false"
         status: pass
     human_judgment: false
   - id: D8
@@ -142,7 +142,7 @@ coverage:
     requirement: UI-04
     verification:
       - kind: other
-        ref: "bash scripts/check-ui-literals.sh (OK); pnpm lint && pnpm typecheck && pnpm build; pnpm --filter @tria/web test (46 passed); playwright platform-tenants.spec.ts --project=desktop-chromium (6 passed, 1 phone-only skip)"
+        ref: "bash scripts/check-ui-literals.sh (OK); pnpm lint && pnpm typecheck && pnpm build; pnpm --filter @rede-social/web test (46 passed); playwright platform-tenants.spec.ts --project=desktop-chromium (6 passed, 1 phone-only skip)"
         status: pass
     human_judgment: false
   - id: D9
@@ -190,10 +190,10 @@ status: complete
 
 ## Verification
 
-- `pnpm --filter @tria/web exec playwright test platform-domains.spec.ts` → 12 passed (6 tests on `mobile-chromium` + `desktop-chromium`) against the local stack with the fake provider (no worker — "Verificar agora" is the only verification path).
-- `pnpm --filter @tria/web exec playwright test platform-tenants.spec.ts --project=desktop-chromium` → 6 passed, 1 skipped (phone-only) — 02-12's tab order / access refusals unaffected by the replaced stubs.
-- `pnpm lint` (incl. `check-ui-literals.sh`), `pnpm typecheck`, `pnpm build` (`/plataforma/tenants/[id]/dominios` and `/modulos` build as ƒ), `pnpm --filter @tria/web test` → 46 passed.
-- Acceptance greps verified: catalog node checks exit 0 for both files; `DnsRecordsTable.tsx` has `navigator.clipboard.writeText(`, `role="status"`, `aria-live="polite"`, `` `${record.type}|${record.name}` `` and zero `dangerouslySetInnerHTML` / `innerText` / `textContent`; no `'@tria/contracts'` import in `components/platform/*.tsx`; `requirePlatformTenantDetail(` precedes `toDomainCardView(` / `REAL_TENANT_DEFAULT_MODULES.map(` in both pages; no `tabPendingTitle`, no `use cache`, no `TOGGLEABLE_MODULES` in the pages / `ModuleToggles`; every spec string of the three tasks present. One gate not met literally — see Deviations.
+- `pnpm --filter @rede-social/web exec playwright test platform-domains.spec.ts` → 12 passed (6 tests on `mobile-chromium` + `desktop-chromium`) against the local stack with the fake provider (no worker — "Verificar agora" is the only verification path).
+- `pnpm --filter @rede-social/web exec playwright test platform-tenants.spec.ts --project=desktop-chromium` → 6 passed, 1 skipped (phone-only) — 02-12's tab order / access refusals unaffected by the replaced stubs.
+- `pnpm lint` (incl. `check-ui-literals.sh`), `pnpm typecheck`, `pnpm build` (`/plataforma/tenants/[id]/dominios` and `/modulos` build as ƒ), `pnpm --filter @rede-social/web test` → 46 passed.
+- Acceptance greps verified: catalog node checks exit 0 for both files; `DnsRecordsTable.tsx` has `navigator.clipboard.writeText(`, `role="status"`, `aria-live="polite"`, `` `${record.type}|${record.name}` `` and zero `dangerouslySetInnerHTML` / `innerText` / `textContent`; no `'@rede-social/contracts'` import in `components/platform/*.tsx`; `requirePlatformTenantDetail(` precedes `toDomainCardView(` / `REAL_TENANT_DEFAULT_MODULES.map(` in both pages; no `tabPendingTitle`, no `use cache`, no `TOGGLEABLE_MODULES` in the pages / `ModuleToggles`; every spec string of the three tasks present. One gate not met literally — see Deviations.
 - Tracer feedback gate (Task 1): automated `<verify>` re-run green on both projects before expansion.
 
 ## Deviations from Plan
@@ -227,7 +227,7 @@ Compare against `.planning/sketches/001-phase-02-designed-screens/index.html` on
 2. **Domínios, phone (< 768 px)**: the form stacks (full-width button), the DNS table becomes stacked Tipo / Nome / Valor blocks (no horizontal scroll, long TXT values break), the action row wraps.
 3. **Confirmations**: "Tornar {host} o domínio primário?" (brand, CheckCircle icon) and "Remover {host}?" (danger, TriangleAlert) vs the two overlay demos; both footer buttons disable with the spinner while pending.
 4. **Módulos** — `#tenant-page-modulos`: six `min-h-14` rows (name 14/700, description 12 tertiary, Ativado/Desativado pill, switch), helper line at the bottom; toggling flips the switch immediately with the "Alterações salvas." toast.
-5. **Light and dark**: neutral TRIA tokens only on the platform host.
+5. **Light and dark**: neutral platform tokens only on the platform host.
 
 ## Known Stubs
 

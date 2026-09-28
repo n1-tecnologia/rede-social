@@ -4,20 +4,23 @@ import {
   platformTenantsSchema,
   TENANT_HOST_HEADER,
   TOGGLEABLE_MODULES,
-} from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
-import { sendPendingInvites } from '@tria/core/server/platform/invites';
-import { setModuleEnabled } from '@tria/core/server/platform/modules';
+} from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { sendPendingInvites } from '@rede-social/core/server/platform/invites';
+import { setModuleEnabled } from '@rede-social/core/server/platform/modules';
 import {
   createTenant,
   getTenantDetail,
   listPlatformTenants,
   setTenantStatus,
   updateTenant,
-} from '@tria/core/server/platform/tenants';
-import { invalidateTenantHost, resolveTenantHost } from '@tria/core/server/tenancy/tenant-host';
+} from '@rede-social/core/server/platform/tenants';
+import {
+  invalidateTenantHost,
+  resolveTenantHost,
+} from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -30,7 +33,7 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setu
  * module toggle reflected in a member's bootstrap without a restart, suspend -> TENANT_SUSPENDED and
  * the invite pending/sent states. Every tenant created here carries a unique `pt-svc-…`/`pt-test-…`
  * slug and is deleted in `afterAll`; the seeded tenants are only ever read, except for one module
- * flip on tria-demo (part 1) and one on tria-lab (part 2), both restored in the same case.
+ * flip on rede-demo (part 1) and one on rede-lab (part 2), both restored in the same case.
  *
  * Platform identity / host-mismatch coverage lives in `isolation.test.ts` and `modules.test.ts`;
  * only one case of each is repeated here, on a mutation route.
@@ -38,10 +41,10 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setu
 
 const RUN = Date.now();
 const SVC_SLUG = `pt-svc-${RUN}`.slice(0, 40);
-const SVC_EMAIL = `Admin.${RUN}@Tria-Test.local`;
+const SVC_EMAIL = `Admin.${RUN}@Rede-Social-Test.local`;
 const SVC_HOST = `pt-svc-${RUN}.localhost`;
 
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
 
 const ids = { demo: '', lab: '', svc: '' };
@@ -77,7 +80,7 @@ const newTenantBody = (slug: string, overrides: Record<string, unknown> = {}) =>
   colors: { primary: '#7c3aed', secondary: '#a78bfa' },
   // Every real module, 05.3-01's `reels` included (D-122), so "created with all" stays all-enabled.
   modules: ['feed', 'communities', 'stories', 'events', 'chat', 'notifications', 'reels'],
-  adminEmail: `admin-${slug}@tria-test.local`,
+  adminEmail: `admin-${slug}@rede-social-test.local`,
   ...overrides,
 });
 
@@ -117,7 +120,7 @@ async function cleanupTestTenants(): Promise<void> {
   // identities/sessions from auth.users and public.users follows (users_id_users_id_fk).
   await adminSql`
     delete from auth.users
-     where lower(email) like '%@tria-test.local'
+     where lower(email) like '%@rede-social-test.local'
        and (lower(email) like 'admin-pt-%' or lower(email) like 'member-pt-%'
             or lower(email) like 'admin.%')`;
 }
@@ -128,11 +131,11 @@ beforeAll(async () => {
     throw new Error('SUPER_ADMIN_PASSWORD is required (same value as `pnpm db:seed`)');
   }
   await cleanupTestTenants();
-  ids.demo = await tenantIdBySlug('tria-demo');
-  ids.lab = await tenantIdBySlug('tria-lab');
+  ids.demo = await tenantIdBySlug('rede-demo');
+  ids.lab = await tenantIdBySlug('rede-lab');
   tokens.superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
 
   const [admin] = await adminSql<{ user_id: string }[]>`
     select user_id from public.platform_admins limit 1`;
@@ -148,8 +151,8 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const userId of createdAuthUsers) await authAdmin().deleteUser(userId);
   await cleanupTestTenants();
-  // events is flipped on tria-demo (part 1) and tria-lab (part 2) and restored in the same case;
-  // make sure both are on either way (D-17: tria-lab = feed + events).
+  // events is flipped on rede-demo (part 1) and rede-lab (part 2) and restored in the same case;
+  // make sure both are on either way (D-17: rede-lab = feed + events).
   await adminSql`update public.tenant_modules set enabled = true
                  where tenant_id in (${ids.demo}::uuid, ${ids.lab}::uuid) and module_key = 'events'`;
   moduleFlags.invalidate(ids.demo);
@@ -213,7 +216,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
           slug: SVC_SLUG,
           colors: { primary: '#111111', secondary: '#222222' },
           modules: [],
-          adminEmail: `other-${RUN}@tria-test.local`,
+          adminEmail: `other-${RUN}@rede-social-test.local`,
         },
         actor,
       ),
@@ -227,15 +230,15 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(count?.n).toBe('1');
     const [invites] = await adminSql<{ n: string }[]>`
       select count(*)::text as n from public.tenant_invites
-       where email = ${`other-${RUN}@tria-test.local`}`;
+       where email = ${`other-${RUN}@rede-social-test.local`}`;
     expect(invites?.n).toBe('0');
   });
 
   it('3. listPlatformTenants filters by q (name or slug, case-insensitive) and status, pages by slug cursor, and carries primaryHost', async () => {
     const byName = await listPlatformTenants({ q: 'LAB', limit: 25 });
-    expect(byName.rows.map((r) => r.slug)).toEqual(['tria-lab']);
+    expect(byName.rows.map((r) => r.slug)).toEqual(['rede-lab']);
     expect(byName.nextCursor).toBeNull();
-    expect(byName.rows[0]?.primaryHost).toBe(process.env.TENANT_LAB_HOST ?? 'tria-lab.localhost');
+    expect(byName.rows[0]?.primaryHost).toBe(process.env.TENANT_LAB_HOST ?? 'rede-lab.localhost');
 
     const bySlug = await listPlatformTenants({ q: 'pt-svc', limit: 25 });
     expect(bySlug.rows.map((r) => r.slug)).toEqual([SVC_SLUG]);
@@ -262,7 +265,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     const demo = await getTenantDetail(ids.demo);
     expect(demo).not.toBeNull();
     const parsed = platformTenantDetailSchema.parse(demo);
-    expect(parsed.tenant.slug).toBe('tria-demo');
+    expect(parsed.tenant.slug).toBe('rede-demo');
     expect(parsed.modules.map((m) => m.key).sort()).toEqual(
       ['chat', 'communities', 'events', 'feed', 'notifications', 'reels', 'stories'].sort(),
     );
@@ -272,7 +275,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(parsed.domains[0]?.isPrimary).toBe(true);
     expect(parsed.invites).toEqual([]);
     expect(parsed.admins.length).toBeGreaterThanOrEqual(1);
-    expect(parsed.admins[0]?.email).toBe('admin@tria-demo.local');
+    expect(parsed.admins[0]?.email).toBe('admin@rede-demo.local');
     expect(parsed.tenant.contrast.onPrimary.ok).toBe(true);
 
     const svc = platformTenantDetailSchema.parse(await getTenantDetail(ids.svc));
@@ -432,13 +435,13 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     const res = await platform('/tenants', {
       method: 'POST',
       token: tokens.superAdmin,
-      body: newTenantBody(SLUG, { adminEmail: `  Admin-${SLUG}@Tria-Test.local ` }),
+      body: newTenantBody(SLUG, { adminEmail: `  Admin-${SLUG}@Rede-Social-Test.local ` }),
     });
     expect(res.status).toBe(201);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = platformTenantDetailSchema.strict().parse(await res.json());
     tenantId = body.tenant.id;
-    inviteEmail = `admin-${SLUG}@tria-test.local`;
+    inviteEmail = `admin-${SLUG}@rede-social-test.local`;
 
     expect(body.tenant.slug).toBe(SLUG);
     expect(body.tenant.status).toBe('active');
@@ -606,7 +609,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(after.tenant.slug).toBe(SLUG);
   });
 
-  it('17. ROLE-04: PUT …/modules/events on tria-lab is reflected in the lab member’s bootstrap on the very next request; a key outside the vocabulary is refused', async () => {
+  it('17. ROLE-04: PUT …/modules/events on rede-lab is reflected in the lab member’s bootstrap on the very next request; a key outside the vocabulary is refused', async () => {
     const before = (await (await bootstrap(tokens.labMember)).json()) as {
       modules: { key: string }[];
     };
@@ -639,7 +642,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
        where tenant_id = ${ids.lab}::uuid and module_key = 'events'`;
     expect(rows?.n).toBe('1');
 
-    // Restore D-17 (tria-lab = feed + events, plus reels by default).
+    // Restore D-17 (rede-lab = feed + events, plus reels by default).
     const on = await platform(`/tenants/${ids.lab}/modules/events`, {
       method: 'PUT',
       token: tokens.superAdmin,
@@ -661,7 +664,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     });
     expect(unknownKey.status).toBe(400);
     expect((await envelope(unknownKey)).code).toBe('VALIDATION_FAILED');
-    // …and tria-demo's own flags were not touched by the refusal: the feed still answers.
+    // …and rede-demo's own flags were not touched by the refusal: the feed still answers.
     const feed = await api.request('/v1/feed', {
       headers: { authorization: `Bearer ${tokens.demoMember}` },
     });
@@ -685,7 +688,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(((await warm.json()) as { status: string }).status).toBe('active');
 
     // A throwaway member of the new tenant.
-    const memberEmail = `member-${SLUG}@tria-test.local`;
+    const memberEmail = `member-${SLUG}@rede-social-test.local`;
     const created = await authAdmin().createUser({
       email: memberEmail,
       password: 'Segredo123',
@@ -795,7 +798,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
 
   it('21. WR-03 (02-19 D-B): an adminEmail that already has an identity on the platform is 400 VALIDATION_FAILED { adminEmail: "in_use" } — case-insensitive, no tenant row, same from the service', async () => {
     const slug = `pt-test-inuse-${RUN}`.slice(0, 40);
-    for (const adminEmail of ['member@tria-demo.local', 'Member@Tria-Demo.LOCAL']) {
+    for (const adminEmail of ['member@rede-demo.local', 'Member@Rede-Demo.LOCAL']) {
       const res = await platform('/tenants', {
         method: 'POST',
         token: tokens.superAdmin,
@@ -818,7 +821,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
           slug,
           colors: { primary: '#111111', secondary: '#222222' },
           modules: [],
-          adminEmail: '  Admin@Tria-Demo.LOCAL ',
+          adminEmail: '  Admin@Rede-Demo.LOCAL ',
         },
         actor,
       ),

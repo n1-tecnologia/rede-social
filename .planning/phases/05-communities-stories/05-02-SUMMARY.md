@@ -130,7 +130,7 @@ coverage:
         ref: "apps/web/i18n/messages.test.ts#UI-D-46 vocabulary amendment (24/24 in the file, 6 placeholder pins + 4 drop pins + 2 boundary pins)"
         status: pass
       - kind: other
-        ref: "pnpm --filter @tria/web typecheck — a call site that stops supplying the argument fails the build"
+        ref: "pnpm --filter @rede-social/web typecheck — a call site that stops supplying the argument fails the build"
         status: pass
     human_judgment: false
   - id: D6
@@ -262,7 +262,7 @@ Out of scope for the plan's wording but squarely in scope for its change: leavin
 | `apps/web/e2e/shell.spec.ts` (×2) | the feed region's accessible name → "Feed principal" |
 | `apps/web/e2e/feed-media.spec.ts` | same |
 | `apps/web/e2e/feed.spec.ts` | `F.empty.bodyAuthor` now interpolated with the fixture tenant, matching the `F.empty.body` line 3 lines above |
-| `apps/web/e2e/feed-composer.spec.ts` | the caption placeholder interpolated with "TRIA Demo" |
+| `apps/web/e2e/feed-composer.spec.ts` | the caption placeholder interpolated with "Rede Demo" |
 | `apps/web/e2e/members.spec.ts` (×3) | the members empty state, the one 404 body (with a comment that it stays indistinguishable across all five causes), and the profile nudge |
 | `apps/web/e2e/media-video.spec.ts` | the remove-video confirmation body |
 
@@ -288,9 +288,9 @@ None. No new network endpoint, auth path, file access pattern or trust-boundary 
 |-------|--------|
 | Task 1 `<automated>` (file, 12 Copywriting-Contract strings, gradient, zero app references) | pass |
 | Task 2 `<automated>` (README, MANIFEST row 003, 05-UI-SPEC reference point, D-33/Destaques/STORY_DURATION_MS) | pass |
-| Task 3 `<automated>` segment 1 — `pnpm --filter @tria/web test -- messages` | pass — 11 files, 94/94; `messages.test.ts` alone 24/24 including all 12 new UI-D-46 cases |
-| Task 3 `<automated>` segment 2 — `pnpm --filter @tria/web typecheck` | pass (`next typegen && tsc --noEmit`) |
-| Task 3 `<automated>` segment 3 — `pnpm --filter @tria/web lint` | pass — 237 files (one Biome format error was raised and fixed before the commit) |
+| Task 3 `<automated>` segment 1 — `pnpm --filter @rede-social/web test -- messages` | pass — 11 files, 94/94; `messages.test.ts` alone 24/24 including all 12 new UI-D-46 cases |
+| Task 3 `<automated>` segment 2 — `pnpm --filter @rede-social/web typecheck` | pass (`next typegen && tsc --noEmit`) |
+| Task 3 `<automated>` segment 3 — `pnpm --filter @rede-social/web lint` | pass — 237 files (one Biome format error was raised and fixed before the commit) |
 | Task 3 `<automated>` segment 4 — `bash scripts/check-ui-literals.sh` | pass — exit 0 |
 | Full chain re-run end to end | `CHAIN EXIT: 0` |
 
@@ -305,7 +305,7 @@ None. No new network endpoint, auth path, file access pattern or trust-boundary 
 | `platform.json` still has `"communities": "Comunidades"` | pass |
 | Out-of-scope files still carry the word (signup / noCommunity / hostMismatch / platformDomains) | **2 / 2 / 1 / 4** — all non-zero |
 | `messages.test.ts` has an assertion per newly-interpolated key naming `{tenant}` | pass — 6 of 6 |
-| `pnpm --filter @tria/web test -- messages` exits 0 | pass |
+| `pnpm --filter @rede-social/web test -- messages` exits 0 | pass |
 | `bash scripts/check-ui-literals.sh` exits 0 | pass |
 
 **The one criterion that must NOT hold, and does not.** `apps/web/messages/pt-BR/media.json` carries **zero** `{tenant}` from this amendment, by the user's decision. Any reading of the plan that expects a `{tenant}` in `media.json` is reading the superseded 4/6 split; see Deviation 1. It was not forced.
@@ -314,7 +314,7 @@ None. No new network endpoint, auth path, file access pattern or trust-boundary 
 
 None outstanding.
 
-One standing fact worth carrying forward: `pnpm --filter @tria/web test -- messages` does **not** filter — the `-- messages` argument is swallowed and vitest runs all 11 web test files (94 tests). That is harmless here (it is strictly more coverage, and the run is green), but the plan's `<fails_when>` clause "the vitest summary … does not name messages.test.ts" cannot be satisfied by that command's default reporter. The file was verified to run and pass by a separate explicit invocation: `pnpm --filter @tria/web exec vitest run i18n/messages.test.ts --reporter=verbose` → 24/24, every UI-D-46 case named.
+One standing fact worth carrying forward: `pnpm --filter @rede-social/web test -- messages` does **not** filter — the `-- messages` argument is swallowed and vitest runs all 11 web test files (94 tests). That is harmless here (it is strictly more coverage, and the run is green), but the plan's `<fails_when>` clause "the vitest summary … does not name messages.test.ts" cannot be satisfied by that command's default reporter. The file was verified to run and pass by a separate explicit invocation: `pnpm --filter @rede-social/web exec vitest run i18n/messages.test.ts --reporter=verbose` → 24/24, every UI-D-46 case named.
 
 ## Next Phase Readiness
 

@@ -1,8 +1,8 @@
-import { MEDIA_STATUSES } from '@tria/contracts/media';
+import { MEDIA_STATUSES } from '@rede-social/contracts/media';
 import { z } from 'zod';
 
 /**
- * The module's published contract surface (`@tria/module-feed/contracts`). Both the API and the web
+ * The module's published contract surface (`@rede-social/module-feed/contracts`). Both the API and the web
  * app import from here — the same Zod schema validates the request body in Hono, the query in the
  * route and the page payload in `apps/web/lib/feed.ts`, so there is exactly one definition of what a
  * feed post is (MOD-01).
@@ -17,7 +17,7 @@ export const FEED_PAGE_SIZE = 10;
 export const FEED_MAX_PAGE_SIZE = 25;
 
 /**
- * The longest cursor this endpoint will look at. The envelope (`@tria/core/server/paging`) is a
+ * The longest cursor this endpoint will look at. The envelope (`@rede-social/core/server/paging`) is a
  * base64url JSON object carrying an ISO timestamp and a uuid, so 512 characters is already generous;
  * the bound exists so a megabyte of "cursor" is refused before it is decoded.
  */
@@ -48,7 +48,7 @@ export const FEED_CAPTION_TRUNCATE_AT = 100;
  * narrowed to posts whose `mediaKind` is `video` AND whose video asset is `ready` — a post still
  * transcoding, failed or rejected is absent here while Início still lists it (D-53). It narrows the
  * SAME endpoint, the same ordering expression and the same cursor envelope, and it combines with
- * `communityId` (one community's ready videos). Reels (`@tria/module-reels`, D-121) is its reader:
+ * `communityId` (one community's ready videos). Reels (`@rede-social/module-reels`, D-121) is its reader:
  * Reels owns no route and reads posts only through this parameter, so it can never list a post the
  * feed would not show the same member. Any other value is a 400 (`z.enum`).
  */
@@ -117,7 +117,7 @@ export const FEED_COMMUNITY_ISSUE_SET: ReadonlySet<string> = new Set(FEED_COMMUN
  * The community a post belongs to, as the FEED projects it (D-71) — a NAME and the two ids the host
  * needs to build a route, and deliberately nothing else.
  *
- * **This is not `@tria/module-communities`' `CommunitySummary`, and it must not become it.** Two
+ * **This is not `@rede-social/module-communities`' `CommunitySummary`, and it must not become it.** Two
  * reasons, and both are load-bearing:
  *
  *  1. **The boundary.** `turbo.json`'s tag allowlist lets a module depend on the kernel, the shared
@@ -494,7 +494,7 @@ export const FEED_VIDEO_COMMUNITIES_CAP = 50;
 
 /**
  * `GET /v1/feed/video-communities` (REELS-04, D-117, D-119, D-120) — the communities worth a Reels
- * lane, as feed's own published contract. Its one reader is Reels (`@tria/module-reels`, D-121),
+ * lane, as feed's own published contract. Its one reader is Reels (`@rede-social/module-reels`, D-121),
  * which owns no route and so reads the lanes here, beside the list they open.
  *
  * - **Lanes are communities, never tags (D-117).** The read takes no parameter: no composer field
@@ -772,7 +772,7 @@ export interface PostDeleted {
  * the kernel knowing modules exist. Anything that imports this file gets `emit`/`subscribe` typed
  * for all nine.
  */
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'post.published': PostPublished;
     'post.edited': PostEdited;

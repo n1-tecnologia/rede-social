@@ -1,6 +1,6 @@
 'use client';
 
-import { Tabs } from '@tria/ui';
+import { Tabs } from '@rede-social/ui';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -24,7 +24,7 @@ export interface TenantTabsProps {
 /**
  * Marca · Módulos · Domínios · Admins · Status as links to the tab sub-routes; the active tab is the
  * segment after `/plataforma/tenants/{id}/` (the tenant root redirects to `marca`). Arrow keys move
- * through `@tria/ui` `Tabs`' roving tabindex and navigate.
+ * through `@rede-social/ui` `Tabs`' roving tabindex and navigate.
  */
 export function TenantTabs({ tenantId, className }: TenantTabsProps) {
   const t = useTranslations('platform');

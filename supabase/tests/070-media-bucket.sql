@@ -45,7 +45,7 @@ select ok(
   'T-03-09: a vector upload is NOT accepted — unlike the admin-only brand logo there is no safety-scan escape hatch for a member avatar'
 );
 
--- 03-06: the allow-list is exactly the union of MEDIA_LIMITS in @tria/contracts/media. The two video
+-- 03-06: the allow-list is exactly the union of MEDIA_LIMITS in @rede-social/contracts/media. The two video
 -- mimes are here for `VIDEO_PROVIDER=fake`, which mints its direct-upload target in THIS bucket
 -- rather than at a dev-only byte-accepting API route (that route would contradict MEDIA-01). With
 -- `VIDEO_PROVIDER=mux` the vendor owns the object and they are unused. Pinned as a SET, so neither

@@ -1,4 +1,4 @@
-import type { TenantRole } from '@tria/contracts';
+import type { TenantRole } from '@rede-social/contracts';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import type { AppEnv, RequestContext } from '../server/auth/context';

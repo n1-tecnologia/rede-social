@@ -12,7 +12,7 @@ import {
   PLAYBACK_TOKEN_TTL_SECONDS,
   REFUSED_IMAGE_MIMES,
   RESUMABLE_THRESHOLD_BYTES,
-} from '@tria/contracts/media';
+} from '@rede-social/contracts/media';
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { mediaAssets, tenantDomains } from '../../db/schema';

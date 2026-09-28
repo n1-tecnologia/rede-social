@@ -6,12 +6,12 @@ import {
   type MediaPurpose,
   PURPOSE_WIDTHS,
   VARIANT_WIDTHS,
-} from '@tria/contracts/media';
+} from '@rede-social/contracts/media';
 
 /**
  * Server-side ceilings and decoder guards. Pure: no database, no env, no Storage client.
  *
- * The per-(kind, purpose) mime allow-list and byte cap live in `@tria/contracts/media`, NOT here:
+ * The per-(kind, purpose) mime allow-list and byte cap live in `@rede-social/contracts/media`, NOT here:
  * the browser needs the same table for its pick-time gate (the Phase 2 `classifyFile` /
  * `BRANDING_MAX_BYTES` precedent in `apps/web/lib/upload.ts`). This file keeps only what must never
  * reach a bundle — the per-tenant ceilings and the sharp decoder limits — and re-exports the

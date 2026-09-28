@@ -1,6 +1,6 @@
 'use server';
 
-import { resetSchema } from '@tria/contracts';
+import { resetSchema } from '@rede-social/contracts';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 

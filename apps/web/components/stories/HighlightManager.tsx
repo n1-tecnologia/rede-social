@@ -1,11 +1,11 @@
 'use client';
 
-import { mediaAcceptFor } from '@tria/contracts/media';
+import { mediaAcceptFor } from '@rede-social/contracts/media';
 import {
   STORY_HIGHLIGHT_MAX_ITEMS,
   STORY_HIGHLIGHT_MAX_PER_PLACE,
   STORY_HIGHLIGHT_MAX_TITLE,
-} from '@tria/module-stories/contracts';
+} from '@rede-social/module-stories/contracts';
 import {
   type HighlightEditItem,
   HighlightEditSheet,
@@ -15,8 +15,15 @@ import {
   type HighlightMembershipRow,
   HighlightStoryThumb,
   HighlightTitleStep,
-} from '@tria/module-stories/ui';
-import { BottomSheet, Button, EmptyState, InfiniteScroll, Skeleton, useToast } from '@tria/ui';
+} from '@rede-social/module-stories/ui';
+import {
+  BottomSheet,
+  Button,
+  EmptyState,
+  InfiniteScroll,
+  Skeleton,
+  useToast,
+} from '@rede-social/ui';
 import { Bookmark, ImagePlus, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';

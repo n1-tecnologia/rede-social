@@ -5,8 +5,8 @@ import {
   tenantDomainParamsSchema,
   tenantDomainSchema,
   tenantDomainsListSchema,
-} from '@tria/contracts';
-import { ApiError } from '@tria/core/server/http/api-error';
+} from '@rede-social/contracts';
+import { ApiError } from '@rede-social/core/server/http/api-error';
 import {
   attachDomain,
   checkDomain,
@@ -14,8 +14,8 @@ import {
   removeDomain,
   restartDomainVerification,
   setPrimaryDomain,
-} from '@tria/core/server/platform/domains';
-import type { PlatformEnv } from '@tria/core/server/platform/require-super-admin';
+} from '@rede-social/core/server/platform/domains';
+import type { PlatformEnv } from '@rede-social/core/server/platform/require-super-admin';
 import { platformDefaultHook } from '../../http/openapi';
 
 /**

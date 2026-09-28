@@ -277,7 +277,7 @@ status: complete
 - **Issue:** The plan's list shape implied the host would build the optimistic row. `lib/registry.tsx` is a server component and `CommentsList` is a client component; React Flight accepts values and server actions across that boundary, not arbitrary functions. A `buildOptimistic` prop would have failed at runtime the first time a member typed a comment.
 - **Fix:** Replaced it with `viewer: CommentViewer` + `labels.nowLabel` — data the host already has — and the list assembles the pending row itself.
 - **Files modified:** `packages/modules/feed/ui/CommentsList.tsx`, `apps/web/lib/registry.tsx`
-- **Verification:** `pnpm --filter @tria/web build` (the Next build reports server/client boundary errors) and the e2e case that submits a comment and waits for `aria-busy` to clear.
+- **Verification:** `pnpm --filter @rede-social/web build` (the Next build reports server/client boundary errors) and the e2e case that submits a comment and waits for `aria-busy` to clear.
 - **Committed in:** `322984d`
 
 **2. [Rule 2 — Missing critical] `linkify` extracted into a shared module**
@@ -286,7 +286,7 @@ status: complete
 - **Issue:** The plan asked the comment body to use "the same render-time URL auto-linking the caption uses", and the plan's own prohibition names drift on the scheme restriction and the `rel` attributes as the risk. `linkify` was a private function inside `PostCaption.tsx`; copying it into `CommentItem.tsx` would have created exactly the two-implementations condition the prohibition warns about.
 - **Fix:** Moved it to `packages/modules/feed/ui/linkify.tsx` with the three rules it holds documented there; `PostCaption` and `CommentItem` both call it. `PostCaption.tsx` is not in the plan's `files_modified`, so this widened the file list by one modification and one creation.
 - **Files modified:** `packages/modules/feed/ui/linkify.tsx` (new), `packages/modules/feed/ui/PostCaption.tsx`, `packages/modules/feed/ui/CommentItem.tsx`
-- **Verification:** `grep -rc dangerouslySetInnerHTML packages/modules/feed/ui/` → 0; `pnpm --filter @tria/module-feed test` (91 pass, including the existing caption tests).
+- **Verification:** `grep -rc dangerouslySetInnerHTML packages/modules/feed/ui/` → 0; `pnpm --filter @rede-social/module-feed test` (91 pass, including the existing caption tests).
 - **Committed in:** `322984d`
 
 **3. [Rule 3 — Blocking] `commentView` added to `feed-view.tsx`, a file the plan did not list**
@@ -295,7 +295,7 @@ status: complete
 - **Issue:** Both `inicio/feed-actions.ts` and (potentially) `lib/registry.tsx` need the `FeedComment` → `CommentView` mapping. Putting it in `registry.tsx` would have recreated the `registry ↔ feed-actions` cycle across the `'use server'` boundary that 04-06 broke by creating `feed-view.tsx` in the first place.
 - **Fix:** `commentView` lives beside `postCardView` in `apps/web/lib/feed-view.tsx` — one mapping, the established home for it.
 - **Files modified:** `apps/web/lib/feed-view.tsx`
-- **Verification:** `pnpm --filter @tria/web build` and `pnpm boundaries` both green.
+- **Verification:** `pnpm --filter @rede-social/web build` and `pnpm boundaries` both green.
 - **Committed in:** `322984d`
 
 **4. [Rule 2 — Missing critical] A live-author root seeded on the same post as the removed-author thread**
@@ -313,7 +313,7 @@ status: complete
 - **Issue:** Every other web action in this app returns a result envelope; a bare `boolean` would have been the one exception, and it did not typecheck against `deleteCommentAction`.
 - **Fix:** The module's prop type is `Promise<{ ok: boolean }>`, and the list treats a rejection and a refusal identically — the row leaves only on a confirmed delete.
 - **Files modified:** `packages/modules/feed/ui/CommentsList.tsx`
-- **Verification:** `pnpm --filter @tria/web typecheck`; the e2e delete case.
+- **Verification:** `pnpm --filter @rede-social/web typecheck`; the e2e delete case.
 - **Committed in:** `322984d`
 
 **6. [Rule 2 — Missing critical] `reply_depth_exceeded` earned its own catalog sentence**
@@ -322,7 +322,7 @@ status: complete
 - **Issue:** The plan asks the action to map the API's reply-depth refusal to its own catalog key, but the list had only one submit-error label. Showing "Não foi possível publicar seu comentário" for a refusal the member can actually act on (reply to the root instead) tells them nothing.
 - **Fix:** `CommentCreateOutcome` carries an optional `code`, the list picks between `submitErrorLabel` and a new `replyDepthErrorLabel`, and `feed.errors.replyDepth` was added to the catalog. The raw machine code still never reaches the DOM (T-04-42).
 - **Files modified:** `packages/modules/feed/ui/CommentsList.tsx`, `apps/web/lib/registry.tsx`, `apps/web/messages/pt-BR/feed.json`
-- **Verification:** `bash scripts/check-ui-literals.sh`; `pnpm --filter @tria/web typecheck`.
+- **Verification:** `bash scripts/check-ui-literals.sh`; `pnpm --filter @rede-social/web typecheck`.
 - **Committed in:** `322984d`
 
 ### Acceptance criteria whose literal grep differs from its intent
@@ -372,7 +372,7 @@ None — no external service configuration required.
 - All six created files exist on disk (`[ -f ]` verified).
 - All three task commits found in `git log --oneline --all`.
 - `git rev-list --count 61a6061..HEAD` = 3, matching the `commits:` frontmatter.
-- Plan-level verification re-run at close-out: `pnpm --filter @tria/module-feed typecheck lint test` (91 pass), `pnpm --filter @tria/web typecheck lint build`, `bash scripts/check-ui-literals.sh`, `bash scripts/check-static-routes.sh`, `pnpm boundaries`, `pnpm test:integration -- feed` (369 pass), `playwright test feed-comments.spec.ts --project=mobile-chromium` (9 pass, 26 s) — all green.
+- Plan-level verification re-run at close-out: `pnpm --filter @rede-social/module-feed typecheck lint test` (91 pass), `pnpm --filter @rede-social/web typecheck lint build`, `bash scripts/check-ui-literals.sh`, `bash scripts/check-static-routes.sh`, `pnpm boundaries`, `pnpm test:integration -- feed` (369 pass), `playwright test feed-comments.spec.ts --project=mobile-chromium` (9 pass, 26 s) — all green.
 
 ---
 *Phase: 04-feed*

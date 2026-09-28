@@ -1,11 +1,11 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
-import type { AppEnv } from '@tria/core/server/auth/context';
-import { flushEventsAfterHandler } from '@tria/core/server/events/bus';
-import { ApiError, errorEnvelope } from '@tria/core/server/http/api-error';
-import { communitiesRoutes } from '@tria/module-communities/server';
-import { eventsRoutes } from '@tria/module-events/server';
-import { feedRoutes } from '@tria/module-feed/server';
-import { storiesRoutes } from '@tria/module-stories/server';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
+import { flushEventsAfterHandler } from '@rede-social/core/server/events/bus';
+import { ApiError, errorEnvelope } from '@rede-social/core/server/http/api-error';
+import { communitiesRoutes } from '@rede-social/module-communities/server';
+import { eventsRoutes } from '@rede-social/module-events/server';
+import { feedRoutes } from '@rede-social/module-feed/server';
+import { storiesRoutes } from '@rede-social/module-stories/server';
 import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
 import { healthRoutes } from './routes/health';
@@ -38,7 +38,7 @@ app.onError((err, c) => {
 
 app.doc('/v1/openapi.json', {
   openapi: '3.0.0',
-  info: { title: 'TRIA Rede Social API', version: '1' },
+  info: { title: 'Rede Social API', version: '1' },
 });
 
 // Keep the chained `.route()` style: `AppType` must carry every mounted route for `hc<AppType>()`.

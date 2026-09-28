@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
+import type { MediaPlayback } from '@rede-social/contracts/media';
 import { act, cleanup, render } from '@testing-library/react';
-import type { MediaPlayback } from '@tria/contracts/media';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**

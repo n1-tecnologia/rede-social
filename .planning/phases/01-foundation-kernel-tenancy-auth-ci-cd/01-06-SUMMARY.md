@@ -34,7 +34,7 @@ plan_head_before: 0749936826eeafb153d72c46ef2b7aef3d8d2eb3
 
 # Tech tracking
 tech-stack:
-  added: ["vitest 5 in @tria/core (kernel unit suite)"]
+  added: ["vitest 5 in @rede-social/core (kernel unit suite)"]
   patterns:
     - "Feature flags as rows: a missing tenant_modules row and enabled=false are the same answer (404), only enabled=true enables"
     - "Cache only what may go stale: tenant_modules for 30 s, keyed by tenant id; membership/blocked is re-read every request (D-09)"
@@ -76,7 +76,7 @@ key-files:
     - turbo.json
 
 key-decisions:
-  - "The cross-tenant tenant list lives in packages/core/server/platform/tenants.ts, not in the route file: Biome's noRestrictedImports confines @tria/core/db/admin-tx to the kernel's tenancy/platform lanes and scripts/, and a route reaching past RLS on its own is exactly what that rule exists to prevent"
+  - "The cross-tenant tenant list lives in packages/core/server/platform/tenants.ts, not in the route file: Biome's noRestrictedImports confines @rede-social/core/db/admin-tx to the kernel's tenancy/platform lanes and scripts/, and a route reaching past RLS on its own is exactly what that rule exists to prevent"
   - "moduleFlags is a factory (createModuleFlags) with an injectable loader and clock plus one process-wide instance, so the TTL/isolation behaviour is unit-testable without a database and without test-only setters in production code"
   - "The flags cache exposes no membership accessor at all (asserted by a test), so D-09's per-request block check cannot be short-circuited by a later plan"
   - "permissionsFor(role, enabledKeys) unions kernel grants with only the ENABLED modules' defaultRolePermissions: disabling a module also revokes what it granted"
@@ -92,11 +92,11 @@ requirements-completed: [ROLE-06, ROLE-01, MOD-02, TENANT-01]
 
 coverage:
   - id: D1
-    description: "GET /v1/me/bootstrap lists the tenant's enabled modules (tria-demo: seven keys per D-17/D-19; tria-lab: events + feed) sorted by nav.order then key, with permissions derived from the member's role"
+    description: "GET /v1/me/bootstrap lists the tenant's enabled modules (rede-demo: seven keys per D-17/D-19; rede-lab: events + feed) sorted by nav.order then key, with permissions derived from the member's role"
     requirement: ROLE-06
     verification:
       - kind: integration
-        ref: "apps/api/tests/integration/modules.test.ts#1. tria-demo lists the seven seeded keys; tria-lab only feed + events"
+        ref: "apps/api/tests/integration/modules.test.ts#1. rede-demo lists the seven seeded keys; rede-lab only feed + events"
         status: pass
       - kind: integration
         ref: "apps/api/tests/integration/modules.test.ts#2. permissions come from the role: the admin manages, the member consumes (V1)"
@@ -167,7 +167,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D7
-    description: "D-21 platform host end to end: the seeded super_admin logs in on tria.localhost and sees the tenant list; a member signing in there is signed out with no tenant named; the super_admin is refused on tria-demo.localhost"
+    description: "D-21 platform host end to end: the seeded super_admin logs in on rede-social.localhost and sees the tenant list; a member signing in there is signed out with no tenant named; the super_admin is refused on rede-demo.localhost"
     requirement: TENANT-01
     verification:
       - kind: e2e
@@ -195,11 +195,11 @@ coverage:
         status: pass
     human_judgment: false
   - id: D9
-    description: "The seed matches D-17/D-19/D-24 and is idempotent: tria-demo gets all six plus example, tria-lab only feed + events, the super_admin lands in platform_admins, and tenant_domains still holds exactly 2 rows after a re-run"
+    description: "The seed matches D-17/D-19/D-24 and is idempotent: rede-demo gets all six plus example, rede-lab only feed + events, the super_admin lands in platform_admins, and tenant_domains still holds exactly 2 rows after a re-run"
     requirement: ROLE-06
     verification:
       - kind: other
-        ref: "SEED_PASSWORD=… SUPER_ADMIN_PASSWORD=… pnpm db:seed (run twice) + psql counts: tenant_domains=2, tria-demo=7, tria-lab=2, platform_admins=1"
+        ref: "SEED_PASSWORD=… SUPER_ADMIN_PASSWORD=… pnpm db:seed (run twice) + psql counts: tenant_domains=2, rede-demo=7, rede-lab=2, platform_admins=1"
         status: pass
       - kind: unit
         ref: "apps/api/tests/unit/registry.test.ts#4. prohibition: REAL_TENANT_DEFAULT_MODULES holds the six toggleable keys and never `example`"
@@ -229,7 +229,7 @@ status: complete
 
 ## Accomplishments
 
-- **"Enabled modules" became real data.** `tenant_modules` (tenant_id, module_key, enabled, settings) is a row per toggleable key with RLS and a select-only policy for the tenant lane; its CHECK is generated from `TOGGLEABLE_MODULES`, so the constraint cannot drift from the TypeScript list. The seed writes one row per key for both tenants — tria-demo all six plus `example` (D-19), tria-lab only `feed` and `events` (D-17).
+- **"Enabled modules" became real data.** `tenant_modules` (tenant_id, module_key, enabled, settings) is a row per toggleable key with RLS and a select-only policy for the tenant lane; its CHECK is generated from `TOGGLEABLE_MODULES`, so the constraint cannot drift from the TypeScript list. The seed writes one row per key for both tenants — rede-demo all six plus `example` (D-19), rede-lab only `feed` and `events` (D-17).
 - **A guard chain whose order is enforced, not documented.** `requireModule` answers 404 `MODULE_DISABLED` for a disabled *or absent* row and `requireRole` answers 403 `FORBIDDEN`; both throw 401 when `ctx` is missing, so mounting them before `requireAuth` can never leak whether a module exists. An anonymous probe of a disabled route gets 401, a member on an admin route of an enabled module gets 403, and on a disabled module even the tenant admin gets 404.
 - **A flags cache that caches exactly one thing.** `moduleFlags` keys entries by tenant id with a 30 s TTL and exposes `invalidate(tenantId)`; it has no membership accessor at all (a unit test asserts the surface), which keeps D-09's "a block takes effect on the very next request" structurally true.
 - **The platform lane exists without a membership.** `requireSuperAdmin()` verifies the bearer with the same `verifyBearer` the tenant lane uses, reads `platform_admins` per request through the admin lane, and refuses a registered tenant host with 403 `TENANT_HOST_MISMATCH` (D-23) while leaving generic hosts open for dev and Preview. `GET /v1/platform/tenants` serves the list behind it, with a pino `platform.tenants.list` audit line.
@@ -260,7 +260,7 @@ status: complete
 
 ## Decisions Made
 
-1. **The cross-tenant query lives in the kernel, not the route.** `apps/api/src/routes/platform.ts` cannot import `@tria/core/db/admin-tx` — Biome confines the admin lane to `packages/core/server/{tenancy,platform}` and `scripts/`. `listPlatformTenants()` was added under `server/platform/` and the route calls it. The plan's sketch had the route open the lane itself; that would have required weakening the boundary rule that keeps RLS-bypassing code reviewable in one place.
+1. **The cross-tenant query lives in the kernel, not the route.** `apps/api/src/routes/platform.ts` cannot import `@rede-social/core/db/admin-tx` — Biome confines the admin lane to `packages/core/server/{tenancy,platform}` and `scripts/`. `listPlatformTenants()` was added under `server/platform/` and the route calls it. The plan's sketch had the route open the lane itself; that would have required weakening the boundary rule that keeps RLS-bypassing code reviewable in one place.
 2. **`createModuleFlags` factory + one shared instance** instead of module-level mutable state with test-only setters. The TTL, isolation and invalidation behaviour is provable with an injected clock and loader, and production code carries no test hooks.
 3. **`permissionsFor` takes the enabled key set**, so a module's `defaultRolePermissions` only apply while its flag is on. Turning a module off revokes its grants in the same request.
 4. **`tenant_modules` has no `for: 'all'` policy** — members read their tenant's flags (the bootstrap call runs in the tenant lane) and every write goes through the admin lane. Tenant-admin toggling is a Phase 2 route, which is the right place to audit it.
@@ -288,8 +288,8 @@ status: complete
 
 **3. [Rule 1 - Bug] The new integration test failed `typecheck` while passing at runtime**
 - **Found during:** Task 3 (plan-level verification)
-- **Issue:** `Record<string, string>` fixtures widen to `string | undefined` under the repo's `noUncheckedIndexedAccess`, so `pnpm --filter @tria/api typecheck` failed even though all 12 cases passed.
-- **Fix:** Concrete-keyed fixture objects (`tokens`, `tenantIds`), and the tria-lab admin token is signed in once in `beforeAll` like the others.
+- **Issue:** `Record<string, string>` fixtures widen to `string | undefined` under the repo's `noUncheckedIndexedAccess`, so `pnpm --filter @rede-social/api typecheck` failed even though all 12 cases passed.
+- **Fix:** Concrete-keyed fixture objects (`tokens`, `tenantIds`), and the rede-lab admin token is signed in once in `beforeAll` like the others.
 - **Files modified:** `apps/api/tests/integration/modules.test.ts`
 - **Verification:** `pnpm typecheck` (all 7 tasks) clean; the suite still passes 12/12.
 - **Committed in:** `d83908e`
@@ -323,7 +323,7 @@ status: complete
 
 | Stub | File | Reason |
 |---|---|---|
-| `MODULE_REGISTRY` is `{}` | `apps/api/src/modules/registry.ts` | Deliberate: plan 01-07 registers `@tria/module-example`, and no other module exists before Phase 4. Until then every enabled key is manifest-less, so `/inicio` lists raw keys (`chat`, `feed`, …) instead of nav labels. Recorded in `.planning/WINDOWS.md`. |
+| `MODULE_REGISTRY` is `{}` | `apps/api/src/modules/registry.ts` | Deliberate: plan 01-07 registers `@rede-social/module-example`, and no other module exists before Phase 4. Until then every enabled key is manifest-less, so `/inicio` lists raw keys (`chat`, `feed`, …) instead of nav labels. Recorded in `.planning/WINDOWS.md`. |
 | `counters` still zero | `apps/api/src/routes/me.ts` | Unchanged from 01-01; notifications/chat counters are Phase 7 (existing window #2). |
 
 `.planning/WINDOWS.md` window #1 ("bootstrap returns modules: [] and permissions: []") is now **fixed** — this plan filled both.
@@ -334,11 +334,11 @@ None — every file touched is covered by the plan's `<threat_model>`; no new ne
 
 ## User Setup Required
 
-None — no external service configuration. Local and CI runs need `SUPER_ADMIN_PASSWORD` alongside `SEED_PASSWORD` when running `pnpm db:seed`, the API integration suite or the e2e suite (`SUPER_ADMIN_EMAIL` defaults to `ferramentas@triacompany.com.br`). Plan 01-11 must add `SUPER_ADMIN_PASSWORD` to the GitHub Actions secrets used by the seed workflow.
+None — no external service configuration. Local and CI runs need `SUPER_ADMIN_PASSWORD` alongside `SEED_PASSWORD` when running `pnpm db:seed`, the API integration suite or the e2e suite (`SUPER_ADMIN_EMAIL` defaults to `superadmin@rede-social.test`). Plan 01-11 must add `SUPER_ADMIN_PASSWORD` to the GitHub Actions secrets used by the seed workflow.
 
 ## Next Phase Readiness
 
-- **01-07** can register the example manifest by adding one entry to `MODULE_REGISTRY` and mounting its routes with `requireAuth, requireModule('example')`; `example` is already enabled for `tria-demo` and disabled for `tria-lab`, so its disabled-module 404 is seeded.
+- **01-07** can register the example manifest by adding one entry to `MODULE_REGISTRY` and mounting its routes with `requireAuth, requireModule('example')`; `example` is already enabled for `rede-demo` and disabled for `rede-lab`, so its disabled-module 404 is seeded.
 - **01-08** can assert `pg_policy` count = 0 on `platform_admins` and 1 (select-only) on `tenant_modules`; the cross-tenant negative case for `tenant_modules` is ready for pgTAP.
 - **01-11** should carry `SUPER_ADMIN_PASSWORD` into the staging/production seed workflow.
 - **Phase 2's platform panel** consumes `platformTenantsSchema` unchanged and should call `moduleFlags.invalidate(tenantId)` after a toggle so the flip is immediate on the writing instance (the other instances converge within 30 s).
@@ -349,4 +349,4 @@ None — no external service configuration. Local and CI runs need `SUPER_ADMIN_
 
 ## Self-Check: PASSED
 
-All 15 `key-files.created` paths exist on disk; all four task commits (`7bf1a0b`, `09da6c3`, `d00e89c`, `d83908e`) are present in `git log`. Plan `<verification>` re-run at close-out: `@tria/core` 15/15, `registry.test.ts` 6/6, `modules.test.ts` 12/12, `auth-middleware.test.ts` 10/10, full API integration 50/50, `platform.spec.ts` 4/4 (full e2e 29/29), `pnpm typecheck` and `pnpm lint` clean across all workspaces.
+All 15 `key-files.created` paths exist on disk; all four task commits (`7bf1a0b`, `09da6c3`, `d00e89c`, `d83908e`) are present in `git log`. Plan `<verification>` re-run at close-out: `@rede-social/core` 15/15, `registry.test.ts` 6/6, `modules.test.ts` 12/12, `auth-middleware.test.ts` 10/10, full API integration 50/50, `platform.spec.ts` 4/4 (full e2e 29/29), `pnpm typecheck` and `pnpm lint` clean across all workspaces.

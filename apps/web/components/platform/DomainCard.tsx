@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, ConfirmDialog, StatusPill, useToast } from '@tria/ui';
+import { Button, Card, ConfirmDialog, StatusPill, useToast } from '@rede-social/ui';
 import { CheckCircle2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useState, useTransition } from 'react';
 import { DnsRecordsTable, type DnsRecordView } from './DnsRecordsTable';

@@ -1,6 +1,6 @@
 'use client';
 
-import { Badge, cn } from '@tria/ui';
+import { Badge, cn } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';

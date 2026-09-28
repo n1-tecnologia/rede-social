@@ -1,6 +1,6 @@
 'use client';
 
-import type { StoryMediaControls } from '@tria/module-stories/ui';
+import type { StoryMediaControls } from '@rede-social/module-stories/ui';
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
 import { fetchPlaybackTokenAction } from '@/app/(app)/configuracoes/midia/actions';

@@ -1,6 +1,6 @@
 'use client';
 
-import { Avatar, Badge, cn } from '@tria/ui';
+import { Avatar, Badge, cn } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { activeTabChrome, iconFor, isNavItemActive, type NavItem } from './nav';
@@ -34,7 +34,7 @@ const slotLinkClasses =
  *
  * Media chrome (UI-D-81): while the active tab's nav entry declares `chrome: 'media'` the bar is not
  * rendered at all, so the video surface owns the top of the screen. The rule is declarative — it reads
- * the active tab's declaration through `activeTabChrome` — because a pathname check in `@tria/core/ui`
+ * the active tab's declaration through `activeTabChrome` — because a pathname check in `@rede-social/core/ui`
  * would couple the kernel to a module (MOD-02). The desktop rail keeps the tenant identity there.
  */
 export function TopBar({

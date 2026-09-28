@@ -309,10 +309,10 @@ Both TDD-marked tasks ran a full RED → GREEN cycle with machine-verified evide
 | Task | Gate | Commit | Status |
 |------|------|--------|--------|
 | 1 | RED | `a0f0d05` `test(05-07)` | Pass — `check tdd-red-evidence` returned **`RED_EVIDENCE_OK`** (`target_test_failed`) |
-| 1 | GREEN | `6bdf833` `feat(05-07)` | Pass — 7/7 paging, 12/12 story-comment contract, 197 for `@tria/core` |
+| 1 | GREEN | `6bdf833` `feat(05-07)` | Pass — 7/7 paging, 12/12 story-comment contract, 197 for `@rede-social/core` |
 | 1 | REFACTOR | — | Not performed; no cleanup was warranted |
 | 3 | RED | `2f40ff6` `test(05-07)` | Pass — `check tdd-red-evidence` returned **`RED_EVIDENCE_OK`** (`target_test_failed`) |
-| 3 | GREEN | `3e82d4b` `feat(05-07)` | Pass — 11/11 flat cases, 12/12 host cases, 122 for `@tria/module-feed` |
+| 3 | GREEN | `3e82d4b` `feat(05-07)` | Pass — 11/11 flat cases, 12/12 host cases, 122 for `@rede-social/module-feed` |
 | 3 | REFACTOR | — | Not performed; `494b608` repaired a test-runner defect rather than cleaning up |
 
 **Task 1 RED evidence, verbatim from the observed run:**
@@ -351,7 +351,7 @@ Both RED phases were valid on the first capture — neither returned `unexpected
 **2. [Rule 1 - Bug] Two Vitest suites exited 1 while every assertion passed**
 
 - **Found during:** Task 3, `pnpm turbo run test` after the task commit
-- **Issue:** happy-dom's `Animation.cancel()` REJECTS the animation's `finished` promise, `motion` attaches no catch, and `cleanup()` unmounting a `BottomSheet` (or the composer's animated submit button) mid-transition raised six unhandled rejections. `@tria/module-feed` reported 122/122 and `@tria/web` 112/112 — and both exited non-zero. Piping the output through `grep` had hidden it earlier.
+- **Issue:** happy-dom's `Animation.cancel()` REJECTS the animation's `finished` promise, `motion` attaches no catch, and `cleanup()` unmounting a `BottomSheet` (or the composer's animated submit button) mid-transition raised six unhandled rejections. `@rede-social/module-feed` reported 122/122 and `@rede-social/web` 112/112 — and both exited non-zero. Piping the output through `grep` had hidden it earlier.
 - **Fix:** `motion/react` is mocked into plain elements in the two suites that mount a sheet, with the reason in the docblock. Neither file is about animation. It also let the host's close assertion return to its stronger form — the sheet really does leave the DOM.
 - **Files modified:** `packages/modules/feed/tests/comments-list-flat.test.tsx`, `apps/web/components/stories/StoryViewerHost.test.tsx`
 - **Verification:** `pnpm turbo run test` — 8 tasks, all green, exit 0.
@@ -390,7 +390,7 @@ Both RED phases were valid on the first capture — neither returned `unexpected
 ### Unmet acceptance criteria (recorded, not skipped)
 
 1. **`packages/modules/stories/server/service.ts` contains `story_comment_not_likeable`.** It does not, as code. Liking a comment is `POST /v1/feed/comments/{commentId}/like` — the FEED's route — so its `23503`/`23514` translation lives in `packages/modules/feed/server/service.ts`, and inventing a story-comment-like endpoint purely to hold a refusal would create the affordance the requirement removes. The code IS named in this file, in the docblock that explains the split, and both codes are enumerated together in the stories module's exported `STORY_COMMENT_ISSUES` so the web has one exhaustive switch. The truth the criterion serves — "the API answers both refusals with distinct machine codes it translated rather than invented" — holds and is asserted by machine code in two integration cases.
-2. **`packages/modules/stories/ui/StoryViewer.tsx` contains `CommentSheet` and passes the flat variant, and its paused expression references the sheet's open state.** The string appears only in the `overlay` prop's docblock. `CommentSheet` lives in `@tria/module-feed` and `turbo boundaries` denies a `module -> module` package edge — the identical wall 05-03, 05-05 and 05-06 hit, and the plan's own `key_links` names it. `StoryViewerHost` (in `apps/web`, which may reach both) composes the sheet, passes `variant="flat"`, and drives `externallyPaused` from its open state. The viewer participates through the `overlay` prop rather than through an import, and the behaviour is asserted at the host and in the browser.
+2. **`packages/modules/stories/ui/StoryViewer.tsx` contains `CommentSheet` and passes the flat variant, and its paused expression references the sheet's open state.** The string appears only in the `overlay` prop's docblock. `CommentSheet` lives in `@rede-social/module-feed` and `turbo boundaries` denies a `module -> module` package edge — the identical wall 05-03, 05-05 and 05-06 hit, and the plan's own `key_links` names it. `StoryViewerHost` (in `apps/web`, which may reach both) composes the sheet, passes `variant="flat"`, and drives `externallyPaused` from its open state. The viewer participates through the `overlay` prop rather than through an import, and the behaviour is asserted at the host and in the browser.
 3. **`grep -c "export function CommentsList" … prints 1`.** It prints **2**, and printed 2 before this plan as well: `CommentsListSkeleton` is exported from the same file (04-08). The exact-function form `grep -c "export function CommentsList("` prints 1, and `find … -name '*CommentsList*.tsx' | wc -l` prints 1 — there is still exactly one comment list.
 
 **Total deviations:** 5 auto-fixed (2× Rule 1 bugs, 1× Rule 2 missing, 2× Rule 3 blockers) plus 6 documented additions and 3 recorded unmet greps. **Impact:** net positive — deviation 1 in particular caught a defect that had removed the stories strip from the home screen entirely, which no unit test would have seen, and deviation 2 caught two suites that were reporting green while failing their runner.
@@ -427,14 +427,14 @@ None. Every file this plan touched sits inside the threat model the plan registe
 
 | Check | Result |
 |-------|--------|
-| `pnpm --filter @tria/module-feed typecheck && lint` | pass (40 files) |
-| `pnpm --filter @tria/module-feed test` | pass — 8 files, 122/122 |
-| `pnpm --filter @tria/module-stories typecheck && lint` | pass (21 files) |
-| `pnpm --filter @tria/module-stories test` | pass — 5 files, 50/50 |
-| `pnpm --filter @tria/core typecheck && test` | pass — 21 files, 197/197 (the paging suite included) |
-| `pnpm --filter @tria/web typecheck && lint` | pass (257 files) |
-| `pnpm --filter @tria/web test` | pass — 13 files, 112/112 |
-| `pnpm --filter @tria/api typecheck` | pass |
+| `pnpm --filter @rede-social/module-feed typecheck && lint` | pass (40 files) |
+| `pnpm --filter @rede-social/module-feed test` | pass — 8 files, 122/122 |
+| `pnpm --filter @rede-social/module-stories typecheck && lint` | pass (21 files) |
+| `pnpm --filter @rede-social/module-stories test` | pass — 5 files, 50/50 |
+| `pnpm --filter @rede-social/core typecheck && test` | pass — 21 files, 197/197 (the paging suite included) |
+| `pnpm --filter @rede-social/web typecheck && lint` | pass (257 files) |
+| `pnpm --filter @rede-social/web test` | pass — 13 files, 112/112 |
+| `pnpm --filter @rede-social/api typecheck` | pass |
 | `pnpm turbo run lint typecheck` | pass — 19 tasks |
 | `pnpm turbo run test` | pass — 8 tasks |
 | `pnpm db:generate` against the committed migration | no-op ("No schema changes"); `git status --porcelain -- supabase/migrations` empty |
@@ -444,9 +444,9 @@ None. Every file this plan touched sits inside the threat model the plan registe
 | `pnpm test:integration` (stories file alone) | pass — 41/41 |
 | `pnpm test:integration` (feed-interactions alone) | pass — 18/18 |
 | `bash scripts/check-ui-literals.sh` | pass |
-| `pnpm --filter @tria/web exec playwright test stories.spec.ts` | pass — 21 passed, 11 skipped |
-| `pnpm --filter @tria/web exec playwright test` (whole suite) | **378 passed, 1 failed, 69 skipped** (22.3 min) — the failure is the known flake below |
-| `pnpm --filter @tria/web exec playwright test media-video.spec.ts -g "the player opens in a sheet"` | pass in isolation — confirms the flake |
+| `pnpm --filter @rede-social/web exec playwright test stories.spec.ts` | pass — 21 passed, 11 skipped |
+| `pnpm --filter @rede-social/web exec playwright test` (whole suite) | **378 passed, 1 failed, 69 skipped** (22.3 min) — the failure is the known flake below |
+| `pnpm --filter @rede-social/web exec playwright test media-video.spec.ts -g "the player opens in a sheet"` | pass in isolation — confirms the flake |
 | `pnpm boundaries` | pass — 544 files, 9 packages, no issues |
 | `pnpm boundaries:negative` | pass — both layers reject the fixture |
 

@@ -41,7 +41,7 @@ the orchestrator's own verification of the blockers.
 
 | Part | Scope | Files | Critical | Warning | Info |
 |------|-------|-------|----------|---------|------|
-| A | `packages/**` — `@tria/module-feed`, kernel, UI primitives | 58 | 2 | 12 | 9 |
+| A | `packages/**` — `@rede-social/module-feed`, kernel, UI primitives | 58 | 2 | 12 | 9 |
 | B | `apps/api/**`, `supabase/**`, `scripts/**` | 32 | 1 | 16 | 7 |
 | C | `apps/web/**` | 40 | 1 | 11 | 10 |
 | **Total** | | **130** | **4** | **39** | **26** |
@@ -106,7 +106,7 @@ it … destroys seeded content the e2e measures."* Only the row half was impleme
 Two further consequences noted in Part B: the row delete is scoped only by
 `feed_post_media`, so seeded **avatar** assets are deleted, and
 `member_profiles_avatar_asset_id_…_fk` is `ON DELETE set null`, so it happens silently with
-no FK error; and `media.test.ts` sweeps **both** `tria-demo` and `tria-lab`. One
+no FK error; and `media.test.ts` sweeps **both** `rede-demo` and `rede-lab`. One
 `pnpm test:integration` run leaves the seed with `media_assets` rows pointing at objects
 that no longer exist and zero member photos. This is the most likely root cause of the
 cross-spec e2e flakiness already logged in `deferred-items.md`.
@@ -153,7 +153,7 @@ The cookie is host-scoped (no `Domain`), tenants are distinct hosts, `primaryHos
 folds an alias to the primary origin *before* the auth bounce, and the cookie is spent on
 use regardless of outcome.
 
-The one real defect is `C-WR-01`: `proxy.ts:218-223` writes `tria_continue` without
+The one real defect is `C-WR-01`: `proxy.ts:218-223` writes `rede_continue` without
 `secure`, contradicting the repo's own `lib/supabase/cookie-options.ts` policy
 (`secure: NODE_ENV === 'production'`). `TENANT_SLUG_COOKIE` (line 199, one-year lifetime)
 has the same gap.
@@ -199,7 +199,7 @@ Full detail in the part files. The ones with consequences beyond their own line:
   `position` though the contract carries it.
 - **C-WR-07/08** — e2e mutate-and-undo pairs are not in `finally`, so one failed assertion
   permanently poisons the shared seed; and `deletePostAssetsSince` captures `startedAt` at
-  *module* scope, so it deletes every post asset created in `tria-demo` during the whole
+  *module* scope, so it deletes every post asset created in `rede-demo` during the whole
   run. Together with B-CR-01 these are the seed-corruption trio.
 
 ## What held up under adversarial reading

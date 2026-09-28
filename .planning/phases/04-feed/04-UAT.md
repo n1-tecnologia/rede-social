@@ -30,7 +30,7 @@ approval_record: ".planning/sketches/002-phase-04-designed-screens/README.md —
 
 
 ### 2. Folha de compartilhamento nativa do SO em aparelho real
-expected: Num iPhone real (Safari) e num Android real (Chrome), autenticado como membro de `tria-demo`, abrir uma publicação e tocar o controle de compartilhar; a folha do SO abre carregando o link `/post/{id}` no host próprio do tenant. Enviar o link para si mesmo, abri-lo deslogado, e confirmar o retorno à publicação depois do login.
+expected: Num iPhone real (Safari) e num Android real (Chrome), autenticado como membro de `rede-demo`, abrir uma publicação e tocar o controle de compartilhar; a folha do SO abre carregando o link `/post/{id}` no host próprio do tenant. Enviar o link para si mesmo, abri-lo deslogado, e confirmar o retorno à publicação depois do login.
 why_human: `navigator.share()` abre uma superfície de nível de SO em que o Playwright não entra (WINDOWS 26). A metade desktop — copiar link e toast — ESTÁ automatizada em `apps/web/e2e/feed-share.spec.ts` e passa.
 result: pass
 

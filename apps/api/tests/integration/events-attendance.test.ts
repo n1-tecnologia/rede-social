@@ -4,8 +4,8 @@ import type {
   Attendee,
   CheckinCode,
   EventSummary,
-} from '@tria/module-events/contracts';
-import { EVENT_CHECKIN_CODE_ALPHABET } from '@tria/module-events/contracts';
+} from '@rede-social/module-events/contracts';
+import { EVENT_CHECKIN_CODE_ALPHABET } from '@rede-social/module-events/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -56,11 +56,11 @@ const TEST_TITLE_PREFIX = 'Evento de participantes';
 const LAB_UPCOMING = '0e000000-0000-4000-8000-000000000e01';
 
 const EMAILS = {
-  demoMember: 'member@tria-demo.local',
-  joao: 'joao.goncalves@tria-demo.local',
-  iris: 'iris.munoz@tria-demo.local',
-  rafael: 'rafael.teixeira@tria-demo.local',
-  sofia: 'sofia.davila@tria-demo.local',
+  demoMember: 'member@rede-demo.local',
+  joao: 'joao.goncalves@rede-demo.local',
+  iris: 'iris.munoz@rede-demo.local',
+  rafael: 'rafael.teixeira@rede-demo.local',
+  sofia: 'sofia.davila@rede-demo.local',
 } as const;
 
 const request = (path: string, token?: string, init: RequestInit = {}, host = HOSTS.demo) =>
@@ -164,7 +164,7 @@ const owners = (page: AttendancePage, map: Map<string, string>) =>
 const soften = (email: string, on: boolean) => adminSql`
   update public.memberships m set deleted_at = ${on ? new Date() : null}
     from public.users u, public.tenants t
-   where u.id = m.user_id and u.email = ${email} and t.id = m.tenant_id and t.slug = 'tria-demo'`;
+   where u.id = m.user_id and u.email = ${email} and t.id = m.tenant_id and t.slug = 'rede-demo'`;
 
 async function sweep(): Promise<void> {
   await adminSql`delete from public.events where title like ${`${TEST_TITLE_PREFIX}%`}`;
@@ -172,7 +172,7 @@ async function sweep(): Promise<void> {
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
   for (const [key, email] of Object.entries(EMAILS)) {
     tokens[key as keyof typeof EMAILS] = await signInAs(email, SEED_PASSWORD);
   }
@@ -257,7 +257,7 @@ describe('events attendance (Participantes)', () => {
       expect(item.removed).toBe(false);
       expect(typeof item.displayName).toBe('string');
       const text = JSON.stringify(item);
-      expect(text).not.toContain('@tria-demo.local');
+      expect(text).not.toContain('@rede-demo.local');
       expect(Object.keys(item)).not.toContain('role');
     }
   });

@@ -238,14 +238,14 @@ None. This plan touches no server, no route and no credential.
 
 | Gate | Result |
 |---|---|
-| `pnpm --filter @tria/core typecheck && lint && test` | ✓ 201 passed / 22 files (`media-image.test.tsx` 4/4) |
-| `pnpm --filter @tria/module-stories typecheck && lint && test` | ✓ 89 passed / 9 files (86 pre-existing + 3 CR-04 cases; `story-viewer-media.test.tsx` 4/4) |
-| `pnpm --filter @tria/web typecheck && lint && test` | ✓ 119 passed / 14 files — `StoryViewerHost.test.tsx` is the second, independent witness that the control identities changed shape without changing behaviour |
+| `pnpm --filter @rede-social/core typecheck && lint && test` | ✓ 201 passed / 22 files (`media-image.test.tsx` 4/4) |
+| `pnpm --filter @rede-social/module-stories typecheck && lint && test` | ✓ 89 passed / 9 files (86 pre-existing + 3 CR-04 cases; `story-viewer-media.test.tsx` 4/4) |
+| `pnpm --filter @rede-social/web typecheck && lint && test` | ✓ 119 passed / 14 files — `StoryViewerHost.test.tsx` is the second, independent witness that the control identities changed shape without changing behaviour |
 | `bash scripts/check-ui-literals.sh` | ✓ OK |
 | `pnpm boundaries` | ✓ 555 files, 9 packages, no issues |
 | No schema/migration file touched | ✓ `git diff --name-only` over the plan's six commits lists five `.tsx`/`.ts` files and nothing under `supabase/migrations/` or any `db/schema` |
 
-**Deferred to 05-11 Task 3 (wave 9), by design:** `pnpm --filter @tria/web exec playwright test stories.spec.ts` — the shipped tap/hold/swipe/deep-link suite over the stage this plan restructured. It is not run here because 05-09 holds the seeded database and the dev-server ports in wave 8, and two Playwright runs against one database is a race, not a gate. `05-11` declares `depends_on: ["05-06", "05-10"]`, so both plans' edits are in the tree when it runs.
+**Deferred to 05-11 Task 3 (wave 9), by design:** `pnpm --filter @rede-social/web exec playwright test stories.spec.ts` — the shipped tap/hold/swipe/deep-link suite over the stage this plan restructured. It is not run here because 05-09 holds the seeded database and the dev-server ports in wave 8, and two Playwright runs against one database is a race, not a gate. `05-11` declares `depends_on: ["05-06", "05-10"]`, so both plans' edits are in the tree when it runs.
 
 ## Known Stubs
 

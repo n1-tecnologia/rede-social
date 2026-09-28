@@ -69,7 +69,7 @@ key-files:
 
 key-decisions:
   - "The share URL is https://{primaryHost}/post/{id} composed server-side per request — resolved independently in the home slot, the load-more action and the post page, so a card appended by the sentinel carries the same link a server-rendered one does"
-  - "The share scheme is https unconditionally (UI-SPEC), so on the local stack the copied link is https://tria-demo.localhost/post/{id} while the tab sits on :3000 — correct about the tenant, deliberately not a dev convenience"
+  - "The share scheme is https unconditionally (UI-SPEC), so on the local stack the copied link is https://rede-demo.localhost/post/{id} while the tab sits on :3000 — correct about the tenant, deliberately not a dev convenience"
   - "A post with no share URL keeps its control present but INERT rather than removing it, preserving 04-06's fixed three-control action-row geometry; the security property (no wrong-origin link) is fully preserved either way"
   - "The FEED-07 round trip needed a return-path mechanism that did not exist: an HttpOnly, 10-minute cookie scoped to /post/ paths only, re-validated at use by safeContinuePath"
   - "The byte-identical 404 assertion strips requestId — the one field that legitimately differs between two calls — which is what makes the rest of the comparison meaningful rather than always-false"
@@ -91,7 +91,7 @@ coverage:
         ref: "apps/web/e2e/feed-share.spec.ts#2. the post page renders the full card with its comments inline (the positive control)"
         status: pass
       - kind: other
-        ref: "pnpm --filter @tria/web build && bash scripts/check-static-routes.sh (route builds as ƒ, absent from the static list)"
+        ref: "pnpm --filter @rede-social/web build && bash scripts/check-static-routes.sh (route builds as ƒ, absent from the static list)"
         status: pass
     human_judgment: false
   - id: D2
@@ -202,7 +202,7 @@ status: complete
 
 ## Decisions Made
 
-1. **`https` unconditionally in the share origin**, per UI-SPEC §Post page contract. On the local stack the copied value is `https://tria-demo.localhost/post/{id}` while the tab sits on `:3000`. Deriving the scheme/port from the request headers would have made dev links clickable, but the value a member sends is for another device, and every registrable host is served over TLS. Correct about the tenant beats convenient in dev.
+1. **`https` unconditionally in the share origin**, per UI-SPEC §Post page contract. On the local stack the copied value is `https://rede-demo.localhost/post/{id}` while the tab sits on `:3000`. Deriving the scheme/port from the request headers would have made dev links clickable, but the value a member sends is for another device, and every registrable host is served over TLS. Correct about the tenant beats convenient in dev.
 2. **A post with no share URL keeps an inert control rather than losing it.** The plan's truth says "omit the share control"; 04-06's shipped contract says the action row is always exactly three controls and an absent handler leaves a control present-but-inert. The security property — no link to a wrong origin — holds identically either way, and honouring the shipped geometry contract avoided a layout change nobody asked for. Recorded here because it is a deliberate reading, not an oversight.
 3. **The shared item mapping stayed split.** The plan asked for the item-to-props mapping to be exported from `registry.tsx`; the prior-wave rule says a view mapping there recreates the `registry ↔ feed-actions` cycle 04-06 broke. Resolution: the LABEL blocks (`postCardLabels`, `feedCommentsProps`) are exported from `registry.tsx` and read by both surfaces, while the DATA mapping (`postCardView`) stays in `lib/feed-view.tsx`. One source for each, no cycle.
 4. **Two thin client shells instead of one.** `FeedSurface` and `PostDetail` exist only because `useToast` is a hook and a server composition point cannot hold one. Neither chooses a label, a route or a datum. `registry.tsx`'s header comment was amended to say precisely which part of "the only file that imports a module's ui package" still holds.
@@ -216,7 +216,7 @@ status: complete
 
 - **Found during:** Task 1 (and required by Task 3's first behaviour).
 - **Issue:** The plan's FEED-07 truth states that a logged-out visitor "is routed through login by the existing authenticated-layout redirect and lands back on the post" and that "the existing bootstrap-refusal redirect table needs no new entry". The first half is true — `proxy.ts` bounces every private path to `/entrar`. The second half is not: `proxy.ts` clears the query (`target.search = ''`) and `login()` has always ended `redirect('/inicio')`. A shared post link therefore routed through login and dropped the member on the home feed, one navigation short of the post they were sent. Task 3's first behaviour ("lands on that same post page with the post's caption visible") was unsatisfiable as the code stood.
-- **Fix:** `apps/web/lib/continue-path.ts` — an `HttpOnly; SameSite=Lax`, 10-minute cookie (`tria_continue`). `proxy.ts` writes it on the unauthenticated bounce, but ONLY for paths matching `^/post/[^/]+$`; the login action reads it, spends it, and redirects there.
+- **Fix:** `apps/web/lib/continue-path.ts` — an `HttpOnly; SameSite=Lax`, 10-minute cookie (`rede_continue`). `proxy.ts` writes it on the unauthenticated bounce, but ONLY for paths matching `^/post/[^/]+$`; the login action reads it, spends it, and redirects there.
   - **Scoped to `/post/` deliberately.** Remembering every private path would silently change where an ordinary login lands (a member who once bounced off `/configuracoes` would later be teleported there) and could have destabilised existing session specs. `/post/{id}` is the only route in the product meant to travel outside it. Widening the predicate is a one-line change.
   - **Open-redirect closed at USE, not at write.** `safeContinuePath` requires a single leading slash, rejects `//host` and `/\host` (both protocol-relative URLs in a browser), rejects control characters and anything over 512 chars, and re-runs the `/post/` predicate — so even an attacker who could set a cookie on this origin cannot steer the login anywhere but that one route shape.
 - **Files modified:** `apps/web/lib/continue-path.ts` (new), `apps/web/proxy.ts`, `apps/web/app/(auth)/entrar/actions.ts`
@@ -229,7 +229,7 @@ status: complete
 - **Issue:** `packages/modules/feed/ui/index.ts` exported neither `FeedCardSkeleton` nor `FeedListSkeleton`, so the route's loading boundary could not reuse the card geometry and would have had to hand-draw a second one — the drift the module exports exist to prevent.
 - **Fix:** Added both to the barrel.
 - **Files modified:** `packages/modules/feed/ui/index.ts`
-- **Verification:** `pnpm --filter @tria/web typecheck`; the boundary renders the module's own skeleton.
+- **Verification:** `pnpm --filter @rede-social/web typecheck`; the boundary renders the module's own skeleton.
 - **Committed in:** `a0a958a`
 
 **3. [Rule 1 — Test correctness] The byte-identical assertion compared a per-request correlation id**
@@ -261,7 +261,7 @@ All five of the plan's `must_haves.prohibitions` moved from `unverified` to veri
 
 | Prohibition | How it is now held |
 |---|---|
-| The share URL must never be derived from the browser's own location | `primaryHostOrigin()` is the only source and runs server-side; `grep -cE "navigator\|window\.\|location"` = 0 in `sharePost.ts`, and `location.origin\|window.location` = 0 across `registry.tsx` and every module UI file. Asserted end to end by e2e case 3 (the copied value is `https://tria-demo.localhost/...`, not the `:3000` origin the tab is on). |
+| The share URL must never be derived from the browser's own location | `primaryHostOrigin()` is the only source and runs server-side; `grep -cE "navigator\|window\.\|location"` = 0 in `sharePost.ts`, and `location.origin\|window.location` = 0 across `registry.tsx` and every module UI file. Asserted end to end by e2e case 3 (the copied value is `https://rede-demo.localhost/...`, not the `:3000` origin the tab is on). |
 | A cross-tenant and a removed post must not render distinguishable screens | e2e case 4 asserts the two renderings EQUAL; isolation case q asserts the three API bodies equal (minus `requestId`), `details` absent, and no tenant/caption/id named. |
 | A dismissed native share must not raise an error toast | `sharePost` returns `'dismissed'` as its own value (2 unit cases, one of them proving the clipboard stub was NOT called); `useSharePost` toasts only on `'copied'` and `'failed'`. |
 | The post page must not render a different card component from the feed | The page renders `PostCard` through `PostDetail`; `grep -c "PostCardDetail\|DetailCard\|variant=\"detail\""` = 0; both surfaces read one `postCardLabels` block and one `postCardView`. |

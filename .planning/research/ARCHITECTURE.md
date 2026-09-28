@@ -10,8 +10,8 @@ Fixed constraints this document designs around (from PROJECT.md):
 - Node/TypeScript API on GCP Cloud Run holds all business logic; the frontend does not read/write Supabase data directly.
 - Supabase for Postgres, Auth, Storage, Realtime.
 - GitHub as source of truth with automated deploys to Vercel and Cloud Run.
-- Modular: each feature (feed, communities, stories, events, chat, notifications, moderation, profiles) is a self-contained module (schema + API + UI), toggled per tenant, reusable in other TRIA products.
-- Roles: `super_admin` (TRIA, cross-tenant), `admin_tenant`, `support_tenant`, `member`.
+- Modular: each feature (feed, communities, stories, events, chat, notifications, moderation, profiles) is a self-contained module (schema + API + UI), toggled per tenant, reusable in other Rede Social products.
+- Roles: `super_admin` (Rede Social, cross-tenant), `admin_tenant`, `support_tenant`, `member`.
 - Schema born ready for V2: members posting, members creating communities, member-to-member chat, users in multiple tenants.
 
 ---
@@ -178,7 +178,7 @@ export const feedModule: ModuleManifest = {
 
 ### Structure Rationale
 
-- **`packages/core/` is the kernel, not a module.** Tenancy, identity, RBAC, flags and DB lanes are cross-cutting; every module depends on them and none may bypass them. Reuse in another TRIA product means: take `core` + the modules you want.
+- **`packages/core/` is the kernel, not a module.** Tenancy, identity, RBAC, flags and DB lanes are cross-cutting; every module depends on them and none may bypass them. Reuse in another Rede Social product means: take `core` + the modules you want.
 - **`packages/modules/<name>/` holds schema + API + UI together.** This is what "toggle per tenant and reuse elsewhere" requires. Enforce with an ESLint `no-restricted-imports` / boundaries rule: a module may import `core`, `contracts`, `ui`, and its declared `dependsOn` modules' `contracts` only. Cross-module side effects go through the typed domain event bus (e.g. `feed.comment.created` → notifications module handler), never direct service calls.
 - **`apps/web/app/**` route files are thin.** They exist for Next.js file-system routing and mount module UI. Business state lives in the API; the web app is a BFF + renderer.
 - **`contracts/` is the only thing shared across the wire.** Zod schemas validate API input on Cloud Run and give the web app typed responses without coupling to server code.
@@ -317,7 +317,7 @@ type Bootstrap = {
 **Flow:**
 
 ```
-1. /login (public, unbranded TRIA neutral chrome)
+1. /login (public, unbranded Rede Social neutral chrome)
 2. Next.js server action → Supabase Auth signInWithPassword (@supabase/ssr) → session cookies (httpOnly)
 3. redirect → /(app)/layout.tsx  (server component)
 4. layout: apiFetch('/me/bootstrap', { jwt: session.access_token })
@@ -840,5 +840,5 @@ Ecosystem / community sources (web search):
 Package versions checked on npm (2026-09-11): next 16.3.4, @supabase/supabase-js 2.116.0, @supabase/ssr 0.12.7, @nestjs/core 12.0.1, fastify 5.12.4, hono 4.13.7, drizzle-orm 0.45.2, jose 6.2.12, pg-boss 12.31.0, web-push 3.6.7 (last published 2024-01), serwist 9.5.12, tus-js-client 4.3.1.
 
 ---
-*Architecture research for: multi-tenant white-label community SaaS (TRIA Rede Social)*
+*Architecture research for: multi-tenant white-label community SaaS (Rede Social)*
 *Researched: 2026-09-11*

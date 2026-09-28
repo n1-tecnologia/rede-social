@@ -92,8 +92,8 @@
 
 **The whole manifest shape** (lines 1–7, 27–34, 94–97):
 ```ts
-import { moduleLogger } from '@tria/core/server/logging';
-import { defineModule } from '@tria/core/server/modules/manifest';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { FEED_PERMISSIONS } from './contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
@@ -136,11 +136,11 @@ export const feedModule = defineModule({
 **Imports + guard chain** (lines 1–6, 57–74):
 ```ts
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import type { AppEnv } from '@tria/core/server/auth/context';
-import { requireAuth } from '@tria/core/server/auth/require-auth';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { requireModule } from '@tria/core/server/modules/require-module';
-import { requirePermission } from '@tria/core/server/rbac/permissions';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
+import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { requireModule } from '@rede-social/core/server/modules/require-module';
+import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 
 const feed = new OpenAPIHono<AppEnv>({
   defaultHook: (result) => {
@@ -261,8 +261,8 @@ export async function likePost(ctx: RequestContext, postId: string) {
 
 **Imports + table shell + RLS** (lines 1–16, 51–57, 116–118):
 ```ts
-import { tenantIsolationPolicy } from '@tria/core/db/rls';
-import { mediaAssets, tenants, users } from '@tria/core/db/schema';
+import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
+import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import { check, foreignKey, index, integer, pgTable, smallint, text,
          timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
@@ -501,7 +501,7 @@ const loadMore = () => {
 ```
 **Error state** (lines 158–170) uses `EmptyState variant="card"` + a retry `Button` — D-77's community empty state copies this with the "Criar comunidade" action swapped in.
 
-> **D-76 delta:** the member directory uses an explicit "Carregar mais" button. The community list must use `InfiniteScroll` from `@tria/ui` (`packages/ui/src/layout/InfiniteScroll.tsx` + `hooks/useInfiniteScroll.ts`, whose observer root comes from `packages/ui/src/layout/ScrollContainerContext.tsx`) — see `packages/modules/feed/ui/FeedList.tsx` for the shipped sentinel usage. The *state machine* above (append, cursor, failed, retry) is what to copy.
+> **D-76 delta:** the member directory uses an explicit "Carregar mais" button. The community list must use `InfiniteScroll` from `@rede-social/ui` (`packages/ui/src/layout/InfiniteScroll.tsx` + `hooks/useInfiniteScroll.ts`, whose observer root comes from `packages/ui/src/layout/ScrollContainerContext.tsx`) — see `packages/modules/feed/ui/FeedList.tsx` for the shipped sentinel usage. The *state machine* above (append, cursor, failed, retry) is what to copy.
 
 ---
 
@@ -666,7 +666,7 @@ only, and the resulting components live in the analogs above.
 | `lib/constants.ts` | `STORY_DURATION_MS = 5000`, `STORY_EXPIRY_HOURS = 24` | story contracts |
 
 Also note RESEARCH §Pitfall 12: the prototype's imports do not exist in this tree — every port is a
-rewrite against `@tria/ui` primitives.
+rewrite against `@rede-social/ui` primitives.
 
 ---
 

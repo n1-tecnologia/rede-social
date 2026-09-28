@@ -2,7 +2,7 @@ import { expect, type Page, test } from '@playwright/test';
 import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
 
 /**
- * D-21 + D-23 on a phone viewport (`mobile-chromium`): the platform host is TRIA's `super_admin`
+ * D-21 + D-23 on a phone viewport (`mobile-chromium`): the platform host is the platform's `super_admin`
  * entry and nobody else's.
  *
  * The authority is the API, not the browser: `/inicio` renders only after
@@ -13,7 +13,7 @@ import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
 
 test.describe.configure({ timeout: 120_000 });
 
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD: string = (() => {
   const value = process.env.SUPER_ADMIN_PASSWORD;
   if (!value) {
@@ -43,17 +43,17 @@ test.describe('D-21 — the platform host serves the super_admin and only the su
 
     // The platform login offers no member sign-up (D-21).
     await page.goto(`${hosts.platform}/entrar`);
-    await expect(page.getByText('Entrar na plataforma TRIA')).toBeVisible();
+    await expect(page.getByText('Entrar na plataforma Rede Social')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveCount(0);
 
     await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     await expect(page).toHaveURL(`${hosts.platform}/inicio`, { timeout: 30_000 });
 
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Plataforma TRIA');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Plataforma Rede Social');
     const body = page.locator('body');
-    await expect(body).toContainText('tria-demo');
-    await expect(body).toContainText('tria-lab');
-    // The module counts come from the API (7 for tria-demo, 2 for tria-lab).
+    await expect(body).toContainText('rede-demo');
+    await expect(body).toContainText('rede-lab');
+    // The module counts come from the API (7 for rede-demo, 2 for rede-lab).
     await expect(body).toContainText('módulos');
 
     // D-21/D-42: the neutral shell's single tab points at the platform panel (02-12), reachable with
@@ -83,7 +83,7 @@ test.describe('D-21 — the platform host serves the super_admin and only the su
     await expect(page.getByText(MISMATCH)).toBeVisible();
 
     const text = (await page.locator('body').innerText()).toLowerCase();
-    for (const secret of ['tria demo', 'tria-demo', 'tria lab', 'tria-lab']) {
+    for (const secret of ['rede-social demo', 'rede-demo', 'rede-social lab', 'rede-lab']) {
       expect(text).not.toContain(secret);
     }
     expect((await context.cookies()).filter((c) => c.name.startsWith('sb-'))).toHaveLength(0);

@@ -1,5 +1,5 @@
 // The jsonb shape is owned by the contract (D-25 fixed keys); `$type` only — no SQL change.
-import type { TenantBranding } from '@tria/contracts';
+import type { TenantBranding } from '@rede-social/contracts';
 import { sql } from 'drizzle-orm';
 import {
   check,

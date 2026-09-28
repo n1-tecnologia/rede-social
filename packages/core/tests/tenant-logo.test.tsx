@@ -10,11 +10,11 @@ afterEach(() => {
 
 describe('TenantLogo (D-26: logo as-is, display name fallback)', () => {
   it('renders the logo as an <img> whose alt is the display name', () => {
-    render(<TenantLogo logoUrl="/seed-logos/tria-demo.svg" displayName="TRIA Demo" size="auth" />);
-    const img = screen.getByRole('img', { name: 'TRIA Demo' });
-    expect(img).toHaveAttribute('src', '/seed-logos/tria-demo.svg');
+    render(<TenantLogo logoUrl="/seed-logos/rede-demo.svg" displayName="Rede Demo" size="auth" />);
+    const img = screen.getByRole('img', { name: 'Rede Demo' });
+    expect(img).toHaveAttribute('src', '/seed-logos/rede-demo.svg');
     expect(img).toHaveClass('object-contain');
-    expect(screen.queryByText('TRIA Demo')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rede Demo')).not.toBeInTheDocument();
   });
 
   it('renders the display name as text when there is no logo', () => {

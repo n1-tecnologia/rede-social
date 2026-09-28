@@ -102,7 +102,7 @@ coverage:
         ref: "apps/web/e2e/events.spec.ts#events agenda 1-4 (mobile-chromium)"
         status: pass
       - kind: other
-        ref: "pnpm --filter @tria/web build && bash scripts/check-static-routes.sh (52 guarded, 0 offenders; /eventos/[eventId]/agenda.ics is dynamic)"
+        ref: "pnpm --filter @rede-social/web build && bash scripts/check-static-routes.sh (52 guarded, 0 offenders; /eventos/[eventId]/agenda.ics is dynamic)"
         status: pass
     human_judgment: false
   - id: D3
@@ -222,7 +222,7 @@ status: complete
 Task 1 carries `tdd="true"`. Its gate sequence in `git log`:
 
 - **RED:** `30fea12 test(06-08): …`. `events-calendar.test.ts` (18 cases) ran against a deliberately inert, self-documented stub `events-calendar.ts` (every export answers `''`), so every case failed on an assertion rather than an import error.
-  - **Command:** `pnpm --filter @tria/web exec vitest run lib/events-calendar --reporter=json`
+  - **Command:** `pnpm --filter @rede-social/web exec vitest run lib/events-calendar --reporter=json`
   - **Result:** exit code 1, with **18 tests, 0 passed, 18 failed** (the run's real counts).
   - **Target test:** `buildIcs a hostile title with an embedded newline and BEGIN:VEVENT stays ONE escaped SUMMARY in ONE VEVENT`, which failed with `AssertionError: expected [] to have a length of 1 but got +0`.
   - **Normalization:** a throwaway scratchpad normalizer (never committed) turned the real Vitest JSON into column-0 `not ok N - <name>` lines plus the `# tests 18` / `# pass 0` / `# fail 18` trailer. The record's fields are top-level.

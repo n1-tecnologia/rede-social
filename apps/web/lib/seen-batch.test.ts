@@ -1,4 +1,4 @@
-import { STORY_SEEN_BATCH_MAX } from '@tria/module-stories/contracts';
+import { STORY_SEEN_BATCH_MAX } from '@rede-social/module-stories/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseSeenBatch, SEEN_BEACON_PATH, sendSeenBeacon } from './seen-batch';
 

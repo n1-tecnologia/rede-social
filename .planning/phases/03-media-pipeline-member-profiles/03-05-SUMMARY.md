@@ -7,13 +7,13 @@ tags: [web, directory, search, keyset, pagination, nudge, next, playwright, pt-B
 # Dependency graph
 requires:
   - phase: 02-tenant-shell-branding-platform-panel
-    provides: "@tria/ui primitives (Avatar, Button, Card, EmptyState, Skeleton, IconButton, PageHeader, PullToRefresh, useDebounce), the pt-BR catalog loader + literal gate, the search-into-the-URL pattern of TenantToolbar, the keyset load-more pattern of TenantTable, the Playwright projects and throwaway-tenant fixtures"
+    provides: "@rede-social/ui primitives (Avatar, Button, Card, EmptyState, Skeleton, IconButton, PageHeader, PullToRefresh, useDebounce), the pt-BR catalog loader + literal gate, the search-into-the-URL pattern of TenantToolbar, the keyset load-more pattern of TenantTable, the Playwright projects and throwaway-tenant fixtures"
   - phase: 03-media-pipeline-member-profiles
     provides: "03-03's GET /v1/members and GET /v1/members/{membershipId} with the opaque keyset cursor and one bare 404 for every miss; 03-04's ProfileHeader, MediaImage, the /v1/media BFF route, the profile pt-BR catalog (which already carried the nudge copy) and the 'Membros' row on /perfil"
 provides:
   - "`/membros` — the tenant's active members, searchable by name with `?q=` as the source of truth and paginated by keyset 25 at a time, reached from a row on `/perfil` rather than a fifth nav tab"
   - "`/membros/[membershipId]` — another member's photo, display name and bio and NOTHING else, with the caller's own id redirecting to `/perfil` and one indistinguishable 404 for every miss"
-  - "`SearchBar` in @tria/ui — the ported pill at 16px/`h-11`, controlled, caller-owned debounce; Phase 8's member management reuses it unchanged"
+  - "`SearchBar` in @rede-social/ui — the ported pill at 16px/`h-11`, controlled, caller-owned debounce; Phase 8's member management reuses it unchanged"
   - "`MemberRow` — the directory row (avatar + name + bio snippet + chevron), the author-row geometry Phase 4's post header inherits"
   - "`ProfileNudgeCard` + `dismissNudgeAction` — the D-02 first-access nudge with a server-state dismissal that cannot fail silently"
   - "`getMembers`/`loadMembers`/`loadMemberProfile` in `apps/web/lib/profile.ts` — the ONE members fetch, shared by the page and the pagination action"
@@ -214,7 +214,7 @@ coverage:
     description: "Every string on these screens comes from the pt-BR catalog, another member's name and bio are plain React text (no `dangerouslySetInnerHTML` anywhere on the path), and the repo's web gates stay green"
     verification:
       - kind: other
-        ref: "bash scripts/check-ui-literals.sh && pnpm --filter @tria/web build && bash scripts/check-static-routes.sh && pnpm boundaries"
+        ref: "bash scripts/check-ui-literals.sh && pnpm --filter @rede-social/web build && bash scripts/check-static-routes.sh && pnpm boundaries"
         status: pass
       - kind: other
         ref: "grep -rn dangerouslySetInnerHTML apps/web/components/profile/ 'apps/web/app/(app)/membros/' — one hit, in a docblock saying there is none"
@@ -342,7 +342,7 @@ See `key-decisions` in the frontmatter. The three a later reader will need:
 
 Two criteria were satisfied for intent rather than byte-literally, and both are recorded here rather than silently passed:
 
-- **`MemberRow` "grep -cE 'FollowButton|Seguir|@[a-z]' prints 0".** The criterion's own parenthetical says the pattern is written "so `@tria/ui` imports are not matched", but `@[a-z]` matches `@tria`. The two hits in the file are the `@tria/contracts/media` and `@tria/ui` import lines and nothing else; with import lines stripped as well as comments the count is **0**. There is no `FollowButton`, no "Seguir" and no handle slot.
+- **`MemberRow` "grep -cE 'FollowButton|Seguir|@[a-z]' prints 0".** The criterion's own parenthetical says the pattern is written "so `@rede-social/ui` imports are not matched", but `@[a-z]` matches `@rede-social`. The two hits in the file are the `@rede-social/contracts/media` and `@rede-social/ui` import lines and nothing else; with import lines stripped as well as comments the count is **0**. There is no `FollowButton`, no "Seguir" and no handle slot.
 - **`actions.ts` "contains `apiFetch(`".** The same plan requires ONE shared implementation of the members fetch, which lives in `lib/profile.ts`. The action calls it through `getMembers`; the literal `apiFetch('/v1/members?…')` appears in the action's docblock naming where the request is made. Duplicating the call to satisfy the grep would have broken the stronger requirement.
 - **`SearchBar` "contains `text-16`".** `text-16` is the UI-SPEC's shorthand for 16px, not a utility this repo defines — `Input` and `Textarea` ship 16px as `text-base`. The field uses `text-base` and the docblock names the spec token; the companion criterion (`text-sm` count is 0, comments stripped) confirms it is not the prototype's 14px.
 
@@ -381,7 +381,7 @@ None — no external service configuration.
 - All 14 files in `key-files.created` exist on disk (`[ -f ]`), and all 8 in `key-files.modified`.
 - All three task commits exist in `git log` (`526593b`, `bfa090e`, `9a81916`); `git rev-list --count d1ca877..HEAD` = 3, matching `actuals.commits`.
 - Every task's `<acceptance_criteria>` re-run mechanically: green, with the three intent-level readings documented above.
-- Plan-level `<verification>` re-run at HEAD: `@tria/ui` typecheck + test (42), `@tria/web` typecheck + lint + test (82), `check-ui-literals`, `next build`, `check-static-routes`, `pnpm boundaries`, `@tria/core` typecheck, and `playwright test members.spec.ts profile.spec.ts` — **50 passed** across `mobile-chromium` and `desktop-chromium`.
+- Plan-level `<verification>` re-run at HEAD: `@rede-social/ui` typecheck + test (42), `@rede-social/web` typecheck + lint + test (82), `check-ui-literals`, `next build`, `check-static-routes`, `pnpm boundaries`, `@rede-social/core` typecheck, and `playwright test members.spec.ts profile.spec.ts` — **50 passed** across `mobile-chromium` and `desktop-chromium`.
 
 ---
 *Phase: 03-media-pipeline-member-profiles*

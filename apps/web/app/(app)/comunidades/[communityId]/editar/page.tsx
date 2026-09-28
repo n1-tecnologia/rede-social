@@ -1,4 +1,4 @@
-import { COMMUNITY_PERMISSIONS } from '@tria/module-communities/contracts';
+import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { CommunityForm } from '@/app/(app)/comunidades/CommunityForm';
 import { requireBootstrap } from '@/lib/bootstrap';

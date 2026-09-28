@@ -12,7 +12,7 @@ import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
 
 test.describe.configure({ timeout: 120_000 });
 
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD: string = (() => {
   const value = process.env.SUPER_ADMIN_PASSWORD;
   if (!value) {
@@ -129,10 +129,10 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     // The list (D-33 `tenant-list`): title, the seed tenant row linked by id, its host and pill.
     await page.goto(`${hosts.platform}/plataforma`);
     await expect(page.getByRole('heading', { level: 1, name: 'Tenants' })).toBeVisible();
-    const demoRow = page.getByRole('link', { name: /TRIA Demo \(tria-demo\)/ });
+    const demoRow = page.getByRole('link', { name: /Rede Demo \(rede-demo\)/ });
     await expect(demoRow).toBeVisible();
     await expect(demoRow).toHaveAttribute('href', UUID_PATH);
-    await expect(visibleText(page, 'tria-demo.localhost')).toBeVisible();
+    await expect(visibleText(page, 'rede-demo.localhost')).toBeVisible();
     await expect(visibleText(page, 'Ativo')).toBeVisible();
 
     // "Novo tenant" → the D-31 form; the slug is suggested from the name while untouched.
@@ -330,13 +330,13 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await page.waitForURL(/q=e2e-mod/);
     await expect(page.getByRole('link', { name: `${modName} (${modSlug})` })).toBeVisible();
 
-    // Status filter: the suspended tenant is listed, tria-demo is not, the chip is current.
+    // Status filter: the suspended tenant is listed, rede-demo is not, the chip is current.
     await setStatus(page, modTenantId, 'suspended');
     await page.goto(`${hosts.platform}/plataforma?status=suspended`);
     const modRow = page.getByRole('link', { name: `${modName} (${modSlug})` });
     await expect(modRow).toBeVisible();
     await expect(visibleText(page, 'Suspenso')).toBeVisible();
-    await expect(page.getByRole('link', { name: /TRIA Demo \(tria-demo\)/ })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Rede Demo \(rede-demo\)/ })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Suspensos' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -457,7 +457,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await expect(strayPage).toHaveURL(/\/(entrar|endereco-invalido)$/, { timeout: 30_000 });
     expect((await stray.cookies()).filter((c) => c.name.startsWith('sb-'))).toHaveLength(0);
     const text = (await strayPage.locator('body').innerText()).toLowerCase();
-    for (const secret of ['tria-demo', 'tria-lab']) expect(text).not.toContain(secret);
+    for (const secret of ['rede-demo', 'rede-lab']) expect(text).not.toContain(secret);
     await expect(strayPage.getByRole('heading', { level: 1, name: 'Tenants' })).toHaveCount(0);
     await stray.close();
 
@@ -479,7 +479,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     test.skip(isRemote, 'local stack only');
     const slugs = slugsFor(testInfo.project.name);
     const s = suffixFor(testInfo.project.name);
-    // The seeded lab member (`member@tria-lab.local`) already has an identity + membership: the
+    // The seeded lab member (`member@rede-lab.local`) already has an identity + membership: the
     // API's 400 VALIDATION_FAILED { adminEmail: 'in_use' } (02-19) becomes a field error under
     // #adminEmail, the form keeps every typed value and no tenant row is created.
     const inUse = users.labMember;

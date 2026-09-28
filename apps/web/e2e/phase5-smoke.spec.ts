@@ -23,7 +23,7 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  * on its own — a single combined flip would pass on an implementation where one module's routes
  * were gated by the other's flag.
  *
- *   ENABLED  — on the seeded `tria-demo`, a member signing in lands on `/inicio` with the STORIES
+ *   ENABLED  — on the seeded `rede-demo`, a member signing in lands on `/inicio` with the STORIES
  *              STRIP above the feed and a `Comunidades` tab in the navigation, and a community page
  *              carries its `Destaques` row — the pinned circles STORY-04 put there.
  *   DISABLED — on a throwaway tenant with each flag off in turn, the same member-shaped session
@@ -50,7 +50,7 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  */
 
 test.describe.configure({ mode: 'serial', timeout: 300_000 });
-test.skip(isRemote, 'local stack only (seeded tria-demo, a throwaway tenant, direct DB fixtures)');
+test.skip(isRemote, 'local stack only (seeded rede-demo, a throwaway tenant, direct DB fixtures)');
 test.use({ serviceWorkers: 'block' });
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -62,7 +62,7 @@ const APP = appMessages.app;
 const RUN = Date.now().toString(36);
 
 /**
- * `SEED_COMMUNITY_IDS['tria-demo'][0]` — the community `scripts/seed.ts` pins BOTH the expired and
+ * `SEED_COMMUNITY_IDS['rede-demo'][0]` — the community `scripts/seed.ts` pins BOTH the expired and
  * an active story to. Mirrored here rather than imported for the reason every other e2e mirrors a
  * seed constant: the seed is a top-level-await script that opens a database connection at import.
  */

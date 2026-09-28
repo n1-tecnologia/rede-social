@@ -1,7 +1,7 @@
 ---
 phase: 02-tenant-shell-branding-platform-panel
 plan: 02
-subsystem: shared UI package (@tria/ui) + Tailwind v4 wiring in apps/web
+subsystem: shared UI package (@rede-social/ui) + Tailwind v4 wiring in apps/web
 tags: [ui, design-system, tailwind, tokens, a11y, motion, vitest, happy-dom]
 
 # Dependency graph
@@ -12,8 +12,8 @@ requires:
   - phase: 01-foundation-kernel-tenancy-auth-ci-cd
     provides: "packages/ui placeholder package, packages/config vitest.base + tsconfig.base + biome.base, apps/web root layout with next-intl"
 provides:
-  - "@tria/ui: cn, Button, IconButton, Input, Badge, Chip, StatusPill, Card, SectionTitle, Avatar, Skeleton, EmptyState, Switch, Tabs (+TabPanel), PageHeader, FileDropZone, BottomSheet, ConfirmDialog, Toast/ToastProvider/useToast, PullToRefresh, SafeAreaWrapper, ScrollContainerContext/Provider/useScrollContainer, useMediaQuery, useDebounce, usePullToRefresh"
-  - "@tria/ui/styles/tokens.css: two-layer token model (neutral --theme-* light/dark, --brand-* fallbacks + color-mix derivations, --brand-accent pair flipping in dark), @custom-variant dark, @theme inline aliases (--color-bg…, --color-brand: var(--brand-accent), status colours), --screen-*/--safe-*/--nav-height, .app-scroll, .glass-bar, .pb-safe/.pt-safe, shimmer keyframes"
+  - "@rede-social/ui: cn, Button, IconButton, Input, Badge, Chip, StatusPill, Card, SectionTitle, Avatar, Skeleton, EmptyState, Switch, Tabs (+TabPanel), PageHeader, FileDropZone, BottomSheet, ConfirmDialog, Toast/ToastProvider/useToast, PullToRefresh, SafeAreaWrapper, ScrollContainerContext/Provider/useScrollContainer, useMediaQuery, useDebounce, usePullToRefresh"
+  - "@rede-social/ui/styles/tokens.css: two-layer token model (neutral --theme-* light/dark, --brand-* fallbacks + color-mix derivations, --brand-accent pair flipping in dark), @custom-variant dark, @theme inline aliases (--color-bg…, --color-brand: var(--brand-accent), status colours), --screen-*/--safe-*/--nav-height, .app-scroll, .glass-bar, .pb-safe/.pt-safe, shimmer keyframes"
   - "apps/web: Tailwind v4 via postcss.config.mjs + app/globals.css (@import tailwindcss + tokens, @source for packages/ui/src and packages/core/ui); Manrope --font-manrope on <html>, bg-bg text-text font-sans on <body>"
   - "Package-legitimacy approval for the whole phase: sharp@0.35.4, resend@6.28.0, standardwebhooks@1.1.1, lucide-react@1.46.0, tailwind-merge@3.7.0, motion@13.3.0 (approved by the user 2026-09-16; 02-03 must not re-ask)"
 affects: [02-04 mockup, 02-06 e-mail templates (Button/Card language), 02-07 AppShell, 02-08 auth pages, 02-11 manifest/theme cookie, 02-12/02-14/02-15 platform panel, 02-13 suspended screen]
@@ -22,8 +22,8 @@ affects: [02-04 mockup, 02-06 e-mail templates (Button/Card language), 02-07 App
 tech-stack:
   added:
     - "tailwindcss 4.3.3 + @tailwindcss/postcss 4.3.3 (apps/web)"
-    - "lucide-react 1.46.0, clsx 2.1.1, tailwind-merge 3.7.0, motion 13.3.0 (@tria/ui + apps/web)"
-    - "vitest 5.0.0 + happy-dom 20.14.5 + @testing-library/react 16.3.3 + @testing-library/jest-dom 7.0.1 + @vitejs/plugin-react 6.1.1 (@tria/ui dev)"
+    - "lucide-react 1.46.0, clsx 2.1.1, tailwind-merge 3.7.0, motion 13.3.0 (@rede-social/ui + apps/web)"
+    - "vitest 5.0.0 + happy-dom 20.14.5 + @testing-library/react 16.3.3 + @testing-library/jest-dom 7.0.1 + @vitejs/plugin-react 6.1.1 (@rede-social/ui dev)"
   patterns:
     - "Brand utilities are bound through `@theme inline`: `.bg-brand{background-color:var(--brand-accent)}` resolves on the element, so a per-tenant --brand-primary on any ancestor (and a nested [data-theme]) repaints with no alias re-declaration; the --color-* variables themselves are intentionally NOT emitted"
     - "tokens.css is the only file with hex literals; primitives carry tokenised classes only (grep gate: 0 hex in packages/ui/src/*.tsx)"
@@ -87,7 +87,7 @@ key-decisions:
   - "Tabs implements roving tabindex with ArrowLeft/ArrowRight/Home/End and scrollIntoView({ inline: 'center' }) guarded for environments without it; TabPanel is exported as a small helper (role=tabpanel) beyond the plan's list."
 
 patterns-established:
-  - "Import surface for screens: `import { Button, … } from '@tria/ui'` and `@import \"@tria/ui/styles/tokens.css\"` from apps/web/app/globals.css"
+  - "Import surface for screens: `import { Button, … } from '@rede-social/ui'` and `@import \"@rede-social/ui/styles/tokens.css\"` from apps/web/app/globals.css"
   - "Sticky sub-headers use `stickyTop` (default `calc(var(--safe-top) + 3rem)`), the shell owns the scroll root and provides it through ScrollContainerProvider"
 
 requirements-completed: [UI-01]
@@ -122,7 +122,7 @@ coverage:
     requirement: UI-01
     verification:
       - kind: other
-        ref: "pnpm --filter @tria/web build → exit 0; grep on apps/web/.next/static/chunks/*.css"
+        ref: "pnpm --filter @rede-social/web build → exit 0; grep on apps/web/.next/static/chunks/*.css"
         status: pass
     human_judgment: false
   - id: D5
@@ -158,9 +158,9 @@ actuals:
 plan_head_before: f4c791632480eba92180974d1e0a4afbf75db540
 ---
 
-# Phase 02 Plan 02: Design System Port (@tria/ui + Tailwind v4) Summary
+# Phase 02 Plan 02: Design System Port (@rede-social/ui + Tailwind v4) Summary
 
-**The prototype's design tokens and 21 shared components live in `@tria/ui` with the brand bound through Tailwind v4 `@theme inline` (`bg-brand` → `var(--brand-accent)` on the element), every string/colour arriving as props/tokens, and the a11y contract pinned by 33 happy-dom tests; `apps/web` compiles Tailwind v4 with Manrope and the two-layer token file without regressing Phase 1.**
+**The prototype's design tokens and 21 shared components live in `@rede-social/ui` with the brand bound through Tailwind v4 `@theme inline` (`bg-brand` → `var(--brand-accent)` on the element), every string/colour arriving as props/tokens, and the a11y contract pinned by 33 happy-dom tests; `apps/web` compiles Tailwind v4 with Manrope and the two-layer token file without regressing Phase 1.**
 
 ## Performance
 
@@ -176,11 +176,11 @@ plan_head_before: f4c791632480eba92180974d1e0a4afbf75db540
 
 ## Accomplishments
 
-- `packages/ui/src/styles/tokens.css`: prototype neutrals verbatim (light `:root` / `[data-theme="dark"]`), neutral TRIA brand fallbacks (`#2e6fd0`/`#5b9cf8`, on-colours, dark pair), `color-mix` derivations (`--brand-primary-hover/-soft/-gradient`), `--brand-accent`/`--brand-on-accent` flipping to the dark pair, `@custom-variant dark`, `@theme inline` aliases (`--color-bg…-handle`, `--color-brand/-on-brand/-brand-soft/-brand-hover`, success/danger/warning/info, `--font-sans`, `--animate-shimmer`), `--screen-*`/`--safe-*`/`--nav-height`, `.app-scroll`, `.glass-bar` (+ `@supports` liquid-glass hook), `.pb-safe`/`.pt-safe`, reduced-motion shimmer off. No legacy aliases.
+- `packages/ui/src/styles/tokens.css`: prototype neutrals verbatim (light `:root` / `[data-theme="dark"]`), neutral platform brand fallbacks (`#2e6fd0`/`#5b9cf8`, on-colours, dark pair), `color-mix` derivations (`--brand-primary-hover/-soft/-gradient`), `--brand-accent`/`--brand-on-accent` flipping to the dark pair, `@custom-variant dark`, `@theme inline` aliases (`--color-bg…-handle`, `--color-brand/-on-brand/-brand-soft/-brand-hover`, success/danger/warning/info, `--font-sans`, `--animate-shimmer`), `--screen-*`/`--safe-*`/`--nav-height`, `.app-scroll`, `.glass-bar` (+ `@supports` liquid-glass hook), `.pb-safe`/`.pt-safe`, reduced-motion shimmer off. No legacy aliases.
 - Brand-bearing primitives (Task 2): `Button` (brand/secondary/outline/ghost/danger, sm/md/lg, loading → `aria-busy` + spinner, focus-visible ring), `IconButton` (44×44, required `label`, count `Badge` with `99+`), `Input` (explicit `id`, 16px text, leading icon `pl-10`, error → `border-danger` + `role="alert"` + `aria-describedby` + `aria-invalid`), `Badge`, `Chip` (a/button/span), `StatusPill` (5 tones), `Card`, `SectionTitle` (micro/group).
 - Remaining primitives, overlays, hooks, layout (Task 3): `Avatar`, `Skeleton`, `EmptyState` (`variant="card"`), `Switch` (`role="switch"`, `busy`), `Tabs` + `TabPanel` (roving tabindex, arrow keys, links), `PageHeader` (sticky, back via `onBack`/`backHref` + required `backLabel`), `FileDropZone` (drag-over brand highlight, `accept`/`maxBytes` with `onReject`, progress bar, error slot, labels via props), `BottomSheet` (spring 28/300, drag dismiss, `desktopCard`), `ConfirmDialog` (max-w 300, pending state, spring 380/26), `Toast`/`ToastProvider`/`useToast` (single visible, newer replaces, 3000 ms, `role="status" aria-live="polite"`, desktop `md:max-w-[420px] md:right-6`), `useFocusTrap`, `useMediaQuery`, `useDebounce`, `usePullToRefresh` + `PullToRefresh` (mobile only, scroll root from `ScrollContainerContext`), `SafeAreaWrapper`.
-- `apps/web`: `postcss.config.mjs`, `app/globals.css` (`@import "tailwindcss"`, `@import "@tria/ui/styles/tokens.css"`, `@source` for `packages/ui/src` and `packages/core/ui`), root layout with Manrope (`--font-manrope`) and `bg-bg font-sans text-text antialiased` on `<body>`. Build green; emitted CSS shows `.bg-brand{background-color:var(--brand-accent)}`.
-- Tests: `tokens.test.ts` 6, `button.test.tsx` 15, `overlays.test.tsx` 12 → 33/33 under happy-dom; `pnpm --filter @tria/ui typecheck && lint` green; `apps/web` typecheck + build green; e2e `login/session/branding` 20/20.
+- `apps/web`: `postcss.config.mjs`, `app/globals.css` (`@import "tailwindcss"`, `@import "@rede-social/ui/styles/tokens.css"`, `@source` for `packages/ui/src` and `packages/core/ui`), root layout with Manrope (`--font-manrope`) and `bg-bg font-sans text-text antialiased` on `<body>`. Build green; emitted CSS shows `.bg-brand{background-color:var(--brand-accent)}`.
+- Tests: `tokens.test.ts` 6, `button.test.tsx` 15, `overlays.test.tsx` 12 → 33/33 under happy-dom; `pnpm --filter @rede-social/ui typecheck && lint` green; `apps/web` typecheck + build green; e2e `login/session/branding` 20/20.
 
 ## Task Commits
 
@@ -208,7 +208,7 @@ RED evidence was intentional both times: the imports of not-yet-existing modules
 - `packages/ui/src/index.ts` — client-safe barrel (23 value exports + types)
 - `packages/ui/src/cn.ts`, `src/styles/tokens.css`, `src/primitives/*` (15), `src/overlays/*` (3), `src/hooks/*` (4), `src/layout/*` (3) — see key-files
 - `packages/ui/tests/{tokens,button,overlays}.test.*` — the contract suites
-- `apps/web/package.json` — tailwindcss, @tailwindcss/postcss, lucide-react, clsx, tailwind-merge, motion, `@tria/ui`
+- `apps/web/package.json` — tailwindcss, @tailwindcss/postcss, lucide-react, clsx, tailwind-merge, motion, `@rede-social/ui`
 - `apps/web/postcss.config.mjs`, `app/globals.css`, `app/layout.tsx` — Tailwind v4 entry, Manrope, body ground/text
 - `biome.json` — `css.parser.tailwindDirectives: true`; `tokens.css` excluded from the formatter
 - `pnpm-lock.yaml`
@@ -228,7 +228,7 @@ RED evidence was intentional both times: the imports of not-yet-existing modules
 ### Auto-fixed Issues
 
 **1. [Rule 3 - Blocking] Biome could not parse the Tailwind v4 directives and reformatted the token contract**
-- **Found during:** Task 2 (running `pnpm --filter @tria/ui lint`, part of the task's verify)
+- **Found during:** Task 2 (running `pnpm --filter @rede-social/ui lint`, part of the task's verify)
 - **Issue:** `@theme inline`, `@custom-variant`, `@source` are rejected by Biome's CSS parser by default ("Tailwind-specific syntax is disabled"); with the parser on, the formatter changed the literal selectors/gradient the tests pin
 - **Fix:** `biome.json`: `css.parser.tailwindDirectives: true` + a formatter-off override for `packages/ui/src/styles/tokens.css` (linter stays on)
 - **Files modified:** `biome.json`
@@ -268,18 +268,18 @@ RED evidence was intentional both times: the imports of not-yet-existing modules
 ## Issues Encountered
 
 - Two transient API interruptions (after the Task 2 RED commit and after "Now the three overlays"); each continuation resumed from the committed/on-disk state with no rework.
-- `pnpm --filter @tria/web build` warned nothing; the `@source "../../../packages/core/ui"` directory does not exist yet (Tailwind ignores it, as the plan expected).
+- `pnpm --filter @rede-social/web build` warned nothing; the `@source "../../../packages/core/ui"` directory does not exist yet (Tailwind ignores it, as the plan expected).
 
 ## Verification (plan-level)
 
-- `pnpm --filter @tria/ui test` → 33 passed (3 files); `pnpm --filter @tria/ui typecheck` and `lint` → clean.
-- `pnpm --filter @tria/web typecheck` → clean; `pnpm --filter @tria/web build` → exit 0; emitted CSS contains `.bg-brand{background-color:var(--brand-accent)}`, `.text-on-brand{color:var(--brand-on-accent)}`, `--brand-accent:var(--brand-primary-dark)` (dark), `@font-face{font-family:Manrope`, `.animate-shimmer`.
+- `pnpm --filter @rede-social/ui test` → 33 passed (3 files); `pnpm --filter @rede-social/ui typecheck` and `lint` → clean.
+- `pnpm --filter @rede-social/web typecheck` → clean; `pnpm --filter @rede-social/web build` → exit 0; emitted CSS contains `.bg-brand{background-color:var(--brand-accent)}`, `.text-on-brand{color:var(--brand-on-accent)}`, `--brand-accent:var(--brand-primary-dark)` (dark), `@font-face{font-family:Manrope`, `.animate-shimmer`.
 - `pnpm exec playwright test login.spec.ts session.spec.ts branding.spec.ts` (apps/web, against the running Supabase stack; Playwright started the API and web servers) → 20 passed on mobile-chromium + desktop-chromium.
 - Grep gates: `grep -c "gold\|emerald\|brand-ig-mark" tokens.css` → 0; hex in `packages/ui/src/**/*.tsx` → 0; `framer-motion` → 0; `motion/react` in each overlay → 1; contracts-package mentions under `packages/ui/src` → 0.
 
 ## Human-check notes for the end-of-phase verifier
 
-- No page composes the primitives yet; the only visible change is the Manrope typeface and the `#f5f7fb` ground / `#16233b` text on every page (compare `http://tria-demo.localhost:3000/entrar` before/after). Once 02-04/02-07/02-08 land, compare Button/Input/Chip/Card geometry against `reference/frontend-design` and toggle `data-theme="dark"` on `<html>` in devtools to see the accent flip to `--brand-primary-dark`.
+- No page composes the primitives yet; the only visible change is the Manrope typeface and the `#f5f7fb` ground / `#16233b` text on every page (compare `http://rede-demo.localhost:3000/entrar` before/after). Once 02-04/02-07/02-08 land, compare Button/Input/Chip/Card geometry against `reference/frontend-design` and toggle `data-theme="dark"` on `<html>` in devtools to see the accent flip to `--brand-primary-dark`.
 - Deviation 5 (no `--color-brand` variable in the emitted CSS) is intentional — verify the utility output instead.
 
 ## Known Stubs
@@ -292,7 +292,7 @@ None — no new network endpoint, auth path or schema; `Avatar` renders `<img sr
 
 ## Next Phase Readiness
 
-- 02-04 (mockup) can import `@tria/ui` and `@tria/ui/styles/tokens.css`; 02-07 should wrap the shell's scroll root in `ScrollContainerProvider` and mount the `#liquid-glass` SVG filter for `.glass-bar`.
+- 02-04 (mockup) can import `@rede-social/ui` and `@rede-social/ui/styles/tokens.css`; 02-07 should wrap the shell's scroll root in `ScrollContainerProvider` and mount the `#liquid-glass` SVG filter for `.glass-bar`.
 - 02-11 sets `data-theme` on `<html>` from the cookie — the dark layer and the `@custom-variant dark` are already in place.
 - 02-03 installs `sharp`/`resend`/`standardwebhooks` under the approval recorded above.
 

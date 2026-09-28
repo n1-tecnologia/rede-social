@@ -15,7 +15,7 @@
 
 **The design already exists — port it**
 
-- **D-66:** **`reference/frontend-design/` is the source for every Phase 5 surface that it covers, and the researcher/planner go there before designing anything.** Verified on 2026-09-23, the prototype already provides: the community list (`app/(app)/community/page.tsx` — the `card-magazine` cover card with its gradient, overlaid name and tagline, counts row and chevron), the community page (`app/(app)/community/[communityId]/page.tsx` — cover, overlapping avatar, credit line, tagline, **the horizontal highlights circle row**, posts), a community post detail (`.../[topicId]/page.tsx`), and — critically — `app/(app)/reels/page.tsx`, the pointer-driven vertical pager with dominant-axis lock, 60 px threshold, `translateY(-i*100%)` with rubber-band `dy*0.35`, **side progress ticks**, pre-mounted neighbours and a mute toggle, which is the story viewer's gesture model. Reusable primitives already ported: `DoubleTapHeart`, `BottomSheet`, `Tabs`, `Avatar`, `EmptyState`, `InfiniteScroll` (in `@tria/ui`), plus `CommentSheet`/`CommentsList`/`CommentInput` and `LikeButton` (in `@tria/module-feed`).
+- **D-66:** **`reference/frontend-design/` is the source for every Phase 5 surface that it covers, and the researcher/planner go there before designing anything.** Verified on 2026-09-23, the prototype already provides: the community list (`app/(app)/community/page.tsx` — the `card-magazine` cover card with its gradient, overlaid name and tagline, counts row and chevron), the community page (`app/(app)/community/[communityId]/page.tsx` — cover, overlapping avatar, credit line, tagline, **the horizontal highlights circle row**, posts), a community post detail (`.../[topicId]/page.tsx`), and — critically — `app/(app)/reels/page.tsx`, the pointer-driven vertical pager with dominant-axis lock, 60 px threshold, `translateY(-i*100%)` with rubber-band `dy*0.35`, **side progress ticks**, pre-mounted neighbours and a mute toggle, which is the story viewer's gesture model. Reusable primitives already ported: `DoubleTapHeart`, `BottomSheet`, `Tabs`, `Avatar`, `EmptyState`, `InfiniteScroll` (in `@rede-social/ui`), plus `CommentSheet`/`CommentsList`/`CommentInput` and `LikeButton` (in `@rede-social/module-feed`).
 
   **Exactly five Phase 5 surfaces are genuinely absent from the prototype** and are therefore the only ones that need a D-33 UI-SPEC + mockup review: (1) the stories strip, (2) the story viewer screen, (3) the admin's story publish flow, (4) the community create/edit/archive form, (5) the pin-a-story-to-a-community flow. Everything else is a port, not a design. — **Reversibility:** reversible — but treating a covered screen as prototype-less wastes a design-review cycle and risks drifting from the visual language the pilot tenant already signed off on.
 
@@ -36,8 +36,8 @@
 **Communities — the list**
 
 - **D-75:** A community list card shows **COMM-03's four fields only: cover, name, description, post count**, in the prototype's `card-magazine` layout. The prototype's "3 novos posts" / "Novas interações" activity badge and its member count are **both dropped** — the badge needs a per-user read-marker table nothing in V1 builds, and a member count is meaningless while COMM-02 puts every member in every community.
-- **D-76:** The list lives at **`/comunidades` behind the `Comunidades` nav tab D-55 already reserved**, ordered by **most recent post activity** (a stable expression over an aggregate, so it pages), and **keyset-paged on the existing envelope** — `packages/core/server/paging.ts` plus the `@tria/ui` `InfiniteScroll` that already takes its IntersectionObserver root from `ScrollContainerContext`. Nothing new is built for paging; the list simply cannot break the day a tenant has sixty communities.
-- **D-77:** A tenant with no communities yet shows the ported **`@tria/ui` `EmptyState` with pt-BR copy, and the tab stays visible** — navigation is driven by the module flag, never by data (the rule D-40 built the whole shell on). An `admin_tenant` additionally sees the "Criar comunidade" action on that screen, so the empty state is also the creation entry point.
+- **D-76:** The list lives at **`/comunidades` behind the `Comunidades` nav tab D-55 already reserved**, ordered by **most recent post activity** (a stable expression over an aggregate, so it pages), and **keyset-paged on the existing envelope** — `packages/core/server/paging.ts` plus the `@rede-social/ui` `InfiniteScroll` that already takes its IntersectionObserver root from `ScrollContainerContext`. Nothing new is built for paging; the list simply cannot break the day a tenant has sixty communities.
+- **D-77:** A tenant with no communities yet shows the ported **`@rede-social/ui` `EmptyState` with pt-BR copy, and the tab stays visible** — navigation is driven by the module flag, never by data (the rule D-40 built the whole shell on). An `admin_tenant` additionally sees the "Criar comunidade" action on that screen, so the empty state is also the creation entry point.
 
 **Stories — the strip and publishing**
 
@@ -76,7 +76,7 @@ Everything below was not selected for discussion or was explicitly left to Claud
 - **Enforcing STORY-05 declaratively.** Today `feed_comments_parent_shape_chk` allows `depth = 1` regardless of target, and `feed_likes_comment_uq` allows a like on any comment. The roadmap requires both refusals in the API *and* the DB. Favour the Phase 4 posture — an index-level or CHECK-level fact with no read-then-write window (the way the one-reply-level rule and D-53's gallery-XOR-video rule were expressed) over a trigger or a security-definer function. A composite-FK trick similar to `feed_comments_parent_fk` is the likely shape for "a reply's parent must be a post comment"; the like case needs the target comment's `story_id` to be visible to the constraint.
 - The story length rule (~60 s) on the same `MEDIA_LIMITS` mechanism Phase 3 built and Phase 4 reused, and the `expires_at` column versus a computed predicate (the roadmap says `expires_at`).
 - Domain events for this phase (`community.created`, `story.published`, `story.liked`, …) declared through the `EventMap` declaration-merging point in `packages/contracts/src/events.ts`, with payloads that carry what a Phase 7 notification row needs without a re-read.
-- Whether `@tria/module-communities` and `@tria/module-stories` are two packages or one, given they are two registry keys (`communities`, `stories` already exist in `packages/contracts/src/modules.ts`) and D-74 makes the feed depend on the communities flag. Module-to-module dependency must go through published contracts only (MOD-02, enforced by the boundary lint and `packages/boundary-fixture`).
+- Whether `@rede-social/module-communities` and `@rede-social/module-stories` are two packages or one, given they are two registry keys (`communities`, `stories` already exist in `packages/contracts/src/modules.ts`) and D-74 makes the feed depend on the communities flag. Module-to-module dependency must go through published contracts only (MOD-02, enforced by the boundary lint and `packages/boundary-fixture`).
 
 **UI and composition**
 - Where the stories strip sits on `/inicio` relative to the D-02 profile nudge and the feed home slot (`ModuleHomeSlot.order`), and what it does on desktop under D-39's rail + centred column.
@@ -137,7 +137,7 @@ Four things genuinely needed research rather than imitation, and all four were *
 
 4. **`expires_at` cannot be a generated column** (`timestamptz + interval` is not immutable — Postgres refuses with `generation expression is not immutable`), and the strip must **order by `expires_at`, the same column it ranges on**: ordering by `published_at` while ranging on `expires_at` produces `Bitmap Heap Scan` + `Sort`, while ordering by `expires_at` produces an `Index Only Scan` that both filters and delivers the order.
 
-**Primary recommendation:** build **two** module packages, `@tria/module-communities` and `@tria/module-stories`, as structural copies of `@tria/module-feed` (manifest → contracts → db/schema → server/{routes,service} → ui), because they are two independently toggleable registry keys and D-74 makes the feed branch on `communities` alone. Land the schema in **one** migration pair (generated + `--custom`) that creates `communities`, `community_members`, `stories`, `story_community_pins`, wires the three Phase 4 FK slots, adds the STORY-05 discriminator/FK machinery, adds the merged-feed index, and installs the counter triggers. Keep every read inside `withTenantTx`, keep every write behind `requirePermission`, and put the five prototype-less surfaces through the D-33 UI-SPEC gate before any of them is coded.
+**Primary recommendation:** build **two** module packages, `@rede-social/module-communities` and `@rede-social/module-stories`, as structural copies of `@rede-social/module-feed` (manifest → contracts → db/schema → server/{routes,service} → ui), because they are two independently toggleable registry keys and D-74 makes the feed branch on `communities` alone. Land the schema in **one** migration pair (generated + `--custom`) that creates `communities`, `community_members`, `stories`, `story_community_pins`, wires the three Phase 4 FK slots, adds the STORY-05 discriminator/FK machinery, adds the merged-feed index, and installs the counter triggers. Keep every read inside `withTenantTx`, keep every write behind `requirePermission`, and put the five prototype-less surfaces through the D-33 UI-SPEC gate before any of them is coded.
 
 ---
 
@@ -178,7 +178,7 @@ Actionable directives the plan must honour. These carry the same authority as CO
 | `prepare: true` on the transaction pooler is forbidden | §What NOT to Use | Already set: `postgres(env.DATABASE_URL, { prepare: false, max: 5 })` |
 | Tenant authority taken from the hostname alone is forbidden | §What NOT to Use | Unchanged: membership of record decides; every new route inherits `requireAuth → requireModule → requirePermission` |
 | pt-BR UI, all strings centralised | §Project Constraints, PWA-03 | New `apps/web/messages/pt-BR/communities.json` and `stories.json`; `scripts/check-ui-literals.sh` fails the build on a literal |
-| Each feature is a self-contained package depending only on the kernel and other modules' **published contracts** | MOD-01/MOD-02 | `@tria/module-stories` may import `@tria/module-feed/contracts` (for the comment/like contracts) but **never** `@tria/module-feed/server/*`. The boundary lint + `packages/boundary-fixture` enforce it |
+| Each feature is a self-contained package depending only on the kernel and other modules' **published contracts** | MOD-01/MOD-02 | `@rede-social/module-stories` may import `@rede-social/module-feed/contracts` (for the comment/like contracts) but **never** `@rede-social/module-feed/server/*`. The boundary lint + `packages/boundary-fixture` enforce it |
 | UI follows the prototype; prototype-less screens are designed and reviewed first | UI-01/UI-04, D-33 | The five D-66 surfaces need a UI-SPEC + mockup before code |
 | Supabase Free plan for the pilot (50 MB/file, no native transforms) | §Project Constraints | Story images resize in the worker through the existing `PURPOSE_WIDTHS.story` ladder — no new path |
 
@@ -190,15 +190,15 @@ Actionable directives the plan must honour. These carry the same authority as CO
 
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
-| `hono` + `@hono/zod-openapi` | 4.13.7 / 1.6.3 | The two modules' routes with the `requireAuth → requireModule → requirePermission` chain | `[VERIFIED: packages/modules/feed/server/routes.ts:1-34]` — the file imports `requireAuth`, `requireModule` and `requirePermission` from `@tria/core/server/*` and builds `new OpenAPIHono<AppEnv>`; it is the exact template |
+| `hono` + `@hono/zod-openapi` | 4.13.7 / 1.6.3 | The two modules' routes with the `requireAuth → requireModule → requirePermission` chain | `[VERIFIED: packages/modules/feed/server/routes.ts:1-34]` — the file imports `requireAuth`, `requireModule` and `requirePermission` from `@rede-social/core/server/*` and builds `new OpenAPIHono<AppEnv>`; it is the exact template |
 | `drizzle-orm` | 0.45.2 | Schema, RLS policies, queries, the composite FKs | `[VERIFIED: packages/modules/feed/node_modules/drizzle-orm/package.json]` — `0.45.2`. `generatedAlwaysAs` exists on the pg column builder `[VERIFIED: packages/modules/feed/node_modules/drizzle-orm/pg-core/columns/common.d.ts:49]` — `generatedAlwaysAs(as: SQL \| T['data'] \| (() => SQL)): HasGenerated<this, {` |
 | `drizzle-kit` | 0.31.10 | `pnpm db:generate` → `supabase/migrations` | `[VERIFIED: supabase/migrations/20260922162449_feed_counters.sql:4-6]` — "drizzle-kit 0.31.10 emitted every one of them cleanly" |
 | `zod` | 4.6.2 | Module contracts shared by API + web | `[VERIFIED: apps/web/package.json]` — `"zod": "4.6.2"` |
 | `postgres` (postgres.js) | 3.4.9 | Driver, `prepare: false`, `max: 5` | `[VERIFIED: apps/web/package.json devDependencies]` — `"postgres": "3.4.9"`; the client config is quoted in 04-RESEARCH.md §Standard Stack |
 | `@mux/mux-player-react` | 3.13.4 | Story video playback (HLS + signed tokens) | `[VERIFIED: apps/web/package.json]` — `"@mux/mux-player-react": "3.13.4"`; already wired in `apps/web/components/media/VideoPlayer.tsx:212-224` with `streamType="on-demand"`, `playsInline`, `tokens={{ playback, thumbnail, storyboard }}` |
 | `tus-js-client` / `@mux/upchunk` | 4.3.1 / 3.5.0 | Resumable Storage upload / Mux direct upload | `[VERIFIED: apps/web/package.json]` — `"tus-js-client": "4.3.1"`, `"@mux/upchunk": "3.5.0"` |
-| `@tria/ui` primitives | workspace | `InfiniteScroll`, `BottomSheet`, `DoubleTapHeart`, `Avatar`, `EmptyState`, `Skeleton`, `PageHeader`, `Card`, `IconButton`, `Chip` | `[VERIFIED: packages/ui/src/index.ts:19-66]` — `export { InfiniteScroll, type InfiniteScrollProps } from './layout/InfiniteScroll';` … `export { DoubleTapHeart, … } from './overlays/DoubleTapHeart';` … `export { EmptyState, … } from './primitives/EmptyState';` |
-| `@tria/module-feed/ui` | workspace | `CommentSheet`, `CommentsList`, `CommentItem`, `CommentInput`, `LikeButton`, `ComposeFab`, `PostCard`, `PostHeader` | `[VERIFIED: ls packages/modules/feed/ui/]` — all present as `.tsx` files |
+| `@rede-social/ui` primitives | workspace | `InfiniteScroll`, `BottomSheet`, `DoubleTapHeart`, `Avatar`, `EmptyState`, `Skeleton`, `PageHeader`, `Card`, `IconButton`, `Chip` | `[VERIFIED: packages/ui/src/index.ts:19-66]` — `export { InfiniteScroll, type InfiniteScrollProps } from './layout/InfiniteScroll';` … `export { DoubleTapHeart, … } from './overlays/DoubleTapHeart';` … `export { EmptyState, … } from './primitives/EmptyState';` |
+| `@rede-social/module-feed/ui` | workspace | `CommentSheet`, `CommentsList`, `CommentItem`, `CommentInput`, `LikeButton`, `ComposeFab`, `PostCard`, `PostHeader` | `[VERIFIED: ls packages/modules/feed/ui/]` — all present as `.tsx` files |
 | `motion` | 13.3.0 | Sheet/heart springs; the progress bar is a rAF clock, not a spring | `[VERIFIED: apps/web/package.json]` — `"motion": "13.3.0"` |
 | `lucide-react` | 1.46.0 | Plus / Heart / MessageCircle / Pin icons | `[VERIFIED: apps/web/package.json]` — `"lucide-react": "1.46.0"` |
 | `next-intl` | 4.14.4 | The two new pt-BR namespaces | `[VERIFIED: apps/web/package.json]` — `"next-intl": "4.14.4"` |
@@ -263,14 +263,14 @@ If planning later discovers a genuine need for a dependency (it should not), tha
         │ requireAuth → requireModule('communities'|'stories')       │   │ Supabase Storage     │
         │            → requirePermission(...) on writes             │   │ (signed PUT / TUS)   │
         │                                                            │   │  …or Mux direct      │
-        │  @tria/module-communities         @tria/module-stories     │   └──────────┬───────────┘
+        │  @rede-social/module-communities         @rede-social/module-stories     │   └──────────┬───────────┘
         │   GET  /v1/communities             GET  /v1/stories        │              │ webhook
         │   GET  /v1/communities/{id}        POST /v1/stories        │              ▼
         │   POST /v1/communities             DELETE /v1/stories/{id} │   ┌──────────────────────┐
         │   PATCH /v1/communities/{id}       POST /v1/stories/{id}/  │   │ WORKER (pg-boss)     │
         │   (archive = PATCH status)              likes | comments   │   │ media provider event │
         │                                    PUT /v1/stories/{id}/   │   │  → duration > 60 s ? │
-        │  @tria/module-feed (amended)            pins               │   │    reject asset      │
+        │  @rede-social/module-feed (amended)            pins               │   │    reject asset      │
         │   GET /v1/feed  ── D-73 predicate  GET /v1/stories/mine    │   └──────────┬───────────┘
         │                    D-74 fallback        (admin history)    │              │
         └───────────────────────────┬────────────────────────────────┘              │
@@ -324,13 +324,13 @@ supabase/migrations/<ts>_communities_stories_rules.sql  (--custom: triggers + ge
 supabase/tests/110-communities-stories.sql
 ```
 
-**Two packages, not one.** `communities` and `stories` are two independently toggleable keys `[VERIFIED: packages/contracts/src/modules.ts:2-9]` — `export const TOGGLEABLE_MODULES = [ 'feed', 'communities', 'stories', 'events', 'chat', 'notifications', ] as const;`. A single package would have to be registered under one key, so the other key could never be turned on or off; D-74 explicitly branches the feed on `communities` alone, and D-80's "+" circle belongs to `stories`. Cross-module needs go through published contracts: `@tria/module-stories/contracts` exports the pin shape that `@tria/module-communities/ui` renders, and `@tria/module-feed` imports `@tria/module-communities/contracts` for the community summary on a post header — never the other module's `server/` or `db/`.
+**Two packages, not one.** `communities` and `stories` are two independently toggleable keys `[VERIFIED: packages/contracts/src/modules.ts:2-9]` — `export const TOGGLEABLE_MODULES = [ 'feed', 'communities', 'stories', 'events', 'chat', 'notifications', ] as const;`. A single package would have to be registered under one key, so the other key could never be turned on or off; D-74 explicitly branches the feed on `communities` alone, and D-80's "+" circle belongs to `stories`. Cross-module needs go through published contracts: `@rede-social/module-stories/contracts` exports the pin shape that `@rede-social/module-communities/ui` renders, and `@rede-social/module-feed` imports `@rede-social/module-communities/contracts` for the community summary on a post header — never the other module's `server/` or `db/`.
 
 ---
 
 ### Pattern 1: The module package is a copy, not a design
 
-`@tria/module-feed` is the reference module since 04-10 removed the example. The manifest is data `[VERIFIED: packages/core/server/modules/manifest.ts]` — `export interface ModuleHomeSlot { order: number; }` and `ModuleNav` with `label`, `icon`, `href`, `order`, `placement?: 'tab' | 'topbar'`, `badge?`. Registration is **one line** in `apps/api/src/modules/registry.ts`:
+`@rede-social/module-feed` is the reference module since 04-10 removed the example. The manifest is data `[VERIFIED: packages/core/server/modules/manifest.ts]` — `export interface ModuleHomeSlot { order: number; }` and `ModuleNav` with `label`, `icon`, `href`, `order`, `placement?: 'tab' | 'topbar'`, `badge?`. Registration is **one line** in `apps/api/src/modules/registry.ts`:
 
 ```ts
 export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
@@ -680,7 +680,7 @@ The prototype's `reels/page.tsx` is the gesture model D-66 points at. What is di
 
 **The timing model (recommendation, to be pinned by the D-33 review):**
 
-- Image duration: `STORY_DURATION_MS = 5000` `[VERIFIED: reference/frontend-design/lib/constants.ts:6-7]` — `export const STORY_DURATION_MS = 5000;` / `export const STORY_EXPIRY_HOURS = 24;`. Both constants are the design team's own numbers and are unused in the prototype; port them into `@tria/module-stories/contracts` so the viewer and the schema cite one source.
+- Image duration: `STORY_DURATION_MS = 5000` `[VERIFIED: reference/frontend-design/lib/constants.ts:6-7]` — `export const STORY_DURATION_MS = 5000;` / `export const STORY_EXPIRY_HOURS = 24;`. Both constants are the design team's own numbers and are unused in the prototype; port them into `@rede-social/module-stories/contracts` so the viewer and the schema cite one source.
 - Video duration: the asset's own `duration_seconds`, driven by the player's `timeupdate`, **not** a fixed timer — a fixed timer desynchronises the moment the network stalls.
 - **One `requestAnimationFrame` clock, not a CSS animation.** A rAF/elapsed-time loop is what makes pause, resume and skip interruptible mid-fill; a CSS `animation` has to be restarted or hacked with `animation-play-state` and cannot be scrubbed. `[CITED: dev.to "I Rebuilt Instagram Stories' Segmented Progress Bars"]` — LOW confidence as a source, but it agrees with the mechanism and there is no tenable alternative here.
 - Tap zones: left third = previous, right two-thirds = next (a larger "next" target matches the dominant gesture). Hold anywhere = `pointerdown` pauses the clock and the video, `pointerup` resumes.
@@ -718,11 +718,11 @@ Recommended event set, with payloads carrying what a Phase 7 notification row ne
 The established rule (04-01, and the reason FEED-08 works) is that "only the admin may X" is a **permission value**, composed once in `apps/api/src/modules/registry.ts`'s `permissionsFor(role, enabled, settings)` and read by both the route guard and `GET /v1/me/bootstrap`. Phase 5 declares:
 
 ```ts
-// @tria/module-communities/contracts
+// @rede-social/module-communities/contracts
 export const COMMUNITY_PERMISSIONS = { manage: 'communities.community.manage' } as const;
 // manifest: defaultRolePermissions: { admin_tenant: [COMMUNITY_PERMISSIONS.manage] }
 
-// @tria/module-stories/contracts
+// @rede-social/module-stories/contracts
 export const STORY_PERMISSIONS = {
   publish: 'stories.story.publish',
   manage:  'stories.story.manage',   // delete + pin/unpin (D-84)
@@ -744,7 +744,7 @@ Liking and commenting on a story are **member** actions and need no module permi
 - **`order by published_at` on a query that ranges on `expires_at`.** Verified `Sort`. Order by the column you range on.
 - **A cron/sweeper to expire stories.** Roadmap- and conventions-locked against.
 - **A separate `/story/[id]` page as the comment surface.** D-82 rejects it: it breaks the auto-advance sequence the viewer exists for.
-- **`@tria/module-stories` importing `@tria/module-feed/server/*`.** MOD-02 violation; the boundary lint and `packages/boundary-fixture` will fail. Contracts only.
+- **`@rede-social/module-stories` importing `@rede-social/module-feed/server/*`.** MOD-02 violation; the boundary lint and `packages/boundary-fixture` will fail. Contracts only.
 - **A second data-fetch path for "load more".** `InfiniteScroll` + a server action, exactly as the feed does.
 - **Hard-coding `admin_tenant` in a route.** `requirePermission`, always.
 
@@ -755,9 +755,9 @@ Liking and commenting on a story are **member** actions and need no module permi
 | Problem | Don't Build | Use Instead | Why |
 |---|---|---|---|
 | Cursor pagination for the community list and story comments | A second cursor encoder | `packages/core/server/paging.ts` `encodeCursor`/`decodeCursor` | Its docblock says "Do not write a second envelope"; `decodeCursor` is **total** — a tampered cursor degrades to page 1 rather than 500ing on a shared link |
-| Infinite scroll sentinel | An `IntersectionObserver` in the module | `@tria/ui` `InfiniteScroll` + `useInfiniteScroll` | Ported in Phase 4 **explicitly so Phase 5's community list could reuse it**; it already reads the observer root from `ScrollContainerContext`, which is the part that is easy to get wrong inside a padded scrollport |
-| Story comments UI | A second comment list | `@tria/module-feed/ui` `CommentSheet` + `CommentsList` with a `flat` prop (D-82) | Two lists drift the first time a label or an optimistic update changes |
-| Like button and double-tap heart | A story-specific like control | `LikeButton` + `@tria/ui` `DoubleTapHeart` | Already carry the optimistic-count and failed-like-toast behaviour |
+| Infinite scroll sentinel | An `IntersectionObserver` in the module | `@rede-social/ui` `InfiniteScroll` + `useInfiniteScroll` | Ported in Phase 4 **explicitly so Phase 5's community list could reuse it**; it already reads the observer root from `ScrollContainerContext`, which is the part that is easy to get wrong inside a padded scrollport |
+| Story comments UI | A second comment list | `@rede-social/module-feed/ui` `CommentSheet` + `CommentsList` with a `flat` prop (D-82) | Two lists drift the first time a label or an optimistic update changes |
+| Like button and double-tap heart | A story-specific like control | `LikeButton` + `@rede-social/ui` `DoubleTapHeart` | Already carry the optimistic-count and failed-like-toast behaviour |
 | Signed uploads, TUS, Mux direct upload, "processando" | A story-specific upload path | `apps/web/components/media/useSignedUpload` | 03-04/03-07 own both branches including the provider branch that skips `complete` |
 | Video playback with signed tokens | A `<video>` + hls.js | `apps/web/components/media/VideoPlayer` / `<MuxPlayer>` | Per-request playback tokens (D-44) must never be cached; the existing component already mints and refuses correctly |
 | Image variants for covers/thumbnails | A resize in the API | `GET /v1/media/{assetId}/{variant}` + `PURPOSE_WIDTHS` | MEDIA-01/TENANT-04: a payload never carries a signed Storage URL |
@@ -780,7 +780,7 @@ Liking and commenting on a story are **member** actions and need no module permi
 | Live service config | None. No n8n/Datadog/Cloudflare equivalent exists in this project. Supabase `config.toml` needs no change: the `media` and `branding` buckets already exist and no new bucket is introduced (story media lands in `media`, community covers in `media`) | None — verified by `ls supabase/` and the absence of any new bucket in the media contract |
 | OS-registered state | None — verified: no scheduler, launchd or pm2 registration in this repo | None |
 | Secrets / env vars | None new. Mux, Supabase and VAPID keys are unchanged; no new provider is introduced | None |
-| Build artifacts / installed packages | Two **new workspace packages** (`@tria/module-communities`, `@tria/module-stories`) require `pnpm install` so the workspace links resolve, and `apps/api` + `apps/web` gain `workspace:*` dependencies on them. `turbo.json` task graph picks them up automatically via the `packages/*` glob; `apps/api/drizzle.config.ts` already globs `packages/modules/*/db/schema.ts` | `pnpm install` after the package skeletons land, before the first `pnpm db:generate` |
+| Build artifacts / installed packages | Two **new workspace packages** (`@rede-social/module-communities`, `@rede-social/module-stories`) require `pnpm install` so the workspace links resolve, and `apps/api` + `apps/web` gain `workspace:*` dependencies on them. `turbo.json` task graph picks them up automatically via the `packages/*` glob; `apps/api/drizzle.config.ts` already globs `packages/modules/*/db/schema.ts` | `pnpm install` after the package skeletons land, before the first `pnpm db:generate` |
 
 **One more, specific to this phase:** `scripts/seed.ts` must be extended in **both** demo tenants with identical-looking content — communities with and without covers, active and expired stories, at least one pinned expired story, story likes and flat story comments — or the isolation suite, the expiry predicate test and the pinned-survives-expiry test have nothing to assert against, and the Playwright specs have no fixture.
 
@@ -1149,7 +1149,7 @@ below are recorded so this section cannot be read as outstanding research.
 |----------|-------|
 | Framework | Vitest 5.0.0 (unit + integration), pgTAP via `supabase test db` (CLI 2.117.0), Playwright 1.63.0 (e2e) |
 | Config file | per-package `vitest.config.ts`; `apps/web/playwright.config.ts` + `playwright.pwa.config.ts`; `supabase/tests/*.sql` |
-| Quick run command | `pnpm --filter @tria/module-communities test && pnpm --filter @tria/module-stories test` (new packages) / `pnpm --filter @tria/api test` |
+| Quick run command | `pnpm --filter @rede-social/module-communities test && pnpm --filter @rede-social/module-stories test` (new packages) / `pnpm --filter @rede-social/api test` |
 | Full suite command | `pnpm verify` (the local exit gate; `ci.yml` mirrors it step for step) |
 | Estimated runtime | Phase 4 baseline ~21m51s (unit 512, pgTAP 191→195, integration 373, e2e 328); Phase 5 adds ~2 pgTAP files' worth and 3–4 specs |
 
@@ -1167,14 +1167,14 @@ below are recorded so this section cannot be read as outstanding research.
 | D-74 | Turning `communities` off reverts the predicate; posts survive; re-enabling restores | integration | `npx vitest run tests/integration/communities.test.ts` (module-flag witness, both directions) | ❌ Wave 0 |
 | STORY-01 | Publish image and video stories with optional caption; `purpose: 'story'`; >60 s video ends `rejected`/`duration_too_long` | integration | `npx vitest run tests/integration/stories.test.ts` · existing `mux-webhook.test.ts` pattern | ❌ Wave 0 |
 | STORY-02 | Strip renders active stories newest-first; viewer advances, tap-navigates, holds-to-pause; comment sheet pauses it | e2e (mobile project) | `stories.spec.ts` | ❌ Wave 0 |
-| STORY-02 | Progress clock unit behaviour (pause/resume/skip preserves elapsed) | unit | `pnpm --filter @tria/module-stories test` (`story-clock.test.ts`) | ❌ Wave 0 |
+| STORY-02 | Progress clock unit behaviour (pause/resume/skip preserves elapsed) | unit | `pnpm --filter @rede-social/module-stories test` (`story-clock.test.ts`) | ❌ Wave 0 |
 | STORY-03 | Active/expired split under a controlled clock; the expired **row is retained** | pgTAP | `pnpm supabase test db` (`110-communities-stories.sql`) | ❌ Wave 0 |
 | STORY-04 | Pin/unpin; a pinned expired story still renders on the community page; unpin removes it | pgTAP + integration | `pnpm supabase test db` · `npx vitest run tests/integration/stories.test.ts` | ❌ Wave 0 |
 | STORY-05 | Reply to a story comment and like of a story comment refused by the **DB** (honest + lying), with positive controls | pgTAP | `pnpm supabase test db` (`110-communities-stories.sql`) | ❌ Wave 0 |
 | STORY-05 | The same two refusals at the **API**, as stable machine codes | integration | `npx vitest run tests/integration/stories.test.ts` | ❌ Wave 0 |
 | Pitfall 1 | The 3-valued CHECK hole is closed: `depth = 1` with `parent_depth` null is refused | pgTAP | `pnpm supabase test db` (`090-feed.sql` or `110-…`) | ❌ Wave 0 |
 | TENANT-05 | Cross-tenant: `communities`, `community_members`, `stories`, `story_community_pins` each see own rows and **zero** of tenant B, with identical-looking content | pgTAP + integration | `pnpm supabase test db` (`020-tenant-isolation.sql`) · `npx vitest run tests/integration/isolation.test.ts` | ⚠️ extend both |
-| MOD-03 | New domain events typed, emitted after commit, once, none on rollback | unit | `pnpm --filter @tria/module-stories test` (`events.test.ts`) | ❌ Wave 0 |
+| MOD-03 | New domain events typed, emitted after commit, once, none on rollback | unit | `pnpm --filter @rede-social/module-stories test` (`events.test.ts`) | ❌ Wave 0 |
 | MOD-04 | Two modules mount/unmount by flag; a disabled module's routes 404 | integration | `npx vitest run tests/integration/isolation.test.ts` | ⚠️ extend |
 | Query budget | `/v1/communities` and `/v1/stories` each execute ≤ N statements per page, with a **floor** as well as a ceiling | integration | `npx vitest run tests/integration/feed-query-budget.test.ts` (extended) | ⚠️ extend |
 | UI-01/UI-04 | Five prototype-less surfaces approved through the D-33 UI-SPEC + mockup | manual | — | manual-only |
@@ -1182,7 +1182,7 @@ below are recorded so this section cannot be read as outstanding research.
 
 ### Sampling Rate
 
-- **Per task commit:** `pnpm --filter @tria/module-communities test && pnpm --filter @tria/module-stories test && pnpm --filter @tria/api test` (T1, ≤ 60 s)
+- **Per task commit:** `pnpm --filter @rede-social/module-communities test && pnpm --filter @rede-social/module-stories test && pnpm --filter @rede-social/api test` (T1, ≤ 60 s)
 - **Per wave merge:** `pnpm lint && pnpm turbo typecheck test && pnpm supabase test db && pnpm test:integration` (T2, ≤ 5 min per task when filtered)
 - **Phase gate:** `pnpm verify` green before `/gsd-verify-work` (T3, run once, ≤ 25 min)
 
@@ -1193,7 +1193,7 @@ Phase 5 inherits Phase 4's **tiered** ceiling for the same reason: the strip, th
 - [ ] `packages/modules/communities/{vitest.config.ts,package.json test script}` — new package has no runner
 - [ ] `packages/modules/stories/{vitest.config.ts,package.json test script}` — new package has no runner
 - [ ] `packages/modules/stories/tests/story-clock.test.ts` — the rAF progress clock's pause/resume/skip contract, with an injected clock (no timers in the assertion)
-- [ ] `packages/modules/stories/tests/events.test.ts` — after-commit emission, once-only, none-on-rollback (the `@tria/module-feed/tests/events.test.ts` copy)
+- [ ] `packages/modules/stories/tests/events.test.ts` — after-commit emission, once-only, none-on-rollback (the `@rede-social/module-feed/tests/events.test.ts` copy)
 - [ ] `apps/api/tests/integration/communities.test.ts` — CRUD, archive semantics, COMM-04 write path, the D-74 module-flag witness in **both** directions
 - [ ] `apps/api/tests/integration/stories.test.ts` — publish (image + video), expiry visibility, pin/unpin, story like/comment, and the two STORY-05 API refusals by machine code
 - [ ] `supabase/tests/110-communities-stories.sql` — STORY-05 negatives + positive controls, the Pitfall-1 probe, the controlled-clock expiry pair, the pinned-survives-expiry case, counter reconciliation for `post_count` / `last_activity_at` / story counters, and an `EXPLAIN` block for the community list ordering

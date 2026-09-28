@@ -17,13 +17,13 @@ requires:
   - phase: 01-06
     provides: "tenant_modules, requireModule/requireRole guards, platform lane, super_admin seed"
   - phase: 01-07
-    provides: "@tria/module-example (example_items, guarded routes, pgboss schema and its role switch)"
+    provides: "@rede-social/module-example (example_items, guarded routes, pgboss schema and its role switch)"
   - phase: 01-09
     provides: "ci.yml, which already called `pnpm boundaries:negative` and `supabase test db`"
 provides:
   - "Five pgTAP files (71 assertions) proving RLS coverage, cross-tenant isolation, lane roles and the schema conventions INSIDE Postgres, re-runnable on every CI run"
   - "apps/api/tests/integration/isolation.test.ts — the two-tenant API exit gate (11 cases: list, detail, empty, disabled module, blocked mid-session, cookie/host override, host mismatch, platform identity, public host lookup)"
-  - "@tria/boundary-fixture + scripts/check-boundaries.sh — MOD-02 made falsifiable: both enforcement layers must reject a module that crosses a boundary"
+  - "@rede-social/boundary-fixture + scripts/check-boundaries.sh — MOD-02 made falsifiable: both enforcement layers must reject a module that crosses a boundary"
   - "`pnpm boundaries` exits 0 for the first time (turbo tag rules corrected); `pnpm boundaries:negative` exists, so ci.yml no longer references missing targets"
   - "A clean `supabase db reset` from an empty database with the entire Phase 1 suite green in 90 s, and `db:generate` proven to be a no-op"
   - "scripts/local-env.sh emits the seed credentials, and playwright.config.ts loads .env.local — a clean machine runs the whole suite with no variables typed by hand"
@@ -64,10 +64,10 @@ key-files:
 key-decisions:
   - "pgTAP helpers switch roles with `set_config('role', …, true)` rather than a bare `SET LOCAL ROLE` inside the function, because a plain plpgsql function opens no GUC nesting level — the lane survives the call exactly as `withTenantTx` intends"
   - "`api_user` cannot be asserted to fail `set local role postgres` from pg_prove (SET ROLE is checked against the SESSION user, which is postgres there). The catalogue assertion replaces it: api_user is a member of exactly {authenticated, service_role}"
-  - "Dropped the `contracts` and `tooling` turbo boundary tag rules: turbo 2.10.12 mis-attributes their dependency edges (it reports @tria/config — zero workspace dependencies in package.json and in the lockfile importer — as depending on @tria/core and @tria/contracts), so any rule written there fails the correct graph"
+  - "Dropped the `contracts` and `tooling` turbo boundary tag rules: turbo 2.10.12 mis-attributes their dependency edges (it reports @rede-social/config — zero workspace dependencies in package.json and in the lockfile importer — as depending on @rede-social/core and @rede-social/contracts), so any rule written there fails the correct graph"
   - "Dropped `module.dependents.deny: [\"module\"]`: redundant with `module.dependencies.allow`, and the only rule the negative fixture could not exercise without turning the positive run red (`--filter` excludes a package from being checked, not from the graph)"
   - "The fixture is linted by the PROJECT'S OWN biome.json, not a fixture-local copy: Biome 2.5.13 refuses a second config inside a project that already has a root one, and exercising the real configuration is the stronger claim anyway"
-  - "`@tria/module-example` is imported but NOT declared in the fixture's dependencies — a declared edge would trip the other end's rules during the positive run, and undeclared is the truthful shape of reaching into another module's internals"
+  - "`@rede-social/module-example` is imported but NOT declared in the fixture's dependencies — a declared edge would trip the other end's rules during the positive run, and undeclared is the truthful shape of reaching into another module's internals"
 
 patterns-established:
   - "Test gate rule 1: every new tenant-owned table adds a case to supabase/tests/020-tenant-isolation.sql"
@@ -122,7 +122,7 @@ coverage:
     requirement: MOD-02
     verification:
       - kind: other
-        ref: "pnpm boundaries (exit 0) && pnpm boundaries:negative (exit 0) && pnpm turbo boundaries --filter=@tria/boundary-fixture (exit 1)"
+        ref: "pnpm boundaries (exit 0) && pnpm boundaries:negative (exit 0) && pnpm turbo boundaries --filter=@rede-social/boundary-fixture (exit 1)"
         status: pass
     human_judgment: false
   - id: D7
@@ -137,7 +137,7 @@ coverage:
     description: "The image built from the post-01-07 tree still boots without a database: /v1/health answers {\"ok\":true} with DATABASE_URL pointing at a closed port (the API never starts pg-boss at boot)"
     verification:
       - kind: other
-        ref: "docker build -f apps/api/Dockerfile -t tria-api:local . && docker run … -e DATABASE_URL=postgres://x:y@127.0.0.1:1/x -e ROLE=api && curl /v1/health"
+        ref: "docker build -f apps/api/Dockerfile -t rede-social-api:local . && docker run … -e DATABASE_URL=postgres://x:y@127.0.0.1:1/x -e ROLE=api && curl /v1/health"
         status: pass
     human_judgment: false
   - id: D9
@@ -168,8 +168,8 @@ status: complete
 ## Accomplishments
 
 - **The database now proves its own isolation.** `pnpm supabase test db` runs 71 assertions across five files: every `public` table has RLS and every tenant table has a policy (010); a tenant lane sees its own rows and zero rows of the other tenant across nine tables, with a `42501` on a cross-tenant insert and a zero-row cross-tenant update (020); `api_user` owns nothing until it opens a lane and a claimless lane returns zero rows rather than everything (030); `users` has no tenant or role column, `memberships` rejects `super_admin`, `platform_admins` has zero policies and `tenant_domains` is case-proof (040). It passes twice in a row on the same database and from an empty one.
-- **`isolation.test.ts` is the API-level exit gate.** Eleven cases, every one comparing ids: the other tenant's item is `404 NOT_FOUND` and never `403`; a tenant without the module gets `404 MODULE_DISABLED` on read *and* write; a tenant with the module and no rows gets `200 { items: [] }` while the neighbour demonstrably has rows; a member blocked between two requests is refused on the very next one with the same token; a cookie and an unknown host saying "tria-lab" still yield tria-demo's data; and a tria-demo session on tria-lab's registered host is `403 TENANT_HOST_MISMATCH` with no details, no tenant name and no lab id anywhere in the body — on `/me/bootstrap` and on `/v1/example/items`, in both directions.
-- **MOD-02 is falsifiable again.** `@tria/boundary-fixture` imports an app package, the kernel's admin lane and another module's internals; `pnpm boundaries:negative` requires *both* layers to reject it and fails loudly if Biome exits non-zero for any other reason (the "no files were processed" false green was caught during development and is now an explicit failure branch).
+- **`isolation.test.ts` is the API-level exit gate.** Eleven cases, every one comparing ids: the other tenant's item is `404 NOT_FOUND` and never `403`; a tenant without the module gets `404 MODULE_DISABLED` on read *and* write; a tenant with the module and no rows gets `200 { items: [] }` while the neighbour demonstrably has rows; a member blocked between two requests is refused on the very next one with the same token; a cookie and an unknown host saying "rede-lab" still yield rede-demo's data; and a rede-demo session on rede-lab's registered host is `403 TENANT_HOST_MISMATCH` with no details, no tenant name and no lab id anywhere in the body — on `/me/bootstrap` and on `/v1/example/items`, in both directions.
+- **MOD-02 is falsifiable again.** `@rede-social/boundary-fixture` imports an app package, the kernel's admin lane and another module's internals; `pnpm boundaries:negative` requires *both* layers to reject it and fails loudly if Biome exits non-zero for any other reason (the "no files were processed" false green was caught during development and is now an explicit failure branch).
 - **`pnpm boundaries` exits 0 for the first time in this phase**, and both CI targets that 01-09 had already wired now exist — broken window #7 closed.
 - **The [BLOCKING] clean apply passed.** From `supabase stop --no-backup`: 9/9 migrations through the Supabase CLI only, then pgTAP → seed → lint/typecheck/build/test (20 tasks) → boundaries → negative boundaries → lane guard → 69 integration tests → the Supavisor spike → 64 e2e tests → `db:generate` no-op, in 90 s end to end.
 
@@ -190,7 +190,7 @@ status: complete
 - `scripts/check-boundaries.sh` — `pnpm boundaries:negative`; both layers must reject the fixture.
 - `packages/boundary-fixture/*` — the module-tagged package that violates all three lanes on purpose.
 - `turbo.json` — corrected boundary tag rules (see Deviations).
-- `biome.json` — the fixture is linted by the root config; the module lane now also refuses `@tria/module-*/{server,db,ui,contracts}/*` and `@tria/api*`.
+- `biome.json` — the fixture is linted by the root config; the module lane now also refuses `@rede-social/module-*/{server,db,ui,contracts}/*` and `@rede-social/api*`.
 - `packages/core/docs/SCHEMA-CONVENTIONS.md` — §(j) Test gate rewritten: the six files, what each refuses, and the two rules that keep the gate honest.
 - `scripts/local-env.sh` — emits `SEED_PASSWORD` / `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD`.
 - `apps/web/playwright.config.ts` — loads `apps/web/.env.local` before specs are collected.
@@ -205,7 +205,7 @@ See `key-decisions` in the frontmatter. The two that will matter later:
 
 ## Inherited Debt — disposition
 
-1. **`pnpm boundaries` broken since 01-04** — CLOSED. `scripts/check-boundaries.sh` and `@tria/boundary-fixture` now exist, and the positive run was additionally red for three pre-existing tag violations that had nothing to do with the missing script; both are fixed (`pnpm boundaries` exit 0, `pnpm boundaries:negative` exit 0).
+1. **`pnpm boundaries` broken since 01-04** — CLOSED. `scripts/check-boundaries.sh` and `@rede-social/boundary-fixture` now exist, and the positive run was additionally red for three pre-existing tag violations that had nothing to do with the missing script; both are fixed (`pnpm boundaries` exit 0, `pnpm boundaries:negative` exit 0).
 2. **`ci.yml` referencing missing targets** — CLOSED. Broken window #7 marked fixed. CI's step order is mirrored exactly by Task 3's chain.
 3. **`SUPER_ADMIN_PASSWORD` local-environment gap** — CLOSED. `.env.example` already listed all three variables; what was missing was generation. `scripts/local-env.sh` now emits `SEED_PASSWORD`, `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` (local throwaways, overridable by export), and `playwright.config.ts` loads that file the way `apps/api/vitest.config.ts` already did. `db:reset → local-env.sh --write → db:seed → full suite` now runs with nothing typed by hand. No value was printed into the execution transcript.
 4. **`pg_policy` count = 0 for `platform_admins`, not merely "RLS enabled"** — DONE, and doubled: `040` asserts both the zero-policy count *and* that RLS is still enabled (without it the schema-wide `authenticated` SELECT grant from 01-01's `alter default privileges` would apply), while `020` inserts a real `platform_admins` row and asserts the tenant lane counts zero.
@@ -217,7 +217,7 @@ See `key-decisions` in the frontmatter. The two that will matter later:
 
 **1. [Rule 1 - Bug] `pnpm boundaries` was red for three pre-existing tag violations**
 - **Found during:** Task 2
-- **Issue:** Independently of the new fixture, `turbo boundaries` reported three violations on the correct graph: `@tria/config` — a package whose `package.json` and lockfile importer declare ZERO workspace dependencies — was reported as depending on `@tria/core` and `@tria/contracts`, and `@tria/contracts` as depending on `@tria/core`. Verified by moving the fixture out of the workspace entirely and re-running (`3 issues found`), so it was not caused by this plan.
+- **Issue:** Independently of the new fixture, `turbo boundaries` reported three violations on the correct graph: `@rede-social/config` — a package whose `package.json` and lockfile importer declare ZERO workspace dependencies — was reported as depending on `@rede-social/core` and `@rede-social/contracts`, and `@rede-social/contracts` as depending on `@rede-social/core`. Verified by moving the fixture out of the workspace entirely and re-running (`3 issues found`), so it was not caused by this plan.
 - **Fix:** Removed the `contracts` and `tooling` tag rule blocks from `turbo.json` with a comment recording the exact symptom. Both are leaves; the rules were near-vacuous and could only ever produce false failures on this graph.
 - **Files modified:** `turbo.json`
 - **Verification:** `pnpm boundaries` exit 0, 142 files in 7 packages, no issues.
@@ -225,10 +225,10 @@ See `key-decisions` in the frontmatter. The two that will matter later:
 
 **2. [Rule 3 - Blocking] `module.dependents.deny: ["module"]` made the positive run red whenever the fixture existed**
 - **Found during:** Task 2
-- **Issue:** `pnpm boundaries` filters the fixture out with `--filter='!@tria/boundary-fixture'`, but `--filter` excludes a package from being *checked*, not from the graph — so `@tria/module-example`'s `dependents` rule still saw the fixture and failed the positive run. It fired on the import alone, with or without a declared dependency.
+- **Issue:** `pnpm boundaries` filters the fixture out with `--filter='!@rede-social/boundary-fixture'`, but `--filter` excludes a package from being *checked*, not from the graph — so `@rede-social/module-example`'s `dependents` rule still saw the fixture and failed the positive run. It fired on the import alone, with or without a declared dependency.
 - **Fix:** Removed the rule. It is redundant: the same module → module edge already fails `module.dependencies.allow` and is reported against the importing package, which is where it belongs and where real modules are checked. The fixture still produces three turbo violations (undeclared import, app tag, module tag).
 - **Files modified:** `turbo.json`, `packages/boundary-fixture/package.json`
-- **Verification:** `pnpm boundaries` exit 0; `pnpm turbo boundaries --filter=@tria/boundary-fixture` exit 1 with 3 issues.
+- **Verification:** `pnpm boundaries` exit 0; `pnpm turbo boundaries --filter=@rede-social/boundary-fixture` exit 1 with 3 issues.
 - **Committed in:** `fbd8046`
 
 **3. [Rule 3 - Blocking] A fixture-local `biome.json` cannot exist — plan step 2.3 adapted**
@@ -241,15 +241,15 @@ See `key-decisions` in the frontmatter. The two that will matter later:
 
 **4. [Rule 2 - Missing Critical] The module import lane never matched a deep import**
 - **Found during:** Task 2
-- **Issue:** The `packages/modules/**` Biome rule restricted `@tria/module-*/src/**`, which never matches a published-looking subpath such as `@tria/module-example/server/service` — precisely how one module would reach another's internals. A real module could have done it unnoticed.
-- **Fix:** Added `@tria/module-*/{server,db,ui,contracts}/*` to the "Import published entry points only" group, and `@tria/api` / `@tria/api/*` as "A module may not import an app package".
+- **Issue:** The `packages/modules/**` Biome rule restricted `@rede-social/module-*/src/**`, which never matches a published-looking subpath such as `@rede-social/module-example/server/service` — precisely how one module would reach another's internals. A real module could have done it unnoticed.
+- **Fix:** Added `@rede-social/module-*/{server,db,ui,contracts}/*` to the "Import published entry points only" group, and `@rede-social/api` / `@rede-social/api/*` as "A module may not import an app package".
 - **Files modified:** `biome.json`
-- **Verification:** the fixture's `@tria/module-example/server/service` import is now reported; `pnpm turbo lint` exit 0 (no real module regressed).
+- **Verification:** the fixture's `@rede-social/module-example/server/service` import is now reported; `pnpm turbo lint` exit 0 (no real module regressed).
 - **Committed in:** `fbd8046`
 
 **5. [Rule 1 - Bug] `modules.test.ts` asserted a pre-01-07 module ordering**
 - **Found during:** Task 3 (it only surfaced once the suite could actually run — see Inherited Debt 3)
-- **Issue:** Case 1 asserted the seven tria-demo keys sorted alphabetically, with the comment "no manifest exists yet". 01-07 shipped `@tria/module-example` with `nav.order 90`, so `example` now leads and the six manifest-less keys follow (`MODULE_KEY_ORDER_FALLBACK = 1000`). The test had never run since 01-07 because it requires `SUPER_ADMIN_PASSWORD`.
+- **Issue:** Case 1 asserted the seven rede-demo keys sorted alphabetically, with the comment "no manifest exists yet". 01-07 shipped `@rede-social/module-example` with `nav.order 90`, so `example` now leads and the six manifest-less keys follow (`MODULE_KEY_ORDER_FALLBACK = 1000`). The test had never run since 01-07 because it requires `SUPER_ADMIN_PASSWORD`.
 - **Fix:** The case now asserts the ordering RULE and the module's `nav` object, and the comment explains what Phase 4 will change when the throwaway module is deleted.
 - **Files modified:** `apps/api/tests/integration/modules.test.ts`
 - **Verification:** `pnpm test:integration` → 7 files, 69 tests, all pass.
@@ -281,8 +281,8 @@ See `key-decisions` in the frontmatter. The two that will matter later:
 
 **9. [Rule 3 - Blocking] The `Host:` header was dropped from isolation case (f)**
 - **Found during:** Task 2
-- **Issue:** The plan asked for `Cookie: tenant_slug=tria-lab` + `Host: tria-lab.example` + `x-tenant-host: tria-lab.example`. `Host` is a forbidden header name on `Request` and, more importantly, `requireAuth` explicitly never reads `Host`/`X-Forwarded-Host` (01-01) — asserting on it would test the fetch implementation, not the product.
-- **Fix:** The case sends the cookie and `x-tenant-host` (an unregistered host) and asserts `tenant.slug === 'tria-demo'`. The header the API *does* read is covered by case (f2) with a registered host.
+- **Issue:** The plan asked for `Cookie: tenant_slug=rede-lab` + `Host: rede-lab.example` + `x-tenant-host: rede-lab.example`. `Host` is a forbidden header name on `Request` and, more importantly, `requireAuth` explicitly never reads `Host`/`X-Forwarded-Host` (01-01) — asserting on it would test the fetch implementation, not the product.
+- **Fix:** The case sends the cookie and `x-tenant-host` (an unregistered host) and asserts `tenant.slug === 'rede-demo'`. The header the API *does* read is covered by case (f2) with a registered host.
 - **Files modified:** `apps/api/tests/integration/isolation.test.ts`
 - **Verification:** case (f) passes; `requireAuth`'s comment confirms `Host` is never read.
 - **Committed in:** `fbd8046`
@@ -309,7 +309,7 @@ None — no external service configuration. Local setup is now fully generated: 
 
 ## Known Stubs
 
-None introduced by this plan. Open broken windows #2, #5, #6 and #9 remain and are owned by Phase 7 (chat/notifications) and Phase 4 (deleting `@tria/module-example`); #7 and #8 were closed here.
+None introduced by this plan. Open broken windows #2, #5, #6 and #9 remain and are owned by Phase 7 (chat/notifications) and Phase 4 (deleting `@rede-social/module-example`); #7 and #8 were closed here.
 
 ## Next Phase Readiness
 

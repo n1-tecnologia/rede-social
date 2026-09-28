@@ -1,7 +1,7 @@
-import { sqlClient } from '@tria/core/db';
-import { subscribe } from '@tria/core/server/events/bus';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
-import { encodeCursor } from '@tria/core/server/paging';
+import { sqlClient } from '@rede-social/core/db';
+import { subscribe } from '@rede-social/core/server/events/bus';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { encodeCursor } from '@rede-social/core/server/paging';
 import {
   COMMUNITY_MAX_PAGE_SIZE,
   type CommunityArchived,
@@ -9,12 +9,12 @@ import {
   type CommunityPage,
   type CommunitySummary,
   type CommunityUpdated,
-} from '@tria/module-communities/contracts';
+} from '@rede-social/module-communities/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
- * `@tria/module-communities` end to end against the live local stack and the real seed (05-01) —
+ * `@rede-social/module-communities` end to end against the live local stack and the real seed (05-01) —
  * the tracer, proved rather than asserted.
  *
  * Seven things are proved here that nothing else in the repo can prove:
@@ -131,15 +131,15 @@ async function sweep(): Promise<void> {
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
 
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  tokens.labAdmin = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
 
   // The lab tenant ships with `communities` DISABLED (scripts/seed.ts gives it feed + events only).
@@ -335,8 +335,8 @@ describe('cross-tenant: one bare 404, never an existence oracle (T-05-01, T-05-0
     // forbids. A status-only assertion would not cover this.
     expect(Object.hasOwn(body.error, 'details')).toBe(false);
     const asText = JSON.stringify(body);
-    expect(asText).not.toContain('tria-lab');
-    expect(asText).not.toContain('TRIA Lab');
+    expect(asText).not.toContain('rede-lab');
+    expect(asText).not.toContain('Rede Lab');
   });
 
   it('9. an unknown uuid produces the byte-identical 404 body', async () => {
@@ -933,28 +933,28 @@ describe('POST/PATCH /v1/communities — the cover asset contract (COMM-01, 05-0
   beforeAll(async () => {
     fixtures.ready = await seedAsset(
       tenantIds.demo,
-      'admin@tria-demo.local',
+      'admin@rede-demo.local',
       'image',
       'cover',
       'ready',
     );
     fixtures.avatar = await seedAsset(
       tenantIds.demo,
-      'admin@tria-demo.local',
+      'admin@rede-demo.local',
       'image',
       'avatar',
       'ready',
     );
     fixtures.video = await seedAsset(
       tenantIds.demo,
-      'admin@tria-demo.local',
+      'admin@rede-demo.local',
       'video',
       'post',
       'ready',
     );
     fixtures.processing = await seedAsset(
       tenantIds.demo,
-      'admin@tria-demo.local',
+      'admin@rede-demo.local',
       'image',
       'cover',
       'processing',
@@ -962,7 +962,7 @@ describe('POST/PATCH /v1/communities — the cover asset contract (COMM-01, 05-0
     // The OTHER tenant's perfectly usable cover — case 31's "a pre-fix release wrote this" fixture.
     fixtures.labCover = await seedAsset(
       tenantIds.lab,
-      'admin@tria-lab.local',
+      'admin@rede-lab.local',
       'image',
       'cover',
       'ready',
@@ -1132,7 +1132,7 @@ describe('POST/PATCH /v1/communities — the cover asset contract (COMM-01, 05-0
     // exists to work around.
     const ownCover = await seedAsset(
       tenantIds.demo,
-      'admin@tria-demo.local',
+      'admin@rede-demo.local',
       'image',
       'cover',
       'ready',

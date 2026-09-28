@@ -3,7 +3,7 @@ import { withAdminTx } from '../../db/admin-tx';
 import { platformAdmins } from '../../db/schema';
 
 /**
- * ROLE-01: is this identity TRIA platform staff? `platform_admins` has RLS enabled and **no policy**,
+ * ROLE-01: is this identity Rede Social platform staff? `platform_admins` has RLS enabled and **no policy**,
  * so the tenant lane can never see a row — the admin lane is the only reader, and this file is one of
  * the few places Biome's `noRestrictedImports` allows to open it.
  *

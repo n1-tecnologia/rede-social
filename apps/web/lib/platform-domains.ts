@@ -1,4 +1,4 @@
-import type { TenantDomain } from '@tria/contracts';
+import type { TenantDomain } from '@rede-social/contracts';
 import type { DnsRecordView } from '@/components/platform/DnsRecordsTable';
 import type {
   DomainActionError,

@@ -1,5 +1,5 @@
-import { moduleLogger } from '@tria/core/server/logging';
-import { defineModule } from '@tria/core/server/modules/manifest';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { COMMUNITY_PERMISSIONS } from './contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().

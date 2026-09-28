@@ -1,10 +1,10 @@
 'use client';
 
-import { Button, type ButtonVariant } from '@tria/ui';
+import { Button, type ButtonVariant } from '@rede-social/ui';
 import { useFormStatus } from 'react-dom';
 
 /**
- * Pending state for a server-action form: `@tria/ui` `Button` `variant="brand" size="lg" fullWidth`
+ * Pending state for a server-action form: `@rede-social/ui` `Button` `variant="brand" size="lg" fullWidth`
  * with `loading={pending}` (spinner, `aria-busy`, disabled) and the catalog's pending label
  * ("Entrando...", "Criando...", "Enviando...", "Salvando..."). The idle accessible name is the label.
  */

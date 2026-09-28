@@ -1,6 +1,6 @@
-import { THEME_COOKIE } from '@tria/contracts/branding';
-import { ThemeToggle } from '@tria/core/ui';
-import { ToastProvider } from '@tria/ui';
+import { THEME_COOKIE } from '@rede-social/contracts/branding';
+import { ThemeToggle } from '@rede-social/core/ui';
+import { ToastProvider } from '@rede-social/ui';
 import { SunMoon } from 'lucide-react';
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
@@ -20,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 /**
  * The platform panel's shell (D-21/D-23/D-33): a 240 px rail on desktop, a top bar on the phone,
- * and a 1040 px content column, always in the neutral TRIA brand (no tenant `--brand-*` is set on
+ * and a 1040 px content column, always in the neutral platform brand (no tenant `--brand-*` is set on
  * the platform host).
  *
  * Access is enforced here, in this order and before anything renders:

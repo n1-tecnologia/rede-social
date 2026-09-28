@@ -1,4 +1,4 @@
-import { cn } from '@tria/ui';
+import { cn } from '@rede-social/ui';
 
 export type TenantLogoSize = 'topbar' | 'rail' | 'auth' | 'home';
 
@@ -40,7 +40,7 @@ const TEXT: Record<TenantLogoSize, string> = {
  * tint, no recolouring and no shape applied — the customer's brand asset is shown as-is on both
  * themes. Without a logo the display name renders as text; there is no placeholder image.
  *
- * Client-safe: this file lives under `@tria/core/ui` and may not import the kernel's server or
+ * Client-safe: this file lives under `@rede-social/core/ui` and may not import the kernel's server or
  * database code (Biome override in biome.json).
  */
 export function TenantLogo({ logoUrl, displayName, size, className }: TenantLogoProps) {

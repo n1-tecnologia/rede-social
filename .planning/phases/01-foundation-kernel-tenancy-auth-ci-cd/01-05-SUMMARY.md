@@ -9,7 +9,7 @@ requires:
   - phase: 01-01
     provides: "requireAuth (verify -> membership -> blocked -> host) throwing 403 MEMBERSHIP_BLOCKED { tenantName } / NO_MEMBERSHIP / TENANT_HOST_MISMATCH; error envelope; supabase/templates/recovery.html + [auth.email.template.recovery]; ES256 signing keys; integration setup helpers (signInAs, authAdmin, adminSql, HOSTS)"
   - phase: 01-02
-    provides: "@tria/web scaffold, proxy.ts public allow-list (/auth/*, /esqueci-senha, /redefinir-senha, /acesso-suspenso, /endereco-invalido, /sem-comunidade), lib/supabase/server.ts (HttpOnly cookies), lib/bootstrap.ts (ApiClientError), lib/tenant-host.ts (getHostTenant, signupPath), pt-BR catalog, SubmitButton, Playwright mobile-chromium + e2e/fixtures.ts"
+    provides: "@rede-social/web scaffold, proxy.ts public allow-list (/auth/*, /esqueci-senha, /redefinir-senha, /acesso-suspenso, /endereco-invalido, /sem-comunidade), lib/supabase/server.ts (HttpOnly cookies), lib/bootstrap.ts (ApiClientError), lib/tenant-host.ts (getHostTenant, signupPath), pt-BR catalog, SubmitButton, Playwright mobile-chromium + e2e/fixtures.ts"
   - phase: 01-04
     provides: "PasswordField (show/hide toggle + strength hint, D-10), the x-forwarded-host-before-host precedence in proxy.ts, e2e admin-env file-fallback pattern"
 provides:
@@ -31,7 +31,7 @@ plan_head_before: 671a29bd7342b5286f465fc1991857bf2820bb2d
 
 # Tech tracking
 tech-stack:
-  added: ["postgres 3.4.9 (devDependency of @tria/web, e2e fixtures only)"]
+  added: ["postgres 3.4.9 (devDependency of @rede-social/web, e2e fixtures only)"]
   patterns:
     - "Absolute URLs in the web tier come from the REQUEST: `x-forwarded-host` first, `host` as fallback, `x-forwarded-proto` defaulting to http — the same precedence proxy.ts uses, because a Server Action redirect re-enters the server on its own origin (D-22)"
     - "Constant-answer actions: `forgot` validates, optionally calls Supabase, and has exactly ONE redirect target — enumeration-safety is a structural property of the function, not a branch that happens to agree"
@@ -68,7 +68,7 @@ key-decisions:
   - "`supabase/config.toml` and `supabase/templates/recovery.html` were left untouched and the local stack was NOT restarted: the `[auth.email.template.recovery]` block already existed at the END of config.toml (lines 417-420, written by 01-01) and the running GoTrue already serves it — the e2e reads a `{{ .RedirectTo }}`-shaped link out of Mailpit"
   - "`/redefinir-senha` reuses 01-04's `PasswordField` (imported as `../cadastro/[slug]/PasswordField`) instead of a plain input, so the reset screen has the same show/hide toggle and strength hint as sign-up (D-10); its show/hide/min/strength labels come from the `signup` catalog namespace rather than duplicating five keys under `reset`"
   - "`forgot.pending` (\"Enviando...\") added to messages/pt-BR.json — the catalog had `forgot.submit` but no pending label, and `SubmitButton` requires both"
-  - "`postgres@3.4.9` added as a devDependency of `@tria/web` so `e2e/admin.ts` can write membership rows directly; the GoTrue admin API cannot create a membership and PostgREST would have meant depending on the Data API for fixtures"
+  - "`postgres@3.4.9` added as a devDependency of `@rede-social/web` so `e2e/admin.ts` can write membership rows directly; the GoTrue admin API cannot create a membership and PostgREST would have meant depending on the Data API for fixtures"
   - "e2e/mail.ts probes `GET /api/v1/info` to tell Mailpit from Inbucket and implements both readers, so the suite survives a Supabase CLI upgrade that swaps the catcher again"
   - "Added an orphan-identity e2e case (`blocked.spec.ts`) plus `removeMembership()` — the plan listed the `/sem-comunidade` behaviour as a truth but specified no test for it; it is now proven rather than asserted"
   - "auth-middleware case `d2` (same claims, future `exp`, expected 200) was added next to the expired-token case so `d` cannot silently pass for the wrong reason (a typo'd issuer would also produce 401)"
@@ -94,7 +94,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D2
-    description: "AUTH-03/D-22: the recovery e-mail links back to the host the member used (http://tria-demo.localhost:3000/auth/confirm...), the OTP creates a session, /redefinir-senha sets a new password (min 8) and signs the person in; the new password is the one that works afterwards"
+    description: "AUTH-03/D-22: the recovery e-mail links back to the host the member used (http://rede-demo.localhost:3000/auth/confirm...), the OTP creates a session, /redefinir-senha sets a new password (min 8) and signs the person in; the new password is the one that works afterwards"
     requirement: AUTH-03
     verification:
       - kind: e2e
@@ -113,7 +113,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D4
-    description: "AUTH-06/D-09: blocking a membership takes effect on the VERY NEXT request with the same still-valid token; the web app clears the sb-* cookies and shows only \"Seu acesso a TRIA Demo foi suspenso. Fale com a equipe.\"; a later login lands on the same screen; unblocking restores access"
+    description: "AUTH-06/D-09: blocking a membership takes effect on the VERY NEXT request with the same still-valid token; the web app clears the sb-* cookies and shows only \"Seu acesso a Rede Demo foi suspenso. Fale com a equipe.\"; a later login lands on the same screen; unblocking restores access"
     requirement: AUTH-06
     verification:
       - kind: e2e
@@ -163,11 +163,11 @@ coverage:
         status: pass
     human_judgment: false
   - id: D8
-    description: "TENANT-01/D-23: a tria-demo member logging in on the tria-lab host is signed out and sees only \"Este endereço não pertence à sua comunidade.\" — no query string, no sb-* cookies, and neither \"TRIA Demo\"/\"TRIA Lab\"/\"tria-demo\"/\"tria-lab\" anywhere on the page; the same member works normally on a generic host (D-21) and on their own host"
+    description: "TENANT-01/D-23: a rede-demo member logging in on the rede-lab host is signed out and sees only \"Este endereço não pertence à sua comunidade.\" — no query string, no sb-* cookies, and neither \"Rede Demo\"/\"Rede Lab\"/\"rede-demo\"/\"rede-lab\" anywhere on the page; the same member works normally on a generic host (D-21) and on their own host"
     requirement: TENANT-01
     verification:
       - kind: e2e
-        ref: "apps/web/e2e/host-mismatch.spec.ts#1. tria-demo member on the tria-lab host: signed out, no tenant named"
+        ref: "apps/web/e2e/host-mismatch.spec.ts#1. rede-demo member on the rede-lab host: signed out, no tenant named"
         status: pass
       - kind: e2e
         ref: "apps/web/e2e/host-mismatch.spec.ts#2. D-21: the same member on a generic host logs in normally"
@@ -188,7 +188,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D10
-    description: "Orphan identity: a live session whose membership row disappears is sent to /sem-comunidade, which offers \"Cadastrar em TRIA Demo\" at /cadastro on a tenant host (D-22)"
+    description: "Orphan identity: a live session whose membership row disappears is sent to /sem-comunidade, which offers \"Cadastrar em Rede Demo\" at /cadastro on a tenant host (D-22)"
     requirement: TENANT-01
     verification:
       - kind: e2e
@@ -251,7 +251,7 @@ Each task was committed atomically:
 
 - **No `supabase/config.toml` change and no stack restart.** The plan warned that the `[auth.email.template.recovery]` block "already exists from plan 01-01" and to stop rather than restart. It does exist — at the very end of `config.toml` (lines 417-420), which an initial partial read of the file missed. A briefly-added duplicate block was reverted (`git checkout --`) the moment the CLI reported `trying to redefine an already defined table or value`; the committed `config.toml` is byte-identical to `HEAD`, the running GoTrue already serves the custom template, and the e2e reads a `{{ .RedirectTo }}`-shaped link straight out of Mailpit. Recorded because the diagnosis path (a `CliConfigParseError` with no detail from `supabase status`; `supabase config diff --log-level all` is the command that prints the cause) is worth reusing.
 - **`PasswordField` over a plain input.** The plan allowed a plain `minLength=8` input if 01-04 had not landed. It had, so `/redefinir-senha` imports `../cadastro/[slug]/PasswordField` and the reset screen behaves exactly like sign-up. Its five label strings come from the `signup` namespace instead of being duplicated under `reset`.
-- **`postgres` as a web devDependency.** `e2e/admin.ts` must insert/update/delete `memberships` rows; the GoTrue admin API cannot, and routing fixtures through PostgREST would make the test harness depend on the Data API. The dependency is dev-only and never imported by application code (Biome's `apps/web` import lane only restricts `@tria/core/*` and `@tria/api/*`).
+- **`postgres` as a web devDependency.** `e2e/admin.ts` must insert/update/delete `memberships` rows; the GoTrue admin API cannot, and routing fixtures through PostgREST would make the test harness depend on the Data API. The dependency is dev-only and never imported by application code (Biome's `apps/web` import lane only restricts `@rede-social/core/*` and `@rede-social/api/*`).
 - **One throwaway user per e-mail-sending case.** See the deviation below — this is now a stated pattern, not an accident.
 - **An extra orphan-identity e2e case and an extra `d2` API case.** Both close a gap between what the plan asserted as a truth and what the specified tests actually proved.
 

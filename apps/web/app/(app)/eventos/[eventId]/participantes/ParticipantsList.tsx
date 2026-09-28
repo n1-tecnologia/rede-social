@@ -1,8 +1,15 @@
 'use client';
 
-import type { AttendanceList } from '@tria/module-events/contracts';
-import { AttendeeRow } from '@tria/module-events/ui';
-import { Button, EmptyState, InfiniteScroll, PullToRefresh, Skeleton, StatusPill } from '@tria/ui';
+import type { AttendanceList } from '@rede-social/module-events/contracts';
+import { AttendeeRow } from '@rede-social/module-events/ui';
+import {
+  Button,
+  EmptyState,
+  InfiniteScroll,
+  PullToRefresh,
+  Skeleton,
+  StatusPill,
+} from '@rede-social/ui';
 import { TriangleAlert, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';

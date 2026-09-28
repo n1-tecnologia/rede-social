@@ -7,16 +7,16 @@ import {
   brandingUploadSchema,
   type PlatformTenantDetail,
   platformTenantDetailSchema,
-} from '@tria/contracts';
-import { ApiError } from '@tria/core/server/http/api-error';
+} from '@rede-social/contracts';
+import { ApiError } from '@rede-social/core/server/http/api-error';
 import {
   completeBrandingUpload,
   removeIconOverride,
   setBrandingColors,
   startBrandingUpload,
-} from '@tria/core/server/platform/branding';
-import type { PlatformEnv } from '@tria/core/server/platform/require-super-admin';
-import { getTenantDetail } from '@tria/core/server/platform/tenants';
+} from '@rede-social/core/server/platform/branding';
+import type { PlatformEnv } from '@rede-social/core/server/platform/require-super-admin';
+import { getTenantDetail } from '@rede-social/core/server/platform/tenants';
 import { platformDefaultHook } from '../../http/openapi';
 
 /**

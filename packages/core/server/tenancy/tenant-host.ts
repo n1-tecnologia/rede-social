@@ -5,7 +5,7 @@ import {
   type ResolvedBranding,
   resolveBranding,
   type TenantStatus,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantDomains, tenants } from '../../db/schema';

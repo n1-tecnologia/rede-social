@@ -8,7 +8,7 @@ import type { EventActionState } from '@/lib/events-view';
  * 06-03 — the action zone's RSVP rows (UI-D-207, sketch 006 surface 2 "zona-de-acao-todas-as-linhas").
  *
  * The catalog is the REAL `events.json`, so a copy drift fails here. Stubbed: the server action, the
- * router and the toast. Real: the island and the `@tria/ui` `SegmentedControl`.
+ * router and the toast. Real: the island and the `@rede-social/ui` `SegmentedControl`.
  *
  * Claims:
  *  1. every RSVP row of the §Action zone table renders exactly what the table says (in person
@@ -58,8 +58,8 @@ vi.mock('next-intl', () => ({
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh }) }));
 
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { Chip, Input, useDebounce } from '@tria/ui';
+import { Chip, Input, useDebounce } from '@rede-social/ui';
 import { Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';

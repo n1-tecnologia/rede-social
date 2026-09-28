@@ -77,7 +77,7 @@ key-decisions:
   - "Package-legitimacy approval recorded verbatim for 03-07 to inherit — see the dedicated section below"
   - "`mux.jwt.signPlaybackId` returns keys `playback-token` / `thumbnail-token` / `storyboard-token`, NOT `playback` / `thumbnail` / `storyboard` — 03-RESEARCH Code Example 6 shows the PLAYER's shape; the adapter maps between them"
   - "The normaliser lives in its own `wire.ts` so the fake and the real adapter share ONE translation; a second hand-written one would let the fake pass while the real path drifted"
-  - "The webhook's admin transaction moved into the kernel (`video/inbox.ts`): Biome confines `@tria/core/db/admin-tx` to the kernel, so the route cannot open it"
+  - "The webhook's admin transaction moved into the kernel (`video/inbox.ts`): Biome confines `@rede-social/core/db/admin-tx` to the kernel, so the route cannot open it"
   - "`fake` added to MEDIA_PROVIDERS and to the media_assets provider CHECK: the fake is a first-class implementation and the row must say which one brokered the asset rather than lying"
   - "The private media bucket's mime allow-list is now exactly the union of MEDIA_LIMITS (adds video/mp4 + video/quicktime), because the fake stores its bytes there; pinned as a SET in pgTAP so neither a widening nor a narrowing can pass"
   - "The errored predicate excludes `deleted` as well as `ready`: `status='deleted'` is the handle 03-08's sweeper collects by, so flipping a soft-deleted row to `failed` would strand its provider asset forever"
@@ -392,7 +392,7 @@ Each task was committed atomically:
 - **Found during:** Task 2 (webhook route)
 - **Issue:** The plan puts the `insert … on conflict (id) do nothing` + `enqueueInTx` in
   `apps/api/src/routes/webhooks/mux.ts`. Biome's `noRestrictedImports` override confines
-  `@tria/core/db/admin-tx` to `packages/core/server/{tenancy,platform,media}` and `scripts/` — an
+  `@rede-social/core/db/admin-tx` to `packages/core/server/{tenancy,platform,media}` and `scripts/` — an
   `apps/api` route importing it is a lint error ("Admin lane is kernel-only").
 - **Fix:** Added `packages/core/server/media/video/inbox.ts` exporting `recordProviderEvent(event)`,
   which does both operations in one admin transaction. The route reads the raw body, verifies the
@@ -400,7 +400,7 @@ Each task was committed atomically:
   `on conflict (id) do nothing` and `singletonKey: event.id` in the route file are satisfied by the
   comment that names both, and the behaviour itself is pinned by the replay integration cases.
 - **Files modified:** packages/core/server/media/video/inbox.ts (new), apps/api/src/routes/webhooks/mux.ts
-- **Verification:** `pnpm --filter @tria/api lint` clean; `pnpm boundaries` + `boundaries:negative` + `guard:lanes` green; the replay cases assert one row and one job
+- **Verification:** `pnpm --filter @rede-social/api lint` clean; `pnpm boundaries` + `boundaries:negative` + `guard:lanes` green; the replay cases assert one row and one job
 - **Committed in:** `d4a1240`
 
 **2. [Rule 3 - Blocking] `wire.ts` added so both implementations share ONE normaliser**
@@ -454,7 +454,7 @@ Each task was committed atomically:
   as the ONE production signal and explicitly NOT a second adapter selector — which implementation
   runs is always an explicit `*_PROVIDER` value, so a missing `NODE_ENV` can never switch a vendor on.
 - **Files modified:** packages/core/server/env.ts
-- **Verification:** `pnpm --filter @tria/core typecheck`; `assertProductionEnv` unit cases unaffected
+- **Verification:** `pnpm --filter @rede-social/core typecheck`; `assertProductionEnv` unit cases unaffected
 - **Committed in:** `d4a1240`
 
 **6. [Rule 1 - Bug] `signPlayback` maps the SDK's hyphenated token keys**
@@ -505,7 +505,7 @@ Each task was committed atomically:
   asserts WHICH key the adapter signed and WHAT event it scheduled — a stronger claim than the URL
   string — while the integration suite keeps the real ones, so the browser→Storage path stays proven.
 - **Files modified:** packages/core/server/media/video/fake.ts, packages/core/tests/media-video.test.ts
-- **Verification:** `pnpm --filter @tria/core test` 189 passed with no stack reachable from the unit config
+- **Verification:** `pnpm --filter @rede-social/core test` 189 passed with no stack reachable from the unit config
 - **Committed in:** `d4a1240` (seam) / `09b4c60` (suite)
 
 ---
@@ -584,8 +584,8 @@ endpoint at `https://<api host>/v1/webhooks/mux`, signed default playback policy
 
 **Full gate run from a cold stack:** `pnpm db:generate` no-op → `pnpm db:reset` → `pnpm db:seed` →
 `pnpm supabase test db` (9 files, 121 tests) → `pnpm test:integration` (20 files, 279 tests) →
-`pnpm --filter @tria/core test` (20 files, 189 tests) → `pnpm --filter @tria/api test` (15 tests) →
-`pnpm lint`, `pnpm --filter @tria/api build`, `pnpm boundaries`, `pnpm boundaries:negative`,
+`pnpm --filter @rede-social/core test` (20 files, 189 tests) → `pnpm --filter @rede-social/api test` (15 tests) →
+`pnpm lint`, `pnpm --filter @rede-social/api build`, `pnpm boundaries`, `pnpm boundaries:negative`,
 `pnpm guard:lanes` — all green.
 
 ---

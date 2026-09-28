@@ -1,4 +1,4 @@
-import type { DnsRecord } from '@tria/contracts';
+import type { DnsRecord } from '@rede-social/contracts';
 
 /**
  * Custom-domain adapter contracts (TENANT-07, D-34/D-36). This file knows no database and no env:

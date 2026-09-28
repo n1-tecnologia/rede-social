@@ -1,6 +1,6 @@
 'use server';
 
-import { platformTenantDetailSchema } from '@tria/contracts';
+import { platformTenantDetailSchema } from '@rede-social/contracts';
 import {
   BRANDING_UPLOAD_ISSUES,
   type BrandingUploadIssue,
@@ -10,7 +10,7 @@ import {
   brandingUploadSchema,
   type ContrastReport,
   contrastReportSchema,
-} from '@tria/contracts/branding';
+} from '@rede-social/contracts/branding';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';

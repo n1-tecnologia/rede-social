@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TRIA — Fase 2 · telas [designed] (mockup estático para revisão do time de design)</title>
+<title>Rede Social — Fase 2 · telas [designed] (mockup estático para revisão do time de design)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
   --theme-chip: rgba(22, 35, 59, 0.06);
 }
 :root {
-  /* neutral TRIA brand — overwritten per tenant (here: by the picker on [data-brand-scope]) */
+  /* neutral platform brand — overwritten per tenant (here: by the picker on [data-brand-scope]) */
   --brand-primary: #2e6fd0;
   --brand-secondary: #5b9cf8;
   --brand-on-primary: #ffffff;
@@ -101,12 +101,12 @@
    ancestor rule above cannot tell "nearest" from "any" themed ancestor, so a style container query
    (Chromium 111+, Safari 18+) re-derives the accent pair from the NEAREST [data-theme]. Browsers
    without style queries keep the one-level behaviour of the rules above. */
-[data-theme="light"] { --tria-theme: light; }
-[data-theme="dark"] { --tria-theme: dark; }
-@container style(--tria-theme: light) {
+[data-theme="light"] { --rede-social-theme: light; }
+[data-theme="dark"] { --rede-social-theme: dark; }
+@container style(--rede-social-theme: light) {
   [data-theme] * { --brand-accent: var(--brand-primary); --brand-on-accent: var(--brand-on-primary); --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%); }
 }
-@container style(--tria-theme: dark) {
+@container style(--rede-social-theme: dark) {
   [data-theme] * { --brand-accent: var(--brand-primary-dark); --brand-on-accent: var(--brand-on-primary-dark); --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%); }
 }
 
@@ -182,7 +182,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
 .glass-bar { background: linear-gradient(var(--theme-glass-bar), var(--theme-glass-bar)) padding-box, linear-gradient(125deg, var(--theme-rim-strong) 0%, var(--theme-rim-faint) 32%, var(--theme-rim-faint) 68%, var(--theme-rim-strong) 100%) border-box; border: 1px solid transparent; -webkit-backdrop-filter: blur(2px) saturate(1.5); backdrop-filter: blur(2px) saturate(1.5); box-shadow: var(--theme-bar-shadow); }
 
 /* =====================================================================================
-   4. PRIMITIVES — the @tria/ui geometry (Button, IconButton, Input, Chip, StatusPill, Card,
+   4. PRIMITIVES — the @rede-social/ui geometry (Button, IconButton, Input, Chip, StatusPill, Card,
       SectionTitle, Avatar, Badge, Switch, Tabs, EmptyState, FileDropZone, DataTable, overlays)
    ===================================================================================== */
 .avatar { border-radius: 999px; background: var(--theme-bg-tertiary); display: inline-grid; place-items: center; color: var(--theme-text-tertiary); overflow: hidden; flex: none; border: 2px solid transparent; }
@@ -390,12 +390,12 @@ table.data td.break { word-break: break-all; }
 
 <!-- ============ mockup toolbar (not a product surface) ============ -->
 <div class="toolbar" role="region" aria-label="Controles do mockup">
-  <span class="brandname">TRIA · Fase 2 <small>telas [designed] · 02-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <span class="brandname">Rede Social · Fase 2 <small>telas [designed] · 02-UI-SPEC.md · tokens reais de @rede-social/ui</small></span>
   <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
   <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
   <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
   <span class="row g1">
-    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">Rede Social (neutro)</button>
     <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
     <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
     <button class="preset" type="button" data-p="#b91c1c" data-s="#f87171">Vermelho</button>
@@ -417,8 +417,8 @@ table.data td.break { word-break: break-all; }
   <div class="frames">
     <div class="desktop" data-brand-scope>
       <aside class="rail">
-        <div class="logo-box"><img src="" alt="TRIA Demo" data-logo></div>
-        <div class="display-name" data-tenant-name>TRIA Demo</div>
+        <div class="logo-box"><img src="" alt="Rede Demo" data-logo></div>
+        <div class="display-name" data-tenant-name>Rede Demo</div>
         <nav aria-label="Navegação">
           <a class="rail-item active" href="#desktop-shell-home" aria-current="page"><svg class="i i-22"><use href="#i-home"/></svg>Início</a>
           <a class="rail-item" href="#desktop-shell-home"><svg class="i i-22"><use href="#i-user"/></svg>Perfil</a>
@@ -434,8 +434,8 @@ table.data td.break { word-break: break-all; }
       <main>
         <div class="column col g6">
           <div class="col g4 center" style="align-items:center;margin-top:32px">
-            <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
-            <h1 class="title">Bem-vindo(a) à <span data-tenant-name>TRIA Demo</span></h1>
+            <div class="logo-16"><img src="" alt="Rede Demo" data-logo></div>
+            <h1 class="title">Bem-vindo(a) à <span data-tenant-name>Rede Demo</span></h1>
           </div>
           <div class="card">
             <div class="empty">
@@ -458,7 +458,7 @@ table.data td.break { word-break: break-all; }
   </header>
   <div class="frames">
     <div class="phone" data-brand-scope>
-      <div class="topbar"><div class="row"><div class="brand"><img src="" alt="TRIA Demo" data-logo><span data-tenant-name>TRIA Demo</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
+      <div class="topbar"><div class="row"><div class="brand"><img src="" alt="Rede Demo" data-logo><span data-tenant-name>Rede Demo</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
       <div class="body flush">
         <div class="page-header" style="margin:0;padding:4px 8px 4px 4px"><button class="icon-btn" type="button" aria-label="Voltar"><svg class="i"><use href="#i-chev-l"/></svg></button><h1 class="h16">Configurações</h1></div>
         <div class="settings-group">
@@ -493,13 +493,13 @@ table.data td.break { word-break: break-all; }
 
 <!-- ============================================================================== -->
 <section id="tenant-list" class="screen">
-  <header><h2>Painel — Lista de tenants</h2><code>/plataforma · host da plataforma · marca neutra TRIA · D-31</code>
+  <header><h2>Painel — Lista de tenants</h2><code>/plataforma · host da plataforma · marca neutra Rede Social · D-31</code>
     <p>Linha de título "Tenants" + "Novo tenant" (única cor de marca da tela). Toolbar: busca "Buscar por nome ou slug" + chips "Todos · Ativos · Suspensos". <code>DataTable</code> em um Card; a linha inteira é link. Ao lado, a variante celular: um Card por tenant.</p>
   </header>
   <div class="frames">
     <div class="desktop">
       <aside class="rail">
-        <div class="logo-box"><span class="wordmark">TRIA</span></div>
+        <div class="logo-box"><span class="wordmark">Rede Social</span></div>
         <nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav>
         <div class="bottom">
           <div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div>
@@ -517,8 +517,8 @@ table.data td.break { word-break: break-all; }
             <table class="data">
               <thead><tr><th>Tenant</th><th>Domínio primário</th><th>Módulos</th><th>Status</th><th>Criado em</th></tr></thead>
               <tbody>
-                <tr><td><span class="bold">TRIA Demo</span><span class="sub">tria-demo</span></td><td>comunidade.exemplo.com.br</td><td class="nums">6 módulos</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">12/09/2026</td></tr>
-                <tr><td><span class="bold">TRIA Lab</span><span class="sub">tria-lab</span></td><td>lab.exemplo.com.br</td><td class="nums">4 módulos</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">12/09/2026</td></tr>
+                <tr><td><span class="bold">Rede Demo</span><span class="sub">rede-demo</span></td><td>comunidade.exemplo.com.br</td><td class="nums">6 módulos</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">12/09/2026</td></tr>
+                <tr><td><span class="bold">Rede Lab</span><span class="sub">rede-lab</span></td><td>lab.exemplo.com.br</td><td class="nums">4 módulos</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">12/09/2026</td></tr>
                 <tr><td><span class="bold">Clube Aurora</span><span class="sub">clube-aurora</span></td><td><span class="pill warning">Sem domínio</span></td><td class="nums">6 módulos</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">15/09/2026</td></tr>
                 <tr><td><span class="bold">Instituto Horizonte</span><span class="sub">instituto-horizonte</span></td><td>membros.horizonte.exemplo</td><td class="nums">1 módulo</td><td><span class="pill danger">Suspenso</span></td><td class="t12 nums">02/09/2026</td></tr>
                 <tr><td><span class="bold">Academia Norte</span><span class="sub">academia-norte</span></td><td>app.academianorte.exemplo</td><td class="nums">nenhum módulo</td><td><span class="pill success">Ativo</span></td><td class="t12 nums">16/09/2026</td></tr>
@@ -531,21 +531,21 @@ table.data td.break { word-break: break-all; }
       </main>
     </div>
     <div class="phone">
-      <div class="topbar"><div class="row"><div class="brand"><span class="wordmark">TRIA</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
+      <div class="topbar"><div class="row"><div class="brand"><span class="wordmark">Rede Social</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
       <div class="body col g3">
         <h1 class="title">Tenants</h1>
         <a class="btn md brand full" href="#new-tenant"><svg class="i i-18"><use href="#i-plus"/></svg>Novo tenant</a>
         <div class="input with-icon"><svg class="i i-18"><use href="#i-search"/></svg><input type="search" placeholder="Buscar por nome ou slug" aria-label="Buscar por nome ou slug"></div>
         <div class="row g2"><button class="chip" type="button" aria-pressed="true">Todos</button><button class="chip" type="button" aria-pressed="false">Ativos</button><button class="chip" type="button" aria-pressed="false">Suspensos</button></div>
-        <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">TRIA Demo</span><span class="pill success">Ativo</span></div><div class="t12 tertiary truncate">tria-demo · comunidade.exemplo.com.br</div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
-        <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">TRIA Lab</span><span class="pill success">Ativo</span></div><div class="t12 tertiary truncate">tria-lab · lab.exemplo.com.br</div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
+        <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">Rede Demo</span><span class="pill success">Ativo</span></div><div class="t12 tertiary truncate">rede-demo · comunidade.exemplo.com.br</div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
+        <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">Rede Lab</span><span class="pill success">Ativo</span></div><div class="t12 tertiary truncate">rede-lab · lab.exemplo.com.br</div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
         <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">Clube Aurora</span><span class="pill success">Ativo</span></div><div class="t12 tertiary truncate">clube-aurora · <span class="warning-text">Sem domínio</span></div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
         <a class="card tenant-card hoverable" href="#tenant-page-marca"><div class="txt"><div class="row between"><span class="bold t14 truncate">Instituto Horizonte</span><span class="pill danger">Suspenso</span></div><div class="t12 tertiary truncate">instituto-horizonte · membros.horizonte.exemplo</div></div><svg class="i i-18 tertiary"><use href="#i-chev-r"/></svg></a>
       </div>
       <nav class="bottomnav glass-bar" aria-label="Navegação"><a href="#tenant-list" aria-label="Tenants" aria-current="page"><span class="chip"><svg class="i i-23"><use href="#i-building"/></svg></span></a><a href="#settings" aria-label="Configurações"><span class="chip"><svg class="i i-23"><use href="#i-settings"/></svg></span></a></nav>
     </div>
   </div>
-  <p class="note">O painel vive no host da plataforma e usa sempre a marca neutra TRIA; o seletor de cor da barra acima não o recolore (só o <code>BrandPreview</code> dentro dos formulários).</p>
+  <p class="note">O painel vive no host da plataforma e usa sempre a marca neutra Rede Social; o seletor de cor da barra acima não o recolore (só o <code>BrandPreview</code> dentro dos formulários).</p>
 </section>
 
 <!-- ============================================================================== -->
@@ -565,7 +565,7 @@ table.data td.break { word-break: break-all; }
   <div class="frames">
     <div class="desktop">
       <aside class="rail">
-        <div class="logo-box"><span class="wordmark">TRIA</span></div>
+        <div class="logo-box"><span class="wordmark">Rede Social</span></div>
         <nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav>
         <div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div>
       </aside>
@@ -574,8 +574,8 @@ table.data td.break { word-break: break-all; }
           <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><h1 class="h16">Novo tenant</h1></div>
           <div class="card error p4 mt2" role="alert"><span class="t14 danger-text">Não foi possível criar o tenant. Revise os campos e tente novamente.</span></div>
           <form class="card p6 col g6 mt4" onsubmit="return false">
-            <div class="field"><label for="nt-name">Nome de exibição</label><div class="input"><input id="nt-name" value="TRIA Demo" data-tenant-name-input></div></div>
-            <div class="field"><label for="nt-slug">Slug</label><div class="input error"><input id="nt-slug" value="tria-demo" aria-invalid="true" aria-describedby="nt-slug-err"></div><span class="error" id="nt-slug-err" role="alert">Este slug já está em uso.</span><span class="help">Não pode ser alterado depois.</span></div>
+            <div class="field"><label for="nt-name">Nome de exibição</label><div class="input"><input id="nt-name" value="Rede Demo" data-tenant-name-input></div></div>
+            <div class="field"><label for="nt-slug">Slug</label><div class="input error"><input id="nt-slug" value="rede-demo" aria-invalid="true" aria-describedby="nt-slug-err"></div><span class="error" id="nt-slug-err" role="alert">Este slug já está em uso.</span><span class="help">Não pode ser alterado depois.</span></div>
             <div>
               <p class="micro">Cores</p>
               <div class="grid2">
@@ -584,8 +584,8 @@ table.data td.break { word-break: break-all; }
               </div>
               <div class="card p4 mt3 brand-preview" data-brand-scope>
                 <div class="grid2">
-                  <div><p class="caption">Claro</p><div class="mini-shell" data-theme="light"><div class="mini-top"><span data-tenant-name>TRIA Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
-                  <div><p class="caption">Escuro</p><div class="mini-shell" data-theme="dark"><div class="mini-top"><span data-tenant-name>TRIA Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
+                  <div><p class="caption">Claro</p><div class="mini-shell" data-theme="light"><div class="mini-top"><span data-tenant-name>Rede Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
+                  <div><p class="caption">Escuro</p><div class="mini-shell" data-theme="dark"><div class="mini-top"><span data-tenant-name>Rede Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
                 </div>
                 <div class="readout-row" data-contrast-readout></div>
                 <div class="mt3 col g2" data-contrast-warning hidden>
@@ -621,17 +621,17 @@ table.data td.break { word-break: break-all; }
   </header>
   <div class="frames">
     <div class="desktop">
-      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <aside class="rail"><div class="logo-box"><span class="wordmark">Rede Social</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
       <main>
         <div class="column wide">
           <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
-          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
-          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>Rede Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>rede-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
           <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="true" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
           <div class="card p6 mt6 col g6">
             <div class="grid2">
               <div class="col g2"><p class="micro" style="margin:0">Logo</p>
-                <div class="dropzone"><div class="preview" data-brand-scope><img src="" alt="TRIA Demo" data-logo></div><span class="t12 tertiary">PNG, SVG, WebP ou JPEG · até 2 MB</span><div class="row g2"><button class="btn sm outline" type="button"><svg class="i i-16"><use href="#i-upload"/></svg>Substituir logo</button></div></div>
+                <div class="dropzone"><div class="preview" data-brand-scope><img src="" alt="Rede Demo" data-logo></div><span class="t12 tertiary">PNG, SVG, WebP ou JPEG · até 2 MB</span><div class="row g2"><button class="btn sm outline" type="button"><svg class="i i-16"><use href="#i-upload"/></svg>Substituir logo</button></div></div>
               </div>
               <div class="col g2"><p class="micro" style="margin:0">Ícone quadrado (opcional)</p>
                 <div class="dropzone"><svg class="i"><use href="#i-image"/></svg><span>Nenhum logo enviado — o nome da comunidade aparece no lugar.</span><button class="btn sm outline" type="button"><svg class="i i-16"><use href="#i-upload"/></svg>Enviar ícone quadrado</button></div>
@@ -650,8 +650,8 @@ table.data td.break { word-break: break-all; }
               </div>
               <div class="card p4 mt3 brand-preview" data-brand-scope>
                 <div class="grid2">
-                  <div><p class="caption">Claro</p><div class="mini-shell" data-theme="light"><div class="mini-top"><span data-tenant-name>TRIA Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
-                  <div><p class="caption">Escuro</p><div class="mini-shell" data-theme="dark"><div class="mini-top"><span data-tenant-name>TRIA Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
+                  <div><p class="caption">Claro</p><div class="mini-shell" data-theme="light"><div class="mini-top"><span data-tenant-name>Rede Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
+                  <div><p class="caption">Escuro</p><div class="mini-shell" data-theme="dark"><div class="mini-top"><span data-tenant-name>Rede Demo</span><svg class="i i-16"><use href="#i-bell"/></svg></div><div class="mini-body"><span class="mini-btn">Entrar</span></div><div class="mini-nav glass-bar"><i class="on"></i><i class="off"></i></div></div></div>
                 </div>
                 <div class="readout-row" data-contrast-readout></div>
                 <div class="mt3 col g2" data-contrast-warning hidden><span class="t14 warning-text" role="alert" data-contrast-warning-text></span><label class="checkrow"><input type="checkbox"> Salvar mesmo assim</label></div>
@@ -680,12 +680,12 @@ table.data td.break { word-break: break-all; }
   <header><h2>Painel — aba Módulos</h2><code>/plataforma/{id}/modulos · seis linhas min-h-14 com Switch (âncora visual)</code></header>
   <div class="frames">
     <div class="desktop">
-      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <aside class="rail"><div class="logo-box"><span class="wordmark">Rede Social</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
       <main>
         <div class="column wide">
           <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
-          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
-          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>Rede Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>rede-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
           <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
           <div class="card mt6">
             <div class="module-row"><div class="txt"><div class="name">Feed</div><div class="desc">Publicações do administrador na página inicial.</div></div><span class="pill success">Ativado</span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Feed"><span class="knob"></span></button></div>
@@ -709,12 +709,12 @@ table.data td.break { word-break: break-all; }
   </header>
   <div class="frames">
     <div class="desktop">
-      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <aside class="rail"><div class="logo-box"><span class="wordmark">Rede Social</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
       <main>
         <div class="column wide">
           <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
-          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
-          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>Rede Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>rede-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
           <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
 
           <form class="row wrap g3 mt6" onsubmit="return false">
@@ -734,7 +734,7 @@ table.data td.break { word-break: break-all; }
                 <thead><tr><th>Tipo</th><th>Nome</th><th>Valor</th></tr></thead>
                 <tbody>
                   <tr><td class="mono">CNAME</td><td>app</td><td class="break"><div class="row between g2"><span>cname.plataforma-exemplo.com</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div></td></tr>
-                  <tr><td class="mono">TXT</td><td>_tria-verify.app</td><td class="break"><div class="row between g2"><span>tria-verify=8f3a1c…d2e9</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div></td></tr>
+                  <tr><td class="mono">TXT</td><td>_rede-verify.app</td><td class="break"><div class="row between g2"><span>rede-social-verify=8f3a1c…d2e9</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div></td></tr>
                 </tbody>
               </table>
             </div>
@@ -773,12 +773,12 @@ table.data td.break { word-break: break-all; }
   </header>
   <div class="frames">
     <div class="desktop">
-      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <aside class="rail"><div class="logo-box"><span class="wordmark">Rede Social</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
       <main>
         <div class="column wide">
           <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
-          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
-          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>Rede Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>rede-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
           <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
           <div class="grid2 mt6" style="align-items:start">
             <div class="col g4">
@@ -824,12 +824,12 @@ table.data td.break { word-break: break-all; }
   <header><h2>Painel — aba Status + ConfirmDialog</h2><code>/plataforma/{id}/status · uma CTA (danger "Suspender tenant" ou brand "Reativar tenant") · D-32</code></header>
   <div class="frames">
     <div class="desktop" style="min-height:520px">
-      <aside class="rail"><div class="logo-box"><span class="wordmark">TRIA</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
+      <aside class="rail"><div class="logo-box"><span class="wordmark">Rede Social</span></div><nav aria-label="Navegação do painel"><a class="rail-item active" href="#tenant-list" aria-current="page"><svg class="i i-22"><use href="#i-building"/></svg>Tenants</a></nav><div class="bottom"><div class="rail-item"><svg class="i i-22" data-theme-icon><use href="#i-sun"/></svg>Tema<span class="spacer"></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro" data-theme-switch><span class="knob"></span></button></div><button class="rail-item danger" type="button"><svg class="i i-22"><use href="#i-logout"/></svg>Sair</button></div></aside>
       <main>
         <div class="column wide">
           <div class="page-header"><a class="icon-btn" href="#tenant-list" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400">Tenants</span></div>
-          <div class="row wrap g3"><h1 class="title" data-tenant-name>TRIA Demo</h1><span class="pill success">Ativo</span></div>
-          <div class="row wrap g3 mt2 t12 tertiary"><span>tria-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
+          <div class="row wrap g3"><h1 class="title" data-tenant-name>Rede Demo</h1><span class="pill success">Ativo</span></div>
+          <div class="row wrap g3 mt2 t12 tertiary"><span>rede-demo</span><a class="row g1 link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br <svg class="i i-14"><use href="#i-ext"/></svg></a></div>
           <div class="tabs mt4" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-status">Status</a></div>
           <div class="grid2 mt6" style="align-items:start">
             <div class="card p6 col g4">
@@ -846,7 +846,7 @@ table.data td.break { word-break: break-all; }
         </div>
       </main>
     </div>
-    <div class="overlay-demo" style="width:360px;min-height:300px"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="sd-title"><div class="body"><div class="icon danger"><svg class="i i-28"><use href="#i-alert"/></svg></div><p class="h16" id="sd-title">Suspender <span data-tenant-name>TRIA Demo</span>?</p><p class="t14 secondary" style="margin:0">Os membros não conseguirão entrar até a reativação.</p></div><div class="footer"><button type="button">Cancelar</button><button type="button" class="confirm danger">Suspender</button></div></div></div>
+    <div class="overlay-demo" style="width:360px;min-height:300px"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="sd-title"><div class="body"><div class="icon danger"><svg class="i i-28"><use href="#i-alert"/></svg></div><p class="h16" id="sd-title">Suspender <span data-tenant-name>Rede Demo</span>?</p><p class="t14 secondary" style="margin:0">Os membros não conseguirão entrar até a reativação.</p></div><div class="footer"><button type="button">Cancelar</button><button type="button" class="confirm danger">Suspender</button></div></div></div>
   </div>
 </section>
 
@@ -859,15 +859,15 @@ table.data td.break { word-break: break-all; }
     <div class="phone" data-brand-scope>
       <div class="body col" style="justify-content:center;padding:16px;gap:32px;min-height:100%">
         <div class="col g4 center" style="align-items:center">
-          <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
-          <h1 class="title">Você foi convidado(a) a administrar <span data-tenant-name>TRIA Demo</span></h1>
+          <div class="logo-16"><img src="" alt="Rede Demo" data-logo></div>
+          <h1 class="title">Você foi convidado(a) a administrar <span data-tenant-name>Rede Demo</span></h1>
           <p class="t14 secondary" style="margin:0">Crie sua senha para começar.</p>
         </div>
         <form class="col g4" onsubmit="return false">
           <div class="field"><label for="ai-email">Email</label><div class="input with-icon"><svg class="i i-18"><use href="#i-mail"/></svg><input id="ai-email" type="email" value="admin@cliente.com.br" readonly></div></div>
           <div class="field"><label for="ai-pass">Senha</label><div class="input with-icon"><svg class="i i-18"><use href="#i-lock"/></svg><input id="ai-pass" type="password" value="senha-de-exemplo" style="padding-right:48px"><button class="icon-btn trailing" type="button" aria-label="Mostrar senha"><svg class="i i-20"><use href="#i-eye"/></svg></button></div><div class="strength" aria-hidden="true"><i class="w"></i><i class="o"></i><i class="s"></i></div><span class="help success-text">Forte</span></div>
-          <label class="checkrow"><input type="checkbox" checked> <span>Li e aceito as regras da comunidade <span data-tenant-name>TRIA Demo</span> — <a class="link" href="#accept-invite">ver regras</a></span></label>
-          <label class="checkrow"><input type="checkbox"> <span>Aceito os <a class="link" href="#accept-invite">Termos de Uso</a> e a <a class="link" href="#accept-invite">Política de Privacidade</a> da TRIA</span></label>
+          <label class="checkrow"><input type="checkbox" checked> <span>Li e aceito as regras da comunidade <span data-tenant-name>Rede Demo</span> — <a class="link" href="#accept-invite">ver regras</a></span></label>
+          <label class="checkrow"><input type="checkbox"> <span>Aceito os <a class="link" href="#accept-invite">Termos de Uso</a> e a <a class="link" href="#accept-invite">Política de Privacidade</a> da plataforma</span></label>
           <span class="t14 danger-text center" role="alert">Aceite as regras e os termos para continuar.</span>
           <button class="btn lg brand full" type="submit">Aceitar convite</button>
         </form>
@@ -877,14 +877,14 @@ table.data td.break { word-break: break-all; }
       <main style="align-items:center">
         <div class="col" style="width:100%;max-width:384px;gap:32px">
           <div class="col g4 center" style="align-items:center">
-            <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
-            <h1 class="title">Você foi convidado(a) a administrar <span data-tenant-name>TRIA Demo</span></h1>
+            <div class="logo-16"><img src="" alt="Rede Demo" data-logo></div>
+            <h1 class="title">Você foi convidado(a) a administrar <span data-tenant-name>Rede Demo</span></h1>
             <p class="t14 secondary" style="margin:0">Crie sua senha para começar.</p>
           </div>
           <form class="col g4" onsubmit="return false">
             <div class="field"><label for="ai2-pass">Senha</label><div class="input with-icon"><svg class="i i-18"><use href="#i-lock"/></svg><input id="ai2-pass" type="password" placeholder="Mínimo de 8 caracteres" style="padding-right:48px"><button class="icon-btn trailing" type="button" aria-label="Mostrar senha"><svg class="i i-20"><use href="#i-eye"/></svg></button></div><div class="strength" aria-hidden="true"><i></i><i></i><i></i></div></div>
-            <label class="checkrow"><input type="checkbox"> <span>Li e aceito as regras da comunidade <span data-tenant-name>TRIA Demo</span> — <a class="link" href="#accept-invite">ver regras</a></span></label>
-            <label class="checkrow"><input type="checkbox"> <span>Aceito os <a class="link" href="#accept-invite">Termos de Uso</a> e a <a class="link" href="#accept-invite">Política de Privacidade</a> da TRIA</span></label>
+            <label class="checkrow"><input type="checkbox"> <span>Li e aceito as regras da comunidade <span data-tenant-name>Rede Demo</span> — <a class="link" href="#accept-invite">ver regras</a></span></label>
+            <label class="checkrow"><input type="checkbox"> <span>Aceito os <a class="link" href="#accept-invite">Termos de Uso</a> e a <a class="link" href="#accept-invite">Política de Privacidade</a> da plataforma</span></label>
             <button class="btn lg brand full" type="submit"><svg class="i i-18 spin"><use href="#i-loader"/></svg>Entrando…</button>
           </form>
         </div>
@@ -899,7 +899,7 @@ table.data td.break { word-break: break-all; }
   <div class="frames">
     <div class="phone" data-brand-scope style="height:640px">
       <div class="body col" style="justify-content:center;min-height:100%;padding:16px">
-        <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
+        <div class="logo-16"><img src="" alt="Rede Demo" data-logo></div>
         <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-mail-x"/></svg></div><h3>Convite expirado</h3><p>Este convite expirou. Peça um novo convite ao administrador da plataforma.</p><div class="action"><a class="btn md outline" href="#accept-invite">Voltar para login</a></div></div>
       </div>
     </div>
@@ -914,13 +914,13 @@ table.data td.break { word-break: break-all; }
   <div class="frames">
     <div class="phone" data-brand-scope style="height:640px">
       <div class="body col" style="justify-content:center;min-height:100%;padding:16px">
-        <div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div>
+        <div class="logo-16"><img src="" alt="Rede Demo" data-logo></div>
         <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-alert"/></svg></div><h3>Comunidade indisponível</h3><p>Esta comunidade está temporariamente indisponível.</p><div class="action"><a class="btn md outline" href="#suspended">Voltar para login</a></div></div>
       </div>
     </div>
     <div class="phone" data-brand-scope style="height:640px">
       <div class="body col" style="justify-content:center;min-height:100%;padding:16px;gap:32px">
-        <div class="col g4 center" style="align-items:center"><div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div><p class="h16 secondary">Entrar</p></div>
+        <div class="col g4 center" style="align-items:center"><div class="logo-16"><img src="" alt="Rede Demo" data-logo></div><p class="h16 secondary">Entrar</p></div>
         <div class="card p6 col g3" style="align-items:center;text-align:center"><svg class="i i-28 warning-text"><use href="#i-alert"/></svg><p class="h16">Comunidade indisponível</p><p class="t14 secondary" style="margin:0">Esta comunidade está temporariamente indisponível.</p></div>
       </div>
     </div>
@@ -947,9 +947,9 @@ table.data td.break { word-break: break-all; }
   </header>
   <div class="frames">
     <div class="phone" data-brand-scope>
-      <div class="topbar"><div class="row"><div class="brand"><img src="" alt="TRIA Demo" data-logo><span data-tenant-name>TRIA Demo</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
+      <div class="topbar"><div class="row"><div class="brand"><img src="" alt="Rede Demo" data-logo><span data-tenant-name>Rede Demo</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
       <div class="body col g6">
-        <div class="col g4 center" style="align-items:center;margin-top:32px"><div class="logo-16"><img src="" alt="TRIA Demo" data-logo></div><h1 class="title">Bem-vindo(a) à <span data-tenant-name>TRIA Demo</span></h1></div>
+        <div class="col g4 center" style="align-items:center;margin-top:32px"><div class="logo-16"><img src="" alt="Rede Demo" data-logo></div><h1 class="title">Bem-vindo(a) à <span data-tenant-name>Rede Demo</span></h1></div>
         <div class="card"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-sparkles"/></svg></div><h3>Em breve</h3><p>As novidades da sua comunidade vão aparecer aqui.</p></div></div>
       </div>
       <nav class="bottomnav glass-bar" aria-label="Navegação"><a href="#install-hint" aria-label="Início" aria-current="page"><span class="chip"><svg class="i i-23"><use href="#i-home"/></svg></span></a><a href="#install-hint" aria-label="Perfil"><span class="chip"><svg class="i i-23"><use href="#i-user"/></svg></span></a></nav>
@@ -969,14 +969,14 @@ table.data td.break { word-break: break-all; }
 
 <!-- ============================================================================== -->
 <section id="platform-shell-mobile" class="screen">
-  <header><h2>Painel no celular</h2><code>/plataforma em 390px · TopBar neutra "TRIA" + cards + BottomNav (Tenants) · mesmos componentes, tabelas viram listas</code></header>
+  <header><h2>Painel no celular</h2><code>/plataforma em 390px · TopBar neutra "Rede Social" + cards + BottomNav (Tenants) · mesmos componentes, tabelas viram listas</code></header>
   <div class="frames">
     <div class="phone">
-      <div class="topbar"><div class="row"><div class="brand"><span class="wordmark">TRIA</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
+      <div class="topbar"><div class="row"><div class="brand"><span class="wordmark">Rede Social</span></div><div class="actions"><span class="avatar sm"><svg class="i i-18"><use href="#i-user"/></svg></span></div></div></div>
       <div class="body col g3">
         <div class="page-header" style="margin:0;padding:0"><a class="icon-btn" href="#platform-shell-mobile" aria-label="Voltar para a lista"><svg class="i"><use href="#i-chev-l"/></svg></a><span class="h16 tertiary" style="font-weight:400;flex:1">Tenants</span></div>
-        <div class="row wrap g2"><h1 class="title">TRIA Demo</h1><span class="pill success">Ativo</span></div>
-        <div class="t12 tertiary">tria-demo · <a class="link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br</a></div>
+        <div class="row wrap g2"><h1 class="title">Rede Demo</h1><span class="pill success">Ativo</span></div>
+        <div class="t12 tertiary">rede-demo · <a class="link t12" href="#tenant-page-dominios">comunidade.exemplo.com.br</a></div>
         <div class="tabs" role="tablist"><a class="tab" role="tab" aria-selected="false" href="#tenant-page-marca">Marca</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-modulos">Módulos</a><a class="tab" role="tab" aria-selected="true" href="#tenant-page-dominios">Domínios</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-admins">Admins</a><a class="tab" role="tab" aria-selected="false" href="#tenant-page-status">Status</a></div>
         <form class="col g2" onsubmit="return false"><div class="input with-icon"><svg class="i i-18"><use href="#i-globe"/></svg><input type="text" placeholder="comunidade.cliente.com.br" aria-label="Domínio"></div><button class="btn md brand full" type="submit">Adicionar domínio</button></form>
         <div class="card p4 col g3">
@@ -988,8 +988,8 @@ table.data td.break { word-break: break-all; }
           <div class="col g2">
             <div class="row between g2 t12"><span><span class="bold">CNAME</span> · app</span></div>
             <div class="row between g2"><span class="t14" style="word-break:break-all">cname.plataforma-exemplo.com</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div>
-            <div class="row between g2 t12"><span><span class="bold">TXT</span> · _tria-verify.app</span></div>
-            <div class="row between g2"><span class="t14" style="word-break:break-all">tria-verify=8f3a1c…d2e9</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div>
+            <div class="row between g2 t12"><span><span class="bold">TXT</span> · _rede-verify.app</span></div>
+            <div class="row between g2"><span class="t14" style="word-break:break-all">rede-social-verify=8f3a1c…d2e9</span><button class="icon-btn" type="button" aria-label="Copiar valor" data-copy><svg class="i i-20"><use href="#i-copy"/></svg></button></div>
           </div>
           <span class="dns-note">Crie estes registros no DNS do cliente. A verificação roda a cada 10 minutos por até 7 dias.</span>
           <div class="row wrap g2"><button class="btn sm outline" type="button">Verificar agora</button><button class="btn sm ghost danger-text" type="button">Remover</button></div>
@@ -1027,7 +1027,7 @@ table.data td.break { word-break: break-all; }
   const html = document.documentElement;
   const NEUTRAL = { primary: '#2e6fd0', secondary: '#5b9cf8' };
 
-  /* ---- WCAG 2.x maths (same rules as @tria/contracts/branding: onPrimary is #ffffff or #16233b,
+  /* ---- WCAG 2.x maths (same rules as @rede-social/contracts/branding: onPrimary is #ffffff or #16233b,
           whichever reaches the higher ratio; primaryDark lightens primary by 30% towards white) ---- */
   const hexToRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
   const rgbToHex = (rgb) => '#' + rgb.map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, '0')).join('');
@@ -1070,7 +1070,7 @@ table.data td.break { word-break: break-all; }
   /* placeholder square mark generated from the display name's initials (no real asset in the mockup) —
      the "square-ish logo" case of the spec, so the display name renders next to / below it */
   function renderLogos() {
-    const name = document.querySelector('[data-tenant-name-input]')?.value.trim() || 'TRIA Demo';
+    const name = document.querySelector('[data-tenant-name-input]')?.value.trim() || 'Rede Demo';
     document.querySelectorAll('[data-tenant-name]').forEach((el) => { el.textContent = name; });
     const initials = name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="${state.primary}"/><text x="32" y="41" text-anchor="middle" font-family="Manrope, system-ui, sans-serif" font-size="26" font-weight="800" fill="${onColour(state.primary)}">${initials}</text></svg>`;
@@ -1087,7 +1087,7 @@ table.data td.break { word-break: break-all; }
   document.querySelectorAll('[data-hex-input]').forEach((i) => i.addEventListener('change', (e) => { const v = e.target.value.trim(); if (/^#[0-9a-fA-F]{6}$/.test(v)) { if (i.dataset.hexInput === 'primary') setBrand(v, state.secondary); else setBrand(state.primary, v); } else apply(); }));
   document.querySelector('[data-tenant-name-input]')?.addEventListener('input', renderLogos);
 
-  /* ---- theme: data-theme on <html> (the cookie tria_theme in the app, R-P3); every Switch mirrors it ---- */
+  /* ---- theme: data-theme on <html> (the cookie rede_theme in the app, R-P3); every Switch mirrors it ---- */
   function setTheme(dark) {
     html.setAttribute('data-theme', dark ? 'dark' : 'light');
     document.getElementById('theme-toggle').setAttribute('aria-pressed', String(dark));

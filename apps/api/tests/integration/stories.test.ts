@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { MEDIA_LIMITS } from '@tria/contracts/media';
-import { sqlClient } from '@tria/core/db';
-import { subscribe } from '@tria/core/server/events/bus';
-import { mediaProviderEventJob } from '@tria/core/server/media/video/event-job';
-import type { VideoProviderEvent } from '@tria/core/server/media/video/types';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
-import { setPermissionResolver } from '@tria/core/server/rbac/permissions';
+import { MEDIA_LIMITS } from '@rede-social/contracts/media';
+import { sqlClient } from '@rede-social/core/db';
+import { subscribe } from '@rede-social/core/server/events/bus';
+import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
+import type { VideoProviderEvent } from '@rede-social/core/server/media/video/types';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions';
 import {
   type HighlightSummary,
   highlightDetailSchema,
@@ -26,13 +26,13 @@ import {
   type StoryPublished,
   type StorySummary,
   storyHighlightIdsSchema,
-} from '@tria/module-stories/contracts';
+} from '@rede-social/module-stories/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '../../src/modules/registry';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
- * `@tria/module-stories` end to end against the live local stack and the real seed (05-05).
+ * `@rede-social/module-stories` end to end against the live local stack and the real seed (05-05).
  *
  * Seven things are proved here that nothing else in the repo can prove:
  *  - **STORY-03 is a READ PREDICATE.** The seeded expired story is absent from `GET /v1/stories`,
@@ -202,15 +202,15 @@ async function sweep(): Promise<void> {
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
 
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  tokens.labAdmin = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
 
   // The lab tenant ships with `stories` DISABLED (scripts/seed.ts gives it feed + events only).
@@ -377,7 +377,7 @@ describe('GET /v1/stories — the strip is three predicates (STORY-03, D-78, R-P
 
 describe('POST /v1/stories — a permission, an asset and a window nobody chooses (STORY-01)', () => {
   it('10. a member is refused 403; an admin publishes 201 and the story heads the strip', async () => {
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
 
     const refused = await publish(tokens.demoMember, {
       mediaAssetId: assetId,
@@ -419,7 +419,7 @@ describe('POST /v1/stories — a permission, an asset and a window nobody choose
   });
 
   it('11. another tenant’s asset is a bare 404; an unknown id answers identically', async () => {
-    const labAsset = await makeAsset({ tenantId: tenantIds.lab, email: 'admin@tria-lab.local' });
+    const labAsset = await makeAsset({ tenantId: tenantIds.lab, email: 'admin@rede-lab.local' });
 
     const foreign = await publish(tokens.demoAdmin, {
       mediaAssetId: labAsset,
@@ -442,7 +442,7 @@ describe('POST /v1/stories — a permission, an asset and a window nobody choose
   it('12. an asset whose purpose is not `story` is 400 VALIDATION_FAILED, and no row is written', async () => {
     const postAsset = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
       purpose: 'post',
     });
     const res = await publish(tokens.demoAdmin, {
@@ -466,7 +466,7 @@ describe('POST /v1/stories — a permission, an asset and a window nobody choose
     expect(empty.status).toBe(400);
     expect((await envelope(empty)).error.details?.story).toBe('media_required');
 
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
     const overCap = await publish(tokens.demoAdmin, {
       mediaAssetId: assetId,
       mediaKind: 'image',
@@ -489,7 +489,7 @@ describe('POST /v1/stories — a permission, an asset and a window nobody choose
   it('14. publishing on a PROCESSING video succeeds: the row exists, the strip does not show it', async () => {
     const assetId = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
       kind: 'video',
       status: 'processing',
       providerAssetId: `prov-${randomUUID()}`,
@@ -517,7 +517,7 @@ describe('POST /v1/stories — a permission, an asset and a window nobody choose
     const providerAssetId = `prov-${randomUUID()}`;
     const assetId = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
       kind: 'video',
       status: 'processing',
       providerAssetId,
@@ -556,7 +556,7 @@ describe('POST /v1/stories — a permission, an asset and a window nobody choose
     const providerAssetId = `prov-${randomUUID()}`;
     const assetId = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
       kind: 'video',
       status: 'processing',
       providerAssetId,
@@ -595,7 +595,7 @@ describe('GET /v1/stories/mine and DELETE — the manage permission (D-84, T-05-
   });
 
   it('18. an admin SOFT-deletes: the row survives, the strip drops it, a second delete is 404', async () => {
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
     const res = await publish(tokens.demoAdmin, {
       mediaAssetId: assetId,
       mediaKind: 'image',
@@ -679,7 +679,7 @@ describe('STORY-05 (first half) — the story like toggle is idempotent and coun
   }
 
   beforeAll(async () => {
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
     const res = await publish(tokens.demoAdmin, {
       mediaAssetId: assetId,
       mediaKind: 'image',
@@ -693,7 +693,7 @@ describe('STORY-05 (first half) — the story like toggle is idempotent and coun
     // (the window is a column default), and the seeded expired row must stay untouched.
     const expiredAsset = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
     });
     expiredStoryId = randomUUID();
     created.push(expiredStoryId);
@@ -705,7 +705,7 @@ describe('STORY-05 (first half) — the story like toggle is idempotent and coun
              now() - interval '30 hours', now() - interval '6 hours'
         from public.memberships m
         join public.users u on u.id = m.user_id
-       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
        limit 1`;
   });
 
@@ -787,7 +787,7 @@ describe('STORY-05 (first half) — the story like toggle is idempotent and coun
     created.push(removedId);
     const removedAsset = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
     });
     await adminSql`
       insert into public.stories
@@ -796,7 +796,7 @@ describe('STORY-05 (first half) — the story like toggle is idempotent and coun
              'image', ${`${TEST_CAPTION_PREFIX} — removida`}, now()
         from public.memberships m
         join public.users u on u.id = m.user_id
-       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
        limit 1`;
 
     const removed = await like(tokens.demoMember, removedId);
@@ -902,7 +902,7 @@ describe('STORY-05 (second half) — the comment surface, and the two refusals t
   }
 
   beforeAll(async () => {
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
     const res = await publish(tokens.demoAdmin, {
       mediaAssetId: assetId,
       mediaKind: 'image',
@@ -917,7 +917,7 @@ describe('STORY-05 (second half) — the comment surface, and the two refusals t
     // there would be a second copy of the 24 h window.
     const expiredAsset = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
     });
     expiredStoryId = randomUUID();
     created.push(expiredStoryId);
@@ -929,7 +929,7 @@ describe('STORY-05 (second half) — the comment surface, and the two refusals t
              now() - interval '30 hours', now() - interval '6 hours'
         from public.memberships m
         join public.users u on u.id = m.user_id
-       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
        limit 1`;
 
     // The POSITIVE CONTROLS' target: a tenant-wide post of this file's own (no community, so no
@@ -941,7 +941,7 @@ describe('STORY-05 (second half) — the comment surface, and the two refusals t
       select ${postId}::uuid, ${tenantIds.demo}::uuid, m.user_id, ${`${TEST_CAPTION_PREFIX} — post de controle`}
         from public.memberships m
         join public.users u on u.id = m.user_id
-       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
        limit 1`;
     await adminSql`
       insert into public.feed_comments
@@ -950,7 +950,7 @@ describe('STORY-05 (second half) — the comment surface, and the two refusals t
              'raiz de controle', 0, null, null, null
         from public.memberships m
         join public.users u on u.id = m.user_id
-       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
        limit 1`;
 
     unsubscribes.push(
@@ -1233,7 +1233,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
 
   /** A ready image story of the demo tenant, published through the API. */
   async function publishImage(label: string): Promise<{ storyId: string; assetId: string }> {
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
     const res = await publish(tokens.demoAdmin, {
       mediaAssetId: assetId,
       mediaKind: 'image',
@@ -1270,7 +1270,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
              case when ${opts.removed ?? false} then now() end
         from public.memberships m
         join public.users u on u.id = m.user_id
-       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+       where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
        limit 1`;
     return id;
   }
@@ -1568,7 +1568,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
   async function publishVideo(label: string): Promise<{ storyId: string; assetId: string }> {
     const assetId = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
       kind: 'video',
       providerAssetId: `fake-${randomUUID()}`,
     });
@@ -1698,7 +1698,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     const highlight = await create(tokens.demoAdmin, { title: 'Teste Upload' });
     const cover = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
       purpose: 'cover',
     });
 
@@ -1712,17 +1712,17 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     // T-05.2-12: a story-purpose asset, a processing cover and ANOTHER tenant's cover — one answer.
     const storyPurpose = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
     });
     const processing = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
       purpose: 'cover',
       status: 'processing',
     });
     const foreign = await makeAsset({
       tenantId: tenantIds.lab,
-      email: 'admin@tria-lab.local',
+      email: 'admin@rede-lab.local',
       purpose: 'cover',
     });
     await expectBare404s([
@@ -1735,7 +1735,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     // Replacing the cover never retires the old asset.
     const replacement = await makeAsset({
       tenantId: tenantIds.demo,
-      email: 'admin@tria-demo.local',
+      email: 'admin@rede-demo.local',
       purpose: 'cover',
     });
     const replaced = await patchHighlight(tokens.demoAdmin, highlight.id, {
@@ -2091,7 +2091,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     destination: Record<string, unknown>,
     token = tokens.demoAdmin,
   ): Promise<{ res: Response; caption: string }> {
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
     const caption = `${TEST_CAPTION_PREFIX} — ${label} ${randomUUID()}`;
     const res = await publish(token, {
       mediaAssetId: assetId,
@@ -2203,7 +2203,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
       select ${labCommunity}::uuid, ${tenantIds.lab}::uuid, m.user_id, 'Lab destaque', ${labCommunity}, 'active'
         from public.memberships m
         join public.users u on u.id = m.user_id
-       where m.tenant_id = ${tenantIds.lab}::uuid and u.email = 'admin@tria-lab.local'
+       where m.tenant_id = ${tenantIds.lab}::uuid and u.email = 'admin@rede-lab.local'
        limit 1`;
 
     const before = curationEvents.length;
@@ -2296,7 +2296,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
   it('05.2-23 THE INVARIANT: born in a highlight ≡ added later — same row, same count, same membership, same event', async () => {
     const highlight = await create(tokens.demoAdmin, { title: 'Teste Igual' });
     const adminRows = await adminSql<{ id: string }[]>`
-      select id::text from public.users where email = 'admin@tria-demo.local' limit 1`;
+      select id::text from public.users where email = 'admin@rede-demo.local' limit 1`;
     const adminUserId = adminRows[0]?.id ?? '';
 
     const before = curationEvents.length;
@@ -2369,7 +2369,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
   }
 
   it('05.2-24 a member records two SHOWN stories: 204, two rows, a repeat writes none, and only THEIR read flips', async () => {
-    const memberId = await userIdOf('member@tria-demo.local');
+    const memberId = await userIdOf('member@rede-demo.local');
     const a = await publishImage('visto a');
     const b = await publishImage('visto b');
     const c = await publishImage('nao visto c');
@@ -2400,7 +2400,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
   });
 
   it('05.2-25 an unknown id and the LAB tenant’s story write NOTHING in either tenant — and a demo id beside them writes one row', async () => {
-    const memberId = await userIdOf('member@tria-demo.local');
+    const memberId = await userIdOf('member@rede-demo.local');
     const labStories = await adminSql<{ id: string }[]>`
       select id::text from public.stories
        where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null
@@ -2451,7 +2451,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
   });
 
   it('05.2-27 an EXPIRED story is recorded, and a story seen inside a highlight reads seen in the strip too (R-D-I)', async () => {
-    const memberId = await userIdOf('member@tria-demo.local');
+    const memberId = await userIdOf('member@rede-demo.local');
     const highlight = await create(tokens.demoAdmin, { title: 'Teste Visto' });
 
     const expired = await publishImage('visto expirado');
@@ -2576,7 +2576,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
 
     // D-96 and no idempotency (05.1-8 carried): the same publish into one highlight twice is two
     // stories and two items — and both are in the strip too.
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
     const twice = {
       mediaAssetId: assetId,
       mediaKind: 'image',
@@ -2618,7 +2618,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
    * of them are soft-deleted. Returns the story ids.
    */
   async function seedItems(highlightId: string, n: number, deletedCount = 0): Promise<string[]> {
-    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+    const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
     const inserted = await adminSql<{ id: string }[]>`
       insert into public.stories (tenant_id, author_user_id, media_asset_id, media_kind, caption, deleted_at)
       select ${tenantIds.demo}::uuid, a.author, ${assetId}::uuid, 'image',
@@ -2626,7 +2626,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
         from generate_series(1, ${n}) g,
              (select m.user_id as author from public.memberships m
                 join public.users u on u.id = m.user_id
-               where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+               where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
                limit 1) a
       returning id`;
     const ids = inserted.map((r) => r.id);
@@ -2646,7 +2646,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
         from generate_series(1, ${STORY_HIGHLIGHT_MAX_PER_PLACE}) g,
              (select m.user_id from public.memberships m
                 join public.users u on u.id = m.user_id
-               where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@tria-demo.local'
+               where m.tenant_id = ${tenantIds.demo}::uuid and u.email = 'admin@rede-demo.local'
                limit 1) m`;
   }
 
@@ -2734,7 +2734,7 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
       { highlightId: full.id },
       { newHighlight: { communityId: community, title: 'Teste Nova' } },
     ]) {
-      const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@tria-demo.local' });
+      const assetId = await makeAsset({ tenantId: tenantIds.demo, email: 'admin@rede-demo.local' });
       const caption = `${TEST_CAPTION_PREFIX} — cheio ${randomUUID()}`;
       await expectFull(
         await publish(tokens.demoAdmin, {

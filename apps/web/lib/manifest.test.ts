@@ -1,4 +1,4 @@
-import { NEUTRAL_BRAND, resolveBranding } from '@tria/contracts/branding';
+import { NEUTRAL_BRAND, resolveBranding } from '@rede-social/contracts/branding';
 import { describe, expect, it } from 'vitest';
 import {
   buildManifest,
@@ -24,14 +24,14 @@ const derived = {
 describe('lib/manifest — buildManifest (PWA-01, D-25)', () => {
   it('1. emits the locked id scheme, / start_url + scope, standalone, pt-BR, the neutral bg and three PNG icons', () => {
     const m = buildManifest({
-      slug: 'tria-demo',
-      displayName: 'TRIA Demo',
+      slug: 'rede-demo',
+      displayName: 'Rede Demo',
       themeColor: '#7c3aed',
       icons: NEUTRAL_ICONS,
     });
-    expect(m.id).toBe('/?tenant=tria-demo');
-    expect(m.name).toBe('TRIA Demo');
-    expect(m.short_name).toBe('TRIA Demo');
+    expect(m.id).toBe('/?tenant=rede-demo');
+    expect(m.name).toBe('Rede Demo');
+    expect(m.short_name).toBe('Rede Demo');
     expect(m.start_url).toBe('/');
     expect(m.scope).toBe('/');
     expect(m.display).toBe('standalone');
@@ -52,25 +52,25 @@ describe('lib/manifest — buildManifest (PWA-01, D-25)', () => {
     expect(cut).toBe(cut.trimEnd());
     expect(cut).toBe('Associação B');
     expect(shortName('Associação  Beneficente')).toBe('Associação');
-    expect(shortName('TRIA Demo')).toBe('TRIA Demo');
-    expect(shortName('  TRIA  ')).toBe('TRIA');
+    expect(shortName('Rede Demo')).toBe('Rede Demo');
+    expect(shortName('  Rede Social  ')).toBe('Rede Social');
   });
 
-  it('3. manifestPath and isManifestSlug: tenant slugs and the reserved _tria only', () => {
-    expect(manifestPath('tria-demo')).toBe('/m/tria-demo/manifest.webmanifest');
-    expect(manifestPath(null)).toBe('/m/_tria/manifest.webmanifest');
+  it('3. manifestPath and isManifestSlug: tenant slugs and the reserved _rede only', () => {
+    expect(manifestPath('rede-demo')).toBe('/m/rede-demo/manifest.webmanifest');
+    expect(manifestPath(null)).toBe('/m/_rede/manifest.webmanifest');
     expect(isManifestSlug(NEUTRAL_MANIFEST_SLUG)).toBe(true);
-    expect(isManifestSlug('tria-demo')).toBe(true);
-    expect(isManifestSlug('Tria_Demo')).toBe(false);
+    expect(isManifestSlug('rede-demo')).toBe(true);
+    expect(isManifestSlug('Rede_Demo')).toBe(false);
     expect(isManifestSlug('a')).toBe(false);
     expect(isManifestSlug('')).toBe(false);
     expect(isManifestSlug('not a slug')).toBe(false);
   });
 
-  it('4. neutralManifest is TRIA on the reserved slug with the neutral primary and icons', () => {
+  it('4. neutralManifest is Rede Social on the reserved slug with the neutral primary and icons', () => {
     const m = neutralManifest();
-    expect(m.name).toBe('TRIA');
-    expect(m.id).toBe('/?tenant=_tria');
+    expect(m.name).toBe('Rede Social');
+    expect(m.id).toBe('/?tenant=_rede');
     expect(m.theme_color).toBe(NEUTRAL_BRAND.primary);
     expect(m.icons?.map((i) => i.src)).toEqual([
       NEUTRAL_ICONS.i192,
@@ -82,7 +82,7 @@ describe('lib/manifest — buildManifest (PWA-01, D-25)', () => {
 
 describe('lib/manifest — icon allow-list (T-02-72)', () => {
   it('5. isAllowedIconUrl: /icons/* and the public branding bucket on the Supabase origin only', () => {
-    expect(isAllowedIconUrl('/icons/tria-192.png', origin)).toBe(true);
+    expect(isAllowedIconUrl('/icons/rede-social-192.png', origin)).toBe(true);
     expect(isAllowedIconUrl(derived.i192, origin)).toBe(true);
     expect(isAllowedIconUrl('https://evil.example/icon.png', origin)).toBe(false);
     expect(isAllowedIconUrl(`${origin}/storage/v1/object/public/media/x.png`, origin)).toBe(false);

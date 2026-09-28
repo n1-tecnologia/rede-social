@@ -1,4 +1,4 @@
-import { EmptyState } from '@tria/ui';
+import { EmptyState } from '@rede-social/ui';
 import { WifiOff } from 'lucide-react';
 import type { Metadata } from 'next';
 import { getTranslations } from 'next-intl/server';

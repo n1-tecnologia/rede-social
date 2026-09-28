@@ -1,4 +1,4 @@
-import { vitestBase } from '@tria/config/vitest.base';
+import { vitestBase } from '@rede-social/config/vitest.base';
 import react from '@vitejs/plugin-react';
 import { defineConfig, mergeConfig } from 'vitest/config';
 

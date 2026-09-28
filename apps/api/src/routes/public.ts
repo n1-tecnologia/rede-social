@@ -7,11 +7,11 @@ import {
   signupBodySchema,
   signupResponseSchema,
   toHostBranding,
-} from '@tria/contracts';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { getPublicTenant } from '@tria/core/server/tenancy/public-tenant';
-import { signupMember } from '@tria/core/server/tenancy/signup';
-import { resolveTenantHost } from '@tria/core/server/tenancy/tenant-host';
+} from '@rede-social/contracts';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { getPublicTenant } from '@rede-social/core/server/tenancy/public-tenant';
+import { signupMember } from '@rede-social/core/server/tenancy/signup';
+import { resolveTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import { createOpenApiApp } from '../http/openapi';
 
 /**
@@ -21,7 +21,7 @@ import { createOpenApiApp } from '../http/openapi';
  *
  * The slug path params are typed `z.string()`, NOT `slugSchema`: a malformed slug must answer
  * 404 `TENANT_NOT_FOUND` (adjacency rule T-04-07), which `getPublicTenant` does — validating here
- * would turn `Tria-Demo` into a 400 and leak the difference between "bad shape" and "no such tenant".
+ * would turn `Rede-Demo` into a 400 and leak the difference between "bad shape" and "no such tenant".
  */
 const slugParams = z.object({ slug: z.string() });
 

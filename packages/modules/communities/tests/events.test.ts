@@ -1,5 +1,5 @@
-import type { RequestContext } from '@tria/core/server/auth/context';
-import { flush, subscribe } from '@tria/core/server/events/bus';
+import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { flush, subscribe } from '@rede-social/core/server/events/bus';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -57,7 +57,7 @@ const tx = {
   },
 };
 
-vi.mock('@tria/core/db/tenant-tx', () => ({
+vi.mock('@rede-social/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
 }));
 

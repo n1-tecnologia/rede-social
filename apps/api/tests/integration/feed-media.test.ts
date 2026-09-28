@@ -1,5 +1,9 @@
-import { sqlClient } from '@tria/core/db';
-import { FEED_MAX_ATTACHMENTS, FEED_MAX_IMAGES, type FeedPost } from '@tria/module-feed/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import {
+  FEED_MAX_ATTACHMENTS,
+  FEED_MAX_IMAGES,
+  type FeedPost,
+} from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
 
@@ -29,9 +33,9 @@ type Envelope = {
   error: { code: string; message?: string; details?: { media?: string }; requestId?: string };
 };
 
-const DEMO_ADMIN = 'admin@tria-demo.local';
-const DEMO_MEMBER = 'member@tria-demo.local';
-const LAB_ADMIN = 'admin@tria-lab.local';
+const DEMO_ADMIN = 'admin@rede-demo.local';
+const DEMO_MEMBER = 'member@rede-demo.local';
+const LAB_ADMIN = 'admin@rede-lab.local';
 
 const tokens = { demoAdmin: '', demoMember: '', labAdmin: '' };
 const tenantIds = { demo: '', lab: '' };
@@ -160,10 +164,10 @@ beforeAll(async () => {
   ]);
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
   if (!tenantIds.demo || !tenantIds.lab) throw new Error('the two demo tenants are not seeded');
 });
@@ -259,7 +263,7 @@ describe('T-04-22 / T-04-23 — every referenced asset is the caller’s own, wi
     const body = JSON.stringify(error);
     expect(body).not.toContain(foreign);
     expect(body).not.toContain(tenantIds.lab);
-    expect(body.toLowerCase()).not.toContain('tria-lab');
+    expect(body.toLowerCase()).not.toContain('rede-lab');
   });
 
   it('refuses a PDF offered as a gallery image, and a photo offered as an attachment', async () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useToast } from '@tria/ui';
+import { useToast } from '@rede-social/ui';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';

@@ -1,12 +1,12 @@
-import { env } from '@tria/core/server/env';
+import { env } from '@rede-social/core/server/env';
 import {
   HOOK_HEADER_NAMES,
   HookPayloadError,
   HookSignatureError,
   parseHookSecrets,
   verifyHookRequest,
-} from '@tria/core/server/mail/hook-schema';
-import { MailRefusedError, sendAuthMail } from '@tria/core/server/mail/index';
+} from '@rede-social/core/server/mail/hook-schema';
+import { MailRefusedError, sendAuthMail } from '@rede-social/core/server/mail/index';
 import { createOpenApiApp } from '../http/openapi';
 
 /**

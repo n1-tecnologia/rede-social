@@ -1,13 +1,13 @@
 'use client';
 
-import { THEME_COOKIE } from '@tria/contracts/branding';
-import { Switch } from '@tria/ui';
+import { THEME_COOKIE } from '@rede-social/contracts/branding';
+import { Switch } from '@rede-social/ui';
 import { startTransition, useSyncExternalStore } from 'react';
 
 export type Theme = 'light' | 'dark';
 
 export interface ThemeToggleProps {
-  /** The theme the server rendered (from the `tria_theme` cookie). */
+  /** The theme the server rendered (from the `rede_theme` cookie). */
   initial: Theme;
   /** Accessible name of the switch (catalog string, e.g. "Tema escuro"). */
   label: string;

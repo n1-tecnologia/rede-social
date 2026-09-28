@@ -9,8 +9,8 @@ import {
   type PostCardView,
   PostMenu,
   type PostMenuLabels,
-} from '@tria/module-feed/ui';
-import { useToast } from '@tria/ui';
+} from '@rede-social/module-feed/ui';
+import { useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';

@@ -24,7 +24,7 @@ deferred:
     evidence: "WINDOWS.md #2 (open, owned by Phase 7); ROADMAP Phase 7 goal covers notifications and support chat. apps/api/src/routes/me.ts:89 returns literal zeros — a recorded window, not a Phase 1 must-have."
 human_verification:
 
-  - test: "Judgment-tier prohibition (AUTH-04, plan 01-04): open http://tria-demo.localhost:3000/cadastro on a phone-sized viewport and inspect the two consent controls (community rules, TRIA terms/privacy)."
+  - test: "Judgment-tier prohibition (AUTH-04, plan 01-04): open http://rede-demo.localhost:3000/cadastro on a phone-sized viewport and inspect the two consent controls (community rules, Rede Social terms/privacy)."
     expected: "Two separate, visibly UNCHECKED checkboxes, neither pre-checked, not merged into one control, not collapsed/hidden; submitting with either one unchecked is refused (browser `required` + API 400 VALIDATION_FAILED)."
     why_human: "unverified-prohibition — human review recommended. `verification: judgment` items require explicit human resolution per ADR-550 D4. Non-authoritative LLM-judge verdict: HONORED — apps/web/app/(auth)/cadastro/[slug]/page.tsx:99-112 renders two `<input type=checkbox required>` with no `defaultChecked`; signup.spec.ts:96-97 asserts `not.toBeChecked()` on both; signup.test.ts #6 asserts 400 on a missing consent (all passing in this run)."
   - test: "Judgment-tier prohibition (AUTH-06, plan 01-05): block a seeded member (set memberships.status='blocked' via psql), reload /inicio as that member, and read the /acesso-suspenso screen and the raw 403 body from GET /v1/me/bootstrap."
@@ -52,12 +52,12 @@ Nothing in this report rests on SUMMARY.md counts. Every gate below was re-execu
 |---|---|---|
 | pgTAP | `pnpm supabase test db` (run twice, no reset between) | 5 files, **77/77 ok**, both runs |
 | API integration | `pnpm test:integration` | **10 files, 78/78 passed** |
-| Lint/typecheck/build/unit | `pnpm turbo run lint typecheck build test` (+ `--force` rebuild of `@tria/web`) | **20/20 tasks** successful; `next build` compiled 15 routes |
+| Lint/typecheck/build/unit | `pnpm turbo run lint typecheck build test` (+ `--force` rebuild of `@rede-social/web`) | **20/20 tasks** successful; `next build` compiled 15 routes |
 | Module boundaries | `pnpm boundaries` | 148 files, 7 packages, no issues |
-| Negative boundary fixture | `pnpm boundaries:negative` | both layers (turbo boundaries + Biome `noRestrictedImports`) reject `@tria/boundary-fixture` |
+| Negative boundary fixture | `pnpm boundaries:negative` | both layers (turbo boundaries + Biome `noRestrictedImports`) reject `@rede-social/boundary-fixture` |
 | Lane guard | `pnpm guard:lanes` | OK |
 | Pooler spike (local, direct-port contingency) | `pnpm spike:supavisor` | 3/3 passed |
-| E2E | `pnpm --filter @tria/web exec playwright test --project=mobile-chromium` | **34/34 passed** (32.5 s; fresh `next dev` on :3000, API `tsx watch` on :8787 started 14:05 local, after the last fix commit at 14:00) |
+| E2E | `pnpm --filter @rede-social/web exec playwright test --project=mobile-chromium` | **34/34 passed** (32.5 s; fresh `next dev` on :3000, API `tsx watch` on :8787 started 14:05 local, after the last fix commit at 14:00) |
 | Migration drift | `pnpm db:generate` | "No schema changes, nothing to migrate"; `git status` clean |
 | Docker | `docker build -f apps/api/Dockerfile .` → run `ROLE=api` with an unreachable `DATABASE_URL` | build OK (453 MB); `GET /v1/health` → 200 `{ok:true,service:"api",role:"api"}`; `?deep=1` → 500 `{db:false}` |
 | Live DB catalog | `psql` against `supabase_db_rede-social` | every `tenant_id` table has RLS on + ≥1 policy; `platform_admins` RLS on + 0 policies; `api_user` NOINHERIT/NOBYPASSRLS/LOGIN; `app.membership_for_user` honours `deleted_at`/`blocked_at`; 11/11 migrations applied |
@@ -74,12 +74,12 @@ Not re-run: `pnpm db:reset` (destructive; the fixer's reset is corroborated by 1
 | # | Truth | Status | Evidence |
 |---|---|---|---|
 | **SC-1** | | | |
-| 1 | Sign-up through tenant A's public link on A's own domain, accepting A's rules + TRIA terms recorded with a timestamp, creates a `member` of A | ✓ VERIFIED | `signup.test.ts` #1 (201, one membership `role=member status=active`, two `consent_records` rows `tenant_rules`/`tria_terms` with DB `accepted_at`, ip, user_agent, versions); `signup.spec.ts` #1 on `tria-demo.localhost/cadastro`; `POST /v1/public/signup/{slug}` in `routes/public.ts:84` → `signupMember()` |
-| 2 | Member logs in with e-mail + password and lands on `/inicio` showing tenant, role, e-mail from `/v1/me/bootstrap` | ✓ VERIFIED | `login.spec.ts` #25 (heading 'TRIA Demo', role, e-mail); `entrar/actions.ts:21` `signInWithPassword`; `(app)/layout.tsx` → `getBootstrap()` |
+| 1 | Sign-up through tenant A's public link on A's own domain, accepting A's rules + Rede Social terms recorded with a timestamp, creates a `member` of A | ✓ VERIFIED | `signup.test.ts` #1 (201, one membership `role=member status=active`, two `consent_records` rows `tenant_rules`/`platform_terms` with DB `accepted_at`, ip, user_agent, versions); `signup.spec.ts` #1 on `rede-demo.localhost/cadastro`; `POST /v1/public/signup/{slug}` in `routes/public.ts:84` → `signupMember()` |
+| 2 | Member logs in with e-mail + password and lands on `/inicio` showing tenant, role, e-mail from `/v1/me/bootstrap` | ✓ VERIFIED | `login.spec.ts` #25 (heading 'Rede Demo', role, e-mail); `entrar/actions.ts:21` `signInWithPassword`; `(app)/layout.tsx` → `getBootstrap()` |
 | 3 | Session survives closing/reopening the browser (behavior-dependent) | ✓ VERIFIED | `session.spec.ts`: saves `storageState` (asserts `sb-*` cookies), opens a NEW context, `/inicio` 200 + heading, reload after 2 s still `/inicio`; `proxy.ts:106` `getClaims()` refresh per request |
 | 4 | Forgotten password recovered via e-mail link (origin-derived), new password signs in | ✓ VERIFIED | `recovery.spec.ts` #3 (Mailpit link → `/auth/confirm` → `/redefinir-senha` → `/inicio`), #1/#2 constant D-10 answer, #4/#5/#7 open-redirect guards, #6 WR-09 refused origin sends nothing; `auth/confirm/route.ts` `verifyOtp` + `sameOriginPath()` |
 | 5 | Member can log out (device-local) | ✓ VERIFIED | `logout.spec.ts` (device B stays logged in); `(app)/actions.ts` `scope: 'local'` |
-| 6 | Sign-up link survives register → login round-trip | ✓ VERIFIED | `signup.spec.ts` #2 (register → Sair → `/entrar` shows 'Comunidade: TRIA Demo', 'Criar nova conta' → `/cadastro`), #6 generic-host cookie variant |
+| 6 | Sign-up link survives register → login round-trip | ✓ VERIFIED | `signup.spec.ts` #2 (register → Sair → `/entrar` shows 'Comunidade: Rede Demo', 'Criar nova conta' → `/cadastro`), #6 generic-host cookie variant |
 | **SC-2** | | | |
 | 7 | `GET /me/bootstrap` returns tenant, role, enabled modules from the membership row | ✓ VERIFIED | `bootstrap.test.ts` #1; `modules.test.ts` #1 (demo: 7 keys, lab: `[events, feed]`), #2 permissions from role; `me.ts:36-88` `moduleFlags.flags(ctx)` inside the tenant lane; `require-auth.ts` sets `ctx.tenantId` from `membershipForUser()` only |
 | 8 | Host only selects the shell; session of A on B's registered host → 403 `TENANT_HOST_MISMATCH` naming no tenant | ✓ VERIFIED | `bootstrap.test.ts` #7/#8/#9/#12; `isolation.test.ts` f (cookie + unknown host ignored) and f2 (registered host → 403 on every route, body free of both slugs/names/ids, symmetric); `host-mismatch.spec.ts` #1 screen shows only the D-23 sentence; `require-auth.ts:66-72` |
@@ -91,8 +91,8 @@ Not re-run: `pnpm db:reset` (destructive; the fixer's reset is corroborated by 1
 | 13 | Routes of a module disabled for the tenant return 404 | ✓ VERIFIED | `isolation.test.ts` c; `modules.test.ts` #4/#5 (missing row ≡ `enabled=false`)/#6/#7 (401 before 404, 403 `FORBIDDEN` for member on admin route); `require-module.ts` → `MODULE_DISABLED` |
 | 14 | The automated two-tenant suite (pgTAP + API integration) passes | ✓ VERIFIED | pgTAP 77/77 (twice, per-file `begin…rollback`), integration 78/78 — executed in this session |
 | **SC-4** | | | |
-| 15 | Kernel package, feature-module template, and lint/dependency rules that fail the build on cross-module internals | ✓ VERIFIED | `packages/core` (kernel), `packages/modules/example` (exports exactly `./module ./contracts ./server ./ui ./db`); `pnpm boundaries` green; `pnpm boundaries:negative` proves both turbo tags and Biome `noRestrictedImports` reject `@tria/boundary-fixture` (app dep, admin-lane deep import, `@tria/core/db` raw client, `withAdminTx` via `tenant-tx`) |
-| 16 | Cloud Run image serves API and worker from one image (`ROLE`) | ✓ VERIFIED | `apps/api/Dockerfile` (`node:24-slim`, `turbo@2.10.12 prune @tria/api --docker`, `USER node`, `ROLE=api` default); built and run in this session (API role: health 200 without DB); `main.ts:15` branches to `startWorker()`; `worker.ts` binds the probe AFTER `boss.start()` (CR-01), `worker.test.ts` passes |
+| 15 | Kernel package, feature-module template, and lint/dependency rules that fail the build on cross-module internals | ✓ VERIFIED | `packages/core` (kernel), `packages/modules/example` (exports exactly `./module ./contracts ./server ./ui ./db`); `pnpm boundaries` green; `pnpm boundaries:negative` proves both turbo tags and Biome `noRestrictedImports` reject `@rede-social/boundary-fixture` (app dep, admin-lane deep import, `@rede-social/core/db` raw client, `withAdminTx` via `tenant-tx`) |
+| 16 | Cloud Run image serves API and worker from one image (`ROLE`) | ✓ VERIFIED | `apps/api/Dockerfile` (`node:24-slim`, `turbo@2.10.12 prune @rede-social/api --docker`, `USER node`, `ROLE=api` default); built and run in this session (API role: health 200 without DB); `main.ts:15` branches to `startWorker()`; `worker.ts` binds the probe AFTER `boss.start()` (CR-01), `worker.test.ts` passes |
 | 17 | `ci.yml` mirrors the local exit gate and is reusable via `workflow_call` | ✓ VERIFIED | Parsed steps: install → `turbo lint typecheck build test` → boundaries → boundaries:negative → guard:lanes → Supabase CLI + ES256 keys → `db reset` → `test db` → env → seed → integration → spike → Playwright — the same order as the local gate; `on: workflow_call: {}` |
 | 18 | `deploy-api.yml`: staging on PR, gated production on `main` | ✓ VERIFIED | Parsed: `staging` job `if: pull_request`, `needs: build`, `environment: staging`; `checks` job `uses: ./.github/workflows/ci.yml` on push; `migrate-and-deploy-prod` `if: push && refs/heads/main`, `needs: [checks, build]`, `environment: production`, order migrations → API → worker, no seed; `concurrency: deploy-${{ github.ref }}` `cancel-in-progress: false`; all four `deploy-cloudrun@v3` steps carry `--service-account=${{ vars.RUNTIME_SA }}`; `seed-prod.yml` is `workflow_dispatch` only |
 | 19 | `docs/DEPLOY.md` lists every secret/variable the workflows reference | ✓ VERIFIED | 12 `secrets.*` + 8 `vars.*` names extracted from the four workflows; 20/20 found in `docs/DEPLOY.md` (sections: repo vars, env vars, env secrets, Secret Manager, Vercel, production gate, runbook) |
@@ -106,7 +106,7 @@ Not re-run: `pnpm db:reset` (destructive; the fixer's reset is corroborated by 1
 | 26 | Platform lane: `super_admin` gets `/v1/platform/tenants` without membership; refused on a tenant host; tenant admin 403 | ✓ VERIFIED | `modules.test.ts` #9-#12; `platform.spec.ts` #1-#4; `isolation.test.ts` g/g2 |
 | 27 | Transactional job enqueue in the same tx + typed after-commit domain event; events dropped on failed handler (WR-01) | ✓ VERIFIED | `example.test.ts` #1/#6/#7; `jobs.test.ts` (WR-02 real error surfaces, WR-03 `short` policy + singletonKey dedupe); `bus.test.ts` 7 cases incl. `c.error` drop |
 | 28 | `api_user` outside any lane cannot read tenant tables (42501, NOINHERIT) | ✓ VERIFIED | `bootstrap.test.ts` #6; pgTAP 030; live `pg_roles` (`rolinherit=f`, `rolbypassrls=f`) |
-| 29 | Legal texts carry `version:` front-matter equal to `TRIA_TERMS_VERSION`/`TRIA_PRIVACY_VERSION`, versions equal | ✓ VERIFIED | `packages/contracts/tests/legal.test.ts` (part of the 20/20 turbo run); `/termos`, `/privacidade` pages exist |
+| 29 | Legal texts carry `version:` front-matter equal to `PLATFORM_TERMS_VERSION`/`PLATFORM_PRIVACY_VERSION`, versions equal | ✓ VERIFIED | `packages/contracts/tests/legal.test.ts` (part of the 20/20 turbo run); `/termos`, `/privacidade` pages exist |
 | 30 | GoTrue public sign-up closed; only the API's `admin.createUser` path creates users (CR-02) | ✓ VERIFIED | `supabase/config.toml` `[auth] enable_signup = false` (with `[auth.email] enable_signup = true` documented); `gotrue-signup-disabled.test.ts` passes; `signup.test.ts` still green |
 
 **Score:** 29/30 truths verified (0 present-but-behavior-unverified; 1 deferred to Phase 01.1 per the plan's own wording — not a failure)
@@ -130,7 +130,7 @@ Not re-run: `pnpm db:reset` (destructive; the fixer's reset is corroborated by 1
 | `apps/api/src/routes/public.ts` | contains `signup/:slug` | ✓ VERIFIED | OpenAPI path syntax `'/signup/{slug}'` at line 84, handler calls `signupMember` |
 | `packages/contracts/src/auth.ts` | exports `signupSchema` | ✓ VERIFIED | exported as `signupBodySchema` + `signupFormSchema` (+ `loginSchema`, `forgotSchema`, `resetSchema`, `slugSchema`) |
 | `packages/core/server/events/bus.ts` | exports `flushEventsAfterResponse` | ✓ VERIFIED | renamed to `flushEventsAfterHandler` by WR-01 (runs before the response); mounted in `app.ts:20`, tested in `bus.test.ts` |
-| `apps/api/Dockerfile` | contains `turbo prune` | ✓ VERIFIED | `pnpm dlx turbo@2.10.12 prune @tria/api --docker` (line 21) |
+| `apps/api/Dockerfile` | contains `turbo prune` | ✓ VERIFIED | `pnpm dlx turbo@2.10.12 prune @rede-social/api --docker` (line 21) |
 | all other 60 artifacts | per plan frontmatter | ✓ VERIFIED | exist, substantive, wired (tool-verified; spot-read: `tenant-tx.ts`, `admin-tx.ts`, `require-auth.ts`, `membership.ts`, `me.ts`, `proxy.ts`, `tenant-host.ts`, `worker.ts`, `acesso-suspenso/page.tsx`, `cadastro/[slug]/page.tsx`) |
 
 No artifact is MISSING, STUB or ORPHANED. `packages/ui/src/index.ts` is a documented Phase 2 placeholder (shared UI package is a Phase 2 deliverable per ROADMAP Notes) — not a Phase 1 must-have.
@@ -151,7 +151,7 @@ No artifact is MISSING, STUB or ORPHANED. `packages/ui/src/index.ts` is a docume
 | `signup.ts` → `admin-tx.ts` / `supabase-admin.ts` | `withAdminTx`, `auth.admin.createUser/deleteUser` | | ✓ WIRED | tool-verified; compensation exercised by `signup.test.ts` #9 |
 | `recovery.html` → `auth/confirm/route.ts` | `TokenHash` | | ✓ WIRED | tool-verified; `recovery.spec.ts` #3 follows the real e-mail |
 | `app.ts` → `module-example/server/routes.ts` | `requireModule('example')` | | ✓ WIRED | tool-verified; `isolation.test.ts` c |
-| `inicio/page.tsx` → `@tria/module-example/ui` | `ExampleWidget` when enabled | | ✓ WIRED | `example.spec.ts` #1-#3 |
+| `inicio/page.tsx` → `@rede-social/module-example/ui` | `ExampleWidget` when enabled | | ✓ WIRED | `example.spec.ts` #1-#3 |
 | remaining 19 links | per plan frontmatter | | ✓ WIRED | tool-verified |
 
 ### Data-Flow Trace (Level 4)
@@ -169,7 +169,7 @@ No artifact is MISSING, STUB or ORPHANED. `packages/ui/src/index.ts` is a docume
 
 | Behavior | Command | Result | Status |
 |---|---|---|---|
-| Health without DB (fresh container) | `docker run … -e DATABASE_URL=postgres://…@127.0.0.1:1/… tria-api:verify` + `curl /v1/health` | 200 `{ok:true}`; `?deep=1` 500 `{db:false}` | ✓ PASS |
+| Health without DB (fresh container) | `docker run … -e DATABASE_URL=postgres://…@127.0.0.1:1/… rede-social-api:verify` + `curl /v1/health` | 200 `{ok:true}`; `?deep=1` 500 `{db:false}` | ✓ PASS |
 | Live API deep health through `api_user` | `curl localhost:8787/v1/health?deep=1` | 200 `{db:true}` | ✓ PASS |
 | JWKS serves an ES256 key | `curl …/.well-known/jwks.json` | 1 key ES256/EC | ✓ PASS |
 | pgTAP idempotent without reset | `pnpm supabase test db` ×2 | 77/77 both times | ✓ PASS |
@@ -188,7 +188,7 @@ No `scripts/*/tests/probe-*.sh` probes are declared or present in this project. 
 | TENANT-01 | 01-01, 01-02, 01-05, 01-06 | One deployment, each tenant on its own domain; host selects only the public shell; membership is the tenant of record; mismatch → 403 | ✓ SATISFIED | `tenant_domains` + `by-host` lookup; `proxy.ts` host modes; truths 8, 21; `host-mismatch.spec.ts`, `isolation.test.ts` f/f2 |
 | TENANT-03 | 01-01, 01-03, 01-08 | `tenant_id` on every tenant row; API under an RLS-subject role, no service key for user traffic | ✓ SATISFIED (local) | truths 10, 11, 28; Supavisor 6543 proof deferred to 01.1 (accepted) |
 | TENANT-05 | 01-08 | Automated ≥2-tenant isolation suite | ✓ SATISFIED (phase scope) | pgTAP 020 covers `example_items`, `memberships`, `tenant_modules`, `tenant_domains`, `consent_records`, `chat_*`, `notifications`; API suite covers every existing list/detail endpoint. Search/storage/notification/chat *endpoints* do not exist yet — SCHEMA-CONVENTIONS §(j) obliges later phases to extend `020` and `isolation.test.ts` |
-| MOD-01 | 01-01, 01-07 | Monorepo, each feature a self-contained module package | ✓ SATISFIED | `@tria/module-example` (schema, server, contracts, ui, module manifest; five exports); `MODULE_REGISTRY` composed in the app tier |
+| MOD-01 | 01-01, 01-07 | Monorepo, each feature a self-contained module package | ✓ SATISFIED | `@rede-social/module-example` (schema, server, contracts, ui, module manifest; five exports); `MODULE_REGISTRY` composed in the app tier |
 | MOD-02 | 01-06, 01-07, 01-08 | Kernel package; modules depend only on kernel + contracts; enforced by lint/dependency rules | ✓ SATISFIED | `packages/core`; turbo boundaries tags + Biome `noRestrictedImports`; negative fixture proves both bite |
 | ROLE-01 | 01-01, 01-03, 01-06, 01-08 | Four roles; `super_admin` cross-tenant; roles on membership not user | ✓ SATISFIED | `memberships.role` CHECK (rejects `super_admin`, pgTAP 040); `platform_admins` + `requireSuperAdmin`; `users` has no role column |
 | ROLE-02 | 01-01, 01-04, 01-08 | Identity ≠ membership; V1 one membership per user via droppable constraint | ✓ SATISFIED | `memberships_one_tenant_per_user_v1` unique index (pgTAP 040: 23505); `signup.test.ts` #8 duplicate on another tenant → 409 |
@@ -196,7 +196,7 @@ No `scripts/*/tests/probe-*.sh` probes are declared or present in this project. 
 | AUTH-01 | 01-04 | Public sign-up link → member; link survives round-trip | ✓ SATISFIED | truths 1, 6, 22, 23 |
 | AUTH-02 | 01-02 | E-mail/password login via the Next.js server; stays logged in across restarts | ✓ SATISFIED | truths 2, 3; HttpOnly cookies set by `proxy.ts`/actions |
 | AUTH-03 | 01-05 | Recover password via e-mail link | ✓ SATISFIED (local Mailpit) | truth 4; real Resend delivery is 01.1 SC-3 |
-| AUTH-04 | 01-04 | Accept tenant rules + TRIA terms at sign-up, recorded with timestamp | ✓ SATISFIED | truth 1 (`accepted_at` DB `now()`, `text_version`); judgment-tier prohibition flagged for human review (below) |
+| AUTH-04 | 01-04 | Accept tenant rules + Rede Social terms at sign-up, recorded with timestamp | ✓ SATISFIED | truth 1 (`accepted_at` DB `now()`, `text_version`); judgment-tier prohibition flagged for human review (below) |
 | AUTH-05 | 01-02 | Log out from any page | ✓ SATISFIED | truth 5; "Sair" in the `(app)` top bar |
 | AUTH-06 | 01-01, 01-05 | JWT verified via JWKS; tenant/role/status resolved per request; blocked member cut off immediately | ✓ SATISFIED | truths 9, 28; `auth-middleware.test.ts` d/d2/e/f (expired, forged, HS256 all 401) |
 | PWA-04 | 01-09 (declared) | GitHub → Vercel + Cloud Run auto-deploy with preview/staging + production | ↪ MOVED to Phase 01.1 | REQUIREMENTS.md traceability row reads `PWA-04 \| Phase 01.1 \| Pending` (line 288) and the checkbox at line 135 is unticked — the move is reflected. Plan 01-09's pipeline-as-code share is done (truths 16-20) |
@@ -207,7 +207,7 @@ No `scripts/*/tests/probe-*.sh` probes are declared or present in this project. 
 
 | # | Plan | Requirement | Tier | Statement (abridged) | Enforcement evidence | Disposition |
 |---|---|---|---|---|---|---|
-| P1 | 01-01 | TENANT-03 | test | No tenant query via `postgres`/`service_role`/non-LOCAL switch; only `withTenantTx`/`withAdminTx` | `guard:lanes` (grep gate, OK); Biome restricts `@tria/core/db/admin-tx` + raw `@tria/core/db` for modules; `boundaries:negative`; pgTAP 030 | ✓ verified |
+| P1 | 01-01 | TENANT-03 | test | No tenant query via `postgres`/`service_role`/non-LOCAL switch; only `withTenantTx`/`withAdminTx` | `guard:lanes` (grep gate, OK); Biome restricts `@rede-social/core/db/admin-tx` + raw `@rede-social/core/db` for modules; `boundaries:negative`; pgTAP 030 | ✓ verified |
 | P2 | 01-01 | TENANT-01 | test | Host/`Host`/`X-Forwarded-Host`/cookie/path never SELECT tenant data | `bootstrap.test.ts` #9/#12; `isolation.test.ts` f/f2 | ✓ verified |
 | P3 | 01-02 | TENANT-01 | test | Web tier never trusts client `x-tenant-*`; proxy overwrites | `proxy.ts:32-43` sets all four headers on every request; `isolation.test.ts` f | ✓ verified |
 | P4 | 01-02 | AUTH-05 | test | "Sair" never signs out other devices | `logout.spec.ts`; `(app)/actions.ts` `scope: 'local'` | ✓ verified |
@@ -262,14 +262,14 @@ Three items — two are the judgment-tier prohibitions the ADR-550 protocol rout
 
 #### 1. AUTH-04 consent controls (judgment-tier prohibition, plan 01-04)
 
-**Test:** Open `http://tria-demo.localhost:3000/cadastro` on a phone-sized viewport. Inspect the two consent controls. Try submitting with each one unchecked.
-**Expected:** Two separate, visibly unchecked checkboxes (community rules of "TRIA Demo"; TRIA terms + privacy), neither pre-checked, not merged, not hidden behind a collapsed section; submission with either unchecked is refused (browser `required`; the API answers 400 `VALIDATION_FAILED` if the form is bypassed).
+**Test:** Open `http://rede-demo.localhost:3000/cadastro` on a phone-sized viewport. Inspect the two consent controls. Try submitting with each one unchecked.
+**Expected:** Two separate, visibly unchecked checkboxes (community rules of "Rede Demo"; Rede Social terms + privacy), neither pre-checked, not merged, not hidden behind a collapsed section; submission with either unchecked is refused (browser `required`; the API answers 400 `VALIDATION_FAILED` if the form is bypassed).
 **Why human:** `verification: judgment` — protocol requires explicit human resolution. Non-authoritative LLM-judge verdict: HONORED (`cadastro/[slug]/page.tsx:99-112`; `signup.spec.ts:96-97`; `signup.test.ts` #6). Flag: unverified-prohibition — human review recommended.
 
 #### 2. AUTH-06 suspension disclosure (judgment-tier prohibition, plan 01-05)
 
 **Test:** As a seeded member, log in; then `update public.memberships set status='blocked', blocked_at=now() where user_id=…` via psql; reload `/inicio`; read `/acesso-suspenso` and the raw 403 body of `GET /v1/me/bootstrap` with the same token.
-**Expected:** Screen: "Seu acesso a TRIA Demo foi suspenso. Fale com a equipe." and a link back to `/entrar` — nothing else. 403 body: `{ error: { code: 'MEMBERSHIP_BLOCKED', details: { tenantName } } }` — no reason, actor, timestamp, or hint about other tenants.
+**Expected:** Screen: "Seu acesso a Rede Demo foi suspenso. Fale com a equipe." and a link back to `/entrar` — nothing else. 403 body: `{ error: { code: 'MEMBERSHIP_BLOCKED', details: { tenantName } } }` — no reason, actor, timestamp, or hint about other tenants.
 **Why human:** `verification: judgment`. Non-authoritative LLM-judge verdict: HONORED (`acesso-suspenso/page.tsx`; `require-auth.ts:60`; `blocked.spec.ts`; `auth-middleware.test.ts` a/c/c2/h). Flag: unverified-prohibition — human review recommended.
 
 #### 3. WR-09 policy consequence — recovery e-mails on Vercel Preview
@@ -284,7 +284,7 @@ No gaps. Every roadmap Success Criterion is observably true on the local stack, 
 
 The status is `human_needed` solely because two must-NOT items are declared `verification: judgment` (the protocol requires a human to close them even though code and passing tests support both) and because the WR-09 fix carries a Preview-deployment policy choice the fixer escalated. Three items are deferred, not failed: the two-instance worker boot and the Supavisor transaction-pooler proof land with the staging stack in Phase 01.1, and bootstrap counters are Phase 7's.
 
-Known and accepted (not reported as gaps, per the orchestrator's environment notes): public `/v1/openapi.json`, placeholder legal copy, direct-port local `DATABASE_URL`, two removed turbo boundary rules (reason documented in `turbo.json`), and the throwaway `@tria/module-example`.
+Known and accepted (not reported as gaps, per the orchestrator's environment notes): public `/v1/openapi.json`, placeholder legal copy, direct-port local `DATABASE_URL`, two removed turbo boundary rules (reason documented in `turbo.json`), and the throwaway `@rede-social/module-example`.
 
 ---
 
@@ -296,8 +296,8 @@ _Verifier: Claude (gsd-verifier)_
 Four covered files changed after the full verification run (`c94df87` → `43db3cd`): `apps/web/lib/bootstrap.ts`, `apps/web/lib/platform.ts`, `apps/web/app/(app)/layout.tsx`, `apps/web/app/(app)/inicio/page.tsx`. The change moves the 401/403 → redirect mapping into `requireBootstrap()` / `requirePlatformTenants()` so concurrently rendered segments no longer surface a false `ApiClientError` render error. No API, schema, migration, policy or workflow file changed.
 
 Evidence (orchestrator, not re-running the 37-minute full gate):
-- Quick-task executor gate on the fixed tree: `pnpm --filter @tria/web typecheck` and `lint` clean; Playwright `mobile-chromium` **34/34** (covers blocked, host-mismatch, session, login, logout, signup, recovery, platform, example specs — the very flows the mapping serves); captured dev-server log: **0** `ApiClientError` / `⨯` lines vs 12 before the fix.
-- Orchestrator re-ran `pnpm --filter @tria/web typecheck` and `lint` on HEAD: both exit 0.
+- Quick-task executor gate on the fixed tree: `pnpm --filter @rede-social/web typecheck` and `lint` clean; Playwright `mobile-chromium` **34/34** (covers blocked, host-mismatch, session, login, logout, signup, recovery, platform, example specs — the very flows the mapping serves); captured dev-server log: **0** `ApiClientError` / `⨯` lines vs 12 before the fix.
+- Orchestrator re-ran `pnpm --filter @rede-social/web typecheck` and `lint` on HEAD: both exit 0.
 - Grep: the envelope-code → redirect mapping exists in exactly one place per branch (`lib/bootstrap.ts` for tenant hosts, `lib/platform.ts` for the platform host); all other occurrences are comments.
 - Success criteria 1 and 2 (login, session, recovery, logout, blocked → 403 on the next request, host mismatch) are unchanged in behaviour; the UAT recorded 3/3 pass on 2026-09-14.
 

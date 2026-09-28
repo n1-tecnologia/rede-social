@@ -1,12 +1,12 @@
 {
-  "name": "@tria/boundary-fixture",
+  "name": "@rede-social/boundary-fixture",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "MOD-02 NEGATIVE FIXTURE — a module-tagged package that breaks every boundary on purpose. It must FAIL `turbo boundaries` and Biome; `pnpm boundaries:negative` (scripts/check-boundaries.sh) asserts exactly that. `@tria/module-feed` is DECLARED here on purpose (04-10): a `module` depending on another `module` is itself forbidden by turbo.json's tag allowlist, and the import reaches a path the feed package never published in its `exports` — the truthful shape of reaching into another module's internals. It declares no lint/typecheck/build/test script, so `turbo run …` never picks it up.",
+  "description": "MOD-02 NEGATIVE FIXTURE — a module-tagged package that breaks every boundary on purpose. It must FAIL `turbo boundaries` and Biome; `pnpm boundaries:negative` (scripts/check-boundaries.sh) asserts exactly that. `@rede-social/module-feed` is DECLARED here on purpose (04-10): a `module` depending on another `module` is itself forbidden by turbo.json's tag allowlist, and the import reaches a path the feed package never published in its `exports` — the truthful shape of reaching into another module's internals. It declares no lint/typecheck/build/test script, so `turbo run …` never picks it up.",
   "dependencies": {
-    "@tria/api": "workspace:*",
-    "@tria/core": "workspace:*",
-    "@tria/module-feed": "workspace:*"
+    "@rede-social/api": "workspace:*",
+    "@rede-social/core": "workspace:*",
+    "@rede-social/module-feed": "workspace:*"
   }
 }

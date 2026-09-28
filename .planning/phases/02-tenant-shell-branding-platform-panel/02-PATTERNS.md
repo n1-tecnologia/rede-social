@@ -103,7 +103,7 @@ All analog paths below are git-tracked (`git ls-files` verified). The design pro
 | `apps/web/app/auth/confirm/route.ts` (`type=invite` expired branch) | route handler | request-response | itself lines 45-59 | exact (modify) |
 | `apps/web/app/(auth)/comunidade-indisponivel/page.tsx`, `convite-expirado/page.tsx` | page (public, static copy) | — | `apps/web/app/(auth)/acesso-suspenso/page.tsx` | exact |
 | `apps/web/app/(auth)/aceitar-convite/{page.tsx,actions.ts}` | page + server action | request-response | `(auth)/redefinir-senha/{page.tsx,actions.ts}` + `(auth)/cadastro/[slug]/{page,actions,PasswordField,RulesSheet}` | exact |
-| `apps/web/app/(auth)/{entrar,cadastro,esqueci-senha,redefinir-senha}/page.tsx` (visual port to `@tria/ui`) | page | — | themselves + prototype `app/(auth)/*/page.tsx` | exact (modify) |
+| `apps/web/app/(auth)/{entrar,cadastro,esqueci-senha,redefinir-senha}/page.tsx` (visual port to `@rede-social/ui`) | page | — | themselves + prototype `app/(auth)/*/page.tsx` | exact (modify) |
 | `apps/web/app/(app)/inicio/page.tsx` (kernel home: welcome + EmptyState + home slots) | page | request-response | itself lines 64-110 | exact (modify) |
 | `apps/web/app/(app)/configuracoes/{page.tsx,actions.ts}` (theme toggle, Sair) | page + server action | request-response | `(app)/actions.ts` (`logout`) + `(app)/inicio/page.tsx` | exact |
 | `apps/web/app/(app)/plataforma/page.tsx`, `novo/page.tsx`, `[id]/(marca\|modulos\|dominios\|admins\|status)/page.tsx`, `**/actions.ts` | page + server action (platform) | CRUD | `(app)/inicio/page.tsx` lines 35-62 (platform branch) + `(app)/inicio/example-actions.ts` (apiFetch POST + revalidatePath) | exact |
@@ -126,10 +126,10 @@ All analog paths below are git-tracked (`git ls-files` verified). The design pro
 **Imports + app construction** (`platform.ts` lines 1-35) — copy verbatim for the group; every new route chains onto `platform.openapi(...)`:
 ```ts
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
-import { apiErrorEnvelopeSchema, type PlatformTenants, platformTenantsSchema } from '@tria/contracts';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { type PlatformEnv, requireSuperAdmin } from '@tria/core/server/platform/require-super-admin';
-import { listPlatformTenants } from '@tria/core/server/platform/tenants';
+import { apiErrorEnvelopeSchema, type PlatformTenants, platformTenantsSchema } from '@rede-social/contracts';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { type PlatformEnv, requireSuperAdmin } from '@rede-social/core/server/platform/require-super-admin';
+import { listPlatformTenants } from '@rede-social/core/server/platform/tenants';
 
 const platform = new OpenAPIHono<PlatformEnv>({
   defaultHook: (result) => {
@@ -208,7 +208,7 @@ async (c) => {
 
 **Analog A — read shape:** `packages/core/server/platform/tenants.ts` lines 1-53
 ```ts
-import type { ModuleKey } from '@tria/contracts';
+import type { ModuleKey } from '@rede-social/contracts';
 import { asc, eq } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantModules, tenants } from '../../db/schema';
@@ -228,7 +228,7 @@ export async function listPlatformTenants(): Promise<PlatformTenantRow[]> {
 **Analog B — multi-step write with external call + compensation:** `packages/core/server/tenancy/signup.ts`
 - Imports (lines 1-10): `withAdminTx`, schema tables, `ApiError`, `moduleLogger`, `supabaseAdmin`.
 - Logger injection (lines 12-13, 129): `const baseLog = moduleLogger('signup'); const log = input.logger ? input.logger.child({ name: 'signup' }) : baseLog;` — routes pass `c.get('logger')`.
-- Test seam object (lines 58-88): `export const signupInternals = { async consentInsert(tx, rows) {…}, async insertMembershipAndConsents(args) { await withAdminTx(async (tx) => { /* assert public.users mirror exists */ await tx.insert(memberships).values({ tenantId, userId, role: 'member', status: 'active' }); await signupInternals.consentInsert(tx, [ {kind:'tenant_rules',…}, {kind:'tria_terms',…} ]); }); } }` — `acceptInvite` reuses **exactly** this consent-row shape with `role: 'admin_tenant'` and an `update(memberships).set({ status: 'active' })` instead of an insert.
+- Test seam object (lines 58-88): `export const signupInternals = { async consentInsert(tx, rows) {…}, async insertMembershipAndConsents(args) { await withAdminTx(async (tx) => { /* assert public.users mirror exists */ await tx.insert(memberships).values({ tenantId, userId, role: 'member', status: 'active' }); await signupInternals.consentInsert(tx, [ {kind:'tenant_rules',…}, {kind:'platform_terms',…} ]); }); } }` — `acceptInvite` reuses **exactly** this consent-row shape with `role: 'admin_tenant'` and an `update(memberships).set({ status: 'active' })` instead of an insert.
 - GoTrue admin call + error classification (lines 141-175): `supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata })`; `isDuplicateEmail(error)` matched on `code`/`status`/`message`. `sendPendingInvites` mirrors this with `supabaseAdmin.auth.admin.inviteUserByEmail(email, { redirectTo })` and the same duplicate classification for the "Reenviar" fallback (RESEARCH Open Question 2).
 - Compensation (lines 180-202): on tx failure after the external call, `supabaseAdmin.auth.admin.deleteUser(userId)` + `log.error({ event: 'signup.compensated', … })` + `throw new ApiError(500, 'INTERNAL')`. Domains: provider `addDomain` first, then the row insert; on insert failure call `provider.removeDomain` (idempotent on 404).
 
@@ -294,8 +294,8 @@ Becomes two checks, tenant first: `if (membership.tenantStatus !== 'active') thr
 
 **Analog:** `packages/modules/example/server/jobs.ts` lines 1-31 (definition as data) + `packages/core/server/jobs/boss.ts` lines 148-167 (transactional enqueue):
 ```ts
-import { moduleLogger } from '@tria/core/server/logging';
-import type { JobDefinition } from '@tria/core/server/modules/manifest';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import type { JobDefinition } from '@rede-social/core/server/modules/manifest';
 const log = moduleLogger('module-example');
 export const exampleProcessJob: JobDefinition<ExampleProcessJob> = {
   name: EXAMPLE_PROCESS_QUEUE,
@@ -401,7 +401,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (<><TopBar label={tenant.displayName} logoutLabel={t('logout')} /><main>{children}</main></>);
 }
 ```
-Keep both branches: platform host → `PlatformShell` (desktop side-nav, D-33), tenant host → `<AppShell bootstrap={bootstrap} style={brandStyleVars(bootstrap.tenant.branding)}>`. Add `generateMetadata`/`generateViewport` exports that call the same `requireBootstrap()` (React `cache` dedupes, `lib/bootstrap.ts` line 38). Root layout (`app/layout.tsx` lines 11-19): read `(await cookies()).get(THEME_COOKIE)` and render `<html lang="pt-BR" data-theme={theme}>`; wrap `NextIntlClientProvider` in `SerwistProvider`. `(auth)/layout.tsx` (lines 5-21): replace inline styles with `@tria/ui` classes and wrap in `<div style={brandStyleVars(brand.branding)}>` from `getHostBrand()`; the platform host keeps the neutral TRIA wordmark (`t('appName')`).
+Keep both branches: platform host → `PlatformShell` (desktop side-nav, D-33), tenant host → `<AppShell bootstrap={bootstrap} style={brandStyleVars(bootstrap.tenant.branding)}>`. Add `generateMetadata`/`generateViewport` exports that call the same `requireBootstrap()` (React `cache` dedupes, `lib/bootstrap.ts` line 38). Root layout (`app/layout.tsx` lines 11-19): read `(await cookies()).get(THEME_COOKIE)` and render `<html lang="pt-BR" data-theme={theme}>`; wrap `NextIntlClientProvider` in `SerwistProvider`. `(auth)/layout.tsx` (lines 5-21): replace inline styles with `@rede-social/ui` classes and wrap in `<div style={brandStyleVars(brand.branding)}>` from `getHostBrand()`; the platform host keeps the neutral platform wordmark (`t('appName')`).
 
 ---
 
@@ -504,7 +504,7 @@ export function enabledModulesForBootstrap(enabled: Set<ModuleKey>, settings: Ma
 export type ExampleWidgetProps = { items: ExampleItem[]; canCreate: boolean; createAction?: (formData: FormData) => Promise<void>; labels: { title: string; … } };
 export function ExampleWidget({ items, canCreate, createAction, labels }: ExampleWidgetProps) { … }
 ```
-`@tria/ui` components follow this: no `next-intl` inside; `aria-label`/labels as required props (`IconButton.label` required per UI-SPEC). `packages/ui/src/index.ts` exports client-safe modules only (no `@tria/contracts` import — its index pulls `legal.ts` + `node:fs`).
+`@rede-social/ui` components follow this: no `next-intl` inside; `aria-label`/labels as required props (`IconButton.label` required per UI-SPEC). `packages/ui/src/index.ts` exports client-safe modules only (no `@rede-social/contracts` import — its index pulls `legal.ts` + `node:fs`).
 
 **Package config:** `packages/ui/package.json` (lines 1-17) already has `exports: { ".": "./src/index.ts" }`; add `"./styles/tokens.css": "./src/styles/tokens.css"`, `peerDependencies: { react }`, deps `clsx`, `tailwind-merge`, `lucide-react`, `motion`; scripts `test: vitest run` like `packages/core/package.json` lines 15-19.
 
@@ -581,7 +581,7 @@ Schemas live in `packages/contracts/src/{branding,domains,invites,platform}.ts`;
 ### Strings in the pt-BR catalog
 **Source:** `apps/web/messages/pt-BR.json` (namespaces `common, login, signup, forgot, reset, suspended, hostMismatch, noCommunity, platform, app, example, legal`), `apps/web/i18n/request.ts`
 **Apply to:** every new page/component
-Add namespaces `shell`, `settings`, `home`, `invite`, `inviteExpired`, `tenantSuspended`, `offline`, `platform.{list,new,tenant,brand,modules,domains,admins,status}`; components in `@tria/ui`/`@tria/core/ui` receive strings as props (ExampleWidget rule).
+Add namespaces `shell`, `settings`, `home`, `invite`, `inviteExpired`, `tenantSuspended`, `offline`, `platform.{list,new,tenant,brand,modules,domains,admins,status}`; components in `@rede-social/ui`/`@rede-social/core/ui` receive strings as props (ExampleWidget rule).
 
 ### Seed as the fixture of record
 **Source:** `scripts/seed.ts` lines 112-170

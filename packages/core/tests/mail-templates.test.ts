@@ -1,4 +1,4 @@
-import { deriveBrandColors, NEUTRAL_BRAND } from '@tria/contracts';
+import { deriveBrandColors, NEUTRAL_BRAND } from '@rede-social/contracts';
 import { describe, expect, it } from 'vitest';
 import { renderInvite } from '../server/mail/templates/invite';
 import {
@@ -13,19 +13,19 @@ import { renderRecovery } from '../server/mail/templates/recovery';
 /**
  * The e-mail layout and the three pt-BR templates (D-38, T-02-23): every interpolation escaped, the
  * logo emitted only through an http(s) allow-list, the CTA in the PERSISTED colours, UTF-8 kept
- * verbatim (no entities for accents), the TRIA footer, and a plain-text alternative carrying the link.
+ * verbatim (no entities for accents), the Rede Social footer, and a plain-text alternative carrying the link.
  * Hermetic: nothing here imports the kernel env.
  */
 
 const demo: MailBrand = {
-  displayName: 'TRIA Demo',
-  logoUrl: 'https://tria-demo.example/seed-logos/tria-demo.svg',
+  displayName: 'Rede Demo',
+  logoUrl: 'https://rede-demo.example/seed-logos/rede-demo.svg',
   primary: '#7c3aed',
   onPrimary: '#ffffff',
 };
 
 const LINK =
-  'https://tria-demo.example/auth/confirm?next=/redefinir-senha&token_hash=abc&type=recovery';
+  'https://rede-demo.example/auth/confirm?next=/redefinir-senha&token_hash=abc&type=recovery';
 
 function layout(brand: MailBrand, cta = true) {
   return renderLayout({
@@ -75,13 +75,13 @@ describe('renderLayout', () => {
   it('renders the display name as text in an <h1> when there is no logo (D-26)', () => {
     const { html } = layout({ ...demo, logoUrl: null });
     expect(html).not.toContain('<img');
-    expect(html).toMatch(/<h1[^>]*>TRIA Demo<\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Rede Demo<\/h1>/);
   });
 
   it('renders the logo as-is through <img src alt> when there is one', () => {
     const { html } = layout(demo);
-    expect(html).toContain('<img src="https://tria-demo.example/seed-logos/tria-demo.svg"');
-    expect(html).toContain('alt="TRIA Demo"');
+    expect(html).toContain('<img src="https://rede-demo.example/seed-logos/rede-demo.svg"');
+    expect(html).toContain('alt="Rede Demo"');
   });
 
   it('drops a logo URL that is not http(s) — javascript:, data: — and never emits <img> for it', () => {
@@ -112,8 +112,8 @@ describe('renderLayout', () => {
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(html).toContain('<meta charset="utf-8">');
     expect(html).toContain('<html lang="pt-BR">');
-    expect(html).toContain('Enviado pela plataforma TRIA');
-    expect(text).toContain('Enviado pela plataforma TRIA');
+    expect(html).toContain('Enviado pela plataforma Rede Social');
+    expect(text).toContain('Enviado pela plataforma Rede Social');
     expect(text).toContain(`Abrir: ${LINK}`);
     // The href is escaped inside the attribute and repeated as visible text for copy/paste.
     expect(html).toContain(`href="${LINK.replace(/&/g, '&amp;')}"`);
@@ -124,7 +124,7 @@ describe('renderLayout', () => {
 describe('templates', () => {
   it('recovery: subject names the tenant with an em dash and the CTA carries the link', () => {
     const mail = renderRecovery({ brand: demo, link: LINK });
-    expect(mail.subject).toBe('Redefina sua senha — TRIA Demo');
+    expect(mail.subject).toBe('Redefina sua senha — Rede Demo');
     expect(mail.html).toContain('Redefina sua senha');
     expect(mail.html).toContain('Escolher nova senha');
     expect(mail.text).toContain(LINK);
@@ -132,8 +132,8 @@ describe('templates', () => {
 
   it('invite: D-29 subject and heading', () => {
     const mail = renderInvite({ brand: demo, link: LINK });
-    expect(mail.subject).toBe('Convite para administrar TRIA Demo');
-    expect(mail.html).toContain('Você foi convidado(a) a administrar TRIA Demo');
+    expect(mail.subject).toBe('Convite para administrar Rede Demo');
+    expect(mail.html).toContain('Você foi convidado(a) a administrar Rede Demo');
     expect(mail.html).toContain('Aceitar convite');
     expect(mail.text).toContain(LINK);
   });
@@ -145,7 +145,7 @@ describe('templates', () => {
       link: null,
       code: '482913',
     });
-    expect(mail.subject).toBe('Seu código de confirmação — TRIA Demo');
+    expect(mail.subject).toBe('Seu código de confirmação — Rede Demo');
     expect(mail.html).toContain('482913');
     expect(mail.html).not.toContain('<a href');
     expect(mail.text).toContain('482913');
@@ -158,17 +158,17 @@ describe('templates', () => {
       link: null,
       code: null,
     });
-    expect(mail.subject).toBe('Sua senha foi alterada — TRIA Demo');
+    expect(mail.subject).toBe('Sua senha foi alterada — Rede Demo');
     expect(mail.html).not.toContain('<a href');
     expect(mail.html).not.toContain('letter-spacing');
   });
 
   it('neutral link types carry the CTA when a link is given', () => {
     const magic = renderNeutral({ brand: demo, actionType: 'magiclink', link: LINK, code: null });
-    expect(magic.subject).toBe('Seu link de acesso — TRIA Demo');
+    expect(magic.subject).toBe('Seu link de acesso — Rede Demo');
     expect(magic.html).toContain('>Entrar</a>');
     const signup = renderNeutral({ brand: demo, actionType: 'signup', link: LINK, code: null });
-    expect(signup.subject).toBe('Confirme seu e-mail — TRIA Demo');
+    expect(signup.subject).toBe('Confirme seu e-mail — Rede Demo');
     expect(signup.html).toContain('>Confirmar e-mail</a>');
     const change = renderNeutral({
       brand: demo,
@@ -176,13 +176,13 @@ describe('templates', () => {
       link: LINK,
       code: null,
     });
-    expect(change.subject).toBe('Confirme seu novo e-mail — TRIA Demo');
+    expect(change.subject).toBe('Confirme seu novo e-mail — Rede Demo');
     expect(change.html).toContain('>Confirmar novo e-mail</a>');
   });
 
   it('neutral unknown type: generic subject', () => {
     const mail = renderNeutral({ brand: demo, actionType: 'made_up_type', link: null, code: null });
-    expect(mail.subject).toBe('Aviso da sua conta — TRIA Demo');
+    expect(mail.subject).toBe('Aviso da sua conta — Rede Demo');
   });
 
   it('every template starts with the doctype and declares utf-8', () => {
@@ -195,7 +195,7 @@ describe('templates', () => {
     for (const mail of mails) {
       expect(mail.html.startsWith('<!doctype html>')).toBe(true);
       expect(mail.html).toContain('<meta charset="utf-8">');
-      expect(mail.html).toContain('Enviado pela plataforma TRIA');
+      expect(mail.html).toContain('Enviado pela plataforma Rede Social');
     }
   });
 });

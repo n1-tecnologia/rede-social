@@ -4,7 +4,7 @@ import {
   StoriesStrip,
   type StoriesStripProps,
   type StoryStripCircle,
-} from '@tria/module-stories/ui';
+} from '@rede-social/module-stories/ui';
 import { Pencil } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadHighlightItemsAction } from '@/app/(app)/stories/highlight-actions';

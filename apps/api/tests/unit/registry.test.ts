@@ -3,8 +3,8 @@ import {
   type ModuleKey,
   REAL_TENANT_DEFAULT_MODULES,
   TOGGLEABLE_MODULES,
-} from '@tria/contracts';
-import { defineModule, type ModuleManifest } from '@tria/core/server/modules/manifest';
+} from '@rede-social/contracts';
+import { defineModule, type ModuleManifest } from '@rede-social/core/server/modules/manifest';
 import { describe, expect, it } from 'vitest';
 import {
   effectiveKeys,

@@ -1,6 +1,6 @@
 'use server';
 
-import { type MemberProfile, memberListQuerySchema } from '@tria/contracts/profiles';
+import { type MemberProfile, memberListQuerySchema } from '@rede-social/contracts/profiles';
 import { redirect } from 'next/navigation';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import { getMembers } from '@/lib/profile';

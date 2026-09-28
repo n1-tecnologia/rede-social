@@ -1,10 +1,10 @@
 /*
- * @tria/ui design tokens (UI-01, D-25, D-41).
+ * @rede-social/ui design tokens (UI-01, D-25, D-41).
  *
  * The ONLY file in the monorepo where brand or neutral hex literals may appear. Two layers:
  *
  *  1. Raw values — neutral `--theme-*` (light on the root, dark under the dark theme attribute) ported
- *     verbatim from the design prototype, plus the tenant `--brand-*` fallbacks (the neutral TRIA brand,
+ *     verbatim from the design prototype, plus the tenant `--brand-*` fallbacks (the neutral platform brand,
  *     visible only on generic hosts and the platform host). The layouts overwrite the five fixed
  *     `--brand-primary|secondary|on-primary|primary-dark|on-primary-dark` keys per tenant via
  *     `brandStyleVars` (the contracts package, `branding` subpath); everything else is derived here with color-mix.
@@ -60,7 +60,7 @@
     0 12px 32px rgba(15, 23, 42, 0.16);
   --theme-chip: rgba(22, 35, 59, 0.06);
 
-  /* neutral TRIA brand — overwritten per tenant by the layouts */
+  /* neutral platform brand — overwritten per tenant by the layouts */
   --brand-primary: #2e6fd0;
   --brand-secondary: #5b9cf8;
   --brand-on-primary: #ffffff;

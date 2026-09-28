@@ -17,13 +17,13 @@ requires:
     provides: "TopBar / BottomNav geometry mirrored in miniature; [data-brand-root] on AppShell"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 02
-    provides: "@tria/ui FileDropZone (onFile/onReject, progress, role=alert error slot), ConfirmDialog, useToast, Card/SectionTitle/Skeleton/Button; tokens.css"
+    provides: "@rede-social/ui FileDropZone (onFile/onReject, progress, role=alert error slot), ConfirmDialog, useToast, Card/SectionTitle/Skeleton/Button; tokens.css"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 01
-    provides: "@tria/contracts/branding client-safe subpath (deriveBrandColors, contrastReport, brandStyleVars, hexColorSchema, NEUTRAL_BRAND)"
+    provides: "@rede-social/contracts/branding client-safe subpath (deriveBrandColors, contrastReport, brandStyleVars, hexColorSchema, NEUTRAL_BRAND)"
 provides:
   - "Marca tab `/plataforma/tenants/{id}/marca` (stub replaced): Logo e ícone card (two FileDropZones), Cores card (ColorField x2 + kernel BrandPreview + ContrastFeedback + Salvar alterações), app-icons card with honest derivation status"
-  - "Kernel `BrandPreview` in packages/core/ui (exported from @tria/core/ui): two [data-brand-scope][data-theme=light|dark] 200x140 inert mini-shells with inline brandStyleVars, strings as props, readout slot — reused by NewTenantForm and ready for Phase 8"
+  - "Kernel `BrandPreview` in packages/core/ui (exported from @rede-social/core/ui): two [data-brand-scope][data-theme=light|dark] 200x140 inert mini-shells with inline brandStyleVars, strings as props, readout slot — reused by NewTenantForm and ready for Phase 8"
   - "tokens.css Layer 1b: derived brand aliases declared on :root, [data-brand-root], [data-brand-scope] and [style*=\"--brand-primary\"] (light + dark descendants + light-in-dark override); light neutrals also on [data-theme=\"light\"]"
   - "apps/web/lib/branding-view (BrandingView, toBrandingView) and apps/web/lib/upload (BRANDING_UPLOAD_ACCEPT, resolveMime, classifyFile, uploadToSignedUrl — XHR PUT with progress, no auth header)"
   - "Server actions marca/actions.ts: startBrandingUploadAction, completeBrandingUploadAction, saveBrandColorsAction, removeIconOverrideAction, getBrandingStatusAction (Zod-first, typed results, revalidatePath layout, 401/403 redirect outside try)"
@@ -97,7 +97,7 @@ coverage:
         ref: "apps/web/e2e/platform-branding.spec.ts#1. preview follows the form; low contrast warns; confirmation saves; the tenant host reflects the new primary (mobile-chromium + desktop-chromium)"
         status: pass
       - kind: unit
-        ref: "packages/core/tests/brand-preview.test.tsx (5 cases: two scopes light→dark, inline --brand-primary/--brand-primary-dark, name fallback, two <img> per frame with a logo, no TRIA, no neutral hex, children once)"
+        ref: "packages/core/tests/brand-preview.test.tsx (5 cases: two scopes light→dark, inline --brand-primary/--brand-primary-dark, name fallback, two <img> per frame with a logo, no Rede Social, no neutral hex, children once)"
         status: pass
       - kind: unit
         ref: "packages/ui/tests/tokens.test.ts (scoped alias declarations light/dark/light-in-dark, :root fallbacks intact)"
@@ -146,7 +146,7 @@ coverage:
     requirement: "UI-04"
     verification:
       - kind: other
-        ref: "bash scripts/check-ui-literals.sh (OK); pnpm lint (7/7); pnpm typecheck (8/8); pnpm build (/plataforma/tenants/[id]/marca ƒ); pnpm --filter @tria/web test (56); @tria/core (116); @tria/ui (34); playwright platform-tenants.spec.ts desktop (6 passed, 1 phone-only skip)"
+        ref: "bash scripts/check-ui-literals.sh (OK); pnpm lint (7/7); pnpm typecheck (8/8); pnpm build (/plataforma/tenants/[id]/marca ƒ); pnpm --filter @rede-social/web test (56); @rede-social/core (116); @rede-social/ui (34); playwright platform-tenants.spec.ts desktop (6 passed, 1 phone-only skip)"
         status: pass
     human_judgment: false
   - id: D7
@@ -175,7 +175,7 @@ status: complete
 
 ## Accomplishments
 
-- **Kernel `BrandPreview`** (`packages/core/ui`, exported from `@tria/core/ui`): two 200×140 `[data-brand-scope][data-theme=light|dark]` frames with `brandStyleVars(deriveBrandColors(colors))` inline, an inert mini TopBar (logo or display name + bell + avatar dot), a real `Button variant="brand"` "Entrar" and a glass-bar mini BottomNav; every string a prop, `role="img"` + aria labels, readout slot. Mounted in `NewTenantForm` by default (the `renderPreview` override stays) and in the Marca tab.
+- **Kernel `BrandPreview`** (`packages/core/ui`, exported from `@rede-social/core/ui`): two 200×140 `[data-brand-scope][data-theme=light|dark]` frames with `brandStyleVars(deriveBrandColors(colors))` inline, an inert mini TopBar (logo or display name + bell + avatar dot), a real `Button variant="brand"` "Entrar" and a glass-bar mini BottomNav; every string a prop, `role="img"` + aria labels, readout slot. Mounted in `NewTenantForm` by default (the `renderPreview` override stays) and in the Marca tab.
 - **Brand aliases follow the nearest scope** (`tokens.css` Layer 1b): `--brand-accent`/`--brand-on-accent`/`--brand-primary-hover`/`--brand-primary-soft`/`--brand-gradient` declared on `:root, [data-brand-root], [data-brand-scope], [style*="--brand-primary"]`, the dark pair on `[data-theme="dark"]` and on those scopes under/carrying dark, and a last `[data-brand-scope][data-theme="light"]` override; light neutrals also on `[data-theme="light"]`. Proven by computed style: the light frame's CTA renders `rgb(124, 58, 237)` for `#7c3aed`, the dark frame differs.
 - **Marca tab** replacing the 02-12 stub: `requirePlatformTenantDetail(id)` first → `toBrandingView` → key-remounted `BrandingForm` with the assets card (`LogoUpload`, `IconOverrideUpload`), the Cores card (ColorFields, preview, `ContrastFeedback`, "Salvar alterações" disabled until dirty + valid + confirmed when low) and `DerivedIcons`; `loading.tsx` skeletons shaped like the three cards.
 - **Five server actions** (`marca/actions.ts`) validating with the contracts Zod before any request, returning typed results, revalidating the tenant layout after mutations and routing 401/403 through `platformRedirectPath` outside the try; `saveBrandColorsAction` surfaces the API's `confirmLowContrast: 'required'` report and never retries with the flag on its own.
@@ -196,14 +196,14 @@ status: complete
 
 | Gate | Command | Result |
 |------|---------|--------|
-| RED | `pnpm --filter @tria/web exec vitest run lib/upload.test.ts` | exit 1 — `Cannot find module './upload'` (the helper did not exist; 6 tests could not run) — committed `d766f97` |
+| RED | `pnpm --filter @rede-social/web exec vitest run lib/upload.test.ts` | exit 1 — `Cannot find module './upload'` (the helper did not exist; 6 tests could not run) — committed `d766f97` |
 | GREEN | same | 6/6 passed — committed `ac34040` with the implementation |
 | REFACTOR | — | not needed (no separate commit) |
 
 ## Verification (plan-level)
 
-- `pnpm --filter @tria/ui test` → 34 passed (tokens contract re-pinned); `pnpm --filter @tria/core test` → 116 passed (111 + 5 brand-preview); `pnpm --filter @tria/web test` → 56 passed (46 + 4 branding-view + 6 upload).
-- `pnpm --filter @tria/core typecheck && lint`, `pnpm --filter @tria/web typecheck && lint`, `bash scripts/check-ui-literals.sh` → green; root `pnpm lint` (7/7 + literals), `pnpm typecheck` (8/8), `pnpm build` (`/plataforma/tenants/[id]/marca` builds as ƒ dynamic).
+- `pnpm --filter @rede-social/ui test` → 34 passed (tokens contract re-pinned); `pnpm --filter @rede-social/core test` → 116 passed (111 + 5 brand-preview); `pnpm --filter @rede-social/web test` → 56 passed (46 + 4 branding-view + 6 upload).
+- `pnpm --filter @rede-social/core typecheck && lint`, `pnpm --filter @rede-social/web typecheck && lint`, `bash scripts/check-ui-literals.sh` → green; root `pnpm lint` (7/7 + literals), `pnpm typecheck` (8/8), `pnpm build` (`/plataforma/tenants/[id]/marca` builds as ƒ dynamic).
 - `pnpm exec playwright test platform-branding.spec.ts` (apps/web) → 8 passed, 2 skipped (phone-only on desktop) across `mobile-chromium` + `desktop-chromium`; the spec spawned and stopped its own worker (port 8790 free afterwards).
 - `pnpm exec playwright test platform-tenants.spec.ts --project=desktop-chromium` → 6 passed, 1 phone-only skip (the modified `NewTenantForm` did not break the 02-12 create flow; its test 1 now lands on the real Marca tab).
 - Every task's acceptance-criteria greps re-run and passing (the `--brand-primary` grep in the core test only failed on the shell tool's option parsing; the string is present).
@@ -237,7 +237,7 @@ status: complete
 - **Issue:** 02-02's test asserted the derived aliases inside the FIRST `:root` block and the dark accent pair inside the FIRST `[data-theme="dark"]` block; the plan moves both into scoped blocks, so the test contract changes with the plan (the orchestrator's note allowed this when documented).
 - **Fix:** The `:root` case now pins the five raw fallbacks + the light neutrals + the `[data-theme="light"]` selector; a new case pins the scoped light block, the dark descendant block (`var(--theme-bg) 80%`), the light-in-dark override and their source order; the dark case pins the neutrals only.
 - **Files modified:** `packages/ui/tests/tokens.test.ts`
-- **Verification:** `pnpm --filter @tria/ui test` 34/34, `lint` clean.
+- **Verification:** `pnpm --filter @rede-social/ui test` 34/34, `lint` clean.
 - **Committed in:** `0d1c27d`
 
 **2. [Rule 1 - Bug] e2e file pick lost before hydration**
@@ -251,7 +251,7 @@ status: complete
 ### Design adjustments (documented, not deviations from intent)
 
 - Test 3's "zone back to idle" is asserted on the hidden file input being enabled and no `progressbar` (the `FileDropZone` primitive has no button — its caption label triggers the input).
-- `apps/web/e2e/worker.ts` spawns the root tsx binary directly instead of `pnpm --filter @tria/api exec tsx` (signal delivery; same entry and env-file).
+- `apps/web/e2e/worker.ts` spawns the root tsx binary directly instead of `pnpm --filter @rede-social/api exec tsx` (signal delivery; same entry and env-file).
 - `BrandingForm` exposes `previewLabels` + `actions` props instead of the plan's full `labels` object (ICU strings with arguments cannot cross the server→client boundary; 02-12 pattern).
 - The poll bound is expressed as `pollExhausted(attempts) = attempts >= 20` with `POLL_MS = 3000`.
 
@@ -275,18 +275,18 @@ None beyond the plan's register: no new endpoint or schema; uploads go browser �
 
 ## Human verification (end-of-phase, `human_verify_mode: end-of-phase`)
 
-Compare with `.planning/sketches/001-phase-02-designed-screens/index.html`, signed in as the seeded super_admin on `http://tria.localhost:3000` with the API and a worker running (`ROLE=worker PORT=8790 pnpm --filter @tria/api dev`, or let the branding spec spawn one):
+Compare with `.planning/sketches/001-phase-02-designed-screens/index.html`, signed in as the seeded super_admin on `http://rede-social.localhost:3000` with the API and a worker running (`ROLE=worker PORT=8790 pnpm --filter @rede-social/api dev`, or let the branding spec spawn one):
 
 1. `/plataforma/novo` (`#new-tenant`): the BrandPreview card sits between the colour fields and the contrast pills — two mini-shells "Claro"/"Escuro" (200×140) showing the typed display name (placeholder "Nome da comunidade" while empty), the bell and avatar dot in the mini TopBar, the "Entrar" CTA in the typed primary (light) and the lighter derived primary (dark), the glass pill with the active chip. Type `#f5f7fb` as primary to see "Baixo" pills + the warning + "Salvar mesmo assim".
 2. `/plataforma/tenants/{id}/marca` (`#tenant-page-marca`): "Logo e ícone" card with the two zones side by side (stacked on a phone) — the current logo `h-16` on the neutral ground, "Substituir logo" / "Enviar logo", the square-icon zone with the helper copy and, once set, the 64×64 rounded preview + "Remover"; "Cores" card with the two swatch fields, the preview and the pills; "Salvar alterações" disabled until a colour changes.
 3. Upload a PNG logo: the 4 px brand bar and "{n}% enviado", then "Gerando ícones…", then the toast "Alterações salvas."; the app-icons card shows "Ícones sendo gerados…" (spinner) until the worker runs, then "Ícones gerados", the four thumbs (favicon 16 in a 40×40 box, 192, 512, maskable on the primary), "Versão n" and "Gerados a partir do logo". Without a worker the card says after ~60 s "Os ícones ainda estão sendo gerados. Atualize a página em alguns instantes." instead of spinning forever.
-4. Dark theme (`tria_theme=dark` cookie): the light mini-shell keeps its light ground and light-mode CTA colour inside the dark page (the light-in-dark override), the dark one uses the derived dark primary.
+4. Dark theme (`rede_theme=dark` cookie): the light mini-shell keeps its light ground and light-mode CTA colour inside the dark page (the light-in-dark override), the dark one uses the derived dark primary.
 5. Pick a `.gif` and a > 2 MB file: the zone shows the pt-BR message under it and the network tab shows no `/branding/uploads` call.
 
 ## Next Phase Readiness
 
 - **02-16 (wave 7 smoke):** reuse `apps/web/e2e/worker.ts` (`ensureWorker()`); assert rendered `bg-brand` colour on tenant hosts (the alias fix applies to `[data-brand-root]` and the auth `<main>` too); `/plataforma/tenants/[id]/marca` builds as ƒ dynamic; after a rebrand the manifest/favicon per host follow by-host (02-11 route unchanged).
-- **Phase 8 (ADMIN-01):** import `BrandPreview` from `@tria/core/ui` unchanged; copy the `useSignedUpload` flow against the tenant-scoped mounts; mount inside `[data-brand-root]` — nested `[data-brand-scope]` frames render correctly.
+- **Phase 8 (ADMIN-01):** import `BrandPreview` from `@rede-social/core/ui` unchanged; copy the `useSignedUpload` flow against the tenant-scoped mounts; mount inside `[data-brand-root]` — nested `[data-brand-scope]` frames render correctly.
 - **Phase 3 (media):** add the TUS branch behind `uploadToSignedUrl(signedUrl, file, { mime, onProgress, signal })` for the private bucket.
 - No blockers. No package installed (lockfile untouched). No process left running (ports 3000/8790 free; the pre-existing API dev server on 8787 was reused).
 

@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Tenant brand contract (TENANT-02, D-25/D-26/D-28/D-41).
  *
  * Pure module — no node imports — so client components may import it through
- * `@tria/contracts/branding` without pulling `legal.ts` (`node:fs`) into the bundle.
+ * `@rede-social/contracts/branding` without pulling `legal.ts` (`node:fs`) into the bundle.
  *
  * A brand is primary + secondary color + logo + display name (D-25). Everything else is derived:
  * `onPrimary` (white or navy by contrast), `primaryDark` (the D-41 dark-surface variant) and
@@ -82,7 +82,7 @@ export type ResolvedBranding = {
   colors: BrandColors;
 };
 
-/** TRIA's neutral fallback — visible only on generic hosts and on tenants with no brand yet. */
+/** the platform's neutral fallback — visible only on generic hosts and on tenants with no brand yet. */
 export const NEUTRAL_BRAND = { primary: '#2e6fd0', secondary: '#5b9cf8' } as const;
 /** Neutral surfaces the contrast report checks against (prototype light/dark `--theme-bg`). */
 export const LIGHT_BG = '#f5f7fb';
@@ -91,7 +91,7 @@ export const DARK_BG = '#0f1118';
 export const NAVY = '#16233b';
 export const WHITE = '#ffffff';
 /** Per-device theme preference cookie (D-41), readable by the server for the first HTML. */
-export const THEME_COOKIE = 'tria_theme';
+export const THEME_COOKIE = 'rede_theme';
 
 /** D-41: how far `primary` is mixed towards white for the dark-surface variant (RESEARCH A11). */
 const PRIMARY_DARK_MIX = 0.3;
@@ -199,7 +199,7 @@ export function contrastReport(
 /**
  * `tenants.branding` (any shape the jsonb may hold, `{}` included) → a complete brand. Missing
  * derivations are recomputed from the two source colors; a missing source color falls back to the
- * neutral TRIA brand. Throws on a MALFORMED value (a bad hex): silently substituting the neutral
+ * neutral platform brand. Throws on a MALFORMED value (a bad hex): silently substituting the neutral
  * brand for a configured tenant is the one thing the prohibition forbids, so a corrupt row must be
  * loud, not blue. The panel validates with the same schema before saving, so this only fires on
  * hand-edited data.
@@ -276,7 +276,7 @@ export function absoluteBrandUrl(url: string | null | undefined, origin: string)
 // The platform's brand mutations: `POST …/branding/uploads` (a signed Storage URL for the browser),
 // `POST …/branding/uploads/{uploadId}/complete`, `PUT …/branding/colors` and
 // `DELETE …/branding/icon`. Pure like the rest of this file — the panel imports it through
-// `@tria/contracts/branding` for its client-side size/mime pre-checks.
+// `@rede-social/contracts/branding` for its client-side size/mime pre-checks.
 
 /** D-27: the four accepted logo/icon formats. Storage enforces the same allow-list at PUT time. */
 export const BRANDING_UPLOAD_MIMES = [

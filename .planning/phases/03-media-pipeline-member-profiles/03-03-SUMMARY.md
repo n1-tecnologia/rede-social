@@ -18,7 +18,7 @@ provides:
   - "one indistinguishable `404 NOT_FOUND` for unknown / other-tenant / invited / blocked / soft-deleted, with no details payload and no tenant name (D-23)"
   - "`packages/core/server/profiles/search.ts` — the TOTAL pure module: `normaliseQuery`, `likeEscape`, `encodeCursor`, `decodeCursor`"
   - "the keyset pagination convention Phase 4's feed inherits: opaque base64url `{ v, n, id }`, order by the expression the index is built on, over-fetch `limit + 1`, clamp `limit` server-side"
-  - "`@tria/contracts/profiles` gains `MEMBERS_PAGE_SIZE` (25), `MEMBERS_MAX_PAGE_SIZE` (50), `MEMBERS_MAX_QUERY_LENGTH` (80), `memberListQuerySchema`, `memberListSchema`"
+  - "`@rede-social/contracts/profiles` gains `MEMBERS_PAGE_SIZE` (25), `MEMBERS_MAX_PAGE_SIZE` (50), `MEMBERS_MAX_QUERY_LENGTH` (80), `memberListQuerySchema`, `memberListSchema`"
 affects: [03-05, phase-04-feed, phase-07-chat, phase-08-member-management]
 
 actuals:
@@ -204,7 +204,7 @@ coverage:
         ref: "apps/api/tests/integration/members.test.ts#26. TENANT-05 adjacency: `Ana Paula Ferreira` exists in BOTH communities and only ids tell them apart"
         status: pass
       - kind: other
-        ref: "grep -rn 'admin-tx|supabase-admin' packages/core/server/profiles/ is empty; pnpm --filter @tria/core lint green"
+        ref: "grep -rn 'admin-tx|supabase-admin' packages/core/server/profiles/ is empty; pnpm --filter @rede-social/core lint green"
         status: pass
     human_judgment: false
   - id: D12
@@ -295,12 +295,12 @@ Each task was committed atomically:
 - **Issue:** The D-47 comment written inside the drizzle `sql` tagged template used backticks around the word `and` (markdown habit). A backtick inside a template literal terminates it — `tsc` reported `TS1005: ',' expected` at the line, with no hint that the cause was a comment.
 - **Fix:** Plain quotes inside SQL comments. Recorded here because the same shape will recur every time a decision citation is written inside a `sql` template.
 - **Files modified:** packages/core/server/profiles/service.ts
-- **Verification:** `pnpm --filter @tria/core typecheck` green
+- **Verification:** `pnpm --filter @rede-social/core typecheck` green
 - **Committed in:** `c26bb8f`
 
 **2. [Rule 1 - Bug] A cross-tenant assertion rested on a name that is not unique**
 - **Found during:** Task 2 (the cross-tenant describe)
-- **Issue:** The first version of case 26 asserted that tria-demo's search for `Ana Paula Ferreira` returns zero items, on the assumption that the name existed only in the throwaway tenant. It does not: `Ana Paula Ferreira` is one of 03-02's seeded tria-demo members, so the case failed with one row. Had the assertion been written the other way round (expecting one row) it would have passed while proving nothing.
+- **Issue:** The first version of case 26 asserted that rede-demo's search for `Ana Paula Ferreira` returns zero items, on the assumption that the name existed only in the throwaway tenant. It does not: `Ana Paula Ferreira` is one of 03-02's seeded rede-demo members, so the case failed with one row. Had the assertion been written the other way round (expecting one row) it would have passed while proving nothing.
 - **Fix:** Turned the collision into the point. The case now asserts that the SAME display name exists in both communities and that each side sees only its own rows by id — TENANT-05's adjacency rule (`both tenants get items with the SAME title … every assertion compares IDS, never contents`) applied to the directory. A leak that matched on a value rather than on `tenant_id` can no longer pass by looking plausible.
 - **Files modified:** apps/api/tests/integration/members.test.ts
 - **Verification:** `apps/api/tests/integration/members.test.ts#26` passes and now fails for the right reason if the tenant predicate is removed
@@ -323,12 +323,12 @@ Re-measured on resume, against the live local stack:
 
 | Gate | Result |
 |---|---|
-| `pnpm --filter @tria/core exec vitest run tests/profiles-search.test.ts` | 1 file, **17 passed**, 100 ms |
-| `pnpm --filter @tria/core test -- profiles-search` (whole unit suite) | 19 files, **168 passed** |
-| `pnpm --filter @tria/api exec vitest run tests/integration/members.test.ts` | 1 file, **27 passed**, 2.2 s |
+| `pnpm --filter @rede-social/core exec vitest run tests/profiles-search.test.ts` | 1 file, **17 passed**, 100 ms |
+| `pnpm --filter @rede-social/core test -- profiles-search` (whole unit suite) | 19 files, **168 passed** |
+| `pnpm --filter @rede-social/api exec vitest run tests/integration/members.test.ts` | 1 file, **27 passed**, 2.2 s |
 | `pnpm test:integration -- members profile bootstrap` (whole suite) | 19 files, **260 passed**, 32.7 s |
-| `pnpm --filter @tria/core typecheck` / `lint` | green |
-| `pnpm --filter @tria/api typecheck` / `lint` | green |
+| `pnpm --filter @rede-social/core typecheck` / `lint` | green |
+| `pnpm --filter @rede-social/api typecheck` / `lint` | green |
 | `pnpm lint`, `pnpm typecheck`, `pnpm test` (repo-wide) | green |
 | `pnpm boundaries`, `pnpm boundaries:negative`, `pnpm guard:lanes` | green |
 | `grep -rn 'admin-tx\|supabase-admin' packages/core/server/profiles/` | empty |

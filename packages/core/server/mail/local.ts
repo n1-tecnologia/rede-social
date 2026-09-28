@@ -19,8 +19,8 @@ export const localTransport: MailTransport = {
       Text: message.text,
       HTML: message.html,
       Headers: {
-        'X-Tria-Action': message.meta.actionType,
-        'X-Tria-Idempotency-Key': message.idempotencyKey ?? '',
+        'X-Rede-Action': message.meta.actionType,
+        'X-Rede-Idempotency-Key': message.idempotencyKey ?? '',
       },
     };
     let response: Response;

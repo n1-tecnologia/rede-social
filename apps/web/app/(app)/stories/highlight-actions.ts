@@ -4,7 +4,7 @@ import {
   createStoryHighlightSchema,
   reorderHighlightsSchema,
   updateHighlightSchema,
-} from '@tria/module-stories/contracts';
+} from '@rede-social/module-stories/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

@@ -1,4 +1,4 @@
-import { PageHeader } from '@tria/ui';
+import { PageHeader } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { loadOwnProfile } from '@/lib/profile';

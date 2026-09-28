@@ -1,4 +1,4 @@
-import { EmptyState } from '@tria/ui';
+import { EmptyState } from '@rede-social/ui';
 import { UserX } from 'lucide-react';
 import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';

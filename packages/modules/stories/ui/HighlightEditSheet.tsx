@@ -1,6 +1,6 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
+import { MediaImage } from '@rede-social/core/ui';
 import {
   BottomSheet,
   Button,
@@ -10,7 +10,7 @@ import {
   Input,
   Skeleton,
   StatusPill,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import {
   Bookmark,
   Check,

@@ -1,6 +1,6 @@
-import { TRIA_TERMS_VERSION } from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
-import { signupInternals } from '@tria/core/server/tenancy/signup';
+import { PLATFORM_TERMS_VERSION } from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import { signupInternals } from '@rede-social/core/server/tenancy/signup';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api } from './setup';
 
@@ -33,7 +33,7 @@ function body(overrides: Record<string, unknown> = {}, rulesVersion = demoRulesV
     name: 'Maria Teste',
     email: uniqueEmail('happy'),
     password: 'Segredo123',
-    consents: { tenantRulesVersion: rulesVersion, triaTermsVersion: TRIA_TERMS_VERSION },
+    consents: { tenantRulesVersion: rulesVersion, platformTermsVersion: PLATFORM_TERMS_VERSION },
     ...overrides,
   };
 }
@@ -67,9 +67,9 @@ const consentsOf = (userId: string) =>
 
 beforeAll(async () => {
   const [demo] = await adminSql<{ rules_version: number }[]>`
-    select rules_version from public.tenants where slug = 'tria-demo'`;
+    select rules_version from public.tenants where slug = 'rede-demo'`;
   const [lab] = await adminSql<{ rules_version: number }[]>`
-    select rules_version from public.tenants where slug = 'tria-lab'`;
+    select rules_version from public.tenants where slug = 'rede-lab'`;
   demoRulesVersion = demo?.rules_version ?? 1;
   labRulesVersion = lab?.rules_version ?? 1;
 
@@ -93,12 +93,12 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
   it('1. happy path: 201, member of the tenant, two timestamped consent rows', async () => {
     const payload = body();
     const before = Date.now();
-    const res = await signup('tria-demo', payload);
+    const res = await signup('rede-demo', payload);
     expect(res.status).toBe(201);
     expect(res.headers.get('cache-control')).toBe('no-store');
 
     const created = (await res.json()) as Created;
-    expect(created.tenantSlug).toBe('tria-demo');
+    expect(created.tenantSlug).toBe('rede-demo');
     expect(created.userId).toMatch(/^[0-9a-f-]{36}$/);
 
     const rows = await membershipsOf(created.userId);
@@ -107,9 +107,9 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     expect(rows[0]?.status).toBe('active');
 
     const consents = await consentsOf(created.userId);
-    expect(consents.map((c) => c.kind)).toEqual(['tenant_rules', 'tria_terms']);
+    expect(consents.map((c) => c.kind)).toEqual(['tenant_rules', 'platform_terms']);
     expect(consents[0]?.text_version).toBe(demoRulesVersion);
-    expect(consents[1]?.text_version).toBe(TRIA_TERMS_VERSION);
+    expect(consents[1]?.text_version).toBe(PLATFORM_TERMS_VERSION);
     for (const consent of consents) {
       expect(consent.accepted_at).toBeInstanceOf(Date);
       // The DB clock inside the transaction, never a client timestamp.
@@ -120,7 +120,7 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
   });
 
   it('2. GET /v1/public/tenants/{slug} publishes name, rules and both versions (by-host still wins)', async () => {
-    const res = await api.request('/v1/public/tenants/tria-demo');
+    const res = await api.request('/v1/public/tenants/rede-demo');
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const tenant = (await res.json()) as {
@@ -130,23 +130,23 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
       rulesVersion: number;
       termsVersion: number;
     };
-    expect(tenant.slug).toBe('tria-demo');
-    expect(tenant.displayName).toBe('TRIA Demo');
+    expect(tenant.slug).toBe('rede-demo');
+    expect(tenant.displayName).toBe('Rede Demo');
     expect(tenant.rulesText.length).toBeGreaterThan(0);
-    expect(tenant.termsVersion).toBe(TRIA_TERMS_VERSION);
+    expect(tenant.termsVersion).toBe(PLATFORM_TERMS_VERSION);
 
     // Registration order: the literal path must not be swallowed by `/tenants/{slug}`.
-    const byHost = await api.request('/v1/public/tenants/by-host?host=tria-demo.localhost');
+    const byHost = await api.request('/v1/public/tenants/by-host?host=rede-demo.localhost');
     expect(byHost.status).toBe(200);
-    expect(await byHost.json()).toMatchObject({ slug: 'tria-demo', displayName: 'TRIA Demo' });
+    expect(await byHost.json()).toMatchObject({ slug: 'rede-demo', displayName: 'Rede Demo' });
   });
 
   it('3. boundary: a 7-character password is 400, exactly 8 is 201', async () => {
-    const short = await signup('tria-demo', body({ password: '1234567' }));
+    const short = await signup('rede-demo', body({ password: '1234567' }));
     expect(short.status).toBe(400);
     expect(((await short.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
 
-    const exact = await signup('tria-demo', body({ password: '12345678' }));
+    const exact = await signup('rede-demo', body({ password: '12345678' }));
     expect(exact.status).toBe(201);
   });
 
@@ -165,10 +165,10 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     }
   });
 
-  it('5. adjacency: `Tria-Demo` is a miss, not an alias of `tria-demo`', async () => {
-    const get = await api.request('/v1/public/tenants/Tria-Demo');
+  it('5. adjacency: `Rede-Demo` is a miss, not an alias of `rede-demo`', async () => {
+    const get = await api.request('/v1/public/tenants/Rede-Demo');
     expect(get.status).toBe(404);
-    const post = await signup('Tria-Demo', body());
+    const post = await signup('Rede-Demo', body());
     expect(post.status).toBe(404);
     expect(((await post.json()) as Envelope).error.code).toBe('TENANT_NOT_FOUND');
   });
@@ -182,7 +182,7 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     for (const [label, overrides] of cases) {
       const payload = body(overrides);
       if (overrides.consents === undefined) delete (payload as Record<string, unknown>).consents;
-      const res = await signup('tria-demo', payload);
+      const res = await signup('rede-demo', payload);
       expect(res.status, label).toBe(400);
       const envelope = (await res.json()) as Envelope;
       expect(envelope.error.code, label).toBe('VALIDATION_FAILED');
@@ -190,15 +190,15 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     }
 
     const staleRules = await signup(
-      'tria-demo',
-      body({ consents: { tenantRulesVersion: 99, triaTermsVersion: TRIA_TERMS_VERSION } }),
+      'rede-demo',
+      body({ consents: { tenantRulesVersion: 99, platformTermsVersion: PLATFORM_TERMS_VERSION } }),
     );
     expect(staleRules.status).toBe(400);
     expect(((await staleRules.json()) as Envelope).error.details).toEqual({ consents: 'stale' });
 
     const staleTerms = await signup(
-      'tria-demo',
-      body({ consents: { tenantRulesVersion: demoRulesVersion, triaTermsVersion: 99 } }),
+      'rede-demo',
+      body({ consents: { tenantRulesVersion: demoRulesVersion, platformTermsVersion: 99 } }),
     );
     expect(staleTerms.status).toBe(400);
     expect(((await staleTerms.json()) as Envelope).error.details).toEqual({ consents: 'stale' });
@@ -206,11 +206,11 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
 
   it('7. idempotency: the same sign-up twice is 201 then 409, with one membership and two consents', async () => {
     const payload = body();
-    const first = await signup('tria-demo', payload);
+    const first = await signup('rede-demo', payload);
     expect(first.status).toBe(201);
     const { userId } = (await first.json()) as Created;
 
-    const second = await signup('tria-demo', payload);
+    const second = await signup('rede-demo', payload);
     expect(second.status).toBe(409);
     expect(((await second.json()) as Envelope).error.code).toBe('EMAIL_ALREADY_REGISTERED');
 
@@ -220,16 +220,19 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
 
   it('8. ROLE-02 + T-04-01: a duplicate on another tenant is 409 and never names the first tenant', async () => {
     const payload = body();
-    expect((await signup('tria-demo', payload)).status).toBe(201);
+    expect((await signup('rede-demo', payload)).status).toBe(201);
 
-    const cross = await signup('tria-lab', {
+    const cross = await signup('rede-lab', {
       ...payload,
-      consents: { tenantRulesVersion: labRulesVersion, triaTermsVersion: TRIA_TERMS_VERSION },
+      consents: {
+        tenantRulesVersion: labRulesVersion,
+        platformTermsVersion: PLATFORM_TERMS_VERSION,
+      },
     });
     expect(cross.status).toBe(409);
     const raw = await cross.text();
-    expect(raw).not.toContain('tria-demo');
-    expect(raw).not.toContain('TRIA Demo');
+    expect(raw).not.toContain('rede-demo');
+    expect(raw).not.toContain('Rede Demo');
     expect((JSON.parse(raw) as Envelope).error.details).toBeUndefined();
     expect((JSON.parse(raw) as Envelope).error.message).toBe(
       'Este e-mail já está cadastrado. Entre com sua senha.',
@@ -247,7 +250,7 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
       throw new Error('forced consent insert failure');
     };
     try {
-      const res = await signup('tria-demo', payload);
+      const res = await signup('rede-demo', payload);
       expect(res.status).toBe(500);
       expect(((await res.json()) as Envelope).error.code).toBe('INTERNAL');
     } finally {
@@ -263,7 +266,7 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
   it('10. concurrency: five identical sign-ups yield exactly one 201 and one membership', async () => {
     const payload = body();
     const results = await Promise.all(
-      Array.from({ length: 5 }, () => signup('tria-demo', payload)),
+      Array.from({ length: 5 }, () => signup('rede-demo', payload)),
     );
     const statuses = results.map((r) => r.status);
     expect(statuses.filter((s) => s === 201)).toHaveLength(1);

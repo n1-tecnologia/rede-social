@@ -1,8 +1,8 @@
 'use client';
 
-import type { EventPeriod } from '@tria/module-events/contracts';
-import { EventPoster } from '@tria/module-events/ui';
-import { Button, EmptyState, InfiniteScroll, PullToRefresh, Skeleton } from '@tria/ui';
+import type { EventPeriod } from '@rede-social/module-events/contracts';
+import { EventPoster } from '@rede-social/module-events/ui';
+import { Button, EmptyState, InfiniteScroll, PullToRefresh, Skeleton } from '@rede-social/ui';
 import { CalendarDays, History, Plus, TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';

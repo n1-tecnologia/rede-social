@@ -1,5 +1,5 @@
-import { PURPOSE_WIDTHS } from '@tria/contracts/media';
-import { Avatar } from '@tria/ui';
+import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
+import { Avatar } from '@rede-social/ui';
 import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { MediaImage } from '@/components/media/MediaImage';

@@ -8,7 +8,7 @@ import { emit, flush, flushEventsAfterHandler, subscribe } from '../server/event
  * way a module does. This also proves the augmentation mechanism itself: without this block the
  * `emit` calls below would not typecheck.
  */
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'test.one': { value: number };
     'test.two': { value: number };

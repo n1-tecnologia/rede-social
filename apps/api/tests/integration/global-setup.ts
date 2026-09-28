@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
  * interfaces (the auth container reaches the host through `host.docker.internal`, which on Linux
  * runners arrives from the docker bridge, not loopback).
  *
- * When something already listens on 8787 (`pnpm --filter @tria/api dev`, the Playwright web server)
+ * When something already listens on 8787 (`pnpm --filter @rede-social/api dev`, the Playwright web server)
  * that instance is reused: it reads the same `.env.local`, so it answers the hook identically.
  *
  * Vitest runs this file in the main process, where `test.env` is not applied — the env file is
@@ -41,7 +41,7 @@ export async function setup(): Promise<void> {
     started.once('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
         console.info(
-          `[integration] reusing the API already listening on ${PORT} (pnpm --filter @tria/api dev)`,
+          `[integration] reusing the API already listening on ${PORT} (pnpm --filter @rede-social/api dev)`,
         );
         resolve();
         return;
@@ -59,6 +59,6 @@ export async function teardown(): Promise<void> {
     await new Promise<void>((resolve) => listener.close(() => resolve()));
   }
   // The in-process app opened the kernel's postgres pool; release it so the runner can exit.
-  const { sqlClient } = await import('@tria/core/db');
+  const { sqlClient } = await import('@rede-social/core/db');
   await sqlClient.end({ timeout: 5 }).catch(() => undefined);
 }

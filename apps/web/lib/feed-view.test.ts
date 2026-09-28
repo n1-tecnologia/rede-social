@@ -1,4 +1,4 @@
-import type { FeedComment, FeedPost } from '@tria/module-feed/contracts';
+import type { FeedComment, FeedPost } from '@rede-social/module-feed/contracts';
 import { createTranslator } from 'next-intl';
 import type { getTranslations } from 'next-intl/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -22,7 +22,7 @@ import { absoluteTimeFormatter, commentView, postCardBase, postCardView } from '
 vi.mock('@/lib/env', () => ({
   env: {
     API_URL: 'http://api.test',
-    PLATFORM_HOST: 'tria.test',
+    PLATFORM_HOST: 'rede-social.test',
     NEXT_PUBLIC_SUPABASE_URL: 'http://supabase.test',
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test-key',
   },

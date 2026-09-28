@@ -1,14 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { mediaAssetSchema } from '@rede-social/contracts/media';
+import { sqlClient } from '@rede-social/core/db';
+import { deriveIconSet } from '@rede-social/core/server/branding/icons';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { deriveVariantsJob } from '@rede-social/core/server/media/derive-job';
+import { MEDIA_TENANT_BYTES_CEILING } from '@rede-social/core/server/media/limits';
+import { mediaInternals } from '@rede-social/core/server/media/service';
+import { encodeJpeg, probeSize } from '@rede-social/core/server/media/variants';
 import { createClient } from '@supabase/supabase-js';
-import { mediaAssetSchema } from '@tria/contracts/media';
-import { sqlClient } from '@tria/core/db';
-import { deriveIconSet } from '@tria/core/server/branding/icons';
-import { stopBoss } from '@tria/core/server/jobs/boss';
-import { deriveVariantsJob } from '@tria/core/server/media/derive-job';
-import { MEDIA_TENANT_BYTES_CEILING } from '@tria/core/server/media/limits';
-import { mediaInternals } from '@tria/core/server/media/service';
-import { encodeJpeg, probeSize } from '@tria/core/server/media/variants';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
@@ -22,11 +22,11 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  * worker handler produces the purpose's WebP ladder under immutable keys -> `GET /v1/media/{id}/w320`
  * answers a 302 to a freshly signed URL whose target really is a 320 px WebP.
  *
- * The session is a seeded MEMBER of `tria-demo`, never the super_admin: the media lane is tenant-only
+ * The session is a seeded MEMBER of `rede-demo`, never the super_admin: the media lane is tenant-only
  * and a platform admin has no membership (RESEARCH Pitfall 8).
  *
  * The api package has no `sharp` dependency: JPEG fixtures are built through `encodeJpeg` and probed
- * with `probeSize`, both from `@tria/core/server/media/variants` (the 02-13 `deriveIconSet` /
+ * with `probeSize`, both from `@rede-social/core/server/media/variants` (the 02-13 `deriveIconSet` /
  * `readPixel` precedent).
  *
  * `afterAll` deletes the assets through the API, removes the Storage objects under the tenant's
@@ -34,13 +34,13 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  * finding) and clears the pg-boss rows by `singleton_key`.
  */
 
-const MEMBER_EMAIL = 'member@tria-demo.local';
+const MEMBER_EMAIL = 'member@rede-demo.local';
 /** A SECOND seeded member of the SAME community — the intra-tenant half of the authorization gate. */
-const PEER_EMAIL = 'joao.goncalves@tria-demo.local';
+const PEER_EMAIL = 'joao.goncalves@rede-demo.local';
 /** The same community's admin: the other half of the owner-OR-admin predicate. */
-const ADMIN_EMAIL = 'admin@tria-demo.local';
+const ADMIN_EMAIL = 'admin@rede-demo.local';
 /** The second seeded tenant — the isolation half of ROADMAP criterion 4. */
-const LAB_MEMBER_EMAIL = 'member@tria-lab.local';
+const LAB_MEMBER_EMAIL = 'member@rede-lab.local';
 
 /**
  * The same REAL HEVC-compressed HEIC the kernel unit suite pins (RESEARCH Pitfall 2). Read from the
@@ -138,7 +138,7 @@ async function deriveJobs(assetId: string) {
 /**
  * Service-key Storage client for fixture cleanup only (the Storage schema forbids direct deletes
  * from `storage.objects`). Built here like `authAdmin()` in setup.ts instead of importing
- * `@tria/core/server/supabase-admin`, which Biome confines to the kernel's admin lane.
+ * `@rede-social/core/server/supabase-admin`, which Biome confines to the kernel's admin lane.
  */
 function storageAdmin() {
   return createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
@@ -185,8 +185,8 @@ beforeAll(async () => {
   memberToken = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
   const [tenant] = await adminSql<
     { id: string }[]
-  >`select id from public.tenants where slug = 'tria-demo'`;
-  if (!tenant) throw new Error('the tria-demo tenant is not seeded');
+  >`select id from public.tenants where slug = 'rede-demo'`;
+  if (!tenant) throw new Error('the rede-demo tenant is not seeded');
   demoTenantId = tenant.id;
   PHOTO_JPEG = await encodeJpeg(Buffer.from(PHOTO_SVG));
   SMALL_JPEG = await encodeJpeg(Buffer.from(SMALL_SVG));
@@ -197,8 +197,8 @@ beforeAll(async () => {
 
   labToken = await signInAs(LAB_MEMBER_EMAIL, SEED_PASSWORD);
   const [lab] = await adminSql<{ id: string; slug: string; display_name: string }[]>`
-    select id, slug, display_name from public.tenants where slug = 'tria-lab'`;
-  if (!lab) throw new Error('the tria-lab tenant is not seeded');
+    select id, slug, display_name from public.tenants where slug = 'rede-lab'`;
+  if (!lab) throw new Error('the rede-lab tenant is not seeded');
   labTenantId = lab.id;
   labSlug = lab.slug;
   labDisplayName = lab.display_name;
@@ -207,7 +207,7 @@ beforeAll(async () => {
     select m.user_id from public.memberships m
       join public.users u on u.id = m.user_id
      where m.tenant_id = ${demoTenantId}::uuid and u.email = ${MEMBER_EMAIL}`;
-  if (!owner) throw new Error('the tria-demo member is not seeded');
+  if (!owner) throw new Error('the rede-demo member is not seeded');
   demoUserId = owner.user_id;
 
   await cleanup();
@@ -686,7 +686,7 @@ describe('intra-tenant authorization — a fellow member is not an owner (CR-01/
   let peerToken = '';
   let adminToken = '';
 
-  /** A `ready` avatar owned by the `member@tria-demo.local` session the suite runs as. */
+  /** A `ready` avatar owned by the `member@rede-demo.local` session the suite runs as. */
   async function ownedByMember(): Promise<string> {
     const start = await startUpload({
       kind: 'image',
@@ -797,7 +797,7 @@ describe('isolation — a tenant-B session cannot reach a tenant-A object (TENAN
 
     const text = JSON.stringify(await res.json());
     expect(text).not.toContain(labSlug);
-    expect(text).not.toContain('tria-demo');
+    expect(text).not.toContain('rede-demo');
     expect(text).not.toContain(labDisplayName);
     expect(text).not.toContain(demoTenantId);
   });

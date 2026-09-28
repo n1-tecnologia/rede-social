@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 
-// baseURL = the tria-demo TENANT host (D-20). Runs on mobile-chromium (iPhone 14) by default.
+// baseURL = the rede-demo TENANT host (D-20). Runs on mobile-chromium (iPhone 14) by default.
 test.describe('AUTH-02 — login on the tenant host', () => {
   test('a logged-out visit to /inicio redirects to /entrar', async ({ page }) => {
     await page.goto('/inicio');
@@ -13,7 +13,7 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     context,
   }) => {
     await page.goto('/entrar');
-    await expect(page.getByText('Comunidade: TRIA Demo')).toBeVisible();
+    await expect(page.getByText('Comunidade: Rede Demo')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveAttribute(
       'href',
       '/cadastro',
@@ -27,7 +27,7 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     context,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD);
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
     // D-42: the signed-in identity lives on the profile page (the Perfil tab), not on the home.
     // The e-mail is what proves WHICH identity landed there. The role pill this line used to look
     // for was deliberately removed from `/perfil` in 03-05 (UI-D-01/D-45: a profile is a person,
@@ -61,6 +61,6 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveCount(0);
 
     await login(page, users.demoMember, SEED_PASSWORD, hosts.generic);
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
   });
 });

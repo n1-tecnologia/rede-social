@@ -8,7 +8,7 @@ import {
   communityPageSchema,
   communitySummarySchema,
   type UpdateCommunity,
-} from '@tria/module-communities/contracts';
+} from '@rede-social/module-communities/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';

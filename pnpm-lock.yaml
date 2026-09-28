@@ -172,10 +172,10 @@ importers:
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:packages/contracts
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:packages/core
       '@types/node':
@@ -217,25 +217,25 @@ importers:
       '@t3-oss/env-core':
         specifier: 0.13.11
         version: 0.13.11(typescript@7.0.2)(zod@4.6.2)
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@tria/module-communities':
+      '@rede-social/module-communities':
         specifier: workspace:*
         version: link:../../packages/modules/communities
-      '@tria/module-events':
+      '@rede-social/module-events':
         specifier: workspace:*
         version: link:../../packages/modules/events
-      '@tria/module-feed':
+      '@rede-social/module-feed':
         specifier: workspace:*
         version: link:../../packages/modules/feed
-      '@tria/module-reels':
+      '@rede-social/module-reels':
         specifier: workspace:*
         version: link:../../packages/modules/reels
-      '@tria/module-stories':
+      '@rede-social/module-stories':
         specifier: workspace:*
         version: link:../../packages/modules/stories
       drizzle-orm:
@@ -260,7 +260,7 @@ importers:
       '@supabase/supabase-js':
         specifier: 2.116.0
         version: 2.116.0
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@types/node':
@@ -305,28 +305,28 @@ importers:
       '@tailwindcss/postcss':
         specifier: 4.3.3
         version: 4.3.3
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@tria/module-communities':
+      '@rede-social/module-communities':
         specifier: workspace:*
         version: link:../../packages/modules/communities
-      '@tria/module-events':
+      '@rede-social/module-events':
         specifier: workspace:*
         version: link:../../packages/modules/events
-      '@tria/module-feed':
+      '@rede-social/module-feed':
         specifier: workspace:*
         version: link:../../packages/modules/feed
-      '@tria/module-reels':
+      '@rede-social/module-reels':
         specifier: workspace:*
         version: link:../../packages/modules/reels
-      '@tria/module-stories':
+      '@rede-social/module-stories':
         specifier: workspace:*
         version: link:../../packages/modules/stories
-      '@tria/ui':
+      '@rede-social/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       clsx:
@@ -375,10 +375,10 @@ importers:
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tria/api':
+      '@rede-social/api':
         specifier: workspace:*
         version: link:../api
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@types/node':
@@ -408,13 +408,13 @@ importers:
 
   packages/boundary-fixture:
     dependencies:
-      '@tria/api':
+      '@rede-social/api':
         specifier: workspace:*
         version: link:../../apps/api
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:../core
-      '@tria/module-feed':
+      '@rede-social/module-feed':
         specifier: workspace:*
         version: link:../modules/feed
 
@@ -433,7 +433,7 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../config
       '@types/node':
@@ -454,10 +454,10 @@ importers:
       '@t3-oss/env-core':
         specifier: 0.13.11
         version: 0.13.11(typescript@7.0.2)(zod@4.6.2)
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@tria/ui':
+      '@rede-social/ui':
         specifier: workspace:*
         version: link:../ui
       drizzle-orm:
@@ -503,7 +503,7 @@ importers:
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../config
       '@types/node':
@@ -539,13 +539,13 @@ importers:
       '@hono/zod-openapi':
         specifier: 1.6.3
         version: 1.6.3(hono@4.13.7)(zod@4.6.2)
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:../../core
-      '@tria/ui':
+      '@rede-social/ui':
         specifier: workspace:*
         version: link:../../ui
       drizzle-orm:
@@ -570,7 +570,7 @@ importers:
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../../config
       '@types/node':
@@ -606,13 +606,13 @@ importers:
       '@hono/zod-openapi':
         specifier: 1.6.3
         version: 1.6.3(hono@4.13.7)(zod@4.6.2)
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:../../core
-      '@tria/ui':
+      '@rede-social/ui':
         specifier: workspace:*
         version: link:../../ui
       drizzle-orm:
@@ -637,7 +637,7 @@ importers:
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../../config
       '@types/node':
@@ -673,13 +673,13 @@ importers:
       '@hono/zod-openapi':
         specifier: 1.6.3
         version: 1.6.3(hono@4.13.7)(zod@4.6.2)
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:../../core
-      '@tria/ui':
+      '@rede-social/ui':
         specifier: workspace:*
         version: link:../../ui
       drizzle-orm:
@@ -710,7 +710,7 @@ importers:
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../../config
       '@types/node':
@@ -743,13 +743,13 @@ importers:
 
   packages/modules/reels:
     dependencies:
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:../../core
-      '@tria/ui':
+      '@rede-social/ui':
         specifier: workspace:*
         version: link:../../ui
       lucide-react:
@@ -762,7 +762,7 @@ importers:
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../../config
       '@types/node':
@@ -798,13 +798,13 @@ importers:
       '@hono/zod-openapi':
         specifier: 1.6.3
         version: 1.6.3(hono@4.13.7)(zod@4.6.2)
-      '@tria/contracts':
+      '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@tria/core':
+      '@rede-social/core':
         specifier: workspace:*
         version: link:../../core
-      '@tria/ui':
+      '@rede-social/ui':
         specifier: workspace:*
         version: link:../../ui
       drizzle-orm:
@@ -829,7 +829,7 @@ importers:
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../../config
       '@types/node':
@@ -881,7 +881,7 @@ importers:
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tria/config':
+      '@rede-social/config':
         specifier: workspace:*
         version: link:../config
       '@types/node':

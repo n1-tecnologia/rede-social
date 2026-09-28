@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { BRANDING_MAX_BYTES, BRANDING_UPLOAD_MIMES } from '@tria/contracts/branding';
-import { RESUMABLE_THRESHOLD_BYTES } from '@tria/contracts/media';
+import { BRANDING_MAX_BYTES, BRANDING_UPLOAD_MIMES } from '@rede-social/contracts/branding';
+import { RESUMABLE_THRESHOLD_BYTES } from '@rede-social/contracts/media';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BRANDING_UPLOAD_ACCEPT,

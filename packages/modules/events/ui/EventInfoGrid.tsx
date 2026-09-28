@@ -1,4 +1,4 @@
-import { cn } from '@tria/ui';
+import { cn } from '@rede-social/ui';
 import { CalendarDays, Clock, MapPin, Users, Video } from 'lucide-react';
 
 /**

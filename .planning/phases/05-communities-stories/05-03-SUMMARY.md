@@ -83,8 +83,8 @@ key-files:
     - apps/web/e2e/phase4-smoke.spec.ts
 
 key-decisions:
-  - "`feed_posts_community_fk` is HAND-WRITTEN SQL inside the generated migration, not a drizzle `.references(() => communities.id)`. Verified empirically: adding `@tria/module-communities` to the feed package makes `turbo boundaries` report `Package @tria/module-communities found without any tag listed in allowlist for @tria/module-feed` — a `module -> module` dependency is denied outright (the allowlist is kernel/contracts/tooling, and `packages/boundary-fixture` exists to prove it bites). The plan's own acceptance criteria asked for BOTH the dependency and a green `pnpm boundaries`, which are mutually exclusive. The constraint is identical either way and drizzle never diffs it away, because it is absent from the TS schema and therefore from the snapshot."
-  - "`postCommunitySchema` ({ id, name, slug }) is declared IN the feed's own contracts rather than imported from `@tria/module-communities/contracts` — same boundary, and it is also the honest shape: a cover, a post count, a status and an ordering timestamp on every post of the merged feed would be payload nobody renders."
+  - "`feed_posts_community_fk` is HAND-WRITTEN SQL inside the generated migration, not a drizzle `.references(() => communities.id)`. Verified empirically: adding `@rede-social/module-communities` to the feed package makes `turbo boundaries` report `Package @rede-social/module-communities found without any tag listed in allowlist for @rede-social/module-feed` — a `module -> module` dependency is denied outright (the allowlist is kernel/contracts/tooling, and `packages/boundary-fixture` exists to prove it bites). The plan's own acceptance criteria asked for BOTH the dependency and a green `pnpm boundaries`, which are mutually exclusive. The constraint is identical either way and drizzle never diffs it away, because it is absent from the TS schema and therefore from the snapshot."
+  - "`postCommunitySchema` ({ id, name, slug }) is declared IN the feed's own contracts rather than imported from `@rede-social/module-communities/contracts` — same boundary, and it is also the honest shape: a cover, a post count, a status and an ordering timestamp on every post of the merged feed would be payload nobody renders."
   - "`listCommunityFeed` is exposed as `GET /v1/feed?communityId=` rather than as a sibling path. Both pages are built by one `feedPage` helper from the identical `(created_at, id)` tuple, so a cursor is meaningful in either and there is one `FeedQuery` to extend rather than two to keep in step."
   - "The D-71 segment's whole visible string arrives as ONE interpolated `label` prop and the anchor wraps it, so the module never learns the word \"em\". UI-D-36's letter says only the NAME is the link text; the plan's `<action>` says the template is a host label passed in as a prop. The plan won, and the practical effect is a slightly larger tap target with an explicit `aria-label`."
   - "`listAllCommunities()` walks the existing keyset with a 10-page ceiling and NEVER throws: an unreadable list returns `[]`, the picker offers only `Feed principal`, and the composer still publishes. Losing the destination chooser must not cost the admin the post."
@@ -316,11 +316,11 @@ status: complete
 **1. [Rule 3 - Blocker] The plan's FK mechanism is forbidden by the MOD-02 boundary; the constraint landed as hand-written SQL instead**
 
 - **Found during:** Task 1, before any edit (the plan's `<action>` names the mechanism explicitly)
-- **Issue:** The plan says to give `feedPosts.communityId` a `.references(() => communities.id)` and to add `"@tria/module-communities": "workspace:*"` to `packages/modules/feed/package.json`. Verified empirically rather than assumed: with that dependency added, `pnpm turbo boundaries --filter=@tria/module-feed` reports `x Package @tria/module-communities found without any tag listed in allowlist for @tria/module-feed`, pointing at `turbo.json`'s `"module": { "dependencies": { "allow": ["kernel", "contracts", "tooling"] } }`. `packages/boundary-fixture` exists precisely to prove that rule bites, and its own package.json says so ("a `module` depending on another `module` is itself forbidden by turbo.json's tag allowlist"). The plan's acceptance criteria therefore ask for two mutually exclusive facts: the dependency present AND `pnpm boundaries` exit 0.
-- **Fix:** The architectural invariant won. `feed_posts_community_fk` is declared in `supabase/migrations/20260923185730_feed_communities.sql` as hand-written SQL appended to the generated half, with a header stating why. The community summary reaches the projection through raw SQL (`left join public.communities`), and the `{ id, name, slug }` shape is declared in the feed's own contracts as `postCommunitySchema` rather than imported from the other module. Loosening `turbo.json`'s allowlist was considered and rejected: Biome's `@tria/module-*/server/*` pattern does not match the published `@tria/module-communities/server` entry point, so the package-graph rule is currently the ONLY thing stopping a module from reaching into another module's server, and weakening it is a Rule-4 architectural change this plan has no mandate for.
+- **Issue:** The plan says to give `feedPosts.communityId` a `.references(() => communities.id)` and to add `"@rede-social/module-communities": "workspace:*"` to `packages/modules/feed/package.json`. Verified empirically rather than assumed: with that dependency added, `pnpm turbo boundaries --filter=@rede-social/module-feed` reports `x Package @rede-social/module-communities found without any tag listed in allowlist for @rede-social/module-feed`, pointing at `turbo.json`'s `"module": { "dependencies": { "allow": ["kernel", "contracts", "tooling"] } }`. `packages/boundary-fixture` exists precisely to prove that rule bites, and its own package.json says so ("a `module` depending on another `module` is itself forbidden by turbo.json's tag allowlist"). The plan's acceptance criteria therefore ask for two mutually exclusive facts: the dependency present AND `pnpm boundaries` exit 0.
+- **Fix:** The architectural invariant won. `feed_posts_community_fk` is declared in `supabase/migrations/20260923185730_feed_communities.sql` as hand-written SQL appended to the generated half, with a header stating why. The community summary reaches the projection through raw SQL (`left join public.communities`), and the `{ id, name, slug }` shape is declared in the feed's own contracts as `postCommunitySchema` rather than imported from the other module. Loosening `turbo.json`'s allowlist was considered and rejected: Biome's `@rede-social/module-*/server/*` pattern does not match the published `@rede-social/module-communities/server` entry point, so the package-graph rule is currently the ONLY thing stopping a module from reaching into another module's server, and weakening it is a Rule-4 architectural change this plan has no mandate for.
 - **Files modified:** `packages/modules/feed/db/schema.ts` (docblock + index only), `supabase/migrations/20260923185730_feed_communities.sql`, `packages/modules/feed/contracts/index.ts`
 - **Verification:** `feed_posts_community_fk` exists in `pg_constraint` as `FOREIGN KEY (community_id) REFERENCES communities(id)`; `090-feed.sql` asserts it in both directions; `pnpm db:generate` is a no-op; `pnpm boundaries` green (498 files, 8 packages); `pnpm boundaries:negative` green.
-- **Unmet acceptance criteria (recorded, not skipped):** `packages/modules/feed/db/schema.ts` contains no `.references(` on `communityId`, and `packages/modules/feed/package.json` does not contain `"@tria/module-communities"`. Both are the direct consequence of this fix, and the `must_haves` truth they served — "`feed_posts.community_id` finally carries a real foreign key to `communities.id`" — is satisfied.
+- **Unmet acceptance criteria (recorded, not skipped):** `packages/modules/feed/db/schema.ts` contains no `.references(` on `communityId`, and `packages/modules/feed/package.json` does not contain `"@rede-social/module-communities"`. Both are the direct consequence of this fix, and the `must_haves` truth they served — "`feed_posts.community_id` finally carries a real foreign key to `communities.id`" — is satisfied.
 - **Commits:** `c82b443`, `e51465a`
 
 **2. [Rule 1 - Bug] A feed paging assertion still encoded the Phase 4 predicate**
@@ -389,19 +389,19 @@ Per T-05-SC, **zero external packages were installed** — and, per deviation 1,
 
 | Check | Result |
 |-------|--------|
-| `pnpm --filter @tria/module-feed typecheck && lint` | pass (39 files) |
-| `pnpm --filter @tria/module-feed test` | pass — 111/111 (7 files) |
-| `pnpm --filter @tria/module-communities typecheck && lint` | pass (15 files) |
-| `pnpm --filter @tria/module-communities test` | pass — 11/11 |
-| `pnpm --filter @tria/api typecheck && lint` | pass (60 files) |
-| `pnpm --filter @tria/web typecheck && lint` | pass (237 files) |
+| `pnpm --filter @rede-social/module-feed typecheck && lint` | pass (39 files) |
+| `pnpm --filter @rede-social/module-feed test` | pass — 111/111 (7 files) |
+| `pnpm --filter @rede-social/module-communities typecheck && lint` | pass (15 files) |
+| `pnpm --filter @rede-social/module-communities test` | pass — 11/11 |
+| `pnpm --filter @rede-social/api typecheck && lint` | pass (60 files) |
+| `pnpm --filter @rede-social/web typecheck && lint` | pass (237 files) |
 | `pnpm db:generate` against the committed migration | no-op ("No schema changes"), `git status --porcelain -- supabase/migrations` empty |
 | `pnpm db:reset && pnpm db:seed` | pass — FK and all three indexes applied; 6 community posts per tenant |
 | `pnpm supabase test db` | pass — 11 files, **211** tests (was 207), `Result: PASS` |
 | `pnpm test:integration` | pass — 28 files, **400/400** |
-| `pnpm --filter @tria/web exec playwright test comunidades.spec.ts` | pass — 16/16 (mobile + desktop) |
-| `pnpm --filter @tria/web exec playwright test feed.spec.ts` | pass — 23 passed, 3 skipped |
-| `pnpm --filter @tria/web exec playwright test shell.spec.ts phase4-smoke.spec.ts phase2-smoke.spec.ts` | pass — 30/30 |
+| `pnpm --filter @rede-social/web exec playwright test comunidades.spec.ts` | pass — 16/16 (mobile + desktop) |
+| `pnpm --filter @rede-social/web exec playwright test feed.spec.ts` | pass — 23 passed, 3 skipped |
+| `pnpm --filter @rede-social/web exec playwright test shell.spec.ts phase4-smoke.spec.ts phase2-smoke.spec.ts` | pass — 30/30 |
 | `pnpm boundaries` | pass — 498 files, 8 packages, no issues |
 | `pnpm boundaries:negative` | pass — both layers reject the fixture |
 | `bash scripts/check-ui-literals.sh` | pass |

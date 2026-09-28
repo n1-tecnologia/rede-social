@@ -7,9 +7,9 @@ tags: [docker, cloud-run, github-actions, workload-identity-federation, artifact
 # Dependency graph
 requires:
   - phase: 01-01
-    provides: "@tria/* monorepo with stable root scripts (lint/typecheck/build/test, boundaries, boundaries:negative, guard:lanes, db:seed, test:integration, spike:supavisor, e2e), apps/api with tsup build + GET /v1/health, supabase/roles.sql + migrations, scripts/local-env.sh + db-local-role.sh, idempotent scripts/seed.ts reading TENANT_*_HOST"
+    provides: "@rede-social/* monorepo with stable root scripts (lint/typecheck/build/test, boundaries, boundaries:negative, guard:lanes, db:seed, test:integration, spike:supavisor, e2e), apps/api with tsup build + GET /v1/health, supabase/roles.sql + migrations, scripts/local-env.sh + db-local-role.sh, idempotent scripts/seed.ts reading TENANT_*_HOST"
   - phase: 01-02
-    provides: "@tria/web (Next 16 build target for Vercel) and the Playwright suite ci.yml runs"
+    provides: "@rede-social/web (Next 16 build target for Vercel) and the Playwright suite ci.yml runs"
   - phase: 01-03
     provides: "pnpm spike:supavisor as a root script and packages/core/db/README.md's hosted DATABASE_URL shapes (transaction pooler for the API, session pooler for pg-boss)"
 provides:
@@ -58,8 +58,8 @@ key-files:
     - packages/contracts/package.json
 
 key-decisions:
-  - "`pnpm deploy --filter=@tria/api --prod --legacy /app` produces the runner tree. `--legacy` is required on pnpm 12 (it warns `Shared workspace lockfile detected but configuration forces legacy deploy implementation` and without it the shared-lockfile deploy path needs inject-workspace-packages). The deploy root holds `dist/` and `node_modules/` directly, so CMD is `node dist/main.js`, not `node apps/api/dist/main.js` — the plan sanctioned `path per the deploy output`"
-  - "Final image is 439 MB (node:24-slim base + 41 production packages). tsup bundles every @tria/* source into dist/, so only third-party deps ship; @tria/core's transitive runtime deps (postgres, jose, @supabase/supabase-js) come along because pnpm deploy resolves prod deps transitively"
+  - "`pnpm deploy --filter=@rede-social/api --prod --legacy /app` produces the runner tree. `--legacy` is required on pnpm 12 (it warns `Shared workspace lockfile detected but configuration forces legacy deploy implementation` and without it the shared-lockfile deploy path needs inject-workspace-packages). The deploy root holds `dist/` and `node_modules/` directly, so CMD is `node dist/main.js`, not `node apps/api/dist/main.js` — the plan sanctioned `path per the deploy output`"
+  - "Final image is 439 MB (node:24-slim base + 41 production packages). tsup bundles every @rede-social/* source into dist/, so only third-party deps ship; @rede-social/core's transitive runtime deps (postgres, jose, @supabase/supabase-js) come along because pnpm deploy resolves prod deps transitively"
   - "The deep health check is the ONLY query in the codebase outside withTenantTx/withAdminTx, and that is deliberate: `select 1` reads no table (so api_user's NOINHERIT lack of privileges is irrelevant) and switches no role, so nothing can leak onto a pooled connection. `pnpm guard:lanes` stays green"
   - "All four Cloud Run services mount DATABASE_URL, SUPABASE_URL and SUPABASE_SERVICE_KEY, not just the worker's BOSS_DATABASE_URL: apps/api/src/env.ts validates all three at import, so a worker with only BOSS_DATABASE_URL would crash before pg-boss ever starts (01-07)"
   - "The image reference is computed in a dedicated `build` step and exported as a job output, so the four deploy steps all pin the same immutable `:<github.sha>` tag — a production deploy can never pick up a newer `:latest`"
@@ -77,11 +77,11 @@ requirements-completed: [PWA-04]
 # Coverage metadata (#1602)
 coverage:
   - id: D1
-    description: "One node:24-slim image built from `turbo prune @tria/api --docker` starts as ROLE=api and answers GET /v1/health -> 200 {ok:true} with DATABASE_URL pointing at a closed port, and starts as ROLE=worker from the same image (D-18)"
+    description: "One node:24-slim image built from `turbo prune @rede-social/api --docker` starts as ROLE=api and answers GET /v1/health -> 200 {ok:true} with DATABASE_URL pointing at a closed port, and starts as ROLE=worker from the same image (D-18)"
     requirement: PWA-04
     verification:
       - kind: other
-        ref: "docker build -f apps/api/Dockerfile -t tria-api:local . && docker run -e ROLE=api ... && curl -fsS :18080/v1/health | grep '\"ok\":true' -> exit 0 (image 439 MB)"
+        ref: "docker build -f apps/api/Dockerfile -t rede-social-api:local . && docker run -e ROLE=api ... && curl -fsS :18080/v1/health | grep '\"ok\":true' -> exit 0 (image 439 MB)"
         status: pass
       - kind: other
         ref: "docker run -e ROLE=worker ... -> log line {\"port\":8080,\"role\":\"worker\",\"message\":\"api listening\"} (01-07 adds the pg-boss branch)"
@@ -150,7 +150,7 @@ status: complete
 
 ## Accomplishments
 
-- **One image, both roles, no credentials needed to be healthy.** `apps/api/Dockerfile` prunes the monorepo to `@tria/api`'s slice, installs with `--frozen-lockfile`, builds with tsup and ships a `pnpm deploy --prod` tree under the non-root `node` user. It was built and run locally in both modes: `ROLE=api` answered `GET /v1/health` with `{"ok":true}` while `DATABASE_URL` pointed at a closed port, and `ROLE=worker` booted from the same image logging `role=worker` (the pg-boss branch lands in 01-07). Final size **439 MB**.
+- **One image, both roles, no credentials needed to be healthy.** `apps/api/Dockerfile` prunes the monorepo to `@rede-social/api`'s slice, installs with `--frozen-lockfile`, builds with tsup and ships a `pnpm deploy --prod` tree under the non-root `node` user. It was built and run locally in both modes: `ROLE=api` answered `GET /v1/health` with `{"ok":true}` while `DATABASE_URL` pointed at a closed port, and `ROLE=worker` booted from the same image logging `role=worker` (the pg-boss branch lands in 01-07). Final size **439 MB**.
 - **Deep health check wired for the Free-plan keep-alive.** `GET /v1/health?deep=1` runs `select 1` through the `api_user` client and returns `db: true`, or `500 {db:false}` when Postgres is unreachable. Four integration cases cover both routes, two of them in a fresh child process so the closed-port claim is proven against `env.ts`'s import-time validation rather than mocked.
 - **CI written once and reused by the production gate.** `ci.yml` runs install → `turbo lint typecheck build test` → `boundaries` → `boundaries:negative` → `guard:lanes` → Supabase CLI 2.117.0 local stack with ES256 keys → `db reset` → `supabase test db` → seed → `test:integration` → `spike:supavisor` → Playwright, in the same order as the local exit gate. `on: workflow_call` lets `deploy-api.yml` mount it as its `checks` job, so the production path re-runs the identical steps for the exact SHA being deployed instead of trusting an earlier PR run.
 - **Production cannot be reached untested or unapproved.** `migrate-and-deploy-prod` declares `needs: [checks, build]` *and* `environment: { name: production }`, so a direct admin push to `main` still goes through the checks; `concurrency: deploy-<ref>` with `cancel-in-progress: false` means two pushes queue rather than migrating in parallel (PWA-04); the job never seeds (D-14 keeps that in `seed-prod.yml`, `workflow_dispatch` only).
@@ -166,7 +166,7 @@ status: complete
 
 ## Files Created/Modified
 
-- `apps/api/Dockerfile` — four-stage build (`base` → `pruner` → `builder` → `runner`) on `node:24-slim`; `pnpm dlx turbo@2.10.12 prune @tria/api --docker`, cached install layer from `out/json/`, `pnpm turbo build --filter=@tria/api...`, `pnpm deploy --prod --legacy /app`; `USER node`, `EXPOSE 8080`, `ROLE=api`, `CMD ["node","dist/main.js"]`
+- `apps/api/Dockerfile` — four-stage build (`base` → `pruner` → `builder` → `runner`) on `node:24-slim`; `pnpm dlx turbo@2.10.12 prune @rede-social/api --docker`, cached install layer from `out/json/`, `pnpm turbo build --filter=@rede-social/api...`, `pnpm deploy --prod --legacy /app`; `USER node`, `EXPOSE 8080`, `ROLE=api`, `CMD ["node","dist/main.js"]`
 - `.dockerignore` — excludes `node_modules`, `.turbo`, `dist`, `.next`, `out`, `.git`, `.github`, `.gsd`, `.planning`, `.claude`, `reference`, `.env*`, `supabase/.temp`, `supabase/signing_keys.json`, `.vercel`, `docs`, `apps/web`
 - `apps/api/src/routes/health.ts` — adds the `deep` query parameter, the `db` field, the 500 failure response and the comment explaining why this single query is allowed outside the lanes
 - `apps/api/tests/integration/health.test.ts` — four cases: plain 200 without DB, `deep=1` with `db:true`, fresh-process 200 on a closed port, fresh-process 500 `db:false`
@@ -215,7 +215,7 @@ See `key-decisions` in the frontmatter. The two that matter most downstream:
 
 - **`ci.yml` references two scripts that later plans still owe.** `pnpm boundaries:negative` runs `scripts/check-boundaries.sh` (not yet on disk) and `supabase test db` needs `supabase/tests/` (empty today). Both are deliberate: the plan requires CI to mirror the 01-08 exit gate, and the missing pieces belong to the boundary-fixture and pgTAP plans in this phase. Until they land, a real CI run would fail at those steps — which is exactly the coupling the exit gate is meant to expose, and is not observable now because no repository/remote exists yet.
 - **No authentication was attempted.** `gh`, `gcloud`, `vercel` and remote `supabase` calls were deliberately not run: no accounts exist until 01-10/01-11, and this plan's validation contract is YAML parsing, grep assertions and a local Docker build/run.
-- **Local test image removed** after the smoke (`docker rmi tria-api:local`) to give the 9 GiB of free disk back; 01-08 Task 3 rebuilds it after every wave.
+- **Local test image removed** after the smoke (`docker rmi rede-social-api:local`) to give the 9 GiB of free disk back; 01-08 Task 3 rebuilds it after every wave.
 
 ## User Setup Required
 

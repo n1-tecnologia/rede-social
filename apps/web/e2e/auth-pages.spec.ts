@@ -104,7 +104,7 @@ test.describe('B. unverified host is generic (D-36)', () => {
     await closeTenantFixtures();
   });
 
-  test('renders the neutral TRIA shell: no redirect, no tenant, no sign-up link', async ({
+  test('renders the neutral platform shell: no redirect, no tenant, no sign-up link', async ({
     page,
   }) => {
     test.skip(isRemote, 'local stack only');
@@ -112,7 +112,7 @@ test.describe('B. unverified host is generic (D-36)', () => {
     await page.goto(url);
     await expect(page).toHaveURL(url);
     await expect(page.getByText('Comunidade:')).toHaveCount(0);
-    await expect(page.getByText('TRIA', { exact: true })).toBeVisible();
+    await expect(page.getByText('Rede Social', { exact: true })).toBeVisible();
     expect(await brandPrimary(page, 'main')).toBe(NEUTRAL);
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveCount(0);
   });
@@ -124,7 +124,7 @@ test.describe('C. suspended tenant (D-32)', () => {
   const host1 = `e2e-susp1-${sfx}.localhost`;
   const slug2 = `e2e-susp2-${sfx}`;
   const host2 = `e2e-susp2-${sfx}.localhost`;
-  const email = `susp-${sfx}@tria-test.local`;
+  const email = `susp-${sfx}@rede-social-test.local`;
 
   test.beforeAll(async () => {
     test.skip(isRemote, 'local stack only');

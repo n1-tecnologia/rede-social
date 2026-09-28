@@ -1,5 +1,5 @@
-import { tenantIsolationPolicy } from '@tria/core/db/rls';
-import { mediaAssets, tenants, users } from '@tria/core/db/schema';
+import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
+import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
   check,

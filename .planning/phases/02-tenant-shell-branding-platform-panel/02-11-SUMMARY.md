@@ -8,16 +8,16 @@ tags: [pwa, serwist, manifest, service-worker, offline, install-hint, playwright
 requires:
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 01
-    provides: "@tria/contracts/branding (resolveBranding, NEUTRAL_BRAND, LIGHT_BG, iconUrls fixed keys), apps/web/lib/host-brand.ts getHostBrand() (host-authoritative brand), seed brands demo #7c3aed / lab #0f766e"
+    provides: "@rede-social/contracts/branding (resolveBranding, NEUTRAL_BRAND, LIGHT_BG, iconUrls fixed keys), apps/web/lib/host-brand.ts getHostBrand() (host-authoritative brand), seed brands demo #7c3aed / lab #0f766e"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 02
-    provides: "@tria/ui EmptyState, Button, BottomSheet; tokens (--safe-top, --screen-h, neutral surfaces)"
+    provides: "@rede-social/ui EmptyState, Button, BottomSheet; tokens (--safe-top, --screen-h, neutral surfaces)"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 04
     provides: "per-namespace pt-BR catalog + loader, scripts/check-ui-literals.sh, apps/web/vitest.config.ts, D-33 approved mockup (#offline, #install-hint)"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 07
-    provides: "root layout with <html data-theme> from the tria_theme cookie (D-41), ThemeToggle that rewrites meta[name=theme-color] at runtime"
+    provides: "root layout with <html data-theme> from the rede_theme cookie (D-41), ThemeToggle that rewrites meta[name=theme-color] at runtime"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 08
     provides: "proxy.ts PUBLIC pre-registered /m/<slug>/manifest.webmanifest, /serwist/*, /~offline; proxy.test.ts harness; alias → primary 308"
@@ -25,17 +25,17 @@ provides:
   - "@serwist/turbopack 9.5.12 + serwist 9.5.12 + esbuild 0.28.2 wired: next.config withSerwist(withNextIntl), experimental.useOffline, headers() no-store for /serwist/* and the manifest; tsconfig lib + WebWorker; build green under TypeScript 7.0.2 (no TS 6 alias)"
   - "app/sw.ts caching contract (T-02-70): precache = build assets + /~offline; NetworkOnly for navigations/documents, RSC payloads, server actions, /auth/*, /v1/*, /api/*, /m/*, /serwist/*; CacheFirst next-static (128 entries / 30 d); bounded SWR brand-assets (/icons/, /seed-logos/, public branding bucket, 32 entries / 7 d); dev = NetworkOnly everything; skipWaiting + clientsClaim (silent updates)"
   - "app/serwist/[path]/route.ts: createSerwistRoute, native esbuild, /~offline precached with a per-build revision (VERCEL_GIT_COMMIT_SHA → git HEAD → random)"
-  - "apps/web/lib/manifest.ts: NEUTRAL_MANIFEST_SLUG '_tria', MANIFEST_FILE, NEUTRAL_ICONS, IconSet, manifestPath, isManifestSlug, isAllowedIconUrl, iconsFor (whole-set neutral fallback, T-02-72), shortName (≤ 12), buildManifest (id '/?tenant=<slug>', start_url/scope '/', standalone, pt-BR, background #f5f7fb), neutralManifest"
-  - "app/m/[slug]/manifest.webmanifest/route.ts: host-authoritative (slug must equal the host's tenant slug, _tria only on non-tenant hosts), force-dynamic, application/manifest+json, Cache-Control private, no-store, no cookies (T-02-71)"
+  - "apps/web/lib/manifest.ts: NEUTRAL_MANIFEST_SLUG '_rede', MANIFEST_FILE, NEUTRAL_ICONS, IconSet, manifestPath, isManifestSlug, isAllowedIconUrl, iconsFor (whole-set neutral fallback, T-02-72), shortName (≤ 12), buildManifest (id '/?tenant=<slug>', start_url/scope '/', standalone, pt-BR, background #f5f7fb), neutralManifest"
+  - "app/m/[slug]/manifest.webmanifest/route.ts: host-authoritative (slug must equal the host's tenant slug, _rede only on non-tenant hosts), force-dynamic, application/manifest+json, Cache-Control private, no-store, no cookies (T-02-71)"
   - "Root layout generateMetadata (title template, applicationName, manifest link, favicon + apple-touch-icon from the same allow-listed set, appleWebApp, formatDetection) + generateViewport (theme-color = brand primary / neutral, viewportFit cover, no zoom lock); 02-07 theme cookie rendering unchanged"
   - "components/pwa/ServiceWorkerRegister (SerwistProvider swUrl /serwist/sw.js, scope /, updateViaCache none, module; cacheOnNavigation=false, reloadOnOnline=false; <html data-display-mode='standalone'|'browser'> mirror of matchMedia('(display-mode: standalone)'))"
   - "components/pwa/OfflineBanner (next/offline useOffline → role=status aria-live=polite, neutral tokens, under --safe-top, z-[90]); mounted once in the root layout"
   - "app/~offline: neutral pt-BR fallback page (EmptyState WifiOff + outline RetryButton → location.reload()), outside (app)/(auth), no session/brand root (T-02-74)"
-  - "components/pwa/InstallHint (BUILT, UNMOUNTED — Phase 7 PWA-02): BottomSheet coach mark with Share icon, 'Entendi' (no persistence) / 'Agora não' (tria_install_hint_dismissed, 14 days); exports isIosSafari, isStandalone, shouldShowInstallHint, INSTALL_HINT_DISMISSED_KEY, INSTALL_HINT_DISMISS_MS"
-  - "Neutral TRIA icon set apps/web/public/icons/tria-{48,192,512,maskable-512,apple-180}.png (#2e6fd0, mark inside the 80% safe zone on the maskable)"
+  - "components/pwa/InstallHint (BUILT, UNMOUNTED — Phase 7 PWA-02): BottomSheet coach mark with Share icon, 'Entendi' (no persistence) / 'Agora não' (rede_install_hint_dismissed, 14 days); exports isIosSafari, isStandalone, shouldShowInstallHint, INSTALL_HINT_DISMISSED_KEY, INSTALL_HINT_DISMISS_MS"
+  - "Neutral Rede Social icon set apps/web/public/icons/rede-social-{48,192,512,maskable-512,apple-180}.png (#2e6fd0, mark inside the 80% safe zone on the maskable)"
   - "Catalog pwa.json: pwa.offline.{title,body,retry,banner}, pwa.install.{title,body,confirm,dismiss}"
-  - "proxy.ts: manifest PUBLIC slug class widened to [a-z0-9_-] so the reserved _tria is public (one line)"
-  - "Tests: lib/manifest.test.ts (8), components/pwa/InstallHint.test.ts (10), proxy.test.ts cases 9-11, e2e/pwa.spec.ts (@tracer/@offline/@install, 45 passed + 3 annotated skips on iphone-chromium / pixel-chromium / desktop-chromium) via playwright.pwa.config.ts (production build on :3100, `pnpm --filter @tria/web e2e:pwa`); vitest.config.ts oxc.jsx automatic"
+  - "proxy.ts: manifest PUBLIC slug class widened to [a-z0-9_-] so the reserved _rede is public (one line)"
+  - "Tests: lib/manifest.test.ts (8), components/pwa/InstallHint.test.ts (10), proxy.test.ts cases 9-11, e2e/pwa.spec.ts (@tracer/@offline/@install, 45 passed + 3 annotated skips on iphone-chromium / pixel-chromium / desktop-chromium) via playwright.pwa.config.ts (production build on :3100, `pnpm --filter @rede-social/web e2e:pwa`); vitest.config.ts oxc.jsx automatic"
 affects: [02-13 icon derivation (writes branding.iconUrls under the public branding bucket — isAllowedIconUrl accepts exactly that origin/prefix), 02-14 Marca tab (branding save must invalidate the host cache so manifest/theme-color follow), 02-16 CI (add e2e:pwa production job, fold /~offline, /m/*, /serwist/* into check-static-routes.sh, keep the real-device standalone check manual), Phase 7 PWA-02 (mount InstallHint gated on shouldShowInstallHint; data-display-mode + isStandalone are the iOS push gate), Phase 8 (optional SW update toast via useSerwist)]
 
 # Actuals (#2632) — estimateTokens scale (chars/4 over the realized diff, lockfile + PNGs excluded)
@@ -49,7 +49,7 @@ plan_head_before: 2f5a08ff264675ad7fd9a9480d027469e21d0a3b
 tech-stack:
   added: ["@serwist/turbopack@9.5.12", "serwist@9.5.12", "esbuild@0.28.2 (dev)"]
   patterns:
-    - "Manifest and head icons come from ONE allow-listed set (lib/manifest.ts iconsFor): a single foreign/other-bucket URL drops the whole derived set to the neutral TRIA icons — never a mixed set"
+    - "Manifest and head icons come from ONE allow-listed set (lib/manifest.ts iconsFor): a single foreign/other-bucket URL drops the whole derived set to the neutral platform icons — never a mixed set"
     - "The HOST decides the manifest; the [slug] in the URL is only checked for equality with the host's tenant slug (404 otherwise) — no lookup keyed by the path segment"
     - "Service-worker runtime rules are hand-written and allow-list shaped: everything that can carry a session (documents, RSC, actions, auth/API) is NetworkOnly; only hashed build chunks and public brand assets are ever stored; SerwistProvider's cacheOnNavigation/reloadOnOnline are explicitly false"
     - "PWA plumbing is only testable on a production build: playwright.pwa.config.ts builds + starts on :3100 and pwa.spec.ts self-skips under the default dev-server suite (PWA_PROD)"
@@ -71,11 +71,11 @@ key-files:
     - apps/web/messages/pt-BR/pwa.json
     - apps/web/e2e/pwa.spec.ts
     - apps/web/playwright.pwa.config.ts
-    - apps/web/public/icons/tria-48.png
-    - apps/web/public/icons/tria-192.png
-    - apps/web/public/icons/tria-512.png
-    - apps/web/public/icons/tria-maskable-512.png
-    - apps/web/public/icons/tria-apple-180.png
+    - apps/web/public/icons/rede-social-48.png
+    - apps/web/public/icons/rede-social-192.png
+    - apps/web/public/icons/rede-social-512.png
+    - apps/web/public/icons/rede-social-maskable-512.png
+    - apps/web/public/icons/rede-social-apple-180.png
   modified:
     - apps/web/app/layout.tsx
     - apps/web/next.config.ts
@@ -93,7 +93,7 @@ key-decisions:
   - "The /~offline page and pwa.json were pulled forward from Task 2 into the Task 1 commit (Rule 3): the worker precaches /~offline and a 404 precache entry fails the install, so the tracer's own 'SW controlling' assertion could not pass without the page; D-33 approval was already in place"
   - "Refused manifest URLs are asserted as 404 OR 307→/entrar: a slug the proxy PUBLIC class rejects (e.g. `not a slug`) never reaches the route and is bounced by the auth gate — both are refusals and neither is a manifest"
   - "vitest.config.ts gained `oxc: { jsx: { runtime: 'automatic' } }` (Vite 8 transforms with oxc, not esbuild) so InstallHint.test.ts can import the .tsx module for its pure helpers under node while tsconfig keeps `jsx: preserve` for Next"
-  - "InstallHint lives in apps/web/components/pwa/ (UI-SPEC inventory says @tria/core/ui) to keep wave-5 files disjoint; Phase 7 may hoist it when wiring PWA-02. Catalog namespace is pwa.offline.*/pwa.install.* in one pwa.json (UI-SPEC lists offline/install) per the plan"
+  - "InstallHint lives in apps/web/components/pwa/ (UI-SPEC inventory says @rede-social/core/ui) to keep wave-5 files disjoint; Phase 7 may hoist it when wiring PWA-02. Catalog namespace is pwa.offline.*/pwa.install.* in one pwa.json (UI-SPEC lists offline/install) per the plan"
 
 patterns-established:
   - "Adding a PWA-served public path = one anchored PUBLIC regex in proxy.ts + a NetworkOnly prefix in app/sw.ts when the answer can be tenant- or session-bound"
@@ -104,7 +104,7 @@ requirements-completed: [PWA-01, PWA-03]
 
 coverage:
   - id: D1
-    description: "Per-tenant manifest: GET /m/tria-demo/manifest.webmanifest on the demo host answers 200 application/manifest+json, private no-store, name 'TRIA Demo', short_name ≤ 12, theme_color #7c3aed, background #f5f7fb, id '/?tenant=tria-demo', start_url/scope '/', standalone, pt-BR, three PNG icons (192 any, 512 any, 512 maskable); the lab host answers 'TRIA Lab' / #0f766e / '/?tenant=tria-lab'"
+    description: "Per-tenant manifest: GET /m/rede-demo/manifest.webmanifest on the demo host answers 200 application/manifest+json, private no-store, name 'Rede Demo', short_name ≤ 12, theme_color #7c3aed, background #f5f7fb, id '/?tenant=rede-demo', start_url/scope '/', standalone, pt-BR, three PNG icons (192 any, 512 any, 512 maskable); the lab host answers 'Rede Lab' / #0f766e / '/?tenant=rede-lab'"
     requirement: PWA-01
     verification:
       - kind: e2e
@@ -118,18 +118,18 @@ coverage:
         status: pass
     human_judgment: false
   - id: D2
-    description: "Host-authoritative manifest (T-02-71): /m/tria-lab on the demo host, /m/tria-demo on generic/platform hosts, /m/_tria on a tenant host and an invalid slug are all refused; /m/_tria answers the neutral TRIA manifest (id '/?tenant=_tria', /icons/tria-* only) on generic and platform hosts; the route is force-dynamic and never prerendered"
+    description: "Host-authoritative manifest (T-02-71): /m/rede-lab on the demo host, /m/rede-demo on generic/platform hosts, /m/_rede on a tenant host and an invalid slug are all refused; /m/_rede answers the neutral platform manifest (id '/?tenant=_rede', /icons/rede-social-* only) on generic and platform hosts; the route is force-dynamic and never prerendered"
     requirement: PWA-01
     verification:
       - kind: e2e
-        ref: "apps/web/e2e/pwa.spec.ts#cross-host manifests are refused (T-02-71); _tria answers only on non-tenant hosts"
+        ref: "apps/web/e2e/pwa.spec.ts#cross-host manifests are refused (T-02-71); _rede answers only on non-tenant hosts"
         status: pass
       - kind: other
-        ref: "pnpm --filter @tria/web build → /m/[slug]/manifest.webmanifest listed as ƒ (dynamic); .next/prerender-manifest.json routes = [/_global-error, /serwist/sw.js, /serwist/sw.js.map]"
+        ref: "pnpm --filter @rede-social/web build → /m/[slug]/manifest.webmanifest listed as ƒ (dynamic); .next/prerender-manifest.json routes = [/_global-error, /serwist/sw.js, /serwist/sw.js.map]"
         status: pass
     human_judgment: false
   - id: D3
-    description: "Root layout metadata: /entrar before login links /m/tria-demo/manifest.webmanifest, meta theme-color #7c3aed, link rel=icon + apple-touch-icon from the same set, apple-mobile-web-app-title 'TRIA Demo'; the lab host links its own manifest and #0f766e; 02-07's data-theme rendering unchanged"
+    description: "Root layout metadata: /entrar before login links /m/rede-demo/manifest.webmanifest, meta theme-color #7c3aed, link rel=icon + apple-touch-icon from the same set, apple-mobile-web-app-title 'Rede Demo'; the lab host links its own manifest and #0f766e; 02-07's data-theme rendering unchanged"
     requirement: PWA-01
     verification:
       - kind: e2e
@@ -193,7 +193,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D9
-    description: "Public plumbing (T-02-77): cookie-less GET /m/tria-demo/manifest.webmanifest, /m/_tria/manifest.webmanifest, /serwist/sw.js and /~offline are not redirected; /inicio, a traversal suffix and an upper-case slug still redirect to /entrar; PUBLIC has one entry each for the manifest, /serwist/ and /~offline"
+    description: "Public plumbing (T-02-77): cookie-less GET /m/rede-demo/manifest.webmanifest, /m/_rede/manifest.webmanifest, /serwist/sw.js and /~offline are not redirected; /inicio, a traversal suffix and an upper-case slug still redirect to /entrar; PUBLIC has one entry each for the manifest, /serwist/ and /~offline"
     requirement: PWA-01
     verification:
       - kind: unit
@@ -204,7 +204,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D10
-    description: "Icon provenance (T-02-72) + neutral set: /icons/tria-192.png and tria-maskable-512.png are served as image/png; the demo manifest's icons are all /icons/tria-* or all under /storage/v1/object/public/branding/ (never mixed); the five PNGs have the exact dimensions 48/192/512/512/180"
+    description: "Icon provenance (T-02-72) + neutral set: /icons/rede-social-192.png and rede-social-maskable-512.png are served as image/png; the demo manifest's icons are all /icons/rede-social-* or all under /storage/v1/object/public/branding/ (never mixed); the five PNGs have the exact dimensions 48/192/512/512/180"
     requirement: PWA-01
     verification:
       - kind: e2e
@@ -214,7 +214,7 @@ coverage:
         ref: "apps/web/e2e/pwa.spec.ts#the demo manifest icons are all neutral or all from the branding bucket — never mixed (T-02-72)"
         status: pass
       - kind: other
-        ref: "sharp metadata at generation: tria-48 48x48, tria-192 192x192, tria-512 512x512, tria-apple-180 180x180, tria-maskable-512 512x512"
+        ref: "sharp metadata at generation: rede-social-48 48x48, rede-social-192 192x192, rede-social-512 512x512, rede-social-apple-180 180x180, rede-social-maskable-512 512x512"
         status: pass
     human_judgment: false
   - id: D11
@@ -265,7 +265,7 @@ status: complete
 - **Files modified:** 27 (19 created, 8 modified)
 
 ## Accomplishments
-- PWA-01 manifest half: every route — `/entrar` before login included — links the host tenant's own manifest, favicon, apple-touch-icon and `theme-color`; the manifest route answers only the host's slug (cross-host and `_tria`-on-tenant requests are refused), `force-dynamic`, `private, no-store`, no cookies.
+- PWA-01 manifest half: every route — `/entrar` before login included — links the host tenant's own manifest, favicon, apple-touch-icon and `theme-color`; the manifest route answers only the host's slug (cross-host and `_rede`-on-tenant requests are refused), `force-dynamic`, `private, no-store`, no cookies.
 - PWA-01 service worker: `/serwist/sw.js` served `no-store` + `Service-Worker-Allowed: /`, registered with `updateViaCache: 'none'`, `cacheOnNavigation`/`reloadOnOnline` off; precache = build assets + `/~offline`; documents, RSC payloads, server actions, `/auth`, `/v1`, `/api`, `/m`, `/serwist` are NetworkOnly — asserted after a real login that Cache Storage holds no authenticated entry.
 - Offline: neutral `/~offline` page served for any navigation while offline (no brand root), `OfflineBanner` on every route, `experimental.useOffline` retries blocked navigations/actions.
 - Standalone signal `<html data-display-mode>` from `matchMedia('(display-mode: standalone)')`; the `InstallHint` (iOS coach mark) ships unmounted with its decision helpers unit-tested for Phase 7.
@@ -273,7 +273,7 @@ status: complete
 
 ## Task Commits
 
-1. **Task 1 (tracer): installable tenant shell — packages, next.config, sw.ts + serwist route, lib/manifest + route, root metadata/viewport + ServiceWorkerRegister, proxy `_tria`, neutral icons, playwright.pwa.config + `@tracer`** - `b1be5e5` (feat)
+1. **Task 1 (tracer): installable tenant shell — packages, next.config, sw.ts + serwist route, lib/manifest + route, root metadata/viewport + ServiceWorkerRegister, proxy `_rede`, neutral icons, playwright.pwa.config + `@tracer`** - `b1be5e5` (feat)
 2. **Task 2: offline expansion — OfflineBanner + layout mount + `@offline` e2e** - `97330bf` (feat)
 3. **Task 3: install expansion — InstallHint (unmounted) + helpers/tests, vitest oxc jsx, `@install` e2e** - `88350a7` (feat)
 4. **Docblock reword so the OfflineBanner no-reload grep gate reads clean** - `1e0c627` (docs)
@@ -289,7 +289,7 @@ status: complete
 - `apps/web/components/pwa/ServiceWorkerRegister.tsx`, `OfflineBanner.tsx`, `InstallHint.tsx` (+ `InstallHint.test.ts`).
 - `apps/web/app/~offline/page.tsx`, `RetryButton.tsx` — neutral offline page.
 - `apps/web/messages/pt-BR/pwa.json` — `pwa.offline.*`, `pwa.install.*`.
-- `apps/web/public/icons/tria-{48,192,512,maskable-512,apple-180}.png` — neutral TRIA set.
+- `apps/web/public/icons/rede-social-{48,192,512,maskable-512,apple-180}.png` — neutral platform set.
 - `apps/web/next.config.ts` — `withSerwist`, `experimental.useOffline`, `headers()`; `apps/web/tsconfig.json` — `WebWorker` lib; `apps/web/package.json` — pins + `e2e:pwa`.
 - `apps/web/proxy.ts` (one line: `[a-z0-9_-]` manifest slug class) + `proxy.test.ts` cases 9-11.
 - `apps/web/e2e/pwa.spec.ts`, `apps/web/playwright.pwa.config.ts` — production-build PWA suite; `apps/web/vitest.config.ts` — `oxc.jsx` automatic.
@@ -328,7 +328,7 @@ status: complete
 - **Issue:** the web vitest config transformed no JSX, so importing `InstallHint.tsx` for its pure helpers failed at import analysis.
 - **Fix:** `oxc: { jsx: { runtime: 'automatic' } }` (Vite 8 uses oxc; the `esbuild` key is ignored). No new dependency.
 - **Files modified:** apps/web/vitest.config.ts
-- **Verification:** `pnpm --filter @tria/web test` 41/41.
+- **Verification:** `pnpm --filter @rede-social/web test` 41/41.
 - **Committed in:** 88350a7
 
 **4. [Rule 1 - Bug] Test expectation for `shortName`**
@@ -351,7 +351,7 @@ status: complete
 The planner ASSUMED PWA-01's acceptance surface is (a) a valid per-tenant manifest, (b) the SW registered and controlling, (c) `display-mode: standalone` detected, (d) the offline fallback served. (a), (b), (d) are asserted end-to-end in `pwa.spec.ts` on three projects. (c) is only half-automatable: the `browser` value and the `matchMedia` mirror are asserted; the `standalone` value cannot be emulated by the bundled Chromium and Playwright cannot install a PWA — **the real-device check below is the definitive proof.**
 
 ## Manual verification (human_verify_mode = end-of-phase; 02-VALIDATION.md "Manual-Only Verifications")
-1. On a real iPhone, open the demo host in Safari → Compartilhar → "Adicionar à Tela de Início" → launch from the home screen: no browser chrome, name "TRIA Demo", the TRIA/derived icon, status bar in the tenant primary; in Web Inspector `document.documentElement.dataset.displayMode === 'standalone'`.
+1. On a real iPhone, open the demo host in Safari → Compartilhar → "Adicionar à Tela de Início" → launch from the home screen: no browser chrome, name "Rede Demo", the Rede Social/derived icon, status bar in the tenant primary; in Web Inspector `document.documentElement.dataset.displayMode === 'standalone'`.
 2. On a real Android phone (Chrome), open the demo host → install prompt / "Adicionar à tela inicial" → launch: standalone window, `theme-color` = `#7c3aed`, maskable icon not cropped.
 3. Visual fidelity of `/~offline` (airplane mode → navigate) and of `InstallHint` (temporarily mount `<InstallHint open />` in a scratch page) against `.planning/sketches/001-phase-02-designed-screens/index.html#offline` / `#install-hint`.
 
@@ -359,10 +359,10 @@ The planner ASSUMED PWA-01's acceptance surface is (a) a valid per-tenant manife
 None. `InstallHint` is deliberately unmounted (PWA-02 wiring is Phase 7) — a documented phase boundary, not a stub; its behaviour is fully implemented and tested.
 
 ## Threat Flags
-None beyond the plan's `<threat_model>` — the new surfaces (`/m/[slug]/manifest.webmanifest`, `/serwist/*`, `/~offline`, Cache Storage rules, the `_tria` PUBLIC widening, echoed icon URLs) are all registered there (T-02-70 … T-02-79, T-02-SC).
+None beyond the plan's `<threat_model>` — the new surfaces (`/m/[slug]/manifest.webmanifest`, `/serwist/*`, `/~offline`, Cache Storage rules, the `_rede` PUBLIC widening, echoed icon URLs) are all registered there (T-02-70 … T-02-79, T-02-SC).
 
 ## User Setup Required
-None — no external service configuration required. `pnpm --filter @tria/web e2e:pwa` builds and starts the app on :3100 itself (kill a stale server with `lsof -ti:3100 | xargs kill`).
+None — no external service configuration required. `pnpm --filter @rede-social/web e2e:pwa` builds and starts the app on :3100 itself (kill a stale server with `lsof -ti:3100 | xargs kill`).
 
 ## Next Phase Readiness
 - **02-13** writes `branding.iconUrls.*` + `faviconUrl` as absolute URLs under `${NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/branding/…` — exactly the origin/prefix `isAllowedIconUrl` accepts; any other shape falls back to the neutral set (the e2e "never mixed" case will show the derived icons once seed derivation runs).

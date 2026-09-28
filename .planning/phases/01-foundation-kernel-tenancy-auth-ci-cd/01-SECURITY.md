@@ -62,7 +62,7 @@ created: 2026-09-14
 | T-04-04 | Elevation of privilege | admin lane in `signup.ts` | high | mitigate | Import allowed only under `packages/core/server/tenancy/**` (Biome pattern); role is always `member` (never taken from the request) | closed |
 | T-04-05 | Denial of service | sign-up spam | medium | accept | Supabase sign-up rate limit (30/5 min/IP); further limits deferred to Phase 8 (CONTEXT Deferred Ideas) | open — below high threshold (non-blocking) |
 | T-04-06 | Tampering | orphan identity after partial failure | medium | mitigate | Compensation `deleteUser` + 500; `NO_MEMBERSHIP` screen (01-05) as the safety net | closed |
-| T-04-07 | Spoofing | slug aliasing (`Tria-Demo`) | low | mitigate | Strict lowercase regex; no normalisation; adjacency tests | closed |
+| T-04-07 | Spoofing | slug aliasing (`Rede-Demo`) | low | mitigate | Strict lowercase regex; no normalisation; adjacency tests | closed |
 | T-04-08 | Tampering | hidden `slug` field vs host on a tenant domain | low | mitigate | On tenant hosts the server action uses `hostTenant.slug` and ignores the form value; the proxy redirects `/cadastro/*` to `/cadastro`; e2e c | closed |
 | T-05-01 | Tampering | `next` param on `/auth/confirm` | high | mitigate | Regex `^/(?!/)` guard; e2e asserts external and protocol-relative targets fall back | closed |
 | T-05-02 | Information disclosure | account enumeration on `/esqueci-senha` | medium | mitigate | Single constant response (D-10); action has one redirect target; e2e compares known vs unknown e-mail | closed |
@@ -77,7 +77,7 @@ created: 2026-09-14
 | T-06-03 | Elevation of privilege | role checks | high | mitigate | `requireRole` after `requireModule`; role read from the membership row each request, never from the token | closed |
 | T-06-04 | Tampering | flags cache cross-tenant bleed | high | mitigate | Cache keyed by tenant id; unit test proves isolation; only `tenant_modules` is cached | closed |
 | T-06-05 | Repudiation | platform reads | low | mitigate | pino line `platform.tenants.list` with `userId` + `requestId` (full audit log is Phase 8) | closed |
-| T-06-06 | Elevation of privilege | `example` enabled on a real tenant | medium | mitigate | `REAL_TENANT_DEFAULT_MODULES` excludes it (unit test); seed enables it only for `tria-demo` | closed |
+| T-06-06 | Elevation of privilege | `example` enabled on a real tenant | medium | mitigate | `REAL_TENANT_DEFAULT_MODULES` excludes it (unit test); seed enables it only for `rede-demo` | closed |
 | T-06-07 | Elevation of privilege | platform session used on a tenant domain / member session on the platform host | medium | mitigate | `requireSuperAdmin` + `requireAuth` answer 403 `TENANT_HOST_MISMATCH` on registered tenant hosts (test (8)); the platform-host web branch re | closed |
 | T-07-01 | Elevation of privilege | `POST /v1/example/items` | high | mitigate | `requireRole('admin_tenant')`; `createdByUserId` from `ctx`, never from the body | closed |
 | T-07-02 | Information disclosure | `GET /items/:id` across tenants | high | mitigate | Query inside `withTenantTx`; RLS hides foreign rows → 404 `NOT_FOUND` (test) | closed |

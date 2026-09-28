@@ -7,7 +7,7 @@ import { clearMailbox, expectNoRecoveryMail, waitForRecoveryMail } from './mail'
  * AUTH-03 / D-10 password recovery on a phone viewport (`mobile-chromium`), end to end through the
  * local mail catcher: form -> e-mail -> `/auth/confirm` -> `/redefinir-senha` -> signed in.
  *
- * `baseURL` is the tria-demo TENANT host, which is the point of case 3: the link in the e-mail must
+ * `baseURL` is the rede-demo TENANT host, which is the point of case 3: the link in the e-mail must
  * come back to the host the member actually used, never to `site_url` (D-22).
  *
  * Every case that triggers a send uses its OWN throwaway member: GoTrue throttles recovery e-mails
@@ -25,8 +25,8 @@ const SENT = 'Se existir uma conta com este e-mail, enviamos um link.';
 const created: string[] = [];
 
 async function newMember(tag: string): Promise<string> {
-  const email = `e2e-recovery-${tag}-${Date.now()}@tria-demo.local`;
-  await createMember(email, OLD_PASSWORD, 'tria-demo');
+  const email = `e2e-recovery-${tag}-${Date.now()}@rede-demo.local`;
+  await createMember(email, OLD_PASSWORD, 'rede-demo');
   created.push(email);
   return email;
 }
@@ -56,7 +56,7 @@ test.describe('AUTH-03 — recuperação de senha', () => {
   test('2. an unknown address gets exactly the same answer (no enumeration, T-05-02)', async ({
     page,
   }) => {
-    await requestLink(page, `nao-existe-${Date.now()}@tria-demo.local`);
+    await requestLink(page, `nao-existe-${Date.now()}@rede-demo.local`);
   });
 
   test('3. D-22: the e-mail link returns to the host used, sets a new password and signs in', async ({
@@ -77,7 +77,7 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     await page.locator('#password').fill(NEW_PASSWORD);
     await page.getByRole('button', { name: 'Salvar nova senha' }).click();
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
       timeout: 20_000,
     });
 

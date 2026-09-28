@@ -1,6 +1,6 @@
 'use client';
 
-import { Avatar, cn, IconButton } from '@tria/ui';
+import { Avatar, cn, IconButton } from '@rede-social/ui';
 import { MessageCircle, Send } from 'lucide-react';
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 

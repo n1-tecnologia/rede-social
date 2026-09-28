@@ -45,8 +45,8 @@ Output: `requireBootstrap()` + `requirePlatformTenants()`; layout and page with 
 </objective>
 
 <execution_context>
-@/Users/igorvboas/Library/Developer/TRIA/rede_social/.claude/gsd-core/workflows/execute-plan.md
-@/Users/igorvboas/Library/Developer/TRIA/rede_social/.claude/gsd-core/templates/summary.md
+@./.claude/gsd-core/workflows/execute-plan.md
+@./.claude/gsd-core/templates/summary.md
 </execution_context>
 
 <context>
@@ -77,13 +77,13 @@ Facts the executor must not rediscover:
   <files>(none — read-only reproduction; creates log files in the session scratchpad only)</files>
   <action>
 Set `LOGDIR` to a fresh directory inside the session scratchpad (e.g. `$SCRATCHPAD/quick-260914-mfk`) and create it. From the repo root start the two dev servers as detached background commands (the Bash tool's `run_in_background`), appending stdout+stderr to files:
-- API: `pnpm --filter @tria/api dev >> "$LOGDIR/api.log" 2>&1`
-- Web: `pnpm --filter @tria/web dev >> "$LOGDIR/web-before.log" 2>&1`
+- API: `pnpm --filter @rede-social/api dev >> "$LOGDIR/api.log" 2>&1`
+- Web: `pnpm --filter @rede-social/web dev >> "$LOGDIR/web-before.log" 2>&1`
 
 Wait for readiness with curl retry loops on `http://localhost:8787/v1/health` and `http://localhost:3000/entrar` (see context; no `sleep`).
 
 Run only the two specs that exercise the 403 paths, on the phone project:
-`pnpm --filter @tria/web exec playwright test --project=mobile-chromium e2e/blocked.spec.ts e2e/platform.spec.ts`
+`pnpm --filter @rede-social/web exec playwright test --project=mobile-chromium e2e/blocked.spec.ts e2e/platform.spec.ts`
 They are expected to PASS (the bug is log-only). Then inspect `$LOGDIR/web-before.log`:
 - sanity: it must contain Next request lines for the redirect (`GET /inicio 307`); if it does not, the log capture is wrong — fix the capture (not the code) before continuing;
 - reproduction: it must contain the unhandled render error for the page (`ApiClientError` with `MEMBERSHIP_BLOCKED`, and normally also `NO_MEMBERSHIP` from the orphan test and `FORBIDDEN` from platform test 2).
@@ -119,7 +119,7 @@ Move the explanatory comments from the layout (why each 403 goes to a Route Hand
 Do not touch `apps/web/app/auth/*` route handlers, `proxy.ts`, or any e2e spec.
   </action>
   <verify>
-    <automated>cd /Users/igorvboas/Library/Developer/TRIA/rede_social && pnpm --filter @tria/web typecheck && pnpm --filter @tria/web lint && grep -q 'export async function requireBootstrap' apps/web/lib/bootstrap.ts && grep -qF 'export const getBootstrap = cache(' apps/web/lib/bootstrap.ts && grep -q 'export async function requirePlatformTenants' apps/web/lib/platform.ts && grep -qF 'export const getPlatformTenants = cache(' apps/web/lib/platform.ts && grep -v '^\s*[/*]' apps/web/lib/bootstrap.ts | grep -q 'auth/blocked' && ! grep -rq 'auth/blocked' 'apps/web/app/(app)' && ! grep -q 'ApiClientError' 'apps/web/app/(app)/layout.tsx' && ! grep -q 'next/navigation' 'apps/web/app/(app)/layout.tsx' && ! grep -qF 'getBootstrap()' 'apps/web/app/(app)/layout.tsx' 'apps/web/app/(app)/inicio/page.tsx' && ! grep -qF 'getPlatformTenants()' 'apps/web/app/(app)/layout.tsx' 'apps/web/app/(app)/inicio/page.tsx' && grep -qF 'requireBootstrap()' 'apps/web/app/(app)/inicio/page.tsx' && grep -qF 'requirePlatformTenants()' 'apps/web/app/(app)/inicio/page.tsx'</automated>
+    <automated>cd . && pnpm --filter @rede-social/web typecheck && pnpm --filter @rede-social/web lint && grep -q 'export async function requireBootstrap' apps/web/lib/bootstrap.ts && grep -qF 'export const getBootstrap = cache(' apps/web/lib/bootstrap.ts && grep -q 'export async function requirePlatformTenants' apps/web/lib/platform.ts && grep -qF 'export const getPlatformTenants = cache(' apps/web/lib/platform.ts && grep -v '^\s*[/*]' apps/web/lib/bootstrap.ts | grep -q 'auth/blocked' && ! grep -rq 'auth/blocked' 'apps/web/app/(app)' && ! grep -q 'ApiClientError' 'apps/web/app/(app)/layout.tsx' && ! grep -q 'next/navigation' 'apps/web/app/(app)/layout.tsx' && ! grep -qF 'getBootstrap()' 'apps/web/app/(app)/layout.tsx' 'apps/web/app/(app)/inicio/page.tsx' && ! grep -qF 'getPlatformTenants()' 'apps/web/app/(app)/layout.tsx' 'apps/web/app/(app)/inicio/page.tsx' && grep -qF 'requireBootstrap()' 'apps/web/app/(app)/inicio/page.tsx' && grep -qF 'requirePlatformTenants()' 'apps/web/app/(app)/inicio/page.tsx'</automated>
   </verify>
   <done>Typecheck and Biome are clean; `requireBootstrap`/`requirePlatformTenants` exist next to their still-`cache()`d loaders; the `/auth/blocked` mapping appears once in `lib/bootstrap.ts` and nowhere under `app/(app)`; the layout imports neither `redirect` nor `ApiClientError`; both call sites in `inicio/page.tsx` use the `require*` helpers.</done>
 </task>
@@ -128,15 +128,15 @@ Do not touch `apps/web/app/auth/*` route handlers, `proxy.ts`, or any e2e spec.
   <name>Task 3: Prove the error line is gone, keep e2e at 34/34, commit</name>
   <files>(commit of the four files from Task 2; log files in the scratchpad only)</files>
   <action>
-Restart the web dev server so the after-fix log is unambiguous: stop whatever listens on :3000 (`lsof -ti:3000 | xargs -r kill`, verify with a second `lsof -ti:3000` that it is gone; escalate to `kill -9` only if it survived), then start it again as a detached background command appending to a NEW file: `pnpm --filter @tria/web dev >> "$LOGDIR/web-after.log" 2>&1`, and wait for `http://localhost:3000/entrar` with the curl retry loop. Leave the API from Task 1 running (`api.log`).
+Restart the web dev server so the after-fix log is unambiguous: stop whatever listens on :3000 (`lsof -ti:3000 | xargs -r kill`, verify with a second `lsof -ti:3000` that it is gone; escalate to `kill -9` only if it survived), then start it again as a detached background command appending to a NEW file: `pnpm --filter @rede-social/web dev >> "$LOGDIR/web-after.log" 2>&1`, and wait for `http://localhost:3000/entrar` with the curl retry loop. Leave the API from Task 1 running (`api.log`).
 
-1. Targeted re-run of the same two specs: `pnpm --filter @tria/web exec playwright test --project=mobile-chromium e2e/blocked.spec.ts e2e/platform.spec.ts` — must pass, and `web-after.log` must contain the `GET /inicio 307` redirect lines (proof the log is live) but ZERO `ApiClientError` lines.
-2. Full suite, with the runner output kept for the verify step: `pnpm --filter @tria/web exec playwright test --project=mobile-chromium 2>&1 | tee "$LOGDIR/e2e-full.log"` — must report `34 passed` (check `${PIPESTATUS[0]}`/`$pipestatus[1]` is 0, not just the tee). Re-check `web-after.log` afterwards: still zero `ApiClientError` lines across the whole suite.
+1. Targeted re-run of the same two specs: `pnpm --filter @rede-social/web exec playwright test --project=mobile-chromium e2e/blocked.spec.ts e2e/platform.spec.ts` — must pass, and `web-after.log` must contain the `GET /inicio 307` redirect lines (proof the log is live) but ZERO `ApiClientError` lines.
+2. Full suite, with the runner output kept for the verify step: `pnpm --filter @rede-social/web exec playwright test --project=mobile-chromium 2>&1 | tee "$LOGDIR/e2e-full.log"` — must report `34 passed` (check `${PIPESTATUS[0]}`/`$pipestatus[1]` is 0, not just the tee). Re-check `web-after.log` afterwards: still zero `ApiClientError` lines across the whole suite.
 3. Commit ONLY the four source files (`git add apps/web/lib/bootstrap.ts apps/web/lib/platform.ts "apps/web/app/(app)/layout.tsx" "apps/web/app/(app)/inicio/page.tsx"`) with an English message whose subject contains the quick id, e.g. `fix(quick-260914-mfk): route bootstrap 401/403 to redirects through one requireBootstrap() helper`, a short body explaining the concurrent layout+page render and the false `⨯ ApiClientError` log, and the mandatory trailer `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`. Do not stage `.planning/`, `apps/web/AGENTS.md` (if `next dev` re-touched it) or any log.
 4. Cleanup: stop both dev servers (`lsof -ti:3000,8787 | xargs -r kill`) so the environment is left as it was found (nothing running). Put the before/after grep counts in the SUMMARY.
   </action>
   <verify>
-    <automated>cd /Users/igorvboas/Library/Developer/TRIA/rede_social && grep -q 'GET /inicio 307' "$LOGDIR/web-after.log" && test "$(grep -c 'ApiClientError' "$LOGDIR/web-after.log")" -eq 0 && test "$(grep -c 'ApiClientError' "$LOGDIR/web-before.log")" -ge 1 && grep -q '34 passed' "$LOGDIR/e2e-full.log" && MSG=$(git log -1 --format=%B) && printf '%s\n' "$MSG" | grep -q 'quick-260914-mfk' && printf '%s\n' "$MSG" | grep -qF 'Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>' && RAW=$(git diff-tree --no-commit-id --name-only -r HEAD) && FILES=$(printf '%s\n' "$RAW" | LC_ALL=C sort | tr '\n' ' ') && test "$FILES" = "apps/web/app/(app)/inicio/page.tsx apps/web/app/(app)/layout.tsx apps/web/lib/bootstrap.ts apps/web/lib/platform.ts "</automated>
+    <automated>cd . && grep -q 'GET /inicio 307' "$LOGDIR/web-after.log" && test "$(grep -c 'ApiClientError' "$LOGDIR/web-after.log")" -eq 0 && test "$(grep -c 'ApiClientError' "$LOGDIR/web-before.log")" -ge 1 && grep -q '34 passed' "$LOGDIR/e2e-full.log" && MSG=$(git log -1 --format=%B) && printf '%s\n' "$MSG" | grep -q 'quick-260914-mfk' && printf '%s\n' "$MSG" | grep -qF 'Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>' && RAW=$(git diff-tree --no-commit-id --name-only -r HEAD) && FILES=$(printf '%s\n' "$RAW" | LC_ALL=C sort | tr '\n' ' ') && test "$FILES" = "apps/web/app/(app)/inicio/page.tsx apps/web/app/(app)/layout.tsx apps/web/lib/bootstrap.ts apps/web/lib/platform.ts "</automated>
   </verify>
   <done>`web-before.log` shows the ApiClientError render error and `web-after.log` (same specs, then the full suite) shows the 307 redirects with zero ApiClientError lines; `mobile-chromium` is 34/34; one commit containing `quick-260914-mfk` and the required trailer holds exactly the four source files; no dev servers left running.</done>
 </task>
@@ -164,8 +164,8 @@ Restart the web dev server so the after-fix log is unambiguous: stop whatever li
 </threat_model>
 
 <verification>
-- `pnpm --filter @tria/web typecheck` and `pnpm --filter @tria/web lint` clean.
-- `pnpm --filter @tria/web exec playwright test --project=mobile-chromium` -> 34 passed.
+- `pnpm --filter @rede-social/web typecheck` and `pnpm --filter @rede-social/web lint` clean.
+- `pnpm --filter @rede-social/web exec playwright test --project=mobile-chromium` -> 34 passed.
 - Captured dev-server log: `ApiClientError` count >= 1 before the change (Task 1), == 0 after (Task 3), with `GET /inicio 307` present in both (the log is live).
 - Grep gates: the four redirect targets live once in `lib/bootstrap.ts` (plus the platform pair in `lib/platform.ts`) and nowhere under `app/(app)`.
 </verification>

@@ -1,5 +1,5 @@
-import { CommentsListSkeleton, FeedCardSkeleton } from '@tria/module-feed/ui';
-import { Skeleton } from '@tria/ui';
+import { CommentsListSkeleton, FeedCardSkeleton } from '@rede-social/module-feed/ui';
+import { Skeleton } from '@rede-social/ui';
 
 /**
  * `/post/[postId]` loading (UI-SPEC E13/loading): the header chrome, ONE card skeleton and the

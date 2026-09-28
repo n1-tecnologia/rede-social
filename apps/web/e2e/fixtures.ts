@@ -13,10 +13,10 @@ export const SEED_PASSWORD: string = (() => {
 
 /** Seeded users (01-01). */
 export const users = {
-  demoMember: 'member@tria-demo.local',
-  demoAdmin: 'admin@tria-demo.local',
-  labMember: 'member@tria-lab.local',
-  labAdmin: 'admin@tria-lab.local',
+  demoMember: 'member@rede-demo.local',
+  demoAdmin: 'admin@rede-demo.local',
+  labMember: 'member@rede-lab.local',
+  labAdmin: 'admin@rede-lab.local',
 } as const;
 
 /**
@@ -33,8 +33,8 @@ export const users = {
 export const seededFeed = {
   oldest: 'Bem-vindos! Esta é a primeira publicação da comunidade.',
   newest: 'Encontro de sábado confirmado. Levem água e um caderno.',
-  demoAuthor: 'Admin TRIA Demo',
-  labAuthor: 'Admin TRIA Lab',
+  demoAuthor: 'Admin Rede Demo',
+  labAuthor: 'Admin Rede Lab',
 } as const;
 
 /**
@@ -129,9 +129,9 @@ export const seededFeedMedia = {
 
 /** Distinct origins (D-20/D-21). Chromium resolves `*.localhost` to loopback without /etc/hosts. */
 export const hosts = {
-  demo: process.env.PLAYWRIGHT_DEMO_URL ?? 'http://tria-demo.localhost:3000',
-  lab: process.env.PLAYWRIGHT_LAB_URL ?? 'http://tria-lab.localhost:3000',
-  platform: process.env.PLAYWRIGHT_PLATFORM_URL ?? 'http://tria.localhost:3000',
+  demo: process.env.PLAYWRIGHT_DEMO_URL ?? 'http://rede-demo.localhost:3000',
+  lab: process.env.PLAYWRIGHT_LAB_URL ?? 'http://rede-lab.localhost:3000',
+  platform: process.env.PLAYWRIGHT_PLATFORM_URL ?? 'http://rede-social.localhost:3000',
   generic: process.env.PLAYWRIGHT_GENERIC_URL ?? 'http://localhost:3000',
 } as const;
 

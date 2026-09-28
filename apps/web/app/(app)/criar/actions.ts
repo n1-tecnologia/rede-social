@@ -1,6 +1,6 @@
 'use server';
 
-import { createPostSchema } from '@tria/module-feed/contracts';
+import { createPostSchema } from '@rede-social/module-feed/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createPost } from '@/lib/feed';

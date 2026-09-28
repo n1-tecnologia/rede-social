@@ -1,6 +1,6 @@
-import { type AttendanceList, EVENT_PERMISSIONS } from '@tria/module-events/contracts';
-import { CheckinCodeCard } from '@tria/module-events/ui';
-import { Chip, EmptyState, PageHeader } from '@tria/ui';
+import { type AttendanceList, EVENT_PERMISSIONS } from '@rede-social/module-events/contracts';
+import { CheckinCodeCard } from '@rede-social/module-events/ui';
+import { Chip, EmptyState, PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

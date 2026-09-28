@@ -6,7 +6,7 @@ import {
   type Page,
   test,
 } from '@playwright/test';
-import { STORY_MAX_PAGE_SIZE } from '@tria/module-stories/contracts';
+import { STORY_MAX_PAGE_SIZE } from '@rede-social/module-stories/contracts';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
@@ -63,7 +63,7 @@ import { ensureWorker } from './worker';
  */
 
 test.describe.configure({ mode: 'serial', timeout: 240_000 });
-test.skip(isRemote, 'local stack only (seeded tria-demo, direct DB fixtures, a local worker)');
+test.skip(isRemote, 'local stack only (seeded rede-demo, direct DB fixtures, a local worker)');
 test.use({ serviceWorkers: 'block' });
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -88,11 +88,11 @@ const CAPTION = `${CAPTION_PREFIX} ${RUN} — publicado no destaque da comunidad
  * top-level-await script that requires `SEED_PASSWORD` and opens a database connection at import.
  */
 const SEEDED = {
-  tenantName: 'TRIA Demo',
-  /** `SEED_COMMUNITY_IDS['tria-demo'][0]` — community[0], home of the seeded `Destaques`. */
+  tenantName: 'Rede Demo',
+  /** `SEED_COMMUNITY_IDS['rede-demo'][0]` — community[0], home of the seeded `Destaques`. */
   communityId: '0d000000-0000-4000-8000-0000000000c1',
   communityName: 'Avisos da diretoria',
-  /** `SEED_HIGHLIGHT_IDS['tria-demo']` and `SEED_HIGHLIGHT_TITLES`. */
+  /** `SEED_HIGHLIGHT_IDS['rede-demo']` and `SEED_HIGHLIGHT_TITLES`. */
   bastidoresId: '0d000000-0000-4000-8000-0000000002a1',
   aulasId: '0d000000-0000-4000-8000-0000000002a2',
   destaquesId: '0d000000-0000-4000-8000-0000000002a3',
@@ -179,7 +179,7 @@ async function catalog(): Promise<{ id: string; title: string; communityId: stri
  * the seed's seen state back. Idempotent: safe before the walk (a crashed run) and after it.
  */
 async function sweep(): Promise<void> {
-  for (const prefix of TITLE_PREFIXES) await deleteHighlightsByTitlePrefix('tria-demo', prefix);
+  for (const prefix of TITLE_PREFIXES) await deleteHighlightsByTitlePrefix('rede-demo', prefix);
   await deleteStoriesByCaptionPrefix(CAPTION_PREFIX);
   const order = await storiesApi(
     await sessionToken(users.demoAdmin),
@@ -191,8 +191,8 @@ async function sweep(): Promise<void> {
     },
   );
   expect(order.status, 'Início’s seeded order was put back').toBeLessThan(300);
-  await setStoryViews(users.demoMember, 'tria-demo', SEED_SEEN.member);
-  await setStoryViews(users.demoAdmin, 'tria-demo', SEED_SEEN.admin);
+  await setStoryViews(users.demoMember, 'rede-demo', SEED_SEEN.member);
+  await setStoryViews(users.demoAdmin, 'rede-demo', SEED_SEEN.admin);
 }
 
 let stopWorker: (() => Promise<void>) | null = null;
@@ -645,7 +645,7 @@ test.describe('Phase 05.2 smoke — the UAT replay (CONTEXT <specifics>)', () =>
     // Everything else already seen — the seeded video included, which cannot be SHOWN here.
     await setStoryViews(
       users.demoMember,
-      'tria-demo',
+      'rede-demo',
       sequence.slice(0, first).map((story) => story.id),
     );
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { type ToastTone, useToast } from '@tria/ui';
+import { type ToastTone, useToast } from '@rede-social/ui';
 import { useEffect } from 'react';
 
 /**

@@ -7,13 +7,13 @@ tags: [web, profile, upload, tus, canvas, next, playwright, pt-BR, accessibility
 # Dependency graph
 requires:
   - phase: 02-tenant-shell-branding-platform-panel
-    provides: "@tria/ui primitives, the pt-BR catalog loader + literal gate, the signed-upload posture of LogoUpload (WR-07), the server-action conventions of marca/actions.ts, the Playwright projects"
+    provides: "@rede-social/ui primitives, the pt-BR catalog loader + literal gate, the signed-upload posture of LogoUpload (WR-07), the server-action conventions of marca/actions.ts, the Playwright projects"
   - phase: 03-media-pipeline-member-profiles
     provides: "03-01's media broker (start/complete/serve, MEDIA_LIMITS, classifyMediaFile, PURPOSE_WIDTHS) and 03-02's member_profiles + GET/PATCH /v1/me/profile"
 provides:
   - "`/perfil` — the real profile screen: photo, name, e-mail, bio and three rows, with no role badge (UI-D-01)"
   - "`/perfil/editar` — name (60) and bio (150 under a live counter) saved through PATCH /v1/me/profile"
-  - "`Textarea` in @tria/ui — Input geometry plus a {n}/{max} counter that turns danger at the cap"
+  - "`Textarea` in @rede-social/ui — Input geometry plus a {n}/{max} counter that turns danger at the cap"
   - "`MediaImage` — the ONE way a private image renders: /v1/media/{assetId}/{variant} with the payload's srcSet ladder and a neutral fallback"
   - "`useSignedUpload({ kind, purpose })` — the six-state upload machine Phase 4's composer and 03-07's video zone reuse unchanged"
   - "`AvatarUploadField` — pick, silent re-encode, monotonic progress, cancel, remove behind a confirmation"
@@ -189,7 +189,7 @@ coverage:
     description: "Every string on these screens comes from the pt-BR catalog, and the repo's web gates stay green (literal scan, build, static-route allow-list, module boundaries)"
     verification:
       - kind: other
-        ref: "bash scripts/check-ui-literals.sh && pnpm --filter @tria/web build && bash scripts/check-static-routes.sh && pnpm boundaries"
+        ref: "bash scripts/check-ui-literals.sh && pnpm --filter @rede-social/web build && bash scripts/check-static-routes.sh && pnpm boundaries"
         status: pass
     human_judgment: false
 
@@ -287,7 +287,7 @@ See `key-decisions` in the frontmatter. The three that will matter to a later re
 - **Found during:** Task 2
 - **Issue:** UI-SPEC E9 says a broken-image glyph is never shown, but the shipped `Avatar` rendered a bare `<img>` — so the shell avatar showed the glyph whenever a variant was missing or expired.
 - **Fix:** the neutral `User` icon fallback, keyed by `src` so pointing it at another photo retries.
-- **Verification:** `pnpm --filter @tria/ui test` (37) plus the E9 e2e.
+- **Verification:** `pnpm --filter @rede-social/ui test` (37) plus the E9 e2e.
 - **Committed in:** `68de77d` / `93df1c4`
 
 **6. [Rule 2 - Missing critical] A failed transfer was invisible in the console**
@@ -347,7 +347,7 @@ None — no external service configuration.
 - All 21 files listed in `key-files.created` exist on disk (`[ -f ]`).
 - All three task commits exist in `git log` (`e3bc8e5`, `68de77d`, `93df1c4`).
 - Every task's `<acceptance_criteria>` re-run mechanically and green (greps, `node -e` catalog root-key checks, `git ls-files` on the fixtures).
-- Plan-level `<verification>` re-run at HEAD: `@tria/ui` typecheck + test (37), `@tria/web` typecheck + lint + test (80), `check-ui-literals`, `next build`, `check-static-routes`, `pnpm boundaries`, and `playwright test profile.spec.ts media-upload.spec.ts` (26 passed across `mobile-chromium` and `desktop-chromium`). `@tria/core` typecheck + test (168) re-run as a cross-package guard for the two `@tria/ui` primitive changes.
+- Plan-level `<verification>` re-run at HEAD: `@rede-social/ui` typecheck + test (37), `@rede-social/web` typecheck + lint + test (80), `check-ui-literals`, `next build`, `check-static-routes`, `pnpm boundaries`, and `playwright test profile.spec.ts media-upload.spec.ts` (26 passed across `mobile-chromium` and `desktop-chromium`). `@rede-social/core` typecheck + test (168) re-run as a cross-package guard for the two `@rede-social/ui` primitive changes.
 
 ---
 *Phase: 03-media-pipeline-member-profiles*

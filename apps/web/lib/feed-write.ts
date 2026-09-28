@@ -4,7 +4,7 @@ import {
   type FeedCommunityIssue,
   type FeedMediaIssue,
   type FeedPost,
-} from '@tria/module-feed/contracts';
+} from '@rede-social/module-feed/contracts';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 
 /**

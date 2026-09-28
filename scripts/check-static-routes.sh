@@ -6,7 +6,7 @@
 # tenant's brand (or one member's shell) to every host — the cross-tenant leak this phase exists to
 # prevent. Runs after `next build` inside the root `verify` script and in CI (`pnpm check:static-routes`).
 #
-# What it reads (apps/web/.next after `pnpm --filter @tria/web build`):
+# What it reads (apps/web/.next after `pnpm --filter @rede-social/web build`):
 #   - app-path-routes-manifest.json — every App Router source key → public path;
 #   - prerender-manifest.json — `routes` (static HTML emitted at build) and `dynamicRoutes`
 #     (parametrised routes with generated params).
@@ -37,7 +37,7 @@ NEXT_DIR="${NEXT_DIR:-$ROOT/apps/web/.next}"
 
 for file in prerender-manifest.json app-path-routes-manifest.json; do
   if [ ! -f "$NEXT_DIR/$file" ]; then
-    echo "check-static-routes: $NEXT_DIR/$file missing — run 'pnpm --filter @tria/web build' first" >&2
+    echo "check-static-routes: $NEXT_DIR/$file missing — run 'pnpm --filter @rede-social/web build' first" >&2
     exit 2
   fi
 done

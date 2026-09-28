@@ -2,16 +2,16 @@ import {
   platformTenantDetailSchema,
   tenantDomainSchema,
   tenantDomainsListSchema,
-} from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
-import { withTenantTx } from '@tria/core/db/tenant-tx';
-import type { RequestContext } from '@tria/core/server/auth/context';
-import { localAllowListEntries } from '@tria/core/server/domains/auth-allow-list';
-import { fakeDomainProviderStats } from '@tria/core/server/domains/fake';
-import { DOMAIN_VERIFY_QUEUE } from '@tria/core/server/domains/types';
-import { domainVerifyJob } from '@tria/core/server/domains/verify-job';
-import { enqueueInTx, stopBoss } from '@tria/core/server/jobs/boss';
-import { invalidateTenantHost } from '@tria/core/server/tenancy/tenant-host';
+} from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { localAllowListEntries } from '@rede-social/core/server/domains/auth-allow-list';
+import { fakeDomainProviderStats } from '@rede-social/core/server/domains/fake';
+import { DOMAIN_VERIFY_QUEUE } from '@rede-social/core/server/domains/types';
+import { domainVerifyJob } from '@rede-social/core/server/domains/verify-job';
+import { enqueueInTx, stopBoss } from '@rede-social/core/server/jobs/boss';
+import { invalidateTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, signInAs } from './setup';
 
@@ -31,7 +31,7 @@ import { adminSql, api, authAdmin, signInAs } from './setup';
  */
 
 const RUN = Date.now();
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
 
 type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
@@ -63,7 +63,7 @@ const byHost = (host: string) =>
 const envelope = async (res: Response) => ((await res.json()) as Envelope).error;
 
 async function createThrowawayTenant(slug: string): Promise<{ id: string; adminEmail: string }> {
-  const adminEmail = `admin-${slug}@tria-test.local`;
+  const adminEmail = `admin-${slug}@rede-social-test.local`;
   const res = await platform('/tenants', {
     method: 'POST',
     body: {
@@ -91,7 +91,7 @@ async function cleanup(): Promise<void> {
     delete from public.memberships where tenant_id in
       (select id from public.tenants where slug like 'pd-%')`;
   await adminSql`delete from public.tenants where slug like 'pd-%'`;
-  await adminSql`delete from auth.users where lower(email) like 'admin-pd-%@tria-test.local'`;
+  await adminSql`delete from auth.users where lower(email) like 'admin-pd-%@rede-social-test.local'`;
   if (createdDomainIds.length > 0) {
     await adminSql`
       delete from pgboss.job_common
@@ -109,8 +109,8 @@ beforeAll(async () => {
   const [row] = await adminSql<{ tenant_id: string; user_id: string }[]>`
     select m.tenant_id, m.user_id from public.memberships m
       join public.tenants t on t.id = m.tenant_id
-     where t.slug = 'tria-demo' and m.role = 'admin_tenant' limit 1`;
-  if (!row) throw new Error('seed tenant tria-demo has no admin (run pnpm db:seed)');
+     where t.slug = 'rede-demo' and m.role = 'admin_tenant' limit 1`;
+  if (!row) throw new Error('seed tenant rede-demo has no admin (run pnpm db:seed)');
   laneCtx = {
     userId: row.user_id,
     tenantId: row.tenant_id,
@@ -176,7 +176,7 @@ describe('tracer — attach, verify, resolve, invite (D-34/D-36)', () => {
     expect(domain.dnsRecords).toContainEqual({
       type: 'CNAME',
       name: HOST,
-      value: 'fake.tria-dns.test',
+      value: 'fake.rede-social-dns.test',
       purpose: 'routing',
     });
     expect(domain.dnsRecords.some((r) => r.type === 'TXT')).toBe(false);
@@ -516,7 +516,7 @@ describe('adjacency and concurrency — a second tenant (TENANT-07 edge ledger)'
     expect(body).not.toContain(shared.tenantA);
     expect(body).not.toContain(`pd-tracer-${RUN}`);
 
-    const platformHost = process.env.PLATFORM_HOST ?? 'tria.localhost';
+    const platformHost = process.env.PLATFORM_HOST ?? 'rede-social.localhost';
     const reserved = await platform(`/tenants/${tenantB}/domains`, {
       method: 'POST',
       body: { host: platformHost },

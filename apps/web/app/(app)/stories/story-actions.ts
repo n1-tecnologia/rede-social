@@ -1,12 +1,12 @@
 'use server';
 
-import type { CommentView } from '@tria/module-feed/ui';
+import type { CommentView } from '@rede-social/module-feed/ui';
 import {
   createStoryCommentSchema,
   publishStorySchema,
   storyCommentsQuerySchema,
   storyQuerySchema,
-} from '@tria/module-stories/contracts';
+} from '@rede-social/module-stories/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

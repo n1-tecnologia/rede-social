@@ -18,9 +18,9 @@ provides:
   - "`PATCH /v1/me/profile { displayName?, bio?, avatarAssetId? }` — free rename (D-46), 150-char plain-text bio, photo set/replace/remove with replace-on-write"
   - "`POST /v1/me/profile/dismiss-nudge` — idempotent server-side dismissal (D-02/R-13)"
   - "`GET /v1/me/bootstrap` now serves the REAL `membership.profile`, with `bootstrapSchema` byte-identical (Pitfall 9)"
-  - "`@tria/contracts/profiles` — caps in UTF-16 code units, `normaliseBio`, `PROFILE_ISSUES`, `ownProfileSchema`, the D-45 `.strict()` `memberProfileSchema`, `avatarSrcSet`"
+  - "`@rede-social/contracts/profiles` — caps in UTF-16 code units, `normaliseBio`, `PROFILE_ISSUES`, `ownProfileSchema`, the D-45 `.strict()` `memberProfileSchema`, `avatarSrcSet`"
   - "the 03-03 search infrastructure: `unaccent` + `pg_trgm`, `app.imm_unaccent` (IMMUTABLE), the GIN-trigram index and the keyset order index"
-  - "a seeded community: nine active members in tria-demo, four in tria-lab, accented pt-BR names, two real avatars, two members with no bio"
+  - "a seeded community: nine active members in rede-demo, four in rede-lab, accented pt-BR names, two real avatars, two members with no bio"
 affects: [03-03, 03-04, 03-05, 03-08, phase-04-feed, phase-07-chat, phase-08-member-management]
 
 actuals:
@@ -66,7 +66,7 @@ key-files:
 key-decisions:
   - "zod 4.6.2's `z.string().max(n)` counts Unicode CODE POINTS, not UTF-16 code units — the plan assumed otherwise, so both schemas carry an explicit `withinCodeUnits` refinement that actually pins the unit the browser counter uses"
   - "`member_profiles.user_id` cascades on delete, like every other `user_id` FK in the schema: without it, deleting an identity (LGPD, and every test fixture teardown) is blocked by the profile row"
-  - "`@tria/contracts/profiles` is a package SUBPATH export, not a root-barrel re-export — the frozen `src/index.ts` stays byte-identical (the `./media` precedent)"
+  - "`@rede-social/contracts/profiles` is a package SUBPATH export, not a root-barrel re-export — the frozen `src/index.ts` stays byte-identical (the `./media` precedent)"
   - "A composite `uploadAvatar` fixture lives in `tests/integration/setup.ts` behind DYNAMIC imports, so no other integration file pays for sharp/pg-boss just to reach `api`/`adminSql`"
   - "`020-tenant-isolation.sql` creates its second tenant-A member mid-file, after the membership assertions, so the self-update policy gets a neighbour without moving any existing pin"
 
@@ -192,11 +192,11 @@ coverage:
         status: pass
     human_judgment: false
   - id: D11
-    description: "The seed leaves a real community: nine active members in tria-demo and four in tria-lab with accented pt-BR names, two demo members carrying a real `ready` avatar asset and two carrying no bio"
+    description: "The seed leaves a real community: nine active members in rede-demo and four in rede-lab with accented pt-BR names, two demo members carrying a real `ready` avatar asset and two carrying no bio"
     requirement: PROF-01
     verification:
       - kind: other
-        ref: "psql counts after a cold db:reset && db:seed — 9 active tria-demo members, 2 profiles with avatar_asset_id, 7 with a null bio, 0 memberships without a profile"
+        ref: "psql counts after a cold db:reset && db:seed — 9 active rede-demo members, 2 profiles with avatar_asset_id, 7 with a null bio, 0 memberships without a profile"
         status: pass
       - kind: integration
         ref: "apps/api/tests/integration/bootstrap.test.ts#11. a second run exits 0 and leaves tenant_domains unchanged with one primary per tenant (seed idempotency)"
@@ -229,7 +229,7 @@ status: complete
 - **The caps really are counted in the unit the browser counts in.** The plan assumed `z.string().max()` measures UTF-16 code units; it does not — zod 4.6.2 counts Unicode **code points**, so `z.string().max(4)` happily accepts three emoji (6 code units) that a `maxLength={4}` field would have refused. Both schemas now carry an explicit `withinCodeUnits` refinement next to `.max()`, and the unit suite pins it from both sides: 75 emoji pass at exactly 150 code units, 76 fail, and a 31-emoji display name (62 units, 31 points) is refused.
 - **Every profile refusal has a machine code.** A route-level validation hook adds `details.displayName` / `details.bio` / `details.avatarAssetId` from the closed `PROFILE_ISSUES` set on top of the shared `details.issues[]`, so 03-04 maps one code to one pt-BR string. The avatar gate checks four facts (purpose, owner, status, soft-delete) plus the tenant supplied by RLS and answers the *same* `invalid` for all of them — a neighbour's asset, a tenant-B asset, a `post` image and a random uuid are indistinguishable from outside.
 - **Profiles is a pure tenant-lane area.** `packages/core/server/profiles/**` is deliberately absent from Biome's privileged-lane allow-list, so every read runs under RLS scoped by `membershipOfRecord(ctx)` and every write under the self-scoped `member_profiles_self_update` policy. The one cross-area call is `deleteAsset` for replace-on-write, wrapped so a cleanup failure logs `profiles.avatar_cleanup_failed` and never fails an edit the member already saw applied.
-- **The seeded communities are honest fixtures.** tria-demo has nine active members and tria-lab four, with names that genuinely need accent folding (`João Gonçalves`, `Íris Muñoz`, `Luís Ângelo Sá`, `Sofia D'Ávila`, `Helena Küster`), two demo members carrying a real `ready` avatar written under the broker's own key shape, and two carrying no bio at all — so 03-03's search, 03-04's avatar fallback and 03-05's nudge card all have something real to assert against.
+- **The seeded communities are honest fixtures.** rede-demo has nine active members and rede-lab four, with names that genuinely need accent folding (`João Gonçalves`, `Íris Muñoz`, `Luís Ângelo Sá`, `Sofia D'Ávila`, `Helena Küster`), two demo members carrying a real `ready` avatar written under the broker's own key shape, and two carrying no bio at all — so 03-03's search, 03-04's avatar fallback and 03-05's nudge card all have something real to assert against.
 
 ## Task Commits
 
@@ -263,7 +263,7 @@ Each task was committed atomically:
 
 - **The code-unit cap is an explicit refinement, not `.max()`.** Verified against this repo's zod 4.6.2 rather than assumed. `.max()` is kept because it produces the `too_big` issue for ordinary text; `withinCodeUnits` is the stricter of the two and is what actually pins the unit. Both carry the same `'too_long'` message so the route hook maps either to one code.
 - **`member_profiles.user_id` cascades on delete.** Every other `user_id` FK in the schema does (`memberships`, `consent_records`), and without it deleting an identity is blocked — which breaks the LGPD deletion story and, immediately, every integration fixture that removes a throwaway user.
-- **`@tria/contracts/profiles` is a package subpath.** Same reasoning as 03-01's `./media`: `src/index.ts` is a hand-written list of `export *` lines and is frozen, so a subpath is the only way to make the module reachable without touching it.
+- **`@rede-social/contracts/profiles` is a package subpath.** Same reasoning as 03-01's `./media`: `src/index.ts` is a hand-written list of `export *` lines and is frozen, so a subpath is the only way to make the module reachable without touching it.
 - **The composite upload fixture lives in `setup.ts` behind dynamic imports.** Exporting it from `media.test.ts` would make vitest re-run that whole suite inside `profile.test.ts`; importing sharp and pg-boss at `setup.ts` module scope would tax every other integration file, including the deliberately database-free health check. Lazy imports inside the function satisfy both.
 - **`020`'s second tenant-A member is created mid-file.** A tenant with one member cannot distinguish "my row" from "a row of my tenant", so the self-scoped UPDATE policy needs a neighbour — but adding one in the fixture block would have changed the existing `memberships count = 1` pin. Creating them after the membership assertions leaves every prior assertion exactly as it was.
 - **The route hook, not the shared default hook.** The shared `platformDefaultHook` is right for shape violations across the whole API; only the profile form needs a per-field code, so the specialisation is attached to that one route rather than widened globally.
@@ -288,7 +288,7 @@ Each task was committed atomically:
 - **Verification:** the full integration suite went from 7 failed files / 1 failed test to 18 passed files / 220 passed tests on a cold stack; `pnpm db:generate` is a no-op afterwards
 - **Committed in:** `112eb46`
 
-**3. [Rule 3 - Blocking] `@tria/contracts/profiles` exported as a package subpath**
+**3. [Rule 3 - Blocking] `@rede-social/contracts/profiles` exported as a package subpath**
 - **Found during:** Task 1 (contracts)
 - **Issue:** The plan says the new file is re-exported by "the existing `export *` barrel — so do NOT edit `packages/contracts/src/index.ts`", but that barrel is a hand-written per-module list; without editing it the module is unreachable. The same contradiction 03-01 hit for `./media`, and the same acceptance criterion (`git diff --quiet -- packages/contracts/src/index.ts`) points at the same resolution.
 - **Fix:** Added `"./profiles": "./src/profiles.ts"` to `packages/contracts/package.json` exports. `src/index.ts` is untouched.
@@ -328,7 +328,7 @@ Each task was committed atomically:
 ## Issues Encountered
 
 - **The `user_id` FK failure surfaced as an unrelated-looking test failure.** The first full integration run reported `bootstrap.test.ts` failing on `tenant_domains` count `3 ≠ 2` plus six files with `afterAll` errors. The count assertion was a symptom: the FK blocked fixture teardown, so a `mail-test-*` tenant survived into the next file. Chasing the count would have been the wrong fix; the FK was the cause. Noted because the same shape will recur — a leftover-fixture failure in this suite is usually a broken cascade, not a flaky assertion.
-- **`pnpm db:generate -- --name=X` still does not forward the flag** (03-01's finding, re-confirmed). `pnpm --filter @tria/api exec drizzle-kit generate --name=X` does. Regenerating after the FK fix also required deleting the stale snapshot and journal entry, or drizzle would have emitted an `ALTER` migration instead of a corrected `CREATE`.
+- **`pnpm db:generate -- --name=X` still does not forward the flag** (03-01's finding, re-confirmed). `pnpm --filter @rede-social/api exec drizzle-kit generate --name=X` does. Regenerating after the FK fix also required deleting the stale snapshot and journal entry, or drizzle would have emitted an `ALTER` migration instead of a corrected `CREATE`.
 - **`pnpm test:integration -- profile bootstrap` runs the WHOLE suite**, because vitest ORs the filters and `tests/integration` (from the package script) already matches every file. Every gate in this plan therefore ran against all 18 files — stronger than the plan asked for, but worth knowing before reading a "filtered" run's output.
 
 ## Known Stubs

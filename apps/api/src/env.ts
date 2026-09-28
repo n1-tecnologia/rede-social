@@ -6,7 +6,7 @@ export const env = createEnv({
   server: {
     PORT: z.coerce.number().int().positive().default(8787),
     ROLE: z.enum(['api', 'worker']).default('api'),
-    // LOG_LEVEL is a kernel setting (`@tria/core/server/env`), read by the one root logger.
+    // LOG_LEVEL is a kernel setting (`@rede-social/core/server/env`), read by the one root logger.
     DATABASE_URL: z.url(),
     /**
      * Connection the pg-boss worker polls on. Defaults to `DATABASE_URL`; in production it points at

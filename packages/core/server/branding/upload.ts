@@ -3,7 +3,7 @@ import {
   type BrandingUploadKind,
   type BrandingUploadMime,
   mimeToExtension,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 
 /**
  * Object-key and upload-id helpers for the public `branding` bucket (D-27, CLAUDE.md §4). Pure: no

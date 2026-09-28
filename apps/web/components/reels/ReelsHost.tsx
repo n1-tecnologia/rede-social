@@ -1,19 +1,19 @@
 'use client';
 
-import type { MediaPlayback } from '@tria/contracts/media';
+import type { MediaPlayback } from '@rede-social/contracts/media';
 import {
   CommentSheet,
   type CommentSheetProps,
   type CountTemplates,
   type LikeOutcome,
   type LikeState,
-} from '@tria/module-feed/ui';
+} from '@rede-social/module-feed/ui';
 import {
   REELS_BUFFERING_DELAY_MS,
   REELS_MINT_MAX_IDS,
   REELS_PREFETCH_DISTANCE,
   REELS_TOKEN_REMINT_MARGIN_MS,
-} from '@tria/module-reels/contracts';
+} from '@rede-social/module-reels/contracts';
 import {
   ReelPlaybackError,
   type ReelsLane,
@@ -21,8 +21,8 @@ import {
   ReelsPager,
   type ReelsPagerItem,
   ReelsStage,
-} from '@tria/module-reels/ui';
-import { Button, EmptyState, IconButton, useToast } from '@tria/ui';
+} from '@rede-social/module-reels/ui';
+import { Button, EmptyState, IconButton, useToast } from '@rede-social/ui';
 import { CircleAlert, Film, Loader2, Volume2, VolumeX } from 'lucide-react';
 import {
   type ReactNode,
@@ -50,8 +50,8 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  * element, the credentials, sound, every pause source, paging and every state the UI-SPEC names.
  *
  * **Why it lives in `apps/web`.** The pager and the over-video pieces are props-only module
- * components (`@tria/module-reels/ui`), the like engine and the comment sheet belong to
- * `@tria/module-feed`, and `turbo boundaries` denies a module → module edge. The server actions
+ * components (`@rede-social/module-reels/ui`), the like engine and the comment sheet belong to
+ * `@rede-social/module-feed`, and `turbo boundaries` denies a module → module edge. The server actions
  * (pages, credentials, likes, comments) and `useToast` are app-tier too. So this file owns the ONE
  * state machine, the way `StoryViewerHost` does for the story viewer.
  *

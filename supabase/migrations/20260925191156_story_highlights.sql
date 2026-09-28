@@ -15,7 +15,7 @@
 --   2. HAND-WRITTEN — three statements:
 --
 --      a. `story_highlights_community_fk`. It is not generated because it CANNOT be: the
---         communities table belongs to `@tria/module-communities`, and `turbo.json`'s boundary
+--         communities table belongs to `@rede-social/module-communities`, and `turbo.json`'s boundary
 --         allowlist denies a `module -> module` package dependency (MOD-02). The DATABASE enforces
 --         it either way, and `120-story-highlights.sql` asserts it (23503 + positive control).
 --         `community_id` NULL means Início, and a NULL passes a foreign key by definition.

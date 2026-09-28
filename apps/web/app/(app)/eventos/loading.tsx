@@ -1,4 +1,4 @@
-import { Chip } from '@tria/ui';
+import { Chip } from '@rede-social/ui';
 import { getTranslations } from 'next-intl/server';
 import { EventsSkeleton } from './EventsList';
 

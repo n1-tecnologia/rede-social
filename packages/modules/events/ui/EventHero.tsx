@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@tria/ui';
+import { cn } from '@rede-social/ui';
 import { MapPin, Video } from 'lucide-react';
 import { EventCover } from './EventCover';
 

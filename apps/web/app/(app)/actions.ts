@@ -1,6 +1,6 @@
 'use server';
 
-import { THEME_COOKIE } from '@tria/contracts/branding';
+import { THEME_COOKIE } from '@rede-social/contracts/branding';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';

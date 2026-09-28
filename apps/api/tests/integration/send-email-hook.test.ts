@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
+import { deriveBrandColors } from '@rede-social/contracts';
+import { parseHookSecrets } from '@rede-social/core/server/mail/hook-schema';
 import { createClient } from '@supabase/supabase-js';
-import { deriveBrandColors } from '@tria/contracts';
-import { parseHookSecrets } from '@tria/core/server/mail/hook-schema';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, HOSTS } from './setup';
 
@@ -16,7 +16,7 @@ import { adminSql, api, authAdmin, HOSTS } from './setup';
  */
 
 const MAILPIT_URL = (process.env.MAILPIT_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
-const MAIL_DOMAIN = process.env.MAIL_DOMAIN ?? 'mail.tria.localhost';
+const MAIL_DOMAIN = process.env.MAIL_DOMAIN ?? 'mail.rede-social.localhost';
 const HOOK_PATH = '/v1/hooks/auth/send-email';
 
 type HookPayload = {
@@ -148,14 +148,14 @@ async function mailpitFind(
   throw new Error(`no Mailpit message to ${to} carrying ${marker} within ${timeoutMs}ms`);
 }
 
-/** Messages to `to` whose `X-Tria-Idempotency-Key` header (set by the local transport) is `webhookId`. */
+/** Messages to `to` whose `X-Rede-Idempotency-Key` header (set by the local transport) is `webhookId`. */
 async function mailpitByWebhookId(to: string, webhookId: string): Promise<MailpitMessage[]> {
   const found: MailpitMessage[] = [];
   for (const { ID } of await mailpitSearch(to)) {
     const res = await fetch(`${MAILPIT_URL}/api/v1/message/${ID}/headers`);
     if (!res.ok) continue;
     const headers = (await res.json()) as Record<string, string[] | undefined>;
-    if (headers['X-Tria-Idempotency-Key']?.includes(webhookId))
+    if (headers['X-Rede-Idempotency-Key']?.includes(webhookId))
       found.push(await mailpitMessage(ID));
   }
   return found;
@@ -222,9 +222,9 @@ beforeAll(async () => {
     select u.id, u.email from public.users u
       join public.memberships m on m.user_id = u.id
       join public.tenants t on t.id = m.tenant_id
-     where t.slug = 'tria-demo' and m.role = 'member'
+     where t.slug = 'rede-demo' and m.role = 'member'
      order by u.email limit 1`;
-  if (!row) throw new Error('seed tenant tria-demo has no member (run pnpm db:seed)');
+  if (!row) throw new Error('seed tenant rede-demo has no member (run pnpm db:seed)');
   demoMember = row;
 
   const [admin] = await adminSql<Fixture[]>`
@@ -267,7 +267,7 @@ afterAll(async () => {
 });
 
 describe('POST /v1/hooks/auth/send-email', () => {
-  it('1. tracer: a signed recovery payload for a demo member lands in Mailpit branded for TRIA Demo', async () => {
+  it('1. tracer: a signed recovery payload for a demo member lands in Mailpit branded for Rede Demo', async () => {
     const payload = recoveryPayload(
       demoMember,
       `http://${HOSTS.demo}:3000/auth/confirm?next=/redefinir-senha`,
@@ -280,15 +280,15 @@ describe('POST /v1/hooks/auth/send-email', () => {
     expect(elapsedMs).toBeLessThan(1000);
 
     const mail = await mailpitFind(demoMember.email, marker);
-    expect(mail.Subject).toBe('Redefina sua senha — TRIA Demo');
-    expect(mail.From.Name).toBe('TRIA Demo');
+    expect(mail.Subject).toBe('Redefina sua senha — Rede Demo');
+    expect(mail.From.Name).toBe('Rede Demo');
     expect(mail.From.Address).toBe(`no-reply@${MAIL_DOMAIN}`);
     for (const fragment of [
       '#7c3aed',
       'color:#ffffff',
-      'seed-logos/tria-demo.svg',
-      'alt="TRIA Demo"',
-      'Enviado pela plataforma TRIA',
+      'seed-logos/rede-demo.svg',
+      'alt="Rede Demo"',
+      'Enviado pela plataforma Rede Social',
       'token_hash=hook-test-',
       'type=recovery',
       '<meta charset="utf-8">',
@@ -373,7 +373,7 @@ describe('POST /v1/hooks/auth/send-email', () => {
     expect(mail.HTML).toContain('#b45309');
   });
 
-  it('7. no membership + unresolved host (localhost) → neutral TRIA, never another tenant’s brand', async () => {
+  it('7. no membership + unresolved host (localhost) → neutral platform, never another tenant’s brand', async () => {
     const payload = recoveryPayload(
       memberless,
       'http://localhost:3000/auth/confirm?next=/redefinir-senha',
@@ -382,15 +382,15 @@ describe('POST /v1/hooks/auth/send-email', () => {
     expect(response.status).toBe(200);
 
     const mail = await mailpitFind(memberless.email, payload.email_data.token_hash);
-    expect(mail.Subject).toBe('Redefina sua senha — TRIA');
-    expect(mail.From.Name).toBe('TRIA');
+    expect(mail.Subject).toBe('Redefina sua senha — Rede Social');
+    expect(mail.From.Name).toBe('Rede Social');
     expect(mail.HTML).toContain('#2e6fd0');
     for (const hex of ['#7c3aed', '#0f766e', '#b45309']) expect(mail.HTML).not.toContain(hex);
     expect(mail.HTML).not.toContain('<img');
   });
 
-  it('8. a platform admin (no membership) on the platform host → neutral TRIA', async () => {
-    const platformHost = process.env.PLATFORM_HOST ?? 'tria.localhost';
+  it('8. a platform admin (no membership) on the platform host → neutral platform', async () => {
+    const platformHost = process.env.PLATFORM_HOST ?? 'rede-social.localhost';
     const payload = recoveryPayload(
       superAdmin,
       `http://${platformHost}:3000/auth/confirm?next=/redefinir-senha`,
@@ -399,8 +399,8 @@ describe('POST /v1/hooks/auth/send-email', () => {
     expect(response.status).toBe(200);
 
     const mail = await mailpitFind(superAdmin.email, payload.email_data.token_hash);
-    expect(mail.Subject).toBe('Redefina sua senha — TRIA');
-    expect(mail.From.Name).toBe('TRIA');
+    expect(mail.Subject).toBe('Redefina sua senha — Rede Social');
+    expect(mail.From.Name).toBe('Rede Social');
     expect(mail.HTML).not.toContain('<img');
     for (const hex of ['#7c3aed', '#0f766e', '#b45309']) expect(mail.HTML).not.toContain(hex);
   });
@@ -428,7 +428,7 @@ describe('POST /v1/hooks/auth/send-email', () => {
     expect(response.status).toBe(200);
 
     const mail = await mailpitFindByWebhookId(demoMember.email, id);
-    expect(mail.Subject).toBe('Sua senha foi alterada — TRIA Demo');
+    expect(mail.Subject).toBe('Sua senha foi alterada — Rede Demo');
     expect(mail.HTML).not.toContain('/auth/confirm');
     expect(mail.HTML).toContain('#7c3aed');
   });
@@ -456,8 +456,8 @@ describe('POST /v1/hooks/auth/send-email', () => {
       // A throwaway demo member so the address is unique to this run (GoTrue throttles recovery per user).
       const member = await createThrowawayUser(`gotrue-${RUN}@mail-test.local`);
       const [demo] = await adminSql<{ id: string }[]>`
-        select id from public.tenants where slug = 'tria-demo'`;
-      if (!demo) throw new Error('seed tenant tria-demo missing');
+        select id from public.tenants where slug = 'rede-demo'`;
+      if (!demo) throw new Error('seed tenant rede-demo missing');
       await adminSql`
         insert into public.memberships (tenant_id, user_id, role, status)
         values (${demo.id}::uuid, ${member.id}::uuid, 'member', 'active')`;
@@ -477,7 +477,7 @@ describe('POST /v1/hooks/auth/send-email', () => {
       while (Date.now() < deadline && !mail) {
         for (const { ID } of await mailpitSearch(member.email)) {
           const message = await mailpitMessage(ID);
-          if (message.Subject === 'Redefina sua senha — TRIA Demo') {
+          if (message.Subject === 'Redefina sua senha — Rede Demo') {
             mail = message;
             break;
           }
@@ -490,11 +490,11 @@ describe('POST /v1/hooks/auth/send-email', () => {
         'token_hash=',
         'type=recovery',
         '#7c3aed',
-        'seed-logos/tria-demo.svg',
+        'seed-logos/rede-demo.svg',
       ]) {
         expect(mail.HTML, fragment).toContain(fragment);
       }
-      expect(mail.From.Name).toBe('TRIA Demo');
+      expect(mail.From.Name).toBe('Rede Demo');
     },
   );
 });

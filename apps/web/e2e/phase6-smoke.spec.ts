@@ -26,7 +26,7 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  * ROADMAP success criterion asserted once, and an explicit note wherever the walk deliberately
  * proves nothing.
  *
- *   ENABLED  on the seeded `tria-demo`: a member sees the `Eventos` tab, the Próximos list headed by
+ *   ENABLED  on the seeded `rede-demo`: a member sees the `Eventos` tab, the Próximos list headed by
  *            the seeded in-progress event, that event's Início card in check-in mode, and an event
  *            detail whose date and times are the tenant's clock.
  *   DISABLED on a throwaway tenant with `events` off: the same member-shaped session sees no tab and
@@ -58,7 +58,7 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  */
 
 test.describe.configure({ mode: 'serial', timeout: 300_000 });
-test.skip(isRemote, 'local stack only (seeded tria-demo, throwaway tenants, direct DB fixtures)');
+test.skip(isRemote, 'local stack only (seeded rede-demo, throwaway tenants, direct DB fixtures)');
 test.use({ serviceWorkers: 'block' });
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
@@ -71,7 +71,7 @@ const OFF_SLUG = `p6off-${RUN}`;
 const CRIT_SLUG = `p6crit-${RUN}`;
 const PHONE = 'mobile-chromium';
 
-/** What `scripts/seed.ts` writes for tria-demo (`SEED_EVENTS`), mirrored as `events.spec.ts` does. */
+/** What `scripts/seed.ts` writes for rede-demo (`SEED_EVENTS`), mirrored as `events.spec.ts` does. */
 const SEEDED = {
   inProgress: 'Semana de integracao',
   upcomingInPerson: 'Encontro de boas-vindas',
@@ -234,7 +234,7 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
 
     // D-202: the seeded in-progress in-person event is the next event, and the member (no answer,
     // inside its window) gets the check-in CTA on the card, beside the row and not inside it.
-    const inProgress = await readEventInstants('tria-demo', SEEDED.inProgress);
+    const inProgress = await readEventInstants('rede-demo', SEEDED.inProgress);
     await expect(page.getByRole('heading', { name: E.home.title, exact: true })).toBeVisible();
     await expect(nextEvent(page).getByTestId('next-event-title')).toHaveText(SEEDED.inProgress);
     await expect(page.getByTestId('next-event-checkin')).toHaveAttribute(
@@ -257,7 +257,7 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     ).toHaveText(SEEDED.inProgress);
 
     // A detail on the tenant's clock (UI-D-203): the stored UTC instants, formatted in São Paulo.
-    const upcoming = await readEventInstants('tria-demo', SEEDED.upcomingInPerson);
+    const upcoming = await readEventInstants('rede-demo', SEEDED.upcomingInPerson);
     await page.goto(`${hosts.demo}/eventos/${upcoming.id}`);
     await expect(infoValues(page).nth(0)).toHaveText(day(upcoming.startsAt, SAO_PAULO));
     await expect(infoValues(page).nth(1)).toHaveText(
@@ -547,7 +547,7 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     );
   });
 
-  test('8. the tenant clock reaches the feed: tria-demo switched to America/Manaus reads a post one hour earlier', async ({
+  test('8. the tenant clock reaches the feed: rede-demo switched to America/Manaus reads a post one hour earlier', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== PHONE, 'flips the seeded tenant: one project only');
@@ -561,7 +561,7 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     expect(Number.isNaN(instant)).toBe(false);
     await expect(first).toHaveAttribute('title', absolute(instant, SAO_PAULO));
 
-    const previous = await setTenantTimezone('tria-demo', MANAUS);
+    const previous = await setTenantTimezone('rede-demo', MANAUS);
     try {
       await page.reload();
       const same = page.locator(`main time[datetime="${iso}"]`).first();
@@ -570,7 +570,7 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
       await expect(same).toHaveAttribute('title', absolute(instant, MANAUS));
       expect(absolute(instant, MANAUS)).toBe(absolute(instant - 3_600_000, SAO_PAULO));
     } finally {
-      await setTenantTimezone('tria-demo', previous);
+      await setTenantTimezone('rede-demo', previous);
     }
     await page.reload();
     await expect(page.locator(`main time[datetime="${iso}"]`).first()).toHaveAttribute(

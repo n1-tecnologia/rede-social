@@ -1,7 +1,7 @@
 'use client';
 
-import { BRANDING_MAX_BYTES } from '@tria/contracts/branding';
-import { FileDropZone, type FileDropZoneState, SectionTitle, useToast } from '@tria/ui';
+import { BRANDING_MAX_BYTES } from '@rede-social/contracts/branding';
+import { FileDropZone, type FileDropZoneState, SectionTitle, useToast } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { useRef, useState } from 'react';
 import type {

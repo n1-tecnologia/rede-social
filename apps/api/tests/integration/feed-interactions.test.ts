@@ -1,5 +1,5 @@
-import { sqlClient } from '@tria/core/db';
-import { subscribe } from '@tria/core/server/events/bus';
+import { sqlClient } from '@rede-social/core/db';
+import { subscribe } from '@rede-social/core/server/events/bus';
 import {
   type CommentCreated,
   type CommentDeleted,
@@ -10,7 +10,7 @@ import {
   type LikeResult,
   type PostLiked,
   REPLIES_PAGE_SIZE,
-} from '@tria/module-feed/contracts';
+} from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -124,15 +124,15 @@ async function replies(token: string, commentId: string, query = ''): Promise<Fe
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
 
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  tokens.labAdmin = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
   for (const row of rows) {
-    if (row.slug === 'tria-demo') tenantIds.demo = row.id;
-    if (row.slug === 'tria-lab') tenantIds.lab = row.id;
+    if (row.slug === 'rede-demo') tenantIds.demo = row.id;
+    if (row.slug === 'rede-lab') tenantIds.lab = row.id;
   }
 
   // A SECOND demo member, so "someone else's comment" is a real session rather than a mocked id.
@@ -140,7 +140,7 @@ beforeAll(async () => {
     select u.email from public.users u
       join public.memberships m on m.user_id = u.id
      where m.tenant_id = ${tenantIds.demo}::uuid and m.role = 'member'
-       and u.email <> 'member@tria-demo.local'
+       and u.email <> 'member@rede-demo.local'
      order by u.email limit 1`;
   if (!other) throw new Error('the seed must provide a second demo member');
   tokens.demoOther = await signInAs(other.email, SEED_PASSWORD);

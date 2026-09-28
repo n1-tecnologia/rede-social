@@ -22,14 +22,14 @@ cd "$(dirname "$0")/.."
 FIXTURE="packages/boundary-fixture"
 STATUS=0
 
-echo "boundaries:negative: expecting BOTH layers to reject @tria/boundary-fixture"
+echo "boundaries:negative: expecting BOTH layers to reject @rede-social/boundary-fixture"
 
-pnpm turbo boundaries --filter=@tria/boundary-fixture > /tmp/gsd-boundaries-turbo.log 2>&1
+pnpm turbo boundaries --filter=@rede-social/boundary-fixture > /tmp/gsd-boundaries-turbo.log 2>&1
 TURBO_RC=$?
 if [ "$TURBO_RC" -ne 0 ]; then
   echo "  [ok]   turbo boundaries correctly rejected the fixture (exit $TURBO_RC)"
 else
-  echo "  [FAIL] turbo boundaries ACCEPTED @tria/boundary-fixture — the package-graph layer is not enforcing." >&2
+  echo "  [FAIL] turbo boundaries ACCEPTED @rede-social/boundary-fixture — the package-graph layer is not enforcing." >&2
   echo "         Check turbo.json 'boundaries.tags' and ${FIXTURE}/turbo.json ('tags': ['module'])." >&2
   cat /tmp/gsd-boundaries-turbo.log >&2
   STATUS=1
@@ -43,7 +43,7 @@ if [ "$BIOME_RC" -ne 0 ] && grep -q "noRestrictedImports" /tmp/gsd-boundaries-bi
   echo "  [ok]   biome noRestrictedImports correctly rejected the fixture (exit $BIOME_RC)"
 elif [ "$BIOME_RC" -ne 0 ]; then
   # Non-zero for some OTHER reason (a config error, or "no files were processed") is a false green.
-  echo "  [FAIL] biome failed on @tria/boundary-fixture, but not with noRestrictedImports —" >&2
+  echo "  [FAIL] biome failed on @rede-social/boundary-fixture, but not with noRestrictedImports —" >&2
   echo "         the import lanes were never evaluated. This is a false negative, not a pass." >&2
   cat /tmp/gsd-boundaries-biome.log >&2
   STATUS=1

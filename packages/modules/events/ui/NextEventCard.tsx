@@ -1,4 +1,4 @@
-import { Card, SectionTitle, StatusPill } from '@tria/ui';
+import { Card, SectionTitle, StatusPill } from '@rede-social/ui';
 import { ChevronRight, MapPin, Video } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { EventCover } from './EventCover';

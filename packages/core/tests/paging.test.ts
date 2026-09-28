@@ -4,7 +4,7 @@ import {
   encodeCursor,
   type KeysetDirection,
   keysetComparison,
-} from '@tria/core/server/paging';
+} from '@rede-social/core/server/paging';
 import { describe, expect, it } from 'vitest';
 
 /**

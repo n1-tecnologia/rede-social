@@ -5,8 +5,8 @@ import {
   type MediaStatus,
   mediaAcceptFor,
   PURPOSE_WIDTHS,
-} from '@tria/contracts/media';
-import { type CommunityPickerRow, CommunityPickerSheet } from '@tria/module-communities/ui';
+} from '@rede-social/contracts/media';
+import { type CommunityPickerRow, CommunityPickerSheet } from '@rede-social/module-communities/ui';
 import {
   createPostSchema,
   FEED_MAX_ATTACHMENTS,
@@ -14,7 +14,7 @@ import {
   FEED_MAX_IMAGES,
   firstUrlIn,
   updatePostSchema,
-} from '@tria/module-feed/contracts';
+} from '@rede-social/module-feed/contracts';
 import {
   Button,
   ConfirmDialog,
@@ -23,7 +23,7 @@ import {
   PageHeader,
   Textarea,
   useToast,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import {
   Check,
   ChevronLeft,

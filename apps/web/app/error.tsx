@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, EmptyState } from '@tria/ui';
+import { Button, EmptyState } from '@rede-social/ui';
 import { TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';

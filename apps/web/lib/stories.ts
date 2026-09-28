@@ -31,7 +31,7 @@ import {
   storyPageSchema,
   storySummarySchema,
   type UpdateHighlight,
-} from '@tria/module-stories/contracts';
+} from '@rede-social/module-stories/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 

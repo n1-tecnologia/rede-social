@@ -39,7 +39,7 @@ import { normaliseProviderEvent, VIDEO_EVENT_TYPES } from './wire';
  */
 
 /** Local-stack throwaway; `FAKE_VIDEO_WEBHOOK_SECRET` overrides it. Never a real credential. */
-const DEFAULT_FAKE_SECRET = 'tria-local-fake-video-webhook-secret';
+const DEFAULT_FAKE_SECRET = 'rede-social-local-fake-video-webhook-secret';
 
 const DEFAULT_DURATION_SECONDS = 12;
 const DEFAULT_ASPECT_RATIO = '16:9';

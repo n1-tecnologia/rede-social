@@ -1,4 +1,4 @@
-import { Skeleton } from '@tria/ui';
+import { Skeleton } from '@rede-social/ui';
 
 /**
  * `/perfil/editar` loading (UI-SPEC E2/loading): the avatar circle and two field bars — the same

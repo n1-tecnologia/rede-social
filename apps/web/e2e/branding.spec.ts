@@ -5,12 +5,12 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
  * TENANT-02 tracer (plan 02-01): two seed tenants with distinct brands (scripts/seed.ts) render ONLY
  * their own brand on their own host — before login with JavaScript disabled (so the assertion is on the
  * server-rendered HTML, Pitfall 2: no default-brand flash) and after login in the authenticated shell.
- * A generic host renders TRIA's neutral brand. Both tenants share every neutral token, so the primary
+ * A generic host renders the platform's neutral brand. Both tenants share every neutral token, so the primary
  * hex is the observable that tells them apart.
  */
 const BRAND = {
-  demo: { primary: '#7c3aed', name: 'TRIA Demo', logo: '/seed-logos/tria-demo.svg' },
-  lab: { primary: '#0f766e', name: 'TRIA Lab', logo: '/seed-logos/tria-lab.svg' },
+  demo: { primary: '#7c3aed', name: 'Rede Demo', logo: '/seed-logos/rede-demo.svg' },
+  lab: { primary: '#0f766e', name: 'Rede Lab', logo: '/seed-logos/rede-lab.svg' },
   neutral: '#2e6fd0',
 } as const;
 
@@ -33,7 +33,7 @@ async function withoutJavaScript<T>(browser: Browser, fn: (page: Page) => Promis
 }
 
 test.describe('TENANT-02 — brand per host, server-rendered', () => {
-  test('tria-demo /entrar carries the demo brand in the first HTML (JS disabled)', async ({
+  test('rede-demo /entrar carries the demo brand in the first HTML (JS disabled)', async ({
     browser,
   }) => {
     await withoutJavaScript(browser, async (page) => {
@@ -51,7 +51,7 @@ test.describe('TENANT-02 — brand per host, server-rendered', () => {
     });
   });
 
-  test('tria-lab /entrar carries the lab brand and never the demo one (JS disabled)', async ({
+  test('rede-lab /entrar carries the lab brand and never the demo one (JS disabled)', async ({
     browser,
   }) => {
     test.skip(isRemote, 'local stack only');
@@ -69,14 +69,14 @@ test.describe('TENANT-02 — brand per host, server-rendered', () => {
     });
   });
 
-  test('a generic host renders the neutral TRIA brand, not a seeded tenant', async ({
+  test('a generic host renders the neutral platform brand, not a seeded tenant', async ({
     browser,
   }) => {
     test.skip(isRemote, 'local stack only');
     await withoutJavaScript(browser, async (page) => {
       await page.goto(`${hosts.generic}/entrar`, { waitUntil: 'domcontentloaded' });
       expect(await brandPrimary(page, 'main')).toBe(BRAND.neutral);
-      await expect(page.getByText('TRIA', { exact: true })).toBeVisible();
+      await expect(page.getByText('Rede Social', { exact: true })).toBeVisible();
       await expect(page.getByRole('img')).toHaveCount(0);
       const html = await page.content();
       expect(html).not.toContain(BRAND.demo.primary);
@@ -125,14 +125,14 @@ test.describe('TENANT-02 — brand per host, server-rendered', () => {
  * (TENANT-02, D-24/D-25/D-26/D-28/D-36, PWA-01). The ~40 helper lines are duplicated from
  * `phase2-smoke.spec.ts` on purpose (no shared fixture file — the outline's file set is kept).
  *
- * Remote runs (`PLAYWRIGHT_BASE_URL` on the TRIA-owned seed hosts, D-24) keep the demo cases and
+ * Remote runs (`PLAYWRIGHT_BASE_URL` on the platform-owned seed hosts, D-24) keep the demo cases and
  * need `PLAYWRIGHT_API_URL` for the by-host reads; the lab and generic-host cases are local only.
  */
 const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
 const NEUTRAL = '#2e6fd0';
 const SEED = {
-  demo: { host: 'tria-demo.localhost', slug: 'tria-demo', name: 'TRIA Demo', primary: '#7c3aed' },
-  lab: { host: 'tria-lab.localhost', slug: 'tria-lab', name: 'TRIA Lab', primary: '#0f766e' },
+  demo: { host: 'rede-demo.localhost', slug: 'rede-demo', name: 'Rede Demo', primary: '#7c3aed' },
+  lab: { host: 'rede-lab.localhost', slug: 'rede-lab', name: 'Rede Lab', primary: '#0f766e' },
 } as const;
 type SeedKey = keyof typeof SEED;
 
@@ -281,7 +281,7 @@ test.describe('Phase 2 — served brand per host (phone + desktop)', () => {
       expect(new Set(manifest.icons.map((i) => i.src))).toEqual(
         new Set([b.iconUrls.i192, b.iconUrls.i512, b.iconUrls.maskable512]),
       );
-      for (const icon of manifest.icons) expect(icon.src).not.toContain('/icons/tria-');
+      for (const icon of manifest.icons) expect(icon.src).not.toContain('/icons/rede-social-');
     });
 
     test(`B2. ${seed.slug}: the logged-in shell renders its brand in the visible navigation`, async ({
@@ -317,13 +317,13 @@ test.describe('Phase 2 — served brand per host (phone + desktop)', () => {
     });
   }
 
-  test('B3. the generic host serves the neutral TRIA brand and icons, never a tenant primary', async ({
+  test('B3. the generic host serves the neutral platform brand and icons, never a tenant primary', async ({
     page,
   }) => {
     test.skip(isRemote, 'local stack only');
     const html = await firstHtml(page, `${hosts.generic}/entrar`);
     expect(metaContent(html, 'theme-color')).toBe(NEUTRAL);
-    expect(linkHref(html, 'icon')).toContain('/icons/tria-48.png');
+    expect(linkHref(html, 'icon')).toContain('/icons/rede-social-48.png');
     expect(html).not.toContain(SEED.demo.primary);
     expect(html).not.toContain(SEED.lab.primary);
   });

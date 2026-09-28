@@ -5,7 +5,7 @@ import { createThrowawayTenant, deleteTenantBySlug, throwawayOrigin } from './te
 /**
  * Fixtures for the DIRECTORY states (03-05 Task 2).
  *
- * The seeded `tria-demo` community has nine active members, which is enough to prove search and a
+ * The seeded `rede-demo` community has nine active members, which is enough to prove search and a
  * member profile but says nothing about the keyset second page: with a page size of 25 the
  * "Carregar mais" button never appears. So this module provisions a THROWAWAY tenant with
  * 27 active members — two past the page boundary — plus the two memberships the 404 matrix needs

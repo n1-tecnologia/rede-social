@@ -7,7 +7,7 @@ import { startWorker } from './worker';
 /**
  * One image, two roles (D-18). `ROLE=worker` runs pg-boss; anything else serves HTTP.
  *
- * The API branch deliberately touches NOTHING in `@tria/core/server/jobs/boss`: `serve()` binds the
+ * The API branch deliberately touches NOTHING in `@rede-social/core/server/jobs/boss`: `serve()` binds the
  * port immediately and the queue is reached only through the lazy `getBoss()` on the first enqueue.
  * That is what keeps `GET /v1/health` answering 200 while the database is unreachable (01-09's
  * DB-free-boot property, re-verified by the Docker smoke in 01-08).

@@ -145,7 +145,7 @@ allowed_mime_types = ["image/png", "image/svg+xml", "image/webp", "image/jpeg", 
 # widening the day a token leaks. Never a vector format, which as a member-uploaded avatar would be
 # a stored-XSS surface (T-03-09).
 #
-# The allow-list is exactly the union of `MEDIA_LIMITS` in @tria/contracts/media — jpeg/png/webp
+# The allow-list is exactly the union of `MEDIA_LIMITS` in @rede-social/contracts/media — jpeg/png/webp
 # (images), pdf (files) and mp4/quicktime (video). Video is here for 03-06's `VIDEO_PROVIDER=fake`,
 # which is what every non-production environment runs: it mints its direct-upload target in THIS
 # bucket under the asset's own prefix rather than accepting bytes at a dev-only API route, which
@@ -335,7 +335,7 @@ max_frequency = "5s"
 # templates; the API resolves the tenant, renders the pt-BR template in the tenant's brand
 # (packages/core/server/mail/templates) and hands the message to the mail transport (Mailpit locally,
 # Resend hosted). `host.docker.internal` is how the auth container reaches the API on the host
-# (`pnpm --filter @tria/api dev` on 8787, or the integration suite's in-process listener). The
+# (`pnpm --filter @rede-social/api dev` on 8787, or the integration suite's in-process listener). The
 # secret is NEVER a literal here: scripts/supabase.sh exports the local throwaway, CI exports its
 # own value at job level, hosted environments keep theirs in Secret Manager; rotation is the
 # two-segment form `v1,whsec_<old>|v1,whsec_<new>` (the route verifies against every segment).
@@ -344,7 +344,7 @@ max_frequency = "5s"
 # `pnpm supabase stop && pnpm supabase start` (auth container env).
 # When this block is disabled GoTrue falls back to its own SMTP templates — the
 # `[auth.email.template.recovery]` block at the bottom of this file stays configured for that case
-# (D-13, neutral TRIA copy).
+# (D-13, neutral platform copy).
 [auth.hook.send_email]
 enabled = true
 uri = "http://host.docker.internal:8787/v1/hooks/auth/send-email"
@@ -480,7 +480,7 @@ enabled = true
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
 
-# Password-recovery e-mail (pt-BR, neutral TRIA). Plan 01-05 builds the /auth/confirm route the link targets.
+# Password-recovery e-mail (pt-BR, neutral platform). Plan 01-05 builds the /auth/confirm route the link targets.
 [auth.email.template.recovery]
 subject = "Redefinir sua senha"
 content_path = "./supabase/templates/recovery.html"

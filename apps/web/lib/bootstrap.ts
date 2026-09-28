@@ -1,4 +1,4 @@
-import { type ApiErrorEnvelope, type Bootstrap, bootstrapSchema } from '@tria/contracts';
+import { type ApiErrorEnvelope, type Bootstrap, bootstrapSchema } from '@rede-social/contracts';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
 import { apiFetch } from '@/lib/api';
@@ -129,7 +129,7 @@ export function acceptInviteRedirectPath(error: ApiClientError): string | null {
  * on `getBootstrap` still guarantees a single `GET /v1/me/bootstrap` per render.
  *
  * D-29: an invited admin who opens `/inicio`, `/configuracoes` or `/perfil` before accepting the
- * tenant rules and TRIA's terms is routed to `/aceitar-convite` — the API answers the bootstrap with
+ * tenant rules and the platform's terms is routed to `/aceitar-convite` — the API answers the bootstrap with
  * `membership.status = 'invited'`, and the guard lives here so no `(app)` segment needs to know.
  * `redirect()` is called outside any try/catch (Next 16 rule).
  */

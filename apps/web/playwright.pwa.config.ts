@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 import base from './playwright.config';
 
 /**
- * PWA suite (02-11) against a PRODUCTION build: `pnpm --filter @tria/web e2e:pwa`.
+ * PWA suite (02-11) against a PRODUCTION build: `pnpm --filter @rede-social/web e2e:pwa`.
  *
  * Why production: `@serwist/turbopack` forces the precache to `[]` in `next dev` and `app/sw.ts` is
  * network-only there, so the offline fallback and the caching contract are only observable on
@@ -21,9 +21,9 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const PORT = 3100;
 
 process.env.PWA_PROD ??= '1';
-process.env.PLAYWRIGHT_DEMO_URL ??= `http://tria-demo.localhost:${PORT}`;
-process.env.PLAYWRIGHT_LAB_URL ??= `http://tria-lab.localhost:${PORT}`;
-process.env.PLAYWRIGHT_PLATFORM_URL ??= `http://tria.localhost:${PORT}`;
+process.env.PLAYWRIGHT_DEMO_URL ??= `http://rede-demo.localhost:${PORT}`;
+process.env.PLAYWRIGHT_LAB_URL ??= `http://rede-lab.localhost:${PORT}`;
+process.env.PLAYWRIGHT_PLATFORM_URL ??= `http://rede-social.localhost:${PORT}`;
 process.env.PLAYWRIGHT_GENERIC_URL ??= `http://localhost:${PORT}`;
 
 const apiServer = (Array.isArray(base.webServer) ? base.webServer : [base.webServer]).find(
@@ -42,7 +42,7 @@ export default defineConfig({
   webServer: [
     ...(apiServer ? [apiServer] : []),
     {
-      command: `pnpm --filter @tria/web exec next build && pnpm --filter @tria/web exec next start -p ${PORT}`,
+      command: `pnpm --filter @rede-social/web exec next build && pnpm --filter @rede-social/web exec next start -p ${PORT}`,
       url: `http://localhost:${PORT}/entrar`,
       reuseExistingServer: false,
       timeout: 300_000,

@@ -1,6 +1,6 @@
 'use client';
 
-import { Button } from '@tria/ui';
+import { Button } from '@rede-social/ui';
 
 /**
  * "Tentar novamente" on the offline page (E09/error): a plain reload — while the device is still

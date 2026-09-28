@@ -1,11 +1,11 @@
-import { cn } from '@tria/ui';
+import { cn } from '@rede-social/ui';
 import Link from 'next/link';
 import type { AnchorHTMLAttributes, ReactNode } from 'react';
 
 /**
- * A `next/link` anchor that looks like `@tria/ui` `Button` (server component — the public pages are
+ * A `next/link` anchor that looks like `@rede-social/ui` `Button` (server component — the public pages are
  * server-rendered and a navigation needs an `<a>`, so `getByRole('link', { name })` keeps matching).
- * `@tria/ui` exposes no class builder for `Button`, so the geometry is mirrored HERE only; the colours
+ * `@rede-social/ui` exposes no class builder for `Button`, so the geometry is mirrored HERE only; the colours
  * are the same tokens (`bg-brand` / `text-on-brand`, `border-border-secondary`, `text-brand`).
  */
 const variantStyles = {

@@ -35,7 +35,7 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Two versioned checkboxes | Tenant rules (bottom sheet) + TRIA terms/privacy; `consent_records` with kind, version, timestamp, IP | ✓ |
+| Two versioned checkboxes | Tenant rules (bottom sheet) + Rede Social terms/privacy; `consent_records` with kind, version, timestamp, IP | ✓ |
 | One combined checkbox | Less friction, single record; weaker for LGPD | |
 | Intermediate rules screen | Full-screen rules with "Aceito e continuar", terms as checkbox | |
 
@@ -71,7 +71,7 @@
 |--------|-------------|----------|
 | Tenant cookie + minimal `/inicio` page | `tenant_slug` cookie (1 year) from `/cadastro/{slug}`; `/entrar` shows tenant name; `/inicio` renders `/me/bootstrap` + Sair | ✓ |
 | Query param `?t={slug}` carried between screens | No cookie; context lost on direct URL entry | |
-| No tenant memory; neutral TRIA login | Contradicts AUTH-01 round-trip | |
+| No tenant memory; neutral platform login | Contradicts AUTH-01 round-trip | |
 
 **User's choice:** Tenant cookie + minimal `/inicio` page
 
@@ -103,7 +103,7 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| `main` = production, PRs = preview/staging | Rename master -> main; repo under tria-company; PR = Vercel Preview + Cloud Run staging services; merge = prod | ✓ |
+| `main` = production, PRs = preview/staging | Rename master -> main; repo under n1-tecnologia; PR = Vercel Preview + Cloud Run staging services; merge = prod | ✓ |
 | `develop` = staging, `main` = production | Simplified git-flow, two merges per feature | |
 | `main` = staging, tag = production | Manual prod via tags; outside PWA-04 wording | |
 
@@ -135,7 +135,7 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Idempotent TS seed script with env vars | `pnpm db:seed`: `tria-demo`, `tria-lab`, admin + member each, super_admin from `SUPER_ADMIN_EMAIL`; auto for local/staging, manual `workflow_dispatch` for prod | ✓ |
+| Idempotent TS seed script with env vars | `pnpm db:seed`: `rede-demo`, `rede-lab`, admin + member each, super_admin from `SUPER_ADMIN_EMAIL`; auto for local/staging, manual `workflow_dispatch` for prod | ✓ |
 | Migration SQL with embedded tenants | Credentials in git history; no per-env variation | |
 | Temporary protected bootstrap endpoint | Anticipates Phase 2 panel; extra door to remove | |
 
@@ -163,21 +163,21 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| All 6 on by default; seed: tria-demo all, tria-lab feed + events | Exercises disabled-module 404 from Phase 1 | ✓ |
+| All 6 on by default; seed: rede-demo all, rede-lab feed + events | Exercises disabled-module 404 from Phase 1 | ✓ |
 | Default feed + notifications; rest on demand | Minimal tenant by default | |
 | No defaults; super_admin chooses at creation | Panel forces a choice | |
 
-**User's choice:** All 6 on by default; tria-lab partial
+**User's choice:** All 6 on by default; rede-lab partial
 
 ### npm scope and layout
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| `@tria/*` with `apps/{web,api}` and `packages/{core,contracts,ui,config,modules/*}` | Worker from the same API image with `ROLE=worker` | ✓ |
+| `@rede-social/*` with `apps/{web,api}` and `packages/{core,contracts,ui,config,modules/*}` | Worker from the same API image with `ROLE=worker` | ✓ |
 | `@rede-social/*` same layout | Product-named scope; awkward for reuse | |
-| `@tria/*` with separate `apps/worker` | Two images to keep in sync | |
+| `@rede-social/*` with separate `apps/worker` | Two images to keep in sync | |
 
-**User's choice:** `@tria/*` with shared API/worker image
+**User's choice:** `@rede-social/*` with shared API/worker image
 
 ### Module template deliverable
 

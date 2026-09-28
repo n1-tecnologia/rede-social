@@ -5,13 +5,13 @@ updated: 2026-09-11
 
 # Política de Privacidade
 
-Versão do piloto TRIA. Este documento explica como seus dados pessoais são tratados na plataforma,
+Versão do piloto. Este documento explica como seus dados pessoais são tratados na plataforma,
 conforme a Lei Geral de Proteção de Dados (Lei 13.709/2018 — LGPD).
 
 ## 1. Objeto
 
 Esta Política descreve quais dados são coletados quando você cria uma conta e participa de uma
-comunidade hospedada na plataforma TRIA, com que finalidade eles são usados e quais são os seus
+comunidade hospedada na plataforma Rede Social, com que finalidade eles são usados e quais são os seus
 direitos como titular.
 
 ## 2. Conta e dados coletados
@@ -31,7 +31,7 @@ multi-inquilino: os dados de uma comunidade nunca são exibidos a membros de out
 
 ## 4. Dados pessoais (LGPD)
 
-- **Controlador:** TRIA, responsável pela plataforma, em conjunto com a organização que opera a sua
+- **Controlador:** Rede Social, responsável pela plataforma, em conjunto com a organização que opera a sua
   comunidade, cada uma no âmbito das suas próprias decisões de tratamento.
 - **Finalidades:** criar e autenticar a sua conta; vincular você à comunidade correta; exibir o
   conteúdo da comunidade; permitir interação e atendimento; registrar consentimentos; manter a
@@ -47,7 +47,7 @@ multi-inquilino: os dados de uma comunidade nunca são exibidos a membros de out
 - **Direitos do titular:** confirmação da existência de tratamento, acesso, correção, anonimização,
   bloqueio ou eliminação de dados desnecessários, portabilidade, informação sobre compartilhamento,
   e revogação do consentimento, nos termos do art. 18 da LGPD.
-- **Contato do encarregado:** privacidade@tria.app.br.
+- **Contato do encarregado:** privacidade@rede-social.app.br.
 
 ## 5. Segurança
 
@@ -61,4 +61,4 @@ conjunto com os Termos de Uso, e o número da versão aceita fica registrado jun
 
 ## 7. Contato
 
-Dúvidas sobre esta Política ou sobre o exercício dos seus direitos: privacidade@tria.app.br.
+Dúvidas sobre esta Política ou sobre o exercício dos seus direitos: privacidade@rede-social.app.br.

@@ -16,12 +16,12 @@ import { ensureWorker } from './worker';
  * screen — `GET /v1/me/profile` through the Next BFF, `PATCH` through the server action — and every
  * string asserted is the catalog's, so a copy drift fails the spec rather than shipping.
  *
- * The seeded `member@tria-demo.local` is SHARED by the whole suite, so `afterEach` puts the row back
+ * The seeded `member@rede-demo.local` is SHARED by the whole suite, so `afterEach` puts the row back
  * to the values `pnpm db:seed` writes (no photo, no bio).
  */
 
 /** What `scripts/seed.ts` writes for the demo member. */
-const SEEDED = { displayName: 'Membro TRIA Demo', bio: null } as const;
+const SEEDED = { displayName: 'Membro Rede Demo', bio: null } as const;
 
 /** The display name on `/perfil` — the Title role (24/700), the one 24px element of the screen. */
 function profileName(page: Page) {
@@ -52,7 +52,7 @@ test.describe('PROF-01 — /perfil and /perfil/editar', () => {
     await expect(page.getByText(users.demoMember)).toBeVisible();
 
     // The seeded member has no photo and no bio: the neutral avatar, and no placeholder line.
-    await expect(page.locator('main [role="img"][aria-label="Membro TRIA Demo"]')).toBeVisible();
+    await expect(page.locator('main [role="img"][aria-label="Membro Rede Demo"]')).toBeVisible();
     await expect(page.locator('main img[src^="/v1/media/"]')).toHaveCount(0);
 
     for (const [name, href] of [

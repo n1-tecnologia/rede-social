@@ -127,7 +127,7 @@ function visibleNav(page: Page, mobile: boolean): Locator {
 }
 
 test.describe('D-55 — the feed is a home slot on /inicio, and no navigation tab', () => {
-  test('a tria-demo member sees the seeded posts as cards, newest first, below the welcome', async ({
+  test('a rede-demo member sees the seeded posts as cards, newest first, below the welcome', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -166,7 +166,7 @@ test.describe('D-55 — the feed is a home slot on /inicio, and no navigation ta
     );
 
     // UI-D-19: the widget sits BELOW the welcome block, which is still the page's h1.
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à TRIA Demo');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à Rede Demo');
   });
 
   test('the feed adds NO navigation tab — the shell keeps the tabs it had', async ({
@@ -187,7 +187,7 @@ test.describe('D-55 — the feed is a home slot on /inicio, and no navigation ta
     expect(names.some((name) => /feed|publica/i.test(name))).toBe(false);
   });
 
-  test('a tria-lab member never sees the tria-demo feed, even though the captions match', async ({
+  test('a rede-lab member never sees the rede-demo feed, even though the captions match', async ({
     page,
   }) => {
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
@@ -200,7 +200,7 @@ test.describe('D-55 — the feed is a home slot on /inicio, and no navigation ta
     await expect(region.getByText(seededFeed.newest, { exact: false }).first()).toBeVisible();
     await expect(region.getByRole('link', { name: seededFeed.labAuthor }).first()).toBeVisible();
     await expect(region.getByRole('link', { name: seededFeed.demoAuthor })).toHaveCount(0);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à TRIA Lab');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à Rede Lab');
   });
 });
 

@@ -14,7 +14,7 @@ requires:
   - phase: 01-foundations
     provides: "withTenantTx, tenantIsolationPolicy, requireAuth/requireModule/requirePermission, the module manifest, MODULE_REGISTRY and HomeSlots"
 provides:
-  - "@tria/module-stories — a real workspace package with the five-export map (./module, ./contracts, ./server, ./ui, ./db)"
+  - "@rede-social/module-stories — a real workspace package with the five-export map (./module, ./contracts, ./server, ./ui, ./db)"
   - "stories: RLS, its isolation policy, the volatile-default expires_at window, both CHECKs and the partial keyset index that serves the strip AND the admin history"
   - "feed_comments_story_fk / feed_likes_story_fk — the two Phase 4 slots, finally referential"
   - "GET /v1/stories (keyset on expires_at), GET /v1/stories/mine, GET /v1/stories/{id}, POST /v1/stories, DELETE /v1/stories/{id}"
@@ -91,7 +91,7 @@ key-files:
     - scripts/seed.ts
 
 key-decisions:
-  - "`feed_comments.story_id` and `feed_likes.story_id` got their foreign keys as HAND-WRITTEN SQL inside the generated migration, not as `.references(() => stories.id)`. A column-level reference needs `@tria/module-stories` in the feed's package.json, and `turbo boundaries` denies a module -> module package edge. The same resolution 05-03 reached for `feed_posts_community_fk`; the plan's two `.references(` acceptance greps are therefore unmet by construction and recorded as such."
+  - "`feed_comments.story_id` and `feed_likes.story_id` got their foreign keys as HAND-WRITTEN SQL inside the generated migration, not as `.references(() => stories.id)`. A column-level reference needs `@rede-social/module-stories` in the feed's package.json, and `turbo boundaries` denies a module -> module package edge. The same resolution 05-03 reached for `feed_posts_community_fk`; the plan's two `.references(` acceptance greps are therefore unmet by construction and recorded as such."
   - "`packages/core/db/schema/index.ts` was NOT modified, for the reason 05-01 recorded: the kernel may not import a module, and `drizzle.config.ts` already globs `packages/modules/*/db/schema.ts`."
   - "`listOwnStories` is the MANAGING view of the tenant's stories, not an author filter. The plan says it is 'the SAME query with and without the range', and an author predicate would be a second shape the one index would serve badly — and would hide a co-admin's story from the person responsible for moderating it."
   - "`storySummarySchema` carries `mediaVariantWidths`, `mediaStatus` and `mediaFailureReason` beside `mediaAssetId`. The ladder is what `MediaImage` needs for `srcSet` in the SAME statement (Pitfall 11); the other two are what the history screen renders the `Processando` / `Recusado` pill from."
@@ -304,7 +304,7 @@ status: complete
 
 # Phase 5 Plan 05: The Stories Module and STORY-01's Publish Flow Summary
 
-**`@tria/module-stories` shipped end to end — a 24 h broadcast whose expiry is a read predicate rather than a job, a strip that both ranges and orders on one index, an order-5 `/inicio` slot that renders nothing at all for a member with nothing live, and a full-screen publish route that reuses the Phase 3 upload machine without writing a byte of new media code.**
+**`@rede-social/module-stories` shipped end to end — a 24 h broadcast whose expiry is a read predicate rather than a job, a strip that both ranges and orders on one index, an order-5 `/inicio` slot that renders nothing at all for a member with nothing live, and a full-screen publish route that reuses the Phase 3 upload machine without writing a byte of new media code.**
 
 ## Performance
 
@@ -376,11 +376,11 @@ Both TDD-marked tasks ran a full RED → GREEN cycle with machine-verified evide
 **1. [Rule 3 - Blocker] The two Phase 4 foreign keys are hand-written SQL, not `.references()`**
 
 - **Found during:** Task 1, before any edit (the plan's `<action>` names the mechanism explicitly)
-- **Issue:** The plan says to give `feedComments.storyId` and `feedLikes.storyId` their real `.references(() => stories.id)`, and lists `packages/modules/feed/package.json` among the files to modify. That requires `"@tria/module-stories": "workspace:*"` in the feed package, and `turbo.json`'s `"module": { "dependencies": { "allow": ["kernel", "contracts", "tooling"] } }` denies a `module -> module` package edge. 05-03 verified this empirically for the identical shape and `packages/boundary-fixture` exists to prove the rule bites. The plan's acceptance criteria therefore ask for two mutually exclusive facts: the references present AND `pnpm boundaries` exit 0.
+- **Issue:** The plan says to give `feedComments.storyId` and `feedLikes.storyId` their real `.references(() => stories.id)`, and lists `packages/modules/feed/package.json` among the files to modify. That requires `"@rede-social/module-stories": "workspace:*"` in the feed package, and `turbo.json`'s `"module": { "dependencies": { "allow": ["kernel", "contracts", "tooling"] } }` denies a `module -> module` package edge. 05-03 verified this empirically for the identical shape and `packages/boundary-fixture` exists to prove the rule bites. The plan's acceptance criteria therefore ask for two mutually exclusive facts: the references present AND `pnpm boundaries` exit 0.
 - **Fix:** The architectural invariant won. `feed_comments_story_fk` and `feed_likes_story_fk` are declared in `supabase/migrations/20260923214059_stories.sql` as hand-written SQL appended to the generated half, with a header stating why and recording that both validations are trivial today (every `story_id` is NULL) while 05-07's migration on the same tables will not be. The feed's schema docblocks were updated at all three sites so a reviewer reading the TS finds the constraint named and explained.
 - **Files modified:** `packages/modules/feed/db/schema.ts` (docblocks only), `supabase/migrations/20260923214059_stories.sql`
 - **Verification:** both constraints exist in `pg_constraint`; `110-communities-stories.sql` asserts each in both directions (a 23503 for an orphan, a positive control for a real story); `pnpm db:generate` is a no-op; `pnpm boundaries` green (527 files, 9 packages); `pnpm boundaries:negative` green.
-- **Unmet acceptance criteria (recorded, not skipped):** `packages/modules/feed/db/schema.ts` contains no new `.references(` calls resolving to `stories`, and `packages/modules/feed/package.json` does not contain `"@tria/module-stories"`. Both are the direct consequence of this fix, and the `must_haves` truth they served — "`feed_comments.story_id` and `feed_likes.story_id` … gain their real foreign keys to `stories.id` in this plan" — is satisfied.
+- **Unmet acceptance criteria (recorded, not skipped):** `packages/modules/feed/db/schema.ts` contains no new `.references(` calls resolving to `stories`, and `packages/modules/feed/package.json` does not contain `"@rede-social/module-stories"`. Both are the direct consequence of this fix, and the `must_haves` truth they served — "`feed_comments.story_id` and `feed_likes.story_id` … gain their real foreign keys to `stories.id` in this plan" — is satisfied.
 - **Commit:** `2d327a0`, `f6e78b7`
 
 **2. [Rule 3 - Blocker] `packages/core/db/schema/index.ts` was NOT modified**
@@ -444,7 +444,7 @@ Both TDD-marked tasks ran a full RED → GREEN cycle with machine-verified evide
 - **`durationLabel` mirrors `useSignedUpload`'s formatter.** The approved drawing shows "Vídeo de até 60 s."; the shipped refusal for the same cap says "1 min". One of the two had to give, and consistency with the sentence a member reads at the moment of failure won. Recorded as a provisional-approval delta rather than a silent change.
 - **`activeReadyStoryCount` / `deleteStoriesByCaptionPrefix` in `e2e/admin.ts`.** See deviations 4 and 8.
 
-**Unmet acceptance grep (recorded, not skipped):** `grep -vE "^[[:space:]]*(//|\*|/\*)" StoryComposer.tsx | grep -c "maxBytes\|maxDurationSeconds"` prints 1, not 0. The single occurrence is `MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0` — a READ of the contract's cap, which is what the criterion's own words ask for ("the caps are read, never redeclared"); the grep is over-broad because reading a field necessarily names it. `@tria/contracts/media` exports no accessor that would avoid it. The underlying truth holds and is independently provable: there is no numeric cap literal anywhere in the file, and the unit test derives its expected string from `MEDIA_LIMITS` too, so a cap change moves both sides or fails.
+**Unmet acceptance grep (recorded, not skipped):** `grep -vE "^[[:space:]]*(//|\*|/\*)" StoryComposer.tsx | grep -c "maxBytes\|maxDurationSeconds"` prints 1, not 0. The single occurrence is `MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0` — a READ of the contract's cap, which is what the criterion's own words ask for ("the caps are read, never redeclared"); the grep is over-broad because reading a field necessarily names it. `@rede-social/contracts/media` exports no accessor that would avoid it. The underlying truth holds and is independently provable: there is no numeric cap literal anywhere in the file, and the unit test derives its expected string from `MEDIA_LIMITS` too, so a cap change moves both sides or fails.
 
 **Total deviations:** 8 auto-fixed (5× Rule 1 bugs, 3× Rule 3 blockers) plus 4 documented additions and 3 recorded unmet greps. **Impact:** net positive — four of the five Rule 1 fixes repaired real defects that a member or an admin would have hit (a dead `Publicar` button, a stale home screen, and two suites that could not start), and the fifth removed an order dependency before it could become one.
 
@@ -475,20 +475,20 @@ One boundary worth naming for the record, since it is new: `apps/web/e2e/admin.t
 
 | Check | Result |
 |-------|--------|
-| `pnpm --filter @tria/module-stories typecheck` | pass |
-| `pnpm --filter @tria/module-stories lint` | pass (15 files) |
-| `pnpm --filter @tria/module-stories test` | pass — 15/15 |
-| `pnpm --filter @tria/module-feed typecheck && lint` | pass |
-| `pnpm --filter @tria/api typecheck && lint` | pass (61 files) |
-| `pnpm --filter @tria/web typecheck && lint` | pass (251 files) |
+| `pnpm --filter @rede-social/module-stories typecheck` | pass |
+| `pnpm --filter @rede-social/module-stories lint` | pass (15 files) |
+| `pnpm --filter @rede-social/module-stories test` | pass — 15/15 |
+| `pnpm --filter @rede-social/module-feed typecheck && lint` | pass |
+| `pnpm --filter @rede-social/api typecheck && lint` | pass (61 files) |
+| `pnpm --filter @rede-social/web typecheck && lint` | pass (251 files) |
 | `pnpm turbo run test` (all packages) | pass — 7 tasks, 560 tests |
 | `pnpm db:generate` against the committed migration | no-op ("No schema changes") |
 | `pnpm db:reset && pnpm db:seed` | pass — 5 stories per tenant (3 active, 1 expired, 1 on a processing asset) |
 | `pnpm supabase test db` | pass — 12 files, **245 tests**, `Result: PASS` (was 207) |
 | `pnpm test:integration` | pass — 29 files, **431/431** |
 | `pnpm test:integration -- stories` | pass — 21/21 |
-| `pnpm --filter @tria/web exec playwright test stories.spec.ts` | pass — 11 passed, 1 skipped |
-| `pnpm --filter @tria/web exec playwright test` (whole suite) | pass — **369 passed, 59 skipped, 0 failed** (21.3 min) |
+| `pnpm --filter @rede-social/web exec playwright test stories.spec.ts` | pass — 11 passed, 1 skipped |
+| `pnpm --filter @rede-social/web exec playwright test` (whole suite) | pass — **369 passed, 59 skipped, 0 failed** (21.3 min) |
 | `pnpm boundaries` | pass — 527 files, 9 packages, no issues |
 | `pnpm boundaries:negative` | pass — both layers reject the fixture |
 | `bash scripts/check-ui-literals.sh` | pass |

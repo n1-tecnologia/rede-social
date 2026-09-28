@@ -1,7 +1,7 @@
 'use client';
 
-import type { MediaStatus } from '@tria/contracts/media';
-import { Button, Card, StatusPill, useToast } from '@tria/ui';
+import type { MediaStatus } from '@rede-social/contracts/media';
+import { Button, Card, StatusPill, useToast } from '@rede-social/ui';
 import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';

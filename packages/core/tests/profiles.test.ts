@@ -1,4 +1,4 @@
-import { PURPOSE_WIDTHS } from '@tria/contracts/media';
+import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import {
   avatarSrcSet,
   bioSchema,
@@ -9,13 +9,13 @@ import {
   normaliseBio,
   PROFILE_ISSUES,
   updateProfileBodySchema,
-} from '@tria/contracts/profiles';
+} from '@rede-social/contracts/profiles';
 import { describe, expect, it } from 'vitest';
 
 /**
  * PROF-01 — the PURE half of the member profile: normalisation, the caps and their UNIT, and the
  * two `.strict()` guards. No database, no `env`, no service import: this file exercises only
- * `@tria/contracts/profiles`, which is the same module the browser's edit form imports, so what it
+ * `@rede-social/contracts/profiles`, which is the same module the browser's edit form imports, so what it
  * pins is literally what both sides of the wire agree on.
  */
 

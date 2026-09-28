@@ -78,8 +78,8 @@ Output: the 8 code/test files above, the two doc updates, and
 </objective>
 
 <execution_context>
-@/Users/igorvboas/Library/Developer/TRIA/rede_social/.claude/gsd-core/workflows/execute-plan.md
-@/Users/igorvboas/Library/Developer/TRIA/rede_social/.claude/gsd-core/templates/summary.md
+@./.claude/gsd-core/workflows/execute-plan.md
+@./.claude/gsd-core/templates/summary.md
 </execution_context>
 
 <context>
@@ -107,10 +107,10 @@ ReelsHost.tsx (apps/web/components/reels) — read these regions, do not re-read
 - State (~290-298): `const [interactions, setInteractions] = useState<Record<string, ReelInteraction>>({})`; `const likeSeq = useRef(new Map<string, number>())` with the comment "The number of the latest like request per post: only that request's answer is recorded."
 - `trackLike` (~706-724): `useCallback(async (postId: string, nextLiked: boolean): Promise<LikeOutcome> => …, [onLike, onUnlike])`; bumps `likeSeq`, awaits `onLike`/`onUnlike`, writes `{ liked, likeCount }` into `interactions` only when `outcome.ok` and its seq is still latest; does not catch. `onLikeTracked`/`onUnlikeTracked` wrap it.
 - Empty state (~905-930): `EmptyState` `action={canPost ? <Link href="/criar" className="inline-flex h-11 … focus-visible:ring-white">{labels.emptyCta}</Link> : undefined}`. `Link` (next/link, line 27) is used ONLY there.
-- `LikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false }` and `LikeState = { liked: boolean; likeCount: number }` come from `@tria/module-feed/ui`.
+- `LikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false }` and `LikeState = { liked: boolean; likeCount: number }` come from `@rede-social/module-feed/ui`.
 - ReelOverlay.tsx:97-99 turns `{ ok: false }` into a thrown `Error('like_refused')`; the engine (`useOptimisticLike`, LikeButton.tsx:75-105) catches any throw/rejection of the LATEST request, reverts to `previous` and calls `onError` (the generic toast). A stale request's settle is ignored by the engine (`requestId`).
 
-ReelsHost.test.tsx helpers (reuse, do not duplicate): `renderHost(overrides)`, `flush()`, `press(key)`, `heartOn(i)`, `countOn(i, 'like' | 'comment')`, `pageAt(i)`, `position()`, `f(key)` (feed catalog), `toast.show` (mocked `useToast`), `deferred<T>()` at ~247 (returns `{ promise, resolve }` only), `postId(n)`. CR-01 describe starts ~967; (e) latest-wins ~1140 and (f) refusal-on-remount ~1174 are the templates for the new cases. The empty-state CTA test is at ~695 ('an author gets "Criar publicação" to /criar in the empty state'). `@tria/ui` is mocked by spreading the original (so `cn` is real).
+ReelsHost.test.tsx helpers (reuse, do not duplicate): `renderHost(overrides)`, `flush()`, `press(key)`, `heartOn(i)`, `countOn(i, 'like' | 'comment')`, `pageAt(i)`, `position()`, `f(key)` (feed catalog), `toast.show` (mocked `useToast`), `deferred<T>()` at ~247 (returns `{ promise, resolve }` only), `postId(n)`. CR-01 describe starts ~967; (e) latest-wins ~1140 and (f) refusal-on-remount ~1174 are the templates for the new cases. The empty-state CTA test is at ~695 ('an author gets "Criar publicação" to /criar in the empty state'). `@rede-social/ui` is mocked by spreading the original (so `cn` is real).
 
 ReelsPager.tsx (packages/modules/reels/ui):
 - `const origin = useRef<{ x: number; y: number } | null>(null)` (~220).
@@ -125,7 +125,7 @@ ReelCaption.tsx (packages/modules/reels/ui): `TOGGLE = cn('text-sm font-bold tex
 
 ReelsLanes.tsx (packages/modules/reels/ui) ~123-152: each tab is `<button role="tab" id aria-selected aria-controls tabIndex onClick onKeyDown className={cn('h-11 max-w-40 shrink-0 truncate border-b-2 px-1 text-sm', active ? 'border-white font-bold text-white' : 'border-transparent font-normal text-white/70', SHADOW, RING)}>{lane.label}</button>`. Tests: reels-lanes.test.tsx ~96-104 (active/idle classes on the button) and ~121-130 (60-char label: `truncate` + `max-w-40` on the button).
 
-Button-as-Link precedent: `@tria/ui` `Button` (packages/ui/src/primitives/Button.tsx) is a `<button>` only — no `asChild`, no exported class builder. The codebase's link form is `LinkButton` in `apps/web/app/(auth)/LinkButton.tsx` (`href`, `variant: 'brand' | 'outline' | 'ghost'`, `size: 'md' | 'lg'`, `fullWidth`, `className`; mirrors Button's geometry and tokens; renders `next/link`). It is already imported from client components as `import { LinkButton } from '@/app/(auth)/LinkButton'` (apps/web/components/profile/ProfileNudgeCard.tsx:8, apps/web/components/platform/TenantTable.tsx:7), both with `variant="brand"`.
+Button-as-Link precedent: `@rede-social/ui` `Button` (packages/ui/src/primitives/Button.tsx) is a `<button>` only — no `asChild`, no exported class builder. The codebase's link form is `LinkButton` in `apps/web/app/(auth)/LinkButton.tsx` (`href`, `variant: 'brand' | 'outline' | 'ghost'`, `size: 'md' | 'lg'`, `fullWidth`, `className`; mirrors Button's geometry and tokens; renders `next/link`). It is already imported from client components as `import { LinkButton } from '@/app/(auth)/LinkButton'` (apps/web/components/profile/ProfileNudgeCard.tsx:8, apps/web/components/platform/TenantTable.tsx:7), both with `variant="brand"`.
 
 Hit-area precedent: apps/web/components/platform/TenantTable.tsx:42 extends a hit area with `after:absolute after:inset-0 after:content-[""]`.
 
@@ -152,12 +152,12 @@ Tests first: write them, watch them fail for the reasons in behavior, then fix. 
 1. RED, WR-04 — apps/web/components/reels/ReelsHost.test.tsx:
    - Extend the file's `deferred<T>()` helper to also return a `reject(reason)` (additive; existing callers keep using `promise`/`resolve`).
    - Append 'CR-01 (h) …' and 'CR-01 (i) …' (exact titles in behavior) at the end of the CR-01 describe, modelled on (e) and (f), using only the existing helpers listed in interfaces.
-   - Run `pnpm --filter @tria/web exec vitest run components/reels/ReelsHost.test.tsx -t "WR-04"`; confirm both fail on the post-round-trip assertion ("unliked" / "") and record the failing assertions for the SUMMARY.
+   - Run `pnpm --filter @rede-social/web exec vitest run components/reels/ReelsHost.test.tsx -t "WR-04"`; confirm both fail on the post-round-trip assertion ("unliked" / "") and record the failing assertions for the SUMMARY.
 
 2. RED, WR-05 — packages/modules/reels/tests/reels-pager.test.tsx:
    - Add `isPrimary: true` to the pointer-init object of `drag()`, of `tap()`, of the cancel case (~236) and of the WR-01 describe's `mouse` const (~552), i.e. every existing init that carries `pointerId: 1`. Rationale (put it in a one-line comment on `drag`): a real browser's lone pointer is always primary, while happy-dom's `PointerEvent` defaults `isPrimary` to false. Change no expectation of any existing case.
    - Append a describe 'ReelsPager — only the pointer that started a gesture decides it (WR-05, D-117)' with the three cases titled exactly as in behavior; fire each pointer event on the element named there (finger 2's press and release on `overlay-p0`, finger 1's moves and release on `stack()`).
-   - Run `pnpm --filter @tria/module-reels test -- -t "WR-05"` (or `pnpm --filter @tria/module-reels exec vitest run tests/reels-pager.test.tsx -t "WR-05"`); confirm all three fail as described (case 1 with `[['lane', -1]]`), then run the whole module suite once to confirm the `isPrimary` fixture edit alone changed nothing (122 passed + 3 new failing).
+   - Run `pnpm --filter @rede-social/module-reels test -- -t "WR-05"` (or `pnpm --filter @rede-social/module-reels exec vitest run tests/reels-pager.test.tsx -t "WR-05"`); confirm all three fail as described (case 1 with `[['lane', -1]]`), then run the whole module suite once to confirm the `isPrimary` fixture edit alone changed nothing (122 passed + 3 new failing).
    - Commit the red tests of steps 1-2: `test(quick-260927-ebk): add red WR-04 and WR-05 cases`.
 
 3. GREEN, WR-04 — apps/web/components/reels/ReelsHost.tsx (the review's fix, with one hardening):
@@ -178,10 +178,10 @@ Tests first: write them, watch them fail for the reasons in behavior, then fix. 
 5. Run the gates in verify; commit `fix(quick-260927-ebk): keep the confirmed like across a refused toggle and tie Reels gestures to their pointer`. Use `pnpm --filter <pkg> exec biome check --write <path>` only to fix formatting/import order that `lint` reports in the files of this task.
   </action>
   <verify>
-    <automated>pnpm --filter @tria/web exec vitest run components/reels/ReelsHost.test.tsx -t "CR-01"</automated>
-    <automated>pnpm --filter @tria/module-reels exec vitest run tests/reels-pager.test.tsx</automated>
-    <automated>pnpm --filter @tria/module-reels test &amp;&amp; pnpm --filter @tria/module-reels typecheck &amp;&amp; pnpm --filter @tria/module-reels lint</automated>
-    <automated>pnpm --filter @tria/web exec vitest run components/reels &amp;&amp; pnpm --filter @tria/web typecheck &amp;&amp; pnpm --filter @tria/web lint &amp;&amp; bash scripts/check-ui-literals.sh</automated>
+    <automated>pnpm --filter @rede-social/web exec vitest run components/reels/ReelsHost.test.tsx -t "CR-01"</automated>
+    <automated>pnpm --filter @rede-social/module-reels exec vitest run tests/reels-pager.test.tsx</automated>
+    <automated>pnpm --filter @rede-social/module-reels test &amp;&amp; pnpm --filter @rede-social/module-reels typecheck &amp;&amp; pnpm --filter @rede-social/module-reels lint</automated>
+    <automated>pnpm --filter @rede-social/web exec vitest run components/reels &amp;&amp; pnpm --filter @rede-social/web typecheck &amp;&amp; pnpm --filter @rede-social/web lint &amp;&amp; bash scripts/check-ui-literals.sh</automated>
     <automated>test "$(grep -c 'pointerId' packages/modules/reels/ui/ReelsPager.tsx)" -ge 5 &amp;&amp; grep -q 'isPrimary' packages/modules/reels/ui/ReelsPager.tsx &amp;&amp; grep -q 'const confirmed = useRef' apps/web/components/reels/ReelsHost.tsx</automated>
   </verify>
   <done>CR-01 (h) and (i) and the three WR-05 cases were observed red before the fixes (failing assertions recorded) and are green after them; CR-01 and CR-01 (a)..(g) and every earlier pager case are green with no expectation changed (only `isPrimary: true` added to pointer inits); both packages typecheck and lint clean; check-ui-literals passes.</done>
@@ -208,9 +208,9 @@ UI-REVIEW fix 2 (ReelsLanes.tsx ~142-147):
 Run the gates in verify; commit `fix(quick-260927-ebk): give the Reels caption toggles a 44 px hit area and draw the lane underline under the label`.
   </action>
   <verify>
-    <automated>pnpm --filter @tria/module-reels exec vitest run tests/reel-caption.test.tsx tests/reels-lanes.test.tsx</automated>
-    <automated>pnpm --filter @tria/module-reels test &amp;&amp; pnpm --filter @tria/module-reels typecheck &amp;&amp; pnpm --filter @tria/module-reels lint &amp;&amp; bash scripts/check-ui-literals.sh</automated>
-    <automated>pnpm --filter @tria/web exec vitest run components/reels</automated>
+    <automated>pnpm --filter @rede-social/module-reels exec vitest run tests/reel-caption.test.tsx tests/reels-lanes.test.tsx</automated>
+    <automated>pnpm --filter @rede-social/module-reels test &amp;&amp; pnpm --filter @rede-social/module-reels typecheck &amp;&amp; pnpm --filter @rede-social/module-reels lint &amp;&amp; bash scripts/check-ui-literals.sh</automated>
+    <automated>pnpm --filter @rede-social/web exec vitest run components/reels</automated>
   </verify>
   <done>Both caption toggles carry the 44 px hit-area classes with their visual box untouched; the lane underline lives on the inner label span and the button keeps h-11 and its tab semantics; the module suite (including the new caption case and the two updated lane cases) is green; typecheck, lint and check-ui-literals pass; the web Reels suite is still green (it renders the real lanes and caption through the pager).</done>
 </task>
@@ -220,21 +220,21 @@ Run the gates in verify; commit `fix(quick-260927-ebk): give the Reels caption t
   <files>apps/web/components/reels/ReelsHost.tsx, apps/web/components/reels/ReelsHost.test.tsx, .planning/phases/05.3-reels/05.3-VALIDATION.md, .planning/phases/05.3-reels/05.3-UI-REVIEW.md</files>
   <action>
 Code first (UI-REVIEW fix 3, ReelsHost.tsx ~921-926):
-1. Replace the hand-styled CTA with `<LinkButton href="/criar" variant="brand" size="md" className="focus-visible:ring-white focus-visible:ring-offset-0">{labels.emptyCta}</LinkButton>`, imported as `import { LinkButton } from '@/app/(auth)/LinkButton';` — the codebase's Button-as-Link (`@tria/ui` `Button` has no `asChild` and exports no class builder; ProfileNudgeCard.tsx and TenantTable.tsx use the same import). `LinkButton` merges `className` through `cn` (tailwind-merge), so the white ring with no offset replaces its default brand ring and ring offset on the dark Reels surface — the same override the sound button already uses. It stays inside `canPost ? … : undefined`. Remove the now-unused next/link import (Biome fails on unused imports) and let `biome check --write` order the imports.
+1. Replace the hand-styled CTA with `<LinkButton href="/criar" variant="brand" size="md" className="focus-visible:ring-white focus-visible:ring-offset-0">{labels.emptyCta}</LinkButton>`, imported as `import { LinkButton } from '@/app/(auth)/LinkButton';` — the codebase's Button-as-Link (`@rede-social/ui` `Button` has no `asChild` and exports no class builder; ProfileNudgeCard.tsx and TenantTable.tsx use the same import). `LinkButton` merges `className` through `cn` (tailwind-merge), so the white ring with no offset replaces its default brand ring and ring offset on the dark Reels surface — the same override the sound button already uses. It stays inside `canPost ? … : undefined`. Remove the now-unused next/link import (Biome fails on unused imports) and let `biome check --write` order the imports.
 2. ReelsHost.test.tsx: extend 'an author gets "Criar publicação" to /criar in the empty state' (keep its title): besides `href` === '/criar', the link's className contains `bg-brand`, `text-on-brand`, `rounded-xl`, `h-11`, `px-5`, `focus-visible:ring-white`, `focus-visible:ring-offset-0`, and does not contain `focus-visible:ring-brand`. The non-author empty-state case keeps asserting no CTA.
-3. Run `pnpm --filter @tria/web exec vitest run components/reels`, `pnpm --filter @tria/web typecheck`, `pnpm --filter @tria/web lint`, `bash scripts/check-ui-literals.sh`; commit `fix(quick-260927-ebk): render the Reels empty-state CTA through LinkButton with the white ring`.
+3. Run `pnpm --filter @rede-social/web exec vitest run components/reels`, `pnpm --filter @rede-social/web typecheck`, `pnpm --filter @rede-social/web lint`, `bash scripts/check-ui-literals.sh`; commit `fix(quick-260927-ebk): render the Reels empty-state CTA through LinkButton with the white ring`.
 
 Then the docs (only after steps 1-3 and Tasks 1-2 are green; use Edit, never a whole-file Write):
 4. .planning/phases/05.3-reels/05.3-VALIDATION.md:
    - Frontmatter: `nyquist_compliant: false` → `nyquist_compliant: true`. Leave `status: validated` and the dates.
    - The paragraph that starts `**Escalated (2026-09-27 audit):**` becomes `**Escalated (2026-09-27 audit) → resolved by quick 260927-ebk (2026-09-27):**` followed by one sentence: both reproduced warnings now have a test that failed against the old code and passes after the fix. In its table, keep the Gap / Requirement / Missing behavior columns (rename the last header "Behavior") and replace the "Test to add" column with "Test" and a "Status" column: WR-04 → `apps/web/components/reels/ReelsHost.test.tsx` › "CR-01 (h): …" and "CR-01 (i): …" (full titles), `✅ green (resolved)`; WR-05 → `packages/modules/reels/tests/reels-pager.test.tsx` › the three "WR-05: …" titles, `✅ green (resolved)`.
    - Validation Sign-Off: tick the last checkbox (the `nyquist_compliant` line) and replace its parenthetical with "(quick 260927-ebk resolved WR-04 and WR-05)". Set the Approval line to `**Approval:** validated 2026-09-27; Nyquist-compliant after quick 260927-ebk (WR-04 and WR-05 resolved)`.
-   - Append at the end a section `## Validation Audit 2026-09-27 (follow-up, quick 260927-ebk)` with a Metric/Count table (Gaps found 2 — the escalated WR-04/WR-05; Resolved 2; Escalated 0) and a short Suite/Result table carrying the REAL counts of this plan's final runs (`pnpm --filter @tria/module-reels test`, `pnpm --filter @tria/web exec vitest run components/reels`, plus the Playwright run if it was made). Add one line: 05.3-VERIFICATION.md was not edited; its covered digest is stale because covered Reels code changed, and it is re-verified after the Phase 01.1 phone UAT rather than re-attested here.
+   - Append at the end a section `## Validation Audit 2026-09-27 (follow-up, quick 260927-ebk)` with a Metric/Count table (Gaps found 2 — the escalated WR-04/WR-05; Resolved 2; Escalated 0) and a short Suite/Result table carrying the REAL counts of this plan's final runs (`pnpm --filter @rede-social/module-reels test`, `pnpm --filter @rede-social/web exec vitest run components/reels`, plus the Playwright run if it was made). Add one line: 05.3-VERIFICATION.md was not edited; its covered digest is stale because covered Reels code changed, and it is re-verified after the Phase 01.1 phone UAT rather than re-attested here.
 5. .planning/phases/05.3-reels/05.3-UI-REVIEW.md: insert, right after the "Minor: …" paragraph that closes "Top 3 Priority Fixes" (before the `---` that precedes "Detailed Findings"), a section `## Applied (quick 260927-ebk, 2026-09-27)` with: one sentence that the scores above are the audit's and were not re-rated; three numbered items — Fix 1 applied (ReelCaption.tsx: "… mais" pseudo-element hit area, "menos" 24 px upward pad, both 44 px with no layout or scroll change; test title), Fix 2 applied (ReelsLanes.tsx: underline on the inner label span `border-b-2 pb-1`, `h-11` stays on the tab; updated test titles), Fix 3 applied (ReelsHost.tsx: `LinkButton` brand/md with the white ring; test title); and one line that the Minor items (the `right-[3px]`/`w-[3px]` ticks, the ReelsHost.tsx size) were not applied. Do not change the Pillar Scores table, the Overall line or any Detailed Findings text.
 6. Final diff checks (verify), then commit `docs(quick-260927-ebk): resolve the 05.3 WR-04/WR-05 validation rows and record the applied UI-review fixes`.
   </action>
   <verify>
-    <automated>pnpm --filter @tria/web exec vitest run components/reels &amp;&amp; pnpm --filter @tria/web typecheck &amp;&amp; pnpm --filter @tria/web lint &amp;&amp; bash scripts/check-ui-literals.sh</automated>
+    <automated>pnpm --filter @rede-social/web exec vitest run components/reels &amp;&amp; pnpm --filter @rede-social/web typecheck &amp;&amp; pnpm --filter @rede-social/web lint &amp;&amp; bash scripts/check-ui-literals.sh</automated>
     <automated>grep -q 'LinkButton' apps/web/components/reels/ReelsHost.tsx &amp;&amp; grep -q '^nyquist_compliant: true' .planning/phases/05.3-reels/05.3-VALIDATION.md &amp;&amp; test "$(grep -c -- '- \[ \]' .planning/phases/05.3-reels/05.3-VALIDATION.md)" = "0" &amp;&amp; grep -q 'CR-01 (h)' .planning/phases/05.3-reels/05.3-VALIDATION.md &amp;&amp; grep -q 'WR-05: a second finger' .planning/phases/05.3-reels/05.3-VALIDATION.md &amp;&amp; grep -q '260927-ebk' .planning/phases/05.3-reels/05.3-VALIDATION.md</automated>
     <automated>grep -q '^## Applied (quick 260927-ebk' .planning/phases/05.3-reels/05.3-UI-REVIEW.md &amp;&amp; grep -q '^\*\*Overall: 21/24\*\*' .planning/phases/05.3-reels/05.3-UI-REVIEW.md</automated>
     <automated>git diff --quiet "${BASE:-e9afe9e}" -- .planning/phases/05.3-reels/05.3-VERIFICATION.md .planning/phases/05.3-reels/05.3-UAT.md &amp;&amp; git diff --quiet "${BASE:-e9afe9e}" -- pnpm-lock.yaml apps/web/package.json packages/modules/reels/package.json package.json &amp;&amp; test -z "$(git status --porcelain -- supabase)"</automated>
@@ -268,11 +268,11 @@ Then the docs (only after steps 1-3 and Tasks 1-2 are green; use Edit, never a w
 <verification>
 After the three tasks, once:
 
-- `pnpm --filter @tria/module-reels test` · `pnpm --filter @tria/module-reels typecheck` · `pnpm --filter @tria/module-reels lint`
-- `pnpm --filter @tria/web exec vitest run components/reels` · `pnpm --filter @tria/web typecheck` · `pnpm --filter @tria/web lint`
+- `pnpm --filter @rede-social/module-reels test` · `pnpm --filter @rede-social/module-reels typecheck` · `pnpm --filter @rede-social/module-reels lint`
+- `pnpm --filter @rede-social/web exec vitest run components/reels` · `pnpm --filter @rede-social/web typecheck` · `pnpm --filter @rede-social/web lint`
 - `bash scripts/check-ui-literals.sh`
 - `git diff --stat "${BASE:-e9afe9e}"..HEAD -- apps packages .planning/phases` lists only the ten files in `files_modified` (the quick directory's PLAN/SUMMARY and STATE.md are the orchestrator's and are expected outside that filter).
-- Optional, only if `df -h /System/Volumes/Data` shows at least 5 GiB free: `VIDEO_PROVIDER=fake pnpm --filter @tria/web exec playwright test reels.spec.ts` (about 1.5 min; it starts its own dev servers on the existing local data; no `db:reset`). Expected 28 passed / 6 declared skips as in the 2026-09-27 audit. If it is skipped, say so in the SUMMARY; do not claim it.
+- Optional, only if `df -h /System/Volumes/Data` shows at least 5 GiB free: `VIDEO_PROVIDER=fake pnpm --filter @rede-social/web exec playwright test reels.spec.ts` (about 1.5 min; it starts its own dev servers on the existing local data; no `db:reset`). Expected 28 passed / 6 declared skips as in the 2026-09-27 audit. If it is skipped, say so in the SUMMARY; do not claim it.
 
 Record in the SUMMARY: the RED output of the five new cases before their fixes, the green runs after, the two deliberate differences from the review's snippets (the seq-tagged `confirmed` pair; a primary pointerdown restarts the gesture instead of being refused while an origin is held) and the two differences from the UI review's example classes (pseudo-element hit area on "… mais", upward pad on "menos"), and a note that 05.3-VERIFICATION.md's digest is now stale by design (re-verify after the Phase 01.1 phone UAT; do not re-attest).
 </verification>

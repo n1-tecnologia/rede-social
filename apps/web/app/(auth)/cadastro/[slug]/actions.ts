@@ -1,6 +1,6 @@
 'use server';
 
-import { signupFormSchema } from '@tria/contracts';
+import { signupFormSchema } from '@rede-social/contracts';
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { env } from '@/lib/env';
@@ -31,7 +31,7 @@ export async function signup(formData: FormData): Promise<void> {
     password: String(formData.get('password') ?? ''),
     consents: {
       tenantRulesVersion: Number(formData.get('rulesVersion')),
-      triaTermsVersion: Number(formData.get('termsVersion')),
+      platformTermsVersion: Number(formData.get('termsVersion')),
     },
     // Unchecked boxes are absent from the FormData entirely; `z.literal(true)` then fails (AUTH-04).
     acceptRules: formData.get('acceptRules') === 'on',

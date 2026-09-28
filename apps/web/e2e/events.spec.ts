@@ -54,10 +54,10 @@ const SEEDED = {
   longTitle:
     'Encontro regional de voluntarios, lideres de grupo e parceiros para planejar juntos as acoes do proximo semestre inteiro',
   longVenue: 'Centro de Convencoes Professor Joaquim Nabuco, Auditorio 12B',
-  tenantName: 'TRIA Demo',
+  tenantName: 'Rede Demo',
 } as const;
 
-/** The tenant's zone, exactly what `bootstrap.tenant.timezone` carries for tria-demo. */
+/** The tenant's zone, exactly what `bootstrap.tenant.timezone` carries for rede-demo. */
 const TENANT_ZONE = 'America/Sao_Paulo';
 
 /** `19:00` in `timeZone`, the formatter `lib/events-view.ts` uses. */
@@ -156,7 +156,7 @@ test.describe('events lista', () => {
       }),
     ).toBeVisible();
 
-    const { endsAt } = await readEventInstants('tria-demo', SEEDED.inProgress);
+    const { endsAt } = await readEventInstants('rede-demo', SEEDED.inProgress);
     const first = posters(page).first();
     await expect(first.getByTestId('event-poster-title')).toHaveText(SEEDED.inProgress);
     await expect(first.getByTestId('event-poster-pill')).toHaveText(E.when.now);
@@ -294,7 +294,7 @@ test.describe('events lista', () => {
       await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
       await page.goto(`${hosts.demo}/eventos`);
 
-      const { startsAt } = await readEventInstants('tria-demo', SEEDED.upcomingInPerson);
+      const { startsAt } = await readEventInstants('rede-demo', SEEDED.upcomingInPerson);
       const tenantTime = clock(startsAt, TENANT_ZONE);
       const deviceTime = clock(startsAt, 'America/Manaus');
       expect(tenantTime).not.toBe(deviceTime);
@@ -329,7 +329,7 @@ test.describe('events detalhe', () => {
   let longEventId = '';
 
   test.beforeAll(async () => {
-    demoTenantId = await tenantIdBySlug('tria-demo');
+    demoTenantId = await tenantIdBySlug('rede-demo');
     await deleteEventsByTitlePrefix(demoTenantId, DETAIL_FIXTURE_PREFIX);
     longEventId = await insertEvent(demoTenantId, {
       title: `${DETAIL_FIXTURE_PREFIX} texto longo`,
@@ -364,7 +364,7 @@ test.describe('events detalhe', () => {
     );
     await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.going);
 
-    const { startsAt, endsAt } = await readEventInstants('tria-demo', SEEDED.upcomingInPerson);
+    const { startsAt, endsAt } = await readEventInstants('rede-demo', SEEDED.upcomingInPerson);
     const values = page.getByTestId('event-info-value');
     await expect(values).toHaveText([
       day(startsAt, TENANT_ZONE),
@@ -394,7 +394,7 @@ test.describe('events detalhe', () => {
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    const { id } = await readEventInstants('tria-demo', SEEDED.pastRecent);
+    const { id } = await readEventInstants('rede-demo', SEEDED.pastRecent);
     await page.goto(`${hosts.demo}/eventos/${id}`);
 
     await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.present);
@@ -409,7 +409,7 @@ test.describe('events detalhe', () => {
 
   test('the cancelled event: the danger banner and the Cancelado pill', async ({ page }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    const { id } = await readEventInstants('tria-demo', SEEDED.upcomingCancelled);
+    const { id } = await readEventInstants('rede-demo', SEEDED.upcomingCancelled);
     await page.goto(`${hosts.demo}/eventos/${id}`);
 
     await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.cancelled);
@@ -423,7 +423,7 @@ test.describe('events detalhe', () => {
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    const lab = await readEventInstants('tria-lab', SEEDED.upcomingInPerson);
+    const lab = await readEventInstants('rede-lab', SEEDED.upcomingInPerson);
     for (const id of ['0d000000-0000-4000-8000-00000000ffff', lab.id, 'not-a-uuid']) {
       await page.goto(`${hosts.demo}/eventos/${id}`);
       await expect(page.getByText(E.notFound.title, { exact: true })).toBeVisible();
@@ -495,7 +495,7 @@ test.describe('events detalhe', () => {
     test('the info grid shows the TENANT wall clock, not the device one', async ({ page }) => {
       await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
       const { id, startsAt, endsAt } = await readEventInstants(
-        'tria-demo',
+        'rede-demo',
         SEEDED.upcomingInPerson,
       );
       await page.goto(`${hosts.demo}/eventos/${id}`);

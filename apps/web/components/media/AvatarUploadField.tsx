@@ -1,7 +1,7 @@
 'use client';
 
-import { mediaAcceptFor, PURPOSE_WIDTHS } from '@tria/contracts/media';
-import { Avatar, Button, ConfirmDialog, FileDropZone, useToast } from '@tria/ui';
+import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
+import { Avatar, Button, ConfirmDialog, FileDropZone, useToast } from '@rede-social/ui';
 import { Camera } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';

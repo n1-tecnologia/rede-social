@@ -1,4 +1,4 @@
-import { type PublicTenant, slugSchema, TRIA_TERMS_VERSION } from '@tria/contracts';
+import { PLATFORM_TERMS_VERSION, type PublicTenant, slugSchema } from '@rede-social/contracts';
 import { and, eq } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenants } from '../../db/schema';
@@ -9,7 +9,7 @@ import { ApiError } from '../http/api-error';
  * the answer is limited to what the page renders: display name, the rules text the person must accept
  * and the two version numbers the consents are bound to.
  *
- * Adjacency rule (T-04-07): the slug is matched EXACTLY. `Tria-Demo` fails `slugSchema` and gets the
+ * Adjacency rule (T-04-07): the slug is matched EXACTLY. `Rede-Demo` fails `slugSchema` and gets the
  * same 404 as an unknown slug — no lower-casing, no trimming, nothing that could alias two tenants.
  * A suspended tenant is a 404 as well: its public link stops working.
  */
@@ -31,7 +31,7 @@ export async function getPublicTenant(slug: string): Promise<PublicTenant> {
   });
   if (!row) throw new ApiError(404, 'TENANT_NOT_FOUND');
 
-  return { ...row, termsVersion: TRIA_TERMS_VERSION };
+  return { ...row, termsVersion: PLATFORM_TERMS_VERSION };
 }
 
 /** Internal helper for `signupMember`: the tenant id is needed for the inserts but never published. */

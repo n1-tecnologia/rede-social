@@ -1,7 +1,7 @@
 'use client';
 
-import { mediaAcceptFor } from '@tria/contracts/media';
-import { Button, FileDropZone } from '@tria/ui';
+import { mediaAcceptFor } from '@rede-social/contracts/media';
+import { Button, FileDropZone } from '@rede-social/ui';
 import { Camera } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useSignedUpload } from '@/components/media/useSignedUpload';

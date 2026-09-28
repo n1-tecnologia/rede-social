@@ -1,4 +1,4 @@
-import { VARIANT_WIDTHS } from '@tria/contracts/media';
+import { VARIANT_WIDTHS } from '@rede-social/contracts/media';
 
 /**
  * Object-key helpers for the PRIVATE `media` bucket (MEDIA-01/TENANT-04, RESEARCH Pattern 1).

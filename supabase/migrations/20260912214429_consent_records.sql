@@ -7,7 +7,7 @@ CREATE TABLE "consent_records" (
 	"accepted_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"ip" "inet",
 	"user_agent" text,
-	CONSTRAINT "consent_records_kind_chk" CHECK ("consent_records"."kind" in ('tenant_rules','tria_terms'))
+	CONSTRAINT "consent_records_kind_chk" CHECK ("consent_records"."kind" in ('tenant_rules','platform_terms'))
 );
 --> statement-breakpoint
 ALTER TABLE "consent_records" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint

@@ -3,8 +3,8 @@
 // a FORM grouping — it would announce a photograph as a set of form controls.
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
-import { cn, DoubleTapHeart, useToast } from '@tria/ui';
+import { MediaImage } from '@rede-social/core/ui';
+import { cn, DoubleTapHeart, useToast } from '@rede-social/ui';
 import { type KeyboardEvent, type ReactNode, useCallback, useRef, useState } from 'react';
 import { type AttachmentDescriptor, AttachmentRow } from './AttachmentRow';
 import { LinkPreviewCard, type LinkPreviewCardProps } from './LinkPreviewCard';
@@ -16,8 +16,8 @@ import { LinkPreviewCard, type LinkPreviewCardProps } from './LinkPreviewCard';
  * can never present both.
  *
  * **`MediaImage` is imported, the player is INJECTED.** A module package may not import from
- * `apps/web` (MOD-02). `MediaImage` depends only on `@tria/contracts/media` and `@tria/ui`, so it was
- * promoted into `@tria/core/ui` and is imported here. `VideoPlayer` was NOT promoted: it binds an
+ * `apps/web` (MOD-02). `MediaImage` depends only on `@rede-social/contracts/media` and `@rede-social/ui`, so it was
+ * promoted into `@rede-social/core/ui` and is imported here. `VideoPlayer` was NOT promoted: it binds an
  * app-scoped server action for its per-request playback token (D-44) and the next-intl catalog, so
  * it arrives as `video` — an ALREADY-CREATED client element, which crosses the RSC boundary safely
  * (a component object is what 02-08 found Flight refuses).

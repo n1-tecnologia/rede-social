@@ -29,7 +29,7 @@ import { ensureWorker } from './worker';
  * invite mail in Mailpit → branded login / manifest / icons on the new host → Marca rebrand (logo +
  * colour) through the worker → served HTML and manifest follow → member shell on phone and desktop →
  * platform-rail theme row → alias 308 → suspend/reactivate from the Status tab → module toggle →
- * branded recovery mail. The seed tenants (tria-demo, tria-lab) are never mutated; `branding.spec.ts`
+ * branded recovery mail. The seed tenants (rede-demo, rede-lab) are never mutated; `branding.spec.ts`
  * covers them.
  *
  * Decision recorded — honest ROLE-04 witness. When this file was written no toggleable module shipped
@@ -60,7 +60,7 @@ test.skip(isRemote, 'local stack only (throwaway hosts, Mailpit, superuser SQL)'
 
 const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
 const MAIL_URL = (process.env.PLAYWRIGHT_MAIL_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD: string = (() => {
   const value = process.env.SUPER_ADMIN_PASSWORD;
   if (!value) {
@@ -71,7 +71,7 @@ const SUPER_ADMIN_PASSWORD: string = (() => {
   return value;
 })();
 
-/** Neutral TRIA brand and the two seed primaries — none may ever appear on the throwaway tenant. */
+/** Neutral Rede Social brand and the two seed primaries — none may ever appear on the throwaway tenant. */
 const NEUTRAL = '#2e6fd0';
 const SEED_PRIMARIES = ['#7c3aed', '#0f766e'] as const;
 /** Far from the seed and neutral values; PRIMARY_2 is the rebrand of test 1 (f). */
@@ -112,7 +112,7 @@ type HostAnswer = {
   branding: HostBranding;
 };
 
-const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/tria-lab.svg', import.meta.url));
+const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/rede-lab.svg', import.meta.url));
 
 /**
  * Spec-only superuser connection (local stack only — `isRemote` skips the file; the URL is never
@@ -316,7 +316,7 @@ async function waitForHydration(page: Page, selector: string): Promise<void> {
   );
 }
 
-/** The single visible toast (`@tria/ui` `Toast`, `role=status`). */
+/** The single visible toast (`@rede-social/ui` `Toast`, `role=status`). */
 function toast(page: Page, text: string | RegExp): Locator {
   return page.getByRole('status').filter({ hasText: text }).first();
 }
@@ -414,7 +414,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
       await expect(themeSwitch).toHaveAttribute('aria-checked', 'true');
       await expect
-        .poll(async () => (await context.cookies()).find((c) => c.name === 'tria_theme')?.value)
+        .poll(async () => (await context.cookies()).find((c) => c.name === 'rede_theme')?.value)
         .toBe('dark');
       const reloaded = await page.reload();
       expect(await reloaded?.text()).toContain('data-theme="dark"'); // server-rendered, no flash
@@ -422,7 +422,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       await rail.getByRole('switch', { name: 'Tema' }).click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
       await expect
-        .poll(async () => (await context.cookies()).find((c) => c.name === 'tria_theme')?.value)
+        .poll(async () => (await context.cookies()).find((c) => c.name === 'rede_theme')?.value)
         .toBe('light');
     }
 
@@ -450,7 +450,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     expect(cold.status).toBe(200);
     expect(metaContent(cold.html, 'theme-color')).toBe(NEUTRAL);
     expect(cold.html).not.toContain(PRIMARY_1);
-    expect(linkHref(cold.html, 'icon')).toContain('/icons/tria-48.png');
+    expect(linkHref(cold.html, 'icon')).toContain('/icons/rede-social-48.png');
 
     // (d) Domínios tab: attach through the fake provider, "Verificar agora" → Verificado (TENANT-07,
     // D-34/D-35); by-host answers 200 as primary; the pending invite is sent on verification (D-30).
@@ -502,7 +502,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     expect(declaresPrimary(served1.html, PRIMARY_1)).toBe(true);
     expect(metaContent(served1.html, 'theme-color')).toBe(PRIMARY_1);
     expect(linkHref(served1.html, 'manifest')).toBe(`/m/${slug}/manifest.webmanifest`);
-    expect(linkHref(served1.html, 'icon')).toContain('/icons/tria-48.png');
+    expect(linkHref(served1.html, 'icon')).toContain('/icons/rede-social-48.png');
     expect(served1.html).toContain('data-theme="light"');
     expect(served1.html).toContain('data-testid="auth-brand-name"');
     await expect(page.getByTestId('auth-brand-name')).toHaveText(displayName);
@@ -516,7 +516,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     expect(manifest1.json.name).toBe(displayName);
     expect(manifest1.json.theme_color).toBe(PRIMARY_1);
     expect(manifest1.json.id).toBe(`/?tenant=${slug}`);
-    for (const icon of manifest1.json.icons) expect(icon.src).toContain('/icons/tria-'); // PWA-01
+    for (const icon of manifest1.json.icons) expect(icon.src).toContain('/icons/rede-social-'); // PWA-01
 
     // (f) Marca rebrand: logo through the signed PUT → the worker derives v1; a primary-colour save
     // bumps iconVersion → v2 (D-27/D-28). by-host then carries the new colour, logo and icon URLs.
@@ -638,9 +638,9 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
 
     const html = await page.content();
     for (const hex of [...SEED_PRIMARIES, NEUTRAL, PRIMARY_1]) expect(html).not.toContain(hex);
-    await expect(page.locator('[data-brand-root]').getByText('TRIA', { exact: true })).toHaveCount(
-      0,
-    );
+    await expect(
+      page.locator('[data-brand-root]').getByText('Rede Social', { exact: true }),
+    ).toHaveCount(0);
   });
 
   test('3. alias host → 308 to the primary; Status tab suspend → branded unavailable screen; reactivate', async ({
@@ -860,7 +860,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     expect(mail.HTML).toContain(`background:${PRIMARY_2}`);
     expect(mail.HTML).toContain(`<img src="${brand.logoUrl}"`);
     expect(mail.HTML).toContain(`alt="${displayName}"`);
-    expect(mail.HTML).toContain('Enviado pela plataforma TRIA');
+    expect(mail.HTML).toContain('Enviado pela plataforma Rede Social');
     for (const hex of [...SEED_PRIMARIES, NEUTRAL]) expect(mail.HTML).not.toContain(hex);
     expect(mail.Text).toContain(`${origin}/auth/confirm`); // plain-text alternative
     // No link is followed: Phase 1's recovery.spec.ts owns the reset flow (branded by 02-06).

@@ -1,8 +1,8 @@
 ---
 phase: 02-tenant-shell-branding-platform-panel
 plan: 08
-subsystem: web public pages (auth tree on @tria/ui), host routing (proxy.ts), suspended-tenant flow
-tags: [auth-pages, proxy, host-routing, 308, branding, suspended, tria-ui, playwright, vitest, tracer]
+subsystem: web public pages (auth tree on @rede-social/ui), host routing (proxy.ts), suspended-tenant flow
+tags: [auth-pages, proxy, host-routing, 308, branding, suspended, rede-social-ui, playwright, vitest, tracer]
 
 # Dependency graph
 requires:
@@ -11,7 +11,7 @@ requires:
     provides: "hostTenantSchema with status/isPrimary/primaryHost/branding, resolveHostTenant verified-only (D-36), getHostBrand(), brandStyleVars, seed brands, branding.spec.ts"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 02
-    provides: "@tria/ui primitives (Button, IconButton, Input, Card, EmptyState, BottomSheet, useMediaQuery, cn) and tokens.css brand utilities"
+    provides: "@rede-social/ui primitives (Button, IconButton, Input, Card, EmptyState, BottomSheet, useMediaQuery, cn) and tokens.css brand utilities"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 03
     provides: "TENANT_SUSPENDED envelope code answered by requireAuth before the blocked check; interim bootstrap mapping to /auth/blocked"
@@ -20,12 +20,12 @@ requires:
     provides: "per-namespace pt-BR catalog + loader, scripts/check-ui-literals.sh, apps/web/vitest.config.ts, D-33 approved mockup (#suspended)"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 07
-    provides: "<html data-theme> from the tria_theme cookie (D-41), e2e fixtures.ts login()/hosts, 86-spec baseline"
+    provides: "<html data-theme> from the rede_theme cookie (D-41), e2e fixtures.ts login()/hosts, 86-spec baseline"
 provides:
   - "apps/web/proxy.ts: verified non-primary host → 308 to the tenant's primary origin (scheme from x-forwarded-proto or the request, port from the browser-facing host, path + query from request.nextUrl, Cache-Control: no-store, isRegistrableHost + loop guard) before the Supabase client; PUBLIC entries /comunidade-indisponivel, /aceitar-convite, /convite-expirado, /manifest.webmanifest, /m/<slug>/manifest.webmanifest, /serwist/*, /~offline"
   - "apps/web/proxy.test.ts (8 vitest cases) + `@/` alias in apps/web/vitest.config.ts"
   - "(auth) layout on token utilities: brandStyleVars on <main>, AuthBrand (logo <img alt> as-is or display name text, data-testid=auth-brand-name), generateViewport themeColor = primary, generateMetadata title = display name; min-h-[var(--screen-h)] column max-w-sm"
-  - "Shared (auth) components: AuthInput (client icon-name → lucide wrapper over @tria/ui Input), LinkButton (next/link styled as Button: brand|outline|ghost), SubmitButton (Button variant=brand size=lg fullWidth loading=pending), UnavailableCard (Card + TriangleAlert), PasswordField (Input + eye IconButton aria-pressed + 3-segment D-10 meter, autoComplete prop), RulesSheet (BottomSheet, desktopCard from md), ConsentFields (#acceptRules with the sheet, #acceptTerms with /termos · /privacidade)"
+  - "Shared (auth) components: AuthInput (client icon-name → lucide wrapper over @rede-social/ui Input), LinkButton (next/link styled as Button: brand|outline|ghost), SubmitButton (Button variant=brand size=lg fullWidth loading=pending), UnavailableCard (Card + TriangleAlert), PasswordField (Input + eye IconButton aria-pressed + 3-segment D-10 meter, autoComplete prop), RulesSheet (BottomSheet, desktopCard from md), ConsentFields (#acceptRules with the sheet, #acceptTerms with /termos · /privacidade)"
   - "/entrar ported: login.tenantHint line (D-22), h1 16/700 secondary with a logo, icon inputs, brand CTA, forgot link, divider, outline sign-up LinkButton; suspended host → UnavailableCard and nothing else; login action redirects to /comunidade-indisponivel before signInWithPassword (D-32)"
   - "/cadastro/[slug], /esqueci-senha, /redefinir-senha ported with Phase 1 paths, ids, hidden inputs and actions byte-identical; ?campos= allow-list name|email|password → Input error + signup.fieldErrors.{name,email} / passwordMin (T-02-49); suspended host → UnavailableCard; not-found on EmptyState"
   - "D-09 pattern for TENANT_SUSPENDED: lib/bootstrap.ts → /auth/suspended (no query) → signOut scope local → /comunidade-indisponivel (EmptyState, reads nothing, branded by the layout); unavailable.json"
@@ -84,11 +84,11 @@ key-files:
 
 key-decisions:
   - "AuthInput client wrapper (icon by name) instead of passing lucide components from server pages: React Flight rejects a forwardRef object as a client prop ('Functions cannot be passed directly to Client Components'); PasswordField already lived in the client boundary so it imports Lock/Eye directly"
-  - "AuthBrand stays a local stand-in for TenantLogo size='auth' even though apps/web now depends on @tria/core (02-07): TenantLogo lacks the data-testid and the break-words/text-center fallback the encoding truth needs; the swap is a follow-up once TenantLogo grows those"
+  - "AuthBrand stays a local stand-in for TenantLogo size='auth' even though apps/web now depends on @rede-social/core (02-07): TenantLogo lacks the data-testid and the break-words/text-center fallback the encoding truth needs; the swap is a follow-up once TenantLogo grows those"
   - "ConsentFields takes { rulesText, labels } only — the tenant name arrives already interpolated in the labels, so a tenantName prop would have been dead"
   - "RulesSheet picks BottomSheet's desktopCard through useMediaQuery('(min-width: 768px)') (sheet on phones, centred card on desktop) rather than a fixed boolean"
   - "The 'Comunidade: {tenant}' line stays on tenant hosts (planner note: D-22 + ROADMAP criterion 1 outrank the UI-SPEC row) and lives in /entrar only, never in the layout, so /endereco-invalido's body text names no tenant (D-23)"
-  - "The dark-theme e2e polls the CTA colour: @tria/ui Button carries transition-colors (150 ms), so a one-shot computed read right after the attribute flip captures the start value"
+  - "The dark-theme e2e polls the CTA colour: @rede-social/ui Button carries transition-colors (150 ms), so a one-shot computed read right after the attribute flip captures the start value"
 
 patterns-established:
   - "Client-boundary icon naming: ICONS map inside a 'use client' file, pages pass a string union"
@@ -98,7 +98,7 @@ requirements-completed: [UI-03, TENANT-02, PWA-03]
 
 coverage:
   - id: D1
-    description: "On tria-demo/tria-lab hosts /entrar is branded before login (JS disabled): --brand-primary on <main>, logo <img alt> as-is, 'Comunidade: {name}' line; the other tenant's hex/name never appear; generic host neutral"
+    description: "On rede-demo/rede-lab hosts /entrar is branded before login (JS disabled): --brand-primary on <main>, logo <img alt> as-is, 'Comunidade: {name}' line; the other tenant's hex/name never appear; generic host neutral"
     requirement: TENANT-02
     verification:
       - kind: e2e
@@ -169,7 +169,7 @@ status: complete
 
 # Phase 02 Plan 08: Branded Public Pages, Alias 308 and the Suspended-Tenant Screen Summary
 
-**The public auth tree ported onto `@tria/ui` in the prototype's language and branded per host before login; `proxy.ts` folds verified alias hosts into the primary origin with a 308 (unverified hosts stay generic); a suspended tenant refuses its members through `/auth/suspended` → branded `/comunidade-indisponivel` — pinned by 8 vitest cases and 14 new Playwright cases on both projects with the Phase 1 suite unchanged.**
+**The public auth tree ported onto `@rede-social/ui` in the prototype's language and branded per host before login; `proxy.ts` folds verified alias hosts into the primary origin with a 308 (unverified hosts stay generic); a suspended tenant refuses its members through `/auth/suspended` → branded `/comunidade-indisponivel` — pinned by 8 vitest cases and 14 new Playwright cases on both projects with the Phase 1 suite unchanged.**
 
 ## Performance
 
@@ -182,7 +182,7 @@ status: complete
 ## Accomplishments
 
 - **Branded public chrome:** `(auth)/layout.tsx` uses only token utilities, sets the five `--brand-*` variables on `<main>`, renders `AuthBrand` (logo as-is or display-name text, D-26), emits `themeColor` = tenant primary through `generateViewport` and the display name as `<title>`. Dark theme works through `<html data-theme>` alone (E in the new spec).
-- **`/entrar` on `@tria/ui`:** tenant line (`login.tenantHint`, D-22), 16/700 title when a logo is present, `Mail`/`Lock` icon inputs, brand `SubmitButton`, forgot link, divider, outline "Criar nova conta". On a suspended host the form is replaced by `UnavailableCard` and the login action redirects to `/comunidade-indisponivel` before calling Supabase.
+- **`/entrar` on `@rede-social/ui`:** tenant line (`login.tenantHint`, D-22), 16/700 title when a logo is present, `Mail`/`Lock` icon inputs, brand `SubmitButton`, forgot link, divider, outline "Criar nova conta". On a suspended host the form is replaced by `UnavailableCard` and the login action redirects to `/comunidade-indisponivel` before calling Supabase.
 - **`proxy.ts`:** `primaryHostRedirect()` answers a verified non-primary host with a 308 to `primaryHost` (scheme from `x-forwarded-proto` or the request, port from the browser-facing host, path + query from `request.nextUrl`, `Cache-Control: no-store`, `isRegistrableHost` + loop guard) before the Supabase client; PUBLIC pre-registers the wave-5 paths. `proxy.test.ts` pins the eight routing cases.
 - **Sign-up / forgot / reset ported** with byte-identical actions: shared `PasswordField` (eye `IconButton` with `aria-pressed`, three-segment D-10 meter, polite hint), `RulesSheet` on `BottomSheet`, `ConsentFields` (both consents unchecked + required), `?campos=` allow-list → `Input` error state with `signup.fieldErrors`.
 - **Suspended tenant in the D-09 pattern:** `bootstrapRedirectPath('TENANT_SUSPENDED') → '/auth/suspended'` (the 02-03 interim `/auth/blocked` mapping is gone), a no-input sign-out Route Handler, and the branded `EmptyState` screen. `/acesso-suspenso`, `/endereco-invalido`, `/sem-comunidade` restyled on `EmptyState` + outline `LinkButton` with their disclosure contracts intact.
@@ -220,7 +220,7 @@ Tracer feedback gate (Task 1): interactive run, `human_verify_mode = end-of-phas
 ## Decisions Made
 
 - **`AuthInput` icon-by-name wrapper** (see Deviations 1) — the only way a Server Component can hand a lucide icon to the client `Input`.
-- **`AuthBrand` kept local** although `@tria/core` is now a web dependency: `TenantLogo` has neither the test id nor the wrapping fallback typography the encoding truth needs; the one-line swap stays a follow-up.
+- **`AuthBrand` kept local** although `@rede-social/core` is now a web dependency: `TenantLogo` has neither the test id nor the wrapping fallback typography the encoding truth needs; the one-line swap stays a follow-up.
 - **`ConsentFields` without `tenantName`:** labels arrive interpolated, so the prop would be dead code; the key-link in the plan is otherwise honoured (`<ConsentFields rulesText labels />` inside the form, ids unchanged).
 - **`RulesSheet` desktop card via `useMediaQuery`** so the phone gets the sheet and `md+` the centred card, matching the UI-SPEC wording.
 - **Tenant line only on `/entrar`** (planner note honoured): D-22 + ROADMAP criterion 1 outrank the UI-SPEC row, and keeping it out of the layout preserves D-23 on `/endereco-invalido`.
@@ -240,7 +240,7 @@ Tracer feedback gate (Task 1): interactive run, `human_verify_mode = end-of-phas
 
 **2. [Rule 1 - Test bug] Dark-theme assertion read the CTA colour mid-transition**
 - **Found during:** Task 1 (case E failed with the light primary while the probe already showed the dark derivation)
-- **Issue:** `@tria/ui` `Button` has `transition-colors`; a single `getComputedStyle` right after flipping `data-theme` returns the start colour.
+- **Issue:** `@rede-social/ui` `Button` has `transition-colors`; a single `getComputedStyle` right after flipping `data-theme` returns the start colour.
 - **Fix:** `expect.poll` on the CTA's computed background against the probe value (the assertion intent is unchanged).
 - **Committed in:** `10544b6`
 
@@ -255,7 +255,7 @@ Tracer feedback gate (Task 1): interactive run, `human_verify_mode = end-of-phas
 
 ## Issues Encountered
 
-- `pnpm e2e -- <spec>` and `pnpm --filter @tria/web test -- proxy` do not filter (known from 02-01/02-07); scoped runs used `pnpm --filter @tria/web exec playwright test <spec>` and `pnpm --filter @tria/web exec vitest run proxy`.
+- `pnpm e2e -- <spec>` and `pnpm --filter @rede-social/web test -- proxy` do not filter (known from 02-01/02-07); scoped runs used `pnpm --filter @rede-social/web exec playwright test <spec>` and `pnpm --filter @rede-social/web exec vitest run proxy`.
 - The acceptance grep "`role="status"` exactly once" counted the docblock; reworded the comment so the count is the rendered element only.
 
 ## D-33 / sketch deltas
@@ -272,8 +272,8 @@ None beyond the plan's register: `/auth/suspended` (T-02-43, no input/no forward
 
 ## Human-check notes for the end-of-phase verifier
 
-1. **Branded login look (phone + desktop):** open `http://tria-demo.localhost:3000/entrar` (purple, logo, "Comunidade: TRIA Demo", 16/700 "Entrar" under the logo) and `http://tria-lab.localhost:3000/entrar` (teal); `http://localhost:3000/entrar` shows the 24/700 "TRIA" wordmark and 24/700 "Entrar". Compare with `reference/frontend-design/app/(auth)/login/page.tsx`: brand block → icon inputs → brand CTA → forgot link → divider "ou" → outline "Criar nova conta".
-2. **Sign-up:** `/cadastro` on tria-demo — eye toggle sits inside the password field at the right, three neutral segments below until typing, both consents unchecked; "ver regras" opens a bottom sheet on the phone and a centred card on desktop; "Fechar" closes it.
+1. **Branded login look (phone + desktop):** open `http://rede-demo.localhost:3000/entrar` (purple, logo, "Comunidade: Rede Demo", 16/700 "Entrar" under the logo) and `http://rede-lab.localhost:3000/entrar` (teal); `http://localhost:3000/entrar` shows the 24/700 "Rede Social" wordmark and 24/700 "Entrar". Compare with `reference/frontend-design/app/(auth)/login/page.tsx`: brand block → icon inputs → brand CTA → forgot link → divider "ou" → outline "Criar nova conta".
+2. **Sign-up:** `/cadastro` on rede-demo — eye toggle sits inside the password field at the right, three neutral segments below until typing, both consents unchecked; "ver regras" opens a bottom sheet on the phone and a centred card on desktop; "Fechar" closes it.
 3. **Suspended screen:** mark a throwaway tenant suspended (or run `auth-pages.spec.ts` C2 with `--headed`) and check `/entrar` shows the brand block + warning card with no form, and `/comunidade-indisponivel` shows the EmptyState with the outline "Voltar para login".
 4. **E06 long-text backstop:** the `D.` case (`Associação São José da Comunidade Beneficente`, run `--headed` on mobile-chromium) should wrap to at most two centred lines in the brand block and in the "Comunidade:" line.
 5. **Dark theme:** toggle "Tema escuro" in `/configuracoes`, sign out, and check `/entrar` — dark ground, lighter brand CTA.

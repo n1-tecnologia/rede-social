@@ -1,5 +1,5 @@
-import type { RequestContext } from '@tria/core/server/auth/context';
-import { flush, subscribe } from '@tria/core/server/events/bus';
+import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { flush, subscribe } from '@rede-social/core/server/events/bus';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -122,11 +122,11 @@ const tx = {
   },
 };
 
-vi.mock('@tria/core/db/tenant-tx', () => ({
+vi.mock('@rede-social/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
 }));
 
-vi.mock('@tria/core/server/modules/flags-cache', () => ({
+vi.mock('@rede-social/core/server/modules/flags-cache', () => ({
   moduleFlags: { isEnabled: async () => communitiesOn },
 }));
 

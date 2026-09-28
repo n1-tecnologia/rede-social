@@ -1,6 +1,6 @@
-import { brandStyleVars, resolveBranding } from '@tria/contracts';
-import { THEME_COOKIE } from '@tria/contracts/branding';
-import { AppShell, buildNav, type ShellNav, ThemeToggle } from '@tria/core/ui';
+import { brandStyleVars, resolveBranding } from '@rede-social/contracts';
+import { THEME_COOKIE } from '@rede-social/contracts/branding';
+import { AppShell, buildNav, type ShellNav, ThemeToggle } from '@rede-social/core/ui';
 import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';

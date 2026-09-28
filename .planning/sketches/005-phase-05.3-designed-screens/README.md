@@ -78,7 +78,7 @@ Controles no topo (chrome do mockup, fora do produto):
 
 - **Tema escuro / Tema claro** — alterna o tema do membro. **O palco de Reels é sempre escuro**
   (UI-D-98); o tema só muda a página, o DesktopRail e o toast, que ficam fora do escopo escuro.
-- **Cor primária / Cor secundária** e quatro presets (TRIA neutro, Demo roxo, Lab verde, Vermelho)
+- **Cor primária / Cor secundária** e quatro presets (Rede Social neutro, Demo roxo, Lab verde, Vermelho)
   — escrevem as cinco variáveis `--brand-*` como `brandStyleVars()` faz no servidor, incluindo o par
   escuro. O quadro C da Superfície 5 fica fixo numa **segunda marca** (roxo) para comparar lado a lado.
 - Os links de seção pulam para cada uma das seis superfícies. As abas de trilha e o botão de som

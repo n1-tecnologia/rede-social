@@ -1,6 +1,6 @@
 'use client';
 
-import { cn, useMediaQuery } from '@tria/ui';
+import { cn, useMediaQuery } from '@rede-social/ui';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,

@@ -1,15 +1,19 @@
-import { createClient } from '@supabase/supabase-js';
 import {
   BRANDING_UPLOAD_ID_RE,
   hostTenantSchema,
   iconsUpToDate,
   platformTenantDetailSchema,
-} from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
-import { deriveIconsJob } from '@tria/core/server/branding/derive-icons-job';
-import { deriveIconSet, inspectBrandingImage, readPixel } from '@tria/core/server/branding/icons';
-import { stopBoss } from '@tria/core/server/jobs/boss';
-import { brandingInternals, deriveTenantIcons } from '@tria/core/server/platform/branding';
+} from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import { deriveIconsJob } from '@rede-social/core/server/branding/derive-icons-job';
+import {
+  deriveIconSet,
+  inspectBrandingImage,
+  readPixel,
+} from '@rede-social/core/server/branding/icons';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { brandingInternals, deriveTenantIcons } from '@rede-social/core/server/platform/branding';
+import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
@@ -25,7 +29,7 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  *
  * The api package has no `sharp` dependency: PNG fixtures are generated through the kernel
  * (`deriveIconSet` on an inline SVG) and pixels/dimensions are probed with `readPixel` /
- * `inspectBrandingImage` from `@tria/core/server/branding/icons`.
+ * `inspectBrandingImage` from `@rede-social/core/server/branding/icons`.
  *
  * Every tenant created here carries a unique `pb-…` slug and a unique `…-<run>.cliente.test` host;
  * `afterAll` removes tenants (cascade), Storage objects under their prefixes, pg-boss rows keyed by
@@ -33,7 +37,7 @@ import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
  */
 
 const RUN = Date.now();
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
 
 type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
@@ -80,7 +84,7 @@ async function createThrowawayTenant(
   colors = { primary: PRIMARY, secondary: '#a78bfa' },
 ): Promise<{ id: string; host: string }> {
   const slug = `${prefix}-${RUN}`.slice(0, 40);
-  const adminEmail = `admin-${slug}@tria-test.local`;
+  const adminEmail = `admin-${slug}@rede-social-test.local`;
   const res = await platform('/tenants', {
     method: 'POST',
     body: { displayName: `Marca ${slug}`, slug, colors, modules: ['feed'], adminEmail },
@@ -137,7 +141,7 @@ async function deriveJobs(tenantId: string) {
 /**
  * Service-key Storage client for fixture cleanup only (the Storage schema forbids direct deletes
  * from `storage.objects`). Built here like `authAdmin()` in setup.ts instead of importing
- * `@tria/core/server/supabase-admin`, which Biome confines to the kernel's admin lane.
+ * `@rede-social/core/server/supabase-admin`, which Biome confines to the kernel's admin lane.
  */
 function storageAdmin() {
   const url = process.env.SUPABASE_URL ?? '';
@@ -168,7 +172,7 @@ async function cleanup(): Promise<void> {
   >`select id from public.tenants where slug like 'pb-%'`;
   const ids = [...new Set([...createdTenantIds, ...stale.map((r) => r.id)])];
   await adminSql`delete from public.tenants where slug like 'pb-%'`;
-  await adminSql`delete from auth.users where lower(email) like 'admin-pb-%@tria-test.local'`;
+  await adminSql`delete from auth.users where lower(email) like 'admin-pb-%@rede-social-test.local'`;
   for (const id of ids) {
     await removeTenantObjects(id);
     await adminSql`
@@ -657,7 +661,7 @@ describe('isolation and auth — tenant prefixes never cross, members are refuse
 
   it('2. a seeded member Bearer answers 403 FORBIDDEN on the upload route', async () => {
     if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
-    const member = await signInAs('member@tria-demo.local', SEED_PASSWORD);
+    const member = await signInAs('member@rede-demo.local', SEED_PASSWORD);
     const res = await startUpload(tenantA, { kind: 'logo', mime: 'image/png', size: 10 }, member);
     expect(res.status).toBe(403);
     expect((await envelope(res)).code).toBe('FORBIDDEN');

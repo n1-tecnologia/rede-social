@@ -1,8 +1,8 @@
-# TRIA Rede Social (white-label community platform)
+# Rede Social (white-label community platform)
 
 ## What This Is
 
-A multi-tenant, white-label "social network" SaaS built by TRIA. Organizations (creators, companies, institutions, any group with a member base) get their own branded community inside a single deployment, each tenant reached on its own custom domain (e.g. `comunidade.cliente.com.br`) while the platform domain (`app.seusistema.com`) serves TRIA's `super_admin`: the host selects the tenant's public shell and, after login, the app confirms the user's tenant from their membership and applies that tenant's logo, colors, favicon and display name. It is mobile-first (installable PWA) and fully responsive on desktop.
+A multi-tenant, white-label "social network" SaaS. Organizations (creators, companies, institutions, any group with a member base) get their own branded community inside a single deployment, each tenant reached on its own custom domain (e.g. `comunidade.cliente.com.br`) while the platform domain (`app.seusistema.com`) serves the platform's `super_admin`: the host selects the tenant's public shell and, after login, the app confirms the user's tenant from their membership and applies that tenant's logo, colors, favicon and display name. It is mobile-first (installable PWA) and fully responsive on desktop.
 
 In V1 only the tenant's admin publishes content (feed posts, stories, communities, events); members consume, like, comment, share, RSVP/check-in to events, and talk to the tenant's support team via chat. The data model is born ready for V2, where any member can post, create communities and chat with other members.
 
@@ -12,7 +12,7 @@ A tenant's members open one branded app and feel it is *their organization's* co
 
 ## Business Context
 
-- **Customer**: Organizations with a member base (creators/mentors, companies, churches, schools, associations). TRIA provisions each as a tenant.
+- **Customer**: Organizations with a member base (creators/mentors, companies, churches, schools, associations). Rede Social provisions each as a tenant.
 - **Revenue model**: SaaS subscription per tenant (billing not built in V1; tenant record carries plan/status fields for later).
 - **Success metric**: V1 is done when one real tenant is live as a pilot, with its own branding, using feed, stories, communities, events, support chat and notifications.
 - **Strategy notes**: Modular architecture so each feature module can be reused across products and toggled per tenant.
@@ -39,13 +39,13 @@ Validated in Phase 5: Communities & Stories (2026-09-25, local stack; UAT 12/12,
 ### Active
 
 **Tenancy & branding**
-- [ ] Single deployment serves every tenant on that tenant's own custom domain; the host picks the public shell, the logged-in user's membership is the authority and must match the host's tenant; the platform domain is reserved for TRIA's `super_admin`
+- [ ] Single deployment serves every tenant on that tenant's own custom domain; the host picks the public shell, the logged-in user's membership is the authority and must match the host's tenant; the platform domain is reserved for the platform's `super_admin`
 - [ ] Each tenant has customizable branding: logo, color palette, favicon, display name, applied after login
 - [ ] Feature modules (feed, communities, stories, events, chat, notifications) can be enabled/disabled per tenant and drive the app navigation
 - [ ] Strict data isolation between tenants (every query scoped by tenant, enforced at DB level)
 
 **Roles & access**
-- [ ] `super_admin` (TRIA staff): sees everything across all tenants; creates tenants, sets initial branding, enables modules, creates the first `admin_tenant`, via a platform panel
+- [ ] `super_admin` (Rede Social staff): sees everything across all tenants; creates tenants, sets initial branding, enables modules, creates the first `admin_tenant`, via a platform panel
 - [ ] `admin_tenant`: manages own tenant's visual identity (colors, logo, etc.), publishes all content in V1, moderates
 - [ ] `support_tenant`: a person from the tenant (not necessarily admin) who answers the support chat
 - [ ] `member`: consumes content, interacts, joins events, chats with support
@@ -98,29 +98,29 @@ Validated in Phase 5: Communities & Stories (2026-09-25, local stack; UAT 12/12,
 - Members creating posts or communities — V2; schema supports it, UI/permissions do not expose it in V1
 - Member-to-member chat — V2; V1 chat is member ↔ support only, on the same schema
 - Tenant subdomains under the platform domain, and DNS automation on the customer's behalf — each tenant brings a domain it owns; the customer creates the DNS records from the platform panel's instructions
-- Billing / subscription checkout — tenants are provisioned by TRIA; plan/status fields exist but no payment integration
+- Billing / subscription checkout — tenants are provisioned by Rede Social; plan/status fields exist but no payment integration
 - Varied reactions (emoji) — plain "like" only
 - Native iOS/Android apps — PWA covers mobile in V1
 - Email and WhatsApp notifications — in-app + push only
 - Public (logged-out) post pages — share links are internal and require login
-- Self-service tenant creation — TRIA creates tenants through the platform panel
+- Self-service tenant creation — Rede Social creates tenants through the platform panel
 - Multi-language UI — pt-BR only
 
 ## Context
 
 - Greenfield project. Empty repository at start.
-- Repo name `rede_social` under TRIA's workspace; TRIA (triacompany.com.br) is the platform operator.
+- Repo name `rede_social` under the platform's workspace; Rede Social (rede-social.test) is the platform operator.
 - The user works in Portuguese; planning artifacts are written in English for agent consumption. Domain terms kept as the user named them: `super_admin`, `admin_tenant`.
-- "Modularize everything" is a stated architectural goal: each feature (feed, stories, communities, events, chat, notifications) should be a self-contained module (DB schema, API routes, UI) that can be reused in other TRIA products and toggled per tenant.
+- "Modularize everything" is a stated architectural goal: each feature (feed, stories, communities, events, chat, notifications) should be a self-contained module (DB schema, API routes, UI) that can be reused in other Rede Social products and toggled per tenant.
 - Expected usage is predominantly mobile browser / PWA; desktop is secondary but must work.
-- **Design prototype exists**: the design team built a mocked frontend at `github.com/tria-company/social-igor` (private; cloned read-only to `reference/frontend-design/`, git-ignored). Stack: Next.js 16, React 19, Tailwind v4, framer-motion, lucide-react, Manrope font. 34 screens, 66 components, all `"use client"` reading `lib/mock/*`. It is the **visual/UX source of truth** but was not built for the modular architecture: brand colors are hex literals, nav is hardcoded, desktop is an iPhone mockup, there are no stories, events are modeled as paid tickets, chat is a ticket helpdesk, and ~1/3 of screens are out of scope (reels, LMS "membros" area, forum, explore, follow graph, reputation). Full analysis in `.planning/research/PROTOTYPE.md`. Decision: port presentational components and design language into module packages phase by phase; rewrite containers, data model and theming; never refactor the prototype in place.
+- **Design prototype exists**: the design team built a mocked frontend at `github.com/n1-tecnologia/social-igor` (private; cloned read-only to `reference/frontend-design/`, git-ignored). Stack: Next.js 16, React 19, Tailwind v4, framer-motion, lucide-react, Manrope font. 34 screens, 66 components, all `"use client"` reading `lib/mock/*`. It is the **visual/UX source of truth** but was not built for the modular architecture: brand colors are hex literals, nav is hardcoded, desktop is an iPhone mockup, there are no stories, events are modeled as paid tickets, chat is a ticket helpdesk, and ~1/3 of screens are out of scope (reels, LMS "membros" area, forum, explore, follow graph, reputation). Full analysis in `.planning/research/PROTOTYPE.md`. Decision: port presentational components and design language into module packages phase by phase; rewrite containers, data model and theming; never refactor the prototype in place.
 - Research (2026-09-11) is in `.planning/research/` (STACK, FEATURES, ARCHITECTURE, PITFALLS, PROTOTYPE, SUMMARY).
 
 ## Constraints
 
 - **Tech stack**: Next.js frontend deployed on Vercel — user decision, mobile-first PWA
 - **Tech stack**: Backend API in Node/TypeScript deployed on GCP (Cloud Run) — user decision; all business logic goes through this API. Two confirmed exceptions where the frontend talks to Supabase directly: (1) Supabase Auth login/refresh/recovery via `@supabase/ssr` in the Next.js server, (2) read-only Supabase Realtime Broadcast subscriptions for chat/notification signals (data is always fetched through the API)
-- **Modularity**: each feature is a self-contained package (schema, API, UI) depending only on a kernel and on other modules' published contracts, toggled per tenant and reusable in other TRIA projects — user decision, see MOD-01..05
+- **Modularity**: each feature is a self-contained package (schema, API, UI) depending only on a kernel and on other modules' published contracts, toggled per tenant and reusable in other projects — user decision, see MOD-01..05
 - **Design**: UI follows the design team's prototype (`reference/frontend-design/`); components are ported into module packages, not refactored in place — see PROTOTYPE.md
 - **Infra plan**: Supabase Free plan for the pilot (no native image transforms, 50 MB per file, Realtime quotas) — user decision; image resizing done in the worker; upgrade to Pro is a V2 item
 - **Tech stack**: Supabase (Postgres, Auth, Storage, Realtime) as the database/platform — user decision
@@ -134,9 +134,9 @@ Validated in Phase 5: Communities & Stories (2026-09-25, local stack; UAT 12/12,
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Each tenant on its own custom domain; platform domain reserved for TRIA `super_admin` (2026-09-11, supersedes "single URL") | Tenants want their own address and branding before login; the membership stays the authority and must match the host's tenant | — Pending |
+| Each tenant on its own custom domain; platform domain reserved for Rede Social `super_admin` (2026-09-11, supersedes "single URL") | Tenants want their own address and branding before login; the membership stays the authority and must match the host's tenant | — Pending |
 | One admin per tenant publishes all V1 content | Validates the community product with controlled content before opening posting to members | — Pending |
-| Feature flags per tenant (not plans) | TRIA super_admin toggles modules directly; plans can map to flag sets later | — Pending |
+| Feature flags per tenant (not plans) | Rede Social super_admin toggles modules directly; plans can map to flag sets later | — Pending |
 | Central API on GCP, frontend never hits Supabase directly | User wants business logic centralized and reusable; Supabase used as managed Postgres/Auth/Storage | — Pending |
 | Next.js + Node/TS backend | Single language, shared types between frontend and API | — Pending |
 | Support is a dedicated tenant role (`support_tenant`) | Support may be someone other than the admin | — Pending |

@@ -1,4 +1,4 @@
-import { StatusPill } from '@tria/ui';
+import { StatusPill } from '@rede-social/ui';
 import { ChevronLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';

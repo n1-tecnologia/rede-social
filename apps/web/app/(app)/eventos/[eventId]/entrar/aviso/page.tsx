@@ -1,4 +1,4 @@
-import { EmptyState, PageHeader } from '@tria/ui';
+import { EmptyState, PageHeader } from '@rede-social/ui';
 import { CalendarClock, CalendarX2, Lock, type LucideIcon } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
+import { ToastProvider } from '@rede-social/ui';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { ToastProvider } from '@tria/ui';
 import { MotionGlobalConfig } from 'motion/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

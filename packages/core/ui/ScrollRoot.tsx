@@ -1,6 +1,6 @@
 'use client';
 
-import { cn, ScrollContainerProvider } from '@tria/ui';
+import { cn, ScrollContainerProvider } from '@rede-social/ui';
 import { usePathname } from 'next/navigation';
 import { type ReactNode, useEffect, useRef } from 'react';
 
@@ -11,7 +11,7 @@ export interface ScrollRootProps {
 
 /**
  * The app's single scroll container (UI-SPEC §Shell Contract): `<main class="app-scroll">` scrolls,
- * the document does not. Exposed through `@tria/ui`'s `ScrollContainerContext` so PullToRefresh,
+ * the document does not. Exposed through `@rede-social/ui`'s `ScrollContainerContext` so PullToRefresh,
  * sticky sub-headers and the BottomNav's scroll reaction read it instead of querying an id. A route
  * change scrolls it back to the top. No `vh`/`dvh` here or in any page — the height comes from the
  * shell's `--screen-h` contract.

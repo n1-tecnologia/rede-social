@@ -1,4 +1,4 @@
-import { normalizeHost, type ResolvedBranding, resolveBranding } from '@tria/contracts';
+import { normalizeHost, type ResolvedBranding, resolveBranding } from '@rede-social/contracts';
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantDomains, tenants } from '../../db/schema';
@@ -12,10 +12,10 @@ import { resolveTenantHost } from './tenant-host';
  *
  * Resolution order — membership first, always:
  *   1. the user's membership → that tenant (D-23: membership is the authority);
- *   2. no membership, `platform_admins` → neutral TRIA;
+ *   2. no membership, `platform_admins` → neutral platform;
  *   3. no membership, `redirect_to` host resolves to a VERIFIED tenant host → that tenant (the
  *      first-admin invite: GoTrue calls the hook BEFORE 02-05 inserts the invited membership);
- *   4. otherwise neutral TRIA.
+ *   4. otherwise neutral platform.
  * A membership tenant that differs from the verified tenant of the `redirect_to` host is REFUSED —
  * the mail must carry neither brand.
  */
@@ -98,7 +98,7 @@ export async function resolveMailTenant(input: {
     };
   }
 
-  // No membership: platform staff get the neutral TRIA mail; otherwise the verified tenant behind the
+  // No membership: platform staff get the neutral platform mail; otherwise the verified tenant behind the
   // `redirect_to` host (the first-admin invite, whose membership 02-05 inserts AFTER GoTrue returns).
   if (await isPlatformAdmin(input.userId)) return { kind: 'neutral', via: 'platform_admin' };
   if (hostTenant.kind === 'tenant') {

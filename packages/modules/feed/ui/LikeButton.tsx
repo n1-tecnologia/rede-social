@@ -1,6 +1,6 @@
 'use client';
 
-import { cn, IconButton, useMediaQuery } from '@tria/ui';
+import { cn, IconButton, useMediaQuery } from '@rede-social/ui';
 import { Heart } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 

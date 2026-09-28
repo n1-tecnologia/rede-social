@@ -1,6 +1,6 @@
 'use client';
 
-import { Card } from '@tria/ui';
+import { Card } from '@rede-social/ui';
 import { ChevronRight, MessageCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { CommunityCover } from './CommunityCover';

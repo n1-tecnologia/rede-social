@@ -7,25 +7,25 @@ import {
   bootstrapSchema,
   resolveBranding,
   TENANT_ROLES,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import {
   ownProfileSchema,
   type ProfileIssue,
   updateProfileBodySchema,
-} from '@tria/contracts/profiles';
-import { memberships, tenants, users } from '@tria/core/db/schema';
-import { withTenantTx } from '@tria/core/db/tenant-tx';
-import { requireAuth } from '@tria/core/server/auth/require-auth';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
+} from '@rede-social/contracts/profiles';
+import { memberships, tenants, users } from '@rede-social/core/db/schema';
+import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import {
   dismissNudge,
   getOwnProfile,
   profileForBootstrap,
   updateOwnProfile,
-} from '@tria/core/server/profiles/index';
-import { acceptInvite } from '@tria/core/server/tenancy/accept-invite';
-import { membershipOfRecord } from '@tria/core/server/tenancy/membership-scope';
+} from '@rede-social/core/server/profiles/index';
+import { acceptInvite } from '@rede-social/core/server/tenancy/accept-invite';
+import { membershipOfRecord } from '@rede-social/core/server/tenancy/membership-scope';
 import { eq } from 'drizzle-orm';
 import type { ZodError } from 'zod';
 import { createOpenApiApp } from '../http/openapi';
@@ -59,7 +59,7 @@ const PROFILE_FIELDS = ['displayName', 'bio', 'avatarAssetId'] as const;
 const profileIssueFor = (code: string, message: string): ProfileIssue => {
   if (message === 'required' || code === 'too_small') return 'required';
   // `too_big` is Zod's code-POINT cap; the code-UNIT refinement next to it raises a `custom` issue
-  // carrying the same `'too_long'` message (see `withinCodeUnits` in @tria/contracts/profiles).
+  // carrying the same `'too_long'` message (see `withinCodeUnits` in @rede-social/contracts/profiles).
   if (message === 'too_long' || code === 'too_big') return 'too_long';
   return 'invalid';
 };
@@ -89,7 +89,7 @@ const profileEnvelope = envelope(
 
 /**
  * `POST /v1/me/accept-invite` (ROLE-03, D-29): the invited first admin accepts the tenant rules and
- * TRIA's terms. The tenant and the user come ONLY from `ctx` — the verified Bearer and its membership
+ * the platform's terms. The tenant and the user come ONLY from `ctx` — the verified Bearer and its membership
  * — never from the body; the body carries the two consent versions and nothing else. The password
  * was set through Supabase by the web action before this call and never reaches the API (D-10).
  * `requireAuth` lets an `invited` membership reach exactly this route and `/bootstrap`.

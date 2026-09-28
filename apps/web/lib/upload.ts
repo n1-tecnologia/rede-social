@@ -2,8 +2,8 @@ import {
   BRANDING_MAX_BYTES,
   BRANDING_UPLOAD_MIMES,
   type BrandingUploadMime,
-} from '@tria/contracts/branding';
-import { MEDIA_BUCKET, MEDIA_LIMITS } from '@tria/contracts/media';
+} from '@rede-social/contracts/branding';
+import { MEDIA_BUCKET, MEDIA_LIMITS } from '@rede-social/contracts/media';
 
 /**
  * Client-safe signed-upload helper (02-14 + 03-04, D-27, CLAUDE.md §4): the browser sends the bytes

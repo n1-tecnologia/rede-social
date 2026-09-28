@@ -1,7 +1,7 @@
 'use server';
 
-import type { MediaPlayback } from '@tria/contracts/media';
-import { REELS_MINT_MAX_IDS } from '@tria/module-reels/contracts';
+import type { MediaPlayback } from '@rede-social/contracts/media';
+import { REELS_MINT_MAX_IDS } from '@rede-social/module-reels/contracts';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';

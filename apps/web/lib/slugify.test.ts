@@ -7,7 +7,7 @@ describe('slugify (D-31 slug suggestion)', () => {
   });
 
   it('collapses punctuation and surrounding whitespace', () => {
-    expect(slugify('  TRIA  Demo!! ')).toBe('tria-demo');
+    expect(slugify('  Rede  Demo!! ')).toBe('rede-demo');
   });
 
   it('cuts at 40 characters without a trailing hyphen', () => {

@@ -1,7 +1,7 @@
-import { THEME_COOKIE } from '@tria/contracts/branding';
-import { iconFor, ThemeToggle } from '@tria/core/ui';
-import { STORY_PERMISSIONS } from '@tria/module-stories/contracts';
-import { Button, Card, PageHeader, SectionTitle, StatusPill } from '@tria/ui';
+import { THEME_COOKIE } from '@rede-social/contracts/branding';
+import { iconFor, ThemeToggle } from '@rede-social/core/ui';
+import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
+import { Button, Card, PageHeader, SectionTitle, StatusPill } from '@rede-social/ui';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
@@ -76,7 +76,7 @@ function Group({
 /**
  * `/configuracoes` (D-42): the kernel's settings page — theme toggle (D-41), placeholder rows that
  * Phase 3 (profile) and Phase 7 (push) wire, the app version and "Sair" (D-08, this device only).
- * Server-rendered: the Switch reads its initial state from the `tria_theme` cookie, so there is no
+ * Server-rendered: the Switch reads its initial state from the `rede_theme` cookie, so there is no
  * loading state (E05/loading). On the platform host only Preferências and Sair render.
  */
 export default async function SettingsPage({

@@ -6,7 +6,7 @@ The design authority is the design team's prototype (`reference/frontend-design/
 Manrope, a light `#f5f7fb` ground with white cards, navy text, 12px radii, 44px touch targets, a
 floating glass BottomNav, and a single accent colour that is the tenant's brand (D-25). Screens the
 prototype does not cover are designed in that same language from the primitives ported into
-`@tria/ui` and reviewed with the design team before implementation (UI-04, D-33).
+`@rede-social/ui` and reviewed with the design team before implementation (UI-04, D-33).
 
 ## Reference Points
 

@@ -1,4 +1,4 @@
-import { TOGGLEABLE_MODULES } from '@tria/contracts';
+import { TOGGLEABLE_MODULES } from '@rede-social/contracts';
 import { sql } from 'drizzle-orm';
 import {
   boolean,

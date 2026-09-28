@@ -55,11 +55,11 @@ with `.planning/phases/02-tenant-shell-branding-platform-panel/02-UI-SPEC.md`.
 
 Toolbar (mockup-only chrome at the top):
 
-- **Tema escuro / Tema claro** — toggles `data-theme` on `<html>` (the `tria_theme` cookie in the app);
+- **Tema escuro / Tema claro** — toggles `data-theme` on `<html>` (the `rede_theme` cookie in the app);
   every "Tema" Switch in the screens mirrors it.
 - **Cor primária / Cor secundária** and the presets — set the five `--brand-*` variables exactly as
   `brandStyleVars()` does, on the tenant-branded surfaces (`[data-brand-scope]`). The platform panel
-  chrome stays neutral TRIA blue on purpose (it lives on the platform host); only the `BrandPreview`
+  chrome stays neutral platform blue on purpose (it lives on the platform host); only the `BrandPreview`
   inside the forms takes the picked colours, with the D-41 contrast readout and the "Contraste baixo"
   warning (try the yellow preset).
 - The section links jump to each screen.

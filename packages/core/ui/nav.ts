@@ -1,4 +1,4 @@
-import type { Bootstrap } from '@tria/contracts';
+import type { Bootstrap } from '@rede-social/contracts';
 import {
   Bell,
   Building2,

@@ -5,7 +5,7 @@ import {
   type MemberProfile,
   type OwnProfile,
   type UpdateProfileBody,
-} from '@tria/contracts/profiles';
+} from '@rede-social/contracts/profiles';
 import { eq, sql } from 'drizzle-orm';
 import { memberProfiles, memberships, users } from '../../db/schema';
 import { type Tx, withTenantTx } from '../../db/tenant-tx';

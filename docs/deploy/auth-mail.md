@@ -11,16 +11,16 @@ must set. `docs/DEPLOY.md` links here (index entry added by 02-16).
   (`apps/api/src/routes/hooks.ts`, mounted without any auth middleware — the Standard Webhooks
   signature is its authentication).
 - The API resolves the brand (`packages/core/server/tenancy/mail-tenant.ts`): the user's
-  **membership** tenant first; without a membership, a `platform_admins` user gets the neutral TRIA
+  **membership** tenant first; without a membership, a `platform_admins` user gets the neutral platform
   mail; otherwise the VERIFIED tenant behind the `redirect_to` host (the first-admin invite, whose
-  membership is inserted only after GoTrue returns); otherwise neutral TRIA. A membership tenant
+  membership is inserted only after GoTrue returns); otherwise neutral platform. A membership tenant
   that differs from the verified tenant of the `redirect_to` host is **refused** (500, nothing
   sent) — a mail never carries the wrong brand.
 - Templates (`packages/core/server/mail/templates/`, pt-BR, plain escaped HTML + text alternative):
   `recovery` ("Redefina sua senha — {tenant}"), `invite` ("Convite para administrar {tenant}") and
   a `neutral` fallback per action type. Logo as-is (`<img>`) or the display name as text (D-26),
-  CTA in the persisted `colors.primary` / `colors.onPrimary`, footer "Enviado pela plataforma TRIA",
-  no TRIA logo in the body.
+  CTA in the persisted `colors.primary` / `colors.onPrimary`, footer "Enviado pela plataforma Rede Social",
+  no Rede Social logo in the body.
 - Sender: `"{displayName}" <no-reply@{MAIL_DOMAIN}>`.
 - Transport (`packages/core/server/mail/`): `MAIL_TRANSPORT=local` (default) posts to Mailpit's
   HTTP API and can never reach a real mailbox; `MAIL_TRANSPORT=resend` uses the Resend SDK with the
@@ -50,12 +50,12 @@ secrets = "env(SEND_EMAIL_HOOK_SECRETS)"
   `apps/api/.env.local`, so GoTrue (container env) and the API share one secret. Override by
   exporting `SEND_EMAIL_HOOK_SECRETS` or `SEND_EMAIL_HOOK_SECRET_B64` before either script.
 - `MAIL_TRANSPORT=local` → Mailpit at `MAILPIT_URL=http://127.0.0.1:54324`. **The local stack never
-  sends real mail.** Read a message: `curl "$MAILPIT_URL/api/v1/search?query=to:member@tria-demo.local"`
+  sends real mail.** Read a message: `curl "$MAILPIT_URL/api/v1/search?query=to:member@rede-demo.local"`
   then `curl "$MAILPIT_URL/api/v1/message/<ID>"`, or open `http://127.0.0.1:54324` in a browser.
 - After editing the hook block: `pnpm supabase stop && pnpm supabase start` (the auth container
   reads the block as environment at start), then `pnpm db:reset`, `bash scripts/local-env.sh --write`,
   `pnpm db:seed`.
-- `host.docker.internal:8787` must answer whenever GoTrue sends mail: `pnpm --filter @tria/api dev`
+- `host.docker.internal:8787` must answer whenever GoTrue sends mail: `pnpm --filter @rede-social/api dev`
   during development, and during `pnpm test:integration` the suite's own listener
   (`apps/api/tests/integration/global-setup.ts` serves the app in-process on `0.0.0.0:8787`, or
   reuses a dev server already on that port).
@@ -120,7 +120,7 @@ and dies with the machine or the job.
 | `mail.refused` reason `no_recipient` / `invalid_redirect_to` / `invalid_payload` | API logs (500) | Malformed hook payload — GoTrue version drift; compare with `sendEmailHookPayloadSchema` |
 | `mail.send_failed` | API logs (500) | Transport failure (Resend error, timeout, Mailpit down). Resend's `Idempotency-Key` = `webhook-id`, so a GoTrue retry cannot double-send |
 | `mail.duplicate_suppressed` | API logs (200) | A GoTrue retry with a `webhook-id` already delivered — expected, nothing to do |
-| No mail at all, GoTrue template arrives instead | Mailbox | The hook block is disabled → GoTrue's SMTP fallback (`supabase/templates/recovery.html`, neutral TRIA). Enable the block and restart / `config push` |
+| No mail at all, GoTrue template arrives instead | Mailbox | The hook block is disabled → GoTrue's SMTP fallback (`supabase/templates/recovery.html`, neutral platform). Enable the block and restart / `config push` |
 
 Log lines (`event`): `mail.sent`, `mail.duplicate_suppressed`, `mail.refused`,
 `mail.signature_rejected`, `mail.send_failed` — each carries `webhookId`, `actionType`, `tenantId`

@@ -1,4 +1,4 @@
-import { MEMBERS_MAX_QUERY_LENGTH } from '@tria/contracts/profiles';
+import { MEMBERS_MAX_QUERY_LENGTH } from '@rede-social/contracts/profiles';
 import type { KeysetCursor } from '../paging';
 
 /**

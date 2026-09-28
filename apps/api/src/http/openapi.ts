@@ -1,6 +1,6 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
-import type { AppEnv } from '@tria/core/server/auth/context';
-import { ApiError } from '@tria/core/server/http/api-error';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
+import { ApiError } from '@rede-social/core/server/http/api-error';
 import type { ZodError } from 'zod';
 
 /**

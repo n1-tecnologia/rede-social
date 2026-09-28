@@ -1,4 +1,4 @@
-import type { DomainEventName, EventMap } from '@tria/contracts';
+import type { DomainEventName, EventMap } from '@rede-social/contracts';
 import { createMiddleware } from 'hono/factory';
 import type { AppEnv, RequestContext } from '../auth/context';
 import { type Logger, moduleLogger } from '../logging';
@@ -15,7 +15,7 @@ import { type Logger, moduleLogger } from '../logging';
  *     failures; it does not rethrow. The write already committed, so failing the response would
  *     lie to the client about what happened.
  *
- * Typing comes from `EventMap` in `@tria/contracts`, which each module declaration-merges into.
+ * Typing comes from `EventMap` in `@rede-social/contracts`, which each module declaration-merges into.
  * The kernel stays module-agnostic (MOD-02) while every call site is checked.
  */
 

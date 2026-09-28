@@ -1,5 +1,5 @@
-import type { PlatformTenantDetail } from '@tria/contracts';
-import { deriveBrandColors, NEUTRAL_BRAND } from '@tria/contracts/branding';
+import type { PlatformTenantDetail } from '@rede-social/contracts';
+import { deriveBrandColors, NEUTRAL_BRAND } from '@rede-social/contracts/branding';
 import { describe, expect, it } from 'vitest';
 import { toBrandingView } from './branding-view';
 

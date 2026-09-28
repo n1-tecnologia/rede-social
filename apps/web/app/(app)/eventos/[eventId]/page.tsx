@@ -1,6 +1,6 @@
-import { EVENT_PERMISSIONS } from '@tria/module-events/contracts';
-import { EventHero, EventInfoGrid } from '@tria/module-events/ui';
-import { Card, EmptyState, PageHeader, SectionTitle, StatusPill } from '@tria/ui';
+import { EVENT_PERMISSIONS } from '@rede-social/module-events/contracts';
+import { EventHero, EventInfoGrid } from '@rede-social/module-events/ui';
+import { Card, EmptyState, PageHeader, SectionTitle, StatusPill } from '@rede-social/ui';
 import {
   CalendarPlus,
   CalendarX2,

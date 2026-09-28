@@ -62,9 +62,9 @@ const NAV = appMessages.app.nav;
 
 /** Every row this spec writes starts with this, and `afterAll` removes it by this. */
 const PREFIX = 'Teste reels';
-const DEMO = 'tria-demo';
+const DEMO = 'rede-demo';
 /** The demo tenant's VERIFIED primary origin — what FEED-07's link is built on (feed-share.spec). */
-const DEMO_SHARE_ORIGIN = 'https://tria-demo.localhost';
+const DEMO_SHARE_ORIGIN = 'https://rede-demo.localhost';
 /**
  * A per-run stamp for the throwaway tenants' hosts (03-05's finding, phase4-smoke's technique): the
  * web tier and the API cache a host for up to 60 s, so a slug reused across runs could resolve to a

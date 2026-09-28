@@ -8,19 +8,19 @@ tags: [schema, drizzle, supabase, pgtap, zod, contracts, env, kernel, tenant-inv
 requires:
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 01
-    provides: "@tria/contracts/branding (hexColorSchema, tenantBrandingSchema, contrastReport, deriveBrandColors), widened hostTenantSchema, normalizeHost/isRegistrableHost, verified-only resolveTenantHost, seeded brands"
+    provides: "@rede-social/contracts/branding (hexColorSchema, tenantBrandingSchema, contrastReport, deriveBrandColors), widened hostTenantSchema, normalizeHost/isRegistrableHost, verified-only resolveTenantHost, seeded brands"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 02
-    provides: "@tria/ui (cn, primitives), happy-dom/Testing Library test shape, biome tailwind directives, the package-legitimacy approval covering sharp/resend/standardwebhooks/png-to-ico/lucide-react"
+    provides: "@rede-social/ui (cn, primitives), happy-dom/Testing Library test shape, biome tailwind directives, the package-legitimacy approval covering sharp/resend/standardwebhooks/png-to-ico/lucide-react"
   - phase: 01-foundation-kernel-tenancy-auth-ci-cd
     provides: "kernel env (createEnv), tenant/admin lanes, tenant_domains + platform_admins schema, requireAuth order, ERROR_CODES/ERROR_MESSAGES envelope, pgTAP gate (000-040), drizzle-kit generate → Supabase CLI apply, scripts/local-env.sh, seed"
 provides:
   - "Kernel env (packages/core/server/env.ts): DOMAIN_PROVIDER=fake|vercel, VERCEL_TOKEN/PROJECT_ID/TEAM_ID, AUTH_ALLOW_LIST=local|supabase, SUPABASE_PAT/PROJECT_REF, MAIL_TRANSPORT=local|resend, RESEND_API_KEY, MAIL_DOMAIN, MAILPIT_URL, SEND_EMAIL_HOOK_SECRETS, PUBLIC_WEB_SCHEME/PORT — local implementations are the defaults; assertProductionEnv() refuses a real selection without its secrets; publicWebOrigin(host) is the only origin composer (D-22)"
-  - "@tria/core dependencies installed once: resend 6.28.0, standardwebhooks 1.1.1, sharp 0.35.4, png-to-ico 3.0.2, lucide-react 1.46.0, @tria/ui; peers react/react-dom ^19.3.0, next ^16.3.0; devDeps for happy-dom .tsx tests"
-  - "@tria/core/ui (client-safe export): TenantLogo({ logoUrl, displayName, size: topbar|rail|auth|home }) — <img> as-is in a fixed box, display-name text fallback (D-26); Biome forbids packages/core/ui/** from importing ../server or ../db"
+  - "@rede-social/core dependencies installed once: resend 6.28.0, standardwebhooks 1.1.1, sharp 0.35.4, png-to-ico 3.0.2, lucide-react 1.46.0, @rede-social/ui; peers react/react-dom ^19.3.0, next ^16.3.0; devDeps for happy-dom .tsx tests"
+  - "@rede-social/core/ui (client-safe export): TenantLogo({ logoUrl, displayName, size: topbar|rail|auth|home }) — <img> as-is in a fixed box, display-name text fallback (D-26); Biome forbids packages/core/ui/** from importing ../server or ../db"
   - "Schema: tenant_invites (RLS on, ZERO policies, citext email unique per tenant, role/status CHECKs) and tenant_domains.verification_status/dns_records/last_checked_at/verify_deadline_at/last_error; migration 20260916183650 applied by the Supabase CLI; shared citext customType (schema/citext.ts)"
   - "pgTAP: 020 proves a tenant lane reads zero invites (even its own) and cannot insert one, the admin lane reads them case-insensitively; 010 exempts exactly tenant_invites from 'at least one policy'; 040 pins tenant_invites at zero policies + RLS on + citext email + tenant-first unique index, and tenant_domains' status CHECK/default"
-  - "@tria/contracts: dnsRecordSchema/DnsRecord, domainStatusSchema, tenantDomainSchema, attachDomainBodySchema (normalizeHost + isRegistrableHost), domainCheckResultSchema, inviteStatusSchema, tenantInviteSchema, acceptInviteBodySchema, acceptInviteResponseSchema, platformTenantsQuerySchema, createTenantBodySchema, updateTenantBodySchema, setTenantStatusBodySchema, setModuleBodySchema, platformTenantDetailSchema (strict), contrastReportSchema; platformTenantsSchema items carry primaryHost and the list carries nextCursor"
+  - "@rede-social/contracts: dnsRecordSchema/DnsRecord, domainStatusSchema, tenantDomainSchema, attachDomainBodySchema (normalizeHost + isRegistrableHost), domainCheckResultSchema, inviteStatusSchema, tenantInviteSchema, acceptInviteBodySchema, acceptInviteResponseSchema, platformTenantsQuerySchema, createTenantBodySchema, updateTenantBodySchema, setTenantStatusBodySchema, setModuleBodySchema, platformTenantDetailSchema (strict), contrastReportSchema; platformTenantsSchema items carry primaryHost and the list carries nextCursor"
   - "ERROR_CODES += TENANT_SUSPENDED ('Esta comunidade está temporariamente indisponível.'); requireAuth answers 403 TENANT_SUSPENDED before the blocked check; invited memberships pass"
   - "scripts/local-env.sh emits PUBLIC_WEB_SCHEME=http, PUBLIC_WEB_PORT=3000, DOMAIN_PROVIDER=fake, AUTH_ALLOW_LIST=local, MAIL_TRANSPORT=local, MAIL_DOMAIN, MAILPIT_URL, SEND_EMAIL_HOOK_SECRETS (32-byte throwaway, overridable)"
   - "Seeded hosts carry verification_status = 'verified'"
@@ -29,13 +29,13 @@ affects: [02-04 mockup, 02-05 provisioning routes, 02-06 mail hook + templates, 
 # Tech tracking
 tech-stack:
   added:
-    - "resend 6.28.0, standardwebhooks 1.1.1, sharp 0.35.4 (prebuilt binary, no allowBuilds entry needed), png-to-ico 3.0.2, lucide-react 1.46.0 (@tria/core)"
-    - "react/react-dom/next/@types/react* + happy-dom/@testing-library/@vitejs/plugin-react as @tria/core devDependencies (ui entry + .tsx tests)"
+    - "resend 6.28.0, standardwebhooks 1.1.1, sharp 0.35.4 (prebuilt binary, no allowBuilds entry needed), png-to-ico 3.0.2, lucide-react 1.46.0 (@rede-social/core)"
+    - "react/react-dom/next/@types/react* + happy-dom/@testing-library/@vitejs/plugin-react as @rede-social/core devDependencies (ui entry + .tsx tests)"
   patterns:
     - "Adapter selection lives in the kernel env with the LOCAL implementation as the default; a real selection without its credentials fails at import (assertProductionEnv)"
     - "The public web origin is composed in exactly one function (publicWebOrigin) from PUBLIC_WEB_SCHEME/PORT — never a SITE_URL"
     - "Admin-lane-only tenant tables = RLS on with ZERO policies (platform_admins, tenant_invites); 010 carries an explicit allow-list and 040 pins the count, so a table is either isolated by a policy or pinned as invisible"
-    - "Kernel client-safe code lives under packages/core/ui and is exported as @tria/core/ui; a Biome override makes server/db imports a lint error"
+    - "Kernel client-safe code lives under packages/core/ui and is exported as @rede-social/core/ui; a Biome override makes server/db imports a lint error"
     - "Request bodies normalise before validating (adminEmail trim+lowercase → z.email(); host normalizeHost → isRegistrableHost) so two spellings are one value at the boundary"
     - "Per-file `// @vitest-environment happy-dom` for .tsx tests inside a node-environment package"
 
@@ -84,12 +84,12 @@ key-decisions:
   - "adminEmail is trimmed and lower-cased BEFORE z.email() (z.string().trim().toLowerCase().pipe(z.email())) — the plan's z.email().trim().toLowerCase() validates first and rejects a padded address"
   - "GET /v1/platform/tenants answers primaryHost (the is_primary row, verified or not) and nextCursor: null now — the widened contract is the route's OpenAPI response type, so the route had to comply; query/cursor handling stays with the panel plan"
   - "On the web tier TENANT_SUSPENDED is routed through the existing /auth/blocked sign-out handler until 02-08 ships /auth/suspended → /comunidade-indisponivel: an unmapped 403 code would otherwise surface as a render error, a regression from Phase 1"
-  - "The Send Email Hook local secret is a fixed 32-byte base64 constant (`tria-local-send-email-hook-key01`), overridable via SEND_EMAIL_HOOK_SECRET_B64; hosted environments never reuse it"
+  - "The Send Email Hook local secret is a fixed 32-byte base64 constant (`rede-social-local-send-email-hook-key01`), overridable via SEND_EMAIL_HOOK_SECRET_B64; hosted environments never reuse it"
 
 patterns-established:
   - "Kernel adapters: env selector + local default + assertProductionEnv guard"
   - "Admin-lane-only tenant table: RLS on, zero policies, 010 allow-list + 040 pin + 020 negative case"
-  - "@tria/core/ui as the kernel's client-safe surface; add exports to packages/core/ui/index.ts"
+  - "@rede-social/core/ui as the kernel's client-safe surface; add exports to packages/core/ui/index.ts"
 
 requirements-completed: [ROLE-03, TENANT-07, MOD-04]
 
@@ -136,14 +136,14 @@ coverage:
         status: pass
     human_judgment: false
   - id: D5
-    description: "Kernel env with fail-safe defaults, dependencies installed, @tria/core/ui with TenantLogo, Biome lane, local-env emission"
+    description: "Kernel env with fail-safe defaults, dependencies installed, @rede-social/core/ui with TenantLogo, Biome lane, local-env emission"
     requirement: MOD-04
     verification:
       - kind: unit
         ref: "packages/core/tests/tenant-logo.test.tsx (4 cases; core suite 30/30 under happy-dom per file)"
         status: pass
       - kind: other
-        ref: "pnpm --filter @tria/core typecheck && lint; bash scripts/local-env.sh | grep PUBLIC_WEB_SCHEME=http / DOMAIN_PROVIDER=fake; biome probe: ../server import under packages/core/ui is an error"
+        ref: "pnpm --filter @rede-social/core typecheck && lint; bash scripts/local-env.sh | grep PUBLIC_WEB_SCHEME=http / DOMAIN_PROVIDER=fake; biome probe: ../server import under packages/core/ui is an error"
         status: pass
     human_judgment: false
   - id: D6
@@ -165,7 +165,7 @@ plan_head_before: 62d77c6bbaa910b569698c1cffa90877965e6ddd
 
 # Phase 02 Plan 03: Kernel Foundation, Schema and Platform Contracts Summary
 
-**`tenant_invites` (RLS on, zero policies) and the `tenant_domains` verification lifecycle applied by the Supabase CLI with pgTAP 87/87; the Phase 2 kernel env with local-by-default adapters, the kernel dependencies, `@tria/core/ui` with `TenantLogo`, the platform-lane Zod contracts and a distinct 403 `TENANT_SUSPENDED` in `requireAuth` — all wave-3 plans can start.**
+**`tenant_invites` (RLS on, zero policies) and the `tenant_domains` verification lifecycle applied by the Supabase CLI with pgTAP 87/87; the Phase 2 kernel env with local-by-default adapters, the kernel dependencies, `@rede-social/core/ui` with `TenantLogo`, the platform-lane Zod contracts and a distinct 403 `TENANT_SUSPENDED` in `requireAuth` — all wave-3 plans can start.**
 
 ## Performance
 
@@ -178,8 +178,8 @@ plan_head_before: 62d77c6bbaa910b569698c1cffa90877965e6ddd
 ## Accomplishments
 
 - **Kernel env:** `DOMAIN_PROVIDER`, `AUTH_ALLOW_LIST`, `MAIL_TRANSPORT` selectors default to `fake`/`local`; credentials (`VERCEL_*`, `SUPABASE_PAT`/`PROJECT_REF`, `RESEND_API_KEY`) optional; `MAIL_DOMAIN`, `MAILPIT_URL`, `SEND_EMAIL_HOOK_SECRETS`, `PUBLIC_WEB_SCHEME`/`PORT`; `assertProductionEnv()` (runs at import) and `publicWebOrigin(host)`.
-- **Dependencies:** `resend`, `standardwebhooks`, `sharp`, `png-to-ico`, `lucide-react`, `@tria/ui` in `@tria/core`; react/react-dom/next peers; `sharp` installed with no build-script block (RESEARCH's expectation confirmed — no `allowBuilds` change).
-- **`@tria/core/ui`:** `TenantLogo` (fixed box per placement, `<img alt={displayName}>` as-is, text fallback), `ui/tsconfig.json` (react-jsx + DOM libs, typechecked by the package's `typecheck`), happy-dom `.tsx` tests in the kernel, Biome override forbidding server/db imports from `packages/core/ui/**` (probed: it fires).
+- **Dependencies:** `resend`, `standardwebhooks`, `sharp`, `png-to-ico`, `lucide-react`, `@rede-social/ui` in `@rede-social/core`; react/react-dom/next peers; `sharp` installed with no build-script block (RESEARCH's expectation confirmed — no `allowBuilds` change).
+- **`@rede-social/core/ui`:** `TenantLogo` (fixed box per placement, `<img alt={displayName}>` as-is, text fallback), `ui/tsconfig.json` (react-jsx + DOM libs, typechecked by the package's `typecheck`), happy-dom `.tsx` tests in the kernel, Biome override forbidding server/db imports from `packages/core/ui/**` (probed: it fires).
 - **Schema/migration:** `tenant_invites` + five `tenant_domains` columns, shared `citext` type, migration `20260916183650_tenant_invites_and_domain_verification.sql` generated by drizzle-kit and applied with `supabase db reset`; `pnpm db:generate` is a no-op afterwards; seed marks hosts `verified`.
 - **pgTAP:** 020 +4 cases (lane sees 0 invites, cannot insert, symmetric, admin lane reads case-insensitively), 010 explicit exemption + existence list, 040 +6 pins → 87/87.
 - **Contracts:** `domains.ts`, `invites.ts`, extended `platform.ts`, `contrastReportSchema`; `TENANT_SUSPENDED` code + message; `requireAuth` split (tenant status before member status); `GET /v1/platform/tenants` answers `primaryHost` + `nextCursor`.
@@ -187,7 +187,7 @@ plan_head_before: 62d77c6bbaa910b569698c1cffa90877965e6ddd
 
 ## Task Commits
 
-1. **Task 1: Kernel foundation (env, deps, @tria/core/ui, Biome lane, local-env)** — `79c1d4a` (feat)
+1. **Task 1: Kernel foundation (env, deps, @rede-social/core/ui, Biome lane, local-env)** — `79c1d4a` (feat)
 2. **Task 2: Schema + migration + seed + pgTAP (BLOCKING apply)** — `0da8778` (feat)
 3. **Task 3 RED: contract tests + integration expectations** — `8b08abc` (test)
 4. **Task 3 GREEN: contracts, TENANT_SUSPENDED, requireAuth split** — `34e852f` (feat)
@@ -235,7 +235,7 @@ See `key-decisions` in the frontmatter. In short: adapters fail safe to local an
 - **Committed in:** `0da8778`
 
 **2. [Rule 3 - Blocking] `GET /v1/platform/tenants` no longer typechecked against the widened `platformTenantsSchema`**
-- **Found during:** Task 3 GREEN (`pnpm --filter @tria/api typecheck`)
+- **Found during:** Task 3 GREEN (`pnpm --filter @rede-social/api typecheck`)
 - **Issue:** the route's OpenAPI 200 schema is `platformTenantsSchema`; adding `primaryHost`/`nextCursor` to the contract made the existing handler's body a type error.
 - **Fix:** `listPlatformTenants` reads the `is_primary` host per tenant (one extra admin-lane query, no join so hostless tenants still list); the route answers `primaryHost` and `nextCursor: null` (query/cursor handling stays with the panel plan).
 - **Files modified:** `packages/core/server/platform/tenants.ts`, `apps/api/src/routes/platform.ts`
@@ -267,7 +267,7 @@ See `key-decisions` in the frontmatter. In short: adapters fail safe to local an
 
 - **Acceptance literal `pgTable('tenant_invites'`** cannot appear in Biome-formatted code: with three arguments Biome breaks every argument onto its own line (`pgTable(\n  'tenant_invites',` — the same shape as every existing table file). The substance (`pgTable`, `'tenant_invites'`, `.enableRLS()`, no `pgPolicy(`) holds.
 - **Migration filename** is `20260916183650_tenant_invites_and_domain_verification.sql` (drizzle-kit's timestamp), not the plan's placeholder `20260915000000_…`, per the plan's own instruction to keep the chosen prefix.
-- **`DnsRecord` type on the schema:** typed locally in Task 2, switched to the `@tria/contracts` import in Task 3 as the plan allowed.
+- **`DnsRecord` type on the schema:** typed locally in Task 2, switched to the `@rede-social/contracts` import in Task 3 as the plan allowed.
 
 ---
 
@@ -285,7 +285,7 @@ None — every new variable has a local default or is emitted by `bash scripts/l
 ## Verification (plan-level)
 
 - `DOCKER_CONFIG=/tmp/dockercfg pnpm db:reset && bash scripts/local-env.sh --write && pnpm db:seed && pnpm supabase test db` → migration applied, seed ok, 87/87.
-- `pnpm test:integration` → 86/86 (11 files). `pnpm --filter @tria/contracts test` → 57/57. `pnpm --filter @tria/core test` → 30/30. `pnpm test` → 5 tasks green. `pnpm typecheck` → 8 tasks green. `pnpm lint` → 7 tasks green.
+- `pnpm test:integration` → 86/86 (11 files). `pnpm --filter @rede-social/contracts test` → 57/57. `pnpm --filter @rede-social/core test` → 30/30. `pnpm test` → 5 tasks green. `pnpm typecheck` → 8 tasks green. `pnpm lint` → 7 tasks green.
 - `pnpm db:generate` → "No schema changes, nothing to migrate".
 - `psql`: `pg_policies` for `tenant_invites` = 0, `relrowsecurity` = t, `verification_status = 'verified'` count = 2.
 

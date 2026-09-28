@@ -1,4 +1,4 @@
-import { TENANT_ROLES, type TenantRole } from '@tria/contracts';
+import { TENANT_ROLES, type TenantRole } from '@rede-social/contracts';
 import { sql } from 'drizzle-orm';
 import { db } from '../../db/client';
 

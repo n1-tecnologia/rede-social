@@ -1,7 +1,7 @@
 # Phase 6: Events - Research
 
 **Researched:** 2026-09-25
-**Domain:** New feature module `@tria/module-events` (Drizzle schema + RLS + SECURITY DEFINER check-in functions, Hono routes, Next.js 16 App Router screens, route handlers for `/entrar` and `.ics`)
+**Domain:** New feature module `@rede-social/module-events` (Drizzle schema + RLS + SECURITY DEFINER check-in functions, Hono routes, Next.js 16 App Router screens, route handlers for `/entrar` and `.ics`)
 **Confidence:** HIGH for codebase patterns and Postgres behaviour (probed live on the local stack); MEDIUM for the Google Calendar template link (community docs only); LOW for nothing load-bearing.
 
 ## Summary
@@ -20,7 +20,7 @@ Timezone handling needs no library. The admin enters wall-clock date and time. T
 
 | Capability | Primary Tier | Secondary Tier | Rationale |
 |------------|-------------|----------------|-----------|
-| Event create/edit/cancel/reactivate | API (`@tria/module-events/server`, `withTenantTx`) | Database (CHECKs, XOR, deferrable FKs, guarded UPDATE) | Business rules live in the API; invariants that must hold for every writer live in the schema |
+| Event create/edit/cancel/reactivate | API (`@rede-social/module-events/server`, `withTenantTx`) | Database (CHECKs, XOR, deferrable FKs, guarded UPDATE) | Business rules live in the API; invariants that must hold for every writer live in the schema |
 | Wall-clock → UTC conversion | Database (`timestamp at time zone tenants.timezone`) | API (Zod shape of `{date,time}`) | Postgres tzdata is authoritative; no JS tz math, no library |
 | Upcoming / past lists, Início "next event" | API (keyset reads) | Database (tenant-first indexes) | One statement per page, counts in the same statement |
 | RSVP | API route → tenant lane upsert | Database (self-only RLS + guard trigger) | "DB refuses after `starts_at`" is a trigger fact, not a UI rule |
@@ -53,7 +53,7 @@ Timezone handling needs no library. The admin enters wall-clock date and time. T
   - `Eventos` is a BottomNav/rail **tab**: `nav: { placement: 'tab', … }` in the module manifest, driven by the module flag and never by data (D-77).
   - The Início card (D-202) is a `home` slot.
 - **Authorisation:** every write is guarded by `requirePermission('events.…')`, never `requireRole` (04-01). V1 grants the manage permission to `admin_tenant` only, through `defaultRolePermissions`.
-- **No new infrastructure:** covers go through the Phase 3 media broker (`useSignedUpload`, `GET /v1/media/{id}/{variant}`). Lists use the one keyset envelope (`packages/core/server/paging.ts`) and the `@tria/ui` `InfiniteScroll`.
+- **No new infrastructure:** covers go through the Phase 3 media broker (`useSignedUpload`, `GET /v1/media/{id}/{variant}`). Lists use the one keyset envelope (`packages/core/server/paging.ts`) and the `@rede-social/ui` `InfiniteScroll`.
 - **Attendance shape:** one attendance row per member per event, whose `status` column moves through transitions. There are no boolean pairs (roadmap Phase 6 Notes; SCHEMA-CONVENTIONS §(d).1).
 
 #### Eventos tab & detail page
@@ -268,7 +268,7 @@ No new dependency. Every piece is already in the workspace.
 |---------|---------|---------|-------------|
 | `motion` | 13.3.0 | The check-in success spring (`motion/react`) | Ticket done state only (UI-D-208) |
 | `lucide-react` | 1.46.0 | Icons (`calendar-days` already mapped in `ICONS`) | Throughout |
-| `@tria/ui` / `@tria/core/ui` | workspace | `Chip`, `StatusPill`, `InfiniteScroll`, `HomeSlots`, `MediaImage`, etc., plus a new `SegmentedControl` primitive | Per UI-SPEC inventory |
+| `@rede-social/ui` / `@rede-social/core/ui` | workspace | `Chip`, `StatusPill`, `InfiniteScroll`, `HomeSlots`, `MediaImage`, etc., plus a new `SegmentedControl` primitive | Per UI-SPEC inventory |
 
 ### Alternatives Considered
 | Instead of | Could Use | Tradeoff |
@@ -279,11 +279,11 @@ No new dependency. Every piece is already in the workspace.
 | SECURITY DEFINER check-in functions | API reading secrets through `withAdminTx` | `withAdminTx` is Biome-confined to `packages/core/server/{tenancy,platform,media}`; a module cannot reach it |
 | Read-time counts (`count(*) filter`) | Trigger-owned `confirmed_count` / `present_count` columns | Counters add drift reconciliation, a hot row during check-in rush, and a lock-upgrade deadlock with the guard trigger's `FOR SHARE` (Pitfall 3) |
 
-**Installation:** none. The only workspace edits are package dependency lines: `"@tria/module-events": "workspace:*"` in `apps/api/package.json` and `apps/web/package.json`.
+**Installation:** none. The only workspace edits are package dependency lines: `"@rede-social/module-events": "workspace:*"` in `apps/api/package.json` and `apps/web/package.json`.
 
 ## Package Legitimacy Audit
 
-This phase installs **no external package**. The new workspace package `@tria/module-events` depends only on packages already in the lockfile at the versions `@tria/module-communities` pins (`@hono/zod-openapi` 1.6.3, `drizzle-orm` 0.45.2, `hono` 4.13.7, `lucide-react` 1.46.0, `pino` 10.3.1, `zod` 4.6.2, plus the same devDependencies) [VERIFIED: packages/modules/communities/package.json].
+This phase installs **no external package**. The new workspace package `@rede-social/module-events` depends only on packages already in the lockfile at the versions `@rede-social/module-communities` pins (`@hono/zod-openapi` 1.6.3, `drizzle-orm` 0.45.2, `hono` 4.13.7, `lucide-react` 1.46.0, `pino` 10.3.1, `zod` 4.6.2, plus the same devDependencies) [VERIFIED: packages/modules/communities/package.json].
 
 | Package | Registry | Age | Downloads | Source Repo | Verdict | Disposition |
 |---------|----------|-----|-----------|-------------|---------|-------------|
@@ -338,7 +338,7 @@ A `pnpm add` of any external package in a Phase 6 plan is a defect (UI-SPEC Regi
 ### Recommended Project Structure
 
 ```
-packages/modules/events/                # @tria/module-events (clone communities' package.json/tsconfig/turbo/vitest config)
+packages/modules/events/                # @rede-social/module-events (clone communities' package.json/tsconfig/turbo/vitest config)
 ├── module.ts                           # defineModule: nav tab order 40, home [{order:7}], events[], defaultRolePermissions
 ├── contracts/index.ts                  # Zod schemas, EVENT_ISSUES, EVENT_PERMISSIONS, window constants, EventMap merge
 ├── db/schema.ts                        # events, event_attendances, event_secrets, event_checkin_attempts
@@ -533,7 +533,7 @@ select e.…, me.status as my_status, me.checked_in_at as my_checked_in_at,
 
 Participantes rows reuse the comment-author join, with the lifecycle predicate in the JOIN condition: `left join memberships ms on ms.user_id = c.author_user_id and ms.deleted_at is null` / `left join member_profiles mp on mp.membership_id = ms.id` [VERIFIED: packages/modules/feed/server/service.ts:1114-1115]. For events, add `ms.tenant_id = a.tenant_id`.
 
-**Keyset:** use `encodeCursor` / `decodeCursor` / `keysetComparison(direction)` from `@tria/core/server/paging`; `keysetComparison('asc')` returns `{ operator: '>', order: 'asc' }` [VERIFIED: packages/core/server/paging.ts:75-77]. Timestamps go through `to_char(... at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`, never a JS `Date` (the microsecond rule).
+**Keyset:** use `encodeCursor` / `decodeCursor` / `keysetComparison(direction)` from `@rede-social/core/server/paging`; `keysetComparison('asc')` returns `{ operator: '>', order: 'asc' }` [VERIFIED: packages/core/server/paging.ts:75-77]. Timestamps go through `to_char(... at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`, never a JS `Date` (the microsecond rule).
 
 ### Pattern 4: RSVP (D-204, D-205)
 
@@ -718,7 +718,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ even
 - **`.ics`** at `GET /eventos/{id}/agenda.ics` (a route handler; the `download` attribute on a same-origin anchor):
 
 ```
-BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//TRIA//Rede Social//PT-BR\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n
+BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Rede Social//PT-BR\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n
 BEGIN:VEVENT\r\nUID:{eventId}@{primaryHost}\r\nDTSTAMP:{nowUTC}\r\nDTSTART:{startUTC}\r\nDTEND:{endUTC}\r\n
 SUMMARY:{esc(title)}\r\nDESCRIPTION:{esc(description + '\n\n' + detailUrl)}\r\nLOCATION:{esc(location)}\r\nURL:{detailUrl}\r\n
 STATUS:CONFIRMED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n
@@ -749,12 +749,12 @@ STATUS:CONFIRMED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n
 | Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
 | Wall-clock ↔ UTC in an IANA zone | JS offset search over `Intl.formatToParts` | Postgres `timestamp at time zone tenants.timezone` / `to_char(… at time zone …)` | DST gaps and folds, tzdata updates; verified behaviour on the live stack |
-| Keyset cursors | A new cursor codec | `encodeCursor` / `decodeCursor` / `keysetComparison` (`@tria/core/server/paging`) | ONE envelope rule (R-11); total decode |
+| Keyset cursors | A new cursor codec | `encodeCursor` / `decodeCursor` / `keysetComparison` (`@rede-social/core/server/paging`) | ONE envelope rule (R-11); total decode |
 | Cover validation | New asset checks | Clone `resolveCoverAsset` + `coverIsUsable` tuple rule | Closes the 05-09 cross-tenant FK oracle; CR-01 self-heal |
 | Rate limiting the code | Redis, in-memory maps (Cloud Run is multi-instance) | `event_checkin_attempts` written only by the definer function | Shared state across instances, survives restarts, testable in pgTAP |
 | Permission checks in the web tier | Role comparisons | `bootstrap.permissions.includes(...)` | FEED-08 / T-05-03 rule |
 | Upload | New upload code | `useSignedUpload` with `purpose: 'cover'` | Phase 3 machine, zero new code |
-| Infinite lists | Custom observers | `@tria/ui` `InfiniteScroll` + `PullToRefresh` + `ScrollContainerContext` | Shipped and tested |
+| Infinite lists | Custom observers | `@rede-social/ui` `InfiniteScroll` + `PullToRefresh` + `ScrollContainerContext` | Shipped and tested |
 | Module nav/home plumbing | Kernel edits | `defineModule({ nav, home })` + `WEB_MODULE_REGISTRY.events` | MOD-04; kernel stays module-agnostic |
 
 **Key insight:** the novel parts (secrets, windows, the side-effecting GET) are all enforced *below* the API. The API and UI only reflect the rules. That is what makes the pgTAP suite the proof and not the UI tests.
@@ -931,29 +931,29 @@ const eventsHome: HomeSlotRenderer = async ({ bootstrap }) => {
 |----------|-------|
 | Framework | Vitest 5.0.0 (module, ui, web, API), Playwright 1.63.0 (e2e), pgTAP via `pnpm supabase test db` (CLI 2.117.0) |
 | Config file | `packages/modules/events/vitest.config.ts` (**new**, clone of communities'), `packages/ui/vitest.config.ts`, `apps/web/vitest.config.ts`, `apps/api/vitest.config.ts` (pins `VIDEO_PROVIDER: 'fake'`), `apps/web/playwright.config.ts`, `supabase/tests/*.sql` |
-| Quick run command | `pnpm --filter @tria/module-events typecheck && pnpm --filter @tria/module-events lint && pnpm --filter @tria/module-events test` |
+| Quick run command | `pnpm --filter @rede-social/module-events typecheck && pnpm --filter @rede-social/module-events lint && pnpm --filter @rede-social/module-events test` |
 | API integration command | `pnpm db:reset && pnpm db:seed && pnpm test:integration -- events` (plus `isolation`, `bootstrap`, `modules`) |
 | DB command | `pnpm supabase test db` |
 | Migration hygiene | `pnpm db:generate && test -z "$(git status --porcelain -- supabase/migrations)"` |
-| Full suite command | `pnpm db:reset && pnpm db:seed && pnpm lint && pnpm typecheck && pnpm test && pnpm boundaries && pnpm supabase test db && pnpm test:integration && pnpm --filter @tria/web build && pnpm check:static-routes && VIDEO_PROVIDER=fake pnpm --filter @tria/web exec playwright test events.spec.ts phase6-smoke.spec.ts shell.spec.ts` (the local exit gate remains `pnpm verify`) |
+| Full suite command | `pnpm db:reset && pnpm db:seed && pnpm lint && pnpm typecheck && pnpm test && pnpm boundaries && pnpm supabase test db && pnpm test:integration && pnpm --filter @rede-social/web build && pnpm check:static-routes && VIDEO_PROVIDER=fake pnpm --filter @rede-social/web exec playwright test events.spec.ts phase6-smoke.spec.ts shell.spec.ts` (the local exit gate remains `pnpm verify`) |
 
-All root scripts exist [VERIFIED: package.json scripts `lint`, `typecheck`, `test`, `boundaries`, `db:generate`, `db:reset`, `db:seed`, `test:integration`, `check:static-routes`, `verify`, `supabase`]. `scripts/check-ui-literals.sh` and `scripts/check-static-routes.sh` exist [VERIFIED: ls scripts]. Web unit subsets: `pnpm --filter @tria/web exec vitest run lib/events` and `pnpm --filter @tria/web exec vitest run "app/(app)/eventos"`.
+All root scripts exist [VERIFIED: package.json scripts `lint`, `typecheck`, `test`, `boundaries`, `db:generate`, `db:reset`, `db:seed`, `test:integration`, `check:static-routes`, `verify`, `supabase`]. `scripts/check-ui-literals.sh` and `scripts/check-static-routes.sh` exist [VERIFIED: ls scripts]. Web unit subsets: `pnpm --filter @rede-social/web exec vitest run lib/events` and `pnpm --filter @rede-social/web exec vitest run "app/(app)/eventos"`.
 
 ### Phase Requirements → Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| EVENT-01 | Create/edit/cancel/reactivate; member 403; XOR + window CHECKs; wall-clock → UTC in tenant tz; cover tuple + foreign-asset bare 404; reactivate refused after start; events emitted once after commit | integration + pgTAP + module unit | `pnpm test:integration -- events`; `pnpm supabase test db`; `pnpm --filter @tria/module-events test` | ❌ W0 (`apps/api/tests/integration/events.test.ts`, `supabase/tests/130-events.sql`, `packages/modules/events/tests/*.test.ts`) |
-| EVENT-01 | Admin form on a phone: create → detail, edit, cancel → banner, Reativar; the `+2 h` end prefill; format switch submits only the visible side | e2e (mobile-chromium) + web unit | `VIDEO_PROVIDER=fake pnpm --filter @tria/web exec playwright test events.spec.ts -g "admin"`; `pnpm --filter @tria/web exec vitest run "app/(app)/eventos"` | ❌ W0 |
-| EVENT-02 | Próximos/Passados keysets (asc/desc, ties, in-progress stays upcoming, cancelled stays), `/next` excludes cancelled, detail in tenant tz under `timezoneId: 'America/Manaus'` | integration + pgTAP EXPLAIN (index by name) + e2e + web unit (`events-view.test.ts` fixed clock/tz) | `pnpm test:integration -- events`; `pnpm supabase test db`; `pnpm --filter @tria/web exec vitest run lib/events-view`; playwright `events.spec.ts -g "lista"` | ❌ W0 |
+| EVENT-01 | Create/edit/cancel/reactivate; member 403; XOR + window CHECKs; wall-clock → UTC in tenant tz; cover tuple + foreign-asset bare 404; reactivate refused after start; events emitted once after commit | integration + pgTAP + module unit | `pnpm test:integration -- events`; `pnpm supabase test db`; `pnpm --filter @rede-social/module-events test` | ❌ W0 (`apps/api/tests/integration/events.test.ts`, `supabase/tests/130-events.sql`, `packages/modules/events/tests/*.test.ts`) |
+| EVENT-01 | Admin form on a phone: create → detail, edit, cancel → banner, Reativar; the `+2 h` end prefill; format switch submits only the visible side | e2e (mobile-chromium) + web unit | `VIDEO_PROVIDER=fake pnpm --filter @rede-social/web exec playwright test events.spec.ts -g "admin"`; `pnpm --filter @rede-social/web exec vitest run "app/(app)/eventos"` | ❌ W0 |
+| EVENT-02 | Próximos/Passados keysets (asc/desc, ties, in-progress stays upcoming, cancelled stays), `/next` excludes cancelled, detail in tenant tz under `timezoneId: 'America/Manaus'` | integration + pgTAP EXPLAIN (index by name) + e2e + web unit (`events-view.test.ts` fixed clock/tz) | `pnpm test:integration -- events`; `pnpm supabase test db`; `pnpm --filter @rede-social/web exec vitest run lib/events-view`; playwright `events.spec.ts -g "lista"` | ❌ W0 |
 | EVENT-03 | RSVP toggle, repeat answer = no write/no event, `rsvp_closed` at `starts_at` (API 409 + pgTAP trigger raise under relative `now()`), locked after check-in, count semantics (D-219) | integration + pgTAP + e2e | same commands | ❌ W0 |
-| EVENT-04 | Code check-in inside the window; `not_open` / `closed` / `cancelled`; walk-in from no row and from `not_going`; wrong code; 6th attempt `too_many_attempts` even with the right code; online `/enter` outcomes (`forward` records nothing, `recorded` walk-in, `ended`, `confirm_first`); detail render records nothing (prod build) | pgTAP (definer functions from both tenants) + integration + e2e | `pnpm supabase test db`; `pnpm test:integration -- events`; `pnpm --filter @tria/web exec playwright test events.spec.ts -g "check-in\|entrar"` (prod `next start` for the D-218 case) | ❌ W0 |
+| EVENT-04 | Code check-in inside the window; `not_open` / `closed` / `cancelled`; walk-in from no row and from `not_going`; wrong code; 6th attempt `too_many_attempts` even with the right code; online `/enter` outcomes (`forward` records nothing, `recorded` walk-in, `ended`, `confirm_first`); detail render records nothing (prod build) | pgTAP (definer functions from both tenants) + integration + e2e | `pnpm supabase test db`; `pnpm test:integration -- events`; `pnpm --filter @rede-social/web exec playwright test events.spec.ts -g "check-in\|entrar"` (prod `next start` for the D-218 case) | ❌ W0 |
 | EVENT-05 | Participantes three chips + counts + keyset + walk-in tag + removed member; code card; member 403 on attendance routes; **member lane reads 0 rows of `event_secrets`**, admin lane reads 1 | pgTAP + integration + e2e | `pnpm supabase test db`; `pnpm test:integration -- events`; playwright `-g "participantes"` | ❌ W0 |
-| EVENT-06 | `.ics` bytes: CRLF, 75-octet folding with accents, escaping, UTC DTSTART/DTEND, online LOCATION is `/entrar`, never the meeting URL; Google link: `…Z` dates, no `ctz`; download in e2e | web unit + e2e | `pnpm --filter @tria/web exec vitest run lib/events-calendar`; playwright `-g "agenda"` | ❌ W0 |
+| EVENT-06 | `.ics` bytes: CRLF, 75-octet folding with accents, escaping, UTC DTSTART/DTEND, online LOCATION is `/entrar`, never the meeting URL; Google link: `…Z` dates, no `ctz`; download in e2e | web unit + e2e | `pnpm --filter @rede-social/web exec vitest run lib/events-calendar`; playwright `-g "agenda"` | ❌ W0 |
 | TENANT-05 (gate) | Four new tables in 020 (A sees own, zero of B, positive control); new endpoints in `isolation.test.ts` (B's id → bare 404, host mismatch 403) | pgTAP + integration | `pnpm supabase test db`; `pnpm test:integration -- isolation` | ✅ files exist; cases ❌ W0 |
-| MOD-02/04 | Registry lists `events`; tab order 40; home order 7; module off → routes 404 + tab gone; boundaries clean | API unit + integration + boundaries | `pnpm --filter @tria/api test`; `pnpm test:integration -- modules`; `pnpm boundaries` | ✅ (update `registry.test.ts`) |
+| MOD-02/04 | Registry lists `events`; tab order 40; home order 7; module off → routes 404 + tab gone; boundaries clean | API unit + integration + boundaries | `pnpm --filter @rede-social/api test`; `pnpm test:integration -- modules`; `pnpm boundaries` | ✅ (update `registry.test.ts`) |
 
 ### Sampling Rate
-- **Per task commit:** the quick run for the touched package (plus `pnpm --filter @tria/web exec vitest run <folder>` for web tasks, `pnpm --filter @tria/ui test` for `SegmentedControl`).
+- **Per task commit:** the quick run for the touched package (plus `pnpm --filter @rede-social/web exec vitest run <folder>` for web tasks, `pnpm --filter @rede-social/ui test` for `SegmentedControl`).
 - **Per wave merge:** `pnpm db:reset && pnpm db:seed && pnpm test:integration -- events` + `pnpm supabase test db` + migration hygiene + `bash scripts/check-ui-literals.sh`.
 - **Phase gate:** the full suite (`pnpm verify`) green before `/gsd-verify-work`, then the phone UAT: RSVP, code at the "venue", `Entrar` from a calendar entry, `.ics` import on iOS and Google.
 

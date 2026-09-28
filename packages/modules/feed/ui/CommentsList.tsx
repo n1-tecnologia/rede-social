@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, ConfirmDialog, cn, Skeleton } from '@tria/ui';
+import { Button, ConfirmDialog, cn, Skeleton } from '@rede-social/ui';
 import { Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { CommentInput, type ReplyTarget } from './CommentInput';

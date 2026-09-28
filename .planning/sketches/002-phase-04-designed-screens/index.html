@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TRIA — Fase 4 · telas [designed] (mockup estático para revisão do time de design)</title>
+<title>Rede Social — Fase 4 · telas [designed] (mockup estático para revisão do time de design)</title>
 <style>
 /* =====================================================================================
    0. NENHUM ASSET EXTERNO. Um arquivo, zero rede: nenhuma fonte remota, nenhum script
@@ -143,7 +143,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
 .page-header h1 { flex: 1; margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
 
 /* =====================================================================================
-   4. PRIMITIVAS — @tria/ui (Button, IconButton, Card, Textarea, EmptyState, BottomSheet,
+   4. PRIMITIVAS — @rede-social/ui (Button, IconButton, Card, Textarea, EmptyState, BottomSheet,
       ConfirmDialog, Avatar, Skeleton). Mesmas medidas, escrito em CSS puro.
    ===================================================================================== */
 .icon-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--theme-text); flex: none; }
@@ -281,12 +281,12 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
 
 <!-- ============ barra do mockup (não é superfície do produto) ============ -->
 <div class="toolbar" role="region" aria-label="Controles do mockup">
-  <span class="brandname">TRIA · Fase 4 <small>telas [designed] · 04-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <span class="brandname">Rede Social · Fase 4 <small>telas [designed] · 04-UI-SPEC.md · tokens reais de @rede-social/ui</small></span>
   <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
   <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
   <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
   <span>
-    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">Rede Social (neutro)</button>
     <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
     <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
     <button class="preset" type="button" data-p="#b91c1c" data-s="#f87171">Vermelho</button>
@@ -368,7 +368,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
         </div>
         <div class="composer">
           <div>
-            <textarea class="textarea" aria-label="Legenda">Fotos da confraternização de sábado. A ata completa está no PDF e o vídeo do coral está em tria.example/coral</textarea>
+            <textarea class="textarea" aria-label="Legenda">Fotos da confraternização de sábado. A ata completa está no PDF e o vídeo do coral está em rede-social.example/coral</textarea>
             <div class="counter">118/2200</div>
           </div>
           <div>
@@ -541,7 +541,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
               <div style="display:flex;align-items:center;gap:10px;min-width:0">
                 <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
                 <span style="min-width:0">
-                  <span class="t14b trunc" style="display:block">Direção TRIA Demo</span>
+                  <span class="t14b trunc" style="display:block">Direção Rede Demo</span>
                   <span class="t12 ter" style="display:block">há 2 h <span aria-hidden="true">·</span> editado</span>
                 </span>
               </div>
@@ -575,13 +575,13 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
       <div class="body" style="padding:16px 16px 120px">
         <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
           <div style="width:64px;height:64px;border-radius:16px;background:var(--brand-accent);color:var(--brand-on-accent);display:grid;place-items:center;font-weight:700;font-size:22px">TD</div>
-          <h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.02em">Bem-vindo(a) à TRIA Demo</h1>
+          <h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.02em">Bem-vindo(a) à Rede Demo</h1>
         </div>
         <div class="card post" style="margin-bottom:12px">
           <div class="head">
             <div style="display:flex;align-items:center;gap:10px;min-width:0">
               <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
-              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
             </div>
             <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
           </div>
@@ -608,7 +608,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
       <div class="body" style="padding:16px 16px 120px">
         <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0 24px">
           <div style="width:64px;height:64px;border-radius:16px;background:var(--brand-accent);color:var(--brand-on-accent);display:grid;place-items:center;font-weight:700;font-size:22px">TD</div>
-          <h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.02em">Bem-vindo(a) à TRIA Demo</h1>
+          <h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.02em">Bem-vindo(a) à Rede Demo</h1>
         </div>
         <div class="card">
           <div class="empty">
@@ -635,7 +635,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
           <div class="head">
             <div style="display:flex;align-items:center;gap:10px;min-width:0">
               <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
-              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
             </div>
             <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
           </div>
@@ -658,19 +658,19 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
 
 <!-- ===================================================================================== -->
 <section id="link-card" class="screen">
-  <header><h2>LinkPreviewCard — quatro estados</h2><code>@tria/module-feed/ui · [designed] · UI-D-11, UI-D-12</code>
+  <header><h2>LinkPreviewCard — quatro estados</h2><code>@rede-social/module-feed/ui · [designed] · UI-D-11, UI-D-12</code>
     <p>Um cartão por publicação, sempre <code>target="_blank" rel="noopener noreferrer"</code>. <strong>Não existe estado pendente e não existe esqueleto</strong>: enquanto a prévia não resolve (ou o alvo não tem tags OG, ou a política recusou o host), a publicação mostra só a URL auto-linkada dentro da legenda — é o primeiro exemplo abaixo. YouTube e Vimeo usam o MESMO cartão com miniatura e selo de play de 56px: abrem externamente, sem player incorporado nesta fase (UI-D-12).</p>
   </header>
   <div class="frames">
     <div style="max-width:340px">
-      <div class="card" style="padding:12px 16px"><span class="t16">A ata completa está em <a href="#link-card" style="color:var(--brand-accent)">tria.example/atas/2026-03</a></span></div>
+      <div class="card" style="padding:12px 16px"><span class="t16">A ata completa está em <a href="#link-card" style="color:var(--brand-accent)">rede-social.example/atas/2026-03</a></span></div>
       <p class="caption">Pendente · falhou · sem tags OG — a URL crua na legenda, nenhum quadro vazio.</p>
     </div>
     <div>
       <a class="link-card" href="#link-card" aria-label="Abrir Assembleia geral: pauta e documentos em nova aba">
         <span class="img"><svg class="i i-40"><use href="#i-images"/></svg></span>
         <span class="body">
-          <span class="t12 ter">tria.example</span>
+          <span class="t12 ter">rede-social.example</span>
           <span class="title">Assembleia geral: pauta e documentos</span>
           <span class="desc">A pauta completa, as contas do trimestre e o formulário de procuração para quem não puder comparecer.</span>
         </span>
@@ -680,7 +680,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
     <div>
       <a class="link-card" href="#link-card" aria-label="Abrir Calendário de eventos 2026 em nova aba">
         <span class="body">
-          <span class="t12 ter">agenda.tria.example</span>
+          <span class="t12 ter">agenda.rede-social.example</span>
           <span class="title">Calendário de eventos 2026</span>
           <span class="desc">Todas as datas do ano, já com os feriados marcados.</span>
         </span>
@@ -688,7 +688,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
       <p class="caption">Sem imagem — o cartão é só corpo, nunca um quadro cinza vazio.</p>
       <a class="link-card" href="#link-card" style="margin-top:12px" aria-label="Abrir Regimento interno atualizado em nova aba">
         <span class="body">
-          <span class="t12 ter">docs.tria.example</span>
+          <span class="t12 ter">docs.rede-social.example</span>
           <span class="title">Regimento interno atualizado</span>
         </span>
       </a>
@@ -710,7 +710,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
 
 <!-- ===================================================================================== -->
 <section id="anexos" class="screen">
-  <header><h2>AttachmentRow — cinco variações</h2><code>@tria/module-feed/ui · [designed] · UI-D-23</code>
+  <header><h2>AttachmentRow — cinco variações</h2><code>@rede-social/module-feed/ui · [designed] · UI-D-23</code>
     <p>Linha de 56px mínimos: quadrado de 40px com <code>FileText</code> 20, nome 14/700 truncado, segunda linha "PDF · tamanho" 12/400 terciária com <code>tabular-nums</code>, e <code>Download</code> 20 terciário no fim. Tocar pede uma URL assinada de vida curta: enquanto isso o glifo vira um spinner e a linha fica <code>aria-busy</code> — um segundo toque não faz nada. Falhando, o glifo volta e o toast genérico de erro dispara; a linha não cresce e a lista não reflui.</p>
   </header>
   <div class="frames">
@@ -753,7 +753,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
 
 <!-- ===================================================================================== -->
 <section id="menu" class="screen">
-  <header><h2>Menu "…" da publicação e as três confirmações</h2><code>@tria/ui BottomSheet + ConfirmDialog · [designed]</code>
+  <header><h2>Menu "…" da publicação e as três confirmações</h2><code>@rede-social/ui BottomSheet + ConfirmDialog · [designed]</code>
     <p>Duas variantes do menu: autor/admin com três linhas (a última destrutiva) e membro com uma só. Nenhum item "Denunciar" nesta fase. As confirmações são o <code>ConfirmDialog</code> já existente, com os corpos exatos do contrato de texto.</p>
   </header>
   <div class="frames">
@@ -763,7 +763,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
           <div class="head">
             <div style="display:flex;align-items:center;gap:10px;min-width:0">
               <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
-              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
             </div>
             <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
           </div>
@@ -785,7 +785,7 @@ section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(
           <div class="head">
             <div style="display:flex;align-items:center;gap:10px;min-width:0">
               <span class="avatar"><svg class="i i-20"><use href="#i-user"/></svg></span>
-              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
+              <span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span>
             </div>
             <button class="icon-btn" type="button" aria-label="Mais opções"><svg class="i i-20"><use href="#i-more"/></svg></button>
           </div>

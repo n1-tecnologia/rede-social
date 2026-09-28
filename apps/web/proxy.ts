@@ -1,5 +1,5 @@
+import { isRegistrableHost, normalizeHost } from '@rede-social/contracts';
 import { createServerClient } from '@supabase/ssr';
-import { isRegistrableHost, normalizeHost } from '@tria/contracts';
 import { type NextRequest, NextResponse } from 'next/server';
 import { CONTINUE_COOKIE, CONTINUE_MAX_AGE_S, isContinuablePath } from '@/lib/continue-path';
 import { env } from '@/lib/env';

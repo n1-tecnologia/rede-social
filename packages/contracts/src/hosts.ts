@@ -6,7 +6,7 @@ export const TENANT_HOST_HEADER = 'x-tenant-host';
 
 /**
  * The ONE place hosts are canonicalised: trim, lower-case, strip a trailing `:port`.
- * Returns null for empty input so `TRIA-DEMO.LOCALHOST:3000` and `tria-demo.localhost` share a key everywhere.
+ * Returns null for empty input so `REDE-DEMO.LOCALHOST:3000` and `rede-demo.localhost` share a key everywhere.
  */
 export function normalizeHost(raw: string | null | undefined): string | null {
   if (raw == null) return null;

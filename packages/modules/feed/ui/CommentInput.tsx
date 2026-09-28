@@ -1,6 +1,6 @@
 'use client';
 
-import { Avatar, cn, IconButton } from '@tria/ui';
+import { Avatar, cn, IconButton } from '@rede-social/ui';
 import { Loader2, Send, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';

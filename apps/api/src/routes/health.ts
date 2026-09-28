@@ -1,6 +1,6 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import { db } from '@tria/core/db';
-import type { AppEnv } from '@tria/core/server/auth/context';
+import { db } from '@rede-social/core/db';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { sql } from 'drizzle-orm';
 import { env } from '../env';
 

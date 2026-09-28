@@ -1,6 +1,6 @@
-import { resolveBranding } from '@tria/contracts';
-import { HomeSlots, TenantLogo } from '@tria/core/ui';
-import { EmptyState } from '@tria/ui';
+import { resolveBranding } from '@rede-social/contracts';
+import { HomeSlots, TenantLogo } from '@rede-social/core/ui';
+import { EmptyState } from '@rede-social/ui';
 import { Sparkles } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { ProfileNudgeCard } from '@/components/profile/ProfileNudgeCard';

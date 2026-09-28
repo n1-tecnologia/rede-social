@@ -4,7 +4,7 @@ import { hosts } from './fixtures';
 /**
  * Fixtures for specs that need their OWN tenant (aliases, unverified hosts, a suspended status): the
  * seed tenants are shared by the whole suite and their hosts sit in two 60 s caches (web + API), so
- * a spec must never flip tria-demo/tria-lab. Everything here goes through the same superuser
+ * a spec must never flip rede-demo/rede-lab. Everything here goes through the same superuser
  * connection `admin.ts` uses (`PLAYWRIGHT_DB_URL`, local default) — application code never does this.
  *
  * Hosts must be `<something>.localhost`: Chromium resolves them to loopback and `next.config.ts`
@@ -82,7 +82,7 @@ export async function createThrowawayTenant(input: ThrowawayTenant): Promise<{ i
 /**
  * Sets one module flag on ONE tenant, by slug. Scoped to a throwaway tenant by every caller: the
  * seed tenants are shared by the whole suite and their flags sit in the API's 30 s cache, so a spec
- * must never flip tria-demo/tria-lab. `(tenant_id, module_key)` is the primary key, so the upsert
+ * must never flip rede-demo/rede-lab. `(tenant_id, module_key)` is the primary key, so the upsert
  * is the same shape the platform panel's own write uses.
  *
  * 04-10 lifted this out of `phase2-smoke.spec.ts` when `phase4-smoke.spec.ts` needed the identical

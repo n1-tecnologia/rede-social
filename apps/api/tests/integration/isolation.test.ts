@@ -1,8 +1,8 @@
+import { TENANT_HOST_HEADER } from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
-import { TENANT_HOST_HEADER } from '@tria/contracts';
-import { sqlClient } from '@tria/core/db';
-import { stopBoss } from '@tria/core/server/jobs/boss';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
 
@@ -45,18 +45,18 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar 
 type Envelope = { error: { code: string; message: string; details?: unknown } };
 type BootstrapBody = { tenant: { id: string; slug: string }; modules: { key: string }[] };
 
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
 
 /** Adjacency: the SAME caption in both tenants, so only the id can tell the rows apart. */
 const SHARED_TITLE = 'Reunião de sábado, às 10h.';
 const RUN = Date.now();
-const EMPTY_SLUG = `tria-empty-${RUN}`.slice(0, 40);
-const NOFEED_SLUG = `tria-nofeed-${RUN}`.slice(0, 40);
-const SUSPENDED_SLUG = `tria-susp-${RUN}`.slice(0, 40);
-const EMPTY_HOST = `tria-empty-${RUN}.localhost`;
-const NOFEED_HOST = `tria-nofeed-${RUN}.localhost`;
-const SUSPENDED_HOST = `tria-susp-${RUN}.localhost`;
+const EMPTY_SLUG = `rede-empty-${RUN}`.slice(0, 40);
+const NOFEED_SLUG = `rede-social-nofeed-${RUN}`.slice(0, 40);
+const SUSPENDED_SLUG = `rede-social-susp-${RUN}`.slice(0, 40);
+const EMPTY_HOST = `rede-empty-${RUN}.localhost`;
+const NOFEED_HOST = `rede-social-nofeed-${RUN}.localhost`;
+const SUSPENDED_HOST = `rede-social-susp-${RUN}.localhost`;
 const THROWAWAY_PASSWORD = 'Segredo123';
 
 const tokens = {
@@ -197,7 +197,7 @@ async function seedStoryImage(tenantId: string, email: string): Promise<string> 
 /**
  * Service-key Storage client for fixture cleanup only (direct deletes from `storage.objects` are
  * refused — the 02-13 finding). Built here like `authAdmin()` rather than importing
- * `@tria/core/server/supabase-admin`, which Biome confines to the kernel's admin lane.
+ * `@rede-social/core/server/supabase-admin`, which Biome confines to the kernel's admin lane.
  */
 function storageAdmin() {
   return createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
@@ -254,8 +254,8 @@ beforeAll(async () => {
     throw new Error('SUPER_ADMIN_PASSWORD is required (same value as `pnpm db:seed`)');
   }
 
-  tenantIds.demo = await tenantIdBySlug('tria-demo');
-  tenantIds.lab = await tenantIdBySlug('tria-lab');
+  tenantIds.demo = await tenantIdBySlug('rede-demo');
+  tenantIds.lab = await tenantIdBySlug('rede-lab');
 
   // Identical-looking content on both sides (TENANT-05 adjacency).
   itemIds.demo = [
@@ -281,7 +281,7 @@ beforeAll(async () => {
     values (${tenantIds.empty}::uuid, ${EMPTY_HOST}, true, now())`;
 
   // A fourth tenant with the module explicitly DISABLED. 04-10 needed this: until then the
-  // disabled-module case rode on tria-lab, which does NOT have the reference module but DOES have
+  // disabled-module case rode on rede-lab, which does NOT have the reference module but DOES have
   // the feed (D-17). "Not here" must still answer 404 MODULE_DISABLED rather than 403.
   const [nofeed] = await adminSql<{ id: string }[]>`
     insert into public.tenants (slug, display_name, rules_text, rules_version)
@@ -306,14 +306,14 @@ beforeAll(async () => {
     insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
     values (${tenantIds.suspended}::uuid, ${SUSPENDED_HOST}, true, now())`;
 
-  tokens.demoMember = await signInAs('member@tria-demo.local', SEED_PASSWORD);
-  tokens.labMember = await signInAs('member@tria-lab.local', SEED_PASSWORD);
-  tokens.demoAdmin = await signInAs('admin@tria-demo.local', SEED_PASSWORD);
-  tokens.labAdmin = await signInAs('admin@tria-lab.local', SEED_PASSWORD);
+  tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.labMember = await signInAs('member@rede-lab.local', SEED_PASSWORD);
+  tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+  tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
   tokens.superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
   tokens.emptyMember = await throwawayMember(tenantIds.empty, `member@${EMPTY_SLUG}.local`);
   tokens.nofeedMember = await throwawayMember(tenantIds.nofeed, `member@${NOFEED_SLUG}.local`);
-  tokens.blockedMember = await throwawayMember(tenantIds.demo, `blocked-${RUN}@tria-demo.local`);
+  tokens.blockedMember = await throwawayMember(tenantIds.demo, `blocked-${RUN}@rede-demo.local`);
   blockedUserId = throwawayUsers[throwawayUsers.length - 1] ?? '';
 
   for (const id of [tenantIds.demo, tenantIds.lab, tenantIds.empty, tenantIds.nofeed]) {
@@ -327,19 +327,19 @@ beforeAll(async () => {
   mediaAssetIds.push(assets.demoImage, assets.labImage);
   assets.demoVideo = await seedVideo(
     tenantIds.demo,
-    'admin@tria-demo.local',
+    'admin@rede-demo.local',
     'privado-da-demo.mp4',
   );
-  assets.labVideo = await seedVideo(tenantIds.lab, 'admin@tria-lab.local', 'privado-do-lab.mp4');
+  assets.labVideo = await seedVideo(tenantIds.lab, 'admin@rede-lab.local', 'privado-do-lab.mp4');
   // 05-09: one usable cover on each side. Same filename on both, so a leak that matched on content
   // rather than on `tenant_id` could not pass by looking plausible (the adjacency rule).
-  assets.demoCover = await seedCover(tenantIds.demo, 'admin@tria-demo.local', 'capa.webp');
-  assets.labCover = await seedCover(tenantIds.lab, 'admin@tria-lab.local', 'capa.webp');
+  assets.demoCover = await seedCover(tenantIds.demo, 'admin@rede-demo.local', 'capa.webp');
+  assets.labCover = await seedCover(tenantIds.lab, 'admin@rede-lab.local', 'capa.webp');
 
-  displayNames.demo = await displayNameOf(tenantIds.demo, 'member@tria-demo.local');
-  displayNames.lab = await displayNameOf(tenantIds.lab, 'member@tria-lab.local');
-  membershipIds.demo = await membershipIdOf(tenantIds.demo, 'member@tria-demo.local');
-  membershipIds.lab = await membershipIdOf(tenantIds.lab, 'member@tria-lab.local');
+  displayNames.demo = await displayNameOf(tenantIds.demo, 'member@rede-demo.local');
+  displayNames.lab = await displayNameOf(tenantIds.lab, 'member@rede-lab.local');
+  membershipIds.demo = await membershipIdOf(tenantIds.demo, 'member@rede-demo.local');
+  membershipIds.lab = await membershipIdOf(tenantIds.lab, 'member@rede-lab.local');
 
   // Phase 4 (04-08): the post-detail route FEED-07's share link points at.
   postIds.demo = await seedPost(tenantIds.demo, SHARED_CAPTION);
@@ -392,7 +392,7 @@ afterAll(async () => {
 });
 
 describe('TENANT-05 — the two-tenant isolation gate', () => {
-  it('a. list: a tria-demo member gets tria-demo ids only, never a tria-lab id', async () => {
+  it('a. list: a rede-demo member gets rede-demo ids only, never a rede-lab id', async () => {
     const res = await request('/v1/feed', tokens.demoMember, {
       [TENANT_HOST_HEADER]: HOSTS.demo,
     });
@@ -429,7 +429,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
 
   it("b2. communities: the other tenant's community id is 404 NOT_FOUND with no details (05-01)", async () => {
     // The lab community ids come from the DATABASE rather than from the lab's own API: `communities`
-    // is disabled for tria-lab in the seed (D-17 gives it feed + events), and the point of this case
+    // is disabled for rede-lab in the seed (D-17 gives it feed + events), and the point of this case
     // is the DEMO session's answer, not the lab's.
     const labCommunities = await adminSql<{ id: string }[]>`
       select id from public.communities where tenant_id = ${tenantIds.lab}::uuid`;
@@ -467,7 +467,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
 
   it("b3. stories: the other tenant's story id is 404 NOT_FOUND with no details (05-05)", async () => {
     // The lab story ids come from the DATABASE rather than from the lab's own API: `stories` is
-    // disabled for tria-lab in the seed (D-17 gives it feed + events), and the point of this case
+    // disabled for rede-lab in the seed (D-17 gives it feed + events), and the point of this case
     // is the DEMO session's answer, not the lab's.
     //
     // A story is the shortest-lived row in the product, and that is exactly why it is here: "it
@@ -510,7 +510,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
   // b4 was 05-08's community pins, retired with the pin model in 05.2-11 (HIGHLIGHT-05, D-116); its
   // crossings are b7's highlight crossings now. 06-01 reuses the free letter for events.
   it("b4. events: the other tenant's events never reach a demo list, and a demo session on the lab host is refused (06-01)", async () => {
-    // Both sides from the DATABASE: `events` is enabled for tria-lab too (D-17), so the lab has its
+    // Both sides from the DATABASE: `events` is enabled for rede-lab too (D-17), so the lab has its
     // own seeded events with titles IDENTICAL to the demo's (§(j) adjacency) — which is why every
     // assertion below compares ids, never titles. The detail route is 06-03's, so its cross-tenant
     // 404 is asserted there and again below (06-03); this case owns the LIST and the detail.
@@ -645,7 +645,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     const [written] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.event_attendances a
         join public.users u on u.id = a.user_id
-       where a.tenant_id = ${tenantIds.lab}::uuid and u.email = 'member@tria-demo.local'`;
+       where a.tenant_id = ${tenantIds.lab}::uuid and u.email = 'member@rede-demo.local'`;
     expect(written?.n).toBe(0);
     const own = await request(`/v1/events/${demoEvents[0]?.id ?? ''}`, tokens.demoMember, {
       [TENANT_HOST_HEADER]: HOSTS.demo,
@@ -718,7 +718,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
 
     // 3. The refusal names nothing about the other organisation — not its slug, not its id, not the
     // asset id it was asked about.
-    for (const needle of ['tria-demo', 'tria-lab', tenantIds.lab, assets.labCover]) {
+    for (const needle of ['rede-demo', 'rede-lab', tenantIds.lab, assets.labCover]) {
       expect(foreignText).not.toContain(needle);
     }
 
@@ -775,7 +775,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // The SEEDED highlights are the fixture — a missing one means the seed is stale.
     expect([labHighlight, demoHighlight].every(Boolean)).toBe(true);
 
-    const assetId = await seedStoryImage(tenantIds.demo, 'admin@tria-demo.local');
+    const assetId = await seedStoryImage(tenantIds.demo, 'admin@rede-demo.local');
     const caption = `Isolamento 05.2 ${RUN}`;
     const controlCaption = `Isolamento 05.2 controle ${RUN}`;
     const publish = (highlightId: string, text: string) =>
@@ -810,7 +810,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(body.error.code).toBe('NOT_FOUND');
       // No `details` key at all — the absence IS the existence-oracle control.
       expect(Object.hasOwn(body.error, 'details')).toBe(false);
-      for (const needle of ['tria-lab', tenantIds.lab, labHighlight]) {
+      for (const needle of ['rede-lab', tenantIds.lab, labHighlight]) {
         expect(text).not.toContain(needle);
       }
 
@@ -935,7 +935,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       // No `details` key at all — the absence IS the existence-oracle control.
       expect(Object.hasOwn(parsed.error, 'details'), label).toBe(false);
       expect(withoutRequestId(text), label).toEqual(withoutRequestId(unknownText));
-      for (const needle of ['tria-lab', tenantIds.lab, ids.labHighlight, ids.labCommunity]) {
+      for (const needle of ['rede-lab', tenantIds.lab, ids.labHighlight, ids.labCommunity]) {
         expect(text, label).not.toContain(needle);
       }
     }
@@ -971,8 +971,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         select id::text from public.users where email = ${email} limit 1`;
       return row?.id ?? '';
     };
-    const demoMemberId = await userId('member@tria-demo.local');
-    const labMemberId = await userId('member@tria-lab.local');
+    const demoMemberId = await userId('member@rede-demo.local');
+    const labMemberId = await userId('member@rede-lab.local');
     // A live, ready story of each tenant that its own member has NOT seen yet (the seed marks one).
     const unseenStory = async (tenantId: string, memberId: string) => {
       const [row] = await adminSql<{ id: string }[]>`
@@ -1113,10 +1113,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       const labCommunity = await freshCommunity(tenantIds.lab, name);
       const demoCommunity = await freshCommunity(tenantIds.demo, name);
       communities.push(labCommunity, demoCommunity);
-      const labAsset = await seedVideo(tenantIds.lab, 'admin@tria-lab.local', 'reel-do-lab.mp4');
+      const labAsset = await seedVideo(tenantIds.lab, 'admin@rede-lab.local', 'reel-do-lab.mp4');
       const demoAsset = await seedVideo(
         tenantIds.demo,
-        'admin@tria-demo.local',
+        'admin@rede-demo.local',
         'reel-da-demo.mp4',
       );
       const labPost = await readyVideoPost(tenantIds.lab, labCommunity, labAsset);
@@ -1160,7 +1160,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(envelope.error.code).toBe('NOT_FOUND');
       expect(Object.hasOwn(envelope.error, 'details')).toBe(false);
       expect(withoutRequestId(foreignText)).toEqual(withoutRequestId(unknownText));
-      for (const needle of [labCommunity, labPost, tenantIds.lab, 'tria-lab']) {
+      for (const needle of [labCommunity, labPost, tenantIds.lab, 'rede-lab']) {
         expect(foreignText).not.toContain(needle);
       }
 
@@ -1260,14 +1260,14 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
 
   it('f. the tenant comes from the membership: a cookie and an unknown host cannot change it (D-23)', async () => {
     const res = await request('/v1/me/bootstrap', tokens.demoMember, {
-      cookie: 'tenant_slug=tria-lab',
-      [TENANT_HOST_HEADER]: 'tria-lab.example',
+      cookie: 'tenant_slug=rede-lab',
+      [TENANT_HOST_HEADER]: 'rede-lab.example',
     });
     expect(res.status).toBe(200);
 
     const body = (await res.json()) as BootstrapBody;
-    // The request says tria-lab three ways; the membership says tria-demo. The membership wins.
-    expect(body.tenant.slug).toBe('tria-demo');
+    // The request says rede-lab three ways; the membership says rede-demo. The membership wins.
+    expect(body.tenant.slug).toBe('rede-demo');
     expect(body.tenant.id).toBe(tenantIds.demo);
   });
 
@@ -1315,7 +1315,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(envelope.error.code).toBe('TENANT_HOST_MISMATCH');
       // The refusal must not say which community lives at that address, nor leak a row.
       expect(envelope.error.details).toBeUndefined();
-      for (const needle of ['tria-lab', 'TRIA Lab', 'tria-demo', SHARED_TITLE]) {
+      for (const needle of ['rede-lab', 'Rede Lab', 'rede-demo', SHARED_TITLE]) {
         expect(text).not.toContain(needle);
       }
       for (const id of itemIds.lab) expect(text).not.toContain(id);
@@ -1343,13 +1343,13 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
   });
 
-  it('h. bootstrap is scoped to the tenant: tria-lab sees exactly [reels, events, feed]', async () => {
+  it('h. bootstrap is scoped to the tenant: rede-lab sees exactly [reels, events, feed]', async () => {
     const res = await request('/v1/me/bootstrap', tokens.labMember, {
       [TENANT_HOST_HEADER]: HOSTS.lab,
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as BootstrapBody;
-    // D-17 pins tria-lab to feed + events, and 05.3-01 adds `reels`, on by default (D-122), sorted
+    // D-17 pins rede-lab to feed + events, and 05.3-01 adds `reels`, on by default (D-122), sorted
     // first by its nav order 30. Lab keeps `communities`, `chat` and `notifications` OFF: that is
     // its disabled-module role (modules.test cases 4-8, 13). Case (c) uses its own no-feed tenant.
     expect(body.modules.map((m) => m.key)).toEqual(['reels', 'events', 'feed']);
@@ -1363,9 +1363,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     expect(lab.status).toBe(200);
     const labText = await lab.text();
     // Brand and host facts (02-01); the exact key set is pinned in hosts.test.ts.
-    expect(JSON.parse(labText)).toMatchObject({ slug: 'tria-lab', displayName: 'TRIA Lab' });
+    expect(JSON.parse(labText)).toMatchObject({ slug: 'rede-lab', displayName: 'Rede Lab' });
     // Unauthenticated and pre-login: it may name the tenant on THIS host and nothing else.
-    expect(labText).not.toContain('tria-demo');
+    expect(labText).not.toContain('rede-demo');
     expect(labText).not.toContain('#7c3aed');
 
     // D-32: the public shell still resolves a suspended tenant's host — branded screen, no login.
@@ -1398,7 +1398,7 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
     expect(foreign.headers.get('location')).toBeNull();
 
     const body = JSON.stringify(await foreign.json());
-    for (const needle of ['tria-demo', 'TRIA Demo', tenantIds.demo, displayNames.demo]) {
+    for (const needle of ['rede-demo', 'Rede Demo', tenantIds.demo, displayNames.demo]) {
       expect(body).not.toContain(needle);
     }
 
@@ -1467,7 +1467,7 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
     const detail = await request(`/v1/members/${membershipIds.demo}`, tokens.labMember);
     expect(detail.status).toBe(404);
     const refusal = JSON.stringify(await detail.json());
-    expect(refusal).not.toContain('tria-demo');
+    expect(refusal).not.toContain('rede-demo');
     expect(refusal).not.toContain(displayNames.demo);
 
     const list = await request('/v1/members?limit=50', tokens.labMember);
@@ -1500,7 +1500,7 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
       'invalid',
     );
     // The refusal names nothing about the other community, and A's asset is untouched by it.
-    expect(JSON.stringify(error)).not.toContain('tria-demo');
+    expect(JSON.stringify(error)).not.toContain('rede-demo');
     const [row] = await adminSql<{ deleted_at: string | null }[]>`
       select deleted_at from public.media_assets where id = ${assets.demoImage}::uuid`;
     expect(row?.deleted_at).toBeNull();
@@ -1571,7 +1571,7 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
     expect(envelope.error.code).toBe('NOT_FOUND');
     expect('details' in envelope.error).toBe(false);
     // And it names nothing about the other community — not the tenant, not the caption, not the id.
-    for (const needle of ['tria-demo', 'TRIA Demo', tenantIds.demo, SHARED_CAPTION, postIds.demo]) {
+    for (const needle of ['rede-demo', 'Rede Demo', tenantIds.demo, SHARED_CAPTION, postIds.demo]) {
       expect(bodies[0]).not.toContain(needle);
     }
 

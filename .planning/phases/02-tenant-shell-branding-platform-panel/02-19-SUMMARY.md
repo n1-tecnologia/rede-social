@@ -74,7 +74,7 @@ coverage:
         ref: "apps/api/tests/integration/invites.test.ts#contracts (02-10 Task 2) > ERROR_CODES carries MEMBERSHIP_INVITED + INVITE_STATE_INVALID"
         status: pass
       - kind: unit
-        ref: "pnpm --filter @tria/contracts test (57 passed)"
+        ref: "pnpm --filter @rede-social/contracts test (57 passed)"
         status: pass
     human_judgment: false
   - id: D2
@@ -187,7 +187,7 @@ status: complete
 - `invites.test.ts` (19): cases 1-13 unchanged + R1 `user_in_other_tenant`, R2 `email_in_use`, R3 23505 mapping, R4 recovery fallback (200 sent, `type=recovery` mail, `verifyOtp` session, row `sent`, membership `invited`), R5 active membership → `already_accepted` with no mail.
 - `platform-tenants.test.ts` (21): cases 1-20 unchanged + case 21 create-time refusal.
 - `platform-domains.test.ts` (21): cases 1-20 (02-17) unchanged + case 21 `last_error` cause + set-primary resilience.
-- Whole integration run: 16 files / 187 tests; `@tria/core` unit 119, `@tria/api` unit 15, `@tria/contracts` 57; lint + typecheck green on contracts/core/api.
+- Whole integration run: 16 files / 187 tests; `@rede-social/core` unit 119, `@rede-social/api` unit 15, `@rede-social/contracts` 57; lint + typecheck green on contracts/core/api.
 
 ## Decisions Made
 

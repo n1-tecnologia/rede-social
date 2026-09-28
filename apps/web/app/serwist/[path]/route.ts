@@ -11,7 +11,7 @@ import { createSerwistRoute } from '@serwist/turbopack';
  * the Vercel commit SHA when present, the local git HEAD otherwise, a random id as the last resort
  * (a stable-but-wrong revision would pin a stale offline page forever). In development the library
  * forces `additionalPrecacheEntries` to `[]`, so the offline fallback is only testable on a
- * production build (`pnpm --filter @tria/web e2e:pwa`).
+ * production build (`pnpm --filter @rede-social/web e2e:pwa`).
  *
  * `Cache-Control: no-store` + `nosniff` for `/serwist/*` come from `next.config.ts` `headers()`;
  * the library adds `Service-Worker-Allowed: /` and the JavaScript content type (T-02-75).

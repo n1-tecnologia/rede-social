@@ -7,14 +7,14 @@ tags: [nextjs-16, proxy, supabase-ssr, next-intl, playwright, custom-domains, te
 # Dependency graph
 requires:
   - phase: 01-01
-    provides: "@tria/* monorepo, @tria/contracts (normalizeHost, hostTenantSchema, bootstrapSchema, errors), API GET /v1/public/tenants/by-host + GET /v1/me/bootstrap with requireAuth (x-tenant-host re-resolution), seeded tenants/hosts/users"
+    provides: "@rede-social/* monorepo, @rede-social/contracts (normalizeHost, hostTenantSchema, bootstrapSchema, errors), API GET /v1/public/tenants/by-host + GET /v1/me/bootstrap with requireAuth (x-tenant-host re-resolution), seeded tenants/hosts/users"
 provides:
-  - "@tria/web (Next 16.3.5 App Router, Turbopack, tag app): lib/env.ts (@t3-oss/env-nextjs, API_URL + optional PLATFORM_HOST, NEXT_PUBLIC_SUPABASE_*), root layout, / -> /inicio"
+  - "@rede-social/web (Next 16.3.5 App Router, Turbopack, tag app): lib/env.ts (@t3-oss/env-nextjs, API_URL + optional PLATFORM_HOST, NEXT_PUBLIC_SUPABASE_*), root layout, / -> /inicio"
   - "Host -> public shell: lib/tenant-host.ts (resolveHostTenant with 300 s / 60 s / 10 s cache, getHostTenant from x-tenant-* headers, signupPath) and proxy.ts (overwrites x-tenant-*, production-only *.vercel.app -> PLATFORM_HOST 307, @supabase/ssr getClaims() refresh, /cadastro rewrite on tenant hosts for every method, 308 /cadastro/* -> /cadastro, platform /cadastro* -> /entrar, tenant_slug cookie on generic hosts only, public allow-list)"
   - "Session plumbing: lib/supabase/server.ts (HttpOnly + SameSite=Lax + Secure-in-production cookies), lib/api.ts (apiFetch + hc<AppType> with Bearer + x-tenant-host), lib/bootstrap.ts (React cache getBootstrap, ApiClientError)"
   - "pt-BR catalog messages/pt-BR.json (common, login, signup, forgot, reset, suspended, hostMismatch, noCommunity, platform, app) through next-intl without routing"
   - "Pages: (auth)/entrar (server-component form + login action), (app) layout with bootstrap-resolved tenant + Sair (scope local), /inicio placeholder (tenant/user/role/modules; platform placeholder on PLATFORM_HOST)"
-  - "Playwright: playwright.config.ts (mobile-chromium = iPhone 14 on Chromium, desktop-chromium, API + web webServer, baseURL tria-demo.localhost), e2e/fixtures.ts, login/session/logout specs; TENANT-01 API cases 12-14"
+  - "Playwright: playwright.config.ts (mobile-chromium = iPhone 14 on Chromium, desktop-chromium, API + web webServer, baseURL rede-demo.localhost), e2e/fixtures.ts, login/session/logout specs; TENANT-01 API cases 12-14"
 affects: [01-04, 01-05, 01-06, 01-07, 01-09, 01-11, 01-12, phase-2-shell, phase-2-domains]
 
 # Actuals (#2632) — same estimateTokens scale as the plan's estimate (chars/4 over the realized diff)
@@ -85,7 +85,7 @@ key-decisions:
   - "mobile-chromium runs the iPhone 14 device preset with browserName: 'chromium' (the preset defaults to WebKit, which is not installed); Playwright 1.63 needs chromium_headless_shell-1243, installed with `playwright install chromium`"
   - "next-env.d.ts is git-ignored and Biome-excluded (it imports the git-ignored .next/types); the web `typecheck` script runs `next typegen && tsc --noEmit` so CI has the route types before tsc"
   - "apps/web/AGENTS.md + CLAUDE.md, written by `next dev` on every run, are committed (Next's own recommendation) so the tree stays clean; they only point agents at node_modules/next/dist/docs"
-  - "`scripts/local-env.sh --write` writes apps/api/.env.local and apps/web/.env.local in one go (values never printed); `pnpm --filter @tria/api dev` now runs `tsx watch --env-file-if-exists=.env.local` so Playwright's webServer can boot the API"
+  - "`scripts/local-env.sh --write` writes apps/api/.env.local and apps/web/.env.local in one go (values never printed); `pnpm --filter @rede-social/api dev` now runs `tsx watch --env-file-if-exists=.env.local` so Playwright's webServer can boot the API"
   - "pnpm-workspace.yaml allowBuilds gains @swc/core and @parcel/watcher (pnpm 12 blocks build scripts by default; Next 16 needs both)"
 
 patterns-established:
@@ -98,14 +98,14 @@ requirements-completed: [AUTH-02, AUTH-05, TENANT-01]
 # Coverage metadata (#1602)
 coverage:
   - id: D1
-    description: "@tria/web scaffold builds inside the monorepo (Next 16.3.5, TS 7.0.2 native tsc, Biome) with env validation and the pt-BR catalog"
+    description: "@rede-social/web scaffold builds inside the monorepo (Next 16.3.5, TS 7.0.2 native tsc, Biome) with env validation and the pt-BR catalog"
     verification:
       - kind: other
         ref: "pnpm turbo typecheck lint build (14 tasks successful) + node catalog key check (login.submit, signup.acceptRules, signup.acceptTerms, forgot.sent, suspended.body, hostMismatch.body, platform.title, app.logout)"
         status: pass
     human_judgment: false
   - id: D2
-    description: "Login on the tenant's own host on an iPhone 14 viewport: logged-out /inicio -> /entrar; /entrar shows 'Comunidade: TRIA Demo' from the HOST with no tenant_slug cookie and links 'Criar nova conta' to /cadastro; member lands on /inicio with tenant, role and e-mail; wrong password -> single generic alert; sb-* cookies HttpOnly"
+    description: "Login on the tenant's own host on an iPhone 14 viewport: logged-out /inicio -> /entrar; /entrar shows 'Comunidade: Rede Demo' from the HOST with no tenant_slug cookie and links 'Criar nova conta' to /cadastro; member lands on /inicio with tenant, role and e-mail; wrong password -> single generic alert; sb-* cookies HttpOnly"
     requirement: AUTH-02
     verification:
       - kind: e2e
@@ -122,7 +122,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D3
-    description: "Generic host (localhost) fallback (D-21): /entrar shows no tenant hint and no sign-up link without a cookie; the same member logs in there and /inicio still shows TRIA Demo (membership wins)"
+    description: "Generic host (localhost) fallback (D-21): /entrar shows no tenant hint and no sign-up link without a cookie; the same member logs in there and /inicio still shows Rede Demo (membership wins)"
     requirement: TENANT-01
     verification:
       - kind: e2e
@@ -160,11 +160,11 @@ coverage:
         status: pass
     human_judgment: false
   - id: D7
-    description: "proxy.ts host modes on the dev server: platform host serves 'Entrar na plataforma TRIA' and 307s /cadastro* to /entrar; tenant host 308s /cadastro/x to /cadastro and rewrites /cadastro (404 until 01-04 adds the route); generic host sets the HttpOnly tenant_slug cookie on /cadastro/{slug}; tria-lab host shows 'Comunidade: TRIA Lab'; redirects keep the tenant host"
+    description: "proxy.ts host modes on the dev server: platform host serves 'Entrar na plataforma Rede Social' and 307s /cadastro* to /entrar; tenant host 308s /cadastro/x to /cadastro and rewrites /cadastro (404 until 01-04 adds the route); generic host sets the HttpOnly tenant_slug cookie on /cadastro/{slug}; rede-lab host shows 'Comunidade: Rede Lab'; redirects keep the tenant host"
     requirement: TENANT-01
     verification:
       - kind: other
-        ref: "curl --resolve / Host-header smoke against `pnpm --filter @tria/web dev` (recorded in this SUMMARY's Issues section); not yet a spec — 01-04's signup.spec.ts covers the tenant-host /cadastro rewrite end-to-end"
+        ref: "curl --resolve / Host-header smoke against `pnpm --filter @rede-social/web dev` (recorded in this SUMMARY's Issues section); not yet a spec — 01-04's signup.spec.ts covers the tenant-host /cadastro rewrite end-to-end"
         status: pass
     human_judgment: false
 
@@ -174,9 +174,9 @@ completed: 2026-09-12
 status: complete
 ---
 
-# Phase 01 Plan 02: @tria/web scaffold, host -> tenant proxy and the browser login/session/logout slice Summary
+# Phase 01 Plan 02: @rede-social/web scaffold, host -> tenant proxy and the browser login/session/logout slice Summary
 
-**Next 16 `@tria/web` with a `proxy.ts` that classifies every request by host (tenant domain / platform host / generic) through the cached public by-host lookup, refreshes the Supabase session with `getClaims()` into HttpOnly cookies, and a plain pt-BR login -> `/inicio` -> "Sair" slice on `GET /v1/me/bootstrap`, proven by seven Playwright cases on an iPhone 14 viewport against `tria-demo.localhost` plus three TENANT-01 API cases.**
+**Next 16 `@rede-social/web` with a `proxy.ts` that classifies every request by host (tenant domain / platform host / generic) through the cached public by-host lookup, refreshes the Supabase session with `getClaims()` into HttpOnly cookies, and a plain pt-BR login -> `/inicio` -> "Sair" slice on `GET /v1/me/bootstrap`, proven by seven Playwright cases on an iPhone 14 viewport against `rede-demo.localhost` plus three TENANT-01 API cases.**
 
 ## Performance
 
@@ -188,7 +188,7 @@ status: complete
 
 ## Accomplishments
 
-- `@tria/web` builds in the monorepo (`pnpm turbo typecheck lint build`: 14/14) with TypeScript 7.0.2 native `tsc`, Biome and Turbopack; `lib/env.ts` fails fast on `API_URL` / `NEXT_PUBLIC_SUPABASE_*`, `PLATFORM_HOST` optional (D-21), no `SITE_URL` (D-22).
+- `@rede-social/web` builds in the monorepo (`pnpm turbo typecheck lint build`: 14/14) with TypeScript 7.0.2 native `tsc`, Biome and Turbopack; `lib/env.ts` fails fast on `API_URL` / `NEXT_PUBLIC_SUPABASE_*`, `PLATFORM_HOST` optional (D-21), no `SITE_URL` (D-22).
 - Host -> public shell (D-20/D-21/D-22): `resolveHostTenant` (platform check, generic fast path for `localhost` / `127.0.0.1` / `*.vercel.app`, cached `GET /v1/public/tenants/by-host` 300 s / 60 s / 10 s), `proxy.ts` overwrites the four `x-tenant-*` request headers, rewrites `/cadastro` to `/cadastro/{hostSlug}` on tenant hosts for every HTTP method, 308s `/cadastro/*` to `/cadastro`, 307s `/cadastro*` to `/entrar` on the platform host, sets the HttpOnly `tenant_slug` cookie only on generic hosts, and 307s `*.vercel.app` to `https://${PLATFORM_HOST}` only when the variable is set (production).
 - Session plumbing (AUTH-02, T-02-01/T-02-02): `getClaims()` gates private routes and refreshes cookies; `apiFetch` / `hc<AppType>` forward `Authorization: Bearer` + `x-tenant-host` (D-23); `getBootstrap` is request-deduped and throws `ApiClientError` with the envelope code; all `sb-*` cookies are HttpOnly + SameSite=Lax (+ Secure in production).
 - Login / `/inicio` / logout (D-06 as amended by D-22, D-07, D-08): `/entrar` shows the host tenant's name from the proxy headers (tenant host), the cookie hint (generic host) or the platform title; `login` action -> `signInWithPassword` -> `/inicio`; `(app)` layout renders the bootstrap tenant and "Sair" (`signOut({ scope: 'local' })`); `/inicio` renders tenant, user, role label and modules, or the platform placeholder.
@@ -199,7 +199,7 @@ status: complete
 
 Each task was committed atomically:
 
-1. **Task 1: @tria/web scaffold, session plumbing, pt-BR catalog and Playwright configuration** - `c81dd51` (feat)
+1. **Task 1: @rede-social/web scaffold, session plumbing, pt-BR catalog and Playwright configuration** - `c81dd51` (feat)
 2. **Task 2: /entrar login form, authenticated (app) layout, /inicio and "Sair"** - `2375be7` (feat)
 3. **Task 3: Session persistence and device-local logout e2e; TENANT-01 cookie/hostname-independence API cases** - `ab5896a` (test)
 
@@ -207,7 +207,7 @@ Each task was committed atomically:
 
 ## Files Created/Modified
 
-- `apps/web/{package.json,turbo.json,tsconfig.json,next.config.ts}` - `@tria/web` package (tag `app`), `allowedDevOrigins: ['*.localhost']`, next-intl plugin; scripts `dev`/`build`/`start`/`typecheck` (`next typegen && tsc --noEmit`)/`lint`/`e2e`
+- `apps/web/{package.json,turbo.json,tsconfig.json,next.config.ts}` - `@rede-social/web` package (tag `app`), `allowedDevOrigins: ['*.localhost']`, next-intl plugin; scripts `dev`/`build`/`start`/`typecheck` (`next typegen && tsc --noEmit`)/`lint`/`e2e`
 - `apps/web/lib/env.ts` - `@t3-oss/env-nextjs` schema (server `API_URL`, `PLATFORM_HOST?`; client `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`)
 - `apps/web/lib/tenant-host.ts` - `HostTenant`, `resolveHostTenant`, `getHostTenant`, `signupPath`, header-name constants
 - `apps/web/proxy.ts` - host classification, session refresh, path rules by mode, public allow-list, `config.matcher`
@@ -226,13 +226,13 @@ Each task was committed atomically:
 ## Decisions Made
 
 - "`*.vercel.app` hosts are generic hosts (slug/cookie fallback) wherever `PLATFORM_HOST` is unset — Vercel Preview and local; in production `proxy.ts` 307-redirects them to `https://${PLATFORM_HOST}`, so the production deployment alias is not a member entry point (D-20/D-21)."
-- **Host cache (recorded discretion):** module-level `Map` keyed by the normalised host — 300 s hit, 60 s 404, 10 s network error/5xx with `console.error('tenant-host.lookup_failed')` and fail-open to `generic`; an unregistered host renders the neutral TRIA shell in `generic` mode (the D-21 fallback) because the only ways to reach the app on such a hostname are localhost and deployment URLs, and the API's membership check (D-23) keeps that safe.
+- **Host cache (recorded discretion):** module-level `Map` keyed by the normalised host — 300 s hit, 60 s 404, 10 s network error/5xx with `console.error('tenant-host.lookup_failed')` and fail-open to `generic`; an unregistered host renders the neutral platform shell in `generic` mode (the D-21 fallback) because the only ways to reach the app on such a hostname are localhost and deployment URLs, and the API's membership check (D-23) keeps that safe.
 - **Next version:** installed `next@16.3.5` (the RESEARCH pin; `npm view next version` = 16.3.5 on 2026-09-12). The CLAUDE.md stack table still lists 16.3.4 — the user should reconcile CLAUDE.md (not edited from this plan).
 - **HttpOnly session cookies:** `@supabase/ssr` defaults `httpOnly: false`; both `createServerClient` calls use `sessionCookieOptions` (HttpOnly, SameSite=Lax, path `/`, Secure on production builds). No browser Supabase client exists in this app, so nothing needs to read the cookies from JS.
 - **Generic-host sign-up link:** with a well-formed `tenant_slug` cookie the "Criar nova conta" link points to `/cadastro/{slug}` even when the display-name lookup (`GET /v1/public/tenants/{slug}`, plan 01-04) fails; the "Comunidade:" hint is shown only on a 2xx. Without a cookie neither is shown.
 - **`mobile-chromium`** = `devices['iPhone 14']` + `browserName: 'chromium'` (the preset defaults to WebKit, which is not installed; only Chromium was installed per the environment notes).
 - **Generated files:** `apps/web/next-env.d.ts` and `*.tsbuildinfo` are git-ignored and `next-env.d.ts` is Biome-excluded; `apps/web/AGENTS.md` + `CLAUDE.md` (written by `next dev`) are committed.
-- **Local dev loop:** `scripts/local-env.sh --write`; `pnpm --filter @tria/api dev` loads `.env.local` itself so Playwright's `webServer` can boot the API from the repo root.
+- **Local dev loop:** `scripts/local-env.sh --write`; `pnpm --filter @rede-social/api dev` loads `.env.local` itself so Playwright's `webServer` can boot the API from the repo root.
 
 ## Deviations from Plan
 
@@ -248,18 +248,18 @@ Each task was committed atomically:
 
 **2. [Rule 3 - Blocking] API dev server did not load `.env.local`**
 - **Found during:** Task 1 (Playwright `webServer` for the API)
-- **Issue:** `tsx watch src/main.ts` reads nothing from `apps/api/.env.local`, so the API cannot start from `pnpm --filter @tria/api dev` without an exported environment
+- **Issue:** `tsx watch src/main.ts` reads nothing from `apps/api/.env.local`, so the API cannot start from `pnpm --filter @rede-social/api dev` without an exported environment
 - **Fix:** `dev` script is `tsx watch --env-file-if-exists=.env.local src/main.ts` (Node 24 flag passed through by tsx); `scripts/local-env.sh --write` writes both `apps/api/.env.local` and `apps/web/.env.local` without printing values
 - **Files modified:** `apps/api/package.json`, `scripts/local-env.sh`
-- **Verification:** `/v1/health` and `/v1/public/tenants/by-host?host=tria-demo.localhost` answer from the dev server; Playwright reuses it
+- **Verification:** `/v1/health` and `/v1/public/tenants/by-host?host=rede-demo.localhost` answer from the dev server; Playwright reuses it
 - **Committed in:** `c81dd51`
 
 **3. [Rule 3 - Blocking] `next-env.d.ts` breaks `tsc --noEmit` and Biome**
-- **Found during:** Task 1 (first `pnpm --filter @tria/web typecheck` / `lint`)
+- **Found during:** Task 1 (first `pnpm --filter @rede-social/web typecheck` / `lint`)
 - **Issue:** Next 16 writes `next-env.d.ts` importing `./.next/types/routes.d.ts` (git-ignored); Biome reformatted the generated file
 - **Fix:** `typecheck` runs `next typegen && tsc --noEmit`; `next-env.d.ts` and `*.tsbuildinfo` git-ignored; `!**/next-env.d.ts` in `biome.json`
 - **Files modified:** `apps/web/package.json`, `.gitignore`, `biome.json`
-- **Verification:** `pnpm --filter @tria/web typecheck && lint` exit 0 from a clean checkout of the ignored files
+- **Verification:** `pnpm --filter @rede-social/web typecheck && lint` exit 0 from a clean checkout of the ignored files
 - **Committed in:** `c81dd51`
 
 **4. [Rule 2 - Missing critical] Session cookies were not HttpOnly (threat T-02-01)**
@@ -273,14 +273,14 @@ Each task was committed atomically:
 **5. [Rule 3 - Blocking] `devices['iPhone 14']` launches WebKit**
 - **Found during:** Task 2 (first Playwright run: `webkit-2359` missing)
 - **Issue:** the device preset's `defaultBrowserType` is `webkit`; only Chromium is (and should be) installed
-- **Fix:** `mobile-chromium` project sets `browserName: 'chromium'`; `pnpm --filter @tria/web exec playwright install chromium` fetched `chromium_headless_shell-1243` (Playwright 1.63's build)
+- **Fix:** `mobile-chromium` project sets `browserName: 'chromium'`; `pnpm --filter @rede-social/web exec playwright install chromium` fetched `chromium_headless_shell-1243` (Playwright 1.63's build)
 - **Files modified:** `apps/web/playwright.config.ts`
 - **Verification:** 7/7 e2e on `mobile-chromium`
 - **Committed in:** `2375be7`
 
 **6. [Rule 1 - Bug] Two e2e locators hit Playwright strict mode**
 - **Found during:** Task 2 (first green-path run: 3/5)
-- **Issue:** `getByText('Membro')` also matched the seeded user name "Membro TRIA Demo"; `getByRole('alert')` also matched Next's route announcer (`#__next-route-announcer__`, `role="alert"`)
+- **Issue:** `getByText('Membro')` also matched the seeded user name "Membro Rede Demo"; `getByRole('alert')` also matched Next's route announcer (`#__next-route-announcer__`, `role="alert"`)
 - **Fix:** `getByText('Membro', { exact: true })`; `page.locator('p[role="alert"]')`
 - **Files modified:** `apps/web/e2e/login.spec.ts`
 - **Verification:** 5/5, then 7/7 with the Task 3 specs
@@ -302,7 +302,7 @@ Each task was committed atomically:
 ## Issues Encountered
 
 - **Secret-file guard:** the sandbox refuses any shell command that names `.env.local`, so the web env file could not be created with the documented redirect; `scripts/local-env.sh --write` does it inside the script (values never reach the conversation). This is also why the API `dev` script loads the file itself.
-- **Host-mode smoke (dev server, `curl --resolve` / `Host:` header):** `tria.localhost` `/entrar` 200 with "Entrar na plataforma TRIA", `/cadastro/x` 307 -> `http://tria.localhost:3000/entrar`; `tria-demo.localhost` `/cadastro/x` 308 -> `http://tria-demo.localhost:3000/cadastro`, `/cadastro` rewritten (404 until 01-04 adds `cadastro/[slug]`), logged-out `/inicio` 307 -> `http://tria-demo.localhost:3000/entrar`; `localhost` `/cadastro/tria-lab` sets `tenant_slug=tria-lab; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`; `tria-lab.localhost` `/entrar` shows "Comunidade: TRIA Lab"; an unregistered host renders the generic shell (200).
+- **Host-mode smoke (dev server, `curl --resolve` / `Host:` header):** `rede-social.localhost` `/entrar` 200 with "Entrar na plataforma Rede Social", `/cadastro/x` 307 -> `http://rede-social.localhost:3000/entrar`; `rede-demo.localhost` `/cadastro/x` 308 -> `http://rede-demo.localhost:3000/cadastro`, `/cadastro` rewritten (404 until 01-04 adds `cadastro/[slug]`), logged-out `/inicio` 307 -> `http://rede-demo.localhost:3000/entrar`; `localhost` `/cadastro/rede-lab` sets `tenant_slug=rede-lab; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`; `rede-lab.localhost` `/entrar` shows "Comunidade: Rede Lab"; an unregistered host renders the generic shell (200).
 - The first Playwright run took long only because of the Chromium download (~94 MiB); subsequent runs finish in ~6 s.
 
 ## Known Stubs

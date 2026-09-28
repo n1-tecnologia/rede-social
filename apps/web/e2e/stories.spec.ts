@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
-import { STORY_MAX_PAGE_SIZE } from '@tria/module-stories/contracts';
+import { STORY_MAX_PAGE_SIZE } from '@rede-social/module-stories/contracts';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
@@ -57,25 +57,25 @@ test.use({ serviceWorkers: 'block' });
 const SEEDED = {
   /** The caption of the EXPIRED story: it must not appear on the strip in any form. */
   expiredCaption: 'Publicado ontem, ja fora da regua.',
-  /** `SEED_STORY_IDS['tria-demo'][3]`: the EXPIRED story (`SEED_STORIES[3]`). */
+  /** `SEED_STORY_IDS['rede-demo'][3]`: the EXPIRED story (`SEED_STORIES[3]`). */
   expiredStoryId: '0d000000-0000-4000-8000-0000000000d4',
   /**
-   * 05.2-07: `SEED_COMMUNITY_IDS['tria-demo'][0]`'s NAME — the place of the community highlight
+   * 05.2-07: `SEED_COMMUNITY_IDS['rede-demo'][0]`'s NAME — the place of the community highlight
    * `Destaques`, which holds the expired story. With `Bastidores` that puts the expired story in TWO
    * highlights, and `Aulas` (empty) is the switch a toggle can be walked on and undone.
    */
   communityHighlightPlace: 'Avisos da diretoria',
   communityHighlight: 'Destaques',
-  /** `SEED_TENANTS['tria-demo'].displayName` — the tenant circle's label and accessible name. */
-  tenantName: 'TRIA Demo',
+  /** `SEED_TENANTS['rede-demo'].displayName` — the tenant circle's label and accessible name. */
+  tenantName: 'Rede Demo',
   /**
-   * `SEED_STORY_IDS['tria-demo'][2]`: the OLDEST active, ready story (an image published 18 h ago).
+   * `SEED_STORY_IDS['rede-demo'][2]`: the OLDEST active, ready story (an image published 18 h ago).
    * The tenant circle plays oldest → newest (D-106), so this is the story it opens on.
    */
   oldestActiveStoryId: '0d000000-0000-4000-8000-0000000000d3',
-  /** `SEED_STORY_IDS['tria-demo'][1]`: the seeded story VIDEO (`SEED_STORIES[1]`), 6 h old. */
+  /** `SEED_STORY_IDS['rede-demo'][1]`: the seeded story VIDEO (`SEED_STORIES[1]`), 6 h old. */
   videoStoryId: '0d000000-0000-4000-8000-0000000000d2',
-  /** `SEED_STORY_IDS['tria-demo'][0]`: the NEWEST active story, an image published 1 h ago. */
+  /** `SEED_STORY_IDS['rede-demo'][0]`: the NEWEST active story, an image published 1 h ago. */
   newestActiveStoryId: '0d000000-0000-4000-8000-0000000000d1',
   /** `SEED_HIGHLIGHT_TITLES`: `home` has items; `homeEmpty` is curator-only and never on a member row. */
   homeHighlight: 'Bastidores',
@@ -92,7 +92,7 @@ const SEEDED = {
 let activeStories = 0;
 
 test.beforeAll(async () => {
-  activeStories = await activeReadyStoryCount('tria-demo');
+  activeStories = await activeReadyStoryCount('rede-demo');
   expect(activeStories, 'the demo tenant has at least one active story to render').toBeGreaterThan(
     0,
   );
@@ -111,13 +111,13 @@ const SEED_SEEN = {
 } as const;
 
 test.beforeEach(async () => {
-  await setStoryViews(users.demoMember, 'tria-demo', []);
-  await setStoryViews(users.demoAdmin, 'tria-demo', []);
+  await setStoryViews(users.demoMember, 'rede-demo', []);
+  await setStoryViews(users.demoAdmin, 'rede-demo', []);
 });
 
 test.afterAll(async () => {
-  await setStoryViews(users.demoMember, 'tria-demo', SEED_SEEN.member);
-  await setStoryViews(users.demoAdmin, 'tria-demo', SEED_SEEN.admin);
+  await setStoryViews(users.demoMember, 'rede-demo', SEED_SEEN.member);
+  await setStoryViews(users.demoAdmin, 'rede-demo', SEED_SEEN.admin);
   await closeAdmin();
 });
 
@@ -125,7 +125,7 @@ const strip = (page: Page) => page.getByRole('list', { name: S.region });
 
 /**
  * D-104: the ONE tenant circle, found by its catalog accessible name (UI-D-61) — "Abrir stories de
- * TRIA Demo" for the seed tenant, resolved from `stories.circle.tenant` rather than typed here.
+ * Rede Demo" for the seed tenant, resolved from `stories.circle.tenant` rather than typed here.
  */
 const tenantCircle = (page: Page) =>
   strip(page).getByRole('button', {
@@ -353,7 +353,7 @@ test.describe('the grouped viewer — circles in a row (D-107, UI-D-65, mobile)'
     const { items } = (await list.json()) as { items: { id: string }[] };
     const sequence = [...items].reverse().map((item) => item.id);
     expect(sequence.length, 'the strip holds every live tenant story').toBe(activeStories);
-    await setStoryViews(users.demoMember, 'tria-demo', sequence);
+    await setStoryViews(users.demoMember, 'rede-demo', sequence);
     await login(page, users.demoMember, SEED_PASSWORD);
     await tenantCircle(page).click();
     await expect(page).toHaveURL(new RegExp(`/stories/${sequence[0]}$`));
@@ -841,7 +841,7 @@ test.describe('the viewer at a FULL tenant sequence on a 320px screen (overflow 
   let created = 0;
 
   test.beforeAll(async () => {
-    created = await cloneActiveStories('tria-demo', BACKSTOP_PREFIX, TARGET - activeStories);
+    created = await cloneActiveStories('rede-demo', BACKSTOP_PREFIX, TARGET - activeStories);
   });
 
   test.afterAll(async () => {
@@ -1257,7 +1257,7 @@ test.describe('"Destacar" from the viewer (D-110 route 1)', () => {
  */
 test.describe('05.2 — publishing into a highlight (D-111..D-115)', () => {
   /**
-   * Mirrored from `scripts/seed.ts`'s `SEED_COMMUNITY_IDS['tria-demo']` (the `comunidades.spec.ts`
+   * Mirrored from `scripts/seed.ts`'s `SEED_COMMUNITY_IDS['rede-demo']` (the `comunidades.spec.ts`
    * convention): `…c1` holds the seeded community highlight `Destaques`, `…c2` is an ACTIVE community
    * with no highlight, `…c5` the ARCHIVED one.
    */
@@ -1553,7 +1553,7 @@ test.describe('05.2 — publishing into a highlight (D-111..D-115)', () => {
  */
 test.describe('the Início manage screen (D-109, UI-D-72..76)', () => {
   const H = S.highlights;
-  /** `SEED_HIGHLIGHT_IDS['tria-demo']` — `Bastidores` (items) and `Aulas` (empty). */
+  /** `SEED_HIGHLIGHT_IDS['rede-demo']` — `Bastidores` (items) and `Aulas` (empty). */
   const HOME_IDS = {
     bastidores: '0d000000-0000-4000-8000-0000000002a1',
     aulas: '0d000000-0000-4000-8000-0000000002a2',
@@ -1567,7 +1567,7 @@ test.describe('the Início manage screen (D-109, UI-D-72..76)', () => {
 
   /** Removes this describe's highlights and puts Início's seeded order back dense (0, 1). */
   async function restoreHome(): Promise<void> {
-    await deleteHighlightsByTitlePrefix('tria-demo', 'Teste ');
+    await deleteHighlightsByTitlePrefix('rede-demo', 'Teste ');
     const token = await adminToken();
     await storiesApi(token, '/v1/stories/highlights/order', {
       method: 'PUT',
@@ -1770,7 +1770,7 @@ test.describe('the seen ring (D-105, UI-D-61, HIGHLIGHT-06)', () => {
   test('the SEED: a member who saw only the oldest story gets the brand ring and resumes at the first unseen', async ({
     page,
   }) => {
-    await setStoryViews(users.demoMember, 'tria-demo', SEED_SEEN.member);
+    await setStoryViews(users.demoMember, 'rede-demo', SEED_SEEN.member);
     await login(page, users.demoMember, SEED_PASSWORD);
 
     // The sequence the circle plays, with the member's OWN flags, from the API the row reads.
@@ -1817,7 +1817,7 @@ test.describe('the seen ring (D-105, UI-D-61, HIGHLIGHT-06)', () => {
     );
     await setStoryViews(
       users.demoMember,
-      'tria-demo',
+      'rede-demo',
       sequence.slice(0, last).map((story) => story.id),
     );
 
@@ -1858,7 +1858,7 @@ test.describe('the seen ring (D-105, UI-D-61, HIGHLIGHT-06)', () => {
   test('the SEED: an admin who saw every live story gets the neutral ring, the plain name and index 0', async ({
     page,
   }) => {
-    await setStoryViews(users.demoAdmin, 'tria-demo', SEED_SEEN.admin);
+    await setStoryViews(users.demoAdmin, 'rede-demo', SEED_SEEN.admin);
     await login(page, users.demoAdmin, SEED_PASSWORD);
 
     const circle = circleNamed(page, false);

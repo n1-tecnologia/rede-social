@@ -1,5 +1,5 @@
 /**
- * @tria/ui — shared primitives ported from the design prototype (UI-01).
+ * @rede-social/ui — shared primitives ported from the design prototype (UI-01).
  *
  * Client-safe barrel: no server code, no import of the contracts package (its root pulls node:fs). Components take
  * every string and aria label as props and every colour from the token file, so nothing here can leak

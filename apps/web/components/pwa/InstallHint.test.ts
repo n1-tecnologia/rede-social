@@ -122,7 +122,7 @@ describe('InstallHint helpers — shouldShowInstallHint (14-day dismissal, T-02-
   });
 
   it('10. constants: the storage key and the 14-day window', () => {
-    expect(INSTALL_HINT_DISMISSED_KEY).toBe('tria_install_hint_dismissed');
+    expect(INSTALL_HINT_DISMISSED_KEY).toBe('rede_install_hint_dismissed');
     expect(INSTALL_HINT_DISMISS_MS).toBe(14 * DAY);
   });
 });

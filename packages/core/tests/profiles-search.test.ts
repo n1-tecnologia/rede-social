@@ -4,13 +4,13 @@ import {
   MEMBERS_PAGE_SIZE,
   memberListQuerySchema,
   memberListSchema,
-} from '@tria/contracts/profiles';
+} from '@rede-social/contracts/profiles';
 import {
   decodeCursor,
   encodeCursor,
   likeEscape,
   normaliseQuery,
-} from '@tria/core/server/profiles/search';
+} from '@rede-social/core/server/profiles/search';
 import { describe, expect, it } from 'vitest';
 
 /**

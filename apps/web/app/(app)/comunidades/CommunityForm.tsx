@@ -1,13 +1,13 @@
 'use client';
 
-import { mediaAcceptFor, PURPOSE_WIDTHS } from '@tria/contracts/media';
+import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import {
   COMMUNITY_MAX_DESCRIPTION,
   COMMUNITY_MAX_NAME,
   createCommunitySchema,
   updateCommunitySchema,
-} from '@tria/module-communities/contracts';
-import { CommunityCover } from '@tria/module-communities/ui';
+} from '@rede-social/module-communities/contracts';
+import { CommunityCover } from '@rede-social/module-communities/ui';
 import {
   Button,
   ConfirmDialog,
@@ -16,7 +16,7 @@ import {
   PageHeader,
   Textarea,
   useToast,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import { Archive, ArchiveRestore, Image as ImageIcon, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';

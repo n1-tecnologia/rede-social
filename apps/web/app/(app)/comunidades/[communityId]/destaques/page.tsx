@@ -1,5 +1,5 @@
-import { STORY_PERMISSIONS } from '@tria/module-stories/contracts';
-import { PageHeader } from '@tria/ui';
+import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
+import { PageHeader } from '@rede-social/ui';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';

@@ -1,6 +1,10 @@
 'use server';
 
-import { type MediaAsset, type MediaPlayback, mediaListQuerySchema } from '@tria/contracts/media';
+import {
+  type MediaAsset,
+  type MediaPlayback,
+  mediaListQuerySchema,
+} from '@rede-social/contracts/media';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';

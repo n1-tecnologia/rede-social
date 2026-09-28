@@ -1,5 +1,5 @@
-import type { HighlightSummary, StorySummary } from '@tria/module-stories/contracts';
-import { STORY_MAX_PAGE_SIZE } from '@tria/module-stories/contracts';
+import type { HighlightSummary, StorySummary } from '@rede-social/module-stories/contracts';
+import { STORY_MAX_PAGE_SIZE } from '@rede-social/module-stories/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
@@ -345,7 +345,7 @@ describe('05.2-06 — highlightPlacesView groups the catalogue by place', () => 
   const GONE = '0c000000-0000-4000-8000-0000000000ff';
   const communities = [
     { id: A, name: 'Avisos da diretoria' },
-    { id: B, name: 'Coral TRIA' },
+    { id: B, name: 'Coral Rede Social' },
   ];
   const home = highlight({ id: '0000000a-1111-4111-8111-000000000001', title: 'Protocolos' });
   const empty = highlight({
@@ -382,7 +382,7 @@ describe('05.2-06 — highlightPlacesView groups the catalogue by place', () => 
     expect(places.map((p) => [p.key, p.label, p.communityId])).toEqual([
       ['home', 'Início', null],
       [A, 'Avisos da diretoria', A],
-      [B, 'Coral TRIA', B],
+      [B, 'Coral Rede Social', B],
     ]);
     // Empty highlights ARE listed (a curator is filling them, UI E09 partial), in catalogue order.
     expect(places[0]?.rows).toEqual([

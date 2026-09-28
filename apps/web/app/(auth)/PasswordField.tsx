@@ -1,6 +1,6 @@
 'use client';
 
-import { IconButton, Input } from '@tria/ui';
+import { IconButton, Input } from '@rede-social/ui';
 import { Eye, EyeOff, Lock } from 'lucide-react';
 import { useState } from 'react';
 
@@ -19,7 +19,7 @@ type Strength = 'weak' | 'ok' | 'strong';
 
 /**
  * Password input with a show/hide toggle instead of a confirm field (D-02) and the simple strength
- * indicator of D-10, on `@tria/ui` `Input` + `IconButton` (UI-SPEC Auth Pages Contract): the eye is a
+ * indicator of D-10, on `@rede-social/ui` `Input` + `IconButton` (UI-SPEC Auth Pages Contract): the eye is a
  * 44×44 control inside the field at `right-1`, `aria-pressed` while visible; the meter is three 4px
  * segments — neutral until typed, `danger` / `warning` / `success` as the password grows — with a
  * polite live hint. Everything is computed locally: nothing about the password ever leaves the form.

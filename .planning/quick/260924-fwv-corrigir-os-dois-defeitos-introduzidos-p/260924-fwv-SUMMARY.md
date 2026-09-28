@@ -157,10 +157,10 @@ The detach/owner-only-clear half passes today and is recorded as a **regression 
 |---|---------|--------|
 | 1 | `pnpm lint` | **exit 0** — 9/9 tasks; `Checked 262 files… No fixes applied`; `check-ui-literals: OK` *(failed twice first — see deviations)* |
 | 2 | `pnpm turbo typecheck` | **exit 0** — 10/10 tasks successful |
-| 3 | `pnpm --filter @tria/web test` | **exit 0** — Test Files 15 passed (15), Tests 128 passed (128) |
-| 4 | `pnpm --filter @tria/module-stories test` | **exit 0** — Test Files 9 passed (9), Tests 89 passed (89) |
-| 5 | `pnpm --filter @tria/api test` | **exit 0** — Test Files 3 passed (3), Tests 16 passed (16) |
-| 6 | `pnpm --filter @tria/api test:integration` | **exit 0** — Test Files 29 passed (29), Tests 480 passed (480) |
+| 3 | `pnpm --filter @rede-social/web test` | **exit 0** — Test Files 15 passed (15), Tests 128 passed (128) |
+| 4 | `pnpm --filter @rede-social/module-stories test` | **exit 0** — Test Files 9 passed (9), Tests 89 passed (89) |
+| 5 | `pnpm --filter @rede-social/api test` | **exit 0** — Test Files 3 passed (3), Tests 16 passed (16) |
+| 6 | `pnpm --filter @rede-social/api test:integration` | **exit 0** — Test Files 29 passed (29), Tests 480 passed (480) |
 | 7 | `pnpm boundaries` | **exit 0** — `Checked 556 files in 9 packages, no issues found` |
 
 Plan-level verification also run: `! grep -n "e2e/stories.spec.ts" packages/modules/stories/ui/StoryViewer.tsx packages/modules/stories/tests/story-viewer.test.tsx` — passes, neither file names the spec.

@@ -15,18 +15,18 @@ import {
   tenantInviteSchema,
   tenantInvitesListSchema,
   updateTenantBodySchema,
-} from '@tria/contracts';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { listTenantInvites, resendInvite } from '@tria/core/server/platform/invites';
-import { setModuleEnabled } from '@tria/core/server/platform/modules';
-import type { PlatformEnv } from '@tria/core/server/platform/require-super-admin';
+} from '@rede-social/contracts';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { listTenantInvites, resendInvite } from '@rede-social/core/server/platform/invites';
+import { setModuleEnabled } from '@rede-social/core/server/platform/modules';
+import type { PlatformEnv } from '@rede-social/core/server/platform/require-super-admin';
 import {
   createTenant,
   getTenantDetail,
   listPlatformTenants,
   setTenantStatus,
   updateTenant,
-} from '@tria/core/server/platform/tenants';
+} from '@rede-social/core/server/platform/tenants';
 import { platformDefaultHook } from '../../http/openapi';
 
 /**

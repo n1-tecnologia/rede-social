@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, useToast } from '@tria/ui';
+import { Button, useToast } from '@rede-social/ui';
 import { useTransition } from 'react';
 import type { ResendInviteResult } from '@/app/(platform)/plataforma/tenants/[id]/admins/actions';
 

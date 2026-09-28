@@ -1,4 +1,4 @@
-import type { DnsRecord } from '@tria/contracts';
+import type { DnsRecord } from '@rede-social/contracts';
 import { z } from 'zod';
 import { moduleLogger } from '../logging';
 import { type DomainCheck, type DomainProvider, DomainProviderError } from './types';

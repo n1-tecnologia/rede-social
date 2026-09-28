@@ -1,4 +1,4 @@
-import { NEUTRAL_BRAND, THEME_COOKIE } from '@tria/contracts/branding';
+import { NEUTRAL_BRAND, THEME_COOKIE } from '@rede-social/contracts/branding';
 import type { Metadata, Viewport } from 'next';
 import { Manrope } from 'next/font/google';
 import { cookies } from 'next/headers';
@@ -17,7 +17,7 @@ const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope', displa
 /**
  * PWA metadata per HOST (PWA-01, D-25/D-28): every route — `/entrar` before login included — links
  * the tenant's own manifest, favicon and apple-touch-icon, and names the installed app after the
- * tenant. Platform and generic hosts get TRIA's neutral set. Icons come from the same allow-listed
+ * tenant. Platform and generic hosts get the platform's neutral set. Icons come from the same allow-listed
  * set the manifest route serves (`iconsFor`, T-02-72), so head and manifest never disagree.
  */
 export async function generateMetadata(): Promise<Metadata> {
@@ -59,7 +59,7 @@ export async function generateViewport(): Promise<Viewport> {
 }
 
 /**
- * D-41: the theme is rendered on the FIRST HTML from the per-device `tria_theme` cookie, so there is
+ * D-41: the theme is rendered on the FIRST HTML from the per-device `rede_theme` cookie, so there is
  * no light flash before hydration (Pitfall 2). Strict allow-list (T-02-30): only the literal `dark`
  * selects dark; any other value — absent, tampered, stale — renders light and is never echoed.
  * Reading `cookies()` here makes every route dynamic, which is intended (RESEARCH Pattern 11).

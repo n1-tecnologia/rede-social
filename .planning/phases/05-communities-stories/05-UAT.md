@@ -48,7 +48,7 @@ result: pass
 expected: Both writes succeed, no "Comunidade não encontrada" appears, and the card falls back to the brand gradient
 why_human: Mechanism is covered by integration case 33, which the verifier ran green — this is the product-surface confirmation of the previously failed gap. A confirmation, not an open defect.
 result: pass
-note: "Precondition was NOT satisfied at first: `media_assets` held 0 retired rows out of 25, and the community's cover was a live file the tester had uploaded during test 4. The tester retired that cover through /configuracoes/midia first, so the archive+reactivate pair did run against a dangling cover as the test intends. Community exercised: 0d000000-0000-4000-8000-0000000000c1 (\"Avisos da diretoria renomeado\", tria-demo)."
+note: "Precondition was NOT satisfied at first: `media_assets` held 0 retired rows out of 25, and the community's cover was a live file the tester had uploaded during test 4. The tester retired that cover through /configuracoes/midia first, so the archive+reactivate pair did run against a dangling cover as the test intends. Community exercised: 0d000000-0000-4000-8000-0000000000c1 (\"Avisos da diretoria renomeado\", rede-demo)."
 
 
 ### 6. Backstop B-05-01 (05-04): a 60-character community name at 24/700 on a 320px viewport
@@ -63,7 +63,7 @@ expected: The strip carries no tenant string; the welcome heading above it absor
 why_human: Declared `verification: backstop`, reason `insufficient_spec`; the second half inherits a Phase 2 backstop that is itself unverified.
 result: pass
 partial: true
-note: "PASS COVERS THE PHASE-5 HALF ONLY. Measured against the live DB: no tenant carries a 40-character display_name — `tria-demo` is 9 chars and `tria-lab` is 8. (a) 'the strip carries no tenant string' is a STRUCTURAL property, true at any length, and is genuinely discharged by this observation — it is also the half Phase 5 owns. (b) 'the welcome heading absorbs the length' is NOT exercised: it needs a 40-char tenant name that does not exist in this environment, and it is the half the entry already marks as inherited from an unverified Phase 2 backstop. Exercising (b) requires renaming a tenant to 40 characters through the platform panel."
+note: "PASS COVERS THE PHASE-5 HALF ONLY. Measured against the live DB: no tenant carries a 40-character display_name — `rede-demo` is 9 chars and `rede-lab` is 8. (a) 'the strip carries no tenant string' is a STRUCTURAL property, true at any length, and is genuinely discharged by this observation — it is also the half Phase 5 owns. (b) 'the welcome heading absorbs the length' is NOT exercised: it needs a 40-char tenant name that does not exist in this environment, and it is the half the entry already marks as inherited from an unverified Phase 2 backstop. Exercising (b) requires renaming a tenant to 40 characters through the platform panel."
 
 
 ### 8. Backstop B-05-03 (05-06): a 25-story sequence at 320px

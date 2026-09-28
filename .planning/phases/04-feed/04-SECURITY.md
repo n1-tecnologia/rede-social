@@ -150,7 +150,7 @@ Rastreado como dívida de validação em `04-VALIDATION.md` (Manual-Only), não 
 
 ## Sinalizações fora do registro (WARNING — não contam para `threats_open`)
 
-### 1. Cookies `tria_continue` e `tenant_slug` sem `secure` (C-WR-01, CONFIRMADO)
+### 1. Cookies `rede_continue` e `tenant_slug` sem `secure` (C-WR-01, CONFIRMADO)
 
 `apps/web/proxy.ts:199-204` e `:218-223` definem `maxAge/sameSite/path/httpOnly` mas **omitem
 `secure`**, enquanto `apps/web/lib/supabase/cookie-options.ts:12` e

@@ -11,7 +11,7 @@ import {
 /**
  * Per-tenant web-app manifest (PWA-01, D-25/D-28), host-authoritative (T-02-71, D-20/D-23):
  * the HOST decides which tenant — never the `[slug]` in the path. The slug must equal the slug the
- * host resolves to (else 404), and the reserved neutral slug `_tria` answers TRIA's manifest ONLY
+ * host resolves to (else 404), and the reserved neutral slug `_rede` answers the platform's manifest ONLY
  * on platform/generic hosts (404 on a tenant host). Because every tenant is its own origin (D-35),
  * the browser's manifest, service-worker registration and Cache Storage are already partitioned.
  *

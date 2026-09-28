@@ -1,7 +1,7 @@
 'use client';
 
-import { PURPOSE_WIDTHS } from '@tria/contracts/media';
-import { Avatar, Button, Card, useToast } from '@tria/ui';
+import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
+import { Avatar, Button, Card, useToast } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { useTransition } from 'react';
 import { dismissNudgeAction } from '@/app/(app)/perfil/actions';

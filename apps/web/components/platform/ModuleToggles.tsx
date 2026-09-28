@@ -1,6 +1,6 @@
 'use client';
 
-import { Card, StatusPill, Switch, useToast } from '@tria/ui';
+import { Card, StatusPill, Switch, useToast } from '@rede-social/ui';
 import { useOptimistic, useState, useTransition } from 'react';
 import type { SetModuleResult } from '@/app/(platform)/plataforma/tenants/[id]/modulos/actions';
 

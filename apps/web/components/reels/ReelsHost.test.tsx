@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
+
+import type { MediaPlayback } from '@rede-social/contracts/media';
+import type { CommentsListLabels, CommentView } from '@rede-social/module-feed/ui';
+import type { ReelsPagerProps } from '@rede-social/module-reels/ui';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import type { MediaPlayback } from '@tria/contracts/media';
-import type { CommentsListLabels, CommentView } from '@tria/module-feed/ui';
-import type { ReelsPagerProps } from '@tria/module-reels/ui';
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { ReelView } from '@/lib/reels';
 import type { ReelsHostLabels, ReelsHostProps } from './ReelsHost';
@@ -104,8 +105,8 @@ vi.mock('motion/react', async () => {
   };
 });
 
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 
@@ -115,8 +116,8 @@ vi.mock('@/app/(app)/reels/reels-actions', () => ({
 }));
 
 /** The real pager, wrapped only so a case can read the props the host handed it. */
-vi.mock('@tria/module-reels/ui', async (orig) => {
-  const actual = await orig<typeof import('@tria/module-reels/ui')>();
+vi.mock('@rede-social/module-reels/ui', async (orig) => {
+  const actual = await orig<typeof import('@rede-social/module-reels/ui')>();
   const { createElement } = await import('react');
   return {
     ...actual,
@@ -177,7 +178,7 @@ function lookup(catalog: Record<string, unknown>, key: string): string {
 const r = (key: string) => lookup(reels, key);
 const f = (key: string) => lookup(feed, key);
 
-const TENANT = 'Tria Demo';
+const TENANT = 'Rede Demo';
 
 const LABELS: ReelsHostLabels = {
   region: r('region'),

@@ -6,7 +6,7 @@ import {
   mediaAcceptFor,
   PURPOSE_WIDTHS,
   VARIANT_WIDTHS,
-} from '@tria/contracts/media';
+} from '@rede-social/contracts/media';
 import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {

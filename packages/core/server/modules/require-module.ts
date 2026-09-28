@@ -1,4 +1,4 @@
-import type { ModuleKey } from '@tria/contracts';
+import type { ModuleKey } from '@rede-social/contracts';
 import { createMiddleware } from 'hono/factory';
 import type { AppEnv } from '../auth/context';
 import { ApiError } from '../http/api-error';

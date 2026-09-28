@@ -7,10 +7,10 @@ tags: [feed, media, gallery, carousel, video, attachments, drizzle, rls, pgtap, 
 requires:
   - phase: 04-feed
     plan: 01
-    provides: "`@tria/module-feed` with `feed_posts`, the one-hydrated-statement rule + its CI query budget, the `post.published` event shape, the presentational `FeedList`/`PostCard` family and the `apps/web/lib/registry.tsx` composition point"
+    provides: "`@rede-social/module-feed` with `feed_posts`, the one-hydrated-statement rule + its CI query budget, the `post.published` event shape, the presentational `FeedList`/`PostCard` family and the `apps/web/lib/registry.tsx` composition point"
   - phase: 04-feed
     plan: 02
-    provides: "`DoubleTapHeart` in `@tria/ui` (300 ms window, decorative burst, reduced-motion branch) and the happy-dom + Testing Library component-test harness this plan copied into the module"
+    provides: "`DoubleTapHeart` in `@rede-social/ui` (300 ms window, decorative burst, reduced-motion branch) and the happy-dom + Testing Library component-test harness this plan copied into the module"
   - phase: 04-feed
     plan: 03
     provides: "the composite-foreign-key technique for a structural invariant a trigger would race on, the SQLSTATE cause-chain translation helper, `supabase/tests/090-feed.sql`, and `viewerLiked` inside the one hydrated statement"
@@ -23,7 +23,7 @@ provides:
   - "`createPost` validates every referenced asset's tenant, kind, purpose and status INSIDE the writing transaction and refuses with ONE non-oracle code, `asset_not_usable`"
   - "`FEED_MAX_IMAGES` (10) / `FEED_MAX_ATTACHMENTS` (5), `postMediaSchema`, the widened `createPostSchema` and `feedPostSchema` (`mediaKind` + `media`)"
   - "the machine codes `too_many_images`, `too_many_attachments`, `gallery_and_video`, `asset_not_usable`, mapped from the schema refinement AND from the database's own 23503/23505/23514"
-  - "`MediaImage` promoted to `@tria/core/ui`, with `apps/web/components/media/MediaImage.tsx` reduced to a re-export so every Phase 3 call site is untouched"
+  - "`MediaImage` promoted to `@rede-social/core/ui`, with `apps/web/components/media/MediaImage.tsx` reduced to a re-export so every Phase 3 call site is untouched"
   - "`PostMedia` — the three-branch media band: shared-ratio snap carousel, injected player, nothing; plus the attachment list under any of them"
   - "`AttachmentRow` + `AttachmentDescriptor` — UI-D-23's row-local pending state and its generic-toast failure, downloading through the tenant-checked BFF media path"
   - "`@source \"../../../packages/modules\"` in globals.css — a module's UI classes are now visible to Tailwind at all"
@@ -79,12 +79,12 @@ key-files:
 key-decisions:
   - "D-53 is a DATABASE rule, not a composer rule: `feed_posts unique (id, media_kind)` + `feed_post_media.post_media_kind` + the composite FK + a CHECK make an image row and a video row on one post mutually exclusive at the index. A caller that never opens the composer gets the same refusal."
   - "`asset_not_usable` is ONE code for unknown id, another tenant's id, wrong kind, wrong purpose and wrong status, with no id echoed back — a per-cause code over an enumerable uuid space would be an existence oracle (T-04-22, the D-23 posture)."
-  - "`MediaImage` was promoted to `@tria/core/ui` (it imports only `@tria/contracts/media` and `@tria/ui`); `VideoPlayer` was NOT — it binds an app-scoped server action for its per-request playback token (D-44), so `PostMedia` takes it as an already-created `ReactNode`. A component object is what 02-08 found Flight refuses."
+  - "`MediaImage` was promoted to `@rede-social/core/ui` (it imports only `@rede-social/contracts/media` and `@rede-social/ui`); `VideoPlayer` was NOT — it binds an app-scoped server action for its per-request playback token (D-44), so `PostMedia` takes it as an already-created `ReactNode`. A component object is what 02-08 found Flight refuses."
   - "The attachment download reads the BFF response as a BLOB instead of following a signed URL: 03-01 forbids a signed Storage URL in any payload, so there is no 'give me a download URL' route, and the 25 MiB PDF cap is what bounds the blob."
-  - "Byte sizes are formatted in `apps/web/lib/registry.tsx`, not in `AttachmentRow`: the plan's prose put the `Intl` formatter in the row, but a module package must ship no language (PWA-03) — a pt-BR locale baked into `@tria/module-feed` would travel to every other TRIA project that installs it. The row takes `sizeLabel: string | null` and renders the type ALONE when it is null."
+  - "Byte sizes are formatted in `apps/web/lib/registry.tsx`, not in `AttachmentRow`: the plan's prose put the `Intl` formatter in the row, but a module package must ship no language (PWA-03) — a pt-BR locale baked into `@rede-social/module-feed` would travel to every other Rede Social project that installs it. The row takes `sizeLabel: string | null` and renders the type ALONE when it is null."
   - "`PostMedia` owns the generic toast through an internal `AttachmentList` that is mounted only when a row exists, so a media-only card never needs a `ToastProvider`; `AttachmentRow` keeps an injected `onError` and stays purely presentational and unit-testable."
   - "The carousel dots are `aria-hidden` and `pointer-events-none`: the announced index is the `aria-live` region's job, and a duplicated announcement plus a swipe-swallowing target would both be regressions."
-  - "The feed-media e2e reads the VIDEO case from tria-lab. `media-video.spec.ts` hard-resets tria-demo's video library before and after every test (its empty-state, newest-first and pagination assertions are absolute counts), which detaches the demo tenant's seeded video post. Reading the identical lab fixture makes the assertion order-independent instead of 'passes when it runs first'."
+  - "The feed-media e2e reads the VIDEO case from rede-lab. `media-video.spec.ts` hard-resets rede-demo's video library before and after every test (its empty-state, newest-first and pagination assertions are absolute counts), which detaches the demo tenant's seeded video post. Reading the identical lab fixture makes the assertion order-independent instead of 'passes when it runs first'."
 
 patterns-established:
   - "RED with an INERT STUB beside the spec (the 04-02 lesson): 14 of 25 module tests failed on assertions about the planned behaviour, never on module resolution — `check tdd-red-evidence` returned RED_EVIDENCE_OK"
@@ -263,7 +263,7 @@ status: complete
   through a temporary object URL and revokes it. A ref-backed guard flips before the first `await`,
   so a second tap while busy is a no-op; a refusal restores the glyph, clears `aria-busy` and raises
   exactly one generic toast with no inline message and no reflow.
-- **`MediaImage` is now shared.** It moved to `@tria/core/ui` with a one-line re-export left at its
+- **`MediaImage` is now shared.** It moved to `@rede-social/core/ui` with a one-line re-export left at its
   old path, so a module package can render a private image and `pnpm boundaries` stays green with
   every Phase 3 call site untouched.
 - **WINDOWS 17 closed.** `post.published` no longer carries a hard-coded `hasMedia: false`; it is
@@ -342,7 +342,7 @@ See `key-decisions` in the frontmatter. The two worth restating in prose:
 - **Found during:** Task 3 (RED)
 - **Issue:** `packages/modules/feed/vitest.config.ts` was `environment: 'node'` with
   `include: ['tests/**/*.test.ts']`, so the plan's own `<verify>` command
-  (`pnpm --filter @tria/module-feed test`) could not run a single one of the `<behavior>` list's
+  (`pnpm --filter @rede-social/module-feed test`) could not run a single one of the `<behavior>` list's
   component assertions.
 - **Fix:** Added `@vitejs/plugin-react`, `happy-dom`, Testing Library, `react-dom` and `motion` as
   devDependencies; the config gained the react plugin and a `{ts,tsx}` include. The default
@@ -351,7 +351,7 @@ See `key-decisions` in the frontmatter. The two worth restating in prose:
   mocks.
 - **Files modified:** `packages/modules/feed/{package.json,vitest.config.ts,tsconfig.json}`,
   `pnpm-lock.yaml`
-- **Verification:** `pnpm --filter @tria/module-feed test` → 25 passed, 2 files, exit 0
+- **Verification:** `pnpm --filter @rede-social/module-feed test` → 25 passed, 2 files, exit 0
 - **Committed in:** `0426792` (RED) and `d21e3ef` (the `motion` addition)
 
 **2. [Rule 1 - Bug] A module's UI classes were invisible to Tailwind**
@@ -365,7 +365,7 @@ See `key-decisions` in the frontmatter. The two worth restating in prose:
   because this plan's entire visual contract — the snap strip, the scrim pill, the 40px icon square —
   depends on it.)
 - **Files modified:** `apps/web/app/globals.css`
-- **Verification:** `pnpm --filter @tria/web lint` (Biome CSS) clean; the e2e reads real geometry
+- **Verification:** `pnpm --filter @rede-social/web lint` (Biome CSS) clean; the e2e reads real geometry
   (`boundingBox().height < 96`) rather than class names
 - **Committed in:** `d21e3ef`
 
@@ -381,7 +381,7 @@ See `key-decisions` in the frontmatter. The two worth restating in prose:
   run" means "not referenced by a post", and the old predicate also destroyed seeded content the e2e
   measures. `deleteTenantVideoAssets` instead detaches the rows first and stays a TOTAL reset,
   because the media library's empty-state, newest-first and pagination assertions are absolute counts
-  that an off-by-one would break; the feed-media e2e reads its video case from tria-lab as a result.
+  that an off-by-one would break; the feed-media e2e reads its video case from rede-lab as a result.
 - **Files modified:** `apps/api/tests/integration/{media,media-playback,mux-webhook}.test.ts`,
   `apps/web/e2e/{admin.ts,feed-media.spec.ts}`
 - **Verification:** `pnpm test:integration` → 26 files, 357 passed; `pnpm e2e` → the four
@@ -512,7 +512,7 @@ database, and killing the first tore down the shared `webServer` for the second.
 
 **7. Three e2e failures in the final full run are PRE-EXISTING and out of scope.** Logged to
 `.planning/phases/04-feed/deferred-items.md` and the WINDOWS ledger rather than fixed:
-`shell.spec.ts:111` expects the "Em breve" card on tria-lab's `/inicio`, but tria-lab has had the
+`shell.spec.ts:111` expects the "Em breve" card on rede-lab's `/inicio`, but rede-lab has had the
 `feed` module enabled since 04-01, so the feed home slot renders (and `feed.spec.ts` asserts exactly
 that) — it fails deterministically on a fresh seed, at HEAD and before this plan's commits;
 `platform-branding.spec.ts:182` is order-dependent and passes in isolation. Nothing in this plan's
@@ -530,8 +530,8 @@ diff touches the shell, the module registry's flags or branding.
 | `pnpm db:generate` | "No schema changes"; `git status --porcelain -- supabase/migrations` empty |
 | `pnpm db:reset && pnpm db:seed && pnpm supabase test db` | 10 files, 188 tests, Result: PASS |
 | `pnpm test:integration` | 26 files, **357 passed** |
-| `pnpm --filter @tria/module-feed test` | 2 files, **25 passed** |
-| `pnpm --filter @tria/web exec playwright test feed-media.spec.ts` | **8 passed** (4 cases x 2 projects) |
+| `pnpm --filter @rede-social/module-feed test` | 2 files, **25 passed** |
+| `pnpm --filter @rede-social/web exec playwright test feed-media.spec.ts` | **8 passed** (4 cases x 2 projects) |
 | `pnpm e2e` (whole suite, clean run) | **278 passed, 3 failed** — all three pre-existing, see Issues 7 |
 
 ## User Setup Required

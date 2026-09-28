@@ -34,7 +34,7 @@ provides:
   - "apps/web/e2e/phase2-smoke.spec.ts — serial phase smoke on a panel-provisioned throwaway tenant (5 tests; 3-5 skip on pixel-chromium): panel reachability + platform-rail theme row, D-31 create, D-36 neutral shell before verification, Domínios attach + Verificar agora, invite mail in Mailpit, first-HTML brand / theme-color / manifest / neutral icons, rendered CTA colour, Marca rebrand (logo → icons v1, primary → v2) followed by served HTML + manifest icons, member shell nav colour on iPhone 14 / Pixel 7 / desktop, alias 308, Status-tab suspend → branded /comunidade-indisponivel → reactivate, Feed toggle (panel path) + reference-module flip (nav + API-404 path) — the honest two-witness ROLE-04 proof, branded recovery mail"
   - "apps/web/e2e/branding.spec.ts — 'Phase 2 — served brand per host (phone + desktop)': B1 first HTML + rendered CTA + manifest/derived icons per seed tenant, B2 logged-in shell rendered nav colour + meta/link, B3 neutral generic host; 02-01's four tests untouched"
   - "apps/web/playwright.config.ts — projects mobile-chromium (iPhone 14), pixel-chromium (Pixel 7, testMatch anchored to branding + phase2-smoke), desktop-chromium; CI reporter github + html (PLAYWRIGHT_REPORT_DIR), outputDir (PLAYWRIGHT_OUTPUT_DIR), expect timeout 10 s; API + web webServer only"
-  - "apps/web/app/(platform)/plataforma/layout.tsx — kernel ThemeToggle in PlatformRail.themeSlot (tria_theme strict read, app.nav.theme, 02-07 setTheme) — D-41 on the platform rail"
+  - "apps/web/app/(platform)/plataforma/layout.tsx — kernel ThemeToggle in PlatformRail.themeSlot (rede_theme strict read, app.nav.theme, 02-07 setTheme) — D-41 on the platform rail"
   - "scripts/check-static-routes.sh + root `check:static-routes` — build-output gate over .next/prerender-manifest.json + app-path-routes-manifest.json (REQUIRED_KEYS, GUARDED_PREFIXES, ALLOWED_STATIC ^/_ and ^/serwist/; exit 2 without a build, 1 with offenders)"
   - "root `verify` (the local exit gate, 11 steps) and `verify:smoke` (branding + phase2-smoke + invite + recovery specs, then the PWA @tracer half)"
   - ".github/workflows/ci.yml — single `checks` job mirroring `verify` step for step (pnpm lint with the UI literal guard, static-routes gate after the build, dev-server e2e on three projects, production-build PWA e2e with separate report/trace folders, artifacts on failure), workflow_call preserved for deploy-api.yml"
@@ -57,7 +57,7 @@ tech-stack:
     - "Phase smoke on a throwaway tenant driven from the panel: unique slug per run (`process.ppid` + project letter), beforeAll wipes leftovers, afterAll deletes users → tenant (cascade) and stops the worker it spawned; the seed tenants are never mutated"
     - "Cache-bounded assertions stay exact: when a change must outlive the 60 s web host cache the spec polls the first HTML up to 70 s and annotates the observed delay (testInfo.annotations) instead of loosening the assertion"
     - "Build-output gate = fixed required keys + guarded prefixes + strict static allow-list, exit 2 on absence — a moved route, a leaked static page and a missing build all fail loudly"
-    - "One local exit gate script (`verify`) is the CI shape; spec filters go through `pnpm --filter @tria/web exec playwright test <spec>`, never `pnpm e2e -- <spec>`"
+    - "One local exit gate script (`verify`) is the CI shape; spec filters go through `pnpm --filter @rede-social/web exec playwright test <spec>`, never `pnpm e2e -- <spec>`"
 
 key-files:
   created:
@@ -80,7 +80,7 @@ key-decisions:
   - "02-16: worker under e2e — playwright.config.ts keeps API + web only; the smoke calls ensureWorker() in beforeAll and stops it in afterAll (02-14 decision honoured)"
   - "02-16: one CI job mirroring `verify` step for step (D-12); the PWA production-build suite is appended after the dev-server e2e with PLAYWRIGHT_REPORT_DIR / PLAYWRIGHT_OUTPUT_DIR rather than a second job duplicating the eight local-stack steps"
   - "02-16: pixel-chromium runs only branding.spec.ts and phase2-smoke.spec.ts (testMatch anchored to the file name — an unanchored regex also matched platform-branding.spec.ts); smoke tests 3-5 skip there as layout-independent"
-  - "02-16: `verify:smoke` uses `pnpm --filter @tria/web exec playwright test <specs>` instead of the plan's `pnpm e2e -- <specs>`: pnpm forwards the `--` and Playwright then ignores every filter and runs the whole suite (observed: a stray `pnpm e2e -- --list …` ran all 208 tests)"
+  - "02-16: `verify:smoke` uses `pnpm --filter @rede-social/web exec playwright test <specs>` instead of the plan's `pnpm e2e -- <specs>`: pnpm forwards the `--` and Playwright then ignores every filter and runs the whole suite (observed: a stray `pnpm e2e -- --list …` ran all 208 tests)"
   - "02-16: `apps/api/turbo.json` declares `@react-email/render` as an implicit boundary dependency — the only way `pnpm boundaries` can follow `pnpm turbo build` (dist/ is walked) in `verify` and CI; the finding was the bundled resend SDK's optional import, not project code"
   - "02-16: the served-HTML follow-up of a brand/status change is bounded by the 60 s web host cache (apps/web/lib/tenant-host.ts): observed 61 s (404-miss → verified), 55 s (rebrand), 58 s (suspend), 61 s (reactivate); the specs poll up to 70 s and record the delay — the assertions were not loosened"
   - "02-16: the acceptInvite catalog namespace stays as 02-10 shipped it (no rename this phase)"
@@ -108,7 +108,7 @@ coverage:
     requirement: TENANT-02
     verification:
       - kind: other
-        ref: "pnpm --filter @tria/web build && pnpm check:static-routes (OK, 25 guarded routes, static = /_global-error + /serwist/sw.js{,.map}); NEXT_DIR=/nonexistent → exit 2; injected routes['/inicio'] → exit 1 naming /inicio; deleted /(app)/perfil/page → 'route moved or renamed'"
+        ref: "pnpm --filter @rede-social/web build && pnpm check:static-routes (OK, 25 guarded routes, static = /_global-error + /serwist/sw.js{,.map}); NEXT_DIR=/nonexistent → exit 2; injected routes['/inicio'] → exit 1 naming /inicio; deleted /(app)/perfil/page → 'route moved or renamed'"
         status: pass
     human_judgment: false
   - id: D3
@@ -136,7 +136,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D6
-    description: "Branded auth mail for a non-seed tenant end to end (GoTrue → hook → Mailpit): recovery Subject 'Redefina sua senha — {name}', From {name} <no-reply@…>, CTA background = persisted primary, uploaded logo as <img>, footer 'Enviado pela plataforma TRIA', plain-text /auth/confirm link; plus the invite mail of D3"
+    description: "Branded auth mail for a non-seed tenant end to end (GoTrue → hook → Mailpit): recovery Subject 'Redefina sua senha — {name}', From {name} <no-reply@…>, CTA background = persisted primary, uploaded logo as <img>, footer 'Enviado pela plataforma Rede Social', plain-text /auth/confirm link; plus the invite mail of D3"
     requirement: TENANT-06
     verification:
       - kind: e2e
@@ -148,7 +148,7 @@ coverage:
     requirement: PWA-01
     verification:
       - kind: e2e
-        ref: "pnpm --filter @tria/web e2e:pwa — 45 passed + 3 annotated skips (CDP display-mode emulation unsupported); phase2-smoke.spec.ts#1 (e)/(g) readManifest"
+        ref: "pnpm --filter @rede-social/web e2e:pwa — 45 passed + 3 annotated skips (CDP display-mode emulation unsupported); phase2-smoke.spec.ts#1 (e)/(g) readManifest"
         status: pass
     human_judgment: false
   - id: D8
@@ -158,15 +158,15 @@ coverage:
     human_judgment: true
     rationale: "verification: backstop — Playwright cannot install a PWA and the bundled Chromium ignores display-mode emulation (02-11); installability needs the hosted HTTPS origin from Phase 01.1. Recorded in docs/DEPLOY.md '## Phase 2 verification' manual table; never auto-passes"
   - id: D9
-    description: "ROADMAP criterion 3 at phase level: `pnpm lint` (Biome + check-ui-literals.sh) green inside `pnpm verify`; @tria/ui 34 tests green; 'Igor Alves' absent from apps/** and packages/**; apps/web/lib/nav.ts absent; navigation built from bootstrap modules only (apps/web/lib/registry.tsx); D-33 approval recorded"
+    description: "ROADMAP criterion 3 at phase level: `pnpm lint` (Biome + check-ui-literals.sh) green inside `pnpm verify`; @rede-social/ui 34 tests green; 'Igor Alves' absent from apps/** and packages/**; apps/web/lib/nav.ts absent; navigation built from bootstrap modules only (apps/web/lib/registry.tsx); D-33 approval recorded"
     requirement: UI-03
     verification:
       - kind: other
-        ref: "pnpm verify step 1 (check-ui-literals: OK); git grep -q 'Igor Alves' -- apps packages ':!reference' → exit 1; test ! -e apps/web/lib/nav.ts; grep buildNav/modules apps/web/lib/registry.tsx; pnpm --filter @tria/ui test 34/34; grep 'approved: true' .planning/sketches/001-phase-02-designed-screens/README.md"
+        ref: "pnpm verify step 1 (check-ui-literals: OK); git grep -q 'Igor Alves' -- apps packages ':!reference' → exit 1; test ! -e apps/web/lib/nav.ts; grep buildNav/modules apps/web/lib/registry.tsx; pnpm --filter @rede-social/ui test 34/34; grep 'approved: true' .planning/sketches/001-phase-02-designed-screens/README.md"
         status: pass
     human_judgment: false
   - id: D10
-    description: "The platform rail carries the kernel ThemeToggle in the pinned bottom group next to 'Sair' (D-41): clicking sets html[data-theme=dark] at once, writes tria_theme=dark, and after a reload the SERVER HTML already carries data-theme=dark; the label truncates and the rail stays within the screen height (E03)"
+    description: "The platform rail carries the kernel ThemeToggle in the pinned bottom group next to 'Sair' (D-41): clicking sets html[data-theme=dark] at once, writes rede_theme=dark, and after a reload the SERVER HTML already carries data-theme=dark; the label truncates and the rail stays within the screen height (E03)"
     requirement: UI-03
     verification:
       - kind: e2e
@@ -186,7 +186,7 @@ coverage:
     human_judgment: true
     rationale: "The repository has no GitHub remote; ci.yml was validated locally (YAML parse + grep assertions + the identical `verify` sequence run locally) but never executed on a runner — the first PR run is the real gate"
   - id: D13
-    description: "Hosted proofs: custom domain end-to-end on a real provider, Send Email Hook against Resend, check-static-routes.sh against a Vercel build, staging smoke on the TRIA-owned seed hosts"
+    description: "Hosted proofs: custom domain end-to-end on a real provider, Send Email Hook against Resend, check-static-routes.sh against a Vercel build, staging smoke on the platform-owned seed hosts"
     verification: []
     human_judgment: true
     rationale: "verification: backstop — Phase 01.1 runbook items linked from docs/DEPLOY.md; locally and in CI the gate runs against DOMAIN_PROVIDER=fake, AUTH_ALLOW_LIST=local, MAIL_TRANSPORT=local by design (prohibition: never a real provider)"
@@ -213,7 +213,7 @@ status: complete
 
 - **Criterion 1 proven twice:** `branding.spec.ts` "Phase 2 — served brand per host" asserts, on the seed tenants and all three projects, the FIRST server HTML (`--brand-primary`, `theme-color`, manifest link, favicon = by-host `faviconUrl`, apple-touch-icon, seed logo, `data-theme`), the RENDERED "Entrar" CTA and active-nav colours, the manifest name/theme_color/derived icons, and the absence of the other tenant's and the neutral hex; `scripts/check-static-routes.sh` guards the build output (exit 2 without a build, 1 on an injected static `/inicio` or a removed required key) inside `verify` and CI.
 - **Criterion 2 proven from the panel:** `phase2-smoke.spec.ts` creates a tenant on `/plataforma/novo`, attaches `<slug>.localhost` on Domínios, presses "Verificar agora", reads the invite in Mailpit, sees the neutral shell before and the tenant's brand after verification, uploads a logo and saves a new primary on Marca (icons v1 → v2 through the spawned worker), and watches by-host → served HTML → manifest follow; then alias 308, Status-tab suspend/reactivate with the branded unavailable screen, the honest two-witness ROLE-04 module proof (Feed from the panel; the reference module's tab, slot and 200/404 route by a spec-only SQL flip), and a branded recovery mail — on a tenant that is deleted afterwards.
-- **Criterion 3 and 4 gates in the exit script:** `pnpm lint` (Biome + UI literal guard) and `@tria/ui` tests run inside `pnpm verify`; the prototype owner's name, `lib/nav.ts` and hardcoded nav are absent; `e2e:pwa` (production build, three projects) is the last `verify` step and a CI step with its own report/trace folders; the real-device standalone install is a named backstop in `must_haves` and `docs/DEPLOY.md`.
+- **Criterion 3 and 4 gates in the exit script:** `pnpm lint` (Biome + UI literal guard) and `@rede-social/ui` tests run inside `pnpm verify`; the prototype owner's name, `lib/nav.ts` and hardcoded nav are absent; `e2e:pwa` (production build, three projects) is the last `verify` step and a CI step with its own report/trace folders; the real-device standalone install is a named backstop in `must_haves` and `docs/DEPLOY.md`.
 - **Platform rail theme row (D-41, 02-12 handoff):** `ThemeToggle` mounted in `PlatformRail.themeSlot` from the `(platform)` layout — cookie written at once, `data-theme="dark"` server-rendered after reload, label truncating in the pinned bottom group — without touching `PlatformRail.tsx`.
 - **CI restructured around `verify`:** single `checks` job (`workflow_call` intact for `deploy-api.yml`), `timeout-minutes: 60`, `pnpm lint` (the literal guard finally runs in CI), static-routes gate after the build, dev-server e2e then PWA e2e, both Playwright reports and both trace folders uploaded on failure, no hosted secret; `docs/DEPLOY.md` gained the Documents index, the OTP-expiration and storage-bucket notes and the Phase 2 verification runbook.
 
@@ -237,8 +237,8 @@ Tracer feedback gate (Task 1): interactive run, `human_verify_mode = end-of-phas
 | First `pnpm verify` attempt | exit 1 after 1147 s: `platform-domains.spec.ts` #6 on mobile timed out on the overflow probe (my Task 1 scoping made the `has:` inner locator non-relative) — fixed in `def1ce9`, then the one-shot green run above |
 | Task 1 `<verify>` | web typecheck + lint + literal guard green; `phase2-smoke.spec.ts` 1-2 green on three projects (2.1 min each); `platform-tenants.spec.ts` desktop 6 passed + 1 phone-only skip |
 | Task 2 `<verify>` | `branding.spec.ts` + `phase2-smoke.spec.ts` green on three projects (mobile 5/5, pixel 2 + 3 skips, desktop 5/5 — the desktop pass re-run alone after a stray concurrent run wiped `test-results/`, see Issues); `example.spec.ts shell.spec.ts` desktop 8/8 afterwards; `select count(*) … slug like 'e2e-smoke-%'` = 0; no `e2e-*` leftovers; ports 8790/3100 free |
-| Task 3 `<verify>` | `bash -n`, script wiring node check, ci.yml/DEPLOY.md greps, `pnpm --filter @tria/web build && pnpm check:static-routes`, `pnpm verify:smoke` — all green |
-| ROADMAP criterion 3 greps | `git grep -q "Igor Alves" -- apps packages ':!reference'` → exit 1; `test ! -e apps/web/lib/nav.ts` ✓; `check-ui-literals.sh` OK; `apps/web/lib/registry.tsx` derives nav/home from `bootstrap.modules`; `@tria/ui` 34/34 |
+| Task 3 `<verify>` | `bash -n`, script wiring node check, ci.yml/DEPLOY.md greps, `pnpm --filter @rede-social/web build && pnpm check:static-routes`, `pnpm verify:smoke` — all green |
+| ROADMAP criterion 3 greps | `git grep -q "Igor Alves" -- apps packages ':!reference'` → exit 1; `test ! -e apps/web/lib/nav.ts` ✓; `check-ui-literals.sh` OK; `apps/web/lib/registry.tsx` derives nav/home from `bootstrap.modules`; `@rede-social/ui` 34/34 |
 | CI | `.github/workflows/ci.yml` parsed with `yaml` (24 steps in the documented order, `workflow_call: {}`, single job, `timeout-minutes: 60`, no `needs:`), every acceptance grep green, no `RESEND_API_KEY` / `VERCEL_TOKEN` / `SUPABASE_PAT` outside comments; `actionlint` not installed. **Never executed** — the repository has no GitHub remote; recorded as D12 (human) |
 
 **Observed by-host → served-HTML delays** (the 60 s web host cache in `apps/web/lib/tenant-host.ts`, annotated by the spec on every project): verify (404-miss → tenant) **61 s**, rebrand **55 s**, suspend **58 s**, reactivate **61 s**. The assertions are exact; only the wait is bounded (70 s). On Vercel this TTL is the documented cache bust (RESEARCH Pattern 1).
@@ -293,7 +293,7 @@ See `key-decisions` in the frontmatter (honest ROLE-04 witness, worker under e2e
 **3. [Rule 1 - Bug] The plan's `verify:smoke` command would run the whole suite**
 - **Found during:** Task 3 (a `pnpm e2e -- --list …` probe launched the entire 208-test suite)
 - **Issue:** pnpm forwards the `--` to `playwright test`, which then ignores every positional filter and `--grep`; `pnpm e2e -- branding.spec.ts …` and `e2e:pwa -- --grep @tracer` are both no-op filters (the 02-07/02-08/02-12 "does not filter" observation, now explained).
-- **Fix:** `verify:smoke` = `pnpm --filter @tria/web exec playwright test branding.spec.ts phase2-smoke.spec.ts invite.spec.ts recovery.spec.ts && pnpm --filter @tria/web exec playwright test --config playwright.pwa.config.ts --grep @tracer` (72 + 21 tests listed; the acceptance strings are all present). DEPLOY.md documents the rule.
+- **Fix:** `verify:smoke` = `pnpm --filter @rede-social/web exec playwright test branding.spec.ts phase2-smoke.spec.ts invite.spec.ts recovery.spec.ts && pnpm --filter @rede-social/web exec playwright test --config playwright.pwa.config.ts --grep @tracer` (72 + 21 tests listed; the acceptance strings are all present). DEPLOY.md documents the rule.
 - **Committed in:** `6c5a477`
 
 **4. [Rule 3 - Blocking] `pnpm boundaries` fails after `pnpm turbo build` (dist/ walked)**
@@ -346,15 +346,15 @@ Everything below is a judgment call or a hosted/real-device proof no command in 
 1. **Real-device standalone install (PWA-01 closure, backstop 1):** on a real iPhone (Safari → Compartilhar → "Adicionar à Tela de Início") and a real Android phone (Chrome install prompt), open a tenant host over HTTPS (hosted environment from Phase 01.1), install, launch — no browser chrome, the tenant's icon and name, status bar in the tenant primary; `document.documentElement.dataset.displayMode === 'standalone'`. Until the hosted origin exists this stays open (recorded in `docs/DEPLOY.md`).
 2. **First green CI run on a PR** shows the 24 steps in the documented order with both Playwright runs (dev-server and PWA) and, on a forced failure, the `playwright-artifacts` upload with both report folders.
 3. **Read `docs/DEPLOY.md` top to bottom** — every link resolves (`docs/deploy/auth-mail.md`, `packages/core/db/README.md`, the in-file sections), the Phase 2 verification section matches `package.json` `verify`.
-4. **Branded login look (02-08, phone + desktop):** `http://tria-demo.localhost:3000/entrar` (purple, logo, "Comunidade: TRIA Demo") vs `tria-lab` (teal) vs `http://localhost:3000/entrar` (TRIA wordmark); sign-up eye toggle + three-segment meter + consents; suspended screen; 40+ character name wraps to ≤ 2 lines; dark theme on `/entrar`.
+4. **Branded login look (02-08, phone + desktop):** `http://rede-demo.localhost:3000/entrar` (purple, logo, "Comunidade: Rede Demo") vs `rede-lab` (teal) vs `http://localhost:3000/entrar` (Rede Social wordmark); sign-up eye toggle + three-segment meter + consents; suspended screen; 40+ character name wraps to ≤ 2 lines; dark theme on `/entrar`.
 5. **Shell fidelity (02-07):** phone TopBar + glass BottomNav that shrinks on scroll; desktop 240 px rail + 680 px column; `/configuracoes` rows; `/perfil`; dark mode with no light flash on reload; 40-character display-name truncation (rename a seed tenant via `PATCH /v1/platform/tenants/{id}`).
 6. **Platform panel screens vs the D-33 mockup (02-12, 02-14, 02-15):** `#tenant-list`, `#platform-shell-mobile`, `#new-tenant` (BrandPreview mini-shells, contrast pills with `#f5f7fb`), `#tenant-page-marca` (zones, upload progress, "Ícones sendo gerados…" → thumbs), `#tenant-page-dominios` (DNS table / stacked blocks, confirm dialogs), `#tenant-page-modulos`, `#tenant-page-admins` / `#tenant-page-status`; light and dark — neutral tokens only on the platform host; **new in 02-16:** the "Tema" row sits in the rail's bottom group above "Sair" and flips the panel's theme.
 7. **Designer review still open (02-04):** the D-33 approval is the product owner's, provisional — confirm the design team's follow-up exists.
-8. **Branded mails in Mailpit (02-06, 02-10):** `http://127.0.0.1:54324` — "Redefina sua senha — TRIA Demo" (purple accent + CTA, wordmark, footer, plain-text tab) and "Convite para administrar …" for a throwaway tenant (accented name as text, amber CTA); after `pnpm verify:smoke` the `Smoke <sfx>` tenant's invite and recovery mails show the uploaded lab SVG logo and the `#0e7490` CTA.
+8. **Branded mails in Mailpit (02-06, 02-10):** `http://127.0.0.1:54324` — "Redefina sua senha — Rede Demo" (purple accent + CTA, wordmark, footer, plain-text tab) and "Convite para administrar …" for a throwaway tenant (accented name as text, amber CTA); after `pnpm verify:smoke` the `Smoke <sfx>` tenant's invite and recovery mails show the uploaded lab SVG logo and the `#0e7490` CTA.
 9. **Accept-invite screen (02-10):** follow an invite link from Mailpit to `/aceitar-convite` on the tenant host — branded heading "Você foi convidado(a) a administrar {tenant}", password + consents, expired link → `/convite-expirado`.
 10. **Offline page and install hint (02-11):** airplane mode → navigate → `/~offline` vs mockup `#offline`; `InstallHint` (mount `<InstallHint open />` in a scratch page) vs `#install-hint`.
 11. **Missing-catalog-key behaviour (02-04):** under `next dev` a deliberately missing key throws; under `next build && next start` the dotted key renders.
-12. **Hosted proofs (backstops 2-4, Phase 01.1 runbook):** real customer domain end to end (`DOMAIN_PROVIDER=vercel`, `AUTH_ALLOW_LIST=supabase`), Send Email Hook against Resend, `check-static-routes.sh` on a Vercel build, staging smoke on the TRIA-owned seed hosts with `PLAYWRIGHT_BASE_URL` + `PLAYWRIGHT_API_URL`; set `otp_expiry = 86400` hosted.
+12. **Hosted proofs (backstops 2-4, Phase 01.1 runbook):** real customer domain end to end (`DOMAIN_PROVIDER=vercel`, `AUTH_ALLOW_LIST=supabase`), Send Email Hook against Resend, `check-static-routes.sh` on a Vercel build, staging smoke on the platform-owned seed hosts with `PLAYWRIGHT_BASE_URL` + `PLAYWRIGHT_API_URL`; set `otp_expiry = 86400` hosted.
 
 ## User Setup Required
 

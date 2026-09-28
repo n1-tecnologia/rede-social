@@ -1,9 +1,9 @@
-import { type Tx, withTenantTx } from '@tria/core/db/tenant-tx';
-import type { RequestContext } from '@tria/core/server/auth/context';
-import { emit } from '@tria/core/server/events/bus';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { moduleLogger } from '@tria/core/server/logging';
-import { decodeCursor, encodeCursor } from '@tria/core/server/paging';
+import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
+import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { emit } from '@rede-social/core/server/events/bus';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { type SQL, sql } from 'drizzle-orm';
 import type {
   CommunityPage,

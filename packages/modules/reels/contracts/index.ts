@@ -1,5 +1,5 @@
 /**
- * The module's published contract surface (`@tria/module-reels/contracts`): the tuning constants the
+ * The module's published contract surface (`@rede-social/module-reels/contracts`): the tuning constants the
  * Reels player, pager and host read (plans 05-08). Constants only — Reels owns no request or response
  * shape of its own, because it reads feed's `GET /v1/feed?media=video` and reuses feed's contracts.
  */

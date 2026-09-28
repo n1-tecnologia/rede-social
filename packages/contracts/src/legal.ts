@@ -3,24 +3,24 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * TRIA's legal texts and their versions (D-03, AUTH-04).
+ * the platform's legal texts and their versions (D-03, AUTH-04).
  *
  * SERVER-ONLY: `readLegalDoc` touches `node:fs`. Never import this module from a client component
- * (there is no `import 'server-only'` here because that package is Next-specific and `@tria/contracts`
+ * (there is no `import 'server-only'` here because that package is Next-specific and `@rede-social/contracts`
  * is also consumed by the API and by scripts).
  *
- * One consent, one version — D-03 records a SINGLE `tria_terms` consent that accepts BOTH texts, so
- * the recorded `consent_records.text_version` is `TRIA_TERMS_VERSION` and that one number must
+ * One consent, one version — D-03 records a SINGLE `platform_terms` consent that accepts BOTH texts, so
+ * the recorded `consent_records.text_version` is `PLATFORM_TERMS_VERSION` and that one number must
  * identify both documents. The rule: a change to EITHER legal text bumps `version:` in BOTH markdown
- * files and BOTH constants together, so `TRIA_PRIVACY_VERSION === TRIA_TERMS_VERSION` always holds.
+ * files and BOTH constants together, so `PLATFORM_PRIVACY_VERSION === PLATFORM_TERMS_VERSION` always holds.
  * `tests/legal.test.ts` fails CI the moment that stops being true.
  */
 
-/** Version of `legal/termos-de-uso.md`. Recorded in `consent_records.text_version` for `tria_terms`. */
-export const TRIA_TERMS_VERSION = 1;
+/** Version of `legal/termos-de-uso.md`. Recorded in `consent_records.text_version` for `platform_terms`. */
+export const PLATFORM_TERMS_VERSION = 1;
 
-/** Version of `legal/politica-de-privacidade.md`. Always equal to `TRIA_TERMS_VERSION` (see above). */
-export const TRIA_PRIVACY_VERSION = 1;
+/** Version of `legal/politica-de-privacidade.md`. Always equal to `PLATFORM_TERMS_VERSION` (see above). */
+export const PLATFORM_PRIVACY_VERSION = 1;
 
 export const LEGAL_DOCS = ['termos-de-uso', 'politica-de-privacidade'] as const;
 export type LegalDocName = (typeof LEGAL_DOCS)[number];
@@ -48,7 +48,7 @@ function candidatePaths(name: LegalDocName): string[] {
   let dir = process.cwd();
   for (let i = 0; i < 6; i += 1) {
     paths.push(join(dir, 'packages', 'contracts', 'legal', `${name}.md`));
-    paths.push(join(dir, 'node_modules', '@tria', 'contracts', 'legal', `${name}.md`));
+    paths.push(join(dir, 'node_modules', '@rede-social', 'contracts', 'legal', `${name}.md`));
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

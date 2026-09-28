@@ -1,4 +1,4 @@
-import { Card } from '@tria/ui';
+import { Card } from '@rede-social/ui';
 import { Video } from 'lucide-react';
 import type { ReactNode } from 'react';
 

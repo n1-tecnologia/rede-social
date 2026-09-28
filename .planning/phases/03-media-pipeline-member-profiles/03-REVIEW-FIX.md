@@ -36,8 +36,8 @@ pre-fix code.
 ### CR-01: `DELETE /v1/media/{assetId}` had no owner or role check
 
 **Files modified:**
-- `/Users/igorvboas/Library/Developer/TRIA/rede_social/packages/core/server/media/service.ts`
-- `/Users/igorvboas/Library/Developer/TRIA/rede_social/apps/api/tests/integration/media.test.ts`
+- `./packages/core/server/media/service.ts`
+- `./apps/api/tests/integration/media.test.ts`
 
 **Commit:** `d3e4d81`
 
@@ -73,10 +73,10 @@ and it loads the *community's* asset, not the caller's.
 
 **Regression tests added** (`apps/api/tests/integration/media.test.ts`, new describe
 `intra-tenant authorization — a fellow member is not an owner`):
-- a second seeded member of `tria-demo` (`joao.goncalves@tria-demo.local`) is refused with 404, the
+- a second seeded member of `rede-demo` (`joao.goncalves@rede-demo.local`) is refused with 404, the
   envelope carries no `details`, the row survives as `ready`, and the owner then deletes it fine;
 - a random uuid produces the byte-identical refusal — the two are indistinguishable;
-- `admin@tria-demo.local` may retire the member's asset (200).
+- `admin@rede-demo.local` may retire the member's asset (200).
 
 **Mutation check:** removing the `assertMayRetire(ctx, row);` line makes the first case fail with
 `expected 200 to be 404`. The other two still pass, which is the point — only the new case pins the
@@ -91,10 +91,10 @@ reachable by any member of the tenant holding a `pending` asset id.
 ### CR-02: profile surfaces requested `w320` that the worker never derived
 
 **Files modified:**
-- `/Users/igorvboas/Library/Developer/TRIA/rede_social/packages/core/server/media/limits.ts`
-- `/Users/igorvboas/Library/Developer/TRIA/rede_social/packages/core/server/media/service.ts`
-- `/Users/igorvboas/Library/Developer/TRIA/rede_social/packages/core/tests/media.test.ts`
-- `/Users/igorvboas/Library/Developer/TRIA/rede_social/apps/api/tests/integration/media.test.ts`
+- `./packages/core/server/media/limits.ts`
+- `./packages/core/server/media/service.ts`
+- `./packages/core/tests/media.test.ts`
+- `./apps/api/tests/integration/media.test.ts`
 
 **Commit:** `86c0b14`
 

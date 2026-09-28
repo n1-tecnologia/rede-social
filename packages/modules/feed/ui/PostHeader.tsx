@@ -1,4 +1,4 @@
-import { Avatar, IconButton } from '@tria/ui';
+import { Avatar, IconButton } from '@rede-social/ui';
 import { MoreHorizontal } from 'lucide-react';
 
 /**

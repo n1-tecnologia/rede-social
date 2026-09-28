@@ -8,7 +8,7 @@
 --      is a no-op against it, which is the property that keeps the TS schema and this folder honest.
 --
 --   2. HAND-WRITTEN — `story_community_pins_community_fk`. It is not generated because it CANNOT
---      be: `public.communities` belongs to `@tria/module-communities`, and `turbo.json`'s boundary
+--      be: `public.communities` belongs to `@rede-social/module-communities`, and `turbo.json`'s boundary
 --      allowlist denies a `module -> module` package dependency (MOD-02, proved by
 --      `packages/boundary-fixture`). A drizzle `.references(() => communities.id)` on that column
 --      needs exactly that import. Nothing is lost: the DATABASE enforces it either way,

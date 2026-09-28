@@ -10,7 +10,7 @@
 --      against it, which is the property that keeps the TS schema and this folder honest.
 --
 --   2. HAND-WRITTEN — `feed_comments_story_fk` and `feed_likes_story_fk`. They are not generated
---      because they CANNOT be: the referencing tables belong to `@tria/module-feed`, and
+--      because they CANNOT be: the referencing tables belong to `@rede-social/module-feed`, and
 --      `turbo.json`'s boundary allowlist denies a `module -> module` package dependency (MOD-02,
 --      proved by `packages/boundary-fixture`). A drizzle `.references(() => stories.id)` on those
 --      columns needs exactly that import. Nothing is lost: the DATABASE enforces them either way,

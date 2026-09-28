@@ -1,8 +1,8 @@
-import { MEDIA_LIST_PAGE_SIZE } from '@tria/contracts/media';
-import { stopBoss } from '@tria/core/server/jobs/boss';
-import { mediaProviderEventJob } from '@tria/core/server/media/video/event-job';
-import { resetFakeVideoInternals } from '@tria/core/server/media/video/fake';
-import type { VideoProviderEvent } from '@tria/core/server/media/video/types';
+import { MEDIA_LIST_PAGE_SIZE } from '@rede-social/contracts/media';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
+import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
+import type { VideoProviderEvent } from '@rede-social/core/server/media/video/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
 
@@ -22,14 +22,14 @@ import { adminSql, api, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
  *    consideration, T-03-48), lists the caller's own assets newest-first, pages by the shared
  *    keyset cursor, and never contains another community's asset id.
  *
- * Tenant A is the seeded `tria-demo`, tenant B the seeded `tria-lab`; the two-community pair is the
+ * Tenant A is the seeded `rede-demo`, tenant B the seeded `rede-lab`; the two-community pair is the
  * same one `isolation.test.ts` uses, and 03-08 lifts the cross-tenant case from here into it.
  */
 
-const DEMO_ADMIN = 'admin@tria-demo.local';
-const DEMO_MEMBER = 'member@tria-demo.local';
-const LAB_ADMIN = 'admin@tria-lab.local';
-const LAB_MEMBER = 'member@tria-lab.local';
+const DEMO_ADMIN = 'admin@rede-demo.local';
+const DEMO_MEMBER = 'member@rede-demo.local';
+const LAB_ADMIN = 'admin@rede-lab.local';
+const LAB_MEMBER = 'member@rede-lab.local';
 
 let demoAdminToken = '';
 let demoMemberToken = '';
@@ -118,9 +118,9 @@ beforeAll(async () => {
     signInAs(LAB_MEMBER, SEED_PASSWORD),
   ]);
   const tenants = await adminSql<{ id: string; slug: string }[]>`
-    select id, slug from public.tenants where slug in ('tria-demo', 'tria-lab')`;
-  demoTenantId = tenants.find((t) => t.slug === 'tria-demo')?.id ?? '';
-  labTenantId = tenants.find((t) => t.slug === 'tria-lab')?.id ?? '';
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
+  demoTenantId = tenants.find((t) => t.slug === 'rede-demo')?.id ?? '';
+  labTenantId = tenants.find((t) => t.slug === 'rede-lab')?.id ?? '';
   if (!demoTenantId || !labTenantId) throw new Error('the two seed tenants are not both present');
   await cleanup();
 });
@@ -354,7 +354,7 @@ describe('GET /v1/media — the admin-only asset list (MEDIA-03, R-11)', () => {
     });
     expect(tooBig.status).toBe(400);
 
-    const unknownKey = await api.request('/v1/media?kind=video&tenant=tria-lab', {
+    const unknownKey = await api.request('/v1/media?kind=video&tenant=rede-lab', {
       headers: authed(demoAdminToken),
     });
     expect(unknownKey.status).toBe(400);
@@ -382,7 +382,7 @@ describe('cross-tenant refusal — criterion 4 video half (T-03-46, TENANT-04)',
     const raw = await res.text();
     expect(raw).not.toContain('tokens');
     expect(raw).not.toContain('fake-playback-tenant-a');
-    expect(raw).not.toContain('tria-demo');
+    expect(raw).not.toContain('rede-demo');
     expect(raw).not.toContain('privado-da-demo');
   });
 

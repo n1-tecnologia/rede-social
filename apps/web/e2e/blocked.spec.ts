@@ -17,12 +17,12 @@ import {
 test.describe.configure({ timeout: 120_000 });
 
 const PASSWORD = 'Segredo123';
-const SUSPENDED = 'Seu acesso a TRIA Demo foi suspenso. Fale com a equipe.';
+const SUSPENDED = 'Seu acesso a Rede Demo foi suspenso. Fale com a equipe.';
 
-const email = `e2e-blocked-${Date.now()}@tria-demo.local`;
+const email = `e2e-blocked-${Date.now()}@rede-demo.local`;
 
 test.beforeAll(async () => {
-  await createMember(email, PASSWORD, 'tria-demo');
+  await createMember(email, PASSWORD, 'rede-demo');
 });
 
 test.afterAll(async () => {
@@ -46,7 +46,7 @@ test('AUTH-06/D-09 — blocked on the next request, session cleared, same screen
 
   // 3. The very next request is refused and the device is signed out.
   await page.goto('/inicio');
-  await expect(page).toHaveURL(/\/acesso-suspenso\?t=TRIA%20Demo$/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/acesso-suspenso\?t=Rede Social%20Demo$/, { timeout: 30_000 });
   await expect(page.getByText(SUSPENDED)).toBeVisible();
   expect(await page.locator('body').innerText()).not.toMatch(/motivo/i);
   expect((await context.cookies()).filter((c) => c.name.startsWith('sb-'))).toHaveLength(0);
@@ -69,7 +69,7 @@ test('AUTH-06/D-09 — blocked on the next request, session cleared, same screen
   await page.locator('#password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
     timeout: 20_000,
   });
 });
@@ -77,8 +77,8 @@ test('AUTH-06/D-09 — blocked on the next request, session cleared, same screen
 test('orphan identity — a session with no membership lands on /sem-comunidade', async ({
   page,
 }) => {
-  const orphan = `e2e-orphan-${Date.now()}@tria-demo.local`;
-  await createMember(orphan, PASSWORD, 'tria-demo');
+  const orphan = `e2e-orphan-${Date.now()}@rede-demo.local`;
+  await createMember(orphan, PASSWORD, 'rede-demo');
 
   await page.goto('/entrar');
   await page.locator('#email').fill(orphan);
@@ -93,7 +93,7 @@ test('orphan identity — a session with no membership lands on /sem-comunidade'
   await expect(page).toHaveURL(/\/sem-comunidade$/, { timeout: 30_000 });
   await expect(page.getByText('Sua conta ainda não pertence a uma comunidade.')).toBeVisible();
   // Tenant host (D-22): the sign-up link carries no slug.
-  await expect(page.getByRole('link', { name: 'Cadastrar em TRIA Demo' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'Cadastrar em Rede Demo' })).toHaveAttribute(
     'href',
     '/cadastro',
   );

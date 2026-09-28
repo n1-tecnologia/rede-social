@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { sqlClient } from '@tria/core/db';
+import { sqlClient } from '@rede-social/core/db';
 import { afterAll, describe, expect, it } from 'vitest';
 import { api } from './setup';
 

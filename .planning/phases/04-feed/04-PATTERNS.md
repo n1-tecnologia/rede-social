@@ -67,7 +67,7 @@ Copy the exports map verbatim — the five subpaths are what Biome's boundary li
   "./db": "./db/schema.ts"
 },
 "scripts": { "typecheck": "tsc --noEmit", "lint": "biome check .", "test": "vitest run --passWithNoTests" },
-"dependencies": { "@hono/zod-openapi": "1.6.3", "@tria/contracts": "workspace:*", "@tria/core": "workspace:*",
+"dependencies": { "@hono/zod-openapi": "1.6.3", "@rede-social/contracts": "workspace:*", "@rede-social/core": "workspace:*",
   "drizzle-orm": "0.45.2", "hono": "4.13.7", "pino": "10.3.1", "zod": "4.6.2" },
 "peerDependencies": { "react": "19.3.0" }
 ```
@@ -81,8 +81,8 @@ Additions for feed: `open-graph-scraper@6.12.0`, `undici@7.29.1` (pinned, per RE
 **Analog:** `packages/modules/example/module.ts` (lines 1-32, whole file)
 
 ```ts
-import { moduleLogger } from '@tria/core/server/logging';
-import { defineModule } from '@tria/core/server/modules/manifest';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { exampleProcessJob } from './server/jobs';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
@@ -119,7 +119,7 @@ export const EXAMPLE_PROCESS_QUEUE = 'example.process';
 /** `tenantId` is data, not authority: the handler re-enters the tenant lane with it and RLS decides (T-07-03). */
 export interface ExampleProcessJob { tenantId: string; itemId: string; }
 
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'example.item.created': ExampleItemCreated;
   }
@@ -149,8 +149,8 @@ Copy the `.strict()` + `z.coerce…default(PAGE_SIZE)` + capped-cursor-string sh
 **Analog A — the module table checklist:** `packages/modules/example/db/schema.ts` (lines 1-40, whole file)
 
 ```ts
-import { tenantIsolationPolicy } from '@tria/core/db/rls';
-import { tenants, users } from '@tria/core/db/schema';
+import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
+import { tenants, users } from '@rede-social/core/db/schema';
 import { index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 export const exampleItems = pgTable(
@@ -209,11 +209,11 @@ FEED-08's generic column is `authorUserId` here, replacing `createdByUserId`.
 **Imports + `defaultHook`** (lines 1-29):
 ```ts
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import type { AppEnv } from '@tria/core/server/auth/context';
-import { requireAuth } from '@tria/core/server/auth/require-auth';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { requireModule } from '@tria/core/server/modules/require-module';
-import { requireRole } from '@tria/core/server/rbac/require-role';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
+import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { requireModule } from '@rede-social/core/server/modules/require-module';
+import { requireRole } from '@rede-social/core/server/rbac/require-role';
 
 const example = new OpenAPIHono<AppEnv>({
   defaultHook: (result) => {
@@ -367,8 +367,8 @@ The unfurl worker writes its `feed_link_previews` row through exactly this shape
 **Analog:** `packages/modules/example/server/jobs.ts` (lines 1-31, whole file)
 
 ```ts
-import { moduleLogger } from '@tria/core/server/logging';
-import type { JobDefinition } from '@tria/core/server/modules/manifest';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import type { JobDefinition } from '@rede-social/core/server/modules/manifest';
 const log = moduleLogger('module-example');
 
 export const exampleProcessJob: JobDefinition<ExampleProcessJob> = {
@@ -420,7 +420,7 @@ export type ExampleWidgetProps = {
 };
 ```
 
-Every `PostCard` / `CommentSheet` prop type follows this: data in, `labels: {…}` in, actions in, zero imports from `@tria/core/server/*`. `cn` comes from `@tria/ui`; animation uses `motion` (already in `@tria/ui`), **not** `framer-motion`.
+Every `PostCard` / `CommentSheet` prop type follows this: data in, `labels: {…}` in, actions in, zero imports from `@rede-social/core/server/*`. `cn` comes from `@rede-social/ui`; animation uses `motion` (already in `@rede-social/ui`), **not** `framer-motion`.
 
 ---
 
@@ -431,7 +431,7 @@ Every `PostCard` / `CommentSheet` prop type follows this: data in, `labels: {…
 **Imports / client boundary** (lines 1-18):
 ```tsx
 'use client';
-import { Button, Card, EmptyState, PullToRefresh, SearchBar, Skeleton, useDebounce } from '@tria/ui';
+import { Button, Card, EmptyState, PullToRefresh, SearchBar, Skeleton, useDebounce } from '@rede-social/ui';
 import { CircleAlert, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useEffect, useState, useTransition } from 'react';
@@ -587,7 +587,7 @@ Three rules encoded here and required for every feed action (load more, like, co
 **Analog:** `apps/web/app/(app)/membros/[membershipId]/page.tsx` (lines 1-60)
 
 ```tsx
-import { EmptyState, PageHeader } from '@tria/ui';
+import { EmptyState, PageHeader } from '@rede-social/ui';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 
@@ -746,9 +746,9 @@ Five cases per table — positive control, adjacency, detail-by-id miss, WITH CH
 **Analog:** `apps/api/tests/integration/example.test.ts` (lines 1-55)
 
 ```ts
-import { sqlClient } from '@tria/core/db';
-import { subscribe } from '@tria/core/server/events/bus';
-import { stopBoss } from '@tria/core/server/jobs/boss';
+import { sqlClient } from '@rede-social/core/db';
+import { subscribe } from '@rede-social/core/server/events/bus';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 const tokens = { demoAdmin: '', demoMember: '', labAdmin: '' };
@@ -802,7 +802,7 @@ Write routes add a per-route `middleware: [...] as const` guard (permission-base
 **Source:** `packages/modules/example/server/service.ts:91-95`, `packages/modules/example/contracts/index.ts:48-52`
 **Apply to:** every feed write.
 ```ts
-declare module '@tria/contracts' { interface EventMap { 'post.published': PostPublished; } }
+declare module '@rede-social/contracts' { interface EventMap { 'post.published': PostPublished; } }
 …
 emit(ctx, 'post.published', { … });   // after withTenantTx resolves; the bus flushes after the handler
 ```

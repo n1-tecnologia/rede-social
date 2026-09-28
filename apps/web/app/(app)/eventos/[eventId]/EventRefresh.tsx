@@ -1,6 +1,6 @@
 'use client';
 
-import { PullToRefresh } from '@tria/ui';
+import { PullToRefresh } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 

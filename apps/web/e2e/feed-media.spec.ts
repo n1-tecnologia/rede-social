@@ -89,7 +89,7 @@ test.describe('UI-D-09 / UI-D-10 — the gallery is a shared-ratio snap carousel
 });
 
 /**
- * The video case reads tria-LAB on purpose. `media-video.spec.ts` hard-resets the tria-demo video
+ * The video case reads rede-social-LAB on purpose. `media-video.spec.ts` hard-resets the rede-demo video
  * library before and after every one of its tests (its empty-state, newest-first and pagination
  * assertions are absolute counts), which detaches the demo tenant's seeded video post. The lab
  * tenant carries the identical fixture (SCHEMA-CONVENTIONS §(j)) and no spec resets it, so this is

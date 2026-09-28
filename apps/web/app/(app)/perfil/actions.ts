@@ -7,8 +7,8 @@ import {
   mediaAssetSchema,
   mediaStartBodySchema,
   mediaStartSchema,
-} from '@tria/contracts/media';
-import { updateProfileBodySchema } from '@tria/contracts/profiles';
+} from '@rede-social/contracts/media';
+import { updateProfileBodySchema } from '@rede-social/contracts/profiles';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';

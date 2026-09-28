@@ -4,7 +4,7 @@ import {
   hostTenantSchema,
   isRegistrableHost,
   normalizeHost,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import { headers } from 'next/headers';
 import { env } from '@/lib/env';
 
@@ -13,7 +13,7 @@ export type HostMode = 'tenant' | 'platform' | 'generic';
 /**
  * How the browser-facing host classifies the request (D-20/D-21):
  * - `tenant`   — the host is a VERIFIED `tenant_domains` row (D-36); the public shell shows that tenant.
- * - `platform` — the host equals `PLATFORM_HOST`; TRIA's `super_admin` entry, no member sign-up.
+ * - `platform` — the host equals `PLATFORM_HOST`; the platform's `super_admin` entry, no member sign-up.
  * - `generic`  — localhost, `*.vercel.app`, any unregistered host; the slug/cookie fallback applies.
  *
  * The host only selects the PUBLIC SHELL. The tenant of record is always the membership: the API
@@ -163,7 +163,7 @@ export function tenantDisplayName(shell: HostShell): string {
  *
  * The scheme is `https` unconditionally, per UI-SPEC §Post page contract: a shared link is for
  * another device, and every host that can be REGISTERED is served over TLS. On the local stack the
- * copied value is therefore `https://tria-demo.localhost/post/{id}` while the tab is on `:3000`,
+ * copied value is therefore `https://rede-demo.localhost/post/{id}` while the tab is on `:3000`,
  * which is correct about the tenant and deliberately not a dev convenience.
  */
 export async function primaryHostOrigin(): Promise<string | null> {

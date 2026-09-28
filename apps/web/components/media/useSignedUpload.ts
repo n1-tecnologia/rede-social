@@ -7,8 +7,8 @@ import {
   type MediaIssue,
   type MediaKind,
   type MediaPurpose,
-} from '@tria/contracts/media';
-import { useToast } from '@tria/ui';
+} from '@rede-social/contracts/media';
+import { useToast } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { useRef, useState } from 'react';
 import { completeMediaUploadAction, startMediaUploadAction } from '@/app/(app)/perfil/actions';

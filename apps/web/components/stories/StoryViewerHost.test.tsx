@@ -118,8 +118,8 @@ vi.mock('motion/react', async () => {
   };
 });
 
-vi.mock('@tria/ui', async (orig) => ({
-  ...(await orig<typeof import('@tria/ui')>()),
+vi.mock('@rede-social/ui', async (orig) => ({
+  ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
 }));
 
@@ -319,7 +319,7 @@ function host(overrides: Record<string, unknown> = {}) {
           key: 'tenant',
           kind: 'tenant',
           highlightId: null,
-          name: 'Direcao TRIA Demo',
+          name: 'Direcao Rede Demo',
           avatar: { kind: 'avatar', src: null },
           items,
         },
@@ -401,7 +401,7 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
     host();
 
     expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true');
-    expect(screen.getByText('Direcao TRIA Demo')).toBeTruthy();
+    expect(screen.getByText('Direcao Rede Demo')).toBeTruthy();
     expect(screen.getByText('há 1 h')).toBeTruthy();
     expect(screen.getByTestId('story-caption').textContent).toBe('Bastidores do encontro de hoje.');
     // The copy is the catalog's, interpolated — never a literal in this file.
@@ -958,7 +958,7 @@ function sheetResult() {
       },
       {
         key: COMMUNITY,
-        label: 'Coral TRIA',
+        label: 'Coral Rede Social',
         communityId: COMMUNITY,
         rows: [{ id: H3, title: 'Ensaios', cover: null }],
       },
@@ -1002,7 +1002,7 @@ describe('StoryViewerHost — "Destacar" (05.2-06, UI-D-66, D-110 route 1)', () 
     expect(loadSheet).toHaveBeenCalledWith(STORY_ID);
     const sheet = screen.getByRole('dialog', { name: 'Destacar story' });
     expect(within(sheet).getByText('Início')).toBeTruthy();
-    expect(within(sheet).getByText('Coral TRIA')).toBeTruthy();
+    expect(within(sheet).getByText('Coral Rede Social')).toBeTruthy();
     expect(
       within(sheet)
         .getByRole('switch', { name: 'Destacar em Bastidores, Início' })
@@ -1010,7 +1010,7 @@ describe('StoryViewerHost — "Destacar" (05.2-06, UI-D-66, D-110 route 1)', () 
     ).toBe('true');
     expect(
       within(sheet)
-        .getByRole('switch', { name: 'Destacar em Ensaios, Coral TRIA' })
+        .getByRole('switch', { name: 'Destacar em Ensaios, Coral Rede Social' })
         .getAttribute('aria-checked'),
     ).toBe('false');
     expect(viewer.getAttribute('data-paused')).toBe('true');
@@ -1046,13 +1046,13 @@ describe('StoryViewerHost — "Destacar" (05.2-06, UI-D-66, D-110 route 1)', () 
     // archived → the switch reverts and the archived toast fires.
     addToHighlight.mockResolvedValueOnce({ ok: false, code: 'archived' });
     await act(async () => {
-      fireEvent.click(switchNamed('Destacar em Ensaios, Coral TRIA'));
+      fireEvent.click(switchNamed('Destacar em Ensaios, Coral Rede Social'));
     });
     expect(addToHighlight).toHaveBeenCalledWith(STORY_ID, H3, {
       communityId: COMMUNITY,
       revalidate: false,
     });
-    expect(switchNamed('Destacar em Ensaios, Coral TRIA').getAttribute('aria-checked')).toBe(
+    expect(switchNamed('Destacar em Ensaios, Coral Rede Social').getAttribute('aria-checked')).toBe(
       'false',
     );
     expect(toast.show).toHaveBeenLastCalledWith({

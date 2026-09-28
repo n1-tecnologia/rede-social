@@ -10,7 +10,7 @@ requires:
   - phase: 05.3-reels
     provides: the current registry/nav state (Reels tab at order 30, D-121 requires) this plan extends
 provides:
-  - "@tria/module-events package (module, contracts, db, server, ui) registered as `events`, Eventos tab at order 40"
+  - "@rede-social/module-events package (module, contracts, db, server, ui) registered as `events`, Eventos tab at order 40"
   - "events + event_secrets tables with the D-213 CHECKs, the admin-only event_secrets_staff_all policy and two hand-written deferrable FKs"
   - "POST /v1/events (requirePermission('events.event.manage'), wall clock -> UTC in SQL) and GET /v1/events?period=upcoming|past (two literal keyset statements)"
   - "event.published domain event (ids and instants only)"
@@ -179,7 +179,7 @@ status: complete
 
 # Phase 6 Plan 01: Events tracer Summary
 
-**`@tria/module-events` with `events` + an admin-only `event_secrets` store tied by deferrable FKs, `POST /v1/events` converting the admin's wall clock to UTC inside Postgres in the tenant's zone, the upcoming/past keyset `GET /v1/events`, `bootstrap.tenant.timezone`, and the `/eventos` tab with Próximos/Passados chips, all proved by pgTAP, the two-tenant gate, an API battery and e2e.**
+**`@rede-social/module-events` with `events` + an admin-only `event_secrets` store tied by deferrable FKs, `POST /v1/events` converting the admin's wall clock to UTC inside Postgres in the tenant's zone, the upcoming/past keyset `GET /v1/events`, `bootstrap.tenant.timezone`, and the `/eventos` tab with Próximos/Passados chips, all proved by pgTAP, the two-tenant gate, an API battery and e2e.**
 
 ## Performance
 
@@ -209,11 +209,11 @@ Tracer gate: interactive run, `end-of-phase`, automated-only `<verify>`. All thr
 
 ## Verification run
 
-- `pnpm --filter @tria/module-events typecheck/lint/test` passed (25 tests). `pnpm --filter @tria/api typecheck/lint/test` passed (19 unit tests). `pnpm boundaries` passed.
+- `pnpm --filter @rede-social/module-events typecheck/lint/test` passed (25 tests). `pnpm --filter @rede-social/api typecheck/lint/test` passed (19 unit tests). `pnpm boundaries` passed.
 - `pnpm db:generate` wrote nothing, and `git status -- supabase/migrations` is clean.
 - `pnpm db:reset && pnpm db:seed && pnpm supabase test db`: PASS, 15 files, 396 tests.
 - `pnpm test:integration` (the whole folder, after reset + seed): 31 files, 541 tests passed.
-- `pnpm --filter @tria/web typecheck/lint`, `vitest run lib/events-view i18n "app/(app)/eventos"` (262 tests), `check-ui-literals`, `build` and `check-static-routes` (43 guarded, 0 offenders) all passed.
+- `pnpm --filter @rede-social/web typecheck/lint`, `vitest run lib/events-view i18n "app/(app)/eventos"` (262 tests), `check-ui-literals`, `build` and `check-static-routes` (43 guarded, 0 offenders) all passed.
 - `VIDEO_PROVIDER=fake playwright test events.spec.ts shell.spec.ts phase2-smoke.spec.ts phase5-smoke.spec.ts phase4-smoke.spec.ts`: 55 passed, 4 skipped. The skips are the desktop 320px backstop and pixel-project scoping.
 
 ## Decisions Made
@@ -240,7 +240,7 @@ Tracer gate: interactive run, `end-of-phase`, automated-only `<verify>`. All thr
 
 **3. [Rule 3 - Tree drift] The lab nav is `Início · Reels · Eventos · Perfil`**
 - **Found during:** Task 3
-- **Issue:** The plan expected lab `Início · Eventos · Perfil`, but 05.3 turned `reels` on for tria-lab, and it contributes because `feed` is on.
+- **Issue:** The plan expected lab `Início · Eventos · Perfil`, but 05.3 turned `reels` on for rede-lab, and it contributes because `feed` is on.
 - **Fix:** Followed the current tree. `shell.spec.ts` lab list is `['Início', 'Reels', 'Eventos', 'Perfil']`, and the demo lists are `['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']`. The phase2 feed-off list is `['Início', 'Comunidades', 'Eventos', 'Perfil']`.
 - **Committed in:** `24bf6b9`
 
@@ -290,7 +290,7 @@ Tracer gate: interactive run, `end-of-phase`, automated-only `<verify>`. All thr
 
 ## Issues Encountered
 
-- **Stale flag left behind by an interrupted run.** `modules.test.ts` case 13 turns `chat` on for tria-lab and restores it at its end. Its first run, before the list update, failed mid-case, so later runs briefly saw lab `chat` enabled. The flag was set back to its seeded value, and every later full run (after reset + seed) was green. This was test state only; no code changed.
+- **Stale flag left behind by an interrupted run.** `modules.test.ts` case 13 turns `chat` on for rede-lab and restores it at its end. Its first run, before the list update, failed mid-case, so later runs briefly saw lab `chat` enabled. The flag was set back to its seeded value, and every later full run (after reset + seed) was green. This was test state only; no code changed.
 - `pnpm test:integration -- <name>` does not filter (orchestrator note 3), so each verify ran the whole folder.
 
 ## Known Stubs

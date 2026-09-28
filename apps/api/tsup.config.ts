@@ -10,5 +10,5 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   // Workspace packages are published as TypeScript sources; bundle them into dist/.
-  noExternal: [/^@tria\//],
+  noExternal: [/^@rede-social\//],
 });

@@ -1,5 +1,5 @@
-import type { AppEnv } from '@tria/core/server/auth/context';
-import { rootLogger } from '@tria/core/server/logging';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
+import { rootLogger } from '@rede-social/core/server/logging';
 import { createMiddleware } from 'hono/factory';
 
 /**

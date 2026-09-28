@@ -6,13 +6,13 @@ tags: [feed, module, drizzle, rls, keyset-pagination, domain-events, rbac, home-
 
 requires:
   - phase: 01-foundation
-    provides: the module manifest contract, the tenant lane (`withTenantTx`), the event bus, `tenant_modules` flags + settings, and `@tria/module-example` as the worked template
+    provides: the module manifest contract, the tenant lane (`withTenantTx`), the event bus, `tenant_modules` flags + settings, and `@rede-social/module-example` as the worked template
   - phase: 02-tenant-shell-branding-platform-panel
     provides: the D-42 home-slot mechanism (`homeSlotsFor`, `HomeSlots` on `/inicio`), the web module registry and the pt-BR catalog loader
   - phase: 03-media-pipeline-member-profiles
     provides: `member_profiles` (display name + `avatar_asset_id`), `avatarUrlFor`, the ONE keyset cursor envelope in `packages/core/server/paging.ts`, and the `lib/profile.ts` web-fetch posture
 provides:
-  - "`@tria/module-feed` — the first REAL feature module, with the same five-subpath exports map as the throwaway example"
+  - "`@rede-social/module-feed` — the first REAL feature module, with the same five-subpath exports map as the throwaway example"
   - "`public.feed_posts` under RLS: generic `author_user_id`, reserved `community_id`, soft delete, `edited_at`, trigger-owned counters"
   - "`GET /v1/feed` — one keyset page over the kernel cursor envelope, ONE statement per page"
   - "`GET /v1/feed/posts/{postId}` — one bare 404 for unknown / foreign-tenant / removed"
@@ -72,7 +72,7 @@ key-decisions:
   - "Feed timestamps are formatted by Postgres with microsecond precision and never round-trip through a JS `Date`, because ms truncation would move the page boundary earlier than the row it came from and silently skip same-millisecond posts"
   - "The projection writes NO tenant predicate at all — not on `feed_posts`, not on the `memberships`/`member_profiles` joins — because all three are RLS-scoped to the lane; a written predicate would be dead weight a reader could mistake for the isolation"
   - "`limit` above `FEED_MAX_PAGE_SIZE` is REFUSED with 400, not silently reduced — the repo's established posture from `GET /v1/media` (03-07)"
-  - "`scripts/seed.ts` writes `public.feed_posts` with raw SQL instead of importing `@tria/module-feed/db`: a root-workspace dependency on a `module`-tagged package makes `turbo boundaries` 2.10.12 mis-report the kernel packages as violating the MOD-02 denylist"
+  - "`scripts/seed.ts` writes `public.feed_posts` with raw SQL instead of importing `@rede-social/module-feed/db`: a root-workspace dependency on a `module`-tagged package makes `turbo boundaries` 2.10.12 mis-report the kernel packages as violating the MOD-02 denylist"
 
 patterns-established:
   - "Module package: copy `packages/modules/example/` structure verbatim, change the name, keep the five-subpath exports map, and give the package its own `vitest.config.ts` (Vitest 5 no longer walks up)"
@@ -84,7 +84,7 @@ requirements-completed: [FEED-02, FEED-08, MOD-03, UI-02]
 
 coverage:
   - id: D1
-    description: "`@tria/module-feed` exists as a real module package, registered under `feed` and mounted at `/v1/feed`, importing only the kernel and the shared contracts"
+    description: "`@rede-social/module-feed` exists as a real module package, registered under `feed` and mounted at `/v1/feed`, importing only the kernel and the shared contracts"
     requirement: MOD-03
     verification:
       - kind: unit
@@ -183,7 +183,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D10
-    description: "`/inicio` renders the feed through the D-55 home slot: the seeded posts appear as cards newest-first, the author links to `/membros/{membershipId}`, no navigation tab is added, and a tria-lab member never sees the tria-demo feed"
+    description: "`/inicio` renders the feed through the D-55 home slot: the seeded posts appear as cards newest-first, the author links to `/membros/{membershipId}`, no navigation tab is added, and a rede-lab member never sees the rede-demo feed"
     requirement: UI-02
     verification:
       - kind: e2e
@@ -227,7 +227,7 @@ status: complete
 
 ## Accomplishments
 
-- **`@tria/module-feed` is the first real feature module.** Same five-subpath exports map as the throwaway example, registered under `feed`, mounted at `/v1/feed`, and green under `pnpm boundaries` — it reaches `@tria/core`, `@tria/ui` and `@tria/contracts` and nothing else.
+- **`@rede-social/module-feed` is the first real feature module.** Same five-subpath exports map as the throwaway example, registered under `feed`, mounted at `/v1/feed`, and green under `pnpm boundaries` — it reaches `@rede-social/core`, `@rede-social/ui` and `@rede-social/contracts` and nothing else.
 - **`feed_posts` exists under RLS with a V2-ready shape.** Generic `author_user_id`, a nullable `community_id` reserved for Phase 5 that already participates in the list index, soft delete + `edited_at`, and trigger-owned counters declared now so 04-03 changes no contract. No title, no post-kind column (D-51). No admin-flavoured authorship column anywhere (FEED-08).
 - **Paging is total, and proven to be.** The kernel's single cursor envelope, an over-fetch of `limit + 1`, and a walk under a concurrent insert that returns every pre-existing post exactly once. A tampered or stale cursor degrades to page 1; `limit` is bounded server-side.
 - **A feed page costs ONE statement.** Pinned in CI by a filtered `pg_stat_statements` `sum(calls)` delta with a named budget, so the day 04-03's `viewerLiked` join arrives it must land in the same statement or the test goes red.
@@ -272,13 +272,13 @@ Recorded in the frontmatter `key-decisions`. The two that will be quoted most of
 - **Issue:** `tx.execute<FeedRow>(sql…)` returns the postgres.js row objects, where `created_at` is TEXT rather than a `Date`. `toPost` called `.toISOString()` on it, so every list and every create threw a `TypeError` after its transaction had already committed. The tracer's own proof caught it; nothing in Task 1's static verification could have.
 - **Fix:** the projection now formats both timestamps in SQL with `to_char(... 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`. This is deliberately more than a cast: it keeps `timestamptz`'s MICROSECOND precision in the cursor's `n`, where a JS `Date` round-trip would have truncated to milliseconds and silently skipped any post written in the same millisecond but a later microsecond — a paging defect that only appears under load.
 - **Files modified:** `packages/modules/feed/server/service.ts`
-- **Verification:** `pnpm --filter @tria/api exec vitest run tests/integration/feed.test.ts tests/integration/feed-query-budget.test.ts` → 13 passed; full suite 330 passed
+- **Verification:** `pnpm --filter @rede-social/api exec vitest run tests/integration/feed.test.ts tests/integration/feed-query-budget.test.ts` → 13 passed; full suite 330 passed
 - **Committed in:** `a0385d6`
 
 **2. [Rule 3 - Blocker] `pnpm boundaries` reported three MOD-02 violations for an import nobody wrote**
 
 - **Found during:** Task 3 (plan-level verification)
-- **Issue:** `scripts/seed.ts` belongs to the ROOT workspace package. Declaring `@tria/module-feed` as a root devDependency so the seed could import `@tria/module-feed/db` made `turbo boundaries` 2.10.12 report `@tria/core` and `@tria/ui` as depending on a `module`-tagged package — the same mis-attribution class `turbo.json` already documents for `@tria/config` on the `contracts`/`tooling` tags.
+- **Issue:** `scripts/seed.ts` belongs to the ROOT workspace package. Declaring `@rede-social/module-feed` as a root devDependency so the seed could import `@rede-social/module-feed/db` made `turbo boundaries` 2.10.12 report `@rede-social/core` and `@rede-social/ui` as depending on a `module`-tagged package — the same mis-attribution class `turbo.json` already documents for `@rede-social/config` on the `contracts`/`tooling` tags.
 - **Fix:** the seed inserts `public.feed_posts` through `withAdminTx` + raw `sql` (the migration is a committed, stable contract), and the root keeps no module dependency.
 - **Files modified:** `scripts/seed.ts`, `package.json`, `pnpm-lock.yaml`
 - **Verification:** `pnpm boundaries` → "Checked 435 files in 8 packages, no issues found"; `pnpm db:reset && pnpm db:seed && pnpm supabase test db` green from a cold stack
@@ -353,4 +353,4 @@ None — no external service configuration required.
 
 - All 20 `key-files` entries verified present on disk (`[ -f ]`).
 - All 5 commits verified present in `git log --oneline --all`: `649c9a1`, `054c8f6`, `f1b6680`, `a0385d6`, `5443dc4`.
-- Plan-level `<verification>` re-run at close-out: module/api/core/web typecheck + lint green, `pnpm --filter @tria/module-feed test` 3 passed, `pnpm --filter @tria/api test` 17 passed, `pnpm test:integration` 330 passed (24 files), `bash scripts/check-ui-literals.sh` OK, `pnpm boundaries` no issues, `pnpm db:generate` no diff, `pnpm db:reset && pnpm db:seed && pnpm supabase test db` green from a cold stack (136 assertions), `playwright test feed.spec.ts` 6 passed.
+- Plan-level `<verification>` re-run at close-out: module/api/core/web typecheck + lint green, `pnpm --filter @rede-social/module-feed test` 3 passed, `pnpm --filter @rede-social/api test` 17 passed, `pnpm test:integration` 330 passed (24 files), `bash scripts/check-ui-literals.sh` OK, `pnpm boundaries` no issues, `pnpm db:generate` no diff, `pnpm db:reset && pnpm db:seed && pnpm supabase test db` green from a cold stack (136 assertions), `playwright test feed.spec.ts` 6 passed.

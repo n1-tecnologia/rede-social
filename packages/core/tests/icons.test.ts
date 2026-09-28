@@ -33,7 +33,7 @@ const ORIGIN = 'http://127.0.0.1:54321';
 
 /** A 300×120 wordmark whose pixels are all the same amber (text is drawn in the same colour). */
 const WORDMARK_SVG = Buffer.from(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="120" viewBox="0 0 300 120"><rect width="300" height="120" fill="#f59e0b"/><text x="20" y="80" font-size="56" fill="#f59e0b">TRIA</text></svg>`,
+  `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="120" viewBox="0 0 300 120"><rect width="300" height="120" fill="#f59e0b"/><text x="20" y="80" font-size="56" fill="#f59e0b">Rede Social</text></svg>`,
 );
 const AMBER = { r: 245, g: 158, b: 11, a: 255 };
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TRIA — Fase 6 · Eventos · telas [designed] (mockup estático para revisão do time de design)</title>
+<title>Rede Social — Fase 6 · Eventos · telas [designed] (mockup estático para revisão do time de design)</title>
 <style>
 /* =====================================================================================
    0. NENHUM ASSET EXTERNO. Um arquivo, zero rede: nenhuma fonte remota, nenhum script
@@ -179,7 +179,7 @@ h3.sub { font-size: 14px; font-weight: 700; margin: 32px 0 12px; color: var(--th
 .desk .column { width: 100%; max-width: 680px; }
 
 /* =====================================================================================
-   4. PRIMITIVAS @tria/ui — mesmas medidas, escritas em CSS puro
+   4. PRIMITIVAS @rede-social/ui — mesmas medidas, escritas em CSS puro
    ===================================================================================== */
 /* PageHeader: sticky, bg/95, px-2 py-1, gap-1, título 16/700 truncado */
 .page-header { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: color-mix(in srgb, var(--theme-bg) 95%, transparent); backdrop-filter: blur(4px); }
@@ -462,12 +462,12 @@ textarea.input.rows2 { min-height: 80px; }
 
 <!-- ============ barra do mockup (não é superfície do produto) ============ -->
 <div class="toolbar" role="region" aria-label="Controles do mockup">
-  <span class="brandname">TRIA · Fase 6 · Eventos <small>as seis telas [designed] + três deltas [proto] · 06-UI-SPEC.md · tokens reais de @tria/ui</small></span>
+  <span class="brandname">Rede Social · Fase 6 · Eventos <small>as seis telas [designed] + três deltas [proto] · 06-UI-SPEC.md · tokens reais de @rede-social/ui</small></span>
   <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
   <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
   <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
   <span>
-    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">TRIA (neutro)</button>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">Rede Social (neutro)</button>
     <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
     <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
     <button class="preset" type="button" data-p="#f5c518" data-s="#ffe27a">Amarelo (tinta escura)</button>
@@ -490,7 +490,7 @@ textarea.input.rows2 { min-height: 80px; }
 
 <section class="screen" id="leia">
   <header><h2>Como ler este arquivo</h2><code>06-UI-SPEC.md · D-33 · UI-04 · D-66</code>
-    <p><strong>Relógio fictício do mockup:</strong> agora = qua., 9 de out. de 2030, 18:20, no fuso do tenant (America/Sao_Paulo; o ano é fictício, escolhido para os dias da semana baterem). Toda data relativa ("Hoje", "Amanhã", "Em 3 dias", "Agora", "Encerrado") é calculada contra esse instante; os quadros que precisam de outro instante (a janela de check-in, um evento que já começou) dizem qual usam na legenda. O tenant de exemplo é <strong>TRIA Demo</strong>; troque a marca na barra acima — tudo que é da marca recolore, e só isso. <strong>[designed]</strong> = superfície sem protótipo, desenhada aqui para ser aprovada antes de ser codada. <strong>[proto]</strong> = portada do protótipo; aparece aqui só onde a Fase 6 muda o que o time de design desenhou (os três deltas a, b, c) ou como contexto em volta de uma peça [designed].</p>
+    <p><strong>Relógio fictício do mockup:</strong> agora = qua., 9 de out. de 2030, 18:20, no fuso do tenant (America/Sao_Paulo; o ano é fictício, escolhido para os dias da semana baterem). Toda data relativa ("Hoje", "Amanhã", "Em 3 dias", "Agora", "Encerrado") é calculada contra esse instante; os quadros que precisam de outro instante (a janela de check-in, um evento que já começou) dizem qual usam na legenda. O tenant de exemplo é <strong>Rede Demo</strong>; troque a marca na barra acima — tudo que é da marca recolore, e só isso. <strong>[designed]</strong> = superfície sem protótipo, desenhada aqui para ser aprovada antes de ser codada. <strong>[proto]</strong> = portada do protótipo; aparece aqui só onde a Fase 6 muda o que o time de design desenhou (os três deltas a, b, c) ou como contexto em volta de uma peça [designed].</p>
   </header>
 </section>
 
@@ -511,7 +511,7 @@ textarea.input.rows2 { min-height: 80px; }
         <div class="body nav-pad">
           <div class="titlerow"><div class="head"><h1 class="t24b">Eventos</h1><p>Confirme presença e faça check-in no dia.</p></div></div>
           <nav class="chipnav" aria-label="Filtrar eventos"><a class="fchip" href="#lista" aria-current="page">Próximos</a><a class="fchip" href="#lista">Passados</a></nav>
-          <div class="pgrid" role="region" aria-label="Próximos eventos de TRIA Demo">
+          <div class="pgrid" role="region" aria-label="Próximos eventos de Rede Demo">
             <a class="poster" href="#rsvp" aria-label="Oficina de fotografia com celular, qua., 9 de out. · 20:00"><span class="photo ph-b"></span><span class="veil v85"></span><span class="pill-slot"><span class="mpill">Hoje</span></span>
               <span class="pblock"><span class="over" style="display:block">qua., 9 de out. · 20:00</span><span class="ttl">Oficina de fotografia com celular</span><span class="place"><svg class="i i-12"><use href="#i-map-pin"/></svg><span>Sala 3 do centro cultural</span></span><span class="meta" style="display:block">Ninguém confirmou ainda</span></span></a>
             <a class="poster" href="#rsvp" aria-label="Feira de trocas do bairro, Acontecendo agora · até 22:00"><span class="photo ph-c"></span><span class="veil v85"></span><span class="pill-slot"><span class="mpill">Agora</span></span>
@@ -617,7 +617,7 @@ textarea.input.rows2 { min-height: 80px; }
           <div class="body">
             <div class="titlerow"><div class="head"><h1 class="t24b">Eventos</h1><p>Confirme presença e faça check-in no dia.</p></div></div>
             <nav class="chipnav"><a class="fchip" href="#lista" aria-current="page">Próximos</a><a class="fchip" href="#lista">Passados</a></nav>
-            <div class="card" style="margin:0 16px"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-cal"/></svg></div><h3>Nada por aqui ainda</h3><p>Os próximos eventos de TRIA Demo vão aparecer aqui.</p></div></div>
+            <div class="card" style="margin:0 16px"><div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-cal"/></svg></div><h3>Nada por aqui ainda</h3><p>Os próximos eventos de Rede Demo vão aparecer aqui.</p></div></div>
           </div>
         </div>
         <div class="phone short">
@@ -655,7 +655,7 @@ textarea.input.rows2 { min-height: 80px; }
           <div class="titlerow"><div class="head"><h1 class="t24b">Eventos</h1><p>Confirme presença e faça check-in no dia.</p></div>
             <a class="create-ctl wide" href="#formulario"><svg class="i i-16"><use href="#i-plus"/></svg>Criar evento</a></div>
           <nav class="chipnav" aria-label="Filtrar eventos"><a class="fchip" href="#lista">Próximos</a><a class="fchip" href="#lista" aria-current="page">Passados</a></nav>
-          <div class="pgrid two" role="region" aria-label="Eventos passados de TRIA Demo">
+          <div class="pgrid two" role="region" aria-label="Eventos passados de Rede Demo">
             <a class="poster" href="#rsvp"><span class="photo ph-b"></span><span class="veil v85"></span><span class="pill-slot"><span class="mpill"><svg class="i i-12 sw3"><use href="#i-check"/></svg>Presente</span></span>
               <span class="pblock"><span class="over" style="display:block">sáb., 28 de set. · 19:00</span><span class="ttl">Noite de talentos da associação</span><span class="place"><svg class="i i-12"><use href="#i-map-pin"/></svg><span>Teatro municipal</span></span><span class="meta" style="display:block">18 presentes</span></span></a>
             <a class="poster" href="#rsvp"><span class="photo ph-c"></span><span class="veil v85"></span><span class="pill-slot"><span class="mpill">Encerrado</span></span>
@@ -829,7 +829,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#cancelado" aria-label="
               <span class="t14 sec">Capa</span>
               <div class="hero nocover" style="border-radius:12px"><span class="fallback"></span></div>
               <button class="pick" type="button"><span class="lead"><svg class="i i-20"><use href="#i-image"/></svg></span>Adicionar capa</button>
-              <p class="helper12">A capa é opcional. Sem ela, usamos as cores de TRIA Demo.</p>
+              <p class="helper12">A capa é opcional. Sem ela, usamos as cores de Rede Demo.</p>
             </div>
             <div class="field"><label for="f1-name">Nome do evento</label><input class="input focused" id="f1-name" placeholder="Ex.: Encontro anual de associados"><span class="counter">0/120</span></div>
             <div class="field"><label for="f1-desc">Descrição</label><textarea class="input" id="f1-desc" placeholder="Conte o que vai acontecer, para quem é e o que levar."></textarea><span class="counter">0/4000</span></div>
@@ -860,7 +860,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#cancelado" aria-label="
               <span class="t14 sec">Capa</span>
               <div class="hero" style="border-radius:12px"><span class="photo ph-c"></span><span class="veil v80"></span><div class="hblock"><p class="hover">qui., 10 de out. · 19:30</p><h2 class="htitle">Live: prestação de contas do trimestre</h2></div></div>
               <div style="display:flex;gap:8px"><button class="btn outline sm" type="button">Trocar capa</button><button class="btn ghost sm" type="button">Remover capa</button></div>
-              <p class="helper12">A capa é opcional. Sem ela, usamos as cores de TRIA Demo.</p>
+              <p class="helper12">A capa é opcional. Sem ela, usamos as cores de Rede Demo.</p>
             </div>
             <div class="field"><label>Nome do evento</label><input class="input" value="Live: prestação de contas do trimestre" readonly><span class="counter">38/120</span></div>
             <div class="field"><label>Descrição</label><textarea class="input" readonly>A diretoria apresenta o balanço do trimestre e responde perguntas ao vivo.</textarea><span class="counter">75/4000</span></div>
@@ -916,7 +916,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#cancelado" aria-label="
               <span class="t14 sec">Capa</span>
               <div class="hero nocover" style="border-radius:12px"><span class="fallback"></span><div class="hblock"><p class="hover">sáb., 12 de out. · 19:00</p><h2 class="htitle">Encontro anual de associados</h2></div></div>
               <button class="pick" type="button"><span class="lead"><svg class="i i-20"><use href="#i-image"/></svg></span>Adicionar capa</button>
-              <p class="helper12">A capa é opcional. Sem ela, usamos as cores de TRIA Demo.</p>
+              <p class="helper12">A capa é opcional. Sem ela, usamos as cores de Rede Demo.</p>
             </div>
             <div class="field"><label>Nome do evento</label><input class="input" value="Encontro anual de associados" readonly><span class="counter">28/120</span></div>
             <div class="stack12">
@@ -980,7 +980,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#cancelado" aria-label="
             <div class="stack8">
               <span class="t14 sec">Capa</span>
               <div class="dropzone"><div class="hero nocover"><span class="fallback"></span><div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--brand-on-primary)"><svg class="i i-40"><use href="#i-image"/></svg><span class="t14b">Adicionar capa</span></div></div></div>
-              <p class="helper12">A capa é opcional. Sem ela, usamos as cores de TRIA Demo.</p>
+              <p class="helper12">A capa é opcional. Sem ela, usamos as cores de Rede Demo.</p>
             </div>
             <div class="field"><label>Nome do evento</label><input class="input" placeholder="Ex.: Encontro anual de associados"><span class="counter">0/120</span></div>
             <div class="stack12">
@@ -1000,7 +1000,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#cancelado" aria-label="
      SUPERFÍCIE 2 — O PAR "VOU / NÃO VOU" E A ZONA DE AÇÃO
      ===================================================================================== -->
 <section id="rsvp" class="screen">
-  <header><h2>Superfície 2 — o par "Vou" / "Não vou" e a zona de ação</h2><code>/eventos/[id] · SegmentedControl (nova primitiva @tria/ui) · EventActions · [designed] · UI-D-206, UI-D-207, D-204, D-205</code>
+  <header><h2>Superfície 2 — o par "Vou" / "Não vou" e a zona de ação</h2><code>/eventos/[id] · SegmentedControl (nova primitiva @rede-social/ui) · EventActions · [designed] · UI-D-206, UI-D-207, D-204, D-205</code>
     <p>O protótipo tinha um único CTA dourado, "Garantir minha vaga" (compra de ingresso). A Fase 6 troca por um <strong>par gravado</strong>: "Não vou" é uma <em>resposta</em>, para a organização distinguir "recusou" de "nunca respondeu" (D-205). Nenhuma primitiva existente serve — não é um <code>Switch</code> (são três estados: sem resposta, sim, não) nem um <code>Chip</code> (chip navega) — então nasce o <code>SegmentedControl</code>: trilho <code>bg-input</code> <code>p-1</code> <code>gap-1</code>, duas opções <code>h-11</code>. Selecionada = superfície <code>bg-card</code> + sombra + <code>Check</code> 16 <strong>da marca</strong> (ev-2); a mesma aparência para as duas opções, então um "Não vou" pesa o mesmo que um "Vou". É <code>role="group"</code> com botões <code>aria-pressed</code>, <strong>não</strong> um radiogroup: setas de rádio <em>gravariam</em> uma resposta ao mover o foco. Sem toast de sucesso — o estado pressionado e a contagem atualizada são o retorno.</p>
   </header>
 
@@ -1390,7 +1390,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#rsvp" aria-label="Abrir
           <div class="statusbar"></div>
           <div class="body">
             <div class="page-header"><a class="back" href="#lista" aria-label="Voltar para eventos"><svg class="i"><use href="#i-chev-l"/></svg></a><h1></h1></div>
-            <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-cal"/></svg></div><h3>Evento não encontrado</h3><p>Este link não existe mais ou não é de TRIA Demo.</p><a class="btn outline" href="#lista" style="margin-top:4px">Ver eventos</a></div>
+            <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-cal"/></svg></div><h3>Evento não encontrado</h3><p>Este link não existe mais ou não é de Rede Demo.</p><a class="btn outline" href="#lista" style="margin-top:4px">Ver eventos</a></div>
           </div>
         </div>
       </div>
@@ -1423,7 +1423,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#rsvp" aria-label="Abrir
             </div>
           </section>
           <div class="card" style="margin:16px 16px 0">
-            <div class="fcard-head"><span class="avatar">TD</span><span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
+            <div class="fcard-head"><span class="avatar">TD</span><span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
             <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
           </div>
         </div>
@@ -1454,7 +1454,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#rsvp" aria-label="Abrir
             </div>
           </section>
           <div class="card" style="margin:16px 16px 0">
-            <div class="fcard-head"><span class="avatar">TD</span><span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
+            <div class="fcard-head"><span class="avatar">TD</span><span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
             <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
           </div>
         </div>
@@ -1516,7 +1516,7 @@ Belo Horizonte, MG</p><a class="btn outline full" href="#rsvp" aria-label="Abrir
         <div class="body">
           <div class="strip" aria-label="Stories"><span class="circ"><i class="ph-b"></i></span><span class="circ"><i class="ph-c"></i></span><span class="circ"><i class="ph-d"></i></span><span class="circ"><i class="ph-e"></i></span></div>
           <div class="card" style="margin:12px 16px 0">
-            <div class="fcard-head"><span class="avatar">TD</span><span style="min-width:0"><span class="t14b trunc" style="display:block">Direção TRIA Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
+            <div class="fcard-head"><span class="avatar">TD</span><span style="min-width:0"><span class="t14b trunc" style="display:block">Direção Rede Demo</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
             <div style="aspect-ratio:4/5;background:var(--theme-bg-tertiary);display:grid;place-items:center;color:var(--theme-text-tertiary)"><svg class="i i-40"><use href="#i-image"/></svg></div>
           </div>
         </div>

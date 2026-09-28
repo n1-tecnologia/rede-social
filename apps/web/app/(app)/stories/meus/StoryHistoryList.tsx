@@ -1,7 +1,11 @@
 'use client';
 
-import { STORY_HIGHLIGHT_MAX_ITEMS } from '@tria/module-stories/contracts';
-import { HighlightSheet, type HighlightSheetPlace, StoryHistoryRow } from '@tria/module-stories/ui';
+import { STORY_HIGHLIGHT_MAX_ITEMS } from '@rede-social/module-stories/contracts';
+import {
+  HighlightSheet,
+  type HighlightSheetPlace,
+  StoryHistoryRow,
+} from '@rede-social/module-stories/ui';
 import {
   BottomSheet,
   Button,
@@ -11,7 +15,7 @@ import {
   InfiniteScroll,
   Skeleton,
   useToast,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import { Bookmark, CircleAlert, Eye, Sparkles, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useRef, useState, useTransition } from 'react';

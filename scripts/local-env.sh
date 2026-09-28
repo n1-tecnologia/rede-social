@@ -56,13 +56,13 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}
 # the direct port. Hosted environments always use the transaction pooler URL from Secret Manager.
 DATABASE_URL=postgres://api_user:postgres@127.0.0.1:54322/postgres
 API_URL=http://localhost:8787
-PLATFORM_HOST=tria.localhost
-TENANT_DEMO_HOST=tria-demo.localhost
-TENANT_LAB_HOST=tria-lab.localhost
+PLATFORM_HOST=rede-social.localhost
+TENANT_DEMO_HOST=rede-demo.localhost
+TENANT_LAB_HOST=rede-lab.localhost
 # Local-stack-only seed credentials. Required by \`pnpm db:seed\`, apps/api's integration suite and
 # apps/web's platform e2e; override by exporting them before running this script.
 SEED_PASSWORD=${SEED_PASSWORD:-Segredo123}
-SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL:-ferramentas@triacompany.com.br}
+SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL:-superadmin@rede-social.test}
 SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD:-SuperSegredo123}
 # Public web origin parts (packages/core/server/env.ts publicWebOrigin): local dev serves http on 3000.
 PUBLIC_WEB_SCHEME=http
@@ -71,7 +71,7 @@ PUBLIC_WEB_PORT=3000
 DOMAIN_PROVIDER=fake
 AUTH_ALLOW_LIST=local
 MAIL_TRANSPORT=local
-MAIL_DOMAIN=mail.tria.localhost
+MAIL_DOMAIN=mail.rede-social.localhost
 MAILPIT_URL=http://127.0.0.1:54324
 # Local-stack-only Send Email Hook secret (Standard Webhooks, \`v1,whsec_<base64>\`); shared with
 # supabase/config.toml through env(SEND_EMAIL_HOOK_SECRETS). Keep the constant IDENTICAL to

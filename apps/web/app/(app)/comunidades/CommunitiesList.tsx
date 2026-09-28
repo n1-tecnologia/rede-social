@@ -1,7 +1,7 @@
 'use client';
 
-import type { CommunityStatus, CommunitySummary } from '@tria/module-communities/contracts';
-import { CommunityCard } from '@tria/module-communities/ui';
+import type { CommunityStatus, CommunitySummary } from '@rede-social/module-communities/contracts';
+import { CommunityCard } from '@rede-social/module-communities/ui';
 import {
   Button,
   Card,
@@ -10,7 +10,7 @@ import {
   PullToRefresh,
   Skeleton,
   StatusPill,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import { Archive, TriangleAlert, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';
@@ -69,7 +69,7 @@ export function CommunitiesSkeleton() {
  * **The state machine is `MembersList`'s, append-never-replace**: a page APPENDS, so every card
  * already on screen keeps its order and its DOM position; a load-more failure renders an inline
  * danger line plus an outline retry AT THE SENTINEL and never discards the rows already loaded (the
- * 03-05 rule). The one delta from the member directory is D-76's: paging is driven by `@tria/ui`'s
+ * 03-05 rule). The one delta from the member directory is D-76's: paging is driven by `@rede-social/ui`'s
  * `InfiniteScroll` sentinel rather than by an explicit "Carregar mais" button.
  *
  * **Four states, and only four.** An unreadable first page renders the generic error card with a

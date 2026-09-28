@@ -29,7 +29,7 @@ import { hosts, isRemote, SEED_PASSWORD } from './fixtures';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'ferramentas@triacompany.com.br';
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
 const SUPER_ADMIN_PASSWORD: string = (() => {
   const value = process.env.SUPER_ADMIN_PASSWORD;
   if (!value) {
@@ -71,7 +71,7 @@ function cardOf(page: Page, host: string) {
     .filter({ has: page.getByRole('heading', { name: host, exact: true }) });
 }
 
-/** The single visible toast (`@tria/ui` `Toast`, `role=status`). */
+/** The single visible toast (`@rede-social/ui` `Toast`, `role=status`). */
 function toast(page: Page, text: string | RegExp) {
   return page.getByRole('status').filter({ hasText: text }).first();
 }
@@ -167,7 +167,7 @@ test.describe('02-15 — Domínios tab', () => {
     // DNS records as TEXT: CNAME routing + TXT ownership challenge (needs-txt).
     const visible = (text: string) => card.getByText(text).filter({ visible: true }).first();
     await expect(visible('CNAME')).toBeVisible();
-    await expect(visible('fake.tria-dns.test')).toBeVisible();
+    await expect(visible('fake.rede-social-dns.test')).toBeVisible();
     await expect(visible('TXT')).toBeVisible();
     await expect(visible('_vercel.exemplo.test')).toBeVisible();
     await expect(visible(`vc-domain-verify=${host1},fake`)).toBeVisible();
@@ -183,7 +183,7 @@ test.describe('02-15 — Domínios tab', () => {
     ).toBeVisible();
     if (test.info().project.name === 'desktop-chromium') {
       const copied = await page.evaluate(() => navigator.clipboard.readText());
-      expect(copied).toBe('fake.tria-dns.test');
+      expect(copied).toBe('fake.rede-social-dns.test');
     }
 
     // D-36: an unverified host never resolves.
@@ -297,7 +297,7 @@ test.describe('02-15 — Domínios tab', () => {
     await expect(toast(page, 'Verificação reiniciada.')).toBeVisible();
     await expect(card.getByText('Aguardando DNS', { exact: true })).toBeVisible();
     await expect(
-      card.getByText('fake.tria-dns.test').filter({ visible: true }).first(),
+      card.getByText('fake.rede-social-dns.test').filter({ visible: true }).first(),
     ).toBeVisible();
     expect(await getDomainStatus(host3)).toMatchObject({ status: 'pending' });
 
@@ -318,18 +318,18 @@ test.describe('02-15 — Domínios tab', () => {
     await expect(page.locator('#host')).toHaveValue('not a host');
 
     // A verified host of another (seeded) tenant: 409 DOMAIN_IN_USE names no owner (T-02-96).
-    await page.locator('#host').fill('tria-demo.localhost');
+    await page.locator('#host').fill('rede-demo.localhost');
     await submit();
     await expect(form.getByRole('alert')).toHaveText('Este domínio já está em uso.');
-    await expect(page.locator('#host')).toHaveValue('tria-demo.localhost');
+    await expect(page.locator('#host')).toHaveValue('rede-demo.localhost');
     const body = await page.locator('body').innerText();
-    expect(body).not.toContain('TRIA Demo');
-    expect(body).not.toContain('tria-demo');
+    expect(body).not.toContain('Rede Demo');
+    expect(body).not.toContain('rede-demo');
 
-    await page.locator('#host').fill('tria.localhost');
+    await page.locator('#host').fill('rede-social.localhost');
     await submit();
     await expect(form.getByRole('alert')).toHaveText('Este endereço é reservado pela plataforma.');
-    await expect(page.locator('#host')).toHaveValue('tria.localhost');
+    await expect(page.locator('#host')).toHaveValue('rede-social.localhost');
 
     // Same tenant, same host: the API answers 200 (idempotent) — no error, still one card.
     await page.locator('#host').fill(host2);

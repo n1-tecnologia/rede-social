@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@tria/ui';
+import { cn } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';

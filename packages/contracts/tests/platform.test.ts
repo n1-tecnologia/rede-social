@@ -138,7 +138,7 @@ describe('domain and invite shapes', () => {
       dnsRecordSchema.parse({
         type: 'CNAME',
         name: 'comunidade.cliente.com.br',
-        value: 'fake.tria-dns.test',
+        value: 'fake.rede-social-dns.test',
         purpose: 'routing',
       }).purpose,
     ).toBe('routing');
@@ -280,7 +280,7 @@ describe('platformTenantDetailSchema (GET /v1/platform/tenants/{id})', () => {
           {
             type: 'CNAME',
             name: 'comunidade.cliente.com.br',
-            value: 'fake.tria-dns.test',
+            value: 'fake.rede-social-dns.test',
             purpose: 'routing',
           },
         ],

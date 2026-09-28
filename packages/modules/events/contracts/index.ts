@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * The module's published contract surface (`@tria/module-events/contracts`). Both the API and the
+ * The module's published contract surface (`@rede-social/module-events/contracts`). Both the API and the
  * web app import from here: the same Zod schema validates the query in Hono, the body in the route
  * and the page payload in `apps/web/lib/events.ts`, so there is exactly one definition of what an
  * event is (MOD-01).
@@ -626,7 +626,7 @@ export interface EventCheckedIn {
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'event.published': EventPublished;
     'event.rsvp': EventRsvp;

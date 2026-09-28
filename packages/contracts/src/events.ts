@@ -2,7 +2,7 @@
  * Domain events (MOD-03 shape, plan 01-07).
  *
  * `EventMap` is the single extension point: a module declares its own payloads with
- * `declare module '@tria/contracts' { interface EventMap { 'x.y': Payload } }` from its
+ * `declare module '@rede-social/contracts' { interface EventMap { 'x.y': Payload } }` from its
  * `contracts` entry point. The kernel therefore never learns any module's event names at
  * authoring time, yet `emit`/`subscribe` stay fully typed at every call site (MOD-02).
  *

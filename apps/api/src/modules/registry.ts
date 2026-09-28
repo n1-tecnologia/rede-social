@@ -3,21 +3,21 @@ import {
   MODULE_KEY_ORDER_FALLBACK,
   type ModuleKey,
   type TenantRole,
-} from '@tria/contracts';
-import { subscribe } from '@tria/core/server/events/bus';
-import { registerJobQueues } from '@tria/core/server/jobs/boss';
-import type { ModuleManifest } from '@tria/core/server/modules/manifest';
-import { setPermissionResolver } from '@tria/core/server/rbac/permissions';
-import { KERNEL_ROLE_PERMISSIONS } from '@tria/core/server/rbac/require-role';
-import { communitiesModule } from '@tria/module-communities/module';
-import { eventsModule } from '@tria/module-events/module';
-import { FEED_PERMISSIONS, feedSettingsSchema } from '@tria/module-feed/contracts';
-import { feedModule } from '@tria/module-feed/module';
-import { reelsModule } from '@tria/module-reels/module';
-import { storiesModule } from '@tria/module-stories/module';
+} from '@rede-social/contracts';
+import { subscribe } from '@rede-social/core/server/events/bus';
+import { registerJobQueues } from '@rede-social/core/server/jobs/boss';
+import type { ModuleManifest } from '@rede-social/core/server/modules/manifest';
+import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions';
+import { KERNEL_ROLE_PERMISSIONS } from '@rede-social/core/server/rbac/require-role';
+import { communitiesModule } from '@rede-social/module-communities/module';
+import { eventsModule } from '@rede-social/module-events/module';
+import { FEED_PERMISSIONS, feedSettingsSchema } from '@rede-social/module-feed/contracts';
+import { feedModule } from '@rede-social/module-feed/module';
+import { reelsModule } from '@rede-social/module-reels/module';
+import { storiesModule } from '@rede-social/module-stories/module';
 
 /**
- * MOD-02: the registry lives in the APP tier, not in `@tria/core`. The kernel defines the manifest
+ * MOD-02: the registry lives in the APP tier, not in `@rede-social/core`. The kernel defines the manifest
  * SHAPE and must never import a module (`turbo boundaries`: `kernel` denies `module`); this file is
  * the single composition point where both sides meet, so adding a module is one entry here.
  *

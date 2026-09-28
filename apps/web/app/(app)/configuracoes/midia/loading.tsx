@@ -1,4 +1,4 @@
-import { Skeleton } from '@tria/ui';
+import { Skeleton } from '@rede-social/ui';
 import { MediaLibrarySkeleton } from './MediaLibrary';
 
 /**

@@ -1,6 +1,6 @@
 'use client';
 
-import { BottomSheet, Button } from '@tria/ui';
+import { BottomSheet, Button } from '@rede-social/ui';
 import { Share } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
  * permission (CLAUDE.md PWA §1 — iOS only delivers Web Push to Home-Screen installs). There is no
  * Android install-prompt event listener anywhere in apps/web (CONTEXT Deferred Ideas).
  *
- * Behaviour: "Entendi" closes without persisting; "Agora não" writes `tria_install_hint_dismissed`
+ * Behaviour: "Entendi" closes without persisting; "Agora não" writes `rede_install_hint_dismissed`
  * (= now, ms) to localStorage and the sheet stays hidden for 14 days; Escape / backdrop / drag-down
  * behave like "Entendi". The dismissal is a UX preference only (T-02-78): `Number()` + NaN check
  * means garbage in storage reads as "not dismissed" and it is never used for authorisation.
@@ -20,7 +20,7 @@ import { useCallback, useEffect, useState } from 'react';
  * The pure helpers are exported for Phase 7 and pinned by InstallHint.test.ts.
  */
 
-export const INSTALL_HINT_DISMISSED_KEY = 'tria_install_hint_dismissed';
+export const INSTALL_HINT_DISMISSED_KEY = 'rede_install_hint_dismissed';
 export const INSTALL_HINT_DISMISS_MS = 14 * 24 * 3600 * 1000;
 
 const STANDALONE_QUERY = '(display-mode: standalone)';

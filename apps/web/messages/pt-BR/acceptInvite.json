@@ -7,7 +7,7 @@
     "pending": "Entrando…",
     "errors": {
       "validation": "Confira os campos destacados e tente novamente.",
-      "consents": "Aceite as regras da comunidade e os termos da TRIA para continuar.",
+      "consents": "Aceite as regras da comunidade e os termos da plataforma para continuar.",
       "staleConsent": "As regras foram atualizadas. Leia e aceite novamente.",
       "generic": "Não foi possível aceitar o convite. Tente novamente."
     },

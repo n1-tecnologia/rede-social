@@ -1,4 +1,4 @@
-import { Card, Skeleton } from '@tria/ui';
+import { Card, Skeleton } from '@rede-social/ui';
 
 /** Módulos tab loading (E15/loading): six switch-row skeletons (name, description, track) + helper. */
 export default function TenantModulesLoading() {

@@ -1,6 +1,6 @@
 'use server';
 
-import { forgotSchema, normalizeHost } from '@tria/contracts';
+import { forgotSchema, normalizeHost } from '@rede-social/contracts';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';

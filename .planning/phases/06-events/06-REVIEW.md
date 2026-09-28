@@ -259,7 +259,7 @@ The poster then takes the gradient branch, and the edit form shows "no cover" in
 ### IN-03: Duplicated logic that can drift
 
 **File:** `apps/web/app/(app)/eventos/[eventId]/EventActions.tsx:12-15,89-101`, `apps/web/components/events/NextEventRefresh.tsx:6-45`, `packages/modules/events/server/checkin-code.ts:25-27`, `apps/web/app/(app)/eventos/[eventId]/check-in/CheckinForm.tsx:16`
-**Issue:** The boundary-refresh effect and its two constants are copied verbatim between `EventActions` and `NextEventRefresh`. `normalizeCheckinCode` is exported from `@tria/module-events/server` but no production code calls it (only its test does). `CheckinForm` has its own copy, and the real normalisation is the SQL `regexp_replace` in the function, whose `[[:space:]]` class may differ from JS `\s` (for example on U+00A0).
+**Issue:** The boundary-refresh effect and its two constants are copied verbatim between `EventActions` and `NextEventRefresh`. `normalizeCheckinCode` is exported from `@rede-social/module-events/server` but no production code calls it (only its test does). `CheckinForm` has its own copy, and the real normalisation is the SQL `regexp_replace` in the function, whose `[[:space:]]` class may differ from JS `\s` (for example on U+00A0).
 **Fix:** Extract a `useBoundaryRefresh(boundaries, phase)` hook. Move `normalizeCheckinCode` to `contracts` so the client imports it, or drop the unused server export.
 
 ### IN-04: Event-id validation differs between server actions

@@ -604,7 +604,7 @@
       "checkConstraints": {
         "consent_records_kind_chk": {
           "name": "consent_records_kind_chk",
-          "value": "\"consent_records\".\"kind\" in ('tenant_rules','tria_terms')"
+          "value": "\"consent_records\".\"kind\" in ('tenant_rules','platform_terms')"
         }
       },
       "isRLSEnabled": true

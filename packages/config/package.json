@@ -1,9 +1,9 @@
 {
-  "name": "@tria/config",
+  "name": "@rede-social/config",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Shared tooling configuration (tsconfig, vitest, biome) for the @tria workspace",
+  "description": "Shared tooling configuration (tsconfig, vitest, biome) for the @rede-social workspace",
   "exports": {
     "./tsconfig.base.json": "./tsconfig.base.json",
     "./vitest.base": "./vitest.base.ts",

@@ -12,7 +12,7 @@ import { useTranslations } from 'next-intl';
  * back online.
  *
  * Neutral tokens only (it renders above tenant and non-tenant pages alike), pinned under the safe-area
- * top inset, `z-[90]` — below the `@tria/ui` toast layer (`z-[100]`). `role="status"` + polite live
+ * top inset, `z-[90]` — below the `@rede-social/ui` toast layer (`z-[100]`). `role="status"` + polite live
  * region so assistive tech announces the change without stealing focus.
  */
 export function OfflineBanner() {

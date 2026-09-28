@@ -24,7 +24,7 @@ const HEIC = `${FIXTURES}iphone.heic`;
 const LARGE = `${FIXTURES}large.jpg`;
 const HUGE = `${FIXTURES}huge.jpg`;
 
-const SEEDED = { displayName: 'Membro TRIA Demo', bio: null } as const;
+const SEEDED = { displayName: 'Membro Rede Demo', bio: null } as const;
 
 /**
  * The photo field's OWN alert. Scoped on purpose: Next renders a permanent empty

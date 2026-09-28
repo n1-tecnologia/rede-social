@@ -61,7 +61,7 @@ A page under `/app` shows "○ (Static)" in the build output; `generateMetadata`
 ### Pitfall 3: Supabase Auth has one global `auth.users` — email uniqueness collides with per-tenant signup and V2 multi-tenant membership
 
 **What goes wrong:**
-Supabase Auth enforces **one email = one account per project**. Tenant A's public signup link and tenant B's link both write to the same `auth.users`. Consequences: (a) a person who already exists in tenant A cannot sign up to tenant B with the same email (V2 blocker); (b) if signup stores `tenant_id` only in profile data, a naive implementation lets a user log in and be resolved to the *wrong* tenant, or to none; (c) password-recovery emails go out with TRIA's generic Supabase template, not the tenant's brand. [MEDIUM — Supabase discussions #1615/#19420, community write-ups]
+Supabase Auth enforces **one email = one account per project**. Tenant A's public signup link and tenant B's link both write to the same `auth.users`. Consequences: (a) a person who already exists in tenant A cannot sign up to tenant B with the same email (V2 blocker); (b) if signup stores `tenant_id` only in profile data, a naive implementation lets a user log in and be resolved to the *wrong* tenant, or to none; (c) password-recovery emails go out with the platform's generic Supabase template, not the tenant's brand. [MEDIUM — Supabase discussions #1615/#19420, community write-ups]
 
 **Why it happens:**
 Teams model "user belongs to one tenant" as a column on `profiles` and forget that identity (auth) and membership (tenant) are different things. V1's "exactly one tenant" rule hides the problem until V2.
@@ -71,7 +71,7 @@ Teams model "user belongs to one tenant" as a column on `profiles` and forget th
 - Roles live on `tenant_members.role`, **not** on the user. `super_admin` is a platform-level flag on the user or a separate `platform_staff` table, never a tenant role.
 - Signup flow: the public link carries a tenant slug/invite token; the API creates the auth user with the admin client **and** inserts the membership in the same request; put `tenant_id` (V1: the single active tenant) into `app_metadata` via Auth Hook / admin update so RLS can read it from the JWT. Design the JWT claim as "active tenant" so V2 can switch it.
 - If an email already exists at signup for another tenant, V1 should show a clear pt-BR message ("este e-mail já está cadastrado; entre e peça acesso") rather than a 500 — and log it as a V2 signal.
-- Brand the auth emails: Supabase email templates are per project; either use one neutral TRIA template in V1 (accepted, cheap) or send auth emails yourself via the Send Email Auth Hook with tenant branding (defer unless the pilot complains).
+- Brand the auth emails: Supabase email templates are per project; either use one neutral platform template in V1 (accepted, cheap) or send auth emails yourself via the Send Email Auth Hook with tenant branding (defer unless the pilot complains).
 
 **Warning signs:**
 `profiles.tenant_id` with no membership table; `role` column on `profiles`; signup implemented with client-side `supabase.auth.signUp` (violates "frontend never hits Supabase" *and* skips membership creation); tests never sign up the same email twice.
@@ -102,7 +102,7 @@ Three common failures: (1) the API calls `supabase.auth.getUser(token)` on every
 ### Pitfall 5: Flash-of-wrong-brand and the per-tenant PWA manifest/favicon on one origin
 
 **What goes wrong:**
-Branding applied client-side after a fetch produces a visible flash of TRIA-default (or previous tenant's) colors/logo on every cold load — fatal for the core value "feels like *their* app." Separately, PWA install artifacts are per-origin and **captured at install time**: iOS and Android read the manifest (`name`, `icons`, `theme_color`, `start_url`) when the user taps "Add to Home Screen" and don't reliably re-read it. A static manifest means every tenant's home-screen icon is TRIA's. Two installs of the same origin collide unless `manifest.id` differs. [MEDIUM — web.dev manifest, Next.js PWA guide, WebKit blog; LOW for iOS re-read behavior]
+Branding applied client-side after a fetch produces a visible flash of Rede Social-default (or previous tenant's) colors/logo on every cold load — fatal for the core value "feels like *their* app." Separately, PWA install artifacts are per-origin and **captured at install time**: iOS and Android read the manifest (`name`, `icons`, `theme_color`, `start_url`) when the user taps "Add to Home Screen" and don't reliably re-read it. A static manifest means every tenant's home-screen icon is the platform's. Two installs of the same origin collide unless `manifest.id` differs. [MEDIUM — web.dev manifest, Next.js PWA guide, WebKit blog; LOW for iOS re-read behavior]
 
 **How to avoid:**
 - Render branding **server-side on first paint**: the root layout resolves the tenant from the session cookie (via the API), and emits CSS custom properties inline in `<html style="--brand-primary:...">` plus `<meta name="theme-color">`. Client components only *consume* variables. Store a lightweight "last tenant branding" copy in a cookie/localStorage as a paint fallback while logged out.
@@ -253,7 +253,7 @@ Notification inserts inside the post-creation transaction; `unread_count` column
 - **One deployable API, one Next.js app, modular by folder**: `modules/{feed,stories,communities,events,chat,notifications}/` each with `schema.sql` (migration files prefixed by module), `routes.ts`, `service.ts`, `types.ts`, and a `manifest.ts` exporting `{ key: 'feed', routes, requiredFeatures }`. A tiny core provides tenant context, auth, DB, storage, and the feature-flag gate (`requireFeature('feed')` middleware).
 - Same on the frontend: `modules/feed/` with its pages, components, hooks, and a `nav.ts` contribution; the shell composes navigation from enabled modules.
 - Shared types via a single `packages/shared` (or a `shared/` folder) — one package, not one per module.
-- Cross-module interaction through **explicit service calls or an in-process domain-event emitter** (`events.emit('post.created')`), not through raw table access into another module's tables. This is what makes reuse in other TRIA products plausible later.
+- Cross-module interaction through **explicit service calls or an in-process domain-event emitter** (`events.emit('post.created')`), not through raw table access into another module's tables. This is what makes reuse in other Rede Social products plausible later.
 - Defer splitting into separate services/packages until a second product actually needs a module.
 
 **Warning signs:**
@@ -328,7 +328,7 @@ Hard `DELETE` on comments; block implemented only in the frontend; no per-reques
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
 | Service-role client for all API queries | Zero RLS friction | Tenant leakage risk with no safety net; RLS never actually tested | Never for user-facing requests; OK for provisioning/jobs via a clearly separated admin client |
-| Static manifest/favicon, client-side theming | Ships in an hour | Wrong-brand flash and TRIA icon on every tenant's home screen; reinstall needed to fix | Only in local dev; never in the pilot |
+| Static manifest/favicon, client-side theming | Ships in an hour | Wrong-brand flash and Rede Social icon on every tenant's home screen; reinstall needed to fix | Only in local dev; never in the pilot |
 | `postgres_changes` for chat | No trigger/broadcast code | Throughput wall (single-threaded, per-subscriber auth) once V2 chat arrives | Prototype only; switch before Chat phase acceptance |
 | Proxying uploads through the API | Simple code path | 32 MiB HTTP/1 cap, instance held during upload, double egress | Only for tiny files (avatars ≤ 2 MB) if you insist; not for post media |
 | Storing raw phone video without transcoding | No vendor | Unplayable HEVC, huge egress, no poster; retrofit means re-encoding the catalogue | Never for feed video; acceptable to *defer* video entirely if the pilot agrees |
@@ -394,13 +394,13 @@ Hard `DELETE` on comments; block implemented only in the frontend; no per-reques
 | Sharing tenant `slug` in the signup link but resolving tenant by hostname later | Custom-domain V2 breaks resolution | Keep tenant resolution a single function that accepts slug/cookie/host inputs |
 | Push payloads with content | Sensitive support messages on lock screens | Send minimal payloads ("Nova mensagem do suporte"), fetch details on open |
 | Web Push VAPID private key in the frontend or in git | Anyone can send pushes as the app | Secret Manager on Cloud Run only |
-| Missing LGPD basics | Legal exposure for TRIA and the tenant | Consent at signup, account deletion/anonymization, moderation and access logs |
+| Missing LGPD basics | Legal exposure for Rede Social and the tenant | Consent at signup, account deletion/anonymization, moderation and access logs |
 
 ## UX Pitfalls
 
 | Pitfall | User Impact | Better Approach |
 |---------|-------------|-----------------|
-| Unbranded login/signup screens | First impression is "TRIA's app," not the organization's | Tenant slug in signup link + last-tenant cookie brand the pre-login screens |
+| Unbranded login/signup screens | First impression is "the platform's app," not the organization's | Tenant slug in signup link + last-tenant cookie brand the pre-login screens |
 | Wrong-brand flash on load | App feels broken/generic every open | Server-rendered CSS variables and theme-color |
 | Push permission prompt on first load | iOS denies forever; Android users tap "block" | Explain value, then gesture-triggered prompt; only in standalone mode |
 | No install guidance on iOS | Members never install → no push, no badge | Detect Safari-not-standalone; show "Adicionar à Tela de Início" walkthrough |

@@ -202,11 +202,11 @@ status: complete
 
 ## Verification run
 
-- `pnpm --filter @tria/module-events typecheck`, `lint` and `test` (48 tests) passed. `pnpm --filter @tria/api typecheck` and `lint` passed. `pnpm boundaries` passed.
+- `pnpm --filter @rede-social/module-events typecheck`, `lint` and `test` (48 tests) passed. `pnpm --filter @rede-social/api typecheck` and `lint` passed. `pnpm boundaries` passed.
 - `pnpm db:generate` wrote nothing, and `git status -- supabase/migrations` is clean (no schema change).
 - `pnpm db:reset && pnpm db:seed && pnpm supabase test db`: 16 files, 432 tests, PASS.
-- `pnpm --filter @tria/api exec vitest run tests/integration/events-admin.test.ts`: 9 passed. `pnpm test:integration` (the whole folder): 33 files, 560 tests passed.
-- `pnpm --filter @tria/web typecheck` and `lint`, and `vitest run "app/(app)/eventos" lib/events-view i18n` (405 tests) passed. `check-ui-literals` is OK. `pnpm --filter @tria/web build` passed with `/eventos/novo` and `/eventos/[eventId]/editar` dynamic (ƒ). `check-static-routes.sh`: 46 guarded routes, 0 offenders.
+- `pnpm --filter @rede-social/api exec vitest run tests/integration/events-admin.test.ts`: 9 passed. `pnpm test:integration` (the whole folder): 33 files, 560 tests passed.
+- `pnpm --filter @rede-social/web typecheck` and `lint`, and `vitest run "app/(app)/eventos" lib/events-view i18n` (405 tests) passed. `check-ui-literals` is OK. `pnpm --filter @rede-social/web build` passed with `/eventos/novo` and `/eventos/[eventId]/editar` dynamic (ƒ). `check-static-routes.sh`: 46 guarded routes, 0 offenders.
 - `pnpm db:reset && pnpm db:seed && VIDEO_PROVIDER=fake playwright test events.spec.ts -g "events admin" --project=mobile-chromium`: 3 passed. The full events spec on both projects: 31 passed, 7 skipped (the phone-only cases on desktop).
 - Teardown check after the e2e: 0 tenants, 0 GoTrue users and 0 orphan `media_assets` rows remain for `e2e-events-admin`.
 - All acceptance greps pass: 4 manage literals in routes, no `method: 'delete'`, `timesChanged` in the contracts, one `'event.reactivated'`, 6 `is distinct from` in the service, 8 `set constraints all immediate` in 140, the anchor and no `role ===` in `/eventos/page.tsx`, `notFound()` in both routes, `eventInputSchema` in the form, one `longGeneric`, the REQUIRED_KEYS entry, one `describe('events admin'`, the literal `not.toContain('meet.example.test')`, and `secretsFor`.
@@ -300,7 +300,7 @@ See `key-decisions` in the frontmatter. In short:
 ## Issues Encountered
 
 - The browser logs "Service Worker registration blocked by Playwright" and an `unhandledRejection` reading `waiting`, as in 06-03. Both predate this plan and fail no test.
-- `pnpm test:integration -- <x>` does not filter (orchestrator note 6), so the whole folder ran once; the single file ran through `pnpm --filter @tria/api exec vitest run`.
+- `pnpm test:integration -- <x>` does not filter (orchestrator note 6), so the whole folder ran once; the single file ran through `pnpm --filter @rede-social/api exec vitest run`.
 - The uploaded cover's bytes stay in the local Storage bucket after the e2e teardown (a few hundred bytes per run; no row points at them).
 
 ## Known Stubs

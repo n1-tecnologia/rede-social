@@ -5,9 +5,9 @@ import {
   deriveBrandColors,
   hexColorSchema,
   NEUTRAL_BRAND,
-} from '@tria/contracts/branding';
-import { BrandPreview } from '@tria/core/ui';
-import { Button, Card, Input, SectionTitle, Switch } from '@tria/ui';
+} from '@rede-social/contracts/branding';
+import { BrandPreview } from '@rede-social/core/ui';
+import { Button, Card, Input, SectionTitle, Switch } from '@rede-social/ui';
 import { Mail } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useActionState, useMemo, useState } from 'react';

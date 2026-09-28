@@ -1,4 +1,4 @@
-import { markStoriesSeenSchema } from '@tria/module-stories/contracts';
+import { markStoriesSeenSchema } from '@rede-social/module-stories/contracts';
 
 /**
  * The seen write's two shared pieces (HIGHLIGHT-06; quick 260926-d8f, reviews WR-04 and WR-07).

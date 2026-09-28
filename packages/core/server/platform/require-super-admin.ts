@@ -1,4 +1,4 @@
-import { normalizeHost, TENANT_HOST_HEADER } from '@tria/contracts';
+import { normalizeHost, TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { createMiddleware } from 'hono/factory';
 import type { Logger } from 'pino';
 import { verifyBearer } from '../auth/require-auth';

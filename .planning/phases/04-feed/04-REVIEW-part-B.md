@@ -119,7 +119,7 @@ Two further consequences of the same `delete`:
    deleted. `member_profiles_avatar_asset_id_media_assets_id_fk` is `ON DELETE set null`
    (`supabase/migrations/20260921190226_member_profiles.sql:18`), so the deletion is **silent** —
    no foreign-key error, the seeded members simply stop having photos.
-2. `media.test.ts` runs the sweep for **both** `tria-demo` and `tria-lab`.
+2. `media.test.ts` runs the sweep for **both** `rede-demo` and `rede-lab`.
 
 Net effect: one `pnpm test:integration` run leaves the shared seed in a state where the 04-04 media
 posts render broken images, `photoCount` from the seed is zero, and every downstream e2e that
@@ -276,7 +276,7 @@ and replace all eight `Date.now()` call sites with `minutesAgo(...)`.
 in."* It does not, any more:
 
 ```ts
-import { FEED_PERMISSIONS, feedSettingsSchema } from '@tria/module-feed/contracts';
+import { FEED_PERMISSIONS, feedSettingsSchema } from '@rede-social/module-feed/contracts';
 ...
   if (enabled.has('feed') && role === 'member') {
     const parsed = feedSettingsSchema.safeParse(settings.get('feed') ?? {});
@@ -466,7 +466,7 @@ DROP TABLE IF EXISTS "example_items" CASCADE;
 **Issue:**
 
 ```ts
-const SECOND_ADMIN_EMAIL = 'segundo-admin@tria-demo-04-09.local';
+const SECOND_ADMIN_EMAIL = 'segundo-admin@rede-demo-04-09.local';
 const SECOND_ADMIN_PASSWORD = 'segundo-admin-04-09-Aa1!';
 ```
 
@@ -474,7 +474,7 @@ const SECOND_ADMIN_PASSWORD = 'segundo-admin-04-09-Aa1!';
 environment precisely because *"passwords come from env only, never from git"*. This file commits one,
 and unlike the existing throwaway-member pattern (`isolation.test.ts`'s `THROWAWAY_PASSWORD`,
 `platform-tenants.test.ts:689`), the identity it creates is an **`admin_tenant` of the seeded
-`tria-demo` tenant** — a real GoTrue account with post-management authority over seeded content. The
+`rede-demo` tenant** — a real GoTrue account with post-management authority over seeded content. The
 account is removed in `afterAll` (line 162) and defensively in `beforeAll` (line 119), but both are
 best-effort: an interrupted run, a failing `beforeAll`, or a crash inside a test leaves the account
 live with its password in the repository. Escalate this to a blocker if the integration suite is ever

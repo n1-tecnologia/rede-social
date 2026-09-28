@@ -22,7 +22,7 @@
 
 **Feed placement and entry points**
 
-- **D-55:** The feed is a **home slot on `/inicio`**, not a new navigation tab: `@tria/module-feed` registers a widget through the D-42 home-slot mechanism, and the post list is the main content of the home, below the branded greeting and the D-02 profile nudge. When a tenant has `feed` disabled, `/inicio` still renders the remaining widgets. **Amends D-40**, which had pencilled `feed` → an "Início" tab: the feed contributes a home slot, and the BottomNav/rail keeps its budget for Comunidades (Phase 5), Eventos (Phase 6) and the kernel's Perfil. — **Reversibility:** costly — Phases 5 and 6 plan their nav entries against this tab budget, and the registry manifest's `nav` vs `home` distinction is what they copy.
+- **D-55:** The feed is a **home slot on `/inicio`**, not a new navigation tab: `@rede-social/module-feed` registers a widget through the D-42 home-slot mechanism, and the post list is the main content of the home, below the branded greeting and the D-02 profile nudge. When a tenant has `feed` disabled, `/inicio` still renders the remaining widgets. **Amends D-40**, which had pencilled `feed` → an "Início" tab: the feed contributes a home slot, and the BottomNav/rail keeps its budget for Comunidades (Phase 5), Eventos (Phase 6) and the kernel's Perfil. — **Reversibility:** costly — Phases 5 and 6 plan their nav entries against this tab budget, and the registry manifest's `nav` vs `home` distinction is what they copy.
 - **D-56:** The post detail lives at a **dedicated `/post/[id]` route** on the tenant's own domain (the prototype's `app/(app)/post/[postId]` shape): the full `PostCard` plus the comment list inline, under a sticky back header, server-rendered. It is the **FEED-07 share target** — the logged-out visitor is routed through login and lands here — and it is the destination Phase 7's notifications will point at. Cross-tenant access answers 404 (roadmap-locked). — **Reversibility:** costly — once the pilot tenant's members start sharing links, the URL shape is effectively permanent; this is the D-01 lesson applied to content URLs.
 - **D-57:** The admin reaches the composer through an **`admin_tenant`-only floating action button over the feed on `/inicio`, navigating to a full-screen `/criar` route**; the edit flow (FEED-03) reuses the same form at `/post/[id]/editar`. Full screen rather than a bottom sheet because picking several images, waiting on an upload, seeing a link preview resolve and attaching a PDF do not fit a sheet with the mobile keyboard up — and because a long video upload must not live in a layer the admin can dismiss by accident. Both screens are prototype-less and go through the **D-33 UI-SPEC + mockup approval before being coded**.
 - **D-58:** The feed loads with **infinite scroll plus pull-to-refresh**, exactly as roadmap criterion 2 states and as the prototype already implements (`feed/InfiniteScroll.tsx` + `hooks/useInfiniteScroll.ts`, whose IntersectionObserver root is hardcoded to `#app-scroll` and becomes a prop during the port). Paging rides the keyset cursor convention in `packages/core/server/paging.ts` — the sentinel fetches the next page, pull-to-refresh re-reads the first one.
@@ -61,7 +61,7 @@ Everything below was explicitly left to Claude or was not selected for discussio
 - Empty states and skeletons for the feed, the comment list and the composer; what `/inicio` shows a member of a brand-new tenant with no posts; whether the D-02 profile nudge stays above the feed once the feed has content.
 - Desktop composition under D-39 (left rail + centred column): the feed column width, where the FAB goes on desktop, and whether the composer is a full page there too.
 - Share implementation: `navigator.share` with a copy-link fallback, the exact link shape, and the pt-BR copy of the toast.
-- `@tria/module-feed` package layout against the `@tria/module-example` template, and the removal of `@tria/module-example` (D-19) — including the seventh registry key, its seed rows, and any boundary-lint fixture that depends on it.
+- `@rede-social/module-feed` package layout against the `@rede-social/module-example` template, and the removal of `@rede-social/module-example` (D-19) — including the seventh registry key, its seed rows, and any boundary-lint fixture that depends on it.
 - Test strategy: extending the two-tenant pgTAP + API isolation suite with posts, comments and likes; the reply-depth constraint's negative test; the cross-tenant deep-link 404; and Playwright coverage on a mobile viewport for double-tap like, the comment sheet, infinite scroll and pull-to-refresh.
 
 ### Deferred Ideas (OUT OF SCOPE)
@@ -93,15 +93,15 @@ Everything below was explicitly left to Claude or was not selected for discussio
 | FEED-07 | "Member can share a post via the native share sheet (or copy link on desktop) using an internal deep link; opening the link requires login and lands on the post if it belongs to the user's tenant (otherwise 404)" | §Share & deep link; the existing `(app)` layout + `requireBootstrap()` redirect path already does "log in then land"; RLS makes the cross-tenant case a bare 404 with no oracle |
 | FEED-08 | "Posts, communities and stories carry a generic `author_id` and per-tenant posting policy so V2 member posting is a permission change, not a schema change" | §Posting policy — `tenant_modules.settings` is the documented home; `permissionsFor()` is the one place that composes it |
 | MEDIA-04 | "Link unfurling runs server-side with an SSRF guard and caches title/description/image on the post" | §Unfurl pipeline + §SSRF guard (verified: connector-level pinning, IP-literal bypass, `maxResponseSize`) |
-| MOD-03 | "Modules communicate through domain events (e.g. `post.liked`, `event.rsvp`) consumed by other modules … so a module can be removed or replaced without touching the others" | §Domain events — `EventMap` declaration merging + `emit` after commit; `@tria/module-feed` is the first real declarer |
-| UI-02 | "Feature screens are ported into their module package as each vertical phase is built, replacing mock data with API calls and keeping the prototype's interactions (double-tap like, comment sheet, infinite scroll, pull-to-refresh, swipe)" | §Prototype port map — which primitives already exist in `@tria/ui` and which are still missing |
+| MOD-03 | "Modules communicate through domain events (e.g. `post.liked`, `event.rsvp`) consumed by other modules … so a module can be removed or replaced without touching the others" | §Domain events — `EventMap` declaration merging + `emit` after commit; `@rede-social/module-feed` is the first real declarer |
+| UI-02 | "Feature screens are ported into their module package as each vertical phase is built, replacing mock data with API calls and keeping the prototype's interactions (double-tap like, comment sheet, infinite scroll, pull-to-refresh, swipe)" | §Prototype port map — which primitives already exist in `@rede-social/ui` and which are still missing |
 </phase_requirements>
 
 ---
 
 ## Summary
 
-Phase 4 is almost entirely a **composition** phase, not a discovery phase. Every hard mechanism it needs already exists in the tree and is documented in its own source: the keyset cursor envelope (`packages/core/server/paging.ts`), the after-commit domain-event bus (`packages/core/server/events/bus.ts`), the module package contract (`packages/modules/example/*`, which is also the package this phase deletes under D-19), the three-layer tenant scoping (`withTenantTx` + `tenantIsolationPolicy` + `membershipOfRecord`), the media broker with signed direct-to-Storage uploads and the Mux video seam, the `/v1/media/{assetId}/{variant}` delivery path the web BFF already proxies, and the `@tria/ui` primitives (`BottomSheet`, `PullToRefresh`, `ScrollContainerContext`, `Avatar`, `EmptyState`, `Skeleton`, `Toast`). The correct posture for the planner is *copy the established pattern, do not invent a second one* — the repo's own docblocks say so in several places ("Do not write a second envelope").
+Phase 4 is almost entirely a **composition** phase, not a discovery phase. Every hard mechanism it needs already exists in the tree and is documented in its own source: the keyset cursor envelope (`packages/core/server/paging.ts`), the after-commit domain-event bus (`packages/core/server/events/bus.ts`), the module package contract (`packages/modules/example/*`, which is also the package this phase deletes under D-19), the three-layer tenant scoping (`withTenantTx` + `tenantIsolationPolicy` + `membershipOfRecord`), the media broker with signed direct-to-Storage uploads and the Mux video seam, the `/v1/media/{assetId}/{variant}` delivery path the web BFF already proxies, and the `@rede-social/ui` primitives (`BottomSheet`, `PullToRefresh`, `ScrollContainerContext`, `Avatar`, `EmptyState`, `Skeleton`, `Toast`). The correct posture for the planner is *copy the established pattern, do not invent a second one* — the repo's own docblocks say so in several places ("Do not write a second envelope").
 
 Three areas genuinely need research output rather than imitation, and all three are resolved below with verified evidence:
 
@@ -111,7 +111,7 @@ Three areas genuinely need research output rather than imitation, and all three 
 
 3. **The CI query budget.** `pg_stat_statements` 1.11 is already installed and preloaded in the local Supabase Postgres, with normalised statement text — so "a feed page executes ≤ N statements against the feed tables" is expressible as a `sum(calls)` delta filtered by query text, with no production code change and no new dependency.
 
-**Primary recommendation:** build `@tria/module-feed` as a byte-for-byte structural copy of `@tria/module-example` (manifest → contracts → db/schema → server/{routes,service,jobs} → ui), with **one** hydrated feed query per page (post + author + counts + `viewer_liked` in a single statement), likes as one `feed_likes` table with nullable target FKs and partial unique indexes, comments as one `feed_comments` table with the declarative depth constraint and a reserved `story_id` slot, the unfurl as a **worker job** behind a connector-pinned undici Agent, and the posting policy as `tenant_modules.settings.postingPolicy` composed into `permissionsFor()` so the API guard and the composer's visibility read the same value.
+**Primary recommendation:** build `@rede-social/module-feed` as a byte-for-byte structural copy of `@rede-social/module-example` (manifest → contracts → db/schema → server/{routes,service,jobs} → ui), with **one** hydrated feed query per page (post + author + counts + `viewer_liked` in a single statement), likes as one `feed_likes` table with nullable target FKs and partial unique indexes, comments as one `feed_comments` table with the declarative depth constraint and a reserved `story_id` slot, the unfurl as a **worker job** behind a connector-pinned undici Agent, and the posting policy as `tenant_modules.settings.postingPolicy` composed into `permissionsFor()` so the API guard and the composer's visibility read the same value.
 
 ---
 
@@ -127,7 +127,7 @@ Three areas genuinely need research output rather than imitation, and all three 
 | Link unfurl + SSRF guard | API worker (`ROLE=worker`, pg-boss) | API (enqueue only) | Established rule 02-13: "Nothing heavy runs in the request path." An outbound fetch to an attacker-named host is the textbook case. |
 | Image bytes / video playback | CDN / Storage + Mux | API (signing, tenant check), Frontend Server (BFF proxy for `<img>`) | 03-01/03-04/03-07 already own this end to end; Phase 4 adds **zero** new media plumbing. |
 | Post media rendering (carousel, HLS, attachment, embed) | Browser (client components) | — | Pure presentation; the module's `ui/` stays dumb and prop-driven (the `ExampleWidget` posture). |
-| Infinite scroll sentinel / pull-to-refresh | Browser | Frontend Server (server action for the next page) | `PullToRefresh` + `ScrollContainerContext` already exist in `@tria/ui`; `InfiniteScroll` does not yet. |
+| Infinite scroll sentinel / pull-to-refresh | Browser | Frontend Server (server action for the next page) | `PullToRefresh` + `ScrollContainerContext` already exist in `@rede-social/ui`; `InfiniteScroll` does not yet. |
 | Share sheet / copy link | Browser (`navigator.share`) | Frontend Server (route `/post/[id]`) | Web Share API is browser-only; the link shape is a routing decision (D-56). |
 | Domain event fan-out | API / Backend (in-process bus, after commit) | Worker (Phase 7 consumers) | `flushEventsAfterHandler` already runs after the handler's transaction. |
 | Posting policy (FEED-08) | Database (`tenant_modules.settings`) | API (`permissionsFor`), Frontend (`bootstrap.permissions`) | One value, one composition point, two readers. |
@@ -149,7 +149,7 @@ Actionable directives the plan must honour. These have the same authority as CON
 | Rich text/embeds rendered raw = stored XSS; render embeds via known providers only | §Security Mistakes (PITFALLS) | D-54 already bans rich text; embeds restricted to YouTube/Vimeo via oEmbed |
 | Link-preview fetcher with no SSRF protection lets the API probe GCP metadata | §Security Mistakes (PITFALLS) | The connector-pinned Agent below is mandatory, not optional |
 | pt-BR UI, all strings centralised | §Project Constraints, PWA-03 | New `apps/web/messages/pt-BR/feed.json` namespace; `scripts/check-ui-literals.sh` fails the build on a literal |
-| Each feature is a self-contained package depending only on the kernel and other modules' **published contracts** | MOD-01/MOD-02 | `@tria/module-feed` may import `@tria/core/server/*`, `@tria/core/db/tenant-tx`, `@tria/contracts` — and nothing from another module's internals |
+| Each feature is a self-contained package depending only on the kernel and other modules' **published contracts** | MOD-01/MOD-02 | `@rede-social/module-feed` may import `@rede-social/core/server/*`, `@rede-social/core/db/tenant-tx`, `@rede-social/contracts` — and nothing from another module's internals |
 | `open-graph-scraper` 6.12.0, `pg-boss` 12.31.0, `@tanstack/react-query` 5.102.8 are the named stack entries | §Technology Stack | See §Standard Stack for what is actually needed (React Query is **not**, see the note) |
 
 ---
@@ -160,15 +160,15 @@ Actionable directives the plan must honour. These have the same authority as CON
 
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
-| `hono` + `@hono/zod-openapi` | 4.13.7 / 1.6.3 | Feed module routes with the `requireAuth → requireModule → requireRole` chain | `[VERIFIED: apps/api/package.json]` — `"hono": "4.13.7"`, `"@hono/zod-openapi": "1.6.3"`. The `@tria/module-example` route file is the exact template. |
+| `hono` + `@hono/zod-openapi` | 4.13.7 / 1.6.3 | Feed module routes with the `requireAuth → requireModule → requireRole` chain | `[VERIFIED: apps/api/package.json]` — `"hono": "4.13.7"`, `"@hono/zod-openapi": "1.6.3"`. The `@rede-social/module-example` route file is the exact template. |
 | `drizzle-orm` | 0.45.2 | Schema + RLS policies + queries | `[VERIFIED: apps/api/package.json]` — `"drizzle-orm": "0.45.2"`. `foreignKey` is exported from `drizzle-orm/pg-core` `[VERIFIED: node_modules/drizzle-orm/pg-core/foreign-keys.d.ts:39]` — `export declare function foreignKey<…>` — which is what the composite self-FK in Pattern 4 needs. |
 | `drizzle-kit` | 0.31.10 | `pnpm db:generate` → `supabase/migrations` | `[VERIFIED: apps/api/package.json]` |
 | `zod` | 4.6.2 | Contracts shared by API + web | `[VERIFIED: apps/api/package.json]` |
 | `pg-boss` | 12.31.0 | The unfurl job queue | `[VERIFIED: apps/api/package.json]` — `"pg-boss": "12.31.0"` |
 | `postgres` (postgres.js) | 3.4.9 | Driver, `prepare: false`, `max: 5` | `[VERIFIED: packages/core/db/client.ts]` — `export const sqlClient = postgres(env.DATABASE_URL, { prepare: false, max: 5 });` |
-| `@tria/ui` primitives | workspace | `BottomSheet`, `PullToRefresh`, `Avatar`, `EmptyState`, `Skeleton`, `Toast`, `Textarea`, `FileDropZone`, `ConfirmDialog`, `Card`, `IconButton`, `PageHeader` | `[VERIFIED: packages/ui/src/index.ts]` — all of these appear in the barrel's export list |
+| `@rede-social/ui` primitives | workspace | `BottomSheet`, `PullToRefresh`, `Avatar`, `EmptyState`, `Skeleton`, `Toast`, `Textarea`, `FileDropZone`, `ConfirmDialog`, `Card`, `IconButton`, `PageHeader` | `[VERIFIED: packages/ui/src/index.ts]` — all of these appear in the barrel's export list |
 | `lucide-react` | 1.46.0 | Heart / MessageCircle / Send / MoreHorizontal icons | `[VERIFIED: packages/core/package.json]` — `"lucide-react": "1.46.0"` |
-| `motion` | (installed in `@tria/ui`) | Like pulse + double-tap heart spring | `[VERIFIED: packages/ui/node_modules/motion exists]`. The prototype uses `framer-motion`; the repo standardised on `motion` — port the animation, not the import. |
+| `motion` | (installed in `@rede-social/ui`) | Like pulse + double-tap heart spring | `[VERIFIED: packages/ui/node_modules/motion exists]`. The prototype uses `framer-motion`; the repo standardised on `motion` — port the animation, not the import. |
 
 ### Supporting — one new dependency, at most
 
@@ -190,7 +190,7 @@ Actionable directives the plan must honour. These have the same authority as CON
 **Installation (the only package to add):**
 
 ```bash
-pnpm --filter @tria/module-feed add open-graph-scraper@6.12.0 undici@7
+pnpm --filter @rede-social/module-feed add open-graph-scraper@6.12.0 undici@7
 ```
 
 **Version verification performed this session:**
@@ -288,7 +288,7 @@ Run this session via `gsd-tools query package-legitimacy check --ecosystem npm o
 
 ```
 packages/modules/feed/                    # copy of packages/modules/example/ structure
-├── package.json                          # name @tria/module-feed, same exports map
+├── package.json                          # name @rede-social/module-feed, same exports map
 ├── module.ts                             # defineModule({ key: 'feed', home: [{order}], routes, jobs, events, defaultRolePermissions })
 ├── contracts/index.ts                    # zod schemas + EventMap declaration merging + queue name consts
 ├── db/schema.ts                          # feed_posts, feed_post_media, feed_comments, feed_likes, feed_link_previews
@@ -545,7 +545,7 @@ Consequences the planner can rely on without re-deciding:
 
 ```ts
 // Source: packages/modules/example/contracts/index.ts (verbatim)
-declare module '@tria/contracts' {
+declare module '@rede-social/contracts' {
   interface EventMap {
     'example.item.created': ExampleItemCreated;
   }
@@ -560,7 +560,7 @@ declare module '@tria/contracts' {
 //  2. **A subscriber never breaks the request.**
 ```
 
-`[VERIFIED: packages/contracts/src/events.ts]` — `EventMap` is empty on purpose and `DomainEventRecord` is `{ name, payload, tenantId, occurredAt }`. `@tria/module-feed` is the **first real declarer** (MOD-03, criterion 4).
+`[VERIFIED: packages/contracts/src/events.ts]` — `EventMap` is empty on purpose and `DomainEventRecord` is `{ name, payload, tenantId, occurredAt }`. `@rede-social/module-feed` is the **first real declarer** (MOD-03, criterion 4).
 
 **Recommended event set and payloads.** Phase 7 builds notification rows from these, so each payload carries everything a notification row needs without a re-read (PITFALLS §11's `event_id` idempotency point):
 
@@ -625,7 +625,7 @@ This is the only way to satisfy "the guard must sit in one place both the API an
 | One-level reply enforcement | An application `if (parent.parentId) throw` | The composite self-FK in Pattern 4 | FEED-05 says "enforced by a DB constraint"; the application check is also racy |
 | Signed upload / resumable upload / video ingest | Anything at all | `useSignedUpload` + `FileDropZone` (`apps/web/components/media/`) | 03-04/03-07 generalised these exactly so Phase 4 would not touch them. The provider-owned branch (skip `complete` for Mux) is already handled |
 | Image URLs in the feed | A new signed-URL mechanism | `/v1/media/{assetId}/{variant}` via the Next BFF route handler | 03-01/03-04: the path is stable and permanently cacheable, the 302 carries the tenant check, and an `<img>` cannot carry the HttpOnly session |
-| Pull-to-refresh, scroll-root discovery | Porting the prototype's `#app-scroll` lookup | `PullToRefresh` + `useScrollContainer()` from `@tria/ui` | `[VERIFIED: packages/ui/src/index.ts, packages/ui/src/layout/ScrollContainerContext.tsx]` — already ported and already solve the PROTOTYPE risk-2 "implicit global" |
+| Pull-to-refresh, scroll-root discovery | Porting the prototype's `#app-scroll` lookup | `PullToRefresh` + `useScrollContainer()` from `@rede-social/ui` | `[VERIFIED: packages/ui/src/index.ts, packages/ui/src/layout/ScrollContainerContext.tsx]` — already ported and already solve the PROTOTYPE risk-2 "implicit global" |
 | pt-BR strings in components | Literals in JSX | `apps/web/messages/pt-BR/feed.json` + props | `scripts/check-ui-literals.sh` fails `pnpm lint` on pt-BR JSX text (02-04) |
 | Query counting for the CI budget | A bespoke instrumentation layer in production code | `pg_stat_statements` deltas in the integration suite | Already installed and preloaded locally; needs zero production code |
 
@@ -644,7 +644,7 @@ This is the only way to satisfy "the guard must sit in one place both the API an
 | **Live service config** | None — no external service knows about `example`. Verified: no occurrence outside `apps/`, `packages/`, `scripts/`, `supabase/` | None |
 | **OS-registered state** | None — no cron, no scheduler. The `example.process` pg-boss **queue row** exists in `pgboss.queue` once a worker has booted | **Optional cleanup:** `delete from pgboss.queue where name = 'example.process'` (and its `pgboss.job` rows). Harmless if left, but the queue would be recreated by nothing and shows as an orphan |
 | **Secrets/env vars** | None | None |
-| **Build artifacts / installed packages** | `apps/api/package.json` and `apps/web/package.json` declare `@tria/module-example` as a workspace dependency; `packages/boundary-fixture` imports `@tria/module-example/server/service` deliberately as violation #2 `[VERIFIED: packages/boundary-fixture/src/index.ts]` — *"2. `@tria/module-example/server/service` — another module's INTERNALS, not its published entry point"* | **Code edits + `pnpm install`:** repoint the fixture at `@tria/module-feed/server/service` (the fixture must keep testing violation #2, so it needs *a* module to point at — the feed becomes that module) |
+| **Build artifacts / installed packages** | `apps/api/package.json` and `apps/web/package.json` declare `@rede-social/module-example` as a workspace dependency; `packages/boundary-fixture` imports `@rede-social/module-example/server/service` deliberately as violation #2 `[VERIFIED: packages/boundary-fixture/src/index.ts]` — *"2. `@rede-social/module-example/server/service` — another module's INTERNALS, not its published entry point"* | **Code edits + `pnpm install`:** repoint the fixture at `@rede-social/module-feed/server/service` (the fixture must keep testing violation #2, so it needs *a* module to point at — the feed becomes that module) |
 
 **Complete removal inventory** (source files only; `apps/web/.next/**` hits are build artefacts):
 
@@ -747,7 +747,7 @@ So the assertion is `select coalesce(sum(calls),0) from pg_stat_statements where
 
 ### Pitfall 4: The `example` module's tables are the isolation suite's worked example
 
-**What goes wrong:** deleting `@tria/module-example` before the feed tables exist leaves `020-tenant-isolation.sql` and `030-lanes.sql` with no table to prove anything against, and the "exit gate of every phase" silently gets weaker. `[VERIFIED: supabase/tests/020-tenant-isolation.sql]` references `public.example_items` on lines 38, 104, 110, 115, 120, 125, 134, 333, 338; `[VERIFIED: supabase/tests/030-lanes.sql]` on lines 28, 39, 51, 62, 72.
+**What goes wrong:** deleting `@rede-social/module-example` before the feed tables exist leaves `020-tenant-isolation.sql` and `030-lanes.sql` with no table to prove anything against, and the "exit gate of every phase" silently gets weaker. `[VERIFIED: supabase/tests/020-tenant-isolation.sql]` references `public.example_items` on lines 38, 104, 110, 115, 120, 125, 134, 333, 338; `[VERIFIED: supabase/tests/030-lanes.sql]` on lines 28, 39, 51, 62, 72.
 
 **How to avoid:** sequence the plan as *feed schema + its isolation cases land first*, *example removal second*, in that order, with the pgTAP substitution happening in the removal plan. And keep the 03-08 discipline `[VERIFIED: STATE.md]` — *"every new cross-tenant isolation case asserts its POSITIVE control in the same test (T-03-56), so a globally broken route cannot make the negative pass vacuously"*.
 
@@ -769,11 +769,11 @@ So the assertion is `select coalesce(sum(calls),0) from pg_stat_statements where
 
 **What goes wrong:** the prototype components import `framer-motion`, `@/lib/mock/comments`, `@/lib/mock/users` (for a `gender` flag feeding `VerifiedBadge`), `@/hooks/useBookmark`, and `@/lib/utils`'s `cn`. Porting them verbatim drags four dead dependencies into the module package and breaks the boundary lint.
 
-**How to avoid:** the port map is already written — `[VERIFIED: .planning/research/PROTOTYPE.md §5]` — *"Reads `lib/mock/users` for gender"* and *"`onSave` accepted but no button (bookmark removed)"*. Use `motion` (already in `@tria/ui`), drop `VerifiedBadge`, drop `useBookmark`, import `cn` from `@tria/ui`, and take every string as a prop.
+**How to avoid:** the port map is already written — `[VERIFIED: .planning/research/PROTOTYPE.md §5]` — *"Reads `lib/mock/users` for gender"* and *"`onSave` accepted but no button (bookmark removed)"*. Use `motion` (already in `@rede-social/ui`), drop `VerifiedBadge`, drop `useBookmark`, import `cn` from `@rede-social/ui`, and take every string as a prop.
 
 ### Pitfall 8: `InfiniteScroll` is the one prototype primitive that is **not** yet ported
 
-`[VERIFIED: packages/ui/src/index.ts]` — the barrel exports `PullToRefresh`, `usePullToRefresh`, `ScrollContainerProvider`, `useScrollContainer`, `BottomSheet`, `Skeleton` … and **no** `InfiniteScroll` / `useInfiniteScroll`. The prototype's version hardcodes `document.getElementById("app-scroll")` as the IntersectionObserver root. Port it into `@tria/ui` (not into the feed module) taking the root from `useScrollContainer()`, because Phase 5's community post list and Phase 7's notification list need the identical thing.
+`[VERIFIED: packages/ui/src/index.ts]` — the barrel exports `PullToRefresh`, `usePullToRefresh`, `ScrollContainerProvider`, `useScrollContainer`, `BottomSheet`, `Skeleton` … and **no** `InfiniteScroll` / `useInfiniteScroll`. The prototype's version hardcodes `document.getElementById("app-scroll")` as the IntersectionObserver root. Port it into `@rede-social/ui` (not into the feed module) taking the root from `useScrollContainer()`, because Phase 5's community post list and Phase 7's notification list need the identical thing.
 
 ### Pitfall 9: A second data-fetch path for "load more"
 
@@ -898,8 +898,8 @@ export async function unfurl(rawUrl: string) {
 
 ```ts
 // packages/modules/feed/module.ts
-import { moduleLogger } from '@tria/core/server/logging';
-import { defineModule } from '@tria/core/server/modules/manifest';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { feedUnfurlJob } from './server/jobs';
 
 const log = moduleLogger('module-feed');
@@ -989,7 +989,7 @@ The real form is `explain (format json) <the feed query>` captured into a temp t
 | Counter column updated from application code | Same-transaction trigger, with the source table authoritative for reconciliation | Roadmap-locked for this project | No drift; hot-row contention is a non-issue at pilot scale |
 | SSRF guard as a deny-list of hostnames / a regex on the URL | Connector-level pinning at the socket layer (`undici` connector + `net.BlockList`), covering redirects and rebinding in one place | undici 5+ exposed `connect`; `net.BlockList` since Node 15 | The only form that survives a redirect to an IP literal |
 | Polymorphic `target_type` + `target_id` for reactions | Nullable target FKs + `num_nonnulls(...) = 1` CHECK + partial unique indexes | SCHEMA-CONVENTIONS (e).3 (and the roadmap note for this phase) | Keeps `on delete cascade` and lets the counter triggers work |
-| `framer-motion` | `motion` (the renamed package) | 2024 rename | The prototype's imports are stale; `@tria/ui` already carries `motion` |
+| `framer-motion` | `motion` (the renamed package) | 2024 rename | The prototype's imports are stale; `@rede-social/ui` already carries `motion` |
 | `middleware.ts` | `proxy.ts` (Node runtime) | Next 16 | Already done in Phase 1 — do not reintroduce |
 
 **Deprecated/outdated in the prototype (do not port):**
@@ -1016,7 +1016,7 @@ The real form is `explain (format json) <the feed query>` captured into a temp t
 | A9 | `deleted_at` transitions must be handled inside the counter trigger | Pitfall 5 | Medium if missed — phantom counts are user-visible and the pgTAP reconciliation assertion is the cheap guard |
 | A10 | `D-53`'s gallery-XOR-video rule needs a `media_kind` discriminator column to be a real check constraint | Pattern 6 | Low. The alternative (deferred constraint trigger) works too; the discriminator also serves the renderer |
 | A11 | The exact pgTAP formulation of the `EXPLAIN` acceptance check | Code Examples §5 | Low. The check is required by the roadmap; the formulation is mechanical |
-| A12 | `undici` should be a direct dependency of `@tria/module-feed` pinned at `7.29.1` so it is the same instance OGS uses | Standard Stack / Package Audit | Low-Medium. If pnpm resolves two copies, the `dispatcher` object would not be recognised by OGS's `fetch` and the guard would silently not apply — **add an assertion test that a blocked URL actually throws**, which turns this from an assumption into a test |
+| A12 | `undici` should be a direct dependency of `@rede-social/module-feed` pinned at `7.29.1` so it is the same instance OGS uses | Standard Stack / Package Audit | Low-Medium. If pnpm resolves two copies, the `dispatcher` object would not be recognised by OGS's `fetch` and the guard would silently not apply — **add an assertion test that a blocked URL actually throws**, which turns this from an assumption into a test |
 
 ---
 
@@ -1073,35 +1073,35 @@ The real form is `explain (format json) <the feed query>` captured into a temp t
 |----------|-------|
 | Framework | Vitest 5.0.0 (unit + integration), Playwright 1.63.0 (e2e), pgTAP via `supabase test db` (Supabase CLI 2.117.0) |
 | Config file | per-package `vitest.config.ts`; `apps/web/playwright.config.ts` + `playwright.pwa.config.ts`; `supabase/tests/*.sql` |
-| Quick run command | `pnpm --filter @tria/module-feed test` (new package) / `pnpm --filter @tria/api test` |
-| Full suite command | `pnpm verify` — `[VERIFIED: package.json]` `"verify": "pnpm lint && pnpm turbo typecheck build test && pnpm check:static-routes && pnpm boundaries && pnpm boundaries:negative && pnpm guard:lanes && pnpm supabase test db && pnpm test:integration && pnpm spike:supavisor && pnpm e2e && pnpm --filter @tria/web e2e:pwa"` |
+| Quick run command | `pnpm --filter @rede-social/module-feed test` (new package) / `pnpm --filter @rede-social/api test` |
+| Full suite command | `pnpm verify` — `[VERIFIED: package.json]` `"verify": "pnpm lint && pnpm turbo typecheck build test && pnpm check:static-routes && pnpm boundaries && pnpm boundaries:negative && pnpm guard:lanes && pnpm supabase test db && pnpm test:integration && pnpm spike:supavisor && pnpm e2e && pnpm --filter @rede-social/web e2e:pwa"` |
 
 ### Phase Requirements → Test Map
 
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| FEED-01 | admin composes a post with gallery / video / link / PDF | e2e (mobile) | `pnpm --filter @tria/web exec playwright test feed-composer.spec.ts` | ❌ Wave 0 |
+| FEED-01 | admin composes a post with gallery / video / link / PDF | e2e (mobile) | `pnpm --filter @rede-social/web exec playwright test feed-composer.spec.ts` | ❌ Wave 0 |
 | FEED-01 | gallery XOR video refused at the API and at the DB | integration + pgTAP | `pnpm test:integration`, `pnpm supabase test db` | ❌ Wave 0 |
 | FEED-02 | keyset page is stable under concurrent inserts; no duplicates/skips | integration | `pnpm test:integration -t feed-paging` | ❌ Wave 0 |
 | FEED-02 | feed page is an index scan, ≤ 1 statement | pgTAP (`EXPLAIN`) + integration (`pg_stat_statements`) | `pnpm supabase test db`, `pnpm test:integration -t query-budget` | ❌ Wave 0 |
 | FEED-03 | edit marks `edited_at`; soft delete hides the post and decrements counts | integration | `pnpm test:integration -t feed-edit-delete` | ❌ Wave 0 |
-| FEED-04 | double like is idempotent (one row, one count, one event) | unit (service) + integration | `pnpm --filter @tria/module-feed test` | ❌ Wave 0 |
-| FEED-04 | double-tap on the card likes once | e2e (mobile, iPhone 14 project) | `pnpm --filter @tria/web exec playwright test feed.spec.ts` | ❌ Wave 0 |
+| FEED-04 | double like is idempotent (one row, one count, one event) | unit (service) + integration | `pnpm --filter @rede-social/module-feed test` | ❌ Wave 0 |
+| FEED-04 | double-tap on the card likes once | e2e (mobile, iPhone 14 project) | `pnpm --filter @rede-social/web exec playwright test feed.spec.ts` | ❌ Wave 0 |
 | FEED-05 | reply-to-a-reply refused **by the database** | pgTAP negative | `pnpm supabase test db` | ❌ Wave 0 |
 | FEED-05 | the API maps 23503/23514 to `400 VALIDATION_FAILED` | integration | `pnpm test:integration -t comment-depth` | ❌ Wave 0 |
 | FEED-06 | like/unlike a comment and a reply | integration | `pnpm test:integration -t comment-likes` | ❌ Wave 0 |
 | FEED-07 | logged-out deep link → login → lands on `/post/[id]`; other tenant → 404 | e2e + integration isolation | `playwright test feed-share.spec.ts`; `pnpm test:integration -t isolation` | ❌ Wave 0 |
 | FEED-08 | flipping `settings.postingPolicy` to `members` lets a member post, with **no migration** | integration | `pnpm test:integration -t posting-policy` | ❌ Wave 0 |
-| MEDIA-04 | unfurl refuses a private IP, an IP literal, and a redirect to a private target; caps the body | unit (local fixture servers, no internet) | `pnpm --filter @tria/module-feed test -t unfurl-guard` | ❌ Wave 0 |
+| MEDIA-04 | unfurl refuses a private IP, an IP literal, and a redirect to a private target; caps the body | unit (local fixture servers, no internet) | `pnpm --filter @rede-social/module-feed test -t unfurl-guard` | ❌ Wave 0 |
 | MEDIA-04 | preview cached per tenant, reused on a second post | integration | `pnpm test:integration -t unfurl-cache` | ❌ Wave 0 |
-| MOD-03 | every action emits its event **after commit**, once; a failed handler emits **none** | unit (bus) + integration | `pnpm --filter @tria/module-feed test -t events` | ❌ Wave 0 |
+| MOD-03 | every action emits its event **after commit**, once; a failed handler emits **none** | unit (bus) + integration | `pnpm --filter @rede-social/module-feed test -t events` | ❌ Wave 0 |
 | UI-02 | comment sheet, infinite scroll, pull-to-refresh on a mobile viewport | e2e | `playwright test feed.spec.ts` | ❌ Wave 0 |
 | TENANT-05 (gate) | cross-tenant read/write blocked per new table, each with its positive control | pgTAP 020 + integration isolation | `pnpm supabase test db`, `pnpm test:integration` | ✅ extend `supabase/tests/020-tenant-isolation.sql`, `apps/api/tests/integration/isolation.test.ts` |
-| D-19 | `@tria/module-example` gone; boundary fixture retargeted; `example` no longer a module key | boundaries + unit + pgTAP | `pnpm boundaries && pnpm boundaries:negative`, `pnpm supabase test db` | ✅ files exist, contents change |
+| D-19 | `@rede-social/module-example` gone; boundary fixture retargeted; `example` no longer a module key | boundaries + unit + pgTAP | `pnpm boundaries && pnpm boundaries:negative`, `pnpm supabase test db` | ✅ files exist, contents change |
 
 ### Sampling Rate
 
-- **Per task commit:** `pnpm --filter @tria/module-feed test && pnpm --filter @tria/api test`
+- **Per task commit:** `pnpm --filter @rede-social/module-feed test && pnpm --filter @rede-social/api test`
 - **Per wave merge:** `pnpm lint && pnpm turbo typecheck test && pnpm supabase test db && pnpm test:integration`
 - **Phase gate:** `pnpm verify` green before `/gsd-verify-work`. Phase 3 baseline for comparison `[VERIFIED: STATE.md]`: *"pnpm verify is GREEN at 20m26s (unit 385, pgTAP 128, integration 313, e2e 271 passed/41 skipped, PWA 45/3)"*.
 

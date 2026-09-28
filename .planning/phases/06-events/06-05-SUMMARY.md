@@ -19,7 +19,7 @@ provides:
   - "POST /v1/events/{id}/check-in (events.attendance.respond): 200 { outcome, checkedInAt }, 409 { event }, bare 404; mapped only after withTenantTx resolved"
   - "event.checked_in (MOD-03): once per member per event, { tenantId, eventId, userId, walkIn, via, startsAt }"
   - "contracts: EVENT_CHECKIN_MAX_FAILED, EVENT_CHECKIN_FAILED_WINDOW_MINUTES, checkinSchema, checkinResultSchema, CHECKIN_OUTCOMES, EventCheckedIn"
-  - "@tria/module-events/ui EventTicket and EventInfoGrid layout=\"ticket\""
+  - "@rede-social/module-events/ui EventTicket and EventInfoGrid layout=\"ticket\""
   - "/eventos/[eventId]/check-in with CheckinForm; checkInEventAction; lib/events.ts checkIn; events-view eventTicketView + checkedInLine"
   - "the in-person 'Fazer check-in' CTA in the action zone (P1/P2; disabled when cancelled; gone once checked in)"
   - "e2e fixtures addEventsMember, attendanceFor; secretsFor now returns checkinCode"
@@ -210,12 +210,12 @@ status: complete
 
 ## Verification run
 
-- `pnpm --filter @tria/module-events typecheck`, `lint` and `test` pass (61 tests). `pnpm --filter @tria/api typecheck` and `lint` pass. `pnpm boundaries` reports no issues.
+- `pnpm --filter @rede-social/module-events typecheck`, `lint` and `test` pass (61 tests). `pnpm --filter @rede-social/api typecheck` and `lint` pass. `pnpm boundaries` reports no issues.
 - `pnpm db:generate` wrote nothing after the commit, and `git status -- supabase/migrations` is clean.
 - `pnpm db:reset && pnpm db:seed && pnpm supabase test db`: 17 files, 484 tests, PASS (142 plans 43; 020 went from 139 to 148).
-- `pnpm --filter @tria/api exec vitest run tests/integration/events-checkin.test.ts`: 7 passed. `pnpm test:integration` (the whole folder, which does not filter): 34 files, 567 tests passed.
-- `pnpm --filter @tria/web typecheck` and `lint` pass. `vitest run "app/(app)/eventos" lib/events-view i18n`: 441 passed. `check-ui-literals` is OK.
-- `pnpm --filter @tria/web build` passes, with `/eventos/[eventId]/check-in` dynamic (ƒ). `check-static-routes.sh`: 47 guarded routes, 0 offenders.
+- `pnpm --filter @rede-social/api exec vitest run tests/integration/events-checkin.test.ts`: 7 passed. `pnpm test:integration` (the whole folder, which does not filter): 34 files, 567 tests passed.
+- `pnpm --filter @rede-social/web typecheck` and `lint` pass. `vitest run "app/(app)/eventos" lib/events-view i18n`: 441 passed. `check-ui-literals` is OK.
+- `pnpm --filter @rede-social/web build` passes, with `/eventos/[eventId]/check-in` dynamic (ƒ). `check-static-routes.sh`: 47 guarded routes, 0 offenders.
 - Playwright:
   - `-g "events check-in" --project=mobile-chromium`: 4 passed.
   - `-g "events check-in|events rsvp|events detalhe"`: 17 passed, 7 skipped.
@@ -325,7 +325,7 @@ See `key-decisions` in the frontmatter. In short:
 ## Issues Encountered
 
 - The browser logs "Service Worker registration blocked by Playwright" and an `unhandledRejection` reading `waiting`, as in 06-03 and 06-04. Both predate this plan and fail no test.
-- `pnpm test:integration -- <x>` does not filter (orchestrator note 7). The single file ran through `pnpm --filter @tria/api exec vitest run`, and the whole folder ran once.
+- `pnpm test:integration -- <x>` does not filter (orchestrator note 7). The single file ran through `pnpm --filter @rede-social/api exec vitest run`, and the whole folder ran once.
 - Disk stayed at about 8.6-8.9 GB free throughout, and `.turbo/cache` was not touched.
 
 ## Known Stubs

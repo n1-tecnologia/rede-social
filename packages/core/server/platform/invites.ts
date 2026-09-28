@@ -1,4 +1,4 @@
-import { resolveBranding, type TenantInvite } from '@tria/contracts';
+import { resolveBranding, type TenantInvite } from '@rede-social/contracts';
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { memberships, tenantDomains, tenantInvites, tenants, users } from '../../db/schema';

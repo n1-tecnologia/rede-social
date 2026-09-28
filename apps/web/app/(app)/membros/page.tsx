@@ -1,5 +1,5 @@
-import { MEMBERS_MAX_QUERY_LENGTH } from '@tria/contracts/profiles';
-import { PageHeader } from '@tria/ui';
+import { MEMBERS_MAX_QUERY_LENGTH } from '@rede-social/contracts/profiles';
+import { PageHeader } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { loadMembers } from '@/lib/profile';

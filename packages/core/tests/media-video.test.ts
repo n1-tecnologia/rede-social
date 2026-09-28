@@ -52,7 +52,7 @@ describe('fake video provider — the direct-upload target', () => {
     const upload = await provider.createDirectUpload({
       assetId: ASSET,
       tenantId: TENANT,
-      corsOrigin: 'http://tria-demo.localhost:3000',
+      corsOrigin: 'http://rede-demo.localhost:3000',
       test: true,
     });
 
@@ -68,7 +68,7 @@ describe('fake video provider — the direct-upload target', () => {
       provider.createDirectUpload({
         assetId: '../../other-tenant/media/x',
         tenantId: TENANT,
-        corsOrigin: 'http://tria-demo.localhost:3000',
+        corsOrigin: 'http://rede-demo.localhost:3000',
         test: true,
       }),
     ).rejects.toThrow(/outside the tenant prefix/);
@@ -82,7 +82,7 @@ describe('fake video provider — the direct-upload target', () => {
     await createFakeVideoProvider().createDirectUpload({
       assetId: ASSET,
       tenantId: TENANT,
-      corsOrigin: 'http://tria-demo.localhost:3000',
+      corsOrigin: 'http://rede-demo.localhost:3000',
       test: false,
     });
 

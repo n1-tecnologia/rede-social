@@ -1,8 +1,8 @@
-import { COMMUNITY_PERMISSIONS } from '@tria/module-communities/contracts';
-import { CommunityHeader } from '@tria/module-communities/ui';
-import { FEED_CAPTION_TRUNCATE_AT, FEED_PERMISSIONS } from '@tria/module-feed/contracts';
-import { STORY_PERMISSIONS } from '@tria/module-stories/contracts';
-import { EmptyState, SectionTitle, StatusPill } from '@tria/ui';
+import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
+import { CommunityHeader } from '@rede-social/module-communities/ui';
+import { FEED_CAPTION_TRUNCATE_AT, FEED_PERMISSIONS } from '@rede-social/module-feed/contracts';
+import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
+import { EmptyState, SectionTitle, StatusPill } from '@rede-social/ui';
 import { CircleAlert, Pencil } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';

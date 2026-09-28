@@ -6,7 +6,7 @@ status: complete
 tags: [cleanup, d-19, mod-03, module-registry, migration, smoke, exit-gate]
 
 requires:
-  - "@tria/module-feed satisfying the module contract end to end (04-01..04-09)"
+  - "@rede-social/module-feed satisfying the module contract end to end (04-01..04-09)"
   - "the feed substitution in supabase/tests/020-tenant-isolation.sql and 030-lanes.sql (04-01, 04-03)"
 provides:
   - "MOD-03 demonstrated: a module removed in one commit range with nothing else changing behaviour"
@@ -49,16 +49,16 @@ key-files:
     - scripts/seed.ts
 
 key-decisions:
-  - "The boundary fixture now DECLARES @tria/module-feed rather than importing it undeclared. turbo then reports the module→module violation explicitly (the tag allowlist) instead of only 'undeclared import' — strictly more of the rule under test."
+  - "The boundary fixture now DECLARES @rede-social/module-feed rather than importing it undeclared. turbo then reports the module→module violation explicitly (the tag allowlist) instead of only 'undeclared import' — strictly more of the rule under test."
   - "The row delete was hand-added to the GENERATED migration rather than split into a --custom file. Splitting would let the two halves be applied in the wrong order on a future environment, which is the exact failure the ordering exists to prevent."
-  - "The isolation gate's disabled-module case needed a NEW throwaway tenant with feed off: it used to ride on tria-lab, which lacks the reference module but HAS the feed (D-17)."
+  - "The isolation gate's disabled-module case needed a NEW throwaway tenant with feed off: it used to ride on rede-lab, which lacks the reference module but HAS the feed (D-17)."
   - "shell.spec.ts's two seed-tenant cases now assert the identical nav ['Início','Perfil']. That sameness is correct, not a weakened assertion — no seed tenant carries a module tab any more, and the tab-bearing witness moved to phase4-smoke.spec.ts on a throwaway tenant."
   - "setTenantModuleFlag lifted from phase2-smoke.spec.ts into tenant-fixtures.ts: two smokes needed it and two copies would have drifted on the ON CONFLICT clause."
 
 requirements-completed: [MOD-03]
 
 coverage:
-  - deliverable: "@tria/module-example removed from the workspace, the registry, the catalog, the seed and the database"
+  - deliverable: "@rede-social/module-example removed from the workspace, the registry, the catalog, the seed and the database"
     human_judgment: false
     verification:
       - kind: command
@@ -127,9 +127,9 @@ plan_head_before: 9c72952b0f1632da5f7be005adb54d3c08c88aac
 
 # Phase 4 Plan 10: Remove the reference module, ship the smoke, run the exit gate — Summary
 
-D-19 closed by deletion rather than by assertion: `@tria/module-example` is gone from the workspace,
+D-19 closed by deletion rather than by assertion: `@rede-social/module-example` is gone from the workspace,
 the registry, the route table, the catalog, the seed and the database, and every rule it carried was
-repointed at `@tria/module-feed` instead of dropped — which is the only way the removal proves MOD-03
+repointed at `@rede-social/module-feed` instead of dropped — which is the only way the removal proves MOD-03
 rather than merely claiming it.
 
 ## Accomplishments
@@ -147,7 +147,7 @@ the key VOCABULARY refuses an unknown key — at the route (`z.enum(REAL_TENANT_
 constraint name rather than by a message string drizzle wraps).
 
 **3. The boundary fixture repointed, and made stronger.** `packages/boundary-fixture` now imports
-`@tria/module-feed/server/service` — a path the feed package never published in its `exports` — and
+`@rede-social/module-feed/server/service` — a path the feed package never published in its `exports` — and
 **declares** the dependency. That declaration is deliberate: with the import undeclared, turbo only
 reported "undeclared import"; now it reports the real rule, `module` may not depend on `module`, from
 the tag allowlist. `pnpm boundaries:negative` still rejects the fixture on both layers.
@@ -155,7 +155,7 @@ the tag allowlist. `pnpm boundaries:negative` still rejects the fixture on both 
 **4. The isolation gate retargeted with nothing lost.** `isolation.test.ts`'s list, detail, empty,
 disabled, blocked, host-mismatch and platform-identity cases all moved from `/v1/example/items` to
 `/v1/feed`. The disabled case needed a NEW throwaway tenant with the feed off, because the tenant it
-used to ride on (tria-lab) lacks the reference module but HAS the feed. A positive control was added
+used to ride on (rede-lab) lacks the reference module but HAS the feed. A positive control was added
 to case `b` (the tenant's own ids are 200) so the 404s cannot pass vacuously.
 
 **5. The forward-only removal migration (`5e74cac`).** One file, three statements in the only order
@@ -207,7 +207,7 @@ restored 13 GB and the gate never came near the ENOSPC that killed the Phase 2 r
 
 **1. [Rule 3 — Blocker] `apps/api/tests/integration/jobs.test.ts` imported the deleted module's queue constant**
 - **Found during:** Task 1, at `pnpm turbo typecheck`
-- **Issue:** `EXAMPLE_PROCESS_QUEUE` from `@tria/module-example/contracts`. The file is absent from the RESEARCH removal inventory.
+- **Issue:** `EXAMPLE_PROCESS_QUEUE` from `@rede-social/module-example/contracts`. The file is absent from the RESEARCH removal inventory.
 - **Fix:** retargeted to `FEED_UNFURL_QUEUE`. What the file proves is the KERNEL's job wiring, so the owning module is incidental — and the assertions read `pgboss.queue` rather than trusting the constant, so the retarget keeps its teeth.
 - **Commit:** `6f7631c`
 
@@ -232,7 +232,7 @@ restored 13 GB and the gate never came near the ENOSPC that killed the Phase 2 r
 - **Commit:** `8f53ae5`
 
 **6. [Rule 2] The isolation gate gained a fourth fixture tenant**
-- The disabled-module case had no tenant to run against once the reference module was gone (tria-lab has the feed). A throwaway tenant with `feed` explicitly `false` was added rather than dropping the case.
+- The disabled-module case had no tenant to run against once the reference module was gone (rede-lab has the feed). A throwaway tenant with `feed` explicitly `false` was added rather than dropping the case.
 - **Commit:** `6f7631c`
 
 ### Plan-contract deviations (recorded, not "fixed" by weakening anything)
@@ -242,7 +242,7 @@ restored 13 GB and the gate never came near the ENOSPC that killed the Phase 2 r
 `scripts/check-boundaries.sh` wraps the inversion itself and exits **0** when both layers correctly
 reject the fixture. It also contradicts the plan's own exit gate, since `pnpm verify` chains
 `&& pnpm boundaries:negative`. **Resolution:** the underlying intent is satisfied and was verified
-directly — `turbo boundaries --filter=@tria/boundary-fixture` exits 1 with two issues (app dependency
+directly — `turbo boundaries --filter=@rede-social/boundary-fixture` exits 1 with two issues (app dependency
 and module→module), and Biome exits 1 on `noRestrictedImports`. Nothing was relaxed to get there.
 
 **8. `grep -c "example" apps/web/e2e/phase4-smoke.spec.ts` is 3, not 0.** That criterion conflicts

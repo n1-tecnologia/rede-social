@@ -81,7 +81,7 @@ status: issues_found
 
 ## Summary
 
-Part A covers `@tria/module-feed`, the kernel (`@tria/core`, `@tria/ui`, `@tria/contracts`) and the
+Part A covers `@rede-social/module-feed`, the kernel (`@rede-social/core`, `@rede-social/ui`, `@rede-social/contracts`) and the
 boundary fixture. The tenant-isolation posture in the service layer is genuinely strong: every read
 and write runs inside `withTenantTx`, no function compares tenant ids, the 404 branches are bare, and
 the declarative constraint work (`feed_post_media_kind_fk`, `feed_comments_parent_fk`,
@@ -777,7 +777,7 @@ moment `baseWidth` is passed with an empty ladder. Guard it: `srcSet={srcSet || 
 Each is deliberate ("the raw value goes to the console only; the member sees the generic message,
 T-03-51") and none logs member content — the pattern is consistent and the values are `String(error)`.
 Noted only because the module otherwise takes every capability by injection (share surfaces,
-clipboard, media node, every label): a `onLogError?` prop or a `@tria/ui` logger would let the host
+clipboard, media node, every label): a `onLogError?` prop or a `@rede-social/ui` logger would let the host
 route these to Sentry, which is where a production failure needs to land.
 
 ---

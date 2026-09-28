@@ -2,13 +2,13 @@ import {
   type HostTenant as HostTenantFacts,
   type ResolvedBranding,
   resolveBranding,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import { getHostTenant, type HostMode, resolveHostTenant } from '@/lib/tenant-host';
 
 /**
  * The brand a PUBLIC page renders for the host it is served on (TENANT-02, D-25):
  * - `tenant` host: the full by-host answer (`tenant`) and its resolved brand;
- * - `platform` / `generic` host: `tenant` null and TRIA's neutral brand.
+ * - `platform` / `generic` host: `tenant` null and the platform's neutral brand.
  *
  * `displayName` comes from the proxy headers, so it is known even when the cached lookup happens to
  * be unavailable (`tenant` null on a tenant host — fail-open to the neutral brand, never to another

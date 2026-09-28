@@ -1,8 +1,8 @@
+import { bootstrapSchema } from '@rede-social/contracts';
+import { ownProfileSchema } from '@rede-social/contracts/profiles';
+import { sqlClient } from '@rede-social/core/db';
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { createClient } from '@supabase/supabase-js';
-import { bootstrapSchema } from '@tria/contracts';
-import { ownProfileSchema } from '@tria/contracts/profiles';
-import { sqlClient } from '@tria/core/db';
-import { stopBoss } from '@tria/core/server/jobs/boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
 
@@ -22,11 +22,11 @@ import { adminSql, api, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
  *    signed URL, so the tenant check runs on every image fetch.
  */
 
-const MEMBER_EMAIL = 'member@tria-demo.local';
+const MEMBER_EMAIL = 'member@rede-demo.local';
 /** A SECOND member of the SAME tenant — the owner check needs a neighbour, not just a stranger. */
-const NEIGHBOUR_EMAIL = 'admin@tria-demo.local';
+const NEIGHBOUR_EMAIL = 'admin@rede-demo.local';
 /** The second seeded tenant — the isolation half. */
-const LAB_MEMBER_EMAIL = 'member@tria-lab.local';
+const LAB_MEMBER_EMAIL = 'member@rede-lab.local';
 
 let memberToken = '';
 let memberUserId = '';
@@ -374,7 +374,7 @@ describe('avatar lifecycle — replace-on-write retires the outgoing asset (R-07
       expect(body.error.code, label).toBe('VALIDATION_FAILED');
       expect(body.error.details?.avatarAssetId, label).toBe('invalid');
       // The refusal must not disclose the other party: no tenant, no owner, no status.
-      expect(JSON.stringify(body), label).not.toContain('tria-lab');
+      expect(JSON.stringify(body), label).not.toContain('rede-lab');
       expect(JSON.stringify(body), label).not.toContain(neighbour.id);
     }
 

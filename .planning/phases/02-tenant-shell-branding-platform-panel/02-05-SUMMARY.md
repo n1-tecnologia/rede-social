@@ -209,7 +209,7 @@ plan_head_before: df7938c59180662a92ba6a640528f23fea535ef4
 **1. [Rule 1 - Bug] Integration fixture cleanup could not delete the provisioned test tenants**
 - **Found during:** Task 3 (first full run of the suite)
 - **Issue:** `afterAll` deleted `pt-svc-%`/`pt-test-%` tenants directly, but `memberships.tenant_id` has no `ON DELETE CASCADE` (by design), so the rows left by the interrupted previous executor (its auth users were never deleted, hence their memberships survived) blocked the delete; the single failed statement also skipped the rest of `afterAll` (module restore, `adminSql.end()`), leaked two `tenant_domains` rows and broke `bootstrap.test.ts#11` (expects exactly 2 domains) and case 3's `q: 'pt-svc'` assertion on the next run.
-- **Fix:** `cleanupTestTenants()` deletes memberships of the test tenants → the tenants → stale `*-pt-*@tria-test.local` / `admin.<run>@tria-test.local` auth users, and runs in **both** `beforeAll` and `afterAll`, so an interrupted run never poisons the next one.
+- **Fix:** `cleanupTestTenants()` deletes memberships of the test tenants → the tenants → stale `*-pt-*@rede-social-test.local` / `admin.<run>@rede-social-test.local` auth users, and runs in **both** `beforeAll` and `afterAll`, so an interrupted run never poisons the next one.
 - **Files modified:** `apps/api/tests/integration/platform-tenants.test.ts`
 - **Verification:** whole integration suite 107/107 twice in a row; `select count(*) from tenant_domains` back to 2 after the run
 - **Committed in:** `75a058a` (Task 3 commit)
@@ -227,7 +227,7 @@ plan_head_before: df7938c59180662a92ba6a640528f23fea535ef4
 ## Issues Encountered
 
 - **Executor interruption:** the first executor was cut mid-Task 3 with `+428/-8` uncommitted lines in `platform-tenants.test.ts`. This continuation kept that draft verbatim (it was complete), added the `modules.test.ts` case and the cleanup fix, and committed once.
-- **`pnpm test:integration -- platform-tenants modules` does not filter:** the root script forwards to `pnpm --filter @tria/api test:integration`, and the extra args did not reach vitest as file filters — the whole suite ran each time (~10 s, acceptable). The plan's `<verify>` command therefore behaves like the whole-suite acceptance criterion; nothing to fix, noted for future plans (run `pnpm --filter @tria/api exec vitest run tests/integration/platform-tenants.test.ts` for a single file).
+- **`pnpm test:integration -- platform-tenants modules` does not filter:** the root script forwards to `pnpm --filter @rede-social/api test:integration`, and the extra args did not reach vitest as file filters — the whole suite ran each time (~10 s, acceptable). The plan's `<verify>` command therefore behaves like the whole-suite acceptance criterion; nothing to fix, noted for future plans (run `pnpm --filter @rede-social/api exec vitest run tests/integration/platform-tenants.test.ts` for a single file).
 - **OpenAPI acceptance check without a server:** the plan's `curl http://localhost:8787/v1/openapi.json` needs a running API; the same assertion was made in-process with `app.request('/v1/openapi.json')` (all six operations present, `PUT …/modules/{key}` included).
 - **Stale local data from the interruption** (2 tenants, 2 domains, 2 auth users) was removed by the new `beforeAll` cleanup on the first re-run; the local database needed no `pnpm db:reset`.
 

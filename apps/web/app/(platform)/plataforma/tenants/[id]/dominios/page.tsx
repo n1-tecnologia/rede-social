@@ -1,4 +1,4 @@
-import { EmptyState, SectionTitle } from '@tria/ui';
+import { EmptyState, SectionTitle } from '@rede-social/ui';
 import { Globe } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { AttachDomainForm } from '@/components/platform/AttachDomainForm';

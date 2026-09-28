@@ -4,7 +4,7 @@ import {
   type MediaPlayback,
   mediaListSchema,
   mediaPlaybackSchema,
-} from '@tria/contracts/media';
+} from '@rede-social/contracts/media';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';

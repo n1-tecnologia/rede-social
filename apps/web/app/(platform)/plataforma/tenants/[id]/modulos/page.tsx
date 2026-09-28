@@ -1,5 +1,5 @@
-import { REAL_TENANT_DEFAULT_MODULES } from '@tria/contracts';
-import { SectionTitle } from '@tria/ui';
+import { REAL_TENANT_DEFAULT_MODULES } from '@rede-social/contracts';
+import { SectionTitle } from '@rede-social/ui';
 import { getTranslations } from 'next-intl/server';
 import { ModuleToggles } from '@/components/platform/ModuleToggles';
 import { requirePlatformTenantDetail } from '@/lib/platform';

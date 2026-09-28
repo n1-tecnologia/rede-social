@@ -1,5 +1,5 @@
 import { isIP } from 'node:net';
-import { TRIA_TERMS_VERSION } from '@tria/contracts';
+import { PLATFORM_TERMS_VERSION } from '@rede-social/contracts';
 import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { consentRecords, memberships, tenantInvites, tenants, users } from '../../db/schema';
@@ -72,7 +72,10 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<AcceptInvi
     if (!tenant) throw new ApiError(500, 'INTERNAL');
 
     // (b)
-    if (input.rulesVersion !== tenant.rulesVersion || input.termsVersion !== TRIA_TERMS_VERSION) {
+    if (
+      input.rulesVersion !== tenant.rulesVersion ||
+      input.termsVersion !== PLATFORM_TERMS_VERSION
+    ) {
       throw new ApiError(400, 'VALIDATION_FAILED', { consents: 'stale' });
     }
 
@@ -115,7 +118,14 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<AcceptInvi
       .insert(consentRecords)
       .values([
         { tenantId, userId, kind: 'tenant_rules', textVersion: tenant.rulesVersion, ip, userAgent },
-        { tenantId, userId, kind: 'tria_terms', textVersion: TRIA_TERMS_VERSION, ip, userAgent },
+        {
+          tenantId,
+          userId,
+          kind: 'platform_terms',
+          textVersion: PLATFORM_TERMS_VERSION,
+          ip,
+          userAgent,
+        },
       ])
       .onConflictDoNothing();
 

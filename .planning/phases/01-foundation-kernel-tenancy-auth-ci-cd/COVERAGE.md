@@ -74,7 +74,7 @@
 
 | capability | decision | reason |
 |---|---|---|
-| Workload Identity Federation pool + provider for `tria-company/rede-social` | INTEGRATE | |
+| Workload Identity Federation pool + provider for `n1-tecnologia/rede-social` | INTEGRATE | |
 | Deploy service account + IAM bindings (Cloud Run Admin, SA User, AR Writer) | INTEGRATE | |
 | Artifact Registry Docker repo `rede-social` (southamerica-east1) | INTEGRATE | |
 | Cloud Run services api/worker x staging/prod (`deploy-cloudrun@v3`) | INTEGRATE | |
@@ -88,7 +88,7 @@
 
 | capability | decision | reason |
 |---|---|---|
-| Repository under `tria-company`, default branch `main`, branch protection | INTEGRATE | |
+| Repository under `n1-tecnologia`, default branch `main`, branch protection | INTEGRATE | |
 | Actions workflows (ci, deploy-api, seed-prod, keepalive-staging) | INTEGRATE | |
 | Environments (`production` with one required reviewer) | INTEGRATE | conditional on the account plan (Open Question 1); `workflow_dispatch` fallback recorded in plan 01-10 |
 | Repository/environment secrets and variables | INTEGRATE | |

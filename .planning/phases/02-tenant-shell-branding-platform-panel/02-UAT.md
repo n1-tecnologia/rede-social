@@ -17,7 +17,7 @@ expected: The design team records its approval (reviewer + date) in `.planning/s
 result: pass
 
 ### 2. Real-device standalone install (SC4, PWA-01): on a real iPhone (Safari → Compartilhar → 'Adicionar à Tela de Início') and a real Android phone (Chrome install prompt) open a tenant host over HTTPS (hosted environment from Phase 01.1), install and launch from the home screen; in the inspector read `document.documentElement.dataset.displayMode`.
-expected: Launches without browser chrome, shows the tenant's name and derived icon (maskable, not cropped), status bar / theme-color in the tenant primary (#7c3aed on tria-demo), and `data-display-mode === 'standalone'`.
+expected: Launches without browser chrome, shows the tenant's name and derived icon (maskable, not cropped), status bar / theme-color in the tenant primary (#7c3aed on rede-demo), and `data-display-mode === 'standalone'`.
 result: blocked
 blocked_by: prior-phase
 reason: "Phase 01.1 never executed (3 plans, 0 summaries) — no hosted HTTPS tenant host to install from"
@@ -29,7 +29,7 @@ blocked_by: prior-phase
 reason: "Phase 01.1 never executed; 02-USER-SETUP.md credentials (VERCEL_TOKEN, VERCEL_PROJECT_ID, SUPABASE_PAT) all unticked — DOMAIN_PROVIDER=vercel not provisioned"
 
 ### 4. Hosted branded auth mail (SC4, TENANT-06): after Phase 01.1 wires `[remotes.<env>.auth.hook.send_email]` to the Cloud Run API and `MAIL_TRANSPORT=resend`, request a password recovery on a seed tenant host and an invite for a new tenant.
-expected: Both mails arrive through Resend with From name = tenant display name, subject 'Redefina sua senha — {tenant}' / 'Convite para administrar {tenant}', the tenant logo as <img>, the CTA in the persisted primary colour and the 'Enviado pela plataforma TRIA' footer.
+expected: Both mails arrive through Resend with From name = tenant display name, subject 'Redefina sua senha — {tenant}' / 'Convite para administrar {tenant}', the tenant logo as <img>, the CTA in the persisted primary colour and the 'Enviado pela plataforma Rede Social' footer.
 result: blocked
 blocked_by: prior-phase
 reason: "Phase 01.1 never executed — Send Email Hook not wired to Cloud Run and MAIL_TRANSPORT=resend not configured"
@@ -40,23 +40,23 @@ result: blocked
 blocked_by: prior-phase
 reason: "No git remote configured in this repository — cannot push a PR to GitHub Actions"
 
-### 6. Visual fidelity — branded login and member shell (SC1/SC3, 02-07/02-08): open http://tria-demo.localhost:3000/entrar (purple, seed logo, 'Comunidade: TRIA Demo'), http://tria-lab.localhost:3000/entrar (teal) and http://localhost:3000/entrar (neutral TRIA wordmark); log in on a 390 px phone viewport and at 1280 px.
+### 6. Visual fidelity — branded login and member shell (SC1/SC3, 02-07/02-08): open http://rede-demo.localhost:3000/entrar (purple, seed logo, 'Comunidade: Rede Demo'), http://rede-lab.localhost:3000/entrar (teal) and http://localhost:3000/entrar (neutral platform wordmark); log in on a 390 px phone viewport and at 1280 px.
 expected: Phone: TopBar with logo + name, floating glass BottomNav (Início · Exemplo · Perfil on demo; Início · Perfil on lab) that shrinks on downward scroll; desktop: 240 px rail with logo, centred 680 px column, no TopBar/BottomNav; flipping 'Tema escuro' in /configuracoes and reloading shows no light flash; a 40-character display name truncates in the TopBar and clamps to two lines in the rail; geometry matches reference/frontend-design.
 result: pass
 
-### 7. Platform panel screens versus the D-33 mockup (02-12/02-14/02-15/02-16/02-20): signed in as the seeded super_admin on http://tria.localhost:3000, compare `#tenant-list`, `#platform-shell-mobile`, `#new-tenant` (BrandPreview mini-shells; type `#f5f7fb` as primary; type a seeded member's e-mail as adminEmail → field error under #adminEmail, values kept), `#tenant-page-marca` (upload a PNG logo with a worker running → 4 px progress bar → 'Gerando ícones…' → four thumbs + 'Versão n'; then stop the API mid-upload → zone returns to idle with the generic pt-BR error and a second drop works), `#tenant-page-dominios` (DNS table / stacked blocks, confirm dialogs; a host with last_error shows the cause and 'Verificar agora'), `#tenant-page-modulos`, `#tenant-page-admins` (a refused invite shows the danger pill 'Convite recusado — o e-mail já está em uso' and the reason toast on resend), `#tenant-page-status`; light and dark; the rail 'Tema' row sits above 'Sair'.
+### 7. Platform panel screens versus the D-33 mockup (02-12/02-14/02-15/02-16/02-20): signed in as the seeded super_admin on http://rede-social.localhost:3000, compare `#tenant-list`, `#platform-shell-mobile`, `#new-tenant` (BrandPreview mini-shells; type `#f5f7fb` as primary; type a seeded member's e-mail as adminEmail → field error under #adminEmail, values kept), `#tenant-page-marca` (upload a PNG logo with a worker running → 4 px progress bar → 'Gerando ícones…' → four thumbs + 'Versão n'; then stop the API mid-upload → zone returns to idle with the generic pt-BR error and a second drop works), `#tenant-page-dominios` (DNS table / stacked blocks, confirm dialogs; a host with last_error shows the cause and 'Verificar agora'), `#tenant-page-modulos`, `#tenant-page-admins` (a refused invite shows the danger pill 'Convite recusado — o e-mail já está em uso' and the reason toast on resend), `#tenant-page-status`; light and dark; the rail 'Tema' row sits above 'Sair'.
 expected: Each screen matches its mockup section; neutral tokens only on the platform host; without a worker the icons card stops polling after ~60 s with 'Os ícones ainda estão sendo gerados…' instead of spinning forever; a .gif or > 2 MB file shows the pt-BR error with no `/branding/uploads` request.
 result: pass
 
-### 8. Branded mails in Mailpit (02-06/02-10/02-19): open http://127.0.0.1:54324 after `pnpm verify:smoke` and read the newest 'Redefina sua senha — TRIA Demo' and 'Convite para administrar {name}' messages, HTML and plain-text tabs; also the WR-04 fallback mail (resend for an admin who exchanged the link but never accepted) whose link carries `type=recovery&next=/aceitar-convite`.
-expected: Purple (demo) / tenant-primary accent and CTA, the tenant logo or the accented display name as text when there is no logo, 'Enviado pela plataforma TRIA' footer, plain-text alternative with the same /auth/confirm link; the recovery-type invite link opens /aceitar-convite, not /redefinir-senha; rendering in Gmail/Apple Mail is not exercised locally.
+### 8. Branded mails in Mailpit (02-06/02-10/02-19): open http://127.0.0.1:54324 after `pnpm verify:smoke` and read the newest 'Redefina sua senha — Rede Demo' and 'Convite para administrar {name}' messages, HTML and plain-text tabs; also the WR-04 fallback mail (resend for an admin who exchanged the link but never accepted) whose link carries `type=recovery&next=/aceitar-convite`.
+expected: Purple (demo) / tenant-primary accent and CTA, the tenant logo or the accented display name as text when there is no logo, 'Enviado pela plataforma Rede Social' footer, plain-text alternative with the same /auth/confirm link; the recovery-type invite link opens /aceitar-convite, not /redefinir-senha; rendering in Gmail/Apple Mail is not exercised locally.
 result: pass
 
 ### 9. Accept-invite and expired-invite screens (02-10): follow an invite link from Mailpit on the tenant host; then reuse the consumed link.
 expected: /aceitar-convite is branded (main --brand-primary = tenant primary), heading 'Você foi convidado(a) a administrar {tenant}' (two centred lines for a long name on the phone), password field with eye + three-segment meter, two 44 px consent rows, one brand CTA; the consumed link lands on /convite-expirado with one outline 'Voltar para login'.
 result: pass
 
-### 10. Offline page and install hint (02-11): airplane mode → navigate to /inicio on a production build (`pnpm --filter @tria/web e2e:pwa` server on :3100); mount `<InstallHint open />` in a scratch page.
+### 10. Offline page and install hint (02-11): airplane mode → navigate to /inicio on a production build (`pnpm --filter @rede-social/web e2e:pwa` server on :3100); mount `<InstallHint open />` in a scratch page.
 expected: /~offline matches mockup `#offline` (WifiOff icon, 'Você está offline', outline 'Tentar novamente'); InstallHint matches `#install-hint` ('Adicione à Tela de Início', 'Entendi' / 'Agora não').
 result: pass
 

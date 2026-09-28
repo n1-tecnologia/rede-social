@@ -27,7 +27,7 @@ export const env = createEnv({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
     /**
-     * The platform domain (D-21) — where TRIA's `super_admin` works. The API reads it so the
+     * The platform domain (D-21) — where the platform's `super_admin` works. The API reads it so the
      * custom-domain attach refuses it (D-34: a tenant host is never the platform host). Unset in
      * Preview/local means "every unregistered host is generic" (01-02).
      */
@@ -68,7 +68,7 @@ export const env = createEnv({
     MAIL_TRANSPORT: z.enum(['local', 'resend']).default('local'),
     RESEND_API_KEY: z.string().min(1).optional(),
     /** Sender domain: `From: "{displayName} <no-reply@{MAIL_DOMAIN}>"` (D-38). */
-    MAIL_DOMAIN: z.string().min(1).default('mail.tria.localhost'),
+    MAIL_DOMAIN: z.string().min(1).default('mail.rede-social.localhost'),
     MAILPIT_URL: z.url().default('http://127.0.0.1:54324'),
     /** Standard Webhooks secret(s) for the Send Email Hook, `v1,whsec_<b64>[|<b64>]`; unset = hook route refuses every call. */
     SEND_EMAIL_HOOK_SECRETS: z.string().min(1).optional(),
@@ -147,7 +147,7 @@ assertProductionEnv(env);
 
 /**
  * Public origin of the web app for a given host — e-mail links, invite `redirectTo`, allow-list
- * entries. Locally `http://tria-demo.localhost:3000`, hosted `https://comunidade.cliente.com.br`.
+ * entries. Locally `http://rede-demo.localhost:3000`, hosted `https://comunidade.cliente.com.br`.
  */
 export function publicWebOrigin(host: string): string {
   const port = env.PUBLIC_WEB_PORT ? `:${env.PUBLIC_WEB_PORT}` : '';

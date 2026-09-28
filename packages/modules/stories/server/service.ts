@@ -1,10 +1,10 @@
-import { type Tx, withTenantTx } from '@tria/core/db/tenant-tx';
-import type { RequestContext } from '@tria/core/server/auth/context';
-import { emit } from '@tria/core/server/events/bus';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { moduleLogger } from '@tria/core/server/logging';
-import { moduleFlags } from '@tria/core/server/modules/flags-cache';
-import { decodeCursor, encodeCursor, keysetComparison } from '@tria/core/server/paging';
+import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
+import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { emit } from '@rede-social/core/server/events/bus';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { decodeCursor, encodeCursor, keysetComparison } from '@rede-social/core/server/paging';
 import { type SQL, sql } from 'drizzle-orm';
 import {
   type CreateStoryComment,
@@ -104,7 +104,7 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  * an INNER join because `media_asset_id` is NOT NULL: a story whose asset the lane cannot see has
  * nothing to render and must not occupy a circle.
  *
- * `viewer_liked` reads `feed_likes` through RAW SQL rather than through `@tria/module-feed`'s
+ * `viewer_liked` reads `feed_likes` through RAW SQL rather than through `@rede-social/module-feed`'s
  * schema export: a `module -> module` package dependency is denied by `turbo boundaries`, and the
  * table is Phase 4's published shape (`feed_likes_story_uq` already scopes it per user and story).
  * The same posture 05-03 took for the feed's `left join public.communities`.
@@ -734,7 +734,7 @@ type StoryCommentRow = {
  * THE story-comment projection, shared by the list and by the create read-back so the two cannot
  * disagree about what a comment looks like.
  *
- * It reads `feed_comments` through RAW SQL rather than through `@tria/module-feed`'s schema export,
+ * It reads `feed_comments` through RAW SQL rather than through `@rede-social/module-feed`'s schema export,
  * exactly as `storyProjection`'s `viewer_liked` reads `feed_likes`: a `module -> module` package
  * dependency is denied by `turbo boundaries` (MOD-02), and the table is Phase 4's published shape.
  *
@@ -785,7 +785,7 @@ const toStoryComment = (row: StoryCommentRow, viewerUserId: string): StoryCommen
 
 /**
  * The comparison and the order for D-83's forward-running list, resolved ONCE from the repo's one
- * cursor envelope (`@tria/core/server/paging`).
+ * cursor envelope (`@rede-social/core/server/paging`).
  *
  * Both halves are spliced with `sql.raw` because neither can be a bound parameter — an operator is
  * not a value — and both come from a CLOSED union `keysetComparison` is total over, so nothing
@@ -1104,7 +1104,7 @@ function placePredicate(alias: 'h', communityId: string | null): SQL {
  *
  * Phase 10's creator-scoped publishing extends THIS function with its creator branch; no route or
  * other service function has to learn what a place is. The table is named through RAW SQL rather
- * than `@tria/module-communities`'s schema export (MOD-02).
+ * than `@rede-social/module-communities`'s schema export (MOD-02).
  */
 async function resolveHighlightPlace(
   tx: Tx,

@@ -8,7 +8,7 @@ import { registerJobQueues } from '../jobs/boss';
  * `./derive-job.ts` (it imports the service — service -> job direction only, so it is deliberately
  * NOT re-exported from this barrel).
  *
- * Imported as `@tria/core/server/media/index` from outside the kernel (the `./server/*` export maps
+ * Imported as `@rede-social/core/server/media/index` from outside the kernel (the `./server/*` export maps
  * to a file, not a directory).
  */
 

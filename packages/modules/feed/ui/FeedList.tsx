@@ -8,7 +8,7 @@ import {
   PullToRefresh,
   Skeleton,
   useToast,
-} from '@tria/ui';
+} from '@rede-social/ui';
 import { Newspaper, TriangleAlert } from 'lucide-react';
 import { type ReactNode, useCallback, useState, useTransition } from 'react';
 import { CommentSheet, type CommentSheetProps } from './CommentSheet';

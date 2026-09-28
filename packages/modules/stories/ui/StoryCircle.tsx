@@ -1,7 +1,7 @@
 'use client';
 
-import { MediaImage } from '@tria/core/ui';
-import { Avatar, cn } from '@tria/ui';
+import { MediaImage } from '@rede-social/core/ui';
+import { Avatar, cn } from '@rede-social/ui';
 import { Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 

@@ -1,9 +1,12 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
-import type { AppEnv } from '@tria/core/server/auth/context';
-import { requireAuth } from '@tria/core/server/auth/require-auth';
-import { ApiError } from '@tria/core/server/http/api-error';
-import { requireModule } from '@tria/core/server/modules/require-module';
-import { permissionsForRequest, requirePermission } from '@tria/core/server/rbac/permissions';
+import type { AppEnv } from '@rede-social/core/server/auth/context';
+import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { ApiError } from '@rede-social/core/server/http/api-error';
+import { requireModule } from '@rede-social/core/server/modules/require-module';
+import {
+  permissionsForRequest,
+  requirePermission,
+} from '@rede-social/core/server/rbac/permissions';
 import {
   createStoryCommentSchema,
   createStoryHighlightSchema,

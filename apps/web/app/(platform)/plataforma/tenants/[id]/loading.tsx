@@ -1,4 +1,4 @@
-import { Card, Skeleton } from '@tria/ui';
+import { Card, Skeleton } from '@rede-social/ui';
 
 /** Tenant segment loading (E13): the 24 px title, a pill and a card of rows while the detail streams. */
 export default function TenantLoading() {

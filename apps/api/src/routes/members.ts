@@ -1,12 +1,12 @@
 import { createRoute, z } from '@hono/zod-openapi';
-import { apiErrorEnvelopeSchema } from '@tria/contracts';
+import { apiErrorEnvelopeSchema } from '@rede-social/contracts';
 import {
   memberListQuerySchema,
   memberListSchema,
   memberProfileSchema,
-} from '@tria/contracts/profiles';
-import { requireAuth } from '@tria/core/server/auth/require-auth';
-import { getMemberProfile, listMembers } from '@tria/core/server/profiles/index';
+} from '@rede-social/contracts/profiles';
+import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { getMemberProfile, listMembers } from '@rede-social/core/server/profiles/index';
 import { createOpenApiApp } from '../http/openapi';
 
 /**

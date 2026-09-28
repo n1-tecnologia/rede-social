@@ -1,4 +1,4 @@
-import { Card, Skeleton } from '@tria/ui';
+import { Card, Skeleton } from '@rede-social/ui';
 
 /**
  * `/eventos/[eventId]/loading.tsx` (UI-D-216, UI E04/loading): a `PageHeader`-height bar, the 16/10

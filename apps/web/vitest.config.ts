@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { vitestBase } from '@tria/config/vitest.base';
+import { vitestBase } from '@rede-social/config/vitest.base';
 import { configDefaults, defineConfig, mergeConfig } from 'vitest/config';
 
 /**

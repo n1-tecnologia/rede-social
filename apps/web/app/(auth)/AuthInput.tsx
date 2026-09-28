@@ -1,10 +1,10 @@
 'use client';
 
-import { Input, type InputProps } from '@tria/ui';
+import { Input, type InputProps } from '@rede-social/ui';
 import { Lock, type LucideIcon, Mail, User } from 'lucide-react';
 
 /**
- * `@tria/ui` `Input` for the server-rendered public forms. A lucide icon is a `forwardRef` object,
+ * `@rede-social/ui` `Input` for the server-rendered public forms. A lucide icon is a `forwardRef` object,
  * which React Flight refuses to serialise from a Server Component into the client `Input`, so the
  * pages name the icon and this client boundary resolves it — same geometry, same tokens.
  */

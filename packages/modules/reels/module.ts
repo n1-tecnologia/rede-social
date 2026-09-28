@@ -1,4 +1,4 @@
-import { defineModule } from '@tria/core/server/modules/manifest';
+import { defineModule } from '@rede-social/core/server/modules/manifest';
 
 /**
  * The manifest: everything the kernel needs to know about this module, as data (MOD-01).

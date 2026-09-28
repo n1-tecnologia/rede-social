@@ -1,5 +1,9 @@
-import { memberListSchema, memberProfileSchema, ownProfileSchema } from '@tria/contracts/profiles';
-import { sqlClient } from '@tria/core/db';
+import {
+  memberListSchema,
+  memberProfileSchema,
+  ownProfileSchema,
+} from '@rede-social/contracts/profiles';
+import { sqlClient } from '@rede-social/core/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, SEED_PASSWORD, signInAs } from './setup';
 
@@ -27,9 +31,9 @@ import { adminSql, api, authAdmin, SEED_PASSWORD, signInAs } from './setup';
  *    `GET /v1/members/{own membershipId}` agree, because there is ONE row, not two storage paths.
  */
 
-const MEMBER_EMAIL = 'member@tria-demo.local';
-const ADMIN_EMAIL = 'admin@tria-demo.local';
-const LAB_MEMBER_EMAIL = 'member@tria-lab.local';
+const MEMBER_EMAIL = 'member@rede-demo.local';
+const ADMIN_EMAIL = 'admin@rede-demo.local';
+const LAB_MEMBER_EMAIL = 'member@rede-lab.local';
 
 const RUN = Date.now();
 const FIXTURE_SLUG = `mb-${RUN}`.slice(0, 40);
@@ -211,7 +215,7 @@ describe('tracer — list, search, page and open a member (PROF-02/PROF-03/D-47)
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = memberListSchema.parse(await res.json());
 
-    // The seed leaves nine active `member` rows in tria-demo; the page size is 25, so one page holds
+    // The seed leaves nine active `member` rows in rede-demo; the page size is 25, so one page holds
     // them all and there is nothing beyond it.
     expect(body.items.length).toBeGreaterThanOrEqual(8);
     expect(body.nextCursor).toBeNull();
@@ -524,8 +528,8 @@ describe('TENANT-04 — a tenant-B session can neither list, search nor open a t
     const res = await member(memberMembershipId, labToken);
     expect(res.status).toBe(404);
     const raw = JSON.stringify(await refusal(res));
-    expect(raw).not.toContain('tria-demo');
-    expect(raw).not.toContain('TRIA Demo');
+    expect(raw).not.toContain('rede-demo');
+    expect(raw).not.toContain('Rede Demo');
     expect(raw).not.toContain(memberMembershipId);
   });
 
@@ -539,9 +543,9 @@ describe('TENANT-04 — a tenant-B session can neither list, search nor open a t
     const theirs = await listIds();
     for (const id of mine) expect(theirs).not.toContain(id);
 
-    // `Ana Paula Ferreira` exists in tria-demo (seeded) AND twice in the fixture tenant, so a leak
+    // `Ana Paula Ferreira` exists in rede-demo (seeded) AND twice in the fixture tenant, so a leak
     // that matched on a VALUE rather than on `tenant_id` could not pass by looking plausible:
-    // tria-demo's search for that exact name must answer its own single row and nothing else.
+    // rede-demo's search for that exact name must answer its own single row and nothing else.
     const inDemo = await listIds(`?q=${encodeURIComponent(HOMONYM)}`);
     expect(inDemo).toHaveLength(1);
     expect(inDemo).not.toContain(fixture.activeA);

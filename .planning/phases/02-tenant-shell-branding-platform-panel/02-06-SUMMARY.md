@@ -11,7 +11,7 @@ requires:
     provides: "kernel env MAIL_TRANSPORT/RESEND_API_KEY/MAIL_DOMAIN/MAILPIT_URL/SEND_EMAIL_HOOK_SECRETS/PUBLIC_WEB_SCHEME+PORT, publicWebOrigin, assertProductionEnv; resend 6.28.0 + standardwebhooks 1.1.1 installed; scripts/local-env.sh emitting the local hook secret"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 01
-    provides: "@tria/contracts/branding (resolveBranding, deriveBrandColors, hexColorSchema, NEUTRAL_BRAND, LIGHT_BG, NAVY, absoluteBrandUrl), verified-only resolveTenantHost with primaryHost, createBoundedTtlCache/normalizeHost, seeded demo/lab brands with root-relative SVG logos"
+    provides: "@rede-social/contracts/branding (resolveBranding, deriveBrandColors, hexColorSchema, NEUTRAL_BRAND, LIGHT_BG, NAVY, absoluteBrandUrl), verified-only resolveTenantHost with primaryHost, createBoundedTtlCache/normalizeHost, seeded demo/lab brands with root-relative SVG logos"
   - phase: 02-tenant-shell-branding-platform-panel
     plan: 05
     provides: "sendPendingInvites → GoTrue inviteUserByEmail with redirectTo on the verified primary host (membership inserted AFTER GoTrue returns — the hook sees no membership for an invited admin)"
@@ -19,12 +19,12 @@ requires:
     provides: "membershipForUser, isPlatformAdmin, withAdminTx lane (Biome-restricted to tenancy/platform), moduleLogger/child-logger convention, /auth/confirm token_hash+type contract, supabase/templates/recovery.html SMTP fallback, integration setup.ts (api, adminSql, authAdmin, HOSTS), e2e mail.ts Mailpit reader"
 provides:
   - "packages/core/server/mail/transport.ts — MailAddress, MailMessage, MailTransport { name: 'local'|'resend'; send(message, { signal }) }, MailTransportError, MAIL_SEND_TIMEOUT_MS = 3_000, formatMailbox (quoted display name, header-injection stripped, UTF-8 kept), maskEmail"
-  - "packages/core/server/mail/local.ts — localTransport: Mailpit POST /api/v1/send with X-Tria-Action / X-Tria-Idempotency-Key headers; the fail-safe default, never a real MTA"
+  - "packages/core/server/mail/local.ts — localTransport: Mailpit POST /api/v1/send with X-Rede-Action / X-Rede-Idempotency-Key headers; the fail-safe default, never a real MTA"
   - "packages/core/server/mail/resend.ts — resendTransport: lazy `new Resend(env.RESEND_API_KEY)` on first send, from = formatMailbox, `{ idempotencyKey: webhook-id }`, raced against the 3 s signal, `{ error }` → MailTransportError"
   - "packages/core/server/mail/hook-schema.ts (env-free) — sendEmailHookPayloadSchema/SendEmailHookPayload/HookEmailData, HOOK_HEADER_NAMES, HookSignatureError, HookPayloadError(reason), parseHookSecrets (both `v1,whsec_a|v1,whsec_b` and `v1,whsec_a|b`), verifyHookRequest (fail-closed, every secret, standardwebhooks timing-safe + 5-min tolerance, parse only after verification), buildActionLink (redirect_to kept VERBATIM + token_hash + type)"
-  - "packages/core/server/mail/templates/layout.ts (env-free) — MailBrand, RenderedMail, escapeHtml, safeHttpUrl, renderLayout: table-based inline-styled 600 px card on LIGHT_BG, logo <img> as-is (re-filtered by safeHttpUrl) or display name <h1> (D-26), primary-colour top accent, CTA background=persisted primary / color=persisted onPrimary (invalid hex → neutral pair), copy-paste link line, optional code block, muted closing, 'Enviado pela plataforma TRIA' footer, plain-text alternative opening with the brand name"
+  - "packages/core/server/mail/templates/layout.ts (env-free) — MailBrand, RenderedMail, escapeHtml, safeHttpUrl, renderLayout: table-based inline-styled 600 px card on LIGHT_BG, logo <img> as-is (re-filtered by safeHttpUrl) or display name <h1> (D-26), primary-colour top accent, CTA background=persisted primary / color=persisted onPrimary (invalid hex → neutral pair), copy-paste link line, optional code block, muted closing, 'Enviado pela plataforma Rede Social' footer, plain-text alternative opening with the brand name"
   - "templates/recovery.ts renderRecovery ('Redefina sua senha — {tenant}'), templates/invite.ts renderInvite ('Convite para administrar {tenant}', 'Você foi convidado(a) a administrar {tenant}'), templates/neutral.ts renderNeutral + LINK_ACTION_TYPES (pt-BR copy per GoTrue email_action_type: link / code / notice kinds, 'Aviso da sua conta — {tenant}' fallback)"
-  - "packages/core/server/mail/index.ts — mailTransport (switch on env.MAIL_TRANSPORT), MailRefusedError(reason), toMailBrand (logo → absolute URL of primaryHost ?? redirectHost via publicWebOrigin, https-only unless PUBLIC_WEB_SCHEME=http; neutral = TRIA/no logo/neutral pair), sendAuthMail({ payload, webhookId, logger }) → { outcome: 'sent'|'duplicate', tenantId, actionType } with a 5,000-entry / 15-min webhook-id LRU set BEFORE the send and cleared on transport failure; logs mail.sent with masked recipient, never token/token_hash/link"
+  - "packages/core/server/mail/index.ts — mailTransport (switch on env.MAIL_TRANSPORT), MailRefusedError(reason), toMailBrand (logo → absolute URL of primaryHost ?? redirectHost via publicWebOrigin, https-only unless PUBLIC_WEB_SCHEME=http; neutral = Rede Social/no logo/neutral pair), sendAuthMail({ payload, webhookId, logger }) → { outcome: 'sent'|'duplicate', tenantId, actionType } with a 5,000-entry / 15-min webhook-id LRU set BEFORE the send and cleared on transport failure; logs mail.sent with masked recipient, never token/token_hash/link"
   - "packages/core/server/tenancy/mail-tenant.ts — MailTenantResolution, redirectHostOf, resolveMailTenant: membership (one admin-lane select of tenant + verified primary host) → refuse 'tenant_host_mismatch' when redirect_to resolves to a VERIFIED host of another tenant → platform_admins → neutral → verified redirect host → tenant (via 'redirect_host') → neutral (via 'no_tenant')"
   - "apps/api/src/routes/hooks.ts — hookRoutes: plain `.post('/auth/send-email')` (no createRoute, no requireAuth, out of openapi.json), raw body, signature before parsing, GoTrue error shape (401 signature / 500 refused+failed, never 429/503), Cache-Control: no-store, log events mail.signature_rejected / mail.refused / mail.send_failed / mail.duplicate_suppressed; mounted `.route('/v1/hooks', hookRoutes)` between /v1/public and /v1/me"
   - "supabase/config.toml [auth.hook.send_email] enabled → http://host.docker.internal:8787/v1/hooks/auth/send-email, secrets = env(SEND_EMAIL_HOOK_SECRETS); [auth.email.template.recovery] kept as the D-13 fallback"
@@ -84,13 +84,13 @@ key-decisions:
 patterns-established:
   - "Kernel mail module (`packages/core/server/mail/*`) as the one place mail is rendered and sent; Phase 7 adds templates next to recovery/invite/neutral and keeps the transport"
   - "Webhook authentication = standard-webhooks signature over the raw body with rotation-aware secret parsing (`parseHookSecrets`)"
-  - "Mailpit assertions in integration tests: search `to:<address>` then match the HTML marker (token_hash) or the `X-Tria-Idempotency-Key` header for link-less mails"
+  - "Mailpit assertions in integration tests: search `to:<address>` then match the HTML marker (token_hash) or the `X-Rede-Idempotency-Key` header for link-less mails"
 
 requirements-completed: [TENANT-06]
 
 coverage:
   - id: D1
-    description: "A signed recovery payload for a demo member produces a Mailpit message branded for TRIA Demo: subject 'Redefina sua senha — TRIA Demo', From 'TRIA Demo' <no-reply@{MAIL_DOMAIN}>, CTA background #7c3aed / color #ffffff (persisted derivations), the seed logo as <img alt=\"TRIA Demo\"> resolved to the primary host, plain-text alternative with the same link, 'Enviado pela plataforma TRIA' footer, no lab hex; answered in < 1 s"
+    description: "A signed recovery payload for a demo member produces a Mailpit message branded for Rede Demo: subject 'Redefina sua senha — Rede Demo', From 'Rede Demo' <no-reply@{MAIL_DOMAIN}>, CTA background #7c3aed / color #ffffff (persisted derivations), the seed logo as <img alt=\"Rede Demo\"> resolved to the primary host, plain-text alternative with the same link, 'Enviado pela plataforma Rede Social' footer, no lab hex; answered in < 1 s"
     requirement: TENANT-06
     verification:
       - kind: integration
@@ -109,7 +109,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D3
-    description: "Tenant resolution is membership-first: member of a throwaway tenant → its brand; memberless user on that tenant's VERIFIED host → invite in its brand; memberless user on localhost → neutral TRIA with none of the seed/throwaway hexes; seeded super_admin on the platform host → neutral; demo member with redirect_to on the LAB host → 500 tenant_host_mismatch and nothing in Mailpit"
+    description: "Tenant resolution is membership-first: member of a throwaway tenant → its brand; memberless user on that tenant's VERIFIED host → invite in its brand; memberless user on localhost → neutral platform with none of the seed/throwaway hexes; seeded super_admin on the platform host → neutral; demo member with redirect_to on the LAB host → 500 tenant_host_mismatch and nothing in Mailpit"
     requirement: TENANT-06
     verification:
       - kind: integration
@@ -138,7 +138,7 @@ coverage:
         ref: "apps/web/e2e/recovery.spec.ts — 14 passed (mobile-chromium + desktop-chromium)"
         status: pass
       - kind: other
-        ref: "docker logs supabase_auth_rede-social: `Hook ran successfully` for each e2e recovery; `curl $MAILPIT_URL/api/v1/search?query=subject:\"Redefina sua senha — TRIA Demo\"` → messages_count > 0"
+        ref: "docker logs supabase_auth_rede-social: `Hook ran successfully` for each e2e recovery; `curl $MAILPIT_URL/api/v1/search?query=subject:\"Redefina sua senha — Rede Demo\"` → messages_count > 0"
         status: pass
     human_judgment: false
   - id: D6
@@ -168,7 +168,7 @@ plan_head_before: 1bbd076de1f29826200f82d4ad3f2e23eed8b678
 
 # Phase 02 Plan 06: Branded Auth E-mail (Send Email Hook → API → Transport) Summary
 
-**GoTrue on the local stack now delivers every auth e-mail through a standard-webhooks-signed hook to `POST /v1/hooks/auth/send-email`, where the kernel resolves the brand membership-first (verified `redirect_to` host for invites, neutral TRIA for platform staff and unresolved hosts, refusal on a host/membership mismatch), renders a pt-BR table-based template in the tenant's persisted colours with its logo as-is (or its name as text) and hands it to a `MailTransport` — Mailpit locally, Resend hosted with the `webhook-id` as idempotency key — inside GoTrue's 5 s budget; `pnpm supabase`, `pnpm db:reset`, `scripts/local-env.sh`, the integration suite (119/119 through an in-process listener) and CI keep working with no variables typed by hand, and Phase 1's recovery e2e passes 14/14 on the branded mail.**
+**GoTrue on the local stack now delivers every auth e-mail through a standard-webhooks-signed hook to `POST /v1/hooks/auth/send-email`, where the kernel resolves the brand membership-first (verified `redirect_to` host for invites, neutral platform for platform staff and unresolved hosts, refusal on a host/membership mismatch), renders a pt-BR table-based template in the tenant's persisted colours with its logo as-is (or its name as text) and hands it to a `MailTransport` — Mailpit locally, Resend hosted with the `webhook-id` as idempotency key — inside GoTrue's 5 s budget; `pnpm supabase`, `pnpm db:reset`, `scripts/local-env.sh`, the integration suite (119/119 through an in-process listener) and CI keep working with no variables typed by hand, and Phase 1's recovery e2e passes 14/14 on the branded mail.**
 
 ## Performance
 
@@ -264,14 +264,14 @@ See `key-decisions` in the frontmatter. Recorded per the plan's `<output>` reque
 
 ## Issues Encountered
 
-- **Stale dev API on 8787:** an orphaned `pnpm --filter @tria/api dev` tree from 2026-09-12 (PPID 1, a leftover Playwright web server) owned the port; the first whole-suite run reused it (119/119). It was stopped to prove the in-process listener path (`[integration] API listening on 0.0.0.0:8787` → 119/119 again, clean exit). Playwright started and stopped its own servers for the e2e run afterwards; no port is left occupied.
+- **Stale dev API on 8787:** an orphaned `pnpm --filter @rede-social/api dev` tree from 2026-09-12 (PPID 1, a leftover Playwright web server) owned the port; the first whole-suite run reused it (119/119). It was stopped to prove the in-process listener path (`[integration] API listening on 0.0.0.0:8787` → 119/119 again, clean exit). Playwright started and stopped its own servers for the e2e run afterwards; no port is left occupied.
 - **02-04 environment drift resolved:** after the stack restart `recovery.spec.ts` cases 3/5/7 pass again — the mails now originate from GoTrue through the hook (the SMTP template path is only the fallback), so the "default English template" drift recorded in `deferred-items.md` is gone.
 - **Secret-file guard:** `apps/api/.env.local` cannot be read by tooling in this session; its regeneration was verified by the generator's exit status and by the suites that consume it, not by inspection.
 - **Seed env:** `pnpm db:seed` needs the seed credentials in the environment; they were sourced from `scripts/local-env.sh` output without printing them.
 
 ## Human-check notes (for `/gsd-verify-work`, `human_verify_mode: end-of-phase`)
 
-- Open Mailpit at `http://127.0.0.1:54324`, filter `to:member@tria-demo.local` (or any `e2e-recovery-*@tria-demo.local`): newest "Redefina sua senha — TRIA Demo" — purple top accent and CTA, the demo wordmark, "Enviado pela plataforma TRIA" footer, plain-text tab with the same link.
+- Open Mailpit at `http://127.0.0.1:54324`, filter `to:member@rede-demo.local` (or any `e2e-recovery-*@rede-demo.local`): newest "Redefina sua senha — Rede Demo" — purple top accent and CTA, the demo wordmark, "Enviado pela plataforma Rede Social" footer, plain-text tab with the same link.
 - Filter `subject:"Convite para administrar"` — the throwaway "Associação São José" invite renders the accented name as text (no logo) with the amber CTA.
 - The Resend transport has no local key; the first real send is the hosted runbook (docs/deploy/auth-mail.md).
 
@@ -292,7 +292,7 @@ None locally — `pnpm supabase start` → `pnpm db:reset` → `bash scripts/loc
 - 02-08/02-10: invite and recovery mails are branded end to end; the invite CTA lands on `/auth/confirm?next=/aceitar-convite&token_hash=…&type=invite`; a resend-invite fallback can reuse `MailTransport` / `RenderedMail`.
 - 02-09: `sendPendingInvites` on the first verified host now yields a branded invite mail through the hook.
 - 02-16: link `docs/deploy/auth-mail.md` from the docs index.
-- Watch item for later plans: any new integration case that makes GoTrue send mail depends on the `globalSetup` listener — keep `pnpm test:integration` (not a bare `vitest run <file>` outside the config) as the entry point, or run `pnpm --filter @tria/api exec vitest run tests/integration/<file>` (the argv check still attaches the listener).
+- Watch item for later plans: any new integration case that makes GoTrue send mail depends on the `globalSetup` listener — keep `pnpm test:integration` (not a bare `vitest run <file>` outside the config) as the entry point, or run `pnpm --filter @rede-social/api exec vitest run tests/integration/<file>` (the argv check still attaches the listener).
 
 ---
 *Phase: 02-tenant-shell-branding-platform-panel*

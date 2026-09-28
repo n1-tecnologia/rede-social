@@ -1,6 +1,6 @@
 'use server';
 
-import { REAL_TENANT_DEFAULT_MODULES, setModuleBodySchema } from '@tria/contracts';
+import { REAL_TENANT_DEFAULT_MODULES, setModuleBodySchema } from '@rede-social/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';

@@ -3,7 +3,7 @@ import {
   type ModuleKey,
   type TenantRole,
   TOGGLEABLE_MODULES,
-} from '@tria/contracts';
+} from '@rede-social/contracts';
 import type { Hono } from 'hono';
 import type { AppEnv } from '../auth/context';
 
@@ -16,7 +16,7 @@ export type ModuleNavBadge = 'unreadNotifications' | 'unreadConversations';
 /**
  * Navigation entry the shell renders; `order` drives the bootstrap list's sort (ROLE-06 ordering).
  * Everything here is plain data: the manifest lives on the server and travels through
- * `GET /v1/me/bootstrap`, so `icon` is a NAME (`'bell'`, `'users'`, …) that `@tria/core/ui`
+ * `GET /v1/me/bootstrap`, so `icon` is a NAME (`'bell'`, `'users'`, …) that `@rede-social/core/ui`
  * maps to a lucide component — never a React component.
  */
 export interface ModuleNav {

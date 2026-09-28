@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
+import type { AttendanceSummary, Attendee } from '@rede-social/module-events/contracts';
+import { ToastProvider } from '@rede-social/ui';
 import { cleanup, render, screen, within } from '@testing-library/react';
-import type { AttendanceSummary, Attendee } from '@tria/module-events/contracts';
-import { ToastProvider } from '@tria/ui';
 import { MotionGlobalConfig } from 'motion/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -53,7 +53,7 @@ const state = vi.hoisted(() => ({
 vi.mock('@/lib/bootstrap', () => ({
   requireBootstrap: async () => ({
     permissions: state.permissions,
-    tenant: { timezone: 'America/Sao_Paulo', displayName: 'TRIA Demo' },
+    tenant: { timezone: 'America/Sao_Paulo', displayName: 'Rede Demo' },
   }),
 }));
 

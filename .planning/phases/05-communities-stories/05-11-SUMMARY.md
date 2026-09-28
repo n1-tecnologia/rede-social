@@ -108,7 +108,7 @@ coverage:
     requirement: "TENANT-02"
     verification:
       - kind: static
-        ref: "pnpm --filter @tria/web build && bash scripts/check-static-routes.sh — offenders: 0, 39 guarded routes checked; grep '(app)/stories/' prints 3"
+        ref: "pnpm --filter @rede-social/web build && bash scripts/check-static-routes.sh — offenders: 0, 39 guarded routes checked; grep '(app)/stories/' prints 3"
         status: pass
     human_judgment: false
   - id: D7
@@ -212,10 +212,10 @@ None. This plan touches no server route, no credential and no auth path. The pla
 
 | Gate | Result |
 |---|---|
-| `pnpm --filter @tria/web typecheck` | ✓ |
-| `pnpm --filter @tria/web lint` (biome, 262 files) | ✓ no suppressions added anywhere |
-| `pnpm --filter @tria/web test` | ✓ 126 passed / 15 files (`StoryVideo.test.tsx` 6/6, `StoryViewerHost.test.tsx` 13/13 — 12 pre-existing + the new case 13) |
-| `pnpm --filter @tria/web build && bash scripts/check-static-routes.sh` | ✓ `offenders: 0`, `guarded routes checked: 39` |
+| `pnpm --filter @rede-social/web typecheck` | ✓ |
+| `pnpm --filter @rede-social/web lint` (biome, 262 files) | ✓ no suppressions added anywhere |
+| `pnpm --filter @rede-social/web test` | ✓ 126 passed / 15 files (`StoryVideo.test.tsx` 6/6, `StoryViewerHost.test.tsx` 13/13 — 12 pre-existing + the new case 13) |
+| `pnpm --filter @rede-social/web build && bash scripts/check-static-routes.sh` | ✓ `offenders: 0`, `guarded routes checked: 39` |
 | `grep -c "(app)/stories/" scripts/check-static-routes.sh` | ✓ 3 |
 | `git diff --stat scripts/check-static-routes.sh` | ✓ 6 insertions, 0 deletions |
 | `pnpm db:reset && pnpm db:seed && playwright test stories.spec.ts` | ✓ 31 passed / 11 skipped; `--project=mobile-chromium` 20 passed / 1 skipped, including all 8 gesture cases |

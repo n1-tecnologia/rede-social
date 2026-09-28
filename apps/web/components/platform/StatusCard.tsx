@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, ConfirmDialog, SectionTitle, StatusPill, useToast } from '@tria/ui';
+import { Button, Card, ConfirmDialog, SectionTitle, StatusPill, useToast } from '@rede-social/ui';
 import { Ban, CheckCircle2, TriangleAlert } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useState, useTransition } from 'react';

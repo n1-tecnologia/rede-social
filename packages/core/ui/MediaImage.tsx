@@ -1,7 +1,7 @@
 'use client';
 
-import { mediaVariantUrl } from '@tria/contracts/media';
-import { cn } from '@tria/ui';
+import { mediaVariantUrl } from '@rede-social/contracts/media';
+import { cn } from '@rede-social/ui';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 

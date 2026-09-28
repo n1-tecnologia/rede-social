@@ -1,5 +1,5 @@
-import { EventTicket } from '@tria/module-events/ui';
-import { EmptyState, PageHeader } from '@tria/ui';
+import { EventTicket } from '@rede-social/module-events/ui';
+import { EmptyState, PageHeader } from '@rede-social/ui';
 import { CalendarX2, CircleAlert, Clock, Ticket } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';

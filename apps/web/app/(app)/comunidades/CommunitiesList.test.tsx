@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
+import type { CommunitySummary } from '@rede-social/module-communities/contracts';
 import { cleanup, render, screen, within } from '@testing-library/react';
-import type { CommunitySummary } from '@tria/module-communities/contracts';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,7 +33,7 @@ const { catalog } = await vi.hoisted(async () => {
   return { catalog: read('communities').communities as Record<string, unknown> };
 });
 
-// Nothing in the list animates by itself, but `@tria/ui` primitives may; a cancelled spring rejects
+// Nothing in the list animates by itself, but `@rede-social/ui` primitives may; a cancelled spring rejects
 // after the run ends under happy-dom (the 05.1-04 lesson).
 MotionGlobalConfig.skipAnimations = true;
 

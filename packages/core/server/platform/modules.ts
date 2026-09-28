@@ -1,4 +1,4 @@
-import type { ModuleKey } from '@tria/contracts';
+import type { ModuleKey } from '@rede-social/contracts';
 import { eq } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenantModules, tenants } from '../../db/schema';

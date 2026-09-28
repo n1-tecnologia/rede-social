@@ -27,7 +27,7 @@ created: "2026-09-22"
 |----------|-------|
 | **Framework** | Vitest 5.0.0 (unit + integration), pgTAP via `supabase test db` (CLI 2.117.0), Playwright 1.63.0 (e2e) |
 | **Config file** | per-package `vitest.config.ts`; `apps/web/playwright.config.ts` + `playwright.pwa.config.ts`; `supabase/tests/*.sql` |
-| **Quick run command** | `pnpm --filter @tria/module-feed test` (new package) / `pnpm --filter @tria/api test` |
+| **Quick run command** | `pnpm --filter @rede-social/module-feed test` (new package) / `pnpm --filter @rede-social/api test` |
 | **Full suite command** | `pnpm verify` (the local exit gate; `ci.yml` mirrors it step for step) |
 | **Estimated runtime** | ~1230 seconds full suite (Phase 3 baseline: 20m26s); quick run seconds-scale |
 
@@ -35,7 +35,7 @@ created: "2026-09-22"
 
 ## Sampling Rate
 
-- **After every task commit:** Run `pnpm --filter @tria/module-feed test && pnpm --filter @tria/api test`
+- **After every task commit:** Run `pnpm --filter @rede-social/module-feed test && pnpm --filter @rede-social/api test`
 - **After every plan wave:** Run `pnpm lint && pnpm turbo typecheck test && pnpm supabase test db && pnpm test:integration`
 - **Before `/gsd-verify-work`:** Full `pnpm verify` must be green
 
@@ -75,9 +75,9 @@ ordered fast-tier-first so `&&` short-circuits on the cheapest gate that can fai
 | FEED-06 | 04-03, 04-07 | Curtir/descurtir comentários e respostas | integration + e2e | `npx vitest run tests/integration/feed.test.ts` · `feed-comments.spec.ts` | ✅ green |
 | FEED-07 | 04-08 | Deep link, login e aterrissagem, 404 cross-tenant, copiar link no desktop | e2e | `feed-share.spec.ts` | ✅ green (metade nativa → Manual-Only) |
 | FEED-08 | 04-01 | `author_user_id` genérico + política de postagem por tenant, virável sem migração | integration | `npx vitest run tests/integration/feed.test.ts` (caso 7) | ✅ green |
-| MEDIA-04 | 04-05 | Guarda SSRF em nível de socket (range privado, literal de IP, redirect para privado, teto de corpo); cache por tenant | unit | `pnpm --filter @tria/module-feed test` (unfurl-guard.test.ts) | ⚠️ parcial — ver Manual-Only (A-WR-01/02/03) e override MEDIA-04 |
-| MOD-03 | 04-01, 04-03 | 7 eventos tipados, flush após handler, uma vez só, nada no rollback | unit | `pnpm --filter @tria/module-feed test` (events.test.ts) — 9/9 | ✅ green |
-| MOD-03 / D-19 | 04-10 | A remoção do `@tria/module-example` **tem guarda permanente**: tabela ausente, nenhuma relação `example%`, CHECK recusa a chave retirada, controle positivo (B-WR-11 fechado) | pgTAP | `pnpm supabase test db` (100-module-example-removal.sql) | ✅ green — 4/4 |
+| MEDIA-04 | 04-05 | Guarda SSRF em nível de socket (range privado, literal de IP, redirect para privado, teto de corpo); cache por tenant | unit | `pnpm --filter @rede-social/module-feed test` (unfurl-guard.test.ts) | ⚠️ parcial — ver Manual-Only (A-WR-01/02/03) e override MEDIA-04 |
+| MOD-03 | 04-01, 04-03 | 7 eventos tipados, flush após handler, uma vez só, nada no rollback | unit | `pnpm --filter @rede-social/module-feed test` (events.test.ts) — 9/9 | ✅ green |
+| MOD-03 / D-19 | 04-10 | A remoção do `@rede-social/module-example` **tem guarda permanente**: tabela ausente, nenhuma relação `example%`, CHECK recusa a chave retirada, controle positivo (B-WR-11 fechado) | pgTAP | `pnpm supabase test db` (100-module-example-removal.sql) | ✅ green — 4/4 |
 | UI-02 | 04-02, 04-06, 04-07 | 11 primitivas portadas; 6 superfícies desenhadas; interações do protótipo preservadas | e2e + unit | `feed.spec.ts` + `post-media.test.tsx`, `meta.test.ts`, `share.test.ts` | ✅ green (aprovação D-33 → Manual-Only, FECHADA em 2026-09-23) |
 | — (smoke) | 04-10 | A testemunha de duas direções do flag de módulo da fase | e2e | `phase4-smoke.spec.ts` | ✅ green |
 
@@ -95,12 +95,12 @@ ordered fast-tier-first so `&&` short-circuits on the cheapest gate that can fai
 - [x] `apps/api/tests/integration/feed.test.ts` — create/edit/soft-delete, gallery XOR video, like idempotency, comment depth mapping; covers FEED-01/03/04/05/06
 - [x] `apps/api/tests/integration/feed-query-budget.test.ts` — `pg_stat_statements` `sum(calls)` delta filtered by `query ~ 'feed_(posts|comments|likes|...)'`; covers FEED-02 criterion 4
 - [x] `supabase/tests/0xx-feed.sql` — reply-depth negative (FK + CHECK refusals), counter reconciliation, `EXPLAIN` index-scan assertions
-- [x] `supabase/tests/020-tenant-isolation.sql` — substitute feed tables for `example_items`, keeping the positive control per case (**must land before the D-19 `@tria/module-example` removal**, or the exit gate silently weakens)
+- [x] `supabase/tests/020-tenant-isolation.sql` — substitute feed tables for `example_items`, keeping the positive control per case (**must land before the D-19 `@rede-social/module-example` removal**, or the exit gate silently weakens)
 - [x] `supabase/tests/030-lanes.sql` — substitute a feed table for `example_items`
 - [x] `apps/web/e2e/feed.spec.ts`, `feed-composer.spec.ts`, `feed-share.spec.ts` — mobile project; set `serviceWorkers: 'block'` on any spec that intercepts GET (03-05 precedent)
 - [x] `apps/web/e2e/phase4-smoke.spec.ts` — the per-phase smoke, extending 02-16's feed-tab witness with a real feed slot
 - [x] `scripts/seed.ts` — seeded posts of each media shape plus comments, replies and likes, in **both** demo tenants with identical-looking content (SCHEMA-CONVENTIONS §(j))
-- [x] Port `InfiniteScroll` into `@tria/ui` taking the IntersectionObserver root from `useScrollContainer()` — the one prototype primitive not yet ported, needed by Phases 5 and 7 too
+- [x] Port `InfiniteScroll` into `@rede-social/ui` taking the IntersectionObserver root from `useScrollContainer()` — the one prototype primitive not yet ported, needed by Phases 5 and 7 too
 
 ---
 
@@ -153,7 +153,7 @@ futuro perder a extensão, os três testes ficam vermelhos — que é o comporta
 - [x] No watch-mode flags
 - [x] Every task's `<automated>` chain is ordered T1 → T2 (→ T3 only in the final plan's last task)
 - [x] T1 primary signal < 60s on every task; T2 < 5 min per task; T3 run once, ≤ 25 min
-- [x] Feed isolation cases land in `020-tenant-isolation.sql` **before** `@tria/module-example` is removed (D-19) — e agora `100-module-example-removal.sql` impede a ressurreição
+- [x] Feed isolation cases land in `020-tenant-isolation.sql` **before** `@rede-social/module-example` is removed (D-19) — e agora `100-module-example-removal.sql` impede a ressurreição
 - [ ] `nyquist_compliant: true` set in frontmatter — **NÃO**: 2 gaps escalados como defeitos de implementação (A-WR-08, A-WR-01/02/03). Fase é PARCIAL por decisão registrada, não por descuido
 
 **Approval:** validado em 2026-09-23 via `/gsd-validate-phase 04` — PARCIAL (9 automatizados, 5 manual-only dos quais 2 escalados).

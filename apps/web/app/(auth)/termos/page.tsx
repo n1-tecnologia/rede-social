@@ -1,9 +1,9 @@
-import { readLegalDoc } from '@tria/contracts';
+import { readLegalDoc } from '@rede-social/contracts';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 
 /**
- * TRIA's Terms of Use, rendered from the versioned markdown in `@tria/contracts/legal` (D-03).
+ * the platform's Terms of Use, rendered from the versioned markdown in `@rede-social/contracts/legal` (D-03).
  * Server component: `readLegalDoc` reads the file with `node:fs`; `next.config.ts` keeps the markdown
  * inside the deployed function bundle (`outputFileTracingIncludes`).
  */

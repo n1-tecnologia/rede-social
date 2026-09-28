@@ -94,7 +94,7 @@ knows.
 
 - **Optimistic like rollback / sentinel error state.** `likePostAction` and `loadMoreFeedAction`
   return closed result objects; whether a rejected page leaves the sentinel spinning and whether a
-  rejected like restores the exact pre-click pair is decided inside `@tria/module-feed/ui`
+  rejected like restores the exact pre-click pair is decided inside `@rede-social/module-feed/ui`
   (`FeedList`, `PostCard`) — **Part A**. Note that these server actions can also *reject* (transport
   failure, or `redirect()` for a known refusal), not only resolve to `{ ok: false }`; the module must
   handle both.
@@ -429,11 +429,11 @@ and derive the expected comment count from the observed `metaBefore` rather than
    `delete from public.feed_posts where caption like ${prefix + '%'}` with **no tenant scope** and
    **no LIKE-wildcard escaping**. A prefix containing `_` or `%` (none today) silently widens the
    match, and the statement is free to delete matching posts in any tenant.
-2. `deletePostAssetsSince('tria-demo', startedAt)` is called with
+2. `deletePostAssetsSince('rede-demo', startedAt)` is called with
    `const startedAt = new Date()` evaluated at **module scope** (`feed-composer.spec.ts:70`).
    Playwright imports every spec file during collection, before the first test runs, so `startedAt`
    is effectively "the start of the whole run". The teardown therefore deletes **every** `post`/
-   `attachment` media asset created in `tria-demo` during the entire run — including assets created
+   `attachment` media asset created in `rede-demo` during the entire run — including assets created
    by any other spec that executed earlier in the same run.
 3. Unlike `deleteTenantVideoAssets` (which was amended in this very phase to detach
    `feed_post_media` first, `admin.ts:262-268`), `deletePostAssetsSince` deletes `media_assets`

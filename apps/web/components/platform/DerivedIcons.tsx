@@ -1,6 +1,6 @@
 'use client';
 
-import { Card, SectionTitle } from '@tria/ui';
+import { Card, SectionTitle } from '@rede-social/ui';
 import { Check, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { BrandingView } from '@/lib/branding-view';

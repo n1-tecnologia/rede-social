@@ -9,7 +9,7 @@
 --      no-op against it, which is the property that keeps the TS schema and this folder honest.
 --
 --   2. HAND-WRITTEN — `feed_posts_community_fk`. It is not generated because it CANNOT be: the
---      referenced table belongs to `@tria/module-communities`, and `turbo.json`'s boundary
+--      referenced table belongs to `@rede-social/module-communities`, and `turbo.json`'s boundary
 --      allowlist denies a `module -> module` package dependency (MOD-02, proved by
 --      `packages/boundary-fixture`). A drizzle `.references(() => communities.id)` needs that
 --      import, so the constraint is declared here instead. Nothing is lost: the DATABASE enforces

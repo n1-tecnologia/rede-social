@@ -6,13 +6,13 @@ tags: [communities, module-package, keyset, rls, nav-tab, hono, drizzle, pgtap, 
 
 requires:
   - phase: 04-feed
-    provides: "@tria/module-feed as the reference module scaffold, packages/core/server/paging.ts (the ONE cursor envelope), InfiniteScroll, the query-budget harness and the two-tenant isolation gate"
+    provides: "@rede-social/module-feed as the reference module scaffold, packages/core/server/paging.ts (the ONE cursor envelope), InfiniteScroll, the query-budget harness and the two-tenant isolation gate"
   - phase: 03-media-profiles
     provides: "media_assets + MediaImage (the stable /v1/media/{assetId}/{variant} path) and the MembersList append-never-replace paging state machine"
   - phase: 01-foundations
     provides: "withTenantTx, tenantIsolationPolicy, requireAuth/requireModule/requirePermission, the module manifest and MODULE_REGISTRY"
 provides:
-  - "@tria/module-communities — a real workspace package with the five-export map (./module, ./contracts, ./server, ./ui, ./db)"
+  - "@rede-social/module-communities — a real workspace package with the five-export map (./module, ./contracts, ./server, ./ui, ./db)"
   - "communities + community_members: RLS, tenant isolation policies, the partial DESC-NULLS-FIRST activity index and the per-tenant slug unique"
   - "GET /v1/communities (keyset on last_activity_at), GET /v1/communities/{id}, POST /v1/communities"
   - "The Comunidades navigation tab, declared by the manifest and driven by the module flag (D-40, D-77)"
@@ -143,7 +143,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D6
-    description: "@tria/module-communities is registered under the communities key; turning the module off removes the tab and 404s every route, turning it on restores both with no migration and no route edit"
+    description: "@rede-social/module-communities is registered under the communities key; turning the module off removes the tab and 404s every route, turning it on restores both with no migration and no route edit"
     verification:
       - kind: integration
         ref: "apps/api/tests/integration/communities.test.ts#10. with communities OFF: every route 404s and the bootstrap carries neither the tab nor the permission"
@@ -152,7 +152,7 @@ coverage:
         ref: "apps/api/tests/integration/communities.test.ts#11. …and turning it back ON restores both, with no migration and no route edit"
         status: pass
       - kind: integration
-        ref: "apps/api/tests/integration/modules.test.ts#1. tria-demo lists the six seeded keys; tria-lab only feed + events"
+        ref: "apps/api/tests/integration/modules.test.ts#1. rede-demo lists the six seeded keys; rede-lab only feed + events"
         status: pass
     human_judgment: false
   - id: D7
@@ -218,7 +218,7 @@ status: complete
 
 # Phase 5 Plan 01: Communities Tracer Summary
 
-**`@tria/module-communities` shipped end to end — a workspace package with two RLS-isolated tables, a keyset list paged on a trigger-ready `last_activity_at`, a permission-guarded create, the `Comunidades` navigation tab the registry drives, and the `/comunidades` route a real browser reaches on a phone viewport.**
+**`@rede-social/module-communities` shipped end to end — a workspace package with two RLS-isolated tables, a keyset list paged on a trigger-ready `last_activity_at`, a permission-guarded create, the `Comunidades` navigation tab the registry drives, and the `/comunidades` route a real browser reaches on a phone viewport.**
 
 ## Performance
 
@@ -313,7 +313,7 @@ status: complete
 - **Issue:** The control asserted a visible `<img>` inside the covered card. It failed — not because the card is wrong, but because the shared local stack's `media` bucket was empty: `pnpm db:seed` uploads 38 objects, and the integration suite's `media-sweeper.test.ts` removes them before the e2e runs. `MediaImage`'s documented contract is that a missing object degrades to the neutral `bg-bg-tertiary` box, so the assertion was measuring suite order rather than the card.
 - **Fix:** The control now asserts the rendered BRANCH (`data-testid="community-cover-image"` present, gradient fallback absent) plus the symmetric negative on the cover-less card.
 - **Files modified:** `apps/web/e2e/comunidades.spec.ts`
-- **Verification:** `pnpm --filter @tria/web exec playwright test comunidades.spec.ts` — 10 passed.
+- **Verification:** `pnpm --filter @rede-social/web exec playwright test comunidades.spec.ts` — 10 passed.
 - **Commit:** `33bc9e7`
 
 **6. [Rule 3 - Blocker] `010-rls-coverage.sql` needed its catalogue extended, not its `plan(N)`**
@@ -351,17 +351,17 @@ None. Every file this plan touched sits inside the threat model the plan already
 
 | Check | Result |
 |-------|--------|
-| `pnpm --filter @tria/module-communities typecheck` | pass |
-| `pnpm --filter @tria/module-communities lint` | pass (13 files) |
-| `pnpm --filter @tria/module-communities test` | pass — 6/6 |
-| `pnpm --filter @tria/api typecheck && lint` | pass (60 files) |
-| `pnpm --filter @tria/web typecheck && lint` | pass (237 files) |
+| `pnpm --filter @rede-social/module-communities typecheck` | pass |
+| `pnpm --filter @rede-social/module-communities lint` | pass (13 files) |
+| `pnpm --filter @rede-social/module-communities test` | pass — 6/6 |
+| `pnpm --filter @rede-social/api typecheck && lint` | pass (60 files) |
+| `pnpm --filter @rede-social/web typecheck && lint` | pass (237 files) |
 | `pnpm db:generate` against the committed migration | no-op ("No schema changes"), `git status --porcelain -- supabase/migrations` empty |
 | `pnpm db:reset && pnpm db:seed` | pass — 4 communities per tenant, 1 cover-less each, 1 activity tie each |
 | `pnpm supabase test db` | pass — 11 files, 207 tests, `Result: PASS` |
 | `pnpm test:integration` | pass — 28 files, 391/391 |
 | `pnpm test:integration -- isolation` | pass — 20/20 |
-| `pnpm --filter @tria/web exec playwright test comunidades.spec.ts` | pass — 10/10 (mobile + desktop) |
+| `pnpm --filter @rede-social/web exec playwright test comunidades.spec.ts` | pass — 10/10 (mobile + desktop) |
 | `pnpm boundaries` | pass — 491 files, 8 packages, no issues |
 | `bash scripts/check-ui-literals.sh` | pass |
 
@@ -373,7 +373,7 @@ None outstanding. One standing ENVIRONMENT fact worth carrying forward (it is no
 
 Ready for **05-02** (same wave, shares no file with this plan) and for the wave-2 plans that build on the module:
 
-- `@tria/module-communities` is the shape 05-05 (stories) copies: five exports, three scripts, one registry line, one mount.
+- `@rede-social/module-communities` is the shape 05-05 (stories) copies: five exports, three scripts, one registry line, one mount.
 - `communities.post_count` / `last_activity_at` are declared trigger-owned and await 05-03's function on `feed_posts`.
 - `listCommunities`' `communityProjection` is the statement 05-04's community page extends; the query budget already carries a ceiling and a floor for it.
 - `feed_posts.community_id` still carries no foreign key — `communities` exists now, so the plan that adds the reference can.

@@ -1,6 +1,6 @@
 'use client';
 
-import { Card } from '@tria/ui';
+import { Card } from '@rede-social/ui';
 import { Fragment, type ReactNode, useCallback } from 'react';
 import type { AttachmentDescriptor } from './AttachmentRow';
 import { type LikeState, useOptimisticLike } from './LikeButton';

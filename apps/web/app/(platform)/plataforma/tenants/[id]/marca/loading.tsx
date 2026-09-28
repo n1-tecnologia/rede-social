@@ -1,4 +1,4 @@
-import { Card, Skeleton } from '@tria/ui';
+import { Card, Skeleton } from '@rede-social/ui';
 
 /**
  * Marca tab loading (E14/loading): skeletons shaped like the three cards — the two drop zones, the

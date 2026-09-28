@@ -3,7 +3,7 @@ import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
 
 /**
  * TENANT-01 / D-23 on a phone viewport (`mobile-chromium`): the membership is the authority, and the
- * host can only DENY. A tria-demo member who opens tria-lab's address is signed out and told only
+ * host can only DENY. A rede-demo member who opens rede-lab's address is signed out and told only
  * "Este endereço não pertence à sua comunidade." — never which community is theirs, never which
  * community this address serves. The same member keeps working on a generic host (D-21) and on their
  * own host.
@@ -24,7 +24,7 @@ async function signIn(page: Page, origin: string): Promise<void> {
 }
 
 test.describe('TENANT-01/D-23 — a session on another tenant’s host', () => {
-  test('1. tria-demo member on the tria-lab host: signed out, no tenant named', async ({
+  test('1. rede-demo member on the rede-lab host: signed out, no tenant named', async ({
     browser,
   }) => {
     test.skip(isRemote, 'local stack only');
@@ -41,7 +41,7 @@ test.describe('TENANT-01/D-23 — a session on another tenant’s host', () => {
 
     // Neither tenant may appear anywhere on the page.
     const body = (await page.locator('body').innerText()).toLowerCase();
-    for (const secret of ['tria demo', 'tria lab', 'tria-demo', 'tria-lab']) {
+    for (const secret of ['rede-social demo', 'rede-social lab', 'rede-demo', 'rede-lab']) {
       expect(body).not.toContain(secret);
     }
 
@@ -61,7 +61,7 @@ test.describe('TENANT-01/D-23 — a session on another tenant’s host', () => {
 
     await signIn(page, hosts.generic);
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
       timeout: 20_000,
     });
 
@@ -76,7 +76,7 @@ test.describe('TENANT-01/D-23 — a session on another tenant’s host', () => {
 
     await signIn(page, hosts.demo);
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('TRIA Demo', {
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
       timeout: 20_000,
     });
 

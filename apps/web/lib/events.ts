@@ -26,7 +26,7 @@ import {
   type RsvpAnswer,
   type RsvpResult,
   rsvpResultSchema,
-} from '@tria/module-events/contracts';
+} from '@rede-social/module-events/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';

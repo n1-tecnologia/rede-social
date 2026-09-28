@@ -1,4 +1,4 @@
-import { Card, Skeleton } from '@tria/ui';
+import { Card, Skeleton } from '@rede-social/ui';
 
 /**
  * `/perfil` loading (UI-SPEC E1/loading): the 80px avatar circle, two text bars (name + e-mail) and

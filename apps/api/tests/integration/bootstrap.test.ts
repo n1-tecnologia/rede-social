@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { bootstrapSchema, hostTenantSchema } from '@tria/contracts';
-import { db, sqlClient } from '@tria/core/db';
-import { withTenantTx } from '@tria/core/db/tenant-tx';
+import { bootstrapSchema, hostTenantSchema } from '@rede-social/contracts';
+import { db, sqlClient } from '@rede-social/core/db';
+import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { sql } from 'drizzle-orm';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -11,7 +11,7 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setu
 type Envelope = { error: { code: string; message: string; details?: unknown; requestId: string } };
 type Loose = { user: { id: string }; tenant: { id: string; slug: string } };
 
-const MEMBER = 'member@tria-demo.local';
+const MEMBER = 'member@rede-demo.local';
 let token = '';
 let memberCtx = { userId: '', tenantId: '', role: 'member' as const };
 
@@ -26,7 +26,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await adminSql`delete from public.tenants where slug = 'tria-demo-twin'`;
+  await adminSql`delete from public.tenants where slug = 'rede-demo-twin'`;
   await adminSql.end();
   await sqlClient.end();
 });
@@ -36,7 +36,7 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
     const res = await bootstrap();
     expect(res.status).toBe(200);
     const body = bootstrapSchema.parse(await res.json());
-    expect(body.tenant.slug).toBe('tria-demo');
+    expect(body.tenant.slug).toBe('rede-demo');
     expect(body.membership.role).toBe('member');
     expect(body.membership.status).toBe('active');
     expect(body.user.email).toBe(MEMBER);
@@ -49,11 +49,11 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
     expect(first.tenant.timezone).toBe('America/Sao_Paulo');
 
     try {
-      await adminSql`update public.tenants set timezone = 'America/Manaus' where slug = 'tria-demo'`;
+      await adminSql`update public.tenants set timezone = 'America/Manaus' where slug = 'rede-demo'`;
       const second = bootstrapSchema.parse(await (await bootstrap()).json());
       expect(second.tenant.timezone).toBe('America/Manaus');
     } finally {
-      await adminSql`update public.tenants set timezone = 'America/Sao_Paulo' where slug = 'tria-demo'`;
+      await adminSql`update public.tenants set timezone = 'America/Sao_Paulo' where slug = 'rede-demo'`;
     }
   });
 
@@ -102,11 +102,11 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
   });
 
   it('4. TENANT-03 adjacency: an identical display_name in another tenant never merges rows', async () => {
-    await adminSql`insert into public.tenants (slug, display_name) values ('tria-demo-twin', 'TRIA Demo')
+    await adminSql`insert into public.tenants (slug, display_name) values ('rede-demo-twin', 'Rede Demo')
                    on conflict (slug) do nothing`;
     const res = await bootstrap();
     expect(res.status).toBe(200);
-    expect(((await res.json()) as Loose).tenant.slug).toBe('tria-demo');
+    expect(((await res.json()) as Loose).tenant.slug).toBe('rede-demo');
     const count = await withTenantTx(memberCtx, async (tx) => {
       const rows = await tx.execute<{ n: string }>(sql`select count(*)::text as n from tenants`);
       return Number(rows[0]?.n);
@@ -141,7 +141,7 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
     const body = JSON.parse(text) as Envelope;
     expect(body.error.code).toBe('TENANT_HOST_MISMATCH');
     expect(body.error.details).toBeUndefined();
-    for (const needle of ['tria-lab', 'TRIA Lab', 'tria-demo', 'TRIA Demo']) {
+    for (const needle of ['rede-lab', 'Rede Lab', 'rede-demo', 'Rede Demo']) {
       expect(text).not.toContain(needle);
     }
   });
@@ -149,21 +149,21 @@ describe('GET /v1/me/bootstrap — tracer: real GoTrue token -> JWKS -> membersh
   it('8. D-23 match: own host (any case, with port) -> 200', async () => {
     const plain = await bootstrap({ 'x-tenant-host': HOSTS.demo });
     expect(plain.status).toBe(200);
-    expect(((await plain.json()) as Loose).tenant.slug).toBe('tria-demo');
+    expect(((await plain.json()) as Loose).tenant.slug).toBe('rede-demo');
     const shouty = await bootstrap({ 'X-TENANT-HOST': `${HOSTS.demo.toUpperCase()}:3000` });
     expect(shouty.status).toBe(200);
-    expect(((await shouty.json()) as Loose).tenant.slug).toBe('tria-demo');
+    expect(((await shouty.json()) as Loose).tenant.slug).toBe('rede-demo');
   });
 
   it('9. D-21 generic host: an unregistered host can deny, never select data -> 200 with the membership tenant', async () => {
     const res = await bootstrap({ 'x-tenant-host': 'preview.example' });
     expect(res.status).toBe(200);
-    expect(((await res.json()) as Loose).tenant.slug).toBe('tria-demo');
+    expect(((await res.json()) as Loose).tenant.slug).toBe('rede-demo');
   });
 });
 
 describe('TENANT-01 — the membership is the tenant of record; cookie and Host never select data', () => {
-  const NO_MEMBERSHIP_EMAIL = 'no-membership@tria-test.local';
+  const NO_MEMBERSHIP_EMAIL = 'no-membership@rede-social-test.local';
   let orphanId: string | null = null;
 
   afterAll(async () => {
@@ -175,19 +175,19 @@ describe('TENANT-01 — the membership is the tenant of record; cookie and Host 
 
   it('12. adjacency: tenant_slug cookie, Host and X-Forwarded-Host of another tenant are ignored (D-23)', async () => {
     const spoofed = {
-      cookie: 'tenant_slug=tria-lab',
-      host: 'tria-lab.example',
-      'x-forwarded-host': 'tria-lab.example',
+      cookie: 'tenant_slug=rede-lab',
+      host: 'rede-lab.example',
+      'x-forwarded-host': 'rede-lab.example',
     };
     const res = await bootstrap(spoofed);
     expect(res.status).toBe(200);
-    expect(((await res.json()) as Loose).tenant.slug).toBe('tria-demo');
+    expect(((await res.json()) as Loose).tenant.slug).toBe('rede-demo');
 
     // An UNREGISTERED x-tenant-host is a generic host: the membership wins (D-21). The registered-host
-    // denial (x-tenant-host = tria-lab's real host -> 403 TENANT_HOST_MISMATCH) is case 7 above.
-    const generic = await bootstrap({ ...spoofed, 'x-tenant-host': 'tria-lab.example' });
+    // denial (x-tenant-host = rede-lab's real host -> 403 TENANT_HOST_MISMATCH) is case 7 above.
+    const generic = await bootstrap({ ...spoofed, 'x-tenant-host': 'rede-lab.example' });
     expect(generic.status).toBe(200);
-    expect(((await generic.json()) as Loose).tenant.slug).toBe('tria-demo');
+    expect(((await generic.json()) as Loose).tenant.slug).toBe('rede-demo');
   });
 
   it('13. empty: a valid token without a membership row gets 403 NO_MEMBERSHIP, never an empty tenant', async () => {
@@ -229,7 +229,7 @@ describe('GET /v1/public/tenants/by-host — D-20 public lookup', () => {
     expect(ok.headers.get('cache-control')).toBe('no-store');
     const body = hostTenantSchema.strict().parse(await ok.json());
     // Brand/host facts since 02-01 (exact key set pinned in hosts.test.ts).
-    expect(body).toMatchObject({ slug: 'tria-demo', displayName: 'TRIA Demo' });
+    expect(body).toMatchObject({ slug: 'rede-demo', displayName: 'Rede Demo' });
 
     const shouty = await api.request(
       `/v1/public/tenants/by-host?host=${encodeURIComponent(`${HOSTS.demo.toUpperCase()}:3000`)}`,
@@ -263,10 +263,10 @@ describe('scripts/seed.ts — D-24 idempotency', () => {
     const primaries = await adminSql`
       select t.slug, count(*) filter (where d.is_primary)::int as primaries
       from public.tenants t join public.tenant_domains d on d.tenant_id = t.id
-      where t.slug in ('tria-demo', 'tria-lab') group by t.slug order by t.slug`;
+      where t.slug in ('rede-demo', 'rede-lab') group by t.slug order by t.slug`;
     expect(primaries.map((r) => [r.slug, r.primaries])).toEqual([
-      ['tria-demo', 1],
-      ['tria-lab', 1],
+      ['rede-demo', 1],
+      ['rede-lab', 1],
     ]);
   });
 });
