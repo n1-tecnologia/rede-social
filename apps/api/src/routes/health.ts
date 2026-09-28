@@ -32,8 +32,8 @@ const healthQuery = z.object({
  * `GET /v1/health?deep=1` additionally runs `select 1` on the `api_user` client. It is the only
  * query in the codebase that does not go through `withTenantTx`/`withAdminTx`, and it is allowed to:
  * it reads no table (so `api_user`'s NOINHERIT lack of privileges is irrelevant) and switches no
- * role, so nothing leaks onto the pooled connection. `keepalive-staging.yml` calls it twice a week
- * so the Supabase Free-plan inactivity timer never pauses staging (RESEARCH §Pitfall 4, A9).
+ * role, so nothing leaks onto the pooled connection. The production deploy in `deploy-api.yml`
+ * calls `?deep=1` as its post-deploy deep health check.
  */
 export const healthRoutes = new OpenAPIHono<AppEnv>().openapi(
   createRoute({

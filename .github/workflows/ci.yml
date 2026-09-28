@@ -2,7 +2,7 @@
 # literal guard), typecheck/build/unit, the build-output gate, module boundaries, lane guard, pgTAP,
 # API integration, the pooler spike, the dev-server e2e (iPhone 14, Pixel 7, desktop) and the
 # production-build PWA e2e. `workflow_call` makes this same file the `checks` job of deploy-api.yml,
-# so the production gate runs the identical checks for the exact `main` SHA it is about to deploy —
+# so the production gate runs the identical checks for the exact `master` SHA it is about to deploy —
 # there is never a second, drifting copy of these steps (D-12). Add a step here only when the
 # `verify` script gains one, in the same position.
 name: CI
@@ -10,7 +10,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [master]
   workflow_call: {}
 
 permissions:

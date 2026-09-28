@@ -1,25 +1,20 @@
-# API + worker to Cloud Run (D-11, D-12, D-15). One image, two services per environment (D-18).
+# API + worker to Cloud Run (D-11, D-12, D-15). One image, two Cloud Run services (D-18).
 #
-#   pull_request  -> build + `staging`: migrations, roles, config and seed on rede-social-staging,
-#                    then api-staging / worker-staging. The web Preview is Vercel's Git integration.
-#   push to main  -> `checks` (the reusable ci.yml for THIS sha) + build, then
-#                    `migrate-and-deploy-prod` behind the `production` GitHub Environment
-#                    (one manual approval) in the order migrations -> API -> worker.
+# Production only: there is no staging project and no staging services (docs/DEPLOY.md
+# "Decisions (2026-09-28)"). Pull requests run ci.yml only; the web Preview comes from Vercel's
+# Git integration.
 #
-# A direct admin push to `main` cannot skip the gate: the production job needs both `checks` and
+#   push to master -> `checks` (the reusable ci.yml for THIS sha) + build, then
+#                     `migrate-and-deploy-prod` behind the `production` GitHub Environment
+#                     (a required reviewer) in the order migrations -> API -> worker.
+#
+# A direct admin push to `master` cannot skip the gate: the production job needs both `checks` and
 # `build`, so branch protection is a convenience, not the safety mechanism.
 name: Deploy API
 
 on:
-  pull_request:
-    paths:
-      - apps/api/**
-      - packages/**
-      - supabase/**
-      - pnpm-lock.yaml
-      - .github/workflows/deploy-api.yml
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - apps/api/**
       - packages/**
@@ -31,7 +26,7 @@ permissions:
   contents: read
   id-token: write
 
-# Never cancel: a cancelled run could abort a migration halfway. Two pushes to main queue instead.
+# Never cancel: a cancelled run could abort a migration halfway. Two pushes to master queue instead.
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -41,8 +36,8 @@ env:
   AR_REPO: rede-social
 
 jobs:
-  # Same checks as a PR, re-run on the merge commit. Pull requests already run ci.yml on their own,
-  # so this job exists only for the `main` path that feeds the production gate.
+  # Pull requests run ci.yml on their own; this job re-runs the same file for the exact `master`
+  # SHA that feeds the production gate.
   checks:
     if: github.event_name == 'push'
     uses: ./.github/workflows/ci.yml
@@ -82,114 +77,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  staging:
-    name: Staging (every PR)
-    if: github.event_name == 'pull_request'
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: staging
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      - uses: supabase/setup-cli@v3
-        with:
-          version: 2.117.0
-
-      - name: Migrations (roles included)
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-        run: |
-          supabase link --project-ref "$SUPABASE_PROJECT_ID"
-          supabase db push --include-roles
-
-      - name: Set the api_user password
-        env:
-          PGPASSWORD_URL: ${{ secrets.SUPABASE_SESSION_POOLER_URL }}
-          API_DB_PASSWORD: ${{ secrets.API_DB_PASSWORD }}
-        run: psql "$PGPASSWORD_URL" -v ON_ERROR_STOP=1 -v pw="$API_DB_PASSWORD" -c "alter role api_user with login password :'pw'"
-
-      - name: Push auth/SMTP configuration
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-        run: supabase config push
-
-      - name: Seed the staging tenants (D-14)
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
-          SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
-          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
-          PLATFORM_HOST: ${{ vars.PLATFORM_HOST }}
-          TENANT_DEMO_HOST: ${{ vars.TENANT_DEMO_HOST }}
-          TENANT_LAB_HOST: ${{ vars.TENANT_LAB_HOST }}
-        run: pnpm db:seed
-
-      - uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          service_account: ${{ vars.DEPLOY_SA }}
-
-      - uses: google-github-actions/deploy-cloudrun@v3
-        id: api
-        with:
-          service: api-staging
-          region: ${{ env.GCP_REGION }}
-          image: ${{ needs.build.outputs.image }}
-          env_vars: |-
-            ROLE=api
-            LOG_LEVEL=info
-          secrets: |-
-            DATABASE_URL=api-database-url-staging:latest
-            SUPABASE_SERVICE_KEY=supabase-service-key-staging:latest
-            SUPABASE_URL=supabase-url-staging:latest
-          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=0 --allow-unauthenticated --port=8080
-
-      - uses: google-github-actions/deploy-cloudrun@v3
-        with:
-          service: worker-staging
-          region: ${{ env.GCP_REGION }}
-          image: ${{ needs.build.outputs.image }}
-          env_vars: |-
-            ROLE=worker
-            LOG_LEVEL=info
-          secrets: |-
-            DATABASE_URL=api-database-url-staging:latest
-            BOSS_DATABASE_URL=worker-database-url-staging:latest
-            SUPABASE_SERVICE_KEY=supabase-service-key-staging:latest
-            SUPABASE_URL=supabase-url-staging:latest
-          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --no-cpu-throttling --no-allow-unauthenticated
-
-      - name: Deep health check
-        run: curl -fsS "${{ steps.api.outputs.url }}/v1/health?deep=1"
-
   # Fallback if the GitHub plan blocks protected environments on a private repo (RESEARCH §Pitfall 5,
   # Open Question 1): delete the `environment:` block below and replace the `push` trigger for this
   # job with a manual dispatch — the manual run IS the approval. Keep `needs: [checks, build]`.
   #   on:
   #     workflow_dispatch:
   #       inputs:
-  #         sha: { description: "main SHA to deploy", required: true }
+  #         sha: { description: "master SHA to deploy", required: true }
   migrate-and-deploy-prod:
     name: Production (migrations -> API -> worker)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [checks, build]
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://app.seusistema.com
+      url: https://rede-social-woad.vercel.app
     steps:
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v3
@@ -218,7 +120,9 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: supabase config push
 
-      # No seeding here — production tenants are created once through seed-prod.yml (D-14).
+      # No seeding here, ever — production holds only the super_admin, created once by hand on
+      # 2026-09-28; never run `pnpm db:seed` against production (it creates the demo tenants). See
+      # docs/DEPLOY.md "Decisions (2026-09-28)".
 
       - uses: google-github-actions/auth@v3
         with:
