@@ -4,10 +4,10 @@ current_phase: 6
 current_phase_name: Events
 status: executing
 stopped_at: Completed 06-09-PLAN.md
-last_updated: "2026-09-28T03:02:56.786Z"
+last_updated: "2026-09-28T19:43:51.264Z"
 last_activity: 2026-09-28
 last_activity_desc: "06-09 complete: tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS (l) Secrets inside a tenant, phase6-smoke witness, pnpm verify green (e2e 555/0 failed, e2e:pwa 46 with events-prefetch). Phase 6: 9/9 plans; verify-work + phone UAT (blocked on 01.1) next"
-state_head: c3c05e1fda43a60013231c6a6c1498ec170d19b5
+state_head: 6da7acd52da31cc51aeb1809316c9c192d098cde
 progress:
   total_phases: 15
   completed_phases: 0
@@ -32,7 +32,7 @@ Plan: 9 of 9 complete (06-01 … 06-09); next: /gsd-verify-work 6 (phone UAT ite
 Status: Plans complete, awaiting verification — local exit gate `pnpm verify` green 2026-09-27 23:50 São Paulo; sketch 006 approved (provisional, 2026-09-27); real-phone UAT waits on 01.1
 Last activity: 2026-09-28 — 06-09 complete: every tenant timestamp in `bootstrap.tenant.timezone` (feed-view, MediaAssetRow; the Manaus shift proved in unit + smoke), SCHEMA-CONVENTIONS §(l), `phase6-smoke.spec.ts` (ENABLED/DISABLED/FLIP + the four criteria), the seed's events anchored to the tenant-local noon (a real seed bug), seven test-only gate fixes (dev-overlay taps, phase2-smoke manifest poll, phase52-smoke DB-read pins, stories seen-state pin, media-video dialog locator, platform-branding reopen, the check-in fixture on one local day). `pnpm verify` exit 0: pgTAP 17/510, integration 35/590, e2e 555 passed / 119 skipped / 0 failed, e2e:pwa 46/5 skipped with events-prefetch passing on iphone-chromium
 
-Progress: [███████████████████░] 95/98 plans (Phase 6: 9/9)
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -517,6 +517,7 @@ None yet.
 | 260924-fwv | Corrigir os dois defeitos introduzidos pela gap closure da Fase 5: CR-01 (updateCommunity revalida a capa armazenada em todo PATCH) e CR-02 (bindPlay nao chaveado por story id) | 2026-09-24 | e1631da | Verified | [260924-fwv-corrigir-os-dois-defeitos-introduzidos-p](./quick/260924-fwv-corrigir-os-dois-defeitos-introduzidos-p/) |
 | 260926-d8f | Fix 05.2 follow-ups WR-01 (item cap counts live stories only; ghost items removable), WR-04 (seen action bounded to one API call), WR-07 (page-hide seen flush via sendBeacon to POST /api/stories/views), WR-03 (place-cap and item-cap copy for `full`) and the Criar destaque link (next/link to the origin place) | 2026-09-26 | 1a23355 | — | [260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr](./quick/260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr/) |
 | 260927-ebk | Fix 05.3 follow-ups WR-04 (confirmed like pair survives a refused toggle, tagged by request number), WR-05 (Reels gesture tied to its starting pointer; non-primary pointers ignored) and the UI-REVIEW top 3 (44 px caption toggle hit areas, lane underline under the label, empty-state CTA via LinkButton) | 2026-09-27 | 71a603e | — | [260927-ebk-05-3-follow-ups-wr-04-wr-05-fixes-with-t](./quick/260927-ebk-05-3-follow-ups-wr-04-wr-05-fixes-with-t/) |
+| 5 | add web env template (apps/web) listing the variables the web app reads | 2026-09-28 | 6da7acd | — | — |
 
 ### Roadmap Evolution
 
