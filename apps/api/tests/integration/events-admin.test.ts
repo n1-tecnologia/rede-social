@@ -30,7 +30,8 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
  *  - the format switch both ways, checked on `event_secrets` through `adminSql`, the response
  *    carrying no URL, and an RSVP row surviving the edit;
  *  - the cover rule on edit: a foreign NEW cover is a bare 404, an unusable one `cover_invalid`, and
- *    a stored cover retired since is self-healed to null by an unchanged PUT;
+ *    a stored cover retired since reads back as NO cover everywhere (WR-04) and is self-healed to
+ *    null by an unchanged PUT;
  *  - cancel twice = 200/200 with one `event.cancelled`; the cancelled event stays in the member's
  *    list (D-201); an RSVP on it is 409 `cancelled`; reactivate before the start = one
  *    `event.reactivated`; after the start `409 reactivate_started`; cancel after the end
@@ -345,7 +346,7 @@ describe('events admin', () => {
     expect((await envelope(both)).details).toEqual({ event: 'location_required' });
   });
 
-  it('5. cover on edit: a foreign NEW cover is a bare 404, a feed image is cover_invalid, and a retired stored cover self-heals', async () => {
+  it('5. cover on edit: a foreign NEW cover is a bare 404, a feed image is cover_invalid, a retired stored cover reads as none and self-heals', async () => {
     const cover = await seedCover('capa');
     const body = { ...inPerson('capa'), coverAssetId: cover };
     const created = await create(body);
@@ -370,8 +371,22 @@ describe('events admin', () => {
     expect(invalid.status).toBe(400);
     expect((await envelope(invalid)).details).toEqual({ event: 'cover_invalid' });
 
-    // The admin retires the stored cover; an unchanged PUT re-sending it heals the row to null.
+    // The admin retires the stored cover. WR-04: every read drops the dead reference at once (the
+    // gradient branch, not a veil over an empty ladder), before any edit heals the row.
     await adminSql`update public.media_assets set deleted_at = now() where id = ${cover}::uuid`;
+    const memberDetail = (await (
+      await request(`/v1/events/${created.id}`, tokens.demoMember)
+    ).json()) as EventSummary;
+    expect(memberDetail.coverAssetId).toBeNull();
+    expect(memberDetail.coverVariantWidths).toEqual([]);
+    const retiredEdit = (await (await editRead(created.id)).json()) as EventEdit;
+    expect(retiredEdit.coverAssetId).toBeNull();
+    expect(retiredEdit.coverVariantWidths).toEqual([]);
+    const [stored] = await adminSql<{ cover_asset_id: string | null }[]>`
+      select cover_asset_id from public.events where id = ${created.id}::uuid`;
+    expect(stored?.cover_asset_id).toBe(cover);
+
+    // An unchanged PUT re-sending the dead id heals the row to null.
     const healed = await put(created.id, body);
     expect(healed.status, JSON.stringify(await healed.clone().json())).toBe(200);
     expect(((await healed.json()) as EventSummary).coverAssetId).toBeNull();

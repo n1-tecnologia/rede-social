@@ -123,7 +123,9 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  * about what an event looks like. Everything comes back in the SAME statement (the query-budget
  * rule):
  *  - the cover ladder, through a `left join media_assets` with no tenant condition because
- *    `media_assets_tenant_select` decides visibility in this lane;
+ *    `media_assets_tenant_select` decides visibility in this lane. When the join misses (the admin
+ *    retired the asset: the policy hides `deleted_at is not null`), the id is NULLED too, so every
+ *    surface takes the D-69 gradient branch instead of a veil over an empty ladder (06 review WR-04);
  *  - the VIEWER's own attendance row (`me`), through the unique
  *    `event_attendances_tenant_event_user_uq`: only the caller's row, never anyone else's (D-206);
  *  - the two D-219 counts, from a lateral aggregate served by
@@ -138,7 +140,7 @@ const eventColumns = sql`
            e.title,
            e.format,
            e.venue_name,
-           e.cover_asset_id,
+           case when a.id is null then null else e.cover_asset_id end as cover_asset_id,
            a.variant_widths as cover_variant_widths,
            e.status,
            to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
@@ -724,6 +726,9 @@ type EventEditRow = {
  * the `admin_tenant` lane only: the route's manage guard plus the policy are two independent gates
  * (T-06-20). A manage-holding non-admin would read a null URL, which degrades and does not leak.
  *
+ * A retired cover (the `media_assets` join misses) reads back as NO cover, as in the member
+ * projection (WR-04): the form shows "no cover" instead of a dead reference, and saving clears it.
+ *
  * A miss is ONE bare 404 (D-23).
  */
 export async function getEventForEdit(ctx: RequestContext, eventId: string): Promise<EventEdit> {
@@ -732,7 +737,7 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
       select e.id,
              e.title,
              e.description,
-             e.cover_asset_id,
+             case when a.id is null then null else e.cover_asset_id end as cover_asset_id,
              a.variant_widths as cover_variant_widths,
              e.format,
              e.venue_name,
