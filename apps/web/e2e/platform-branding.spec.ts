@@ -97,6 +97,20 @@ async function waitForHydration(page: Page, selector: string): Promise<void> {
   );
 }
 
+/**
+ * Reopens the Marca tab once the icons are ready, so the next interaction meets a form that will not
+ * remount under it. When the status poll sees the icons ready it renders "ready" and THEN calls
+ * `router.refresh()`, and the page keys `BrandingForm` on the view (`formKey`), so the refreshed
+ * server view REMOUNTS the form. Whatever was begun in that window goes with the old tree: in the
+ * 06-09 exit gate (desktop) the "Remover ícone quadrado?" dialog detached mid-click and the test
+ * timed out. A fresh navigation renders the settled server view (icons ready: no poll, no refresh).
+ */
+async function reopenSettled(page: Page): Promise<void> {
+  await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
+  await expect(page.locator('[data-icons-status="ready"]')).toBeVisible();
+  await waitForHydration(page, '[data-upload-zone="icon"] input[type="file"]');
+}
+
 /** The RENDERED background of the mini login CTA inside one preview frame. */
 function brandButtonBg(page: Page, theme: 'light' | 'dark'): Promise<string> {
   return page
@@ -237,7 +251,8 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
       page.locator(`[data-brand-scope][data-theme="light"] img[src="${b.logoUrl}"]`).first(),
     ).toBeAttached();
 
-    // Square-icon override (D-28): same signed-PUT path with kind 'icon'.
+    // Square-icon override (D-28): same signed-PUT path with kind 'icon', on a settled form.
+    await reopenSettled(page);
     await page
       .locator('[data-upload-zone="icon"] input[type="file"]')
       .setInputFiles({ name: 'quadrado.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
@@ -249,7 +264,10 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
     expect(withOverride.iconUrl).not.toBeNull();
     expect(withOverride.iconVersion).toBeGreaterThan(b.iconVersion);
 
-    // Remover → ConfirmDialog → DELETE …/branding/icon → icons re-derive from the logo.
+    // Remover → ConfirmDialog → DELETE …/branding/icon → icons re-derive from the logo. On a settled
+    // form (see `reopenSettled`), where the override is still shown after the navigation.
+    await reopenSettled(page);
+    await expect(override).toBeVisible();
     await page.getByRole('button', { name: 'Remover' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByText('Remover ícone quadrado?')).toBeVisible();
