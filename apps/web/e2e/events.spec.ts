@@ -957,7 +957,15 @@ test.describe('events check-in', () => {
     await expect(page).toHaveURL(new RegExp(`/eventos/${ids.live}/check-in$`));
     await expect(page.getByRole('heading', { level: 1, name: E.checkin.title })).toBeVisible();
     await expect(page.getByText(E.checkin.tip)).toBeVisible();
-    await expect(codeField(page)).toHaveAttribute('maxlength', '4');
+    // WR-02: the raw cap is checkinSchema's 16; the value is normalised and clipped to 4 as typed.
+    await expect(codeField(page)).toHaveAttribute('maxlength', '16');
+    await expect(confirm(page)).toBeDisabled();
+    await expect(async () => {
+      await codeField(page).fill('k7 q-m');
+      await expect(codeField(page)).toHaveValue('K7QM', { timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+    await expect(confirm(page)).toBeEnabled();
+    await codeField(page).fill('');
     await expect(confirm(page)).toBeDisabled();
 
     const ticket = page.getByTestId('event-ticket');
