@@ -5,14 +5,10 @@ import { SegmentedControl, useToast } from '@tria/ui';
 import { Lock, Video } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { startTransition, useEffect, useState } from 'react';
+import { startTransition, useState } from 'react';
+import { useBoundaryRefresh } from '@/components/events/useBoundaryRefresh';
 import type { EventActionState } from '@/lib/events-view';
 import { rsvpEventAction } from '../actions';
-
-/** A scheduled refresh lands just AFTER the boundary, so the server's clock is past it too. */
-const BOUNDARY_MARGIN_MS = 1_000;
-/** Only a boundary within the next day is scheduled; a longer-lived page refreshes on its own. */
-const BOUNDARY_HORIZON_MS = 24 * 60 * 60 * 1_000;
 
 const isRsvpAnswer = (value: string): value is RsvpAnswer =>
   (RSVP_ANSWERS as readonly string[]).includes(value);
@@ -58,8 +54,9 @@ const isRsvpAnswer = (value: string): value is RsvpAnswer =>
  *
  * **Boundary refresh** (UI-D-203): ONE `setTimeout`, set in an effect, targets the next of
  * `checkinOpensAt` / `startsAt` / `endsAt` within 24 h and calls `router.refresh()`, so a member at
- * the venue sees the zone change without pulling. The clock is read ONLY inside that effect, never
- * during render.
+ * the venue sees the zone change without pulling. A refresh that brings the same phase back (a
+ * device clock running ahead of the server) is retried; the hook is `useBoundaryRefresh`, shared
+ * with the Início card. The clock is read ONLY inside that effect, never during render.
  */
 export function EventActions({
   eventId,
@@ -85,20 +82,7 @@ export function EventActions({
   const shown = pending !== null && pending.from === answer ? pending.value : answer;
 
   // `phase` re-arms the timer after each refresh lands: the instants stay the same, the phase moves.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `phase` is the re-arm trigger
-  useEffect(() => {
-    const now = Date.now();
-    const next = [checkinOpensAt, startsAt, endsAt]
-      .map((iso) => Date.parse(iso))
-      .filter((ms) => Number.isFinite(ms) && ms > now)
-      .reduce<number | null>(
-        (soonest, ms) => (soonest === null || ms < soonest ? ms : soonest),
-        null,
-      );
-    if (next === null || next - now > BOUNDARY_HORIZON_MS) return;
-    const timer = window.setTimeout(() => router.refresh(), next - now + BOUNDARY_MARGIN_MS);
-    return () => window.clearTimeout(timer);
-  }, [checkinOpensAt, startsAt, endsAt, phase, router]);
+  useBoundaryRefresh([checkinOpensAt, startsAt, endsAt], phase);
 
   const refresh = () => startTransition(() => router.refresh());
 

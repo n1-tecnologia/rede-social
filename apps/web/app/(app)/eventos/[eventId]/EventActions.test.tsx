@@ -19,7 +19,8 @@ import type { EventActionState } from '@/lib/events-view';
  *  3. a failure reverts and toasts; `rsvp_closed` and `cancelled` toast their own lines and refresh;
  *  4. tapping the already-pressed answer writes nothing;
  *  5. the boundary refresh: one timer at the next boundary within 24 h, none beyond, cleared on
- *     unmount.
+ *     unmount; a refresh that brings the SAME phase back is retried (2, 5, 15, 30 s), and a phase
+ *     change stops the chain (WR-03);
  *  6. (06-05) the in-person "Fazer check-in" CTA;
  *  7. (06-06) EVERY row of §Action zone contract, for BOTH formats, cancelled P0-P3 included: the
  *     elements of each row, at most one brand fill (E05/partial), every `Entrar` a plain `<a>` with
@@ -390,6 +391,39 @@ describe('EventActions — the boundary refresh (UI-D-203)', () => {
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(48 * HOUR);
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('5d. WR-03: a refresh that brings the SAME phase back (device clock ahead) is retried after 2, 5, 15 and 30 s, and a phase change stops the chain', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(NOW);
+    const instants = {
+      checkinOpensAt: new Date(NOW + 10 * 60 * 1000).toISOString(),
+      startsAt: new Date(NOW + 70 * 60 * 1000).toISOString(),
+      endsAt: new Date(NOW + 3 * HOUR).toISOString(),
+    };
+    const { rerender, unmount } = render(<EventActions {...state({ phase: 'P0', ...instants })} />);
+    vi.advanceTimersByTime(10 * 60 * 1000 + 1_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // The server still drew P0 (no rerender with a new phase): the chain retries.
+    vi.advanceTimersByTime(2_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(5_000);
+    expect(refresh).toHaveBeenCalledTimes(3);
+
+    // The server's clock caught up: P1 arrives, the pending retry is cleared, the next boundary armed.
+    rerender(<EventActions {...state({ phase: 'P1', ...instants })} />);
+    vi.advanceTimersByTime(59 * 60 * 1000);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    unmount();
+
+    // With no phase change at all, the chain is bounded: the boundary refresh plus four retries.
+    refresh.mockReset();
+    vi.setSystemTime(NOW);
+    render(<EventActions {...state({ phase: 'P0', ...instants })} />);
+    vi.advanceTimersByTime(10 * 60 * 1000 + 1_000 + 2_000 + 5_000 + 15_000 + 30_000);
+    expect(refresh).toHaveBeenCalledTimes(5);
+    vi.advanceTimersByTime(40 * 60 * 1000);
+    expect(refresh).toHaveBeenCalledTimes(5);
   });
 });
 
