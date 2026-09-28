@@ -15,6 +15,14 @@ type CheckinError = 'wrongCode' | 'tooManyAttempts' | 'notOpen' | 'cancelled' | 
 /** What the member typed, in the stored shape: uppercase, no whitespace or hyphens. */
 const normalize = (raw: string) => raw.toUpperCase().replace(/[\s-]+/g, '');
 
+/**
+ * The RAW input cap: `checkinSchema`'s bound (16), not the code's 4. The browser applies
+ * `maxLength` to the raw text BEFORE `onChange`, so a cap of 4 would truncate a pasted `K7-QM` to
+ * `K7-Q` and freeze `K7 Q` one symbol short (06 review WR-02). The value itself is normalised and
+ * clipped to the code's length in `onChange`, so it never shows more than 4 symbols.
+ */
+const RAW_MAX_LENGTH = 16;
+
 /** The prototype's spring for the done circle [proto]. */
 const DONE_SPRING = { type: 'spring', stiffness: 420, damping: 22, delay: 0.08 } as const;
 
@@ -22,9 +30,10 @@ const DONE_SPRING = { type: 'spring', stiffness: 420, damping: 22, delay: 0.08 }
  * The ticket's bottom section while the check-in window is open, and its done state (UI-D-208,
  * sketch 006 surface 3, approved 2026-09-27).
  *
- * **Open.** The label "Código do evento", the shipped `Input` (uppercase, tracked, `maxLength` = the
- * contract's code length, no autocorrect or autofill) and ONE brand `Button` "Confirmar check-in",
- * disabled until the normalised value has the full length. No error renders before the first submit
+ * **Open.** The label "Código do evento", the shipped `Input` (uppercase, tracked, no autocorrect or
+ * autofill; separators the backend ignores are stripped as they are typed or pasted, and the value is
+ * clipped to the contract's code length) and ONE brand `Button` "Confirmar check-in", disabled until
+ * the normalised value has the full length. No error renders before the first submit
  * (UI E08/empty). While the action runs the button is `loading` ("Confirmando…", `aria-busy`) and the
  * field is read-only, so a double tap is a no-op (UI E08/loading).
  *
@@ -183,13 +192,13 @@ export function CheckinForm({
         name="code"
         value={value}
         onChange={(change) => {
-          setValue(change.target.value.toUpperCase());
+          setValue(normalize(change.target.value).slice(0, EVENT_CHECKIN_CODE_LENGTH));
           if (!locked) setError(null);
         }}
         readOnly={busy}
         error={message}
         placeholder={t('checkin.codePlaceholder')}
-        maxLength={EVENT_CHECKIN_CODE_LENGTH}
+        maxLength={RAW_MAX_LENGTH}
         autoCapitalize="characters"
         autoComplete="off"
         autoCorrect="off"

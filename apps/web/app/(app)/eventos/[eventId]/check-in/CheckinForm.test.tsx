@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * Claims:
  *  1. "Confirmar check-in" stays disabled until the code has its 4 characters, and no error renders
  *     before the first submit (E08/empty); a lowercase entry displays uppercase;
+ *  1b. WR-02: spaces and hyphens (typed or pasted) are stripped as they arrive, so "K7 QM" and
+ *     "k7-qm" are ready and send "K7QM", and a 5th symbol is dropped;
  *  2. while the action runs the button is busy ("Confirmando…") and the field read-only, and a second
  *     submit is a no-op (E08/loading);
  *  3. a wrong code: the inline `role="alert"` error, the value KEPT and SELECTED (E08/error);
@@ -107,7 +109,7 @@ function open() {
 describe('CheckinForm — the open section (UI-D-208, E08)', () => {
   it('1. the submit is disabled until 4 characters, no error before the first submit, and lowercase shows uppercase', () => {
     open();
-    expect(field().getAttribute('maxlength')).toBe('4');
+    expect(field().getAttribute('maxlength')).toBe('16');
     expect(field().getAttribute('autocomplete')).toBe('off');
     expect(field().getAttribute('autocapitalize')).toBe('characters');
     expect(field().getAttribute('spellcheck')).toBe('false');
@@ -122,6 +124,27 @@ describe('CheckinForm — the open section (UI-D-208, E08)', () => {
     expect(field().value).toBe('K7QM');
     expect(submit().disabled).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('1b. WR-02: separators typed or pasted are stripped, so "K7 QM" and a pasted "k7-qm" are ready, and a 5th symbol is dropped', async () => {
+    checkIn.mockResolvedValue({ ok: false, error: 'failed' });
+    open();
+    type('K7 Q');
+    expect(field().value).toBe('K7Q');
+    expect(submit().disabled).toBe(true);
+    type('K7QM');
+    expect(submit().disabled).toBe(false);
+
+    type('k7-qm');
+    expect(field().value).toBe('K7QM');
+    expect(submit().disabled).toBe(false);
+    type(' K7 QM ');
+    expect(field().value).toBe('K7QM');
+    type('K7QMX');
+    expect(field().value).toBe('K7QM');
+
+    await send();
+    expect(checkIn).toHaveBeenCalledWith(ID, 'K7QM');
   });
 
   it('2. while the action runs: busy "Confirmando…", the field read-only, and a double submit is a no-op', async () => {
