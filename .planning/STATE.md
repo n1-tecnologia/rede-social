@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 6 (Events) — ALL PLANS EXECUTED (phase not closed)
 Plan: 9 of 9 complete (06-01 … 06-09); next: /gsd-verify-work 6 (phone UAT items 1-10 carried, blocked on 01.1), then phase close
 Status: Plans complete, awaiting verification — local exit gate `pnpm verify` green 2026-09-27 23:50 São Paulo; sketch 006 approved (provisional, 2026-09-27); real-phone UAT waits on 01.1
-Last activity: 2026-09-28 — 06-09 complete: every tenant timestamp in `bootstrap.tenant.timezone` (feed-view, MediaAssetRow; the Manaus shift proved in unit + smoke), SCHEMA-CONVENTIONS §(l), `phase6-smoke.spec.ts` (ENABLED/DISABLED/FLIP + the four criteria), the seed's events anchored to the tenant-local noon (a real seed bug), seven test-only gate fixes (dev-overlay taps, phase2-smoke manifest poll, phase52-smoke DB-read pins, stories seen-state pin, media-video dialog locator, platform-branding reopen, the check-in fixture on one local day). `pnpm verify` exit 0: pgTAP 17/510, integration 35/590, e2e 555 passed / 119 skipped / 0 failed, e2e:pwa 46/5 skipped with events-prefetch passing on iphone-chromium
+Last activity: 2026-09-28 - Completed quick task 260928-s4y: adapt deploy pipeline to production-only setup
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -517,6 +517,7 @@ None yet.
 | 260924-fwv | Corrigir os dois defeitos introduzidos pela gap closure da Fase 5: CR-01 (updateCommunity revalida a capa armazenada em todo PATCH) e CR-02 (bindPlay nao chaveado por story id) | 2026-09-24 | e1631da | Verified | [260924-fwv-corrigir-os-dois-defeitos-introduzidos-p](./quick/260924-fwv-corrigir-os-dois-defeitos-introduzidos-p/) |
 | 260926-d8f | Fix 05.2 follow-ups WR-01 (item cap counts live stories only; ghost items removable), WR-04 (seen action bounded to one API call), WR-07 (page-hide seen flush via sendBeacon to POST /api/stories/views), WR-03 (place-cap and item-cap copy for `full`) and the Criar destaque link (next/link to the origin place) | 2026-09-26 | 1a23355 | — | [260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr](./quick/260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr/) |
 | 260927-ebk | Fix 05.3 follow-ups WR-04 (confirmed like pair survives a refused toggle, tagged by request number), WR-05 (Reels gesture tied to its starting pointer; non-primary pointers ignored) and the UI-REVIEW top 3 (44 px caption toggle hit areas, lane underline under the label, empty-state CTA via LinkButton) | 2026-09-27 | 71a603e | — | [260927-ebk-05-3-follow-ups-wr-04-wr-05-fixes-with-t](./quick/260927-ebk-05-3-follow-ups-wr-04-wr-05-fixes-with-t/) |
+| 260928-s4y | Adapt the deploy pipeline to the production-only setup (01.1 deviations): `[remotes.production]` auth override in config.toml (site URL, one redirect, otp 24 h, Send Email Hook off), workflows on `master`, staging job + keepalive + seed-prod removed, DEPLOY.md "Decisions (2026-09-28)" | 2026-09-28 | 5ca701b | — | [260928-s4y-adapt-deploy-pipeline-to-production-only](./quick/260928-s4y-adapt-deploy-pipeline-to-production-only/) |
 | 5 | add web env template (apps/web) listing the variables the web app reads | 2026-09-28 | 6da7acd | — | — |
 
 ### Roadmap Evolution
