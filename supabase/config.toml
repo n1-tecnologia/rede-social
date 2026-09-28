@@ -504,3 +504,12 @@ otp_expiry = 86400
 
 [remotes.production.auth.hook.send_email]
 enabled = false
+
+# Free plan + default e-mail provider: the Management API answers 400 ("Email template modification
+# is not available for free tier projects using the default email provider") to any template change,
+# and that rejects the WHOLE auth push. Pin the hosted defaults (subject = the project's current
+# value, no content file) so `config push` sends no template diff. Drop this block when Resend /
+# custom SMTP lands; the local pt-BR `[auth.email.template.recovery]` then applies to production too.
+[remotes.production.auth.email.template.recovery]
+subject = "Reset your password"
+content_path = ""
