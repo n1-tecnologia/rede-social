@@ -97,12 +97,12 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 ### Events
 
-- [ ] **EVENT-01**: `admin_tenant` can create, edit and cancel events with title, description, cover image, start/end datetime (timezone-aware), and either a physical location or an online link
-- [ ] **EVENT-02**: Member can view upcoming and past events and open an event's detail
-- [ ] **EVENT-03**: Member can confirm attendance (RSVP going / not going) before the event and see the number of confirmed attendees
-- [ ] **EVENT-04**: Member can check in to an event on the day, within a time window around the event start; check-in without prior RSVP counts as a walk-in
-- [ ] **EVENT-05**: `admin_tenant` can see the attendance list per event with confirmed vs checked-in status
-- [ ] **EVENT-06**: Member can add an event to their calendar (.ics download and Google Calendar link)
+- [x] **EVENT-01**: `admin_tenant` can create, edit and cancel events with title, description, cover image, start/end datetime (timezone-aware), and either a physical location or an online link
+- [x] **EVENT-02**: Member can view upcoming and past events and open an event's detail
+- [x] **EVENT-03**: Member can confirm attendance (RSVP going / not going) before the event and see the number of confirmed attendees
+- [x] **EVENT-04**: Member can check in to an event on the day, within a time window around the event start; check-in without prior RSVP counts as a walk-in
+- [x] **EVENT-05**: `admin_tenant` can see the attendance list per event with confirmed vs checked-in status
+- [x] **EVENT-06**: Member can add an event to their calendar (.ics download and Google Calendar link)
 - [ ] **EVENT-07**: Members who confirmed receive reminder notifications before the event (24 h and 1 h) through the notification module, via a scheduled job
 
 ### Chat (member ↔ support)
@@ -288,12 +288,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REELS-06 | Phase 05.3 | Pending |
 | REELS-07 | Phase 05.3 | Complete |
 | REELS-08 | Phase 05.3 | Complete |
-| EVENT-01 | Phase 6 | Pending |
-| EVENT-02 | Phase 6 | Pending |
-| EVENT-03 | Phase 6 | Pending |
-| EVENT-04 | Phase 6 | Pending |
-| EVENT-05 | Phase 6 | Pending |
-| EVENT-06 | Phase 6 | Pending |
+| EVENT-01 | Phase 6 | Complete |
+| EVENT-02 | Phase 6 | Complete |
+| EVENT-03 | Phase 6 | Complete |
+| EVENT-04 | Phase 6 | Complete |
+| EVENT-05 | Phase 6 | Complete |
+| EVENT-06 | Phase 6 | Complete |
 | EVENT-07 | Phase 7 | Pending |
 | CHAT-01 | Phase 7 | Pending |
 | CHAT-02 | Phase 7 | Pending |

@@ -517,7 +517,7 @@ Plans:
   3. `admin_tenant` can see the attendance list per event with confirmed vs checked-in status.
   4. Member can add an event to their calendar via .ics download and a Google Calendar link.
 
-**Plans**: 8/9 plans executed
+**Plans**: 9/9 plans executed
 
 Plans:
 
@@ -552,7 +552,7 @@ Plans:
 
 **Wave 8**
 
-- [ ] 06-09-PLAN.md — Tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS §(l), the phase witness, `pnpm verify` and the phone UAT
+- [x] 06-09-PLAN.md — Tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS §(l), the phase witness, `pnpm verify` and the phone UAT
 
 **UI hint**: yes
 **Research needed**: None (conventional); confirm the pilot tenant's timezone handling (store UTC + tenant timezone field, render America/Sao_Paulo).
@@ -674,7 +674,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 3. Media Pipeline & Member Profiles | 8/8 | In Progress|  |
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
-| 6. Events | 8/9 | In Progress|  |
+| 6. Events | 9/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 0/TBD | Not started | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |

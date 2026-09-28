@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 6
 current_phase_name: Events
 status: executing
-stopped_at: Completed 06-08-PLAN.md
-last_updated: "2026-09-27T21:16:15.285Z"
-last_activity: 2026-09-27
-last_activity_desc: "06-08 complete: EVENT-06 calendar export (RFC 5545 .ics + Google TEMPLATE link, online LOCATION = /entrar, the meeting-URL prohibition closed) and the Início 'Próximo evento' card (GET /v1/events/next, home order 7, check-in mode without a reload via the boundary refresh)"
-state_head: d021cfd9bd496b24b91490326df94784900f05d3
+stopped_at: Completed 06-09-PLAN.md
+last_updated: "2026-09-28T03:02:56.786Z"
+last_activity: 2026-09-28
+last_activity_desc: "06-09 complete: tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS (l) Secrets inside a tenant, phase6-smoke witness, pnpm verify green (e2e 555/0 failed, e2e:pwa 46 with events-prefetch). Phase 6: 9/9 plans; verify-work + phone UAT (blocked on 01.1) next"
+state_head: c3c05e1fda43a60013231c6a6c1498ec170d19b5
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 98
-  completed_plans: 94
+  completed_plans: 95
   percent: 0
 ---
 
@@ -27,12 +27,12 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 ## Current Position
 
-Phase: 6 (Events) — EXECUTING
-Plan: 8 of 9 complete (06-01, 06-02, 06-03, 06-04, 06-05, 06-06, 06-07, 06-08); 06-09 next
-Status: Executing — sketch 006 approved (provisional, 2026-09-27); real-phone UAT of the RSVP pair, the event form, the check-in ticket, the online Entrar / calendar hand-off (Google A2, .ics import), Participantes and the Início card waits on 01.1
-Last activity: 2026-09-27 — 06-08 complete: EVENT-06. `apps/web/lib/events-calendar.ts` (utcStamp, icsEscape, 75-octet foldIcsLine by code point, calendarLocation, buildIcs, googleCalendarHref with UTC Z dates and no time-zone parameter; TDD, RED_EVIDENCE_OK), `GET /eventos/{id}/agenda.ics` (pure member-lane read, text/calendar, private no-store), the detail's calendar pair (stacked below sm: half width wraps at 390 and 320), and D-202: `GET /v1/events/next` (status = 'active', soonest first), `NextEventCard` at home order 7, `eventsHome` (never rejects) and `NextEventRefresh` (the card turns into 'Fazer check-in' / `Entrar` at the window's opening without a reload). Integration 35 files / 590 tests; e2e `events agenda|events inicio` 9/9 on the phone
+Phase: 6 (Events) — ALL PLANS EXECUTED (phase not closed)
+Plan: 9 of 9 complete (06-01 … 06-09); next: /gsd-verify-work 6 (phone UAT items 1-10 carried, blocked on 01.1), then phase close
+Status: Plans complete, awaiting verification — local exit gate `pnpm verify` green 2026-09-27 23:50 São Paulo; sketch 006 approved (provisional, 2026-09-27); real-phone UAT waits on 01.1
+Last activity: 2026-09-28 — 06-09 complete: every tenant timestamp in `bootstrap.tenant.timezone` (feed-view, MediaAssetRow; the Manaus shift proved in unit + smoke), SCHEMA-CONVENTIONS §(l), `phase6-smoke.spec.ts` (ENABLED/DISABLED/FLIP + the four criteria), the seed's events anchored to the tenant-local noon (a real seed bug), seven test-only gate fixes (dev-overlay taps, phase2-smoke manifest poll, phase52-smoke DB-read pins, stories seen-state pin, media-video dialog locator, platform-branding reopen, the check-in fixture on one local day). `pnpm verify` exit 0: pgTAP 17/510, integration 35/590, e2e 555 passed / 119 skipped / 0 failed, e2e:pwa 46/5 skipped with events-prefetch passing on iphone-chromium
 
-Progress: [███████████████████░] 94/98 plans (Phase 6: 8/9)
+Progress: [███████████████████░] 95/98 plans (Phase 6: 9/9)
 
 ## Performance Metrics
 
@@ -154,6 +154,7 @@ Progress: [███████████████████░] 94/98 p
 | Phase 06 P06 | 25 min | 2 tasks | 29 files |
 | Phase 06 P07 | 23min | 2 tasks | 28 files |
 | Phase 06 P08 | 45 min | 2 tasks | 26 files |
+| Phase 06 P09 | 5h 43m | 2 tasks | 27 files |
 
 ## Accumulated Context
 
@@ -487,6 +488,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-07: regeneration is refused (bare 404) for an online event, and the new code never travels to the client; the control refreshes and the RSC summary read shows it
 - [Phase 06]: 06-07: support_tenant keeps no access to the door code or the attendee list in V1 (RESEARCH open question 1); widening is one manifest line plus one ALTER POLICY on event_secrets_staff_all, asked at the pilot UAT
 - [Phase 06]: 06-07: a keyset cursor's instant is regex-checked before ::timestamptz (a tampered n degrades to page 1); listEvents still has the latent gap
+- [Phase 06]: 06-09: every tenant timestamp is formatted in bootstrap.tenant.timezone (required argument in postCardView, commentView, MediaAssetRow); the platform panel's PANEL_TIME_ZONE stays TRIA's own
+- [Phase 06]: 06-09: seed events anchor to the tenant-local noon of the seed day; now-relative e2e fixtures that read local-day copy take their window from sameDayWindow (events-admin.ts)
+- [Phase 06]: 06-09: SCHEMA-CONVENTIONS (l) Secrets inside a tenant is the reference for Phase 7 secrets/definers; the 06-06 rule (side-effecting or externally redirecting route handlers answer 204 no-store to prefetch/RSC requests) carries forward
 
 ### Pending Todos
 
@@ -544,6 +548,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-27T21:16:15.050Z
-Stopped at: Completed 06-08-PLAN.md
+Last session: 2026-09-28T03:02:56.130Z
+Stopped at: Completed 06-09-PLAN.md
 Resume file: None
