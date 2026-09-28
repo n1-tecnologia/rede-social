@@ -37,6 +37,43 @@ import { generateCheckinCode } from './checkin-code';
 const log = moduleLogger('module-events');
 
 /**
+ * A cursor's `n` must be an instant this service could have issued before it reaches a
+ * `::timestamptz` cast: `decodeCursor` only proves it is a string, and a tampered `n` would otherwise
+ * be a 500 instead of the first page (T-06-04). The shape alone is not enough (`2026-02-30` or hour
+ * `99` match it and still fail the cast), so the calendar fields must also survive a UTC round trip.
+ */
+const CURSOR_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?Z$/;
+
+function isCursorInstant(value: string): boolean {
+  const match = CURSOR_INSTANT.exec(value);
+  if (!match) return false;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  if (year < 1000) return false;
+  const at = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return (
+    at.getUTCFullYear() === year &&
+    at.getUTCMonth() === month - 1 &&
+    at.getUTCDate() === day &&
+    at.getUTCHours() === hour &&
+    at.getUTCMinutes() === minute &&
+    at.getUTCSeconds() === second
+  );
+}
+
+/** `decodeCursor`, and then page 1 (null) unless `n` is a real instant: the one guard both lists use. */
+function decodeInstantCursor(raw: string | undefined) {
+  const decoded = decodeCursor(raw);
+  return decoded && isCursorInstant(decoded.n) ? decoded : null;
+}
+
+/**
  * The events service (EVENT-01 create half, EVENT-02 list and detail, EVENT-03 RSVP) — a PURE
  * TENANT-LANE area.
  *
@@ -168,11 +205,12 @@ const toEvent = (row: EventRow): EventSummary => ({
  * Every item carries the viewer's own state and the two D-219 counts from the SAME statement (06-03):
  * a page is still one statement, which `feed-query-budget.test.ts` measures with a ceiling and a floor.
  *
- * `decodeCursor` is total: a tampered envelope degrades to page 1 (T-06-04).
+ * `decodeInstantCursor` is total: a tampered envelope, or an `n` that is not a real instant, degrades
+ * to page 1 (T-06-04).
  */
 export async function listEvents(ctx: RequestContext, query: EventQuery): Promise<EventPage> {
   const limit = query.limit;
-  const after = decodeCursor(query.cursor);
+  const after = decodeInstantCursor(query.cursor);
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
   const upcoming = query.period === 'upcoming';
@@ -1235,13 +1273,6 @@ const toAttendee = (row: AttendeeRow): Attendee => ({
   walkIn: row.status === 'walk_in',
 });
 
-/**
- * A cursor's `n` must be an instant this service could have issued before it reaches a
- * `::timestamptz` cast: `decodeCursor` only proves it is a string, and a tampered `n` would otherwise
- * be a 500 instead of the first page (T-06-04).
- */
-const CURSOR_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
-
 /** A live event of THIS tenant, in this lane: the existence check every attendance read starts with. */
 async function assertEventInLane(tx: Tx, ctx: RequestContext, eventId: string): Promise<void> {
   const rows = await tx.execute<{ id: string }>(sql`
@@ -1280,8 +1311,7 @@ export async function listAttendance(
   query: AttendanceQuery,
 ): Promise<AttendancePage> {
   const limit = query.limit;
-  const decoded = decodeCursor(query.cursor);
-  const after = decoded && CURSOR_INSTANT.test(decoded.n) ? decoded : null;
+  const after = decodeInstantCursor(query.cursor);
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
   const list: AttendanceList = query.list;

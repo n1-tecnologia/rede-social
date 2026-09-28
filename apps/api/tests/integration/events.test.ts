@@ -270,6 +270,16 @@ describe('events list and create', () => {
       'not-a-cursor',
       Buffer.from('{"v":9}').toString('base64url'),
       encodeCursor({ n: '2026-01-01T00:00:00.000000Z', id: 'not-a-uuid' }),
+      // WR-01: a well-formed envelope whose `n` is not an instant would fail the ::timestamptz cast.
+      encodeCursor({ n: 'not-a-date', id: '0e000000-0000-4000-8000-000000000e01' }),
+      encodeCursor({
+        n: '2026-02-30T00:00:00.000000Z',
+        id: '0e000000-0000-4000-8000-000000000e01',
+      }),
+      encodeCursor({
+        n: '2026-01-01T99:00:00.000000Z',
+        id: '0e000000-0000-4000-8000-000000000e01',
+      }),
     ]) {
       const again = await page(
         tokens.demoMember,
