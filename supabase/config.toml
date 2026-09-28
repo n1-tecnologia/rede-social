@@ -484,3 +484,23 @@ enabled = true
 [auth.email.template.recovery]
 subject = "Redefinir sua senha"
 content_path = "./supabase/templates/recovery.html"
+
+# Production-only override for the hosted project `rede-social` (docs/DEPLOY.md "Decisions
+# (2026-09-28)"). The CLI merges it only when a command runs against this project ref (`supabase
+# link` + `config push` / `db push` in deploy-api.yml), never for local `start` / `db reset` /
+# `test db` / `status`. The redirect allow-list is one explicit per-domain entry, never a wildcard
+# host (WR-09). The Send Email Hook is disabled because e-mail/Resend is deferred; a disabled hook
+# needs neither `uri` nor `secrets`, so the hosted push needs no SEND_EMAIL_HOOK_SECRETS and hosted
+# GoTrue never calls the local host.docker.internal URL.
+[remotes.production]
+project_id = "qjjhtduxquvlfppybpqq"
+
+[remotes.production.auth]
+site_url = "https://rede-social-woad.vercel.app"
+additional_redirect_urls = ["https://rede-social-woad.vercel.app/auth/confirm**"]
+
+[remotes.production.auth.email]
+otp_expiry = 86400
+
+[remotes.production.auth.hook.send_email]
+enabled = false
