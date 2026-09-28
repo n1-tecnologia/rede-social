@@ -503,8 +503,12 @@ test.describe('MEDIA-03 — the upload and the player', () => {
 
     // `[aria-modal]` narrows this to OUR sheet: mux-player mounts its own `<media-error-dialog
     // role="dialog">` (empty, and asserted empty elsewhere), so a bare dialog role is ambiguous
-    // whenever a player is open.
-    const panel = page.locator('[role="dialog"][aria-modal="true"]');
+    // whenever a player is open. `:not([data-nextjs-dialog])` drops the one other modal dialog that
+    // can exist here, and only under `next dev`: with the fake provider the player's manifest load
+    // fails (stream.mux.com answers 400 to the fake token), mux-player logs a console error, and
+    // Next's dev overlay may mount its own `role="dialog" aria-modal="true"` "Console Error" dialog
+    // before the geometry is read (06-09 exit gate, desktop). The production build has no overlay.
+    const panel = page.locator('[role="dialog"][aria-modal="true"]:not([data-nextjs-dialog])');
     await expect(panel).toBeVisible();
     // The player really mounted inside it — the geometry below is the sheet AROUND a player.
     await expect(page.locator('mux-player')).toHaveCount(1, { timeout: 20_000 });
