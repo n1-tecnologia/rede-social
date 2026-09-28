@@ -197,6 +197,89 @@ export async function insertEvent(tenantId: string, fields: EventFixture): Promi
   return id;
 }
 
+/** The phase bounds a now-relative window must keep while it is moved onto one local day. */
+export type WindowBounds = {
+  /** The earliest acceptable start, in minutes from now (the case's phase still holds). */
+  earliestStart: number;
+  /** The latest acceptable start, in minutes from now. */
+  latestStart: number;
+  /** The shortest acceptable duration, in minutes (the case must finish before the end). */
+  minDuration: number;
+};
+
+/** `2026-09-27` in `timeZone`: the tenant-local calendar day of an instant. */
+const localDay = (ms: number, timeZone: string) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(ms));
+
+/** Whole minutes from `ms` to the next tenant-local midnight (1 … 1440). */
+function minutesToLocalMidnight(ms: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(ms));
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
+  return 1440 - (part('hour') * 60 + part('minute'));
+}
+
+/**
+ * 06-09: a now-relative event window that starts AND ends on ONE tenant-local calendar day, as close
+ * to the requested one as the case's `bounds` allow. Pure (the clock and the zone are arguments) so
+ * it can be proved over every minute of a day.
+ *
+ * Why: the product prints an event that ends on another local day as a RANGE (`27 a 28 de set.`, the
+ * multi-day time line), so a fixture written as "starts in 30 min, lasts 2 h" silently changes the
+ * copy a spec measures whenever the gate runs after ~21:30 in the tenant's zone. The candidates, in
+ * order: the requested window; the requested start with its end pulled back before midnight; the
+ * earliest allowed start, likewise; a start just after the next local midnight (the whole window on
+ * tomorrow). The first that keeps `bounds` wins; none throws, naming the clock, rather than
+ * returning a window that would make the case prove something else.
+ */
+export function sameDayWindowAt(
+  nowMs: number,
+  timeZone: string,
+  want: { startsInMinutes: number; endsInMinutes: number },
+  bounds: WindowBounds,
+): { startsInMinutes: number; endsInMinutes: number } {
+  const duration = want.endsInMinutes - want.startsInMinutes;
+  const at = (minutes: number) => nowMs + minutes * 60_000;
+  const fits = (start: number, end: number) =>
+    start >= bounds.earliestStart &&
+    start <= bounds.latestStart &&
+    end - start >= bounds.minDuration &&
+    localDay(at(start), timeZone) === localDay(at(end), timeZone);
+
+  const afterMidnight = (start: number) => start + minutesToLocalMidnight(at(start), timeZone);
+  const clamped = (start: number) => Math.min(start + duration, afterMidnight(start) - 1);
+  const nextDayStart = Math.max(afterMidnight(0) + 1, bounds.earliestStart);
+  const candidates: [number, number][] = [
+    [want.startsInMinutes, want.endsInMinutes],
+    [want.startsInMinutes, clamped(want.startsInMinutes)],
+    [bounds.earliestStart, clamped(bounds.earliestStart)],
+    [nextDayStart, clamped(nextDayStart)],
+  ];
+  for (const [start, end] of candidates) {
+    if (fits(start, end)) return { startsInMinutes: start, endsInMinutes: end };
+  }
+  throw new Error(
+    `no one-day window for ${JSON.stringify(want)} within ${JSON.stringify(bounds)} at ${new Date(nowMs).toISOString()} in ${timeZone}`,
+  );
+}
+
+/** `sameDayWindowAt` for a tenant, on its stored `tenants.timezone` and the real clock. */
+export async function sameDayWindow(
+  tenantId: string,
+  want: { startsInMinutes: number; endsInMinutes: number },
+  bounds: WindowBounds,
+): Promise<{ startsInMinutes: number; endsInMinutes: number }> {
+  const rows = await sql()<{ timezone: string }[]>`
+    select timezone from public.tenants where id = ${tenantId}::uuid`;
+  const timeZone = rows[0]?.timezone;
+  if (!timeZone) throw new Error(`no tenant ${tenantId}`);
+  return sameDayWindowAt(Date.now(), timeZone, want, bounds);
+}
+
 /**
  * The stored instants of a seeded event, by tenant slug and title, as ISO strings — what a spec
  * formats with `Intl` to compute the copy it expects, instead of hard-coding a wall clock.

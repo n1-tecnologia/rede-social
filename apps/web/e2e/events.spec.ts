@@ -16,6 +16,7 @@ import {
   moveEventStart,
   moveEventStartSeconds,
   readEventInstants,
+  sameDayWindow,
   secretsFor,
   tenantIdBySlug,
   waitForReadyCover,
@@ -884,11 +885,18 @@ test.describe('events check-in', () => {
     if (testInfo.project.name !== 'mobile-chromium') return;
     tenant = await createEventsTenant(SLUG, SEED_PASSWORD);
     walkInEmail = await addEventsMember(tenant, 'sem.resposta', 'Membro Sem Resposta');
+    // 06-09: case 1 measures the SINGLE-DAY Data cell (`27 de set.`), so the window must not cross
+    // the tenant's midnight, where the product prints a range instead (`27 a 28 de set.`). The
+    // bounds keep what cases 1-3 need: a start 10-55 min ahead (P1: the check-in window, which opens
+    // 60 min before the start, is open and Vou still is) and at least 30 min before the end.
     ids.live = await insertEvent(tenant.tenantId, {
       title: 'Encontro presencial com check-in',
       venueName: LONG_VENUE,
-      startsInMinutes: 30,
-      endsInMinutes: 150,
+      ...(await sameDayWindow(
+        tenant.tenantId,
+        { startsInMinutes: 30, endsInMinutes: 150 },
+        { earliestStart: 10, latestStart: 55, minDuration: 30 },
+      )),
     });
     ids.later = await insertEvent(tenant.tenantId, {
       title: 'Encontro mais tarde',
