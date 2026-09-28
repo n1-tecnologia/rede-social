@@ -327,6 +327,14 @@ export const eventCheckinAttempts = pgTable(
       .references(() => users.id),
     failedCount: integer('failed_count').notNull().default(0),
     windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * 06 review WR-05: every wrong code against the CURRENT venue code, across all windows. At
+     * `EVENT_CHECKIN_MAX_FAILED_PER_CODE` the member is refused until the code is regenerated, so the
+     * budget no longer grows with the event's length. It restarts when `total_since` is older than
+     * `event_secrets.code_rotated_at` (a regeneration), which `app.events_check_in` alone decides.
+     */
+    totalFailed: integer('total_failed').notNull().default(0),
+    totalSince: timestamp('total_since', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({

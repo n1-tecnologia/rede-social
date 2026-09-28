@@ -36,7 +36,9 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
  *  - CR-01 (06 code review): with the member's FIRST wrong guess held open on its own connection
  *    (no attempts row committed), twenty PARALLEL wrong codes from the same member are serialised
  *    by the function's advisory lock: four more `wrong_code`, sixteen `too_many_attempts`, the
- *    counter stops at 5, and the right code is then refused.
+ *    counter stops at 5, and the right code is then refused;
+ *  - WR-05 (06 code review): 20 wrong codes against the CURRENT code refuse the right one even in a
+ *    fresh window, and "Gerar novo código" restores the budget.
  *
  * 06-06 adds the describe `enter` (EVENT-04 ONLINE, `app.events_enter`): every outcome over online
  * events created here and moved in time through `adminSql`, the URL present EXACTLY on `forward`,
@@ -469,6 +471,31 @@ describe('events check-in (in person, by code)', () => {
     expect(right.status).toBe(409);
     expect((await envelope(right)).details).toEqual({ event: 'too_many_attempts' });
     expect(await attendance(burst.id, userIds.joao ?? '')).toHaveLength(0);
+  });
+
+  it('9. WR-05: at 20 wrong codes against the current code the right one is refused in a fresh window, and a regeneration restores the budget', async () => {
+    const long = await createEvent('teto');
+    await openWindow(long.id);
+    // 20 wrong codes recorded against THIS code (after its rotation stamp), none in the current
+    // window: only the per-code ceiling can refuse now.
+    await adminSql`
+      insert into public.event_checkin_attempts
+             (tenant_id, event_id, user_id, failed_count, window_started_at, total_failed, total_since)
+      values (${demoTenantId}::uuid, ${long.id}::uuid, ${userIds.iris ?? ''}::uuid,
+              0, now() - interval '1 day', 20, now())`;
+    const refused = await checkIn(long.id, await codeOf(long.id), tokens.iris);
+    expect(refused.status).toBe(409);
+    expect((await envelope(refused)).details).toEqual({ event: 'too_many_attempts' });
+    expect(await attendance(long.id, userIds.iris ?? '')).toHaveLength(0);
+
+    // "Gerar novo código": code_rotated_at now post-dates total_since, so the total restarts.
+    const rotated = await request(`/v1/events/${long.id}/checkin-code`, tokens.demoAdmin, {
+      method: 'POST',
+    });
+    expect(rotated.status).toBe(200);
+    const fresh = await checkIn(long.id, await codeOf(long.id), tokens.iris);
+    expect(fresh.status, JSON.stringify(await fresh.clone().json())).toBe(200);
+    expect(((await fresh.json()) as CheckinResult).outcome).toBe('walk_in');
   });
 });
 

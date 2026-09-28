@@ -59,6 +59,15 @@ export const EVENT_CHECKIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const EVENT_CHECKIN_MAX_FAILED = 5;
 export const EVENT_CHECKIN_FAILED_WINDOW_MINUTES = 15;
 
+/**
+ * 06 review WR-05: at most this many WRONG codes per member per event against the CURRENT venue
+ * code, across every window, so the budget no longer grows with the event's length. Past it the
+ * answer is `too_many_attempts` (even with the right code) until the admin regenerates the code,
+ * which restarts the count. A MIRROR of the literal inside `app.events_check_in`
+ * (`supabase/migrations/*_event_check_in_ceiling.sql`), the only enforcer.
+ */
+export const EVENT_CHECKIN_MAX_FAILED_PER_CODE = 20;
+
 /** Mirrored by `events_format_chk`. */
 export const EVENT_FORMATS = ['in_person', 'online'] as const;
 export type EventFormat = (typeof EVENT_FORMATS)[number];

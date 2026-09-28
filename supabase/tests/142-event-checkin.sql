@@ -64,11 +64,17 @@ begin;
 --     checks in and still writes no attempts row. True concurrency is proved by the integration
 --     test (case 8, twenty parallel wrong codes); a single pgTAP transaction cannot race itself.
 --
+-- 22. WR-05 (06 code review, `*_event_check_in_ceiling.sql`), THE PER-CODE CEILING. With 19 wrong
+--     codes against the current code already recorded (in an EXPIRED window), a 20th is still
+--     `wrong_code` and restarts the window at 1 while `total_failed` reaches 20; the right code is
+--     then `too_many_attempts` although the 15-minute bound is far from tripped. Once the code is
+--     regenerated (`code_rotated_at` after `total_since`), the right code checks in.
+--
 -- The event fixtures carry their `event_secrets` rows (written in one statement), but this file never
 -- commits, so the deferred keys are never checked; `140-events.sql` proves them. Fixture ids use the
 -- `1e200000-…` prefix, free of 140's `1e000000-…` and 141's `1e100000-…`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(68);
+select plan(73);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ci-a', 'Checkin A', '1e200000-0000-4000-8000-000000000001');
@@ -603,6 +609,41 @@ select is_empty(
       where event_id = '1e200000-0000-4000-8000-0000000000ea' $$,
   '…and the lock wrote nothing: still no attempts row after a right first code'
 );
+reset role;
+
+-- ── 22. the per-code ceiling (WR-05) ──────────────────────────────────────────────────────────
+select pg_temp.ev('1e200000-0000-4000-8000-0000000000eb', now() + interval '30 minutes', now() + interval '2 hours');
+select tests.as_service();
+update public.event_secrets set code_rotated_at = now() - interval '2 hours'
+ where tenant_id = '1e200000-0000-4000-8000-000000000001' and event_id = '1e200000-0000-4000-8000-0000000000eb';
+insert into public.event_checkin_attempts
+       (tenant_id, event_id, user_id, failed_count, window_started_at, total_failed, total_since)
+values ('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000eb', '1e200000-0000-4000-8000-0000000000a2', 1, now() - interval '1 day', 19, now() - interval '1 hour');
+reset role;
+select tests.as_tenant('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000a2');
+select is((select outcome from app.events_check_in('1e200000-0000-4000-8000-0000000000eb', 'AAAA')),
+          'wrong_code', 'WR-05: the 20th wrong code against the current code is still counted');
+select results_eq(
+  $$ select failed_count, total_failed from public.event_checkin_attempts
+      where event_id = '1e200000-0000-4000-8000-0000000000eb' $$,
+  $$ values (1, 20) $$,
+  '…the window restarts at 1 while the per-code total reaches 20'
+);
+select is((select outcome from app.events_check_in('1e200000-0000-4000-8000-0000000000eb', 'K7QM')),
+          'too_many_attempts', 'WR-05: at 20 the RIGHT code is refused although the 15-minute bound is not tripped');
+select is_empty(
+  $$ select 1 from public.event_attendances
+      where event_id = '1e200000-0000-4000-8000-0000000000eb' and user_id = '1e200000-0000-4000-8000-0000000000a2' $$,
+  '…and no attendance was recorded'
+);
+reset role;
+select tests.as_service();
+update public.event_secrets set code_rotated_at = now() - interval '30 minutes'
+ where tenant_id = '1e200000-0000-4000-8000-000000000001' and event_id = '1e200000-0000-4000-8000-0000000000eb';
+reset role;
+select tests.as_tenant('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000a2');
+select is((select outcome from app.events_check_in('1e200000-0000-4000-8000-0000000000eb', 'K7QM')),
+          'walk_in', 'WR-05: after a regeneration (code_rotated_at past total_since) the right code checks in');
 reset role;
 
 select * from finish();
