@@ -58,11 +58,17 @@ begin;
 -- 20. T-06-38: tenant A's lane with B's online event id gives `not_found`, B's rows are unchanged
 --     (read as the service lane), and A's own online event, same lane, same block, records.
 --
+-- 21. CR-01 (06 code review, `20260928083828_event_check_in_lock.sql`). A member's FIRST call on a
+--     fresh event (no attempts row exists) already holds the per-member advisory transaction lock,
+--     keyed on (tenant, event, member), so parallel first guesses are serialised; the right code
+--     checks in and still writes no attempts row. True concurrency is proved by the integration
+--     test (case 8, twenty parallel wrong codes); a single pgTAP transaction cannot race itself.
+--
 -- The event fixtures carry their `event_secrets` rows (written in one statement), but this file never
 -- commits, so the deferred keys are never checked; `140-events.sql` proves them. Fixture ids use the
 -- `1e200000-…` prefix, free of 140's `1e000000-…` and 141's `1e100000-…`. Like its siblings, this
 -- file ROLLS BACK.
-select plan(65);
+select plan(68);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ci-a', 'Checkin A', '1e200000-0000-4000-8000-000000000001');
@@ -567,6 +573,35 @@ select is_empty(
       where user_id = '1e200000-0000-4000-8000-0000000000a5'
         and event_id = '1e200000-0000-4000-8000-0000000000f9' $$,
   '…none of them A''s member'
+);
+reset role;
+
+-- ── 21. a FIRST call already holds the per-member advisory lock (CR-01) ─────────────────────────
+select pg_temp.ev('1e200000-0000-4000-8000-0000000000ea', now() + interval '30 minutes', now() + interval '2 hours');
+select tests.as_tenant('1e200000-0000-4000-8000-000000000001', '1e200000-0000-4000-8000-0000000000a5');
+select is((select outcome from app.events_check_in('1e200000-0000-4000-8000-0000000000ea', 'K7QM')),
+          'walk_in', 'CR-01 fixture: the member''s first call on a fresh event checks in');
+select ok(
+  exists (
+    select 1
+      from pg_catalog.pg_locks l,
+           lateral (select pg_catalog.hashtextextended(
+                             'app.events_check_in:1e200000-0000-4000-8000-000000000001:'
+                             || '1e200000-0000-4000-8000-0000000000ea:'
+                             || '1e200000-0000-4000-8000-0000000000a5', 0) as k) h
+     where l.locktype = 'advisory'
+       and l.pid = pg_catalog.pg_backend_pid()
+       and l.granted
+       and l.objsubid = 1
+       and l.classid::bigint = ((h.k >> 32) & 4294967295)
+       and l.objid::bigint = (h.k & 4294967295)
+  ),
+  'CR-01: that first call (no attempts row to lock) held the (tenant, event, member) advisory lock'
+);
+select is_empty(
+  $$ select 1 from public.event_checkin_attempts
+      where event_id = '1e200000-0000-4000-8000-0000000000ea' $$,
+  '…and the lock wrote nothing: still no attempts row after a right first code'
 );
 reset role;
 

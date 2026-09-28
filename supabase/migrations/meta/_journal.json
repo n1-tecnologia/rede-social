@@ -281,6 +281,13 @@
       "when": 1790537490937,
       "tag": "20260927193130_event_enter_function",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790584708510,
+      "tag": "20260928083828_event_check_in_lock",
+      "breakpoints": true
     }
   ]
 }

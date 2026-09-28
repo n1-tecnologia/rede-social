@@ -6,6 +6,7 @@ import type {
   EventDetail,
   EventSummary,
 } from '@tria/module-events/contracts';
+import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
@@ -31,7 +32,11 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
  *    lab event id (nothing written on the lab's side);
  *  - `event.checked_in` exactly once per first check-in, with the exact six-key payload;
  *  - two concurrent right-code requests by the same member record ONE row: one `checked_in` and one
- *    `already` (T-06-34).
+ *    `already` (T-06-34);
+ *  - CR-01 (06 code review): with the member's FIRST wrong guess held open on its own connection
+ *    (no attempts row committed), twenty PARALLEL wrong codes from the same member are serialised
+ *    by the function's advisory lock: four more `wrong_code`, sixteen `too_many_attempts`, the
+ *    counter stops at 5, and the right code is then refused.
  *
  * 06-06 adds the describe `enter` (EVENT-04 ONLINE, `app.events_enter`): every outcome over online
  * events created here and moved in time through `adminSql`, the URL present EXACTLY on `forward`,
@@ -392,6 +397,78 @@ describe('events check-in (in person, by code)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe('checked_in');
     expect(received.slice(before).filter((payload) => payload.eventId === race.id)).toHaveLength(1);
+  });
+
+  it('8. CR-01: a first guess held open plus twenty PARALLEL wrong codes from the same member are serialised: the counter stops at 5 and the right code is refused', async () => {
+    const burst = await createEvent('rajada');
+    await openWindow(burst.id);
+    const code = await codeOf(burst.id);
+    const wrong = wrongCode(code);
+    const claims = JSON.stringify({
+      sub: userIds.joao,
+      role: 'authenticated',
+      tenant_id: demoTenantId,
+      tenant_role: 'member',
+    });
+
+    // The member's FIRST guess, in the member lane on its own connection, held open: no attempts
+    // row is committed yet, which is exactly the case `for update` never locked. The burst below
+    // starts while it is open, so without the per-member advisory lock all twenty would pass the
+    // bound (no committed row) and compare their code; with it, they wait and then read the counter.
+    const lane = postgres('postgres://postgres:postgres@127.0.0.1:54322/postgres', {
+      prepare: false,
+      max: 1,
+    });
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => {};
+    const inside = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    try {
+      const first = lane.begin(async (tx) => {
+        await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+        await tx`set local role authenticated`;
+        const [row] = await tx<{ outcome: string }[]>`
+          select outcome from app.events_check_in(${burst.id}::uuid, ${wrong})`;
+        entered();
+        await held;
+        return row?.outcome;
+      });
+      await inside;
+      const responses = Promise.all(
+        Array.from({ length: 20 }, () => checkIn(burst.id, wrong, tokens.joao)),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      release();
+      expect(await first).toBe('wrong_code');
+
+      const refusals: unknown[] = [];
+      for (const res of await responses) {
+        expect(res.status).toBe(409);
+        refusals.push((await envelope(res)).details);
+      }
+      const count = (event: string) =>
+        refusals.filter((details) => JSON.stringify(details) === JSON.stringify({ event })).length;
+      // 1 held + 4 from the burst reach the bound; the other 16 are refused without a comparison.
+      expect(count('wrong_code')).toBe(4);
+      expect(count('too_many_attempts')).toBe(16);
+    } finally {
+      release();
+      await lane.end();
+    }
+
+    const [counter] = await adminSql<{ failed_count: number }[]>`
+      select failed_count from public.event_checkin_attempts
+       where event_id = ${burst.id}::uuid and user_id = ${userIds.joao ?? ''}::uuid`;
+    expect(counter?.failed_count).toBe(5);
+
+    const right = await checkIn(burst.id, code, tokens.joao);
+    expect(right.status).toBe(409);
+    expect((await envelope(right)).details).toEqual({ event: 'too_many_attempts' });
+    expect(await attendance(burst.id, userIds.joao ?? '')).toHaveLength(0);
   });
 });
 
