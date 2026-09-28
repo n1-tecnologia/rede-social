@@ -463,8 +463,18 @@ const SEED_COMMUNITIES = [
  *      long-text backstop and the D-69 gradient fixture, in 5 days.
  *
  * Ids live in the `…000000000e01` range, free of every earlier fixture. The instants are offsets
- * from ONE clock read rounded down to the hour, so the demo reads "19:00"-style times rather than
- * "14:37", and no two events share a start (the tie the keyset must break is the API test's own).
+ * from ONE anchor, the tenant-local NOON of the seed day, so the demo reads "12:00"-style times
+ * rather than "14:37", and no two events share a start (the tie the keyset must break is the API
+ * test's own).
+ *
+ * Why noon and not the current hour (06-09): every short event above then sits between 10:00 and
+ * 15:00 on the tenant's clock and can never straddle its midnight, whatever hour the seed runs. With
+ * the current hour, a seed run between 22:00 and 23:59 São Paulo put `Encontro de boas-vindas` at
+ * 22:00-00:00 (or 23:00-01:00): it ended on the next calendar day, so the poster, the Data cell and
+ * the Início line printed it as a multi-day RANGE and every spec reading its time failed by the
+ * clock (the 06-09 exit gate: nine failures). The future events stay at least 60 h ahead, the past
+ * ones at least 108 h behind, and `Semana de integracao` (-24 h .. +48 h) is in progress at any hour
+ * of the seed day.
  */
 const SEED_EVENT_IDS: Record<string, readonly string[]> = {
   'tria-demo': [1, 2, 3, 4, 5, 6, 7].map((n) => `0d000000-0000-4000-8000-000000000e0${n}`),
@@ -495,7 +505,7 @@ type SeedEvent = {
   meetingUrl: string | null;
   /** Index into the gallery post's images, or null for the gradient fallback. */
   coverIndex: number | null;
-  /** Offsets in HOURS from the rounded clock. */
+  /** Offsets in HOURS from the anchor: the tenant-local noon of the seed day. */
   startsInHours: number;
   endsInHours: number;
   cancelled: boolean;
@@ -1874,8 +1884,18 @@ for (const t of SEED_TENANTS) {
       // halves of each event go in ONE transaction: the deferred FKs are checked at its commit.
       const eventIds = SEED_EVENT_IDS[t.slug];
       if (eventIds) {
-        // ONE clock read for the batch, rounded down to the hour (see SEED_EVENTS).
-        const eventHour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+        // ONE anchor for the batch: the tenant-local NOON of the seed day, computed in Postgres from
+        // the tenant's own `timezone` so the zone's offset rules stay in one place (see SEED_EVENTS).
+        const anchor = await withAdminTx((tx) =>
+          tx.execute<{ noon_ms: number }>(sql`
+            select (extract(epoch from
+                      (((now() at time zone t.timezone)::date + time '12:00') at time zone t.timezone))
+                    * 1000)::float8 as noon_ms
+              from public.tenants t
+             where t.id = ${tenantId}::uuid`),
+        );
+        const eventHour = Number(anchor[0]?.noon_ms);
+        if (!Number.isFinite(eventHour)) throw new Error(`seed: no timezone for ${t.slug}`);
         const at = (hours: number) => new Date(eventHour + hours * 3_600_000).toISOString();
         await withAdminTx(async (tx) => {
           for (const [index, event] of SEED_EVENTS.entries()) {
