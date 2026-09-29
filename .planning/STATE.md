@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 6 (Events) — ALL PLANS EXECUTED (phase not closed)
 Plan: 9 of 9 complete (06-01 … 06-09); next: /gsd-verify-work 6 (phone UAT items 1-10 carried, blocked on 01.1), then phase close
 Status: Plans complete, awaiting verification — local exit gate `pnpm verify` green 2026-09-27 23:50 São Paulo; sketch 006 approved (provisional, 2026-09-27); real-phone UAT waits on 01.1
-Last activity: 2026-09-28 - Completed quick task 260928-s4y: adapt deploy pipeline to production-only setup
+Last activity: 2026-09-28 - Completed quick task 260928-t3z: fix api production bundle dynamic require crash
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -518,6 +518,7 @@ None yet.
 | 260926-d8f | Fix 05.2 follow-ups WR-01 (item cap counts live stories only; ghost items removable), WR-04 (seen action bounded to one API call), WR-07 (page-hide seen flush via sendBeacon to POST /api/stories/views), WR-03 (place-cap and item-cap copy for `full`) and the Criar destaque link (next/link to the origin place) | 2026-09-26 | 1a23355 | — | [260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr](./quick/260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr/) |
 | 260927-ebk | Fix 05.3 follow-ups WR-04 (confirmed like pair survives a refused toggle, tagged by request number), WR-05 (Reels gesture tied to its starting pointer; non-primary pointers ignored) and the UI-REVIEW top 3 (44 px caption toggle hit areas, lane underline under the label, empty-state CTA via LinkButton) | 2026-09-27 | 71a603e | — | [260927-ebk-05-3-follow-ups-wr-04-wr-05-fixes-with-t](./quick/260927-ebk-05-3-follow-ups-wr-04-wr-05-fixes-with-t/) |
 | 260928-s4y | Adapt the deploy pipeline to the production-only setup (01.1 deviations): `[remotes.production]` auth override in config.toml (site URL, one redirect, otp 24 h, Send Email Hook off), workflows on `master`, staging job + keepalive + seed-prod removed, DEPLOY.md "Decisions (2026-09-28)" | 2026-09-28 | 5ca701b | — | [260928-s4y-adapt-deploy-pipeline-to-production-only](./quick/260928-s4y-adapt-deploy-pipeline-to-production-only/) |
+| 260928-t3z | Make the API production bundle load under Node (first Cloud Run boot crashed on `Dynamic require of "assert"` from bundled undici): tsup `createRequire` banner, `removeNodeProtocol: false`, `sharp` external + direct apps/api dependency | 2026-09-28 | 1f36d25 | — | [260928-t3z-fix-api-production-bundle-dynamic-requir](./quick/260928-t3z-fix-api-production-bundle-dynamic-requir/) |
 | 5 | add web env template (apps/web) listing the variables the web app reads | 2026-09-28 | 6da7acd | — | — |
 
 ### Roadmap Evolution
