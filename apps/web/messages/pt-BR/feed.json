@@ -141,6 +141,8 @@
       "addVideo": "Adicionar vídeo",
       "addFile": "Anexar arquivo",
       "mediaHelper": "Uma publicação leva fotos ou um vídeo — não os dois.",
+      "videoWaiting": "Aguarde o vídeo terminar de processar para publicar.",
+      "videoWaitingEdit": "Aguarde o vídeo terminar de processar para salvar.",
       "attachmentHelper": "PDF de até {limit}.",
       "removePhoto": "Remover foto",
       "removeVideo": "Remover vídeo",

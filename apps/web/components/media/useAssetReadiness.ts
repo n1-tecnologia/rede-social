@@ -22,8 +22,14 @@ import {
  * previous answer arrived, so reads never overlap. It stops on `ready`, on `failed`/`rejected`, when
  * the asset disappears (404), on unmount and when the id changes.
  *
- * A `generic` answer (or a thrown read) keeps polling on the backoff: it is transient, and the
- * composer stays usable meanwhile because publishing is allowed while the video is still waiting.
+ * A `generic` answer (or a thrown read) keeps polling on the backoff: it is transient. In the STORY
+ * composer publishing stays allowed while the video is still waiting — that is the story composer's
+ * rule. The feed composer (quick-260929-ltf) uses this same hook but blocks `Publicar` until the
+ * video is `ready`, because the feed API refuses a video that is not.
+ *
+ * Each read is also what nudges a stale video forward: `GET /v1/media/{assetId}` reconciles a video
+ * whose provider webhook is late with the provider directly (quick-260929-ltf), so a poll converges
+ * even when the webhook does not arrive.
  *
  * Stale-id guard: the stored answer carries the id it was read for, and the hook only returns it
  * while that id is still the current one. A late answer for a previous id can therefore never be

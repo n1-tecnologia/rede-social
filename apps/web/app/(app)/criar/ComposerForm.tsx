@@ -44,6 +44,7 @@ import { createPostAction } from '@/app/(app)/criar/actions';
 import { updatePostAction } from '@/app/(app)/inicio/feed-actions';
 import { PickerDefaultRow } from '@/components/communities/PickerDefaultRow';
 import { MediaImage } from '@/components/media/MediaImage';
+import { useAssetReadiness } from '@/components/media/useAssetReadiness';
 import { formatMediaLimit, useSignedUpload } from '@/components/media/useSignedUpload';
 import { VideoPlayer } from '@/components/media/VideoPlayer';
 import type { ComposerDraft } from '@/lib/feed-view';
@@ -73,10 +74,13 @@ import type { ComposerDraft } from '@/lib/feed-view';
  * the shape; and `feed_post_media_kind_fk` refuses it at the database for a caller that never saw
  * this screen.
  *
- * **Publish rules while media is in flight** (UI-SPEC E14/partial): a post whose VIDEO is still
- * transcoding IS publishable — it enters the feed in the Phase 3 `processando` state — while a post
- * whose IMAGE is still uploading is NOT: the submit waits with its pending label rather than
- * sending a half-uploaded asset id the API would refuse as `asset_not_usable`.
+ * **Publish rules while media is in flight** (UI-SPEC E14/partial, quick-260929-ltf): a feed post
+ * needs a READY video. The API's `validateAssets` refuses a provider video that is still `pending`,
+ * which is what produced the 2026-09-29 `asset_not_usable` refusals, so the composer re-reads the
+ * video with `useAssetReadiness`, keeps the player on its real status, explains the wait under it and
+ * disables the submit until the video is `ready` (a `failed`/`rejected` video blocks for good — the
+ * player's failed card is the message). A post whose IMAGE is still uploading waits too, with its
+ * pending label. Stories are different: the story composer still publishes while processing.
  *
  * **Upload refusals are the Phase 3 copy verbatim**, read from the `media` catalog namespace by the
  * hook itself. This phase adds none of its own (UI-SPEC §Copywriting Contract, "upload refusals").
@@ -247,8 +251,9 @@ export function ComposerForm({
     purpose: 'post',
     successKey: 'toasts.videoQueued',
     // 03-06's provider branch: the bytes belong to the streaming provider, the row is already
-    // `pending` server-side and its webhook is what moves it to `ready`. There is nothing to
-    // confirm here, which is exactly why D-53 lets the post publish while the transcode runs.
+    // `pending` server-side and its webhook (or the read-time reconciliation) is what moves it to
+    // `ready`. `processing` here only starts the readiness poll below; the post cannot publish until
+    // that poll answers `ready` (quick-260929-ltf).
     onHandedToProvider: (assetId) => {
       setVideo({ assetId, status: 'processing' });
       clearErrors();
@@ -286,14 +291,38 @@ export function ComposerForm({
 
   const uploads = [imageUpload, videoUpload, fileUpload];
   /**
-   * Any transfer in flight blocks the submit (E14/partial). The video's TRANSCODE is deliberately
-   * not in here: the hook has already reached `done` by then, which is how "publish while the video
-   * processes" and "wait while a photo uploads" come out of one condition.
+   * Any transfer in flight blocks the submit (E14/partial). The video's TRANSCODE is not in here:
+   * the hook has already reached `done` by then. The transcode wait is `videoBlocksSubmit` below,
+   * which disables the submit WITHOUT the pending spinner, because nothing is being sent.
    */
   const uploading = uploads.some(
     (upload) =>
       upload.state === 'preparing' || upload.state === 'progress' || upload.state === 'processing',
   );
+
+  /**
+   * The video's REAL status (quick-260929-ltf). Only a video still `pending`/`processing` polls: an
+   * edit-mode video that is already `ready` (or terminal) never does. The mapping is the story
+   * composer's: `duration_too_long` is a refusal (`rejected`), any other failure is `failed`.
+   */
+  const pollId =
+    video && (video.status === 'pending' || video.status === 'processing') ? video.assetId : null;
+  const readiness = useAssetReadiness(pollId);
+  const videoStatus: MediaStatus | null =
+    video === null
+      ? null
+      : pollId === null
+        ? video.status
+        : readiness.phase === 'ready'
+          ? 'ready'
+          : readiness.phase === 'failed'
+            ? readiness.issue === 'duration_too_long'
+              ? 'rejected'
+              : 'failed'
+            : 'processing';
+  const videoWaiting = videoStatus === 'pending' || videoStatus === 'processing';
+  /** The API refuses anything but a ready video in a feed post (`validateAssets`, option b). */
+  const videoBlocksSubmit = video !== null && videoStatus !== 'ready';
 
   const galleryChosen = images.length > 0;
   const videoChosen = video !== null;
@@ -418,6 +447,8 @@ export function ComposerForm({
   };
 
   const submit = () => {
+    // The disabled button already says so; this guards an Enter-key submit of the form itself.
+    if (videoBlocksSubmit) return;
     clearErrors();
     startTransition(async () => {
       const imageAssetIds = images.map((image) => image.assetId);
@@ -539,7 +570,7 @@ export function ComposerForm({
             type="submit"
             variant="brand"
             size="sm"
-            disabled={!publishable || busy}
+            disabled={!publishable || busy || videoBlocksSubmit}
             loading={busy}
             aria-busy={busy || undefined}
           >
@@ -822,7 +853,16 @@ export function ComposerForm({
               the ones the card will show — never a second rendering of the same two facts. */}
           {video ? (
             <div data-composer-video className="flex flex-col gap-2">
-              <VideoPlayer assetId={video.assetId} status={video.status} />
+              <VideoPlayer assetId={video.assetId} status={videoStatus ?? video.status} />
+              {videoWaiting ? (
+                <p
+                  role="status"
+                  data-composer-video-wait
+                  className="text-xs font-normal text-text-secondary"
+                >
+                  {mode === 'edit' ? t('composer.videoWaitingEdit') : t('composer.videoWaiting')}
+                </p>
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"
