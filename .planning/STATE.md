@@ -4,10 +4,10 @@ current_phase: 6
 current_phase_name: Events
 status: executing
 stopped_at: Completed 06-09-PLAN.md
-last_updated: "2026-09-29T13:42:20.752Z"
+last_updated: "2026-09-29T15:14:45.934Z"
 last_activity: 2026-09-28
 last_activity_desc: "06-09 complete: tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS (l) Secrets inside a tenant, phase6-smoke witness, pnpm verify green (e2e 555/0 failed, e2e:pwa 46 with events-prefetch). Phase 6: 9/9 plans; verify-work + phone UAT (blocked on 01.1) next"
-state_head: eb6860b24d9061393ea93a6cec38c7cfbfceaace
+state_head: c4e1fcbd0da4f4c5c78cce355a87bc66f95c4776
 progress:
   total_phases: 15
   completed_phases: 0
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 6 (Events) — ALL PLANS EXECUTED (phase not closed)
 Plan: 9 of 9 complete (06-01 … 06-09); next: /gsd-verify-work 6 (phone UAT items 1-10 carried, blocked on 01.1), then phase close
 Status: Plans complete, awaiting verification — local exit gate `pnpm verify` green 2026-09-27 23:50 São Paulo; sketch 006 approved (provisional, 2026-09-27); real-phone UAT waits on 01.1
-Last activity: 2026-09-28 - Completed quick task 260928-t3z: fix api production bundle dynamic require crash
+Last activity: 2026-09-29 - Completed quick task 260929-g0s: fix first-admin invite race and show invite state
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -526,6 +526,7 @@ None yet.
 | 11 | Integration tests assert consent rows by kind (platform_terms rename reordered order-by-kind results) | 2026-09-29 | e9ba606 | — | — |
 | 12 | pg-boss gets libpq sslmode semantics via bossConnectionString (every production enqueue failed with SELF_SIGNED_CERT_IN_CHAIN) | 2026-09-29 | a935e41 | — | — |
 | 13 | Production mail (Resend, n1marketingdigital.com.br) and video (Mux) in deploy-api.yml + hosted Send Email Hook; fix psql -c and config push --yes in the prod job | 2026-09-29 | eb6860b | — | — |
+| 260929-g0s | Invite race fix (deferred kernel.invite-send job), hook refuses tenant links on non-tenant hosts, Admins tab shows invite state | 2026-09-29 | c4e1fcb | Needs Review | [260929-g0s-fix-first-admin-invite-race-and-show-inv](./quick/260929-g0s-fix-first-admin-invite-race-and-show-inv/) |
 
 ### Roadmap Evolution
 

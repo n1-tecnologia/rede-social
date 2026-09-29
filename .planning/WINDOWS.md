@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 34
+open_count: 36
 waived_count: 0
 fixed_count: 19
-total_count: 53
-last_updated: 2026-09-27T18:46:11.297Z
+total_count: 55
+last_updated: 2026-09-29T15:08:34.703Z
 ---
 
 # Broken Windows Ledger
@@ -68,6 +68,8 @@ last_updated: 2026-09-27T18:46:11.297Z
 | 51 | 05.3 | unrun-verify | packages/modules/reels/ui/ReelRail.tsx |  | UI E06 populated (plan 04 lift, phone UAT, blocked until Phase 01.1): rail, caption and lane labels stay legible over a bright video frame, judged against sketch 005 | open |  | 2026-09-26T22:42:29.475Z |  |
 | 52 | 6 | stub | apps/web/lib/events-view.ts |  | Poster href /eventos/{id} resolves to not-found until 06-03 adds the detail route | fixed |  | 2026-09-27T15:36:43.923Z | 2026-09-27T16:04:42.800Z |
 | 53 | 6 | stub | apps/web/app/(app)/eventos/EventsList.tsx |  | Empty Próximos renders only the member body; manager body and Criar evento CTA arrive with 06-04 | fixed |  | 2026-09-27T15:36:43.992Z | 2026-09-27T18:46:11.297Z |
+| 54 | quick-260929-g0s | unrun-verify | apps/web/e2e/invite.spec.ts |  | e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (tria-* seed, tria_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first | open |  | 2026-09-29T15:08:34.622Z |  |
+| 55 | quick-260929-g0s | unrun-verify | apps/api/tests/integration/platform-domains.test.ts |  | platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at tria-demo; re-run after pnpm db:reset + db:seed | open |  | 2026-09-29T15:08:34.703Z |  |
 
 ````json
 [
@@ -706,6 +708,30 @@ last_updated: 2026-09-27T18:46:11.297Z
     "reason": "",
     "recorded_at": "2026-09-27T15:36:43.992Z",
     "resolved_at": "2026-09-27T18:46:11.297Z"
+  },
+  {
+    "id": 54,
+    "kind": "unrun-verify",
+    "phase": "quick-260929-g0s",
+    "file": "apps/web/e2e/invite.spec.ts",
+    "line": null,
+    "description": "e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (tria-* seed, tria_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-29T15:08:34.622Z",
+    "resolved_at": null
+  },
+  {
+    "id": 55,
+    "kind": "unrun-verify",
+    "phase": "quick-260929-g0s",
+    "file": "apps/api/tests/integration/platform-domains.test.ts",
+    "line": null,
+    "description": "platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at tria-demo; re-run after pnpm db:reset + db:seed",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-29T15:08:34.703Z",
+    "resolved_at": null
   }
 ]
 ````
