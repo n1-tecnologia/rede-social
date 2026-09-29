@@ -281,7 +281,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await page.getByRole('tab', { name: 'Admins' }).click();
     await expect(page).toHaveURL(/\/admins$/);
     await expect(page.getByText(longEmail)).toBeVisible();
-    await expect(page.getByText('Convite pendente — aguardando domínio')).toBeVisible();
+    await expect(page.getByText('Aguardando domínio verificado')).toBeVisible();
     await expect(page.getByText('Nenhum administrador ativo ainda.')).toBeVisible();
     const inviteCard = page.getByTestId('invite-card');
     const overflow = await inviteCard.evaluate((el) => ({

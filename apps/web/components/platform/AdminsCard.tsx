@@ -4,11 +4,12 @@ import type { ReactNode } from 'react';
 export type InviteView = {
   email: string;
   /**
-   * The contract's four statuses plus `refused` — a view-only state derived by the page from
-   * `status === 'expired' && sentAt === null` (a refused first-admin e-mail, 02-19 D-A); the API
-   * contract has no such status and never learns of it.
+   * View-only states derived by `deriveInviteState` from the contract's four statuses (the API
+   * contract never learns of them): `awaiting_domain` / `unsent` split `pending` on whether the
+   * tenant has a verified primary host (quick 260929-g0s); `refused` is `expired` with `sentAt`
+   * null (a refused first-admin e-mail, 02-19 D-A).
    */
-  status: 'pending' | 'sent' | 'accepted' | 'expired' | 'refused';
+  status: 'awaiting_domain' | 'unsent' | 'sent' | 'accepted' | 'expired' | 'refused';
   /** Pre-formatted on the server (`formatPanelDate(sentAt, 'dateTime')`). */
   sentAtLabel: string | null;
   /** Pre-formatted on the server (`formatPanelDate(acceptedAt)`). */
@@ -20,7 +21,10 @@ export type AdminView = { userId: string; name: string; email: string };
 export interface AdminsCardLabels {
   inviteTitle: string;
   noInvite: string;
-  invitePending: string;
+  /** Pending and the tenant has no verified primary host yet: nothing can be sent. */
+  inviteAwaitingDomain: string;
+  /** Pending with a verified primary: the automatic send is queued (or failed) — the button sends now. */
+  inviteUnsent: string;
   /** Already interpolated with the sent date. */
   inviteSent: string;
   /** Already interpolated with the accepted date. */
@@ -38,14 +42,56 @@ export interface AdminsCardProps {
   admins: AdminView[];
   labels: AdminsCardLabels;
   /**
-   * The "Reenviar convite" control (D-30). 02-12 passes nothing; plan 02-10 mounts the outline
-   * button + helper wired to `POST /v1/platform/tenants/{id}/invites/{inviteId}/resend`.
+   * The "Enviar convite" / "Reenviar convite" control (D-30). 02-12 passes nothing; plan 02-10 mounts
+   * the outline button + helper wired to `POST /v1/platform/tenants/{id}/invites/{inviteId}/resend`.
    */
   resend?: ReactNode;
 }
 
+/** The contract fields `deriveInviteState` reads (the `TenantInvite` shape, dates as ISO strings). */
+export type InviteStateInput = {
+  status: 'pending' | 'sent' | 'accepted' | 'expired';
+  sentAt: string | null;
+};
+
+export type InviteState = {
+  status: InviteView['status'];
+  /** `send` while the invite was never mailed (`sentAt` null), `resend` after a send, null once accepted. */
+  action: 'send' | 'resend' | null;
+  /** False whenever no verified primary host exists: the button is disabled with the helper line. */
+  canSend: boolean;
+};
+
+/**
+ * Where the first-admin invite stands (quick 260929-g0s), pure so the page and the tests share it:
+ *
+ *   pending, no verified primary     -> awaiting_domain, send (disabled)
+ *   pending, verified primary        -> unsent, send (the automatic send is queued or failed)
+ *   sent                             -> sent, resend
+ *   accepted                         -> accepted, no action
+ *   expired, sentAt null (refused)   -> refused, send (never mailed — 02-19 D-A)
+ *   expired, sentAt set (lapsed)     -> expired, resend
+ *
+ * `canSend` is false for every non-accepted state while the tenant has no verified primary host:
+ * the link must open the tenant's own origin, so the API would refuse anyway (D-36).
+ */
+export function deriveInviteState(invite: InviteStateInput, hasVerifiedHost: boolean): InviteState {
+  const status: InviteView['status'] =
+    invite.status === 'pending'
+      ? hasVerifiedHost
+        ? 'unsent'
+        : 'awaiting_domain'
+      : invite.status === 'expired' && invite.sentAt === null
+        ? 'refused'
+        : invite.status;
+  const action =
+    invite.status === 'accepted' ? null : invite.sentAt === null ? ('send' as const) : 'resend';
+  return { status, action, canSend: action !== null && hasVerifiedHost };
+}
+
 const inviteTone = {
-  pending: 'warning',
+  awaiting_domain: 'warning',
+  unsent: 'warning',
   sent: 'neutral',
   accepted: 'success',
   expired: 'danger',
@@ -54,14 +100,17 @@ const inviteTone = {
 
 /**
  * Admins tab (D-29/D-30, mockup `tenant-page-admins`), server-safe (no hooks): the first-admin
- * invite card (e-mail + state pill + the typed resend slot) and the "Administradores" card listing
+ * invite card (e-mail + the state pill from `deriveInviteState` — awaiting domain, not sent yet,
+ * sent on <date/time>, accepted on <date>, expired, refused — + the typed send/resend slot) and the
+ * "Administradores" card listing
  * `admin_tenant` memberships. Long e-mails `break-all` at 12/14 px so a 60-character address never
  * overflows (E17 backstop); an admin without a profile name shows the e-mail in the name slot.
  */
 export function AdminsCard({ invite, admins, labels, resend }: AdminsCardProps) {
   const inviteLabel = invite
     ? {
-        pending: labels.invitePending,
+        awaiting_domain: labels.inviteAwaitingDomain,
+        unsent: labels.inviteUnsent,
         sent: labels.inviteSent,
         accepted: labels.inviteAccepted,
         expired: labels.inviteExpired,

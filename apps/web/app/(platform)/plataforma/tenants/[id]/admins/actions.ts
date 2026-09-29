@@ -15,7 +15,7 @@ export type ResendInviteResult =
 /**
  * "Reenviar convite" (D-30): `POST /v1/platform/tenants/{id}/invites/{inviteId}/resend`, mirroring
  * `setTenantStatusAction`. Both ids are validated with the API's own `inviteParamsSchema` before the
- * request; on success the tenant layout is revalidated so the "Convite enviado em {date}" pill shows
+ * request; on success the tenant layout is revalidated so the "Enviado em {date}" pill shows
  * the fresh `sentAt` on the same navigation. 401/403 navigate like every platform read (`redirect()`
  * after the try/catch — Next 16 rule); every other refusal is returned as its envelope code and the
  * client translates by key. Nothing from the response body is rendered raw.

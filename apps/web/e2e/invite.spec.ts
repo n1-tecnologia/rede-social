@@ -12,6 +12,7 @@ import {
 import { hosts, isRemote } from './fixtures';
 import { waitForRecoveryMail } from './mail';
 import { throwawayOrigin } from './tenant-fixtures';
+import { ensureWorker } from './worker';
 
 /**
  * First-admin onboarding (02-10, ROLE-03, D-29/D-30/D-03/D-10) against the real local stack: the
@@ -20,6 +21,13 @@ import { throwawayOrigin } from './tenant-fixtures';
  * opens the branded accept screen on the tenant's own host. Test 2 drives the panel resend and the
  * superseded link, test 3 the pending-without-host state, test 4 (02-20, WR-02/WR-03) the refusal
  * of an e-mail that already belongs to another tenant. Both Playwright projects run it.
+ *
+ * Since quick 260929-g0s the FIRST send after a verified domain is not inline: the verify schedules a
+ * `kernel.invite-send` job (no delay with the local allow-list adapter), so this spec needs a
+ * `ROLE=worker` polling the stack — `ensureWorker()` reuses a running one or starts it for the file
+ * (the phase2-smoke.spec.ts pattern) and `afterAll` stops only what it started. The Admins tab now
+ * says "Aguardando domínio verificado" / "Enviado em …" and offers "Enviar convite" until the invite
+ * was mailed once, "Reenviar convite" after.
  *
  * Node-side calls use `127.0.0.1` (Node's resolver does not special-case `*.localhost`); the
  * browser navigates the tenant origin (`<slug>.localhost:3000`).
@@ -185,10 +193,22 @@ async function signIn(page: Page, origin: string, email: string, password: strin
 /** Every fixture a test created, for `afterAll` (Playwright restarts the worker after a failure). */
 const created: { slugs: string[]; emails: string[] } = { slugs: [], emails: [] };
 
+/** Stops the worker this file started (a no-op when an already-running worker was reused). */
+let stopWorker: () => Promise<void> = async () => undefined;
+
+test.beforeAll(async () => {
+  if (isRemote) return;
+  stopWorker = await ensureWorker();
+});
+
 test.afterAll(async () => {
-  for (const email of created.emails) await deleteUserByEmail(email);
-  for (const slug of created.slugs) await deleteTenantBySlug(slug);
-  await closeAdmin();
+  try {
+    for (const email of created.emails) await deleteUserByEmail(email);
+    for (const slug of created.slugs) await deleteTenantBySlug(slug);
+  } finally {
+    await closeAdmin();
+    await stopWorker();
+  }
 });
 
 test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
@@ -280,12 +300,12 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     await waitForInviteStatus(token, id, 'sent');
     const link1 = await waitForInviteLink(adminEmail, null);
 
-    // The super_admin on the platform host: "Convite enviado em …" + an enabled resend button.
+    // The super_admin on the platform host: "Enviado em …" + an enabled resend button.
     const panel = await browser.newContext();
     const page = await panel.newPage();
     await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
-    await expect(page.getByText(/^Convite enviado em /)).toBeVisible();
+    await expect(page.getByText(/^Enviado em /)).toBeVisible();
     const resend = page.getByRole('button', { name: 'Reenviar convite' });
     await expect(resend).toBeEnabled();
     await resend.click();
@@ -359,8 +379,8 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
 
     await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
-    await expect(page.getByText('Convite pendente — aguardando domínio')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Reenviar convite' })).toBeDisabled();
+    await expect(page.getByText('Aguardando domínio verificado')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Enviar convite' })).toBeDisabled();
     await expect(
       page.getByText('Adicione e verifique um domínio para enviar o convite.'),
     ).toBeVisible();
@@ -403,14 +423,15 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     const refused = await waitForInviteStatus(token, id, 'expired');
     expect(refused.sentAt).toBeNull();
 
-    // The panel names the cause instead of "Convite expirado" and still offers the resend.
+    // The panel names the cause instead of "Convite expirado" and offers "Enviar convite" (the
+    // refused invite was never mailed).
     const panel = await browser.newContext();
     const page = await panel.newPage();
     await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
     await expect(page.getByText('Convite recusado — o e-mail já está em uso')).toBeVisible();
     await expect(page.getByText('Convite expirado')).toHaveCount(0);
-    const resend = page.getByRole('button', { name: 'Reenviar convite' });
+    const resend = page.getByRole('button', { name: 'Enviar convite' });
     await expect(resend).toBeEnabled();
     await resend.click();
     await expect(
