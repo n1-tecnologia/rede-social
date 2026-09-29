@@ -81,7 +81,10 @@ jobs:
           version: 2.117.0
 
       - name: Generate ES256 signing keys for the local stack
-        run: supabase gen signing-key --algorithm ES256 -o json > supabase/signing_keys.json
+        # The CLI loads config.toml first, and `signing_keys_path` must already hold valid JSON, so seed
+        # an empty set; the CLI then appends the new key to that file itself (no stdout redirect — a
+        # `>` onto the same path empties it before the CLI reads it).
+        run: echo '[]' > supabase/signing_keys.json && supabase gen signing-key --algorithm ES256 --yes
       - name: Start the local Supabase stack
         run: supabase start
       - name: Apply migrations
