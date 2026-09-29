@@ -107,6 +107,25 @@ vi.mock('@/components/media/useSignedUpload', () => ({
   },
 }));
 
+/**
+ * quick-260929-ka5: the readiness poll is stubbed at its seam too. Each test sets the phase the
+ * composer sees and reads back the ids it was asked about. Like the upload mock, this also keeps
+ * the real server-action module (`lib/api` -> `lib/env`) out of a unit test.
+ */
+const { readiness } = vi.hoisted(() => ({
+  readiness: {
+    value: { phase: 'waiting' } as { phase: string; issue?: string | null },
+    ids: [] as (string | null)[],
+  },
+}));
+
+vi.mock('@/components/media/useAssetReadiness', () => ({
+  useAssetReadiness: (id: string | null) => {
+    readiness.ids.push(id);
+    return id ? readiness.value : { phase: 'idle' };
+  },
+}));
+
 const { MEDIA_LIMITS } = await import('@rede-social/contracts/media');
 const {
   STORY_HIGHLIGHT_MAX_ITEMS,
@@ -131,6 +150,8 @@ async function completeUpload(kind: 'image' | 'video', assetId: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   upload.handlers = {};
+  readiness.value = { phase: 'waiting' };
+  readiness.ids = [];
   publish.mockResolvedValue({ ok: true });
   // happy-dom does not implement object URLs; the preview only needs a stable string.
   globalThis.URL.createObjectURL = vi.fn(() => 'blob:story-preview');
@@ -693,5 +714,79 @@ describe('StoryComposer — "Destaque" (05.2-08, D-111..D-115, UI-D-68..UI-D-71)
     expect(valueNode?.className).toContain('flex-1');
     expect(valueNode?.className).toContain('truncate');
     expect(chevron?.getAttribute('class')).toContain('shrink-0');
+  });
+});
+
+/* ── quick-260929-ka5: the processing row follows the video's real status ─────────────────────── */
+
+const VIDEO_ID = 'b1111111-1111-4111-8111-111111111111';
+
+describe('StoryComposer — video readiness (quick-260929-ka5)', () => {
+  const submitButton = () =>
+    screen.getByRole('button', { name: lookup(catalog, 'publish.submit') });
+
+  it('R1. a video hand-off is polled by its id; an image never is', async () => {
+    const first = composer();
+    await completeUpload('image', IMAGE);
+    expect(readiness.ids.every((id) => id === null)).toBe(true);
+    first.unmount();
+
+    readiness.ids = [];
+    composer();
+    await completeUpload('video', VIDEO_ID);
+    expect(readiness.ids).toContain(VIDEO_ID);
+  });
+
+  it('R2. while waiting, the processing row says Publicar already works, and it does', async () => {
+    composer();
+    await completeUpload('video', VIDEO_ID);
+    expect(screen.getByText(lookup(catalog, 'publish.processingTitle'))).toBeTruthy();
+    expect(screen.getByText(lookup(catalog, 'publish.processingNote'))).toBeTruthy();
+    expect((submitButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('R3. once ready, the row is gone and Publicar publishes the video', async () => {
+    readiness.value = { phase: 'ready' };
+    composer();
+    await completeUpload('video', VIDEO_ID);
+    expect(screen.queryByText(lookup(catalog, 'publish.processingTitle'))).toBeNull();
+    expect(screen.queryByText(lookup(catalog, 'publish.processingNote'))).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaAssetId: VIDEO_ID, mediaKind: 'video' }),
+      { communityId: null },
+    );
+  });
+
+  it('R4. a failed video shows the transcode error, and Publicar sends nothing', async () => {
+    readiness.value = { phase: 'failed', issue: null };
+    composer();
+    await completeUpload('video', VIDEO_ID);
+
+    expect(screen.getByRole('alert').textContent).toBe(lookup(mediaCatalog, 'errors.transcode'));
+    expect(screen.queryByText(lookup(catalog, 'publish.processingTitle'))).toBeNull();
+    expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      fireEvent.submit(screen.getByTestId('story-composer'));
+    });
+    expect(publish).not.toHaveBeenCalled();
+    expect(screen.queryByText(lookup(catalog, 'publish.errors.noMedia'))).toBeNull();
+  });
+
+  it('R5. a too-long video shows the duration error with the story limit', async () => {
+    readiness.value = { phase: 'failed', issue: 'duration_too_long' };
+    composer();
+    await completeUpload('video', VIDEO_ID);
+
+    const cap = MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0;
+    const capLabel = cap >= 60 ? `${Math.round(cap / 60)} min` : `${cap} s`;
+    expect(screen.getByRole('alert').textContent).toBe(
+      lookup(mediaCatalog, 'errors.duration', { duration: capLabel }),
+    );
+    expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
   });
 });

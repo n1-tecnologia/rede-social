@@ -171,7 +171,7 @@
       "submit": "Publicar",
       "submitting": "Publicando…",
       "processingTitle": "Processando o vídeo…",
-      "processingNote": "Seu story aparece no início assim que o vídeo terminar de processar.",
+      "processingNote": "Você já pode publicar — o story aparece no início assim que o vídeo terminar de processar.",
       "toast": "Story publicado.",
       "toastHighlight": "Story publicado no destaque {title}.",
       "toastHighlightCommunity": "Story publicado no destaque {title} de {community}.",

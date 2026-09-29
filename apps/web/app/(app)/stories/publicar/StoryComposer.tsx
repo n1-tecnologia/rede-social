@@ -28,6 +28,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { publishStoryAction } from '@/app/(app)/stories/story-actions';
+import { useAssetReadiness } from '@/components/media/useAssetReadiness';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 
 /**
@@ -53,8 +54,12 @@ import { useSignedUpload } from '@/components/media/useSignedUpload';
  * **The duration cap is enforced ASYNCHRONOUSLY and the copy says so** (Pitfall 5). The pick-time
  * gate is UX; the authority is the worker, which can only measure a video once the vendor reports it
  * ready. So publishing a video is allowed while it transcodes: the row is created immediately, the
- * strip filters it out until the asset is ready, and the note states plainly that the 24 h window
- * starts at PUBLISH — the alternative is silently losing story life.
+ * strip filters it out until the asset is ready, and the note tells the admin they can already
+ * publish. Since quick-260929-ka5 the composer POLLS the asset (`useAssetReadiness`): the
+ * "Processando" row shows only while it is still pending/processing and disappears at `ready`. A
+ * `failed`/`rejected` video blocks "Publicar" and says why, with the `media` catalog's transcode or
+ * duration sentence. (The 2026-09-29 incident: the row was tied to the mere existence of an asset
+ * id, so it said "Processando" forever and the admin waited instead of publishing.)
  *
  * **"Destaque" — the composer asks for a highlight before it can publish** (05.2, D-111..D-115,
  * UI-D-68..UI-D-71; they replace 05.1's D-97/D-98 "Publicar em" row). In the post-pick bottom block,
@@ -214,16 +219,34 @@ export function StoryComposer({
     onCompleted: (asset) => take('video')(asset.id),
   });
 
+  // The video's REAL status, re-read after the provider hand-off (quick-260929-ka5). An image never
+  // polls: its asset is usable the moment `complete` answers.
+  const readiness = useAssetReadiness(
+    picked?.kind === 'video' && picked.assetId ? picked.assetId : null,
+  );
+
   const active = picked?.kind === 'video' ? video : photo;
   const uploading = active.state === 'progress' || active.state === 'preparing';
-  const processing =
-    active.state === 'processing' || (picked?.kind === 'video' && !!picked.assetId);
+  const processing = active.state === 'processing' || readiness.phase === 'waiting';
+  /** The provider refused the video (or it vanished): it can never play, so it cannot be published. */
+  const videoFailed = picked?.kind === 'video' && readiness.phase === 'failed';
+  const videoFailure =
+    readiness.phase !== 'failed'
+      ? null
+      : readiness.issue === 'duration_too_long'
+        ? tm('errors.duration', {
+            duration: durationLabel(MEDIA_LIMITS.video.story?.maxDurationSeconds ?? 0),
+          })
+        : tm('errors.transcode');
   const announced = QUARTILES.includes(active.progress)
     ? tm('progress', { percent: active.progress })
     : '';
 
-  /** Ready to publish: a brokered asset id exists. A local preview alone is not enough. */
-  const publishable = picked !== null && picked.assetId !== '';
+  /**
+   * Ready to publish: a brokered asset id exists and it is not a refused video. A local preview alone
+   * is not enough. A video that is still waiting IS publishable — the strip filters it until ready.
+   */
+  const publishable = picked !== null && picked.assetId !== '' && !videoFailed;
 
   /** The row exists only for a curator: no places means no row (UI-D-69 render rule). */
   const canChoose = places.length > 0;
@@ -298,6 +321,8 @@ export function StoryComposer({
   };
 
   const submit = () => {
+    // A refused video: the alert already says why, so this sends nothing and adds no second error.
+    if (videoFailed) return;
     if (!publishable) {
       // Client-side, and it costs NO request: there is nothing to publish (UI empty/E07).
       setFormError(t('publish.errors.noMedia'));
@@ -589,8 +614,18 @@ export function StoryComposer({
               className="absolute inset-x-4 z-10 flex flex-col gap-3"
               style={{ bottom: 'calc(var(--safe-bottom) + 1rem)' }}
             >
-              {/* The processing row: publishing is ALLOWED while a video transcodes, and the note says
-                the 24 h window starts now rather than losing story life in silence (Pitfall 5). */}
+              {/* The processing row follows the video's real status (quick-260929-ka5): it shows
+                while the asset is pending/processing and disappears at `ready`. Publishing is ALLOWED
+                meanwhile, and the note says so (Pitfall 5). A failed/rejected video takes the same
+                slot with the reason instead, and "Publicar" is disabled. */}
+              {videoFailed && videoFailure ? (
+                <p
+                  role="alert"
+                  className="rounded-xl bg-danger px-3 py-2 text-sm font-normal text-white"
+                >
+                  {videoFailure}
+                </p>
+              ) : null}
               {processing && picked.kind === 'video' ? (
                 <div className="flex items-start gap-3 rounded-xl bg-black/45 px-3 py-2">
                   <Loader size={20} aria-hidden className="mt-0.5 shrink-0 text-white/70" />
