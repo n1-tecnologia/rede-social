@@ -56,8 +56,15 @@ jobs:
       # (UI-03 / PWA-03) run in CI.
       - name: Lint (Biome + UI literal guard)
         run: pnpm lint
+      # apps/web/lib/env.ts validates at `next build` time, and this step runs before the local stack
+      # exists (apps/web/.env.local is written further down). These are the local-stack defaults —
+      # public values that only satisfy validation; nothing is reached during the build.
       - name: Typecheck, build, unit tests
         run: pnpm turbo typecheck build test
+        env:
+          API_URL: http://127.0.0.1:8787
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-build-placeholder
       # ROADMAP Phase 2 criterion 1 build-output gate: no authenticated or host-branded route is static.
       - name: "Build output: no authenticated route is static"
         run: pnpm check:static-routes
