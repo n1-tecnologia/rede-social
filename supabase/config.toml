@@ -489,9 +489,9 @@ content_path = "./supabase/templates/recovery.html"
 # (2026-09-28)"). The CLI merges it only when a command runs against this project ref (`supabase
 # link` + `config push` / `db push` in deploy-api.yml), never for local `start` / `db reset` /
 # `test db` / `status`. The redirect allow-list is one explicit per-domain entry, never a wildcard
-# host (WR-09). The Send Email Hook is disabled because e-mail/Resend is deferred; a disabled hook
-# needs neither `uri` nor `secrets`, so the hosted push needs no SEND_EMAIL_HOOK_SECRETS and hosted
-# GoTrue never calls the local host.docker.internal URL.
+# host (WR-09). The Send Email Hook points at the Cloud Run `api` (Resend on
+# n1marketingdigital.com.br since 2026-09-29); `secrets` must hold the same value as the Secret
+# Manager secret `send-email-hook-secrets-prod` (GitHub environment secret SEND_EMAIL_HOOK_SECRETS).
 [remotes.production]
 project_id = "qjjhtduxquvlfppybpqq"
 
@@ -503,7 +503,9 @@ additional_redirect_urls = ["https://rede-social-woad.vercel.app/auth/confirm**"
 otp_expiry = 86400
 
 [remotes.production.auth.hook.send_email]
-enabled = false
+enabled = true
+uri = "https://api-253040968821.southamerica-east1.run.app/v1/hooks/auth/send-email"
+secrets = "env(SEND_EMAIL_HOOK_SECRETS)"
 
 # Free plan + default e-mail provider: the Management API answers 400 ("Email template modification
 # is not available for free tier projects using the default email provider") to any template change,

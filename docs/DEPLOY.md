@@ -25,11 +25,19 @@ itself is not edited here.
   `https://rede-social-woad.vercel.app/auth/confirm**` live in `supabase/config.toml`
   `[remotes.production.auth]` (WR-09), and `otp_expiry = 86400` in
   `[remotes.production.auth.email]`.
-- **E-mail / Resend deferred.** The Send Email Hook is disabled on the hosted project by
-  `[remotes.production.auth.hook.send_email]` `enabled = false`, so hosted GoTrue never calls the
-  local hook URL and the push needs no `SEND_EMAIL_HOOK_SECRETS`. Until Resend lands the hosted
-  project uses Supabase's default e-mail service and `RESEND_API_KEY` is not needed; when it lands,
-  `docs/deploy/auth-mail.md` applies to production only (its staging column/block does not).
+- **E-mail via Resend (2026-09-29).** Sender domain `n1marketingdigital.com.br` is verified in
+  Resend (São Paulo region), so `MAIL_DOMAIN=n1marketingdigital.com.br` and mail leaves as
+  `"{tenant}" <no-reply@n1marketingdigital.com.br>`. `api` and `worker` run `MAIL_TRANSPORT=resend`
+  with `RESEND_API_KEY` (Secret Manager `resend-api-key-prod`) and `SEND_EMAIL_HOOK_SECRETS`
+  (`send-email-hook-secrets-prod`, same value as the GitHub environment secret). The hosted Send
+  Email Hook (`[remotes.production.auth.hook.send_email]`) calls
+  `https://api-253040968821.southamerica-east1.run.app/v1/hooks/auth/send-email`. Every Supabase CLI
+  step in `deploy-api.yml` exports `SEND_EMAIL_HOOK_SECRETS`, because the CLI validates the hook
+  block on every command. `docs/deploy/auth-mail.md` applies to production only.
+- **Video via Mux (2026-09-29).** `VIDEO_PROVIDER=mux` on `api` and `worker`, using the Mux
+  environment `N1-TECH` (the same one the local stack uses); its webhook now points at
+  `https://api-253040968821.southamerica-east1.run.app/v1/webhooks/mux`, so local real-video testing
+  no longer receives webhooks. The five `mux-*-prod` secrets were copied from the local values.
 - **Production gate.** One required reviewer on the GitHub environment `production`. The
   repository is public (owner `n1-tecnologia`), so protected environments are available and the
   `workflow_dispatch` fallback is not needed.
