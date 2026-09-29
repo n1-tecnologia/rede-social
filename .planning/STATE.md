@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 6 (Events) — ALL PLANS EXECUTED (phase not closed)
 Plan: 9 of 9 complete (06-01 … 06-09); next: /gsd-verify-work 6 (phone UAT items 1-10 carried, blocked on 01.1), then phase close
 Status: Plans complete, awaiting verification — local exit gate `pnpm verify` green 2026-09-27 23:50 São Paulo; sketch 006 approved (provisional, 2026-09-27); real-phone UAT waits on 01.1
-Last activity: 2026-09-29 - Completed quick task 260929-g0s: fix first-admin invite race and show invite state
+Last activity: 2026-09-29 - Completed quick task 260929-ka5: story composer polls video readiness instead of spinning forever
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -527,6 +527,7 @@ None yet.
 | 12 | pg-boss gets libpq sslmode semantics via bossConnectionString (every production enqueue failed with SELF_SIGNED_CERT_IN_CHAIN) | 2026-09-29 | a935e41 | — | — |
 | 13 | Production mail (Resend, n1marketingdigital.com.br) and video (Mux) in deploy-api.yml + hosted Send Email Hook; fix psql -c and config push --yes in the prod job | 2026-09-29 | eb6860b | — | — |
 | 260929-g0s | Invite race fix (deferred kernel.invite-send job), hook refuses tenant links on non-tenant hosts, Admins tab shows invite state | 2026-09-29 | c4e1fcb | Needs Review | [260929-g0s-fix-first-admin-invite-race-and-show-inv](./quick/260929-g0s-fix-first-admin-invite-race-and-show-inv/) |
+| 260929-ka5 | Story composer polls video readiness (new GET /v1/media/{assetId}, useAssetReadiness) so "Processando o vídeo…" clears at ready; failed video blocks Publicar; copy says you can already publish | 2026-09-29 | c1773a3 | Needs Review | [260929-ka5-story-composer-polls-video-readiness-ins](./quick/260929-ka5-story-composer-polls-video-readiness-ins/) |
 
 ### Roadmap Evolution
 
