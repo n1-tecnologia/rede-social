@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { fromDrizzle, PgBoss } from 'pg-boss';
 import type { Tx } from '../../db/tenant-tx';
 import { env } from '../env';
+import { bossConnectionString } from './connection';
 
 /**
  * pg-boss wiring (discretion item resolved in 01-07).
@@ -44,7 +45,7 @@ export type CreateBossOptions = {
  */
 export function createBoss(opts: CreateBossOptions): PgBoss {
   return new PgBoss({
-    connectionString: opts.connectionString,
+    connectionString: bossConnectionString(opts.connectionString),
     schema: 'pgboss',
     migrate: false,
     max: opts.max ?? 2,
