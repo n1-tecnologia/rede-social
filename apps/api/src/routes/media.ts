@@ -14,6 +14,7 @@ import { publicWebOrigin } from '@rede-social/core/server/env';
 import {
   completeUpload,
   deleteAsset,
+  getAsset,
   listAssets,
   playbackTokens,
   serveVariant,
@@ -36,6 +37,9 @@ import { createOpenApiApp } from '../http/openapi';
  * REGISTRATION ORDER IS PART OF THE CONTRACT (Hono matches in declaration order): `GET /` and
  * `GET /{assetId}/playback` are declared before `GET /{assetId}/{variant}`, otherwise `playback`
  * would be matched as a `{variant}` and answer a 400 from the variant regex instead of a token.
+ * `GET /{assetId}` (quick-260929-ka5) sits right after the list: it is ONE segment, so it can never
+ * shadow `/{assetId}/playback` or `/{assetId}/{variant}`. `/uploads` has no GET, so `GET /uploads`
+ * reaches it and fails the uuid param with a 400.
  */
 const media = createOpenApiApp();
 media.use('*', requireAuth);
@@ -68,6 +72,21 @@ const listRoute = createRoute({
     ),
     403: envelope(
       'FORBIDDEN — the asset list is an admin surface in V1: only an `admin_tenant` may enumerate what the community has uploaded. Checked before any tenant consideration',
+    ),
+  },
+});
+
+const getAssetRoute = createRoute({
+  method: 'get',
+  path: '/{assetId}',
+  request: { params: assetParams },
+  responses: {
+    200: assetResponse(
+      "One asset, in ANY live status (pending, processing, ready, failed, rejected), for the asset's uploader or an `admin_tenant` of the caller's community. Answered with Cache-Control: no-store because the status changes while a video transcodes: this is what the story composer polls after a provider hand-off",
+    ),
+    400: envelope('VALIDATION_FAILED — the id is not a uuid'),
+    404: envelope(
+      "NOT_FOUND — one identical bare body for an unknown id, another community's asset, a soft-deleted asset, or a fellow member's asset. No details payload and never a tenant name",
     ),
   },
 });
@@ -165,6 +184,15 @@ export const mediaRoutes = media
     const page = await listAssets(ctx, c.req.valid('query'));
     c.header('Cache-Control', 'no-store');
     return c.json(page, 200);
+  })
+  // One segment: it cannot shadow the two-segment `/{assetId}/playback` or `/{assetId}/{variant}`.
+  .openapi(getAssetRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const { assetId } = c.req.valid('param');
+    const asset = await getAsset(ctx, assetId);
+    // The status moves while a video transcodes: a cached answer would freeze the composer's poll.
+    c.header('Cache-Control', 'no-store');
+    return c.json(asset, 200);
   })
   // BEFORE `/{assetId}/{variant}`: Hono matches in registration order, so declaring the literal
   // `playback` segment first is what stops the variant route from swallowing it as a `{variant}`.

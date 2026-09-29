@@ -1,7 +1,9 @@
 import {
   MEDIA_LIST_PAGE_SIZE,
+  type MediaAsset,
   type MediaList,
   type MediaPlayback,
+  mediaAssetSchema,
   mediaListSchema,
   mediaPlaybackSchema,
 } from '@rede-social/contracts/media';
@@ -13,7 +15,8 @@ import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
  * `GET /v1/media` and `GET /v1/media/{assetId}/playback` for the admin media screen (MEDIA-03),
  * in `lib/profile.ts`'s conventions: ONE implementation shared by the server page and the server
  * actions, so the first page and "Carregar mais" can never disagree about the page size or the
- * tenant the request is scoped to.
+ * tenant the request is scoped to. `GET /v1/media/{assetId}` (quick-260929-ka5) is the single-asset
+ * read the story composer polls while an uploaded video transcodes.
  *
  * `apiFetch` is what keeps this honest about tenancy: the caller's session and the browser's host
  * travel with the request and the API re-derives the tenant from them, so nothing handed in here
@@ -82,4 +85,14 @@ export async function getPlaybackTokens(assetId: string): Promise<MediaPlayback>
   const res = await apiFetch(`/v1/media/${encodeURIComponent(assetId)}/playback`);
   if (!res.ok) throw await apiError(res);
   return mediaPlaybackSchema.parse(await res.json());
+}
+
+/**
+ * ONE asset in whatever live status it is in — the uploader's or the admin's own read (quick-260929-ka5).
+ * Every miss (unknown, foreign, soft-deleted, a fellow member's) is the API's same bare 404.
+ */
+export async function getMediaAsset(assetId: string): Promise<MediaAsset> {
+  const res = await apiFetch(`/v1/media/${encodeURIComponent(assetId)}`);
+  if (!res.ok) throw await apiError(res);
+  return mediaAssetSchema.parse(await res.json());
 }

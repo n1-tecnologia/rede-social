@@ -468,6 +468,11 @@ async function loadOwnAsset(ctx: Ctx, assetId: string): Promise<AssetRow | undef
   });
 }
 
+/** The asset's UPLOADER, or the community's admin: the one intra-tenant rule both lanes share. */
+function isOwnerOrAdmin(ctx: Ctx, row: AssetRow): boolean {
+  return row.ownerUserId === ctx.userId || ctx.role === 'admin_tenant';
+}
+
 /**
  * The intra-tenant write predicate for an asset: its UPLOADER, or the community's admin (T-03-50).
  *
@@ -486,7 +491,7 @@ async function loadOwnAsset(ctx: Ctx, assetId: string): Promise<AssetRow | undef
  * collection, with no id in the request, so its refusal discloses nothing about any particular row.
  */
 function assertMayRetire(ctx: Ctx, row: AssetRow): void {
-  if (row.ownerUserId === ctx.userId || ctx.role === 'admin_tenant') return;
+  if (isOwnerOrAdmin(ctx, row)) return;
   log.warn(
     {
       event: 'media.retire_refused',
@@ -498,6 +503,39 @@ function assertMayRetire(ctx: Ctx, row: AssetRow): void {
     'a member tried to retire an asset they do not own',
   );
   throw new ApiError(404, 'NOT_FOUND');
+}
+
+/**
+ * `GET /v1/media/{assetId}` (quick-260929-ka5) — ONE asset, in whatever live status it is in, for its
+ * UPLOADER or the community's admin. It exists for the story composer's readiness poll: after a video
+ * is handed to the provider, the composer re-reads the row until it is `ready`, `failed` or
+ * `rejected` (the 2026-09-29 incident, where the composer said "Processando" forever). No status is
+ * filtered out on purpose: the uploader must be able to SEE a `failed`/`rejected` video to be told why.
+ *
+ * Why owner-or-admin and not every member: the list is admin-only (T-03-48), and `GET /v1/members`
+ * publishes every member's `avatarAssetId`, so a member-wide by-id read would be a metadata oracle
+ * over the whole directory (sizes, dimensions, upload times of other people's photos). This mirrors
+ * the delete lane's rule (`assertMayRetire`, T-03-50) and its ONE-404 vocabulary: an unknown id,
+ * another community's asset (invisible to the tenant lane, so structural), a soft-deleted row and a
+ * fellow member's asset all answer the same bare `404 NOT_FOUND` with no details payload.
+ */
+export async function getAsset(ctx: Ctx, assetId: string): Promise<MediaAsset> {
+  const row = await loadOwnAsset(ctx, assetId);
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  if (!isOwnerOrAdmin(ctx, row)) {
+    log.warn(
+      {
+        event: 'media.read_refused',
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        requestId: ctx.requestId,
+        assetId: row.id,
+      },
+      'a member tried to read an asset they do not own',
+    );
+    throw new ApiError(404, 'NOT_FOUND');
+  }
+  return assetView(row);
 }
 
 /**

@@ -1,15 +1,18 @@
 'use server';
 
 import {
+  MEDIA_ISSUES,
   type MediaAsset,
+  type MediaIssue,
   type MediaPlayback,
+  type MediaStatus,
   mediaListQuerySchema,
 } from '@rede-social/contracts/media';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import { getMediaAssets, getPlaybackTokens } from '@/lib/media';
+import { getMediaAsset, getMediaAssets, getPlaybackTokens } from '@/lib/media';
 
 /**
  * Server actions of the admin media library (MEDIA-03), in `membros/actions.ts`'s conventions: the
@@ -91,6 +94,51 @@ export async function fetchPlaybackTokenAction(assetId: string): Promise<Playbac
     }
     if (!refusal && !(error instanceof ApiClientError && error.status === 409)) {
       console.error('media.playback_token_failed', { error: String(error) });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+export type AssetStatusResult =
+  | { ok: true; status: MediaStatus; issue: MediaIssue | null }
+  | { ok: false; code: 'notFound' | 'generic' };
+
+const isMediaIssue = (value: string | null): value is MediaIssue =>
+  value !== null && (MEDIA_ISSUES as readonly string[]).includes(value);
+
+/**
+ * The story composer's readiness poll (quick-260929-ka5): the current status of ONE asset the caller
+ * uploaded (or, for an admin, any asset of the community), read every few seconds after a video is
+ * handed to the provider until it is `ready`, `failed` or `rejected`.
+ *
+ * It runs on a timer, so it must NEVER revalidate or refresh anything — it only reads.
+ *
+ * Only the status and a CLOSED `MediaIssue` cross to the client: a provider's raw `failureReason`
+ * string is dropped to `null` (T-03-51). A 404 is an expected poll outcome (the video was removed),
+ * answered `notFound` without a log line; a session refusal becomes a navigation OUTSIDE the
+ * try/catch (Next 16: `redirect()` throws); anything else is logged and answered `generic`.
+ */
+export async function fetchAssetStatusAction(assetId: string): Promise<AssetStatusResult> {
+  const id = assetIdSchema.safeParse(assetId);
+  if (!id.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: AssetStatusResult = { ok: false, code: 'generic' };
+  try {
+    const asset = await getMediaAsset(id.data);
+    result = {
+      ok: true,
+      status: asset.status,
+      issue: isMediaIssue(asset.failureReason) ? asset.failureReason : null,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 404) {
+      result = { ok: false, code: 'notFound' };
+    } else {
+      if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+      if (!refusal) console.error('media.asset_status_failed', { error: String(error) });
     }
   }
 

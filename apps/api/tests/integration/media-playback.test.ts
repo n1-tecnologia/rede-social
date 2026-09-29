@@ -1,4 +1,4 @@
-import { MEDIA_LIST_PAGE_SIZE } from '@rede-social/contracts/media';
+import { MEDIA_LIST_PAGE_SIZE, mediaAssetSchema } from '@rede-social/contracts/media';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
@@ -18,6 +18,8 @@ import { adminSql, api, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
  *    distinguishable code and is reachable only for the caller's own still-transcoding asset —
  *    an unknown id, an image, a failed row and ANOTHER COMMUNITY's ready video all take the same
  *    bare 404 with no details payload (T-03-46);
+ *  - `GET /v1/media/{assetId}` (quick-260929-ka5) answers one asset in any live status, no-store,
+ *    to its uploader or the admin only; every other miss is the same bare 404 (T-03-50);
  *  - `GET /v1/media` is `admin_tenant`-only (403 for a member, checked before any tenant
  *    consideration, T-03-48), lists the caller's own assets newest-first, pages by the shared
  *    keyset cursor, and never contains another community's asset id.
@@ -446,5 +448,102 @@ describe('the fake provider keeps the seam honest', () => {
     expect(body.playbackId).toBe(`fake-playback-${assetId}`);
 
     await adminSql`delete from public.media_provider_events where id = ${event.id}`;
+  });
+});
+
+describe('GET /v1/media/{assetId} — one asset, for its uploader or the admin (quick-260929-ka5)', () => {
+  const read = (assetId: string, token: string) =>
+    api.request(`/v1/media/${assetId}`, { headers: authed(token) });
+
+  it('answers the admin a processing video as a mediaAsset body with Cache-Control: no-store', async () => {
+    const assetId = await seedVideo(demoTenantId, DEMO_ADMIN, { status: 'processing' });
+
+    const res = await read(assetId, demoAdminToken);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = mediaAssetSchema.parse(await res.json());
+    expect(body.id).toBe(assetId);
+    expect(body.status).toBe('processing');
+    expect(body.url).toBe(`/v1/media/${assetId}/original`);
+  });
+
+  it('shows every terminal status, including the failure reason of a rejected video', async () => {
+    for (const status of ['ready', 'failed'] as const) {
+      const assetId = await seedVideo(demoTenantId, DEMO_ADMIN, {
+        status,
+        playbackId: status === 'ready' ? `fake-playback-read-${status}` : null,
+      });
+      const res = await read(assetId, demoAdminToken);
+      expect(res.status).toBe(200);
+      expect(mediaAssetSchema.parse(await res.json()).status).toBe(status);
+    }
+
+    const rejected = await seedVideo(demoTenantId, DEMO_ADMIN, { status: 'rejected' });
+    await adminSql`
+      update public.media_assets set failure_reason = 'duration_too_long'
+       where id = ${rejected}::uuid`;
+    const res = await read(rejected, demoAdminToken);
+    expect(res.status).toBe(200);
+    const body = mediaAssetSchema.parse(await res.json());
+    expect(body.status).toBe('rejected');
+    expect(body.failureReason).toBe('duration_too_long');
+  });
+
+  it('is readable by its uploader and by the admin, never by a fellow member (T-03-50)', async () => {
+    const memberOwned = await seedVideo(demoTenantId, DEMO_MEMBER, { status: 'processing' });
+    expect((await read(memberOwned, demoMemberToken)).status).toBe(200);
+    expect((await read(memberOwned, demoAdminToken)).status).toBe(200);
+
+    const adminOwned = await seedVideo(demoTenantId, DEMO_ADMIN, { status: 'processing' });
+    const res = await read(adminOwned, demoMemberToken);
+    expect(res.status).toBe(404);
+    const error = await envelope(res);
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.details).toBeUndefined();
+  });
+
+  it("another community's asset is the same bare 404, with its positive control (T-03-56)", async () => {
+    const assetId = await seedVideo(demoTenantId, DEMO_ADMIN, {
+      status: 'processing',
+      filename: 'so-da-demo-leitura.mp4',
+    });
+
+    // Positive control: the id is real and readable in its own community.
+    expect((await read(assetId, demoAdminToken)).status).toBe(200);
+
+    const res = await read(assetId, labAdminToken);
+    expect(res.status).toBe(404);
+    const raw = await res.text();
+    expect(raw).not.toContain('so-da-demo-leitura');
+    const error = (JSON.parse(raw) as Envelope).error;
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.details).toBeUndefined();
+  });
+
+  it('an unknown id and a soft-deleted asset both take the same bare 404', async () => {
+    const deleted = await seedVideo(demoTenantId, DEMO_ADMIN, { status: 'processing' });
+    await adminSql`
+      update public.media_assets set status = 'deleted', deleted_at = now()
+       where id = ${deleted}::uuid`;
+
+    for (const assetId of [crypto.randomUUID(), deleted]) {
+      const res = await read(assetId, demoAdminToken);
+      expect(res.status).toBe(404);
+      const error = await envelope(res);
+      expect(error.code).toBe('NOT_FOUND');
+      expect(error.details).toBeUndefined();
+    }
+  });
+
+  it('a malformed id is a 400, and the two-segment playback route is undisturbed', async () => {
+    const malformed = await read('not-a-uuid', demoAdminToken);
+    expect(malformed.status).toBe(400);
+    expect((await envelope(malformed)).code).toBe('VALIDATION_FAILED');
+
+    const assetId = await seedVideo(demoTenantId, DEMO_ADMIN, { status: 'processing' });
+    const playback = await api.request(`/v1/media/${assetId}/playback`, {
+      headers: authed(demoAdminToken),
+    });
+    expect(playback.status).toBe(409);
   });
 });
