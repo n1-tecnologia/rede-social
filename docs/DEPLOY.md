@@ -47,8 +47,20 @@ itself is not edited here.
   "Migrations never run from a developer machine"; every later migration goes through
   `deploy-api.yml`. `seed-prod.yml` was removed for the same reason: `pnpm db:seed` creates the demo
   tenants, and production must only ever hold the super_admin.
-- **GCP billing blocks Cloud Run.** At the time of writing the billing account is closed, so the
-  `api` and `worker` services cannot be deployed until billing is restored.
+- **First Cloud Run deploy (2026-09-28).** Billing account `cobrancas-tech` is linked. `api` serves
+  at `https://api-253040968821.southamerica-east1.run.app` (the Vercel `API_URL`), `worker` is
+  private. The first image was built with Cloud Build from a `git archive` of HEAD (tracked files
+  only) on the default machine — `E2_HIGHCPU_8` has no quota in `southamerica-east1` on a new
+  project — and deployed with `gcloud run deploy`; later images come from `deploy-api.yml`.
+- **`api` is public through `--no-invoker-iam-check`, not `--allow-unauthenticated`.** The
+  `n1marketingdigital.com.br` organization enforces `iam.allowedPolicyMemberDomains` (Domain
+  restricted sharing), which refuses an `allUsers` invoker binding.
+- **`PLATFORM_HOST` is also set on `api` and `worker`** (`env_vars` in `deploy-api.yml`) so a tenant
+  attach of the platform host is refused (D-34).
+- **The worker's `worker-database-url-prod` ends in `?sslmode=require&uselibpqcompat=true`.**
+  node-postgres (pg-boss) treats a bare `sslmode=require` as `verify-full` and fails on Supabase's
+  chain with `SELF_SIGNED_CERT_IN_CHAIN`; `uselibpqcompat=true` restores libpq semantics (encrypted,
+  no CA check). `api-database-url-prod` (postgres.js) keeps `?sslmode=require`.
 
 ## Documents
 

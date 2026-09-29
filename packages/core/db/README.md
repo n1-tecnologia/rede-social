@@ -35,7 +35,7 @@ The lane code is identical in every environment; only the URL changes.
 | Local (target) | `postgres://api_user:postgres@127.0.0.1:54329/postgres` | Supabase CLI pooler (`[db.pooler]`, `pool_mode = "transaction"`) | `prepare: false`, `max: 5` |
 | Local (current contingency, see "Local run") | `postgres://api_user:postgres@127.0.0.1:54322/postgres` | direct Postgres port | same |
 | Staging / production API | `postgres://api_user.<project-ref>:<API_DB_PASSWORD>@aws-0-sa-east-1.pooler.supabase.com:6543/postgres` | Supavisor **transaction** mode (username is `[ROLE].[PROJECT-REF]`) | `prepare: false`, `max` ≤ 5 per Cloud Run instance |
-| Worker (pg-boss) | `postgres://api_user.<project-ref>:<API_DB_PASSWORD>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres` | Supavisor **session** mode | `max: 2` (pg-boss keeps long-lived listeners) |
+| Worker (pg-boss) | `postgres://api_user.<project-ref>:<API_DB_PASSWORD>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require&uselibpqcompat=true` | Supavisor **session** mode | `max: 2` (pg-boss keeps long-lived listeners); `uselibpqcompat=true` is required — node-postgres treats bare `sslmode=require` as verify-full and fails with `SELF_SIGNED_CERT_IN_CHAIN` |
 | Migrations (CI only) | `postgres://postgres.<project-ref>:<DB_PASSWORD>@...:5432/postgres` via `supabase db push` | session | never used by the API |
 
 `prepare: false` stays on in every mode: prepared statements are unsupported in transaction mode, and

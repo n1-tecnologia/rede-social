@@ -138,11 +138,14 @@ jobs:
           env_vars: |-
             ROLE=api
             LOG_LEVEL=info
+            PLATFORM_HOST=rede-social-woad.vercel.app
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-prod:latest
             SUPABASE_URL=supabase-url-prod:latest
-          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --allow-unauthenticated --port=8080
+          # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
+          # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
+          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --no-invoker-iam-check --port=8080
 
       - uses: google-github-actions/deploy-cloudrun@v3
         with:
@@ -152,6 +155,7 @@ jobs:
           env_vars: |-
             ROLE=worker
             LOG_LEVEL=info
+            PLATFORM_HOST=rede-social-woad.vercel.app
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             BOSS_DATABASE_URL=worker-database-url-prod:latest
