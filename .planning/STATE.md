@@ -4,10 +4,10 @@ current_phase: 6
 current_phase_name: Events
 status: executing
 stopped_at: Completed 06-09-PLAN.md
-last_updated: "2026-09-28T19:43:51.264Z"
+last_updated: "2026-09-29T00:21:04.716Z"
 last_activity: 2026-09-28
 last_activity_desc: "06-09 complete: tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS (l) Secrets inside a tenant, phase6-smoke witness, pnpm verify green (e2e 555/0 failed, e2e:pwa 46 with events-prefetch). Phase 6: 9/9 plans; verify-work + phone UAT (blocked on 01.1) next"
-state_head: 6da7acd52da31cc51aeb1809316c9c192d098cde
+state_head: aca646f7d86ff06d6d85dfe328f14a7846b23889
 progress:
   total_phases: 15
   completed_phases: 0
@@ -520,6 +520,7 @@ None yet.
 | 260928-s4y | Adapt the deploy pipeline to the production-only setup (01.1 deviations): `[remotes.production]` auth override in config.toml (site URL, one redirect, otp 24 h, Send Email Hook off), workflows on `master`, staging job + keepalive + seed-prod removed, DEPLOY.md "Decisions (2026-09-28)" | 2026-09-28 | 5ca701b | — | [260928-s4y-adapt-deploy-pipeline-to-production-only](./quick/260928-s4y-adapt-deploy-pipeline-to-production-only/) |
 | 260928-t3z | Make the API production bundle load under Node (first Cloud Run boot crashed on `Dynamic require of "assert"` from bundled undici): tsup `createRequire` banner, `removeNodeProtocol: false`, `sharp` external + direct apps/api dependency | 2026-09-28 | 1f36d25 | — | [260928-t3z-fix-api-production-bundle-dynamic-requir](./quick/260928-t3z-fix-api-production-bundle-dynamic-requir/) |
 | 5 | add web env template (apps/web) listing the variables the web app reads | 2026-09-28 | 6da7acd | — | — |
+| 8 | Align deploy-api.yml and DEPLOY.md with the first Cloud Run deploy (--no-invoker-iam-check, PLATFORM_HOST on api/worker, pg-boss uselibpqcompat) | 2026-09-29 | aca646f | — | — |
 
 ### Roadmap Evolution
 
