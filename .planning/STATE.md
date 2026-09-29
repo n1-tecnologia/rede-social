@@ -4,10 +4,10 @@ current_phase: 6
 current_phase_name: Events
 status: executing
 stopped_at: Completed 06-09-PLAN.md
-last_updated: "2026-09-29T12:51:09.119Z"
+last_updated: "2026-09-29T12:55:03.532Z"
 last_activity: 2026-09-28
 last_activity_desc: "06-09 complete: tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS (l) Secrets inside a tenant, phase6-smoke witness, pnpm verify green (e2e 555/0 failed, e2e:pwa 46 with events-prefetch). Phase 6: 9/9 plans; verify-work + phone UAT (blocked on 01.1) next"
-state_head: c1e83489a5b8e4683e515a83c7a556a4ca495ebf
+state_head: 5b4556df17879135bdf3e2dc9ea51e632bbcc8d0
 progress:
   total_phases: 15
   completed_phases: 0
@@ -522,6 +522,7 @@ None yet.
 | 5 | add web env template (apps/web) listing the variables the web app reads | 2026-09-28 | 6da7acd | — | — |
 | 8 | Align deploy-api.yml and DEPLOY.md with the first Cloud Run deploy (--no-invoker-iam-check, PLATFORM_HOST on api/worker, pg-boss uselibpqcompat) | 2026-09-29 | aca646f | — | — |
 | 9 | CI build step gets local-stack env placeholders (first GitHub run failed: web env validated before .env.local exists) | 2026-09-29 | c1e8348 | — | — |
+| 10 | CI generates the local ES256 signing key in place (redirect onto signing_keys_path emptied the file the CLI reads) | 2026-09-29 | 5b4556d | — | — |
 
 ### Roadmap Evolution
 
