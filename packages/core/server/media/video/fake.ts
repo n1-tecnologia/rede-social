@@ -14,6 +14,7 @@ import {
   type VideoProvider,
   VideoProviderError,
   type VideoProviderEvent,
+  type VideoUploadState,
 } from './types';
 import { normaliseProviderEvent, VIDEO_EVENT_TYPES } from './wire';
 
@@ -68,7 +69,16 @@ export function signFakeVideoWebhook(rawBody: string, timestampSeconds: number):
  * and the 03-08 sweeper's provider-delete path; `failDeleteAsset` is the forced-refusal switch that
  * proves the sweeper leaves a RE-COLLECTABLE row when a provider says no, rather than orphaning the
  * vendor-side asset behind a deleted row.
+ *
+ * `uploadState` drives `getUploadState`, the reconciliation lookup (quick-260929-ltf), and
+ * `uploadStateCalls` records every id it was asked about. The default answer is `waiting` ON PURPOSE:
+ * the fake's own transcode is the deferred synthetic ready job above, so a reconciliation nobody
+ * configured must be a no-op, and no existing suite changes behaviour.
  */
+const waitingUpload = async (_providerUploadId: string): Promise<VideoUploadState> => ({
+  state: 'waiting',
+});
+
 export const fakeVideoInternals = {
   durationSeconds: DEFAULT_DURATION_SECONDS,
   aspectRatio: DEFAULT_ASPECT_RATIO,
@@ -76,6 +86,8 @@ export const fakeVideoInternals = {
   failDeleteAsset: false,
   signUpload: (key: string): Promise<{ signedUrl: string }> => signUpload(key),
   scheduleReady: (event: VideoProviderEvent): Promise<void> => enqueueSyntheticReady(event),
+  uploadState: waitingUpload as (providerUploadId: string) => Promise<VideoUploadState>,
+  uploadStateCalls: [] as string[],
 };
 
 /** Restores the module defaults; every test that touches the seam calls this in a `finally`. */
@@ -86,6 +98,8 @@ export function resetFakeVideoInternals(): void {
   fakeVideoInternals.failDeleteAsset = false;
   fakeVideoInternals.signUpload = (key) => signUpload(key);
   fakeVideoInternals.scheduleReady = (event) => enqueueSyntheticReady(event);
+  fakeVideoInternals.uploadState = waitingUpload;
+  fakeVideoInternals.uploadStateCalls = [];
 }
 
 /**
@@ -129,6 +143,11 @@ export function createFakeVideoProvider(): VideoProvider {
       const providerUploadId = `fake-${input.assetId}`;
       await fakeVideoInternals.scheduleReady(syntheticReadyEvent(input.assetId, providerUploadId));
       return { providerUploadId, uploadUrl: signedUrl };
+    },
+
+    async getUploadState(providerUploadId: string): Promise<VideoUploadState> {
+      fakeVideoInternals.uploadStateCalls.push(providerUploadId);
+      return await fakeVideoInternals.uploadState(providerUploadId);
     },
 
     async getAsset(providerAssetId: string): Promise<VideoAssetInfo> {

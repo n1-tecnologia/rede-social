@@ -8,6 +8,7 @@ import {
   type VideoProvider,
   VideoProviderError,
   type VideoProviderEvent,
+  type VideoUploadState,
 } from './types';
 import { normaliseProviderEvent } from './wire';
 
@@ -59,8 +60,30 @@ function toProviderError(error: unknown): VideoProviderError {
 const asString = (value: unknown): string | null =>
   typeof value === 'string' && value.length > 0 ? value : null;
 
+/**
+ * Request options for the reconciliation lookups (quick-260929-ltf). They run inside
+ * `GET /v1/media/{assetId}`, so they must stay fast: a 4 s ceiling and no SDK retry — the browser's
+ * readiness poll already retries on its own backoff, and the hourly sweeper retries too.
+ */
+const LOOKUP = { timeout: 4_000, maxRetries: 0 } as const;
+
 export function createMuxVideoProvider(config: MuxVideoProviderConfig): VideoProvider {
   const mux = new Mux({ tokenId: config.tokenId, tokenSecret: config.tokenSecret });
+
+  async function retrieveAsset(
+    providerAssetId: string,
+    options?: typeof LOOKUP,
+  ): Promise<VideoAssetInfo> {
+    const asset = await mux.video.assets.retrieve(providerAssetId, options);
+    const playbackIds = asset.playback_ids ?? [];
+    return {
+      providerAssetId: asset.id,
+      status: asset.status === 'ready' || asset.status === 'errored' ? asset.status : 'preparing',
+      playbackId: asString(playbackIds[0]?.id),
+      durationSeconds: typeof asset.duration === 'number' ? Math.round(asset.duration) : null,
+      aspectRatio: asString(asset.aspect_ratio),
+    };
+  }
 
   return {
     name: 'mux',
@@ -92,18 +115,25 @@ export function createMuxVideoProvider(config: MuxVideoProviderConfig): VideoPro
       }
     },
 
+    async getUploadState(providerUploadId: string): Promise<VideoUploadState> {
+      try {
+        // The upload id is what `startUpload` persisted; the upload names its asset once Mux has
+        // created one. Two documented reads, no listing, no reliance on the correlation echo.
+        const upload = await mux.video.uploads.retrieve(providerUploadId, LOOKUP);
+        const assetId = asString(upload.asset_id);
+        if (assetId) return { state: 'asset', asset: await retrieveAsset(assetId, LOOKUP) };
+        if (upload.status === 'errored') return { state: 'errored' };
+        // `waiting`, and also `cancelled`/`timed_out`: the webhook path applies nothing for those.
+        return { state: 'waiting' };
+      } catch (error) {
+        if (error instanceof VideoProviderError) throw error;
+        throw toProviderError(error);
+      }
+    },
+
     async getAsset(providerAssetId: string): Promise<VideoAssetInfo> {
       try {
-        const asset = await mux.video.assets.retrieve(providerAssetId);
-        const playbackIds = asset.playback_ids ?? [];
-        return {
-          providerAssetId: asset.id,
-          status:
-            asset.status === 'ready' || asset.status === 'errored' ? asset.status : 'preparing',
-          playbackId: asString(playbackIds[0]?.id),
-          durationSeconds: typeof asset.duration === 'number' ? Math.round(asset.duration) : null,
-          aspectRatio: asString(asset.aspect_ratio),
-        };
+        return await retrieveAsset(providerAssetId);
       } catch (error) {
         throw toProviderError(error);
       }

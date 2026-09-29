@@ -45,7 +45,10 @@ export type VideoDirectUpload = {
   uploadUrl: string;
 };
 
-/** A provider asset as the provider currently sees it — used by a future reconciliation job. */
+/**
+ * A provider asset as the provider currently sees it. Read by reconciliation (quick-260929-ltf)
+ * through `getUploadState`, which turns it into the same normalised event a webhook would carry.
+ */
 export type VideoAssetInfo = {
   providerAssetId: string;
   status: 'preparing' | 'ready' | 'errored';
@@ -53,6 +56,19 @@ export type VideoAssetInfo = {
   durationSeconds: number | null;
   aspectRatio: string | null;
 };
+
+/**
+ * What the provider currently knows about a direct upload, read by reconciliation when a webhook is
+ * late (quick-260929-ltf):
+ *  - `waiting` — no asset yet. It also covers a cancelled or timed-out upload: the webhook path
+ *    applies nothing for those either, and the 24 h sweeper collects the pending row;
+ *  - `errored` — the upload itself failed;
+ *  - `asset` — the upload produced an asset, in whatever state the provider has it.
+ */
+export type VideoUploadState =
+  | { state: 'waiting' }
+  | { state: 'errored' }
+  | { state: 'asset'; asset: VideoAssetInfo };
 
 /** The three tokens a signed playback needs. 03-07 wraps them in `GET /v1/media/{id}/playback`. */
 export type VideoPlaybackTokens = {
@@ -91,8 +107,8 @@ export interface VideoProviderEvent {
 }
 
 /**
- * Streaming-vendor side of a member video: create a direct upload, read an asset, delete an asset,
- * mint playback tokens, verify an inbound webhook. Nothing else (API coverage decision, 03-06):
+ * Streaming-vendor side of a member video: create a direct upload, read an upload's state, read an
+ * asset, delete an asset, mint playback tokens, verify an inbound webhook. Nothing else (API coverage decision, 03-06):
  * never live streaming, never static renditions, never DRM, never analytics.
  *
  * `verifyWebhook` is the only authentication of `POST /v1/webhooks/mux`, so it must THROW on a bad,
@@ -101,6 +117,13 @@ export interface VideoProviderEvent {
 export interface VideoProvider {
   readonly name: 'fake' | 'mux';
   createDirectUpload(input: VideoDirectUploadInput): Promise<VideoDirectUpload>;
+  /**
+   * The state of a direct upload, by the id `startUpload` recorded in `provider_asset_id` while the
+   * asset is pending (the ready transition later overwrites it with the provider's ASSET id). It
+   * exists for reconciliation when a webhook is late (quick-260929-ltf) and must throw only a
+   * `VideoProviderError`.
+   */
+  getUploadState(providerUploadId: string): Promise<VideoUploadState>;
   getAsset(providerAssetId: string): Promise<VideoAssetInfo>;
   deleteAsset(providerAssetId: string): Promise<void>;
   signPlayback(

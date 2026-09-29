@@ -55,6 +55,7 @@ import {
 } from './storage';
 import { deriveVariants, probeSize } from './variants';
 import { videoProvider } from './video/index';
+import { reconcileVideoAsset } from './video/reconcile';
 
 /**
  * The media broker (MEDIA-01, MEDIA-02, TENANT-04) — a tenant-lane service that returns upload
@@ -97,6 +98,10 @@ type AssetRow = {
   kind: string;
   purpose: string;
   status: string;
+  /** Who brokers the bytes; read by reconciliation only, never by `assetView`. */
+  provider: string;
+  /** The provider's UPLOAD id while a video is pending, its ASSET id once ready. Never in the payload. */
+  providerAssetId: string | null;
   mime: string;
   bytes: number;
   width: number | null;
@@ -117,6 +122,8 @@ const ASSET_COLUMNS = {
   kind: mediaAssets.kind,
   purpose: mediaAssets.purpose,
   status: mediaAssets.status,
+  provider: mediaAssets.provider,
+  providerAssetId: mediaAssets.providerAssetId,
   mime: mediaAssets.mime,
   bytes: mediaAssets.bytes,
   width: mediaAssets.width,
@@ -518,6 +525,13 @@ function assertMayRetire(ctx: Ctx, row: AssetRow): void {
  * the delete lane's rule (`assertMayRetire`, T-03-50) and its ONE-404 vocabulary: an unknown id,
  * another community's asset (invisible to the tenant lane, so structural), a soft-deleted row and a
  * fellow member's asset all answer the same bare `404 NOT_FOUND` with no details payload.
+ *
+ * Reconciliation (quick-260929-ltf): AFTER the owner-or-admin gate, a `pending`/`processing` video
+ * brokered by the active provider, carrying its upload id and older than the grace, is checked with
+ * the provider directly (`reconcileVideoAsset`, throttled per asset). When that applies a
+ * transition — through the webhook's own `kernel.media-provider-event` handler — the row is re-read
+ * so this same response already carries the new status. A provider error never fails the read: the
+ * current row is answered and the webhook stays the primary path.
  */
 export async function getAsset(ctx: Ctx, assetId: string): Promise<MediaAsset> {
   const row = await loadOwnAsset(ctx, assetId);
@@ -534,6 +548,10 @@ export async function getAsset(ctx: Ctx, assetId: string): Promise<MediaAsset> {
       'a member tried to read an asset they do not own',
     );
     throw new ApiError(404, 'NOT_FOUND');
+  }
+  if (await reconcileVideoAsset(row)) {
+    const fresh = await loadOwnAsset(ctx, assetId);
+    return assetView(fresh ?? row);
   }
   return assetView(row);
 }
