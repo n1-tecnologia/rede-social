@@ -11,9 +11,10 @@ import { fakeDomainProviderStats } from '@rede-social/core/server/domains/fake';
 import { DOMAIN_VERIFY_QUEUE } from '@rede-social/core/server/domains/types';
 import { domainVerifyJob } from '@rede-social/core/server/domains/verify-job';
 import { enqueueInTx, stopBoss } from '@rede-social/core/server/jobs/boss';
+import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { invalidateTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, authAdmin, signInAs } from './setup';
+import { adminSql, api, authAdmin, inviteSendJobsOf, runInviteSendJobs, signInAs } from './setup';
 
 /**
  * TENANT-07 / D-34 / D-35 / D-36 — custom domains through `/v1/platform/tenants/{id}/domains*`
@@ -21,7 +22,13 @@ import { adminSql, api, authAdmin, signInAs } from './setup';
  * instances the in-process app uses, so their ledgers/counters are inspectable here).
  *
  * Part 1 is the tracer: attach -> pending (404 on by-host) -> "Verificar agora" -> verified ->
- * by-host 200 -> first-admin invite sent -> allow-list entry present. Part 2 drives the
+ * by-host 200 -> allow-list entry present -> first-admin invite send SCHEDULED (one
+ * `kernel.invite-send` job, quick 260929-g0s; nothing is sent inline any more). Case 4b is the
+ * 2026-09-29 regression: the `.cliente.test` hosts of this file are outside the local GoTrue
+ * `additional_redirect_urls` — the local stand-in for an allow-list entry GoTrue has not applied
+ * yet — so GoTrue drops the invite's `redirect_to` and falls back to `site_url`; the Send Email Hook
+ * refuses that link (`redirect_host_not_tenant`) and the job fails for a retry: invite back to
+ * pending, no mail, `last_error = 'invite'`. Part 2 drives the
  * `kernel.domain-verify` handler directly (cadence, deadline, expiry, restart), then primary
  * switching + removal (D-35), the TENANT-07 edge ledger (idempotency, adjacency with a second
  * tenant, concurrency) and the assumption-delta invariants. Every tenant created here carries a
@@ -35,6 +42,22 @@ const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-soci
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
 
 type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
+
+const MAILPIT_URL = (process.env.MAILPIT_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
+
+/** How many Mailpit messages are addressed to `to` (search API; 0 when Mailpit is unreachable). */
+async function mailpitCount(to: string): Promise<number> {
+  const res = await fetch(
+    `${MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}&limit=20`,
+  );
+  if (!res.ok) return 0;
+  const { messages } = (await res.json()) as { messages?: unknown[] };
+  return messages?.length ?? 0;
+}
+
+/** The `kernel.invite-send` rows of `tenantId` keyed on `inviteId`. */
+const inviteJobsFor = async (tenantId: string, inviteId: string) =>
+  (await inviteSendJobsOf(tenantId)).filter((job) => job.singleton_key === inviteId);
 
 let superAdmin = '';
 const createdDomainIds: string[] = [];
@@ -88,6 +111,10 @@ async function tenantDetail(id: string) {
 /** Removes every `pd-…` tenant, its memberships and the auth users this file invited. */
 async function cleanup(): Promise<void> {
   await adminSql`
+    delete from pgboss.job_common
+     where name = 'kernel.invite-send' and data->>'tenantId' in
+       (select id::text from public.tenants where slug like 'pd-%')`;
+  await adminSql`
     delete from public.memberships where tenant_id in
       (select id from public.tenants where slug like 'pd-%')`;
   await adminSql`delete from public.tenants where slug like 'pd-%'`;
@@ -127,12 +154,13 @@ afterAll(async () => {
   await sqlClient.end();
 });
 
-describe('tracer — attach, verify, resolve, invite (D-34/D-36)', () => {
+describe('tracer — attach, verify, resolve, invite scheduled (D-34/D-36)', () => {
   const SLUG = `pd-tracer-${RUN}`.slice(0, 40);
   const HOST = `pd-test-${RUN}.cliente.test`;
   let tenantId = '';
   let adminEmail = '';
   let domainId = '';
+  let inviteId = '';
 
   it('1. a fresh tenant lists { domains: [], primaryHost: null } and its first-admin invite is pending', async () => {
     const created = await createThrowawayTenant(SLUG);
@@ -152,6 +180,7 @@ describe('tracer — attach, verify, resolve, invite (D-34/D-36)', () => {
 
     const detail = await tenantDetail(tenantId);
     expect(detail.invites[0]?.status).toBe('pending');
+    inviteId = detail.invites[0]?.id ?? '';
   });
 
   it('2. POST attaches the host normalised, pending, primary, with routing records, a ~7-day deadline and ONE waiting kernel.domain-verify job keyed by the domain id', async () => {
@@ -204,7 +233,7 @@ describe('tracer — attach, verify, resolve, invite (D-34/D-36)', () => {
     expect((await envelope(res)).code).toBe('TENANT_NOT_FOUND');
   });
 
-  it('4. "Verificar agora" verifies on the first check with the fake provider: by-host resolves with isPrimary + primaryHost, the invite flips to sent (one auth user) and the allow-list has the per-domain confirm entry', async () => {
+  it('4. "Verificar agora" verifies on the first check with the fake provider: by-host resolves with isPrimary + primaryHost, the allow-list has the per-domain confirm entry, and the invite stays pending with ONE kernel.invite-send job scheduled for it', async () => {
     const res = await platform(`/tenants/${tenantId}/domains/${domainId}/verify`, {
       method: 'POST',
     });
@@ -230,16 +259,33 @@ describe('tracer — attach, verify, resolve, invite (D-34/D-36)', () => {
     expect(body.primaryHost).toBe(HOST);
 
     const detail = await tenantDetail(tenantId);
-    expect(detail.invites[0]?.status).toBe('sent');
-    expect(detail.invites[0]?.sentAt).not.toBeNull();
+    expect(detail.invites[0]?.status).toBe('pending');
+    expect(detail.invites[0]?.sentAt).toBeNull();
     expect(detail.domains.map((d) => d.host)).toEqual([HOST]);
 
-    const { data } = await authAdmin().listUsers({ page: 1, perPage: 1000 });
-    const invited = data.users.filter((u) => u.email?.toLowerCase() === adminEmail);
-    expect(invited).toHaveLength(1);
-    expect(invited[0]?.invited_at).toBeTruthy();
+    const jobs = await inviteJobsFor(tenantId, inviteId);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.data).toEqual({ tenantId, inviteId });
 
     expect(localAllowListEntries.has(`https://${HOST}/auth/confirm**`)).toBe(true);
+  });
+
+  it('4b. the deferred send on a host GoTrue has not allowed reproduces the 2026-09-29 site_url fallback and is refused end-to-end: the job fails for a retry, the invite is pending again, no identity, no mail, last_error "invite"', async () => {
+    await expect(inviteSendJob.handler({ tenantId, inviteId })).rejects.toThrow();
+
+    const detail = await tenantDetail(tenantId);
+    expect(detail.invites[0]?.status).toBe('pending');
+    expect(detail.invites[0]?.sentAt).toBeNull();
+
+    // GoTrue creates the identity and calls the hook in ONE transaction: the hook's 500 rolls the
+    // invited user back, so nothing is left for the retry's identity pre-check to trip on.
+    const users = await adminSql<{ id: string }[]>`
+      select id from auth.users where lower(email) = ${adminEmail}`;
+    expect(users).toHaveLength(0);
+
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(await mailpitCount(adminEmail)).toBe(0);
+    expect((await domainRow(domainId))?.last_error).toBe('invite');
   });
 });
 
@@ -459,7 +505,7 @@ describe('primary switching and removal (D-35)', () => {
     expect((await domainRow(shared.domainC))?.verification_status).toBe('pending');
   });
 
-  it('13. idempotency: re-attaching the alias with different casing answers 200 with the same id and no provider call; verifying a verified host twice never resets verified_at, calls no provider and sends nothing new', async () => {
+  it('13. idempotency: re-attaching the alias with different casing answers 200 with the same id and no provider call; verifying a verified host twice never resets verified_at, calls no provider and schedules no second waiting send', async () => {
     const adds = fakeDomainProviderStats().addDomain;
     const res = await platform(`/tenants/${shared.tenantA}/domains`, {
       method: 'POST',
@@ -484,13 +530,14 @@ describe('primary switching and removal (D-35)', () => {
     expect(b.verifiedAt).toBe(a.verifiedAt);
     expect(fakeDomainProviderStats().verify).toBe(verifies);
 
-    const [sent] = await adminSql<{ n: string }[]>`
-      select count(*)::text as n from public.tenant_invites
-       where tenant_id = ${shared.tenantA}::uuid and status = 'sent'`;
-    expect(sent?.n).toBe('1');
-    const [users] = await adminSql<{ n: string }[]>`
-      select count(*)::text as n from auth.users where lower(email) = ${shared.adminA}`;
-    expect(users?.n).toBe('1');
+    const invites = await adminSql<{ id: string; status: string }[]>`
+      select id, status from public.tenant_invites where tenant_id = ${shared.tenantA}::uuid`;
+    expect(invites).toHaveLength(1);
+    expect(invites[0]?.status).not.toBe('sent');
+    const waiting = (await inviteJobsFor(shared.tenantA, invites[0]?.id ?? '')).filter(
+      (job) => job.state === 'created',
+    );
+    expect(waiting.length).toBeLessThanOrEqual(1);
   });
 });
 
@@ -534,7 +581,7 @@ describe('adjacency and concurrency — a second tenant (TENANT-07 edge ledger)'
     expect((await envelope(malformed)).code).toBe('VALIDATION_FAILED');
   });
 
-  it('15. concurrency: two "Verificar agora" and the job racing on B’s first host settle to ONE verified_at, one sent invite and one auth user', async () => {
+  it('15. concurrency: two "Verificar agora" and the job racing on B’s first host settle to ONE verified_at and ONE scheduled send for B’s invite (the short policy drops the racing duplicates); the invite is still pending', async () => {
     const res = await platform(`/tenants/${tenantB}/domains`, {
       method: 'POST',
       body: { host: RACE_HOST },
@@ -556,12 +603,15 @@ describe('adjacency and concurrency — a second tenant (TENANT-07 edge ledger)'
         from public.tenant_domains where id = ${raceId}::uuid`;
     expect(row).toEqual({ n: '1', verified: true });
 
-    const invites = await adminSql<{ status: string }[]>`
-      select status from public.tenant_invites where tenant_id = ${tenantB}::uuid`;
-    expect(invites).toEqual([{ status: 'sent' }]);
+    const invites = await adminSql<{ id: string; status: string }[]>`
+      select id, status from public.tenant_invites where tenant_id = ${tenantB}::uuid`;
+    expect(invites.map((invite) => invite.status)).toEqual(['pending']);
+    const jobs = await inviteJobsFor(tenantB, invites[0]?.id ?? '');
+    expect(jobs).toHaveLength(1);
+    expect(jobs.filter((job) => job.state === 'created').length).toBeLessThanOrEqual(1);
     const [users] = await adminSql<{ n: string }[]>`
       select count(*)::text as n from auth.users where lower(email) = ${adminB}`;
-    expect(users?.n).toBe('1');
+    expect(users?.n).toBe('0');
     expect((await byHost(RACE_HOST)).status).toBe(200);
   });
 
@@ -663,7 +713,7 @@ describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () 
     );
   });
 
-  it('18. the next run verifies the host (the fake answers OK now): verified_at set, last_error cleared, by-host 200, invite sent, and no further re-arm', async () => {
+  it('18. the next run verifies the host (the fake answers OK now): verified_at set, last_error cleared, by-host 200, the invite send scheduled (invite still pending), and no further verify re-arm', async () => {
     const waitingBefore = (await createdJobsOf(domainId)).length;
 
     await domainVerifyJob.handler({ domainId });
@@ -673,7 +723,9 @@ describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () 
     expect(row?.verified_at).not.toBeNull();
     expect(row?.last_error).toBeNull();
     expect((await byHost(HOST)).status).toBe(200);
-    expect((await tenantDetail(tenantId)).invites[0]?.status).toBe('sent');
+    const invite = (await tenantDetail(tenantId)).invites[0];
+    expect(invite?.status).toBe('pending');
+    expect(await inviteJobsFor(tenantId, invite?.id ?? '')).toHaveLength(1);
     expect((await createdJobsOf(domainId)).length).toBe(waitingBefore);
   });
 
@@ -752,7 +804,7 @@ describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () 
     expect(fakeDomainProviderStats().verify).toBe(verifies);
   });
 
-  it('21. WR-03 / D-D (02-19): an in-use admin e-mail still verifies the host with last_error "invite:email_in_use" and a refused invite; the second verify clears it; the alias promotion answers 200 even when the switch refuses a re-pended invite', async () => {
+  it('21. WR-03 / D-D (02-19): an in-use admin e-mail still verifies the host; the scheduled send is refused terminally (last_error "invite:email_in_use", invite refused, no retry); the second verify clears it; the alias promotion answers 200 and the re-pended invite is refused again by the job', async () => {
     const slug = `pd-inv-${RUN}`.slice(0, 40);
     const host = `pd-inv-${RUN}.cliente.test`;
     const created = await createThrowawayTenant(slug);
@@ -779,8 +831,13 @@ describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () 
     const domain = tenantDomainSchema.parse(await verified.json());
     expect(domain.verificationStatus).toBe('verified');
     expect(domain.verifiedAt).not.toBeNull();
-    expect(domain.lastError).toBe('invite:email_in_use');
+    // Scheduling succeeded; the refusal is the job's outcome now.
+    expect(domain.lastError).toBeNull();
     expect((await byHost(host)).status).toBe(200);
+
+    // The refusal is terminal: the handler resolves (no pg-boss retry) and records the cause.
+    await expect(runInviteSendJobs(created.id)).resolves.toBeGreaterThanOrEqual(1);
+    expect((await domainRow(invDomainId))?.last_error).toBe('invite:email_in_use');
 
     const refused = (await tenantDetail(created.id)).invites[0];
     expect(refused?.status).toBe('expired');
@@ -830,6 +887,13 @@ describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () 
       [aliasHost, true],
       [host, false],
     ]);
+
+    // The promotion only scheduled the re-pended invite; the job refuses it again.
+    const repended = (await tenantDetail(created.id)).invites[0];
+    expect(repended?.status).toBe('pending');
+    await expect(
+      inviteSendJob.handler({ tenantId: created.id, inviteId: repended?.id ?? '' }),
+    ).resolves.toBeUndefined();
 
     const refusedAgain = (await tenantDetail(created.id)).invites[0];
     expect(refusedAgain?.status).toBe('expired');

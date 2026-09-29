@@ -13,6 +13,12 @@ import { adminSql, api, authAdmin, HOSTS } from './setup';
  *
  * The signature helper re-implements the Standard Webhooks algorithm with `node:crypto` because
  * apps/api deliberately has no `standardwebhooks` dependency (it is a kernel dependency).
+ *
+ * Cases 13-17 (quick 260929-g0s) pin the link-host guard: a LINK mail (invite, recovery, …) for a
+ * recipient that belongs to a tenant — a member, or an address with an OPEN first-admin invite — whose
+ * `redirect_to` host is not a verified host of that tenant is GoTrue's `site_url` fallback and is
+ * refused (500 `redirect_host_not_tenant`, nothing sent; the host is never rewritten, T-02-26).
+ * Platform admins, recipients with no tenant and non-link types keep their previous behaviour.
  */
 
 const MAILPIT_URL = (process.env.MAILPIT_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
@@ -197,6 +203,8 @@ const SJ_NAME = 'Associação São José';
 let sjTenantId: string;
 let sjMember: Fixture;
 let memberless: Fixture;
+/** A throwaway address with an open (`sent`) first-admin invite for the SJ tenant (cases 13-14). */
+let invitee: Fixture;
 const createdAuthUsers: string[] = [];
 
 /** The `public.users` mirror is written by a trigger; wait for it before inserting a membership. */
@@ -257,6 +265,12 @@ beforeAll(async () => {
     insert into public.memberships (tenant_id, user_id, role, status)
     values (${sjTenantId}::uuid, ${sjMember.id}::uuid, 'member', 'active')`;
   memberless = await createThrowawayUser(`invitee-${RUN}@mail-test.local`);
+
+  invitee = await createThrowawayUser(`first-admin-${RUN}@mail-test.local`);
+  await adminSql`
+    insert into public.tenant_invites (tenant_id, email, role, status, sent_at, created_by)
+    values (${sjTenantId}::uuid, ${invitee.email}, 'admin_tenant', 'sent', now(),
+            ${superAdmin.id}::uuid)`;
 });
 
 afterAll(async () => {
@@ -497,4 +511,62 @@ describe('POST /v1/hooks/auth/send-email', () => {
       expect(mail.From.Name).toBe('Rede Demo');
     },
   );
+
+  it('13. an open tenant invite whose redirect_to fell back to site_url (GoTrue dropped a not-yet-allowed redirect) → 500 redirect_host_not_tenant, nothing sent', async () => {
+    const payload = hookPayload(invitee, 'http://localhost:3000', 'invite');
+    const { response } = await postHook(payload);
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { error: { http_code: number; message: string } };
+    expect(body.error.http_code).toBe(500);
+    expect(body.error.message).toBe('redirect_host_not_tenant');
+    await mailpitExpectNone(invitee.email, payload.email_data.token_hash);
+  });
+
+  it('14. the same invitee on the tenant’s verified host → 200 and an SJ-branded invite', async () => {
+    const payload = hookPayload(
+      invitee,
+      `http://${SJ_HOST}:3000/auth/confirm?next=/aceitar-convite`,
+      'invite',
+    );
+    const { response } = await postHook(payload);
+    expect(response.status).toBe(200);
+
+    const mail = await mailpitFind(invitee.email, payload.email_data.token_hash);
+    expect(mail.Subject).toBe(`Convite para administrar ${SJ_NAME}`);
+    expect(mail.From.Name).toBe(SJ_NAME);
+    expect(mail.HTML).toContain(`http://${SJ_HOST}:3000/auth/confirm?next=/aceitar-convite`);
+    expect(mail.HTML).toContain('type=invite');
+    expect(mail.HTML).toContain('#b45309');
+  });
+
+  it('15. a tenant member’s recovery on the platform fallback host → 500 redirect_host_not_tenant, nothing sent', async () => {
+    const payload = recoveryPayload(sjMember, 'http://localhost:3000');
+    const { response } = await postHook(payload);
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { error: { http_code: number; message: string } };
+    expect(body.error.message).toBe('redirect_host_not_tenant');
+    await mailpitExpectNone(sjMember.email, payload.email_data.token_hash);
+  });
+
+  it('16. the super_admin’s recovery on the platform fallback host → 200 neutral', async () => {
+    const payload = recoveryPayload(superAdmin, 'http://localhost:3000');
+    const { response } = await postHook(payload);
+    expect(response.status).toBe(200);
+
+    const mail = await mailpitFind(superAdmin.email, payload.email_data.token_hash);
+    expect(mail.Subject).toBe('Redefina sua senha — Rede Social');
+    expect(mail.From.Name).toBe('Rede Social');
+  });
+
+  it('17. a non-link type (password_changed_notification) for a member is untouched by the guard → 200', async () => {
+    const payload = hookPayload(
+      demoMember,
+      'http://localhost:3000',
+      'password_changed_notification',
+    );
+    const { response, id } = await postHook(payload);
+    expect(response.status).toBe(200);
+    const mail = await mailpitFindByWebhookId(demoMember.email, id);
+    expect(mail.Subject).toBe('Sua senha foi alterada — Rede Demo');
+  });
 });

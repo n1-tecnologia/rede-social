@@ -125,6 +125,16 @@ function render(brand: MailBrand, emailData: SendEmailHookPayload['email_data'])
   }
 }
 
+/**
+ * Whether a GoTrue action type's mail carries a confirm link (`invite` and `recovery` have their own
+ * templates and always do; the neutral link types are `LINK_ACTION_TYPES`). Drives the Send Email
+ * Hook's link-host guard (`resolveMailTenant` `linkRequired`, quick 260929-g0s): notifications and
+ * reauthentication codes are never refused for their `redirect_to` host.
+ */
+export function isLinkActionType(type: string): boolean {
+  return type === 'invite' || type === 'recovery' || LINK_ACTION_TYPES.has(type);
+}
+
 export type SendAuthMailInput = {
   payload: SendEmailHookPayload;
   webhookId: string;
@@ -158,7 +168,9 @@ export async function sendAuthMail(input: SendAuthMailInput): Promise<SendAuthMa
   const redirectHost = redirectHostOf(payload.email_data.redirect_to);
   const resolution = await resolveMailTenant({
     userId: payload.user.id,
+    email: to,
     redirectTo: payload.email_data.redirect_to,
+    linkRequired: isLinkActionType(actionType),
   });
   if (resolution.kind === 'refused') throw new MailRefusedError(resolution.reason);
 
