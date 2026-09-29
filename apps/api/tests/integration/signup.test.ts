@@ -107,9 +107,12 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     expect(rows[0]?.status).toBe('active');
 
     const consents = await consentsOf(created.userId);
-    expect(consents.map((c) => c.kind)).toEqual(['tenant_rules', 'platform_terms']);
-    expect(consents[0]?.text_version).toBe(demoRulesVersion);
-    expect(consents[1]?.text_version).toBe(PLATFORM_TERMS_VERSION);
+    // `order by kind`: alphabetical, so platform_terms sorts first. Assert by kind, never by index.
+    expect(consents.map((c) => c.kind)).toEqual(['platform_terms', 'tenant_rules']);
+    expect(consents.find((c) => c.kind === 'tenant_rules')?.text_version).toBe(demoRulesVersion);
+    expect(consents.find((c) => c.kind === 'platform_terms')?.text_version).toBe(
+      PLATFORM_TERMS_VERSION,
+    );
     for (const consent of consents) {
       expect(consent.accepted_at).toBeInstanceOf(Date);
       // The DB clock inside the transaction, never a client timestamp.

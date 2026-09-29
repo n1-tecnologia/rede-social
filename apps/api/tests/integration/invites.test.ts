@@ -239,9 +239,14 @@ describe('tracer — the first admin accepts the invite (ROLE-03, D-29, D-03)', 
        where tenant_id = ${invited.tenantId}::uuid and user_id = ${invited.userId}::uuid
        order by kind`;
     expect(consents).toHaveLength(2);
-    expect(consents.map((c) => c.kind)).toEqual(['tenant_rules', 'platform_terms']);
-    expect(consents[0]?.text_version).toBe(tenant?.rules_version ?? 1);
-    expect(consents[1]?.text_version).toBe(PLATFORM_TERMS_VERSION);
+    // `order by kind`: alphabetical, so platform_terms sorts first. Assert by kind, never by index.
+    expect(consents.map((c) => c.kind)).toEqual(['platform_terms', 'tenant_rules']);
+    expect(consents.find((c) => c.kind === 'tenant_rules')?.text_version).toBe(
+      tenant?.rules_version ?? 1,
+    );
+    expect(consents.find((c) => c.kind === 'platform_terms')?.text_version).toBe(
+      PLATFORM_TERMS_VERSION,
+    );
     for (const c of consents) {
       expect(c.ip).toBe('203.0.113.9');
       expect(c.user_agent).toBe('vitest');
