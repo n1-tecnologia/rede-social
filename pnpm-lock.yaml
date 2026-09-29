@@ -214,9 +214,6 @@ importers:
       '@hono/zod-openapi':
         specifier: 1.6.3
         version: 1.6.3(hono@4.13.7)(zod@4.6.2)
-      '@t3-oss/env-core':
-        specifier: 0.13.11
-        version: 0.13.11(typescript@7.0.2)(zod@4.6.2)
       '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -238,6 +235,9 @@ importers:
       '@rede-social/module-stories':
         specifier: workspace:*
         version: link:../../packages/modules/stories
+      '@t3-oss/env-core':
+        specifier: 0.13.11
+        version: 0.13.11(typescript@7.0.2)(zod@4.6.2)
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(pg@8.23.0)(postgres@3.4.9)
@@ -253,16 +253,19 @@ importers:
       pino-http:
         specifier: 11.0.0
         version: 11.0.0
+      sharp:
+        specifier: 0.35.4
+        version: 0.35.4(@types/node@24.13.4)
       zod:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
-      '@supabase/supabase-js':
-        specifier: 2.116.0
-        version: 2.116.0
       '@rede-social/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@supabase/supabase-js':
+        specifier: 2.116.0
+        version: 2.116.0
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
@@ -290,21 +293,6 @@ importers:
       '@mux/upchunk':
         specifier: 3.5.0
         version: 3.5.0
-      '@serwist/turbopack':
-        specifier: 9.5.12
-        version: 9.5.12(@swc/helpers@0.5.23)(esbuild@0.28.2)(next@16.3.5(@playwright/test@1.63.0)(@types/node@24.13.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(typescript@7.0.2)
-      '@supabase/ssr':
-        specifier: 0.12.7
-        version: 0.12.7(@supabase/supabase-js@2.116.0)
-      '@supabase/supabase-js':
-        specifier: 2.116.0
-        version: 2.116.0
-      '@t3-oss/env-nextjs':
-        specifier: 0.13.11
-        version: 0.13.11(typescript@7.0.2)(zod@4.6.2)
-      '@tailwindcss/postcss':
-        specifier: 4.3.3
-        version: 4.3.3
       '@rede-social/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -329,6 +317,21 @@ importers:
       '@rede-social/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@serwist/turbopack':
+        specifier: 9.5.12
+        version: 9.5.12(@swc/helpers@0.5.23)(esbuild@0.28.2)(next@16.3.5(@playwright/test@1.63.0)(@types/node@24.13.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(typescript@7.0.2)
+      '@supabase/ssr':
+        specifier: 0.12.7
+        version: 0.12.7(@supabase/supabase-js@2.116.0)
+      '@supabase/supabase-js':
+        specifier: 2.116.0
+        version: 2.116.0
+      '@t3-oss/env-nextjs':
+        specifier: 0.13.11
+        version: 0.13.11(typescript@7.0.2)(zod@4.6.2)
+      '@tailwindcss/postcss':
+        specifier: 4.3.3
+        version: 4.3.3
       clsx:
         specifier: 2.1.1
         version: 2.1.1
@@ -372,15 +375,15 @@ importers:
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
-      '@testing-library/react':
-        specifier: 16.3.3
-        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@rede-social/api':
         specifier: workspace:*
         version: link:../api
       '@rede-social/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@testing-library/react':
+        specifier: 16.3.3
+        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
@@ -448,18 +451,18 @@ importers:
       '@mux/mux-node':
         specifier: 15.2.0
         version: 15.2.0
-      '@supabase/supabase-js':
-        specifier: 2.116.0
-        version: 2.116.0
-      '@t3-oss/env-core':
-        specifier: 0.13.11
-        version: 0.13.11(typescript@7.0.2)(zod@4.6.2)
       '@rede-social/contracts':
         specifier: workspace:*
         version: link:../contracts
       '@rede-social/ui':
         specifier: workspace:*
         version: link:../ui
+      '@supabase/supabase-js':
+        specifier: 2.116.0
+        version: 2.116.0
+      '@t3-oss/env-core':
+        specifier: 0.13.11
+        version: 0.13.11(typescript@7.0.2)(zod@4.6.2)
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(pg@8.23.0)(postgres@3.4.9)
@@ -497,15 +500,15 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
+      '@rede-social/config':
+        specifier: workspace:*
+        version: link:../config
       '@testing-library/jest-dom':
         specifier: 7.0.1
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.0)
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@rede-social/config':
-        specifier: workspace:*
-        version: link:../config
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
@@ -564,15 +567,15 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
+      '@rede-social/config':
+        specifier: workspace:*
+        version: link:../../config
       '@testing-library/jest-dom':
         specifier: 7.0.1
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.0)
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@rede-social/config':
-        specifier: workspace:*
-        version: link:../../config
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
@@ -631,15 +634,15 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
+      '@rede-social/config':
+        specifier: workspace:*
+        version: link:../../config
       '@testing-library/jest-dom':
         specifier: 7.0.1
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.0)
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@rede-social/config':
-        specifier: workspace:*
-        version: link:../../config
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
@@ -704,15 +707,15 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
+      '@rede-social/config':
+        specifier: workspace:*
+        version: link:../../config
       '@testing-library/jest-dom':
         specifier: 7.0.1
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.0)
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@rede-social/config':
-        specifier: workspace:*
-        version: link:../../config
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
@@ -756,15 +759,15 @@ importers:
         specifier: 1.46.0
         version: 1.46.0(react@19.3.0)
     devDependencies:
+      '@rede-social/config':
+        specifier: workspace:*
+        version: link:../../config
       '@testing-library/jest-dom':
         specifier: 7.0.1
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.0)
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@rede-social/config':
-        specifier: workspace:*
-        version: link:../../config
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
@@ -823,15 +826,15 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
+      '@rede-social/config':
+        specifier: workspace:*
+        version: link:../../config
       '@testing-library/jest-dom':
         specifier: 7.0.1
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.0)
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@rede-social/config':
-        specifier: workspace:*
-        version: link:../../config
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
@@ -875,15 +878,15 @@ importers:
         specifier: 3.7.0
         version: 3.7.0
     devDependencies:
+      '@rede-social/config':
+        specifier: workspace:*
+        version: link:../config
       '@testing-library/jest-dom':
         specifier: 7.0.1
         version: 7.0.1(@testing-library/dom@10.4.2)(vitest@5.0.0)
       '@testing-library/react':
         specifier: 16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@rede-social/config':
-        specifier: workspace:*
-        version: link:../config
       '@types/node':
         specifier: 24.13.4
         version: 24.13.4
