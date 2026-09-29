@@ -4,10 +4,10 @@ current_phase: 6
 current_phase_name: Events
 status: executing
 stopped_at: Completed 06-09-PLAN.md
-last_updated: "2026-09-29T13:23:05.142Z"
+last_updated: "2026-09-29T13:42:20.752Z"
 last_activity: 2026-09-28
 last_activity_desc: "06-09 complete: tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS (l) Secrets inside a tenant, phase6-smoke witness, pnpm verify green (e2e 555/0 failed, e2e:pwa 46 with events-prefetch). Phase 6: 9/9 plans; verify-work + phone UAT (blocked on 01.1) next"
-state_head: a935e41c605f2ac1fd5ea9ecd1b1e35dfcdd42d6
+state_head: eb6860b24d9061393ea93a6cec38c7cfbfceaace
 progress:
   total_phases: 15
   completed_phases: 0
@@ -525,6 +525,7 @@ None yet.
 | 10 | CI generates the local ES256 signing key in place (redirect onto signing_keys_path emptied the file the CLI reads) | 2026-09-29 | 5b4556d | — | — |
 | 11 | Integration tests assert consent rows by kind (platform_terms rename reordered order-by-kind results) | 2026-09-29 | e9ba606 | — | — |
 | 12 | pg-boss gets libpq sslmode semantics via bossConnectionString (every production enqueue failed with SELF_SIGNED_CERT_IN_CHAIN) | 2026-09-29 | a935e41 | — | — |
+| 13 | Production mail (Resend, n1marketingdigital.com.br) and video (Mux) in deploy-api.yml + hosted Send Email Hook; fix psql -c and config push --yes in the prod job | 2026-09-29 | eb6860b | — | — |
 
 ### Roadmap Evolution
 
