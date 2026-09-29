@@ -1,4 +1,4 @@
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { mediaAssets } from '../../db/schema';
 import { moduleLogger } from '../logging';
@@ -11,6 +11,8 @@ import {
   MEDIA_SWEEP_INTERVAL_S,
 } from './limits';
 import { armSweeper, type PurgeableAsset, purgeAsset } from './service';
+import { videoProvider } from './video/index';
+import { type ReconcilableVideo, reconcileVideoAsset } from './video/reconcile';
 
 /**
  * `kernel.media-sweep-orphans` (R-07) — the collector that makes the broker's lifecycle complete.
@@ -37,6 +39,14 @@ import { armSweeper, type PurgeableAsset, purgeAsset } from './service';
  * a runtime guard that a later edit could invert, and every age is measured with the database's own
  * `now()`, never a client clock.
  *
+ * **A reconcile pass runs FIRST** (quick-260929-ltf). A `pending`/`processing` video of the active
+ * provider, older than five minutes and carrying its upload id, is checked with the provider through
+ * `reconcileVideoAsset`, which applies the webhook's own transition. So a video the provider finished
+ * while its webhook was lost becomes `ready` and falls out of the pending window instead of being
+ * purged as an abandoned upload (and instead of `purgeAsset` deleting by the UPLOAD id, which would
+ * orphan the finished provider asset). The pass never deletes anything; the two windows above and
+ * their by-construction exclusions are unchanged.
+ *
  * Never throws (the `domains/verify-job.ts` rule): pg-boss would otherwise retry a crashing job twice
  * and then park it, leaving the tenant without a collector. One asset's failure increments `failed`
  * and the batch continues; the re-arm happens whatever the outcome, so a bad row cannot stop the
@@ -62,6 +72,38 @@ export {
 } from './limits';
 
 const seconds = (ms: number): number => ms / 1000;
+
+/** A video younger than this is left to its webhook and to the browser's readiness poll. */
+const RECONCILE_SWEEP_MIN_AGE_S = 300;
+
+/** One bounded batch of stale videos the reconcile pass asks the provider about. */
+async function reconcilable(): Promise<ReconcilableVideo[]> {
+  return withAdminTx(async (tx) =>
+    tx
+      .select({
+        id: mediaAssets.id,
+        tenantId: mediaAssets.tenantId,
+        kind: mediaAssets.kind,
+        status: mediaAssets.status,
+        provider: mediaAssets.provider,
+        providerAssetId: mediaAssets.providerAssetId,
+        createdAt: mediaAssets.createdAt,
+      })
+      .from(mediaAssets)
+      .where(
+        and(
+          eq(mediaAssets.kind, 'video'),
+          inArray(mediaAssets.status, ['pending', 'processing']),
+          eq(mediaAssets.provider, videoProvider.name),
+          isNotNull(mediaAssets.providerAssetId),
+          isNull(mediaAssets.deletedAt),
+          sql`${mediaAssets.createdAt} < now() - make_interval(secs => ${RECONCILE_SWEEP_MIN_AGE_S}::double precision)`,
+        ),
+      )
+      .orderBy(mediaAssets.createdAt)
+      .limit(MEDIA_SWEEP_BATCH),
+  );
+}
 
 /** One bounded batch of collectable assets, newest constraint applied in SQL rather than in JS. */
 async function collectable(): Promise<PurgeableAsset[]> {
@@ -99,6 +141,24 @@ export const sweepOrphansJob: JobDefinition<Record<string, never>> = {
     const t0 = Date.now();
     let collected = 0;
     let failed = 0;
+    let reconciled = 0;
+
+    // BEFORE collecting, so a finished video leaves the pending window instead of being purged.
+    // Sequential, bounded and throttled by the same per-asset map the read path uses; it never
+    // deletes, and a failure here never stops the purge below.
+    try {
+      for (const row of await reconcilable()) {
+        if (await reconcileVideoAsset(row)) reconciled += 1;
+      }
+    } catch (error) {
+      log.error(
+        {
+          event: 'media.sweep.reconcile_failed',
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'the reconcile pass failed; collecting anyway',
+      );
+    }
 
     try {
       const rows = await collectable();
@@ -153,6 +213,7 @@ export const sweepOrphansJob: JobDefinition<Record<string, never>> = {
         actor: SYSTEM_ACTOR,
         collected,
         failed,
+        reconciled,
         batch: MEDIA_SWEEP_BATCH,
         nextInSeconds: MEDIA_SWEEP_INTERVAL_S,
         ms: Date.now() - t0,

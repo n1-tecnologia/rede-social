@@ -11,7 +11,8 @@ import {
   fakeVideoInternals,
   resetFakeVideoInternals,
 } from '@rede-social/core/server/media/video/fake';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { resetReconcileInternals } from '@rede-social/core/server/media/video/reconcile';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
 
 /**
@@ -361,5 +362,86 @@ describe('the provider path — a collected video does not linger at the vendor'
     expect(fakeVideoInternals.deletedAssetIds).toContain(providerAssetId);
     expect(await assetStatus(id)).toBeNull();
     resetFakeVideoInternals();
+  });
+});
+
+describe('convergence — a finished video is reconciled, never purged (quick-260929-ltf)', () => {
+  beforeEach(() => {
+    resetFakeVideoInternals();
+    resetReconcileInternals();
+  });
+  afterEach(() => {
+    resetFakeVideoInternals();
+    resetReconcileInternals();
+  });
+
+  const readyAnswer = (assetAssetId: string) => {
+    fakeVideoInternals.uploadState = async () => ({
+      state: 'asset',
+      asset: {
+        providerAssetId: assetAssetId,
+        status: 'ready',
+        playbackId: `fake-pb-${crypto.randomUUID()}`,
+        durationSeconds: 12,
+        aspectRatio: '16:9',
+      },
+    });
+  };
+
+  async function videoRow(id: string): Promise<{ status: string; provider_asset_id: string }> {
+    const rows = await adminSql<{ status: string; provider_asset_id: string }[]>`
+      select status, provider_asset_id from public.media_assets where id = ${id}::uuid`;
+    const row = rows[0];
+    if (!row) throw new Error(`the row ${id} is gone`);
+    return row;
+  }
+
+  it('S1: a 25 h pending video the provider finished becomes ready instead of being purged', async () => {
+    const uploadId = `fake-up-${crypto.randomUUID()}`;
+    const assetAssetId = `fake-asset-${crypto.randomUUID()}`;
+    const id = await seedAsset({
+      status: 'pending',
+      kind: 'video',
+      ageHours: 25,
+      providerAssetId: uploadId,
+    });
+    readyAnswer(assetAssetId);
+
+    await sweepOrphansJob.handler({});
+
+    const row = await videoRow(id);
+    expect(row.status).toBe('ready');
+    expect(row.provider_asset_id).toBe(assetAssetId);
+    expect(fakeVideoInternals.deletedAssetIds).not.toContain(uploadId);
+    expect(fakeVideoInternals.deletedAssetIds).not.toContain(assetAssetId);
+  });
+
+  it('S2: a 1 h pending video the provider finished becomes ready in one run', async () => {
+    const id = await seedAsset({
+      status: 'pending',
+      kind: 'video',
+      ageHours: 1,
+      providerAssetId: `fake-up-${crypto.randomUUID()}`,
+    });
+    readyAnswer(`fake-asset-${crypto.randomUUID()}`);
+
+    await sweepOrphansJob.handler({});
+
+    expect((await videoRow(id)).status).toBe('ready');
+  });
+
+  it('S3: a 1 h pending video still waiting at the provider is asked about and left pending', async () => {
+    const uploadId = `fake-up-${crypto.randomUUID()}`;
+    const id = await seedAsset({
+      status: 'pending',
+      kind: 'video',
+      ageHours: 1,
+      providerAssetId: uploadId,
+    });
+
+    await sweepOrphansJob.handler({});
+
+    expect((await videoRow(id)).status).toBe('pending');
+    expect(fakeVideoInternals.uploadStateCalls).toContain(uploadId);
   });
 });
