@@ -4,10 +4,10 @@ current_phase: 6
 current_phase_name: Events
 status: executing
 stopped_at: Completed 06-09-PLAN.md
-last_updated: "2026-09-29T00:21:04.716Z"
+last_updated: "2026-09-29T12:51:09.119Z"
 last_activity: 2026-09-28
 last_activity_desc: "06-09 complete: tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS (l) Secrets inside a tenant, phase6-smoke witness, pnpm verify green (e2e 555/0 failed, e2e:pwa 46 with events-prefetch). Phase 6: 9/9 plans; verify-work + phone UAT (blocked on 01.1) next"
-state_head: aca646f7d86ff06d6d85dfe328f14a7846b23889
+state_head: c1e83489a5b8e4683e515a83c7a556a4ca495ebf
 progress:
   total_phases: 15
   completed_phases: 0
@@ -521,6 +521,7 @@ None yet.
 | 260928-t3z | Make the API production bundle load under Node (first Cloud Run boot crashed on `Dynamic require of "assert"` from bundled undici): tsup `createRequire` banner, `removeNodeProtocol: false`, `sharp` external + direct apps/api dependency | 2026-09-28 | 1f36d25 | — | [260928-t3z-fix-api-production-bundle-dynamic-requir](./quick/260928-t3z-fix-api-production-bundle-dynamic-requir/) |
 | 5 | add web env template (apps/web) listing the variables the web app reads | 2026-09-28 | 6da7acd | — | — |
 | 8 | Align deploy-api.yml and DEPLOY.md with the first Cloud Run deploy (--no-invoker-iam-check, PLATFORM_HOST on api/worker, pg-boss uselibpqcompat) | 2026-09-29 | aca646f | — | — |
+| 9 | CI build step gets local-stack env placeholders (first GitHub run failed: web env validated before .env.local exists) | 2026-09-29 | c1e8348 | — | — |
 
 ### Roadmap Evolution
 
