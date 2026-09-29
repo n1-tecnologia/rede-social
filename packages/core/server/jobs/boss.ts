@@ -149,12 +149,24 @@ async function startedBoss(): Promise<PgBoss> {
  * `startAfter` (seconds, an ISO string or a Date — pg-boss 12 accepts all three) defers the job:
  * deferred jobs are how the kernel's domain poller (`kernel.domain-verify`, 02-09) paces itself at
  * its ~10-minute cadence without a scheduler, re-arming one deferred job per host under `short`.
+ *
+ * `retryLimit` / `retryDelay` (seconds) / `retryBackoff` / `retryDelayMax` (seconds) are pg-boss 12's
+ * per-job retry options, spread into `send` like the rest; `kernel.invite-send` (quick 260929-g0s)
+ * is the first user — its handler throws on purpose so a GoTrue/hook failure is retried with a
+ * bounded exponential backoff instead of pg-boss's default two immediate-ish retries.
  */
 export async function enqueueInTx(
   tx: Tx,
   name: string,
   payload: object,
-  opts: { singletonKey?: string; startAfter?: number | string | Date } = {},
+  opts: {
+    singletonKey?: string;
+    startAfter?: number | string | Date;
+    retryLimit?: number;
+    retryDelay?: number;
+    retryBackoff?: boolean;
+    retryDelayMax?: number;
+  } = {},
 ): Promise<string | null> {
   const boss = await startedBoss();
   const rows = (await tx.execute(sql`select current_role as role`)) as unknown as {

@@ -152,9 +152,12 @@ async function waitForMirroredUser(tx: Tx, userId: string): Promise<void> {
 /**
  * Sends every `pending` invite of the tenant — the ONLY sender (Pitfall 8). It requires a verified
  * primary host, because the link in the e-mail must open the tenant's own branded origin: without
- * one the call is a documented no-op and the invites stay `pending` until `domain-verify` (02-09)
- * calls this again on the first verified host. `createTenant` calls it right after commit, so a
- * tenant provisioned on an existing host is invited immediately.
+ * one the call is a documented no-op and the invites stay `pending` until the tenant's first host is
+ * verified. After that verified transition (the `kernel.domain-verify` poller, "Verificar agora", a
+ * primary switch) the caller is the `kernel.invite-send` job (`invite-send.ts`, quick 260929-g0s),
+ * never the verify path inline: the job waits out the Supabase Auth allow-list propagation window
+ * and retries, and passes `opts.inviteId` so one job sends exactly its own row. `createTenant` and
+ * `resendInvite` still call this inline (the manual send stays immediate).
  *
  * Per invite, in order:
  *   (a) CLAIM — `update … set status='sent' where id=… and status='pending' returning`; zero rows
@@ -178,6 +181,7 @@ async function waitForMirroredUser(tx: Tx, userId: string): Promise<void> {
 export async function sendPendingInvites(
   tenantId: string,
   actor?: PlatformActor,
+  opts?: { inviteId?: string },
 ): Promise<SendPendingInvitesResult> {
   const log = logFor(actor, 'platform.invites');
 
@@ -199,7 +203,13 @@ export async function sendPendingInvites(
     const pending = await tx
       .select({ id: tenantInvites.id, email: tenantInvites.email })
       .from(tenantInvites)
-      .where(and(eq(tenantInvites.tenantId, tenantId), eq(tenantInvites.status, 'pending')))
+      .where(
+        and(
+          eq(tenantInvites.tenantId, tenantId),
+          eq(tenantInvites.status, 'pending'),
+          opts?.inviteId ? eq(tenantInvites.id, opts.inviteId) : undefined,
+        ),
+      )
       .orderBy(asc(tenantInvites.createdAt));
     return { host: primary.host, slug: primary.slug, pending };
   });

@@ -7,6 +7,7 @@ import { armSweeper } from '@rede-social/core/server/media/service';
 import { sweepOrphansJob } from '@rede-social/core/server/media/sweep-job';
 import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import type { AnyJobDefinition } from '@rede-social/core/server/modules/manifest';
+import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { Hono } from 'hono';
 import { env } from './env';
 import { rootLogger } from './http/logger';
@@ -19,8 +20,10 @@ import { MODULE_REGISTRY } from './modules/registry';
  *
  * Queue creation happens HERE at start, for every `JobDefinition` any registered module declares
  * plus the kernel's own jobs. Kernel jobs are listed here explicitly and register their queue names
- * inside the kernel (`packages/core/server/domains/index.ts`, `…/branding/index.ts`); module jobs
- * come from the registry. Icon derivation (`deriveIconsJob`) is CPU work — sharp resize/composite,
+ * inside the kernel (`packages/core/server/domains/index.ts`, `…/branding/index.ts`,
+ * `…/platform/invite-send.ts`); module jobs come from the registry. `inviteSendJob`
+ * (`kernel.invite-send`, quick 260929-g0s) sends the first-admin invite a verified domain scheduled —
+ * deferred past the Supabase Auth allow-list propagation window and retried by pg-boss. Icon derivation (`deriveIconsJob`) is CPU work — sharp resize/composite,
  * ICO packing, five Storage uploads — and runs HERE, never in the request-serving role (D-28). `createQueues` is idempotent, which is what
  * makes the concurrent cases safe: two worker instances booting together, or a worker booting while
  * the API performs its first lazy enqueue, all converge on the same queue row.
@@ -40,6 +43,7 @@ import { MODULE_REGISTRY } from './modules/registry';
 export async function startWorker(): Promise<void> {
   const jobs: AnyJobDefinition[] = [
     domainVerifyJob,
+    inviteSendJob,
     deriveIconsJob,
     deriveVariantsJob,
     mediaProviderEventJob,

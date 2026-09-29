@@ -22,7 +22,8 @@ import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { enqueueInTx } from '../jobs/boss';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
-import { logFor, type PlatformActor, sendPendingInvites } from './invites';
+import { scheduleInviteSends } from './invite-send';
+import { logFor, type PlatformActor } from './invites';
 
 /**
  * Custom domains of a tenant (TENANT-07, D-34/D-35/D-36) — the admin-lane service behind
@@ -368,7 +369,13 @@ async function clearLastErrorIfSettled(domainId: string): Promise<void> {
  * call is recoverable from the panel):
  *  1. `invalidateTenantHost` so the host resolves on this instance's next request (D-36);
  *  2. the allow-list entry, under the cross-process advisory lock (T-02-53);
- *  3. `sendPendingInvites` — claim-before-send, so re-runs never send twice (D-30, T-02-54).
+ *  3. `scheduleInviteSends` — ONLY when step 2 succeeded (a send before the entry exists is exactly
+ *     the 2026-09-29 bug): one delayed, retrying `kernel.invite-send` job per pending invite
+ *     (quick 260929-g0s). Nothing is sent inline any more — Supabase Auth applies the new
+ *     allow-list entry seconds to minutes after the PATCH, and GoTrue silently falls back to
+ *     `site_url` meanwhile. The job sends through `sendPendingInvites` (claim-before-send, so
+ *     re-runs never send twice — D-30, T-02-54) and records its own outcome (`invite`,
+ *     `invite:<reason>`) through `recordInviteSendOutcome`.
  * Failures of 2/3 are recorded in `last_error` and logged, never thrown, and never touch
  * `verified_at`. Returns whether both steps succeeded; the callers clear `last_error` only then
  * (WR-01).
@@ -395,39 +402,54 @@ async function ensureVerifiedSideEffects(row: DomainRow, actor: PlatformActor): 
     await recordError(row.id, 'allow_list');
   }
 
-  try {
-    await sendPendingInvites(row.tenantId, actor);
-  } catch (error) {
-    ok = false;
-    // A refusal (02-19: the admin e-mail already has an identity on the platform) is recorded with
-    // its cause — `invite:email_in_use` / `invite:user_in_other_tenant` — so the Domínios card can
-    // name it; every other failure stays the plain `invite`. The row is no longer `pending` after a
-    // refusal, so the next re-run finds nothing to send and the clear (WR-01) removes the cause.
-    const reason = inviteRefusalReason(error);
-    log.error(
-      {
-        event: 'platform.domains.invite_failed',
-        tenantId: row.tenantId,
-        domainId: row.id,
-        host: row.host,
-        reason,
-        err: error instanceof Error ? error.message : String(error),
-      },
-      'pending invites could not be sent; retry with "Verificar agora"',
-    );
-    await recordError(row.id, reason ? `invite:${reason}` : 'invite');
+  // Scheduling only: the job records a send failure or a refusal cause itself (the row is no
+  // longer `pending` after a refusal, so the next re-run schedules nothing and the WR-01 clear
+  // removes the cause).
+  if (ok) {
+    try {
+      await scheduleInviteSends(row.tenantId, actor);
+    } catch (error) {
+      ok = false;
+      log.error(
+        {
+          event: 'platform.domains.invite_failed',
+          tenantId: row.tenantId,
+          domainId: row.id,
+          host: row.host,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'pending invites could not be scheduled; retry with "Verificar agora"',
+      );
+      await recordError(row.id, 'invite');
+    }
   }
 
   return ok;
 }
 
-/** The `details.reason` of a 409 `INVITE_STATE_INVALID` thrown by `sendPendingInvites`, else null. */
-function inviteRefusalReason(error: unknown): string | null {
-  return error instanceof ApiError &&
-    error.code === 'INVITE_STATE_INVALID' &&
-    typeof error.details?.reason === 'string'
-    ? error.details.reason
-    : null;
+/**
+ * The `kernel.invite-send` job's bookkeeping (quick 260929-g0s): writes `last_error` on the tenant's
+ * VERIFIED PRIMARY row — the host the link was built on. `null` clears only an `invite…` value
+ * (never an `allow_list` or provider error the panel still has to show). Lives here because this
+ * file owns every runtime write to `tenant_domains` (see the header invariants).
+ */
+export async function recordInviteSendOutcome(
+  tenantId: string,
+  lastError: string | null,
+): Promise<void> {
+  await withAdminTx(async (tx) => {
+    await tx
+      .update(tenantDomains)
+      .set({ lastError })
+      .where(
+        and(
+          eq(tenantDomains.tenantId, tenantId),
+          eq(tenantDomains.isPrimary, true),
+          isNotNull(tenantDomains.verifiedAt),
+          lastError === null ? sql`${tenantDomains.lastError} like 'invite%'` : undefined,
+        ),
+      );
+  });
 }
 
 /**
@@ -625,10 +647,12 @@ async function invalidateTenantHosts(tenantId: string): Promise<void> {
  * `POST …/domains/{domainId}/primary` (D-35): switches the primary among VERIFIED hosts only.
  * Demote-then-promote in ONE admin transaction (PATTERNS Analog D) — the partial unique index
  * `tenant_domains_one_primary_per_tenant` is the last line of defence. After commit every host of
- * the tenant leaves the cache and `sendPendingInvites` runs (a newly verified primary may unblock
- * the first-admin invite). An invite failure — including a 02-19 refusal — is logged and never
- * fails the switch: the primary already committed, and the invite outcome is visible on the Admins
- * tab (D-D). Already primary -> the unchanged list (idempotent).
+ * the tenant leaves the cache and `scheduleInviteSends` runs (a newly verified primary may unblock
+ * the first-admin invite; the promoted host went through the same verified transition, so the send
+ * is deferred and retried by `kernel.invite-send` like after a verify — quick 260929-g0s). A
+ * scheduling failure is logged and never fails the switch: the primary already committed, and the
+ * invite outcome is visible on the Admins tab (D-D). Already primary -> the unchanged list
+ * (idempotent).
  */
 export async function setPrimaryDomain(
   tenantId: string,
@@ -656,7 +680,7 @@ export async function setPrimaryDomain(
 
   await invalidateTenantHosts(tenantId);
   try {
-    await sendPendingInvites(tenantId, actor);
+    await scheduleInviteSends(tenantId, actor);
   } catch (error) {
     log.error(
       {
@@ -665,10 +689,9 @@ export async function setPrimaryDomain(
         tenantId,
         domainId,
         host: row.host,
-        reason: inviteRefusalReason(error),
         err: error instanceof Error ? error.message : String(error),
       },
-      'pending invites could not be sent after the primary switch; see the Admins tab',
+      'pending invites could not be scheduled after the primary switch; see the Admins tab',
     );
   }
   log.info(

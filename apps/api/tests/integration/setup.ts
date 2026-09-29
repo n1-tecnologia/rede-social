@@ -110,3 +110,42 @@ export async function uploadAvatar(
 
   return target.assetId;
 }
+
+/** One `kernel.invite-send` row as the integration suites assert it (quick 260929-g0s). */
+export type InviteSendJobRow = {
+  id: string;
+  state: string;
+  singleton_key: string | null;
+  start_after: Date;
+  retry_limit: number;
+  retry_backoff: boolean;
+  data: Record<string, unknown>;
+};
+
+/** Every `kernel.invite-send` job scheduled for `tenantId`, oldest first (any state). */
+export async function inviteSendJobsOf(tenantId: string): Promise<InviteSendJobRow[]> {
+  return adminSql<InviteSendJobRow[]>`
+    select id, state::text as state, singleton_key, start_after, retry_limit, retry_backoff, data
+      from pgboss.job_common
+     where name = 'kernel.invite-send' and data->>'tenantId' = ${tenantId}
+     order by created_on`;
+}
+
+/**
+ * Plays the worker for `tenantId`'s waiting `kernel.invite-send` jobs, ignoring `start_after`: each
+ * `created` row's payload goes through the real `inviteSendJob.handler` (errors propagate, the row
+ * stays `created`), and a row whose handler resolved is marked `completed` like `boss.work` would —
+ * so a later verify can schedule the same invite again. The kernel job is imported INSIDE the
+ * function (this file's "heavy kernel imports" rule). Returns how many handlers ran.
+ */
+export async function runInviteSendJobs(tenantId: string): Promise<number> {
+  const { inviteSendJob } = await import('@rede-social/core/server/platform/invite-send-job');
+  const rows = (await inviteSendJobsOf(tenantId)).filter((row) => row.state === 'created');
+  for (const row of rows) {
+    await inviteSendJob.handler(row.data as { tenantId: string; inviteId: string });
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name = 'kernel.invite-send' and id = ${row.id}::uuid`;
+  }
+  return rows.length;
+}

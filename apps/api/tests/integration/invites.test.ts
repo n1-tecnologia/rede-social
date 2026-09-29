@@ -9,11 +9,22 @@ import {
 } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { scheduleInviteSends } from '@rede-social/core/server/platform/invite-send';
+import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { isOneTenantPerUserViolation } from '@rede-social/core/server/platform/invites';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import {
+  adminSql,
+  api,
+  authAdmin,
+  HOSTS,
+  inviteSendJobsOf,
+  runInviteSendJobs,
+  SEED_PASSWORD,
+  signInAs,
+} from './setup';
 
 /**
  * ROLE-03 / D-29 / D-30 — the first-admin invite lifecycle against the live local stack.
@@ -27,6 +38,12 @@ import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setu
  *
  * Part 2 (Task 2): idempotent + concurrent accepts, stale consents, cross-tenant host, the invited
  * scope, list/resend routes (409s, 404s, 403), the superseded token.
+ *
+ * Part 3 (quick 260929-g0s): the FIRST send after a verified transition is no longer inline — the
+ * verify schedules one `kernel.invite-send` job per pending invite and `runInviteSendJobs` (setup.ts)
+ * plays the worker. The deferred-send describe proves the job: scheduled once, sends one branded
+ * invite whose link is on the tenant host, idempotent on re-run, silent for accepted/unknown rows and
+ * tenants without a verified primary, and the production delay reaches `start_after`.
  *
  * Every tenant carries a unique `inv-…` slug, every identity a `…@invite.test` address, and
  * `cleanup()` runs before AND after the suite (memberships have no cascade from tenants).
@@ -157,6 +174,10 @@ async function throwawayInvited(tag: string): Promise<Invited> {
 
 /** Removes every `inv-…` tenant, its memberships/consents and the throwaway auth users. */
 async function cleanup(): Promise<void> {
+  await adminSql`
+    delete from pgboss.job_common
+     where name = 'kernel.invite-send' and data->>'tenantId' in
+       (select id::text from public.tenants where slug like 'inv-%')`;
   await adminSql`
     delete from public.consent_records where tenant_id in
       (select id from public.tenants where slug like 'inv-%')`;
@@ -492,6 +513,8 @@ describe('resend lifecycle — list, resend, supersession, 409/404/403 (D-30)', 
       method: 'POST',
     });
     if (verified.status !== 200) throw new Error(`verify failed: ${verified.status}`);
+    // The verify only schedules the first send (quick 260929-g0s); play the worker.
+    await runInviteSendJobs(tenantId);
     await waitForInviteStatus(tenantId, 'sent');
   });
 
@@ -807,5 +830,139 @@ describe('refusals — e-mail already on the platform (WR-02 / WR-03 / WR-04)', 
       expect(err.details?.reason).toBe('already_accepted');
       expect(await mailpitMessages(invited.email)).toHaveLength(mailsAfterR4);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// quick 260929-g0s: the deferred first send. A verified transition schedules ONE
+// `kernel.invite-send` job per pending invite (delay 0 with the local allow-list adapter) and sends
+// nothing inline; the job sends through the one sender and is idempotent. `.localhost` hosts are in
+// GoTrue's local `additional_redirect_urls`, so the link keeps its `/auth/confirm` path.
+// ---------------------------------------------------------------------------------------------
+
+describe('deferred first send — kernel.invite-send (race fix)', () => {
+  const slug = `inv-deferred-${RUN}`.slice(0, 40);
+  const host = `${slug}.localhost`;
+  const adminEmail = `admin+deferred-${RUN}@invite.test`;
+  let tenantId = '';
+  let inviteId = '';
+  let domainId = '';
+
+  const authUsers = () =>
+    adminSql<{ id: string; invited_at: string | null }[]>`
+      select id, invited_at from auth.users where lower(email) = ${adminEmail}`;
+
+  const verifyNow = () =>
+    platform(`/tenants/${tenantId}/domains/${domainId}/verify`, { method: 'POST' });
+
+  beforeAll(async () => {
+    const created = await createTenantViaApi(slug, adminEmail);
+    tenantId = created.id;
+    inviteId = created.inviteId;
+    const attached = await platform(`/tenants/${tenantId}/domains`, {
+      method: 'POST',
+      body: { host },
+    });
+    if (attached.status !== 201) throw new Error(`attach failed: ${attached.status}`);
+    domainId = ((await attached.json()) as { id: string }).id;
+    createdDomainIds.push(domainId);
+  });
+
+  it('D1. "Verificar agora" answers verified, the invite stays pending, and exactly one ids-only job is scheduled for the invite (retry 5, backoff, no delay locally); a second verify adds no waiting duplicate', async () => {
+    const res = await verifyNow();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { verificationStatus: string; lastError: string | null };
+    expect(body.verificationStatus).toBe('verified');
+    expect(body.lastError).toBeNull();
+    expect((await tenantDetail(tenantId)).invites[0]?.status).toBe('pending');
+    expect(await mailpitMessages(adminEmail)).toHaveLength(0);
+
+    const jobs = (await inviteSendJobsOf(tenantId)).filter((job) => job.singleton_key === inviteId);
+    expect(jobs).toHaveLength(1);
+    const [job] = jobs;
+    expect(job?.data).toEqual({ tenantId, inviteId });
+    expect(job?.retry_limit).toBe(5);
+    expect(job?.retry_backoff).toBe(true);
+    expect(new Date(job?.start_after ?? 0).getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+
+    expect((await verifyNow()).status).toBe(200);
+    const again = (await inviteSendJobsOf(tenantId)).filter(
+      (row) => row.singleton_key === inviteId && row.state === 'created',
+    );
+    expect(again.length).toBeLessThanOrEqual(1);
+    expect((await tenantDetail(tenantId)).invites[0]?.status).toBe('pending');
+  });
+
+  it('D2. running the job sends ONE branded invite whose link opens /auth/confirm on the tenant host; the invite is sent, the identity invited, the membership invited admin_tenant', async () => {
+    expect(await runInviteSendJobs(tenantId)).toBeGreaterThanOrEqual(1);
+
+    const detail = await tenantDetail(tenantId);
+    expect(detail.invites[0]?.status).toBe('sent');
+    expect(detail.invites[0]?.sentAt).not.toBeNull();
+
+    const users = await authUsers();
+    expect(users).toHaveLength(1);
+    expect(users[0]?.invited_at).not.toBeNull();
+    const [membership] = await adminSql<{ role: string; status: string }[]>`
+      select role, status from public.memberships
+       where tenant_id = ${tenantId}::uuid and user_id = ${users[0]?.id ?? ''}::uuid`;
+    expect(membership).toEqual({ role: 'admin_tenant', status: 'invited' });
+
+    const mails = await waitForMailCount(adminEmail, 1);
+    expect(mails).toHaveLength(1);
+    expect(mails[0]?.HTML).toContain(`http://${host}:3000/auth/confirm?next=/aceitar-convite`);
+    expect(mails[0]?.HTML).toContain('type=invite');
+  });
+
+  it('D3. the same payload again resolves without a second mail or identity (claim-before-send)', async () => {
+    await expect(inviteSendJob.handler({ tenantId, inviteId })).resolves.toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(await mailpitMessages(adminEmail)).toHaveLength(1);
+    expect(await authUsers()).toHaveLength(1);
+  });
+
+  it('D4. an accepted invite is left alone: the handler resolves and no mail arrives', async () => {
+    await adminSql`
+      update public.tenant_invites set status = 'accepted', accepted_at = now()
+       where id = ${inviteId}::uuid`;
+    await expect(inviteSendJob.handler({ tenantId, inviteId })).resolves.toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(await mailpitMessages(adminEmail)).toHaveLength(1);
+    expect((await tenantDetail(tenantId)).invites[0]?.status).toBe('accepted');
+  });
+
+  it('D5. an unknown invite id and a tenant without a verified primary both resolve without sending', async () => {
+    await expect(
+      inviteSendJob.handler({ tenantId, inviteId: '11111111-1111-4111-8111-111111111111' }),
+    ).resolves.toBeUndefined();
+
+    const nohostSlug = `inv-dnohost-${RUN}`.slice(0, 40);
+    const nohostEmail = `admin+dnohost-${RUN}@invite.test`;
+    const nohost = await createTenantViaApi(nohostSlug, nohostEmail);
+    await expect(
+      inviteSendJob.handler({ tenantId: nohost.id, inviteId: nohost.inviteId }),
+    ).resolves.toBeUndefined();
+    expect((await tenantDetail(nohost.id)).invites[0]?.status).toBe('pending');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(await mailpitMessages(nohostEmail)).toHaveLength(0);
+  });
+
+  it('D6. the production delay reaches pg-boss: scheduleInviteSends with delayS 60 sets start_after about a minute out', async () => {
+    const delaySlug = `inv-ddelay-${RUN}`.slice(0, 40);
+    const delayEmail = `admin+ddelay-${RUN}@invite.test`;
+    const created = await createTenantViaApi(delaySlug, delayEmail);
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at, verification_status)
+      values (${created.id}::uuid, ${`${delaySlug}.localhost`}, true, now(), 'verified')`;
+
+    const result = await scheduleInviteSends(created.id, { userId: 'test' }, { delayS: 60 });
+    expect(result).toEqual({ scheduled: 1 });
+    const jobs = await inviteSendJobsOf(created.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.singleton_key).toBe(created.inviteId);
+    expect(new Date(jobs[0]?.start_after ?? 0).getTime()).toBeGreaterThanOrEqual(
+      Date.now() + 55_000,
+    );
+    expect((await tenantDetail(created.id)).invites[0]?.status).toBe('pending');
   });
 });
