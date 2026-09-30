@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 41
+open_count: 42
 waived_count: 0
 fixed_count: 20
-total_count: 61
-last_updated: 2026-09-30T17:54:09.150Z
+total_count: 62
+last_updated: 2026-09-30T19:34:23.332Z
 ---
 
 # Broken Windows Ledger
@@ -76,6 +76,7 @@ last_updated: 2026-09-30T17:54:09.150Z
 | 59 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 378 | 07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still tria-*), cases 2-5 did not run | open |  | 2026-09-30T13:22:38.830Z |  |
 | 60 | 7 | unrun-verify | apps/api/tests/integration/signup.test.ts | 142 | signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01) | open |  | 2026-09-30T13:22:38.902Z |  |
 | 61 | 7 | unrun-verify | apps/web/e2e/events.spec.ts | 422 | 07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still tria-* (pre-existing, same cause as #59/#60) | open |  | 2026-09-30T17:54:09.150Z |  |
+| 62 | 07 | stub | packages/modules/chat/module.ts |  | 07-08: the chat TopBar slot links to /suporte, which has no page until 07-09, and the member's unreadConversations still renders as a count badge (the dot for conversationsBadge='dot' is 07-09's UI) | open |  | 2026-09-30T19:34:23.332Z |  |
 
 ````json
 [
@@ -809,6 +810,18 @@ last_updated: 2026-09-30T17:54:09.150Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-30T17:54:09.150Z",
+    "resolved_at": null
+  },
+  {
+    "id": 62,
+    "kind": "stub",
+    "phase": "07",
+    "file": "packages/modules/chat/module.ts",
+    "line": null,
+    "description": "07-08: the chat TopBar slot links to /suporte, which has no page until 07-09, and the member's unreadConversations still renders as a count badge (the dot for conversationsBadge='dot' is 07-09's UI)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-30T19:34:23.332Z",
     "resolved_at": null
   }
 ]
