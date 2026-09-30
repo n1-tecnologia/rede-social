@@ -36,6 +36,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 6: Events** - In-person / online events, upcoming + past lists, RSVP and self check-in window, admin attendance list, calendar export
 - [ ] **Phase 7: Notifications, Web Push & Chat** - Realtime infrastructure (Supabase Broadcast on private topics), event-driven notification center with live unread count, Web Push with iOS install flow, event reminders, 1:1 member <-> support chat with support inbox
 - [ ] **Phase 8: Moderation, Tenant Admin Panel & Pilot Hardening** - Delete any comment, block/unblock with immediate revocation, moderation log, branding editor with live preview, member/role management, rules editor, mobile admin flows, per-module READMEs, pilot go-live gate
+- [ ] **Phase 08.1: Multi-Tenant Identity (INSERTED)** - One identity, many memberships: the same e-mail joins several tenants (sign-up on a second tenant joins instead of 409), membership chosen by host, per-tenant recovery branding, shared-identity isolation tests
 - [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
@@ -637,6 +638,26 @@ Plans:
 **UI hint**: yes
 **Research needed**: None (thin screens over columns that exist since Foundation/Feed; hardening is checklist-driven). Flag LGPD legal review to the user before go-live (research covered mechanics only).
 **Notes**: Hardening items without a requirement of their own but expected here: `EXPLAIN` checks on feed/notification/chat queries with a 10k-row seed, Sentry + structured logging with `tenant_id`/`request_id`, Cloud Run config in git (`min-instances=1`, cpu-boost, timeouts), backups/rollback rehearsal, CORS locked to the single origin in production, a11y pass, build-output check for static routes under `(app)`. Moderation of member content (MODER-04) and the reports queue (MODER-05) moved to Phase 11 (post-MVP) on 2026-09-25; this phase's go-live gate closes the MVP.
+
+### Phase 08.1: Multi-Tenant Identity (INSERTED)
+
+**Goal:** One person, one login, many communities. A single Supabase identity (one e-mail, one password) can hold active memberships in several tenants. Signing up on a second tenant with an e-mail that already exists joins that tenant instead of failing with 409. Isolation between tenants stays exactly as strict as it is today.
+**Mode:** mvp
+**Requirements**: V2-PLAT-07 (promoted into the MVP on 2026-09-30; relaxes the ROLE-02 one-membership constraint)
+**Depends on:** Phase 8 (moderation, block and role management act per membership)
+**Success Criteria** (what must be TRUE):
+
+  1. `memberships_one_tenant_per_user_v1` is dropped and `(tenant_id, user_id)` stays unique. The same identity can be `member` in tenant A and `admin_tenant` in tenant B, and blocking, role and profile apply per membership. A block in A has no effect in B.
+  2. On tenant B's sign-up, an e-mail that already has an identity leads to a "já tem conta — entre para participar" flow. The person confirms with their existing password, records B's two consents, and gets a B membership. The response never reveals which other tenant the e-mail belongs to. An already signed-in visitor can join from B's host the same way.
+  3. The auth middleware resolves the tenant of record from the membership that matches the request host. The host still only picks among the user's own memberships: a session with no membership on that host gets `403 TENANT_HOST_MISMATCH`. Bootstrap, the Realtime topic authorization and push subscriptions are all scoped to that membership.
+  4. Password recovery and auth e-mails started on tenant B's host carry B's branding and links. The `super_admin` invite flow (02-19 refusal `user_in_other_tenant`) is revisited so it adds a membership instead of refusing.
+  5. The two-tenant isolation suite grows a shared-identity fixture. pgTAP and API negative tests prove that a user with memberships in A and B, acting on A's host, can never read or write B's rows, storage objects, Realtime topics or notifications, and the reverse.
+
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 08.1 to break down)
 
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 

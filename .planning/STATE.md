@@ -9,7 +9,7 @@ last_activity: 2026-09-30
 last_activity_desc: "07-08 complete: support chat server side (@rede-social/module-chat, gapless seq trigger under the conversation row lock, ids-only signal trigger on conv:/support-inbox/user:, participant/staff-aware RLS, lazy member send, staff reply with 409 member_blocked/member_removed, seq catch-up, keyset inbox, shared staff read, member dot / staff count via conversationsBadge, chat.support moved to the chat manifest, push-only support source, pgTAP 152, seeded support users); next 07-09 (Wave 8)"
 state_head: bee86849c16c708b28995f9033fddf5bdd178e27
 progress:
-  total_phases: 15
+  total_phases: 16
   completed_phases: 0
   total_plans: 109
   completed_plans: 103
@@ -586,6 +586,7 @@ None yet.
 - Phase 9 moved: Rede Social - Follow, Member Posts and Explorar (was 05.3) moved after Phase 8 as post-MVP; gains the Reels member-video visibility criterion. MVP = Phases 1-8 + 01.1, 05.1-05.3 (user decision)
 - Phase 10 moved: Rede Social - Member Stories and Communities (was 05.4) moved after Phase 8 as post-MVP
 - Phase 11 added: Rede Social - Direct Messages, Member Blocking and Reports, post-MVP: split out of Phase 7 (CHAT-06, CHAT-07, follower-scoped notification rules) and Phase 8 (MODER-04, MODER-05)
+- Phase 08.1 inserted after Phase 8: Multi-Tenant Identity: one identity, many memberships (V2-PLAT-07 promoted into the MVP)
 
 ## Deferred Items
 
