@@ -17,4 +17,9 @@ export {
   type MessageBubbleProps,
 } from './MessageBubble';
 export { MessageList, type MessageListItem, type MessageListProps } from './MessageList';
-export { ThreadHeader, type ThreadHeaderProps } from './ThreadHeader';
+export {
+  ThreadHeader,
+  type ThreadHeaderMemberProps,
+  type ThreadHeaderProps,
+  type ThreadHeaderStaffProps,
+} from './ThreadHeader';

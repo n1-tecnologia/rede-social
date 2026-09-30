@@ -4,13 +4,13 @@ import { convTopic, REALTIME_EVENTS } from '@rede-social/contracts/realtime';
 import { TenantLogo, useRealtimeTopic } from '@rede-social/core/ui';
 import { CHAT_PAGE_SIZE } from '@rede-social/module-chat/contracts';
 import { ChatComposer, MessageList } from '@rede-social/module-chat/ui';
-import { Button, EmptyState } from '@rede-social/ui';
-import { ArrowDown, MessageCircle } from 'lucide-react';
+import { Button, EmptyState, useToast } from '@rede-social/ui';
+import { ArrowDown, Ban, MessageCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { type ChatDayKeys, type ChatMessageView, chatRuns } from '@/lib/chat-view';
-import { sendSupportMessageAction } from './actions';
+import { type ChatDayKeys, type ChatMessageView, type ChatViewer, chatRuns } from '@/lib/chat-view';
+import { type ReplyToConversationResult, sendSupportMessageAction } from './actions';
 
 /**
  * The member's support thread pane (UI-D-261, D-240, CHAT-04) [designed]: the scroller and the
@@ -35,6 +35,14 @@ import { sendSupportMessageAction } from './actions';
  *   first message, the conversation id to join. A failure removes the bubble and answers `false`, so
  *   the composer restores the draft and shows its inline error (UI-D-260).
  *
+ * **Staff view (07-10, UI-D-263):** the same pane with `viewer="staff"` and the staff reply injected as
+ * `onSendAction`. A staff thread has no greeting (it exists only once the member wrote; a zero-message
+ * thread reached by URL shows an empty log with the composer enabled), the optimistic bubble reads
+ * "Você", and `readOnlyNotice` (a blocked or departed member) replaces the composer with the notice.
+ * A reply racing a block answers `member_blocked` / `member_removed`: the draft is restored with the
+ * notice as its inline error, the same sentence is toasted, and `router.refresh()` re-renders the page,
+ * which then passes the notice and swaps the composer out.
+ *
  * Every string comes from the `chat` catalog; every time and day label is server-formatted
  * (`chat-view.ts`), and this component never reads the clock (UI-D-14).
  */
@@ -50,6 +58,14 @@ export interface ThreadPaneProps {
   initialKeys: ChatDayKeys;
   /** The server could not load the thread: the error state, no composer. */
   initialError: boolean;
+  /** Who reads: the member in their own thread (default) or staff in the inbox thread (07-10). */
+  viewer?: ChatViewer;
+  /** 07-10: the staff reply (a server action). Without it the pane sends as the member. */
+  onSendAction?: (conversationId: string, body: string) => Promise<ReplyToConversationResult>;
+  /** 07-10 (UI-D-263): a blocked or departed member's thread is read-only; the notice replaces the composer. */
+  readOnlyNotice?: string | null;
+  /** 07-10: the notices a reply racing a block or a departure toasts (the 409 answers). */
+  raceNotices?: { member_blocked: string; member_removed: string };
 }
 
 interface MessagesAnswer {
@@ -134,9 +150,16 @@ export function ThreadPane({
   initialHasOlder,
   initialKeys,
   initialError,
+  viewer = 'member',
+  onSendAction,
+  readOnlyNotice = null,
+  raceNotices,
 }: ThreadPaneProps) {
   const t = useTranslations('chat');
   const router = useRouter();
+  const { show } = useToast();
+  /** The composer's inline error: the generic failure, or a race notice until the refresh lands. */
+  const [sendError, setSendError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [views, setViews] = useState<ChatMessageView[]>(initialViews);
   const [keys, setKeys] = useState<ChatDayKeys>(initialKeys);
@@ -281,13 +304,14 @@ export function ThreadPane({
   const onSend = async (body: string): Promise<boolean> => {
     pendingIdRef.current += 1;
     const tempId = `pending-${pendingIdRef.current}`;
+    const staff = viewer === 'staff';
     const optimistic: ChatMessageView = {
       id: tempId,
       seq: 0,
       side: 'own',
-      authorKey: 'member',
+      authorKey: staff ? 'staff:you' : 'member',
       body,
-      label: null,
+      label: staff ? { firstName: t('sender.you'), srSuffix: '', icon: null } : null,
       time: '',
       dayKey: keys.todayKey,
       createdAtMs: 0,
@@ -296,14 +320,29 @@ export function ThreadPane({
     intentRef.current = { kind: 'bottom' };
     setViews((current) => [...current, optimistic]);
 
-    let result: Awaited<ReturnType<typeof sendSupportMessageAction>> | null = null;
+    let result: ReplyToConversationResult | null = null;
     try {
-      result = await sendSupportMessageAction(body);
+      const id = conversationRef.current;
+      if (onSendAction) result = id ? await onSendAction(id, body) : null;
+      else result = await sendSupportMessageAction(body);
     } catch {
       result = null;
     }
     if (!result?.ok) {
       setViews((current) => current.filter((view) => view.id !== tempId));
+      const race =
+        result && (result.error === 'member_blocked' || result.error === 'member_removed')
+          ? (raceNotices?.[result.error] ?? null)
+          : null;
+      if (race) {
+        // UI-D-263: the draft comes back with the notice, the toast says why, and the refreshed page
+        // swaps the composer for the read-only notice.
+        setSendError(race);
+        show({ tone: 'error', message: race });
+        router.refresh();
+      } else {
+        setSendError(null);
+      }
       return false;
     }
     const { view, conversationId: created } = result;
@@ -380,7 +419,7 @@ export function ThreadPane({
           </div>
         ) : null}
 
-        {views.length === 0 ? (
+        {views.length === 0 && viewer === 'member' ? (
           <SupportGreeting
             logoUrl={logoUrl}
             tenantName={tenantName}
@@ -401,17 +440,27 @@ export function ThreadPane({
             </Button>
           </div>
         ) : null}
-        <ChatComposer
-          label={t('composer.label')}
-          placeholder={t('composer.placeholder')}
-          sendLabel={t('composer.send')}
-          // pt-BR grouping ("1.800") to match the catalog's literal "2.000".
-          counterTemplate={(count) =>
-            t('composer.counter', { count: count.toLocaleString('pt-BR') })
-          }
-          errorText={t('composer.errors.failed')}
-          onSend={onSend}
-        />
+        {readOnlyNotice ? (
+          <div
+            data-chat-readonly
+            className="flex items-center gap-3 border-t border-border bg-bg-secondary px-4 py-3"
+          >
+            <Ban aria-hidden size={20} className="shrink-0 text-text-tertiary" />
+            <p className="text-sm font-normal text-text-secondary">{readOnlyNotice}</p>
+          </div>
+        ) : (
+          <ChatComposer
+            label={t('composer.label')}
+            placeholder={t('composer.placeholder')}
+            sendLabel={t('composer.send')}
+            // pt-BR grouping ("1.800") to match the catalog's literal "2.000".
+            counterTemplate={(count) =>
+              t('composer.counter', { count: count.toLocaleString('pt-BR') })
+            }
+            errorText={sendError ?? t('composer.errors.failed')}
+            onSend={onSend}
+          />
+        )}
       </div>
     </div>
   );

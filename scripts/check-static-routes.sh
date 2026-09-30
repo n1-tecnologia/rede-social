@@ -91,6 +91,10 @@ const REQUIRED_KEYS = [
   // 07-09: the member's support thread (CHAT-02). It reads the session, the member's own
   // conversation and the request instant (day labels such as "Hoje"), so it may never be prerendered.
   '/(app)/suporte/page',
+  // 07-10: the staff side of one member's conversation (CHAT-03). It reads the session, the caller's
+  // `chat.support` permission and another member's messages per request, so a prerendered copy would
+  // serve one member's thread to every visitor.
+  '/(app)/suporte/[conversationId]/page',
   // 06-04: the admin's form routes. Both read the session and the composed manage permission per
   // request (and the edit route the manage-only edit read), so neither may be prerendered.
   '/(app)/eventos/novo/page',

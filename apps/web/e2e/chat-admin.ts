@@ -20,6 +20,19 @@ const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
 /** The seeded demo support thread of `member@rede-demo.local` (07-08). */
 export const SEED_SUPPORT_CONVERSATION_ID = '1d000000-0000-4000-8000-000000000001';
 
+/** Its three bodies, mirrored from `scripts/seed.ts` `SEED_SUPPORT_MESSAGES` (member, staff, member). */
+export const SEED_SUPPORT_MESSAGES = {
+  memberFirst: 'Oi, preciso de ajuda com meu cadastro.',
+  staffReply: 'Oi! Como posso ajudar?',
+  memberSecond: 'Quero trocar meu e-mail.',
+} as const;
+
+/**
+ * The team's read position the seed leaves on that thread: the staff reply (seq 2) is read, the
+ * member's second message (seq 3) is not, so the thread starts "awaiting" and the staff count is 1.
+ */
+export const SEED_STAFF_READ_SEQ = 2;
+
 /** The seeded demo staff member (`support_tenant`, first name "Carla"). */
 export const SUPPORT_EMAIL = 'support@rede-demo.local';
 export const SUPPORT_FIRST_NAME = 'Carla';
@@ -85,18 +98,21 @@ export async function sendAsMember(email: string, body: string): Promise<string>
   return sent.conversationId;
 }
 
-async function tenantAndUser(email: string): Promise<{ tenantId: string; userId: string }> {
+async function tenantAndUser(
+  email: string,
+  slug = 'rede-demo',
+): Promise<{ tenantId: string; userId: string }> {
   const [row] = await sql()<{ tenant_id: string; user_id: string }[]>`
     select t.id::text as tenant_id, u.id::text as user_id
       from public.tenants t, auth.users u
-     where t.slug = 'rede-demo' and u.email = ${email}`;
-  if (!row) throw new Error(`no ${email} in rede-demo`);
+     where t.slug = ${slug} and u.email = ${email}`;
+  if (!row) throw new Error(`no ${email} in ${slug}`);
   return { tenantId: row.tenant_id, userId: row.user_id };
 }
 
 /** Deletes `email`'s support conversation (participants and messages cascade): the greeting again. */
-export async function resetMemberConversation(email: string): Promise<void> {
-  const { tenantId, userId } = await tenantAndUser(email);
+export async function resetMemberConversation(email: string, slug = 'rede-demo'): Promise<void> {
+  const { tenantId, userId } = await tenantAndUser(email, slug);
   await sql()`
     delete from public.chat_conversations
      where tenant_id = ${tenantId}::uuid and kind = 'support' and created_by_user_id = ${userId}::uuid`;
@@ -106,8 +122,8 @@ export async function resetMemberConversation(email: string): Promise<void> {
  * `email`'s support conversation, created empty as the migration role when missing (the seed's own
  * shape: the conversation row plus the member's participant row). Returns its id.
  */
-export async function ensureConversation(email: string): Promise<string> {
-  const { tenantId, userId } = await tenantAndUser(email);
+export async function ensureConversation(email: string, slug = 'rede-demo'): Promise<string> {
+  const { tenantId, userId } = await tenantAndUser(email, slug);
   const existing = await sql()<{ id: string }[]>`
     select id::text as id from public.chat_conversations
      where tenant_id = ${tenantId}::uuid and kind = 'support' and created_by_user_id = ${userId}::uuid`;
@@ -171,4 +187,80 @@ export async function setMemberReadSeq(conversationId: string, seq: number): Pro
       from public.chat_conversations c
      where c.id = p.conversation_id and p.conversation_id = ${conversationId}::uuid
        and p.user_id = c.created_by_user_id`;
+}
+
+/* ── 07-10: the staff side ─────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A clean staff inbox: every rede-demo support conversation EXCEPT the seeded one is deleted, and the
+ * seeded thread's team read position goes back to the seed's (so it is the one "awaiting" thread and
+ * the staff count is 1).
+ */
+export async function resetStaffInbox(): Promise<void> {
+  await sql()`
+    delete from public.chat_conversations c
+     using public.tenants t
+     where t.id = c.tenant_id and t.slug = 'rede-demo' and c.kind = 'support'
+       and c.id <> ${SEED_SUPPORT_CONVERSATION_ID}::uuid`;
+  await setStaffReadSeq(SEED_SUPPORT_CONVERSATION_ID, SEED_STAFF_READ_SEQ);
+}
+
+/** Sets the TEAM's shared read position on a conversation (D-225). */
+export async function setStaffReadSeq(conversationId: string, seq: number): Promise<void> {
+  await sql()`
+    update public.chat_conversations set staff_last_read_seq = ${seq}
+     where id = ${conversationId}::uuid`;
+}
+
+/** Blocks `email`'s membership in `slug` (the admin lane; Phase 8 ships the real action). */
+export async function blockMember(email: string, slug = 'rede-demo'): Promise<void> {
+  const { tenantId, userId } = await tenantAndUser(email, slug);
+  await sql()`
+    update public.memberships set status = 'blocked', blocked_at = now()
+     where tenant_id = ${tenantId}::uuid and user_id = ${userId}::uuid`;
+}
+
+/** Restores `email`'s membership in `slug` to active. */
+export async function unblockMember(email: string, slug = 'rede-demo'): Promise<void> {
+  const { tenantId, userId } = await tenantAndUser(email, slug);
+  await sql()`
+    update public.memberships set status = 'active', blocked_at = null
+     where tenant_id = ${tenantId}::uuid and user_id = ${userId}::uuid`;
+}
+
+/** The member's display name in rede-demo, as the staff header and notices print it. */
+export async function displayNameOf(email: string): Promise<string> {
+  const [row] = await sql()<{ name: string }[]>`
+    select mp.display_name as name
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+      join public.tenants t on t.id = m.tenant_id
+      join public.member_profiles mp on mp.membership_id = m.id
+     where u.email = ${email} and t.slug = 'rede-demo' and m.deleted_at is null`;
+  if (!row) throw new Error(`no profile for ${email}`);
+  return row.name;
+}
+
+/**
+ * One support conversation with one member message for every ACTIVE rede-demo member except the
+ * seeded thread's owner, oldest first, so the inbox has enough rows to scroll (UI-D-264). Returns the
+ * new conversation ids.
+ */
+export async function seedInboxConversations(except: readonly string[] = []): Promise<string[]> {
+  const rows = await sql()<{ email: string }[]>`
+    select u.email
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+      join public.tenants t on t.id = m.tenant_id
+     where t.slug = 'rede-demo' and m.role = 'member' and m.status = 'active'
+       and m.deleted_at is null and u.email <> 'member@rede-demo.local'
+     order by u.email`;
+  const ids: string[] = [];
+  for (const [index, row] of rows.entries()) {
+    if (except.includes(row.email)) continue;
+    const id = await ensureConversation(row.email);
+    await insertMessages(id, [{ side: 'member', body: `Conversa da caixa ${index + 1}` }]);
+    ids.push(id);
+  }
+  return ids;
 }

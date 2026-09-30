@@ -1,20 +1,30 @@
-import { expect, type Page, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { type Browser, expect, type Page, test } from '@playwright/test';
 import { createTranslator } from 'next-intl';
 import chatMessages from '../messages/pt-BR/chat.json' with { type: 'json' };
+import { membershipIdFor } from './admin';
 import {
+  blockMember,
   closeChatAdmin,
+  displayNameOf,
   ensureConversation,
   insertMessages,
   memberReadSeq,
   messagesOf,
   replyAsSupport,
   resetMemberConversation,
+  resetStaffInbox,
   SEED_SUPPORT_CONVERSATION_ID,
+  SEED_SUPPORT_MESSAGES,
+  SUPPORT_EMAIL,
   SUPPORT_FIRST_NAME,
+  seedInboxConversations,
   sendAsMember,
   setMemberReadSeq,
+  setStaffReadSeq,
+  unblockMember,
 } from './chat-admin';
-import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { hosts, login, SEED_PASSWORD, signOut, users } from './fixtures';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const C = chatMessages.chat;
@@ -366,5 +376,413 @@ test.describe('chat membro — relógio do tenant', () => {
     } finally {
       await setMemberReadSeq(SEED_SUPPORT_CONVERSATION_ID, readBefore);
     }
+  });
+});
+
+/* ── 07-10: the staff side ─────────────────────────────────────────────────────────────────────── */
+
+/** A second demo member for the staff cases, so the seeded thread and 07-09's MEMBER stay untouched. */
+const STAFF_CASE_MEMBER = 'rafael.teixeira@rede-demo.local';
+
+/**
+ * The inbox rows IN the list pane (the list is rendered once, in the shared `/suporte` layout). Scoped
+ * on purpose: React streams a resolved Suspense boundary into a hidden `<div hidden id="S:…">` at the
+ * end of the body before revealing it, so an unscoped count can match rows that are not on screen yet.
+ */
+const listPane = (page: Page) => page.locator('[data-support-list]');
+const inboxRows = (page: Page) => listPane(page).locator('a[data-inbox-row]');
+const inboxRow = (page: Page, conversationId: string) =>
+  listPane(page).locator(`a[data-inbox-row][href="/suporte/${conversationId}"]`);
+const staffCount = (count: number) => tc('navBadge.staff', { count });
+
+type DeviceUse = Parameters<Browser['newContext']>[0];
+
+/** A second, independent browser context (its own cookies) signed in as `email` on the demo host. */
+async function contextAs(browser: Browser, email: string, use: DeviceUse) {
+  const context = await browser.newContext(use);
+  const page = await context.newPage();
+  await login(page, email, SEED_PASSWORD, hosts.demo);
+  return { context, page };
+}
+
+/** The ONE not-found screen (D-23), whatever the cause. */
+async function expectConversationNotFound(page: Page): Promise<void> {
+  const screen = page.locator('[data-chat-not-found]').filter({ visible: true });
+  await expect(screen.getByRole('heading', { name: C.notFound.title })).toBeVisible();
+  await expect(screen).toContainText(tc('notFound.body', { tenant: TENANT }));
+  await expect(screen.getByRole('link', { name: C.notFound.cta })).toHaveAttribute(
+    'href',
+    '/suporte',
+  );
+  await expect(thread(page)).toHaveCount(0);
+}
+
+/**
+ * CHAT-03 / CHAT-04 (plan 07-10, ROADMAP SC 3): the staff side of support in the browser. The same
+ * chat slot lands a `chat.support` holder on the inbox (D-224); the list is ordered by activity with the
+ * awaiting dot, refreshes itself live, and the team shares one read state (D-225, D-238). The staff
+ * thread links the member's profile, labels team bubbles with first names or "Você", is read-only for a
+ * blocked member, and every miss is one not-found screen. From `lg` the list and the thread share one
+ * split card, and a row click swaps only the right pane.
+ *
+ * Every case starts from a clean inbox: only the seeded thread, "awaiting", staff count 1.
+ */
+test.describe('chat equipe', () => {
+  test.beforeEach(async () => {
+    await unblockMember(STAFF_CASE_MEMBER);
+    await resetStaffInbox();
+  });
+
+  test.afterAll(async () => {
+    await unblockMember(STAFF_CASE_MEMBER);
+    await resetMemberConversation(users.labMember, 'rede-lab');
+    await resetStaffInbox();
+  });
+
+  test('1. the support user: the slot counts 1, the inbox marks the seeded thread, the thread links the profile and labels its own reply "Você"', async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'mobile-chromium',
+      'the phone flow (list and thread are routes)',
+    );
+    const memberName = await displayNameOf(users.demoMember);
+    const membershipId = await membershipIdFor(users.demoMember, 'rede-demo');
+
+    await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+    await expect(chatSlot(page)).toHaveAccessibleName(staffCount(1));
+    await chatSlot(page).click();
+    await expect(page).toHaveURL(/\/suporte$/);
+    await expect(page.getByRole('heading', { level: 1, name: C.inbox.title })).toBeVisible();
+
+    const row = inboxRow(page, SEED_SUPPORT_CONVERSATION_ID);
+    await expect(inboxRows(page)).toHaveCount(1);
+    await expect(row).toHaveAttribute('data-awaiting', 'true');
+    await expect(row.locator('[data-inbox-dot]')).toBeVisible();
+    await expect(row.locator('[data-inbox-name]')).toHaveText(`${memberName}${C.inbox.awaitingSr}`);
+    await expect(row.locator('[data-inbox-preview]')).toHaveText(
+      SEED_SUPPORT_MESSAGES.memberSecond,
+    );
+    await expect(row.locator('[data-inbox-time]')).toHaveText(/^(\d{2}:\d{2}|Ontem|\d{2}\/\d{2})$/);
+    // D-221: one list, no status chips, no filters.
+    await expect(page.getByRole('tab')).toHaveCount(0);
+
+    const read = page.waitForResponse((res) =>
+      /\/api\/chat\/conversations\/[^/]+\/read$/.test(res.url()),
+    );
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`/suporte/${SEED_SUPPORT_CONVERSATION_ID}$`));
+    expect((await read).status()).toBe(204);
+
+    const profile = page.getByRole('link', { name: tc('staff.profile', { name: memberName }) });
+    await expect(profile).toHaveAttribute('href', `/membros/${membershipId}`);
+    await expect(profile.getByRole('heading', { level: 1 })).toHaveText(memberName);
+    await expect(page.getByRole('link', { name: C.staff.back })).toHaveAttribute(
+      'href',
+      '/suporte',
+    );
+
+    const reply = bubbles(page).filter({ hasText: SEED_SUPPORT_MESSAGES.staffReply });
+    await expect(reply.locator('[data-chat-bubble="own"]')).toBeVisible();
+    await expect(reply.locator('[data-chat-sender]')).toHaveText(C.sender.you);
+    const fromMember = bubbles(page).filter({ hasText: SEED_SUPPORT_MESSAGES.memberFirst });
+    await expect(fromMember.locator('[data-chat-bubble="other"]')).toBeVisible();
+    await expect(fromMember.locator('[data-chat-sender]')).toHaveCount(0);
+
+    // Opening the thread while visible read it for the team: the count clears live.
+    await expect(chatSlot(page)).toHaveAccessibleName(C.nav, { timeout: 15_000 });
+  });
+
+  test('2. two staff members share the thread: a member message moves the row up live in both inboxes, and one read clears the dot and the count for both without a reload', async ({
+    page,
+    browser,
+    contextOptions,
+    viewport,
+    isMobile,
+    hasTouch,
+    userAgent,
+    deviceScaleFactor,
+  }) => {
+    test.setTimeout(120_000);
+    // The member's thread exists and is read, BELOW newer read threads; only the seeded one awaits.
+    const conversationId = await ensureConversation(STAFF_CASE_MEMBER);
+    await insertMessages(conversationId, [{ side: 'member', body: 'Mensagem antiga' }]);
+    const others = await seedInboxConversations([STAFF_CASE_MEMBER]);
+    for (const id of [conversationId, ...others]) await setStaffReadSeq(id, 1);
+
+    await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+    const admin = await contextAs(browser, users.demoAdmin, {
+      ...contextOptions,
+      viewport,
+      isMobile,
+      hasTouch,
+      userAgent,
+      deviceScaleFactor,
+      serviceWorkers: 'block',
+    });
+    try {
+      for (const p of [page, admin.page]) {
+        await p.goto(`${hosts.demo}/suporte`);
+        await expect(inboxRows(p)).toHaveCount(others.length + 2);
+        await expect(inboxRows(p).first()).not.toHaveAttribute(
+          'href',
+          `/suporte/${conversationId}`,
+        );
+        await expect(inboxRow(p, conversationId)).not.toHaveAttribute('data-awaiting', 'true');
+        await expect(chatSlot(p)).toHaveAccessibleName(staffCount(1));
+        await p.evaluate(() => {
+          (window as unknown as { __noReload: boolean }).__noReload = true;
+        });
+      }
+      // Both inboxes join the support-inbox topic before the member writes.
+      await page.waitForTimeout(2_000);
+
+      const text = `Mensagem ao vivo ${Date.now()}`;
+      expect(await sendAsMember(STAFF_CASE_MEMBER, text)).toBe(conversationId);
+      for (const p of [page, admin.page]) {
+        const first = inboxRows(p).first();
+        await expect(first).toHaveAttribute('href', `/suporte/${conversationId}`, {
+          timeout: 15_000,
+        });
+        await expect(first).toHaveAttribute('data-awaiting', 'true');
+        await expect(first.locator('[data-inbox-preview]')).toHaveText(text);
+        await expect(first.locator('[data-inbox-time]')).toHaveText(/^\d{2}:\d{2}$/);
+        await expect(chatSlot(p)).toHaveAccessibleName(staffCount(2), { timeout: 15_000 });
+      }
+
+      // The support user opens it; the admin's dot and count clear with no reload (D-225, D-238).
+      await inboxRow(page, conversationId).click();
+      await expect(page).toHaveURL(new RegExp(`/suporte/${conversationId}$`));
+      const adminRow = inboxRow(admin.page, conversationId);
+      await expect(adminRow).not.toHaveAttribute('data-awaiting', 'true', { timeout: 15_000 });
+      await expect(adminRow.locator('[data-inbox-dot]')).toHaveCount(0);
+      await expect(chatSlot(admin.page)).toHaveAccessibleName(staffCount(1), { timeout: 15_000 });
+      expect(
+        await admin.page.evaluate(
+          () => (window as unknown as { __noReload?: boolean }).__noReload === true,
+        ),
+      ).toBe(true);
+
+      // The admin reads the team's bubbles by first name (UI-D-259).
+      await admin.page.goto(`${hosts.demo}/suporte/${SEED_SUPPORT_CONVERSATION_ID}`);
+      const reply = bubbles(admin.page).filter({ hasText: SEED_SUPPORT_MESSAGES.staffReply });
+      await expect(reply.locator('[data-chat-sender]')).toHaveText(SUPPORT_FIRST_NAME);
+    } finally {
+      await admin.context.close();
+    }
+  });
+
+  test('3. a staff reply reaches the member live; its author reads it as "Você"', async ({
+    page,
+    browser,
+    contextOptions,
+    viewport,
+    isMobile,
+    hasTouch,
+    userAgent,
+    deviceScaleFactor,
+  }) => {
+    test.setTimeout(120_000);
+    const conversationId = await sendAsMember(STAFF_CASE_MEMBER, 'Preciso de ajuda com o evento');
+    const member = await contextAs(browser, STAFF_CASE_MEMBER, {
+      ...contextOptions,
+      viewport,
+      isMobile,
+      hasTouch,
+      userAgent,
+      deviceScaleFactor,
+      serviceWorkers: 'block',
+    });
+    try {
+      await member.page.goto(`${hosts.demo}/suporte`);
+      await expect(bubbles(member.page)).toHaveCount(1);
+
+      await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+      await page.goto(`${hosts.demo}/suporte/${conversationId}`);
+      await expect(bubbles(page)).toHaveCount(1);
+      await member.page.waitForTimeout(1_500);
+
+      const reply = `Resposta da equipe ${Date.now()}`;
+      await send(page, reply);
+      const own = bubbles(page).filter({ hasText: reply });
+      await expect(own.locator('[data-chat-bubble="own"]')).toBeVisible();
+      await expect(own.locator('[data-chat-sender]')).toHaveText(C.sender.you);
+
+      const live = bubbles(member.page).filter({ hasText: reply });
+      await expect(live).toHaveCount(1, { timeout: 15_000 });
+      await expect(live.locator('[data-chat-sender]')).toHaveText(
+        `${SUPPORT_FIRST_NAME}${C.sender.staffSr}`,
+      );
+    } finally {
+      await member.context.close();
+    }
+  });
+
+  test('4. a blocked member: the inbox pill, a read-only thread, and a reply racing the block toasts the notice and swaps it in', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const conversationId = await sendAsMember(STAFF_CASE_MEMBER, 'Mensagem antes do bloqueio');
+    const name = await displayNameOf(STAFF_CASE_MEMBER);
+    const notice = tc('blocked.notice', { name });
+    await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+
+    await blockMember(STAFF_CASE_MEMBER);
+    await page.goto(`${hosts.demo}/suporte`);
+    await expect(inboxRow(page, conversationId).locator('[data-inbox-blocked]')).toHaveText(
+      C.blocked.pill,
+    );
+    await page.goto(`${hosts.demo}/suporte/${conversationId}`);
+    await expect(thread(page).locator('[data-chat-readonly]')).toHaveText(notice);
+    await expect(composerField(page)).toHaveCount(0);
+    await expect(bubbles(page)).toHaveCount(1);
+
+    // The race: the composer is open when the block lands.
+    await unblockMember(STAFF_CASE_MEMBER);
+    await page.reload();
+    await expect(composerField(page)).toBeEnabled();
+    await blockMember(STAFF_CASE_MEMBER);
+    const draft = `Resposta que corre com o bloqueio ${Date.now()}`;
+    await send(page, draft);
+    await expect(page.getByRole('status').filter({ hasText: notice })).toBeVisible();
+    await expect(thread(page).locator('[data-chat-readonly]')).toHaveText(notice, {
+      timeout: 15_000,
+    });
+    await expect(composerField(page)).toHaveCount(0);
+    await expect(bubbles(page).filter({ hasText: draft })).toHaveCount(0);
+  });
+
+  test("5. every miss is one screen: a member on a staff URL, another tenant's id, an unknown id, a malformed id", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const labConversation = await ensureConversation(users.labMember, 'rede-lab');
+
+    await login(page, STAFF_CASE_MEMBER, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/suporte/${SEED_SUPPORT_CONVERSATION_ID}`);
+    await expectConversationNotFound(page);
+    await signOut(page, hosts.demo);
+
+    await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+    for (const id of [labConversation, randomUUID(), 'nao-e-um-id']) {
+      await page.goto(`${hosts.demo}/suporte/${id}`);
+      await expectConversationNotFound(page);
+    }
+  });
+
+  test('6. desktop split: the list beside the idle pane; a row click swaps only the right pane and keeps the list scroll', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chromium', 'the lg split view');
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const extra = await seedInboxConversations();
+
+    await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/suporte`);
+    const split = page.locator('[data-support-split]');
+    await expect(split).toBeVisible();
+    expect(
+      await split.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ')[0]),
+    ).toBe('288px');
+    await expect(page.locator('[data-support-idle]')).toContainText(C.inbox.idle.title);
+    await expect(
+      listPane(page).getByRole('heading', { level: 1, name: C.inbox.title }),
+    ).toBeVisible();
+    await expect(inboxRows(page)).toHaveCount(extra.length + 1);
+    await expect(inboxRows(page).last()).toBeVisible();
+
+    // The list pane scrolls on its own (its rows overflow the card's height).
+    await expect
+      .poll(() =>
+        listPane(page).evaluate((el) => {
+          el.scrollTop = el.scrollHeight;
+          return el.scrollTop;
+        }),
+      )
+      .toBeGreaterThan(0);
+    const top = await listPane(page).evaluate((el) => el.scrollTop);
+    await page.evaluate(() => {
+      (window as unknown as { __split: boolean }).__split = true;
+    });
+
+    const target = inboxRows(page).last();
+    const href = (await target.getAttribute('href')) ?? '';
+    const row = listPane(page).locator(`a[data-inbox-row][href="${href}"]`);
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`${href}$`));
+    await expect(row).toHaveAttribute('aria-current', 'page');
+    await expect(row).toHaveClass(/bg-bg-active/);
+    await expect(thread(page).locator('[data-thread-header]')).toBeVisible();
+    await expect(page.locator('[data-support-idle]')).toHaveCount(0);
+    // A client navigation (no document reload), and the list kept its scroll position.
+    expect(
+      await page.evaluate(() => (window as unknown as { __split?: boolean }).__split === true),
+    ).toBe(true);
+    await page.waitForTimeout(1_000);
+    const after = await listPane(page).evaluate((el) => el.scrollTop);
+    expect(Math.abs(after - top)).toBeLessThanOrEqual(1);
+    await expect(listPane(page).locator('a[data-inbox-row][aria-current="page"]')).toHaveCount(1);
+  });
+
+  test('7. E13 backstop: 1280 → 900 keeps the open conversation URL and shows the thread alone; back returns to the list', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chromium', 'the lg split view');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/suporte`);
+    await inboxRow(page, SEED_SUPPORT_CONVERSATION_ID).click();
+    await expect(page).toHaveURL(new RegExp(`/suporte/${SEED_SUPPORT_CONVERSATION_ID}$`));
+    await expect(listPane(page)).toBeVisible();
+    await expect(thread(page).locator('[data-thread-header]')).toBeVisible();
+
+    await page.setViewportSize({ width: 900, height: 800 });
+    await expect(page).toHaveURL(new RegExp(`/suporte/${SEED_SUPPORT_CONVERSATION_ID}$`));
+    await expect(listPane(page)).toBeHidden();
+    await expect(thread(page).locator('[data-thread-header]')).toBeVisible();
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/suporte$/);
+    await expect(listPane(page)).toBeVisible();
+    await expect(inboxRow(page, SEED_SUPPORT_CONVERSATION_ID)).toBeVisible();
+    await expect(page.locator('[data-support-idle]')).toBeHidden();
+  });
+});
+
+test.describe('chat equipe — relógio do tenant', () => {
+  test.use({ timezoneId: 'America/Manaus' });
+
+  test.beforeEach(async () => {
+    await resetStaffInbox();
+  });
+
+  test('8. inbox times are the São Paulo wall clock, not the device clock', async ({ page }) => {
+    const rows = await messagesOf(SEED_SUPPORT_CONVERSATION_ID);
+    const last = rows.at(-1);
+    expect(last).toBeDefined();
+    const instant = new Date(last?.createdAt ?? 0);
+    const clock = (timeZone: string) =>
+      new Intl.DateTimeFormat('pt-BR', {
+        timeZone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).format(instant);
+    const day = (timeZone: string, at: Date) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone }).format(at);
+
+    await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/suporte`);
+    expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(
+      'America/Manaus',
+    );
+    const time = inboxRow(page, SEED_SUPPORT_CONVERSATION_ID).locator('[data-inbox-time]');
+    await expect(time).toBeVisible();
+    const shown = (await time.textContent()) ?? '';
+    if (day('America/Sao_Paulo', instant) === day('America/Sao_Paulo', new Date())) {
+      expect(shown).toBe(clock('America/Sao_Paulo'));
+    }
+    expect(shown).not.toBe(clock('America/Manaus'));
   });
 });

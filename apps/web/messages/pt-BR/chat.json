@@ -62,10 +62,21 @@
       "awaitingSr": ", aguardando resposta"
     },
     "blocked": {
-      "pill": "Bloqueado"
+      "pill": "Bloqueado",
+      "notice": "{name} está bloqueado. A conversa fica disponível só para leitura."
     },
     "removed": {
-      "name": "Membro removido"
+      "name": "Membro removido",
+      "notice": "Este membro saiu da comunidade. A conversa fica disponível só para leitura."
+    },
+    "staff": {
+      "back": "Voltar para as conversas",
+      "profile": "Ver o perfil de {name}"
+    },
+    "notFound": {
+      "title": "Conversa não encontrada",
+      "body": "Ela não existe ou não é de {tenant}.",
+      "cta": "Ver conversas"
     }
   }
 }

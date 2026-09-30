@@ -1691,3 +1691,48 @@ describe('07-10 — chat staff inbox strings and placeholders', () => {
       expect(all).not.toContain(word);
   });
 });
+
+/**
+ * 07-10 — the `chat` catalog, staff thread (UI-SPEC "Support chat" and the not-found row of the "Core
+ * contract"), verbatim, with `{name}` and `{tenant}` FORMATTED.
+ */
+describe('07-10 — chat staff thread strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['chat.staff.back', 'Voltar para as conversas'],
+    ['chat.staff.profile', 'Ver o perfil de {name}'],
+    ['chat.blocked.notice', '{name} está bloqueado. A conversa fica disponível só para leitura.'],
+    [
+      'chat.removed.notice',
+      'Este membro saiu da comunidade. A conversa fica disponível só para leitura.',
+    ],
+    ['chat.notFound.title', 'Conversa não encontrada'],
+    ['chat.notFound.body', 'Ela não existe ou não é de {tenant}.'],
+    ['chat.notFound.cta', 'Ver conversas'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('formats {name} and {tenant}', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'chat',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    expect(t('staff.profile', { name: 'Ana Souza' })).toBe('Ver o perfil de Ana Souza');
+    expect(t('blocked.notice', { name: 'Heitor Pacheco' })).toBe(
+      'Heitor Pacheco está bloqueado. A conversa fica disponível só para leitura.',
+    );
+    expect(t('notFound.body', { tenant: 'Rede Demo' })).toBe(
+      'Ela não existe ou não é de Rede Demo.',
+    );
+  });
+});
