@@ -1441,4 +1441,59 @@ describe('07 — notifications list strings and placeholders', () => {
       '[Ana] publicou um novo story.',
     );
   });
+
+  /**
+   * 07-05 — the event and reminder rows (UI-SPEC Copywriting Contract, "Notification rows"),
+   * verbatim, with every placeholder: `{actor}`, `{title}`, `{when}` and `{time}`. `eventWhen` is
+   * the UI-D-203 when-line shape (`{date} · {time}`) the row's `{when}` is built from.
+   */
+  it.each([
+    ['notifications.kinds.event', '<b>{actor}</b> criou o evento “{title}” · {when}'],
+    ['notifications.kinds.eventReactivated', '<b>{actor}</b> reativou o evento “{title}” · {when}'],
+    ['notifications.kinds.reminder24h', 'Amanhã às {time}: “{title}”. Você confirmou presença.'],
+    ['notifications.kinds.reminder1h', 'Daqui a 1 hora: “{title}” começa às {time}.'],
+    ['notifications.kinds.eventWhen', '{date} · {time}'],
+  ])('07-05: %s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['notifications.kinds.event', ['{actor}', '{title}', '{when}']],
+    ['notifications.kinds.eventReactivated', ['{actor}', '{title}', '{when}']],
+    ['notifications.kinds.reminder24h', ['{time}', '{title}']],
+    ['notifications.kinds.reminder1h', ['{time}', '{title}']],
+    ['notifications.kinds.eventWhen', ['{date}', '{time}']],
+  ])('07-05: %s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('07-05: the event and reminder sentences format with every value filled', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'notifications',
+    }) as unknown as {
+      (key: string, values?: Record<string, unknown>): string;
+      rich: (key: string, values: Record<string, unknown>) => unknown;
+    };
+    const flat = (node: unknown): string =>
+      Array.isArray(node) ? node.map(flat).join('') : typeof node === 'string' ? node : '';
+    const bold = (chunks: unknown) => `[${flat(chunks)}]`;
+    const when = t('kinds.eventWhen', { date: 'seg., 12 de out.', time: '19:00' });
+    expect(when).toBe('seg., 12 de out. · 19:00');
+    expect(flat(t.rich('kinds.event', { actor: 'Ana', title: 'Encontro', when, b: bold }))).toBe(
+      '[Ana] criou o evento “Encontro” · seg., 12 de out. · 19:00',
+    );
+    expect(
+      flat(t.rich('kinds.eventReactivated', { actor: 'Ana', title: 'Encontro', when, b: bold })),
+    ).toBe('[Ana] reativou o evento “Encontro” · seg., 12 de out. · 19:00');
+    expect(t('kinds.reminder24h', { time: '19:00', title: 'Encontro' })).toBe(
+      'Amanhã às 19:00: “Encontro”. Você confirmou presença.',
+    );
+    expect(t('kinds.reminder1h', { time: '19:00', title: 'Encontro' })).toBe(
+      'Daqui a 1 hora: “Encontro” começa às 19:00.',
+    );
+  });
 });

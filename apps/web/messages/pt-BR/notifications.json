@@ -34,6 +34,11 @@
       "commentLiked": "<b>{actor}</b> curtiu seu comentário: “{excerpt}”",
       "commentReplied": "<b>{actor}</b> respondeu ao seu comentário: “{excerpt}”",
       "storyCommented": "<b>{actor}</b> comentou no seu story: “{excerpt}”",
+      "event": "<b>{actor}</b> criou o evento “{title}” · {when}",
+      "eventReactivated": "<b>{actor}</b> reativou o evento “{title}” · {when}",
+      "reminder24h": "Amanhã às {time}: “{title}”. Você confirmou presença.",
+      "reminder1h": "Daqui a 1 hora: “{title}” começa às {time}.",
+      "eventWhen": "{date} · {time}",
       "generic": "Você tem uma nova notificação.",
       "removed": "Este conteúdo foi removido."
     },

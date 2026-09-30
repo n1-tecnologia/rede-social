@@ -164,6 +164,7 @@ async function resolveEventReactivated(
 type ReminderEventRow = {
   id: string;
   title: string;
+  cover_asset_id: string | null;
   starts_at: string;
   timezone: string;
   /** Whole seconds until `starts_at`, by the database clock (never negative). */
@@ -194,7 +195,8 @@ export function reminderTagAndTopic(eventId: string): { tag: string; topic: stri
  * `Não vou`, no answer, `checked_in` and `walk_in` get nothing. The event is re-checked (active, not
  * removed, still starting at `startsAt`) because the fan-out runs after the job's own check.
  *
- * Actor-less (UI-D-251): the row renders the clock disc. The dedupe key is per window and event, so
+ * Actor-less (UI-D-251): the row renders the clock disc, with the event's cover as its preview when
+ * there is one (sketch 007 surface 7). The dedupe key is per window and event, so
  * at most one 24 h and one 1 h reminder per member per event, ever: a re-run inserts nothing, and a
  * later start move does not re-remind a member already reminded for that window (V2-EVENT-02).
  */
@@ -205,6 +207,7 @@ async function resolveReminderDue(
   const events = await tx.execute<ReminderEventRow>(sql`
     select e.id,
            e.title,
+           e.cover_asset_id,
            to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
            t.timezone,
            greatest(0, floor(extract(epoch from (e.starts_at - now()))))::int as seconds_left
@@ -242,7 +245,12 @@ async function resolveReminderDue(
       subject: { type: 'event', id: row.id },
       object: null,
       actorUserId: null,
-      facts: { eventId: row.id, title: row.title, startsAt: row.starts_at },
+      facts: {
+        eventId: row.id,
+        title: row.title,
+        startsAt: row.starts_at,
+        previewAssetId: row.cover_asset_id,
+      },
       channels: ['in_app', 'push'],
       push: {
         title: 'tenant',

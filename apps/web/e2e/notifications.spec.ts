@@ -10,18 +10,23 @@ import {
   clearNotifications,
   closeNotificationsAdmin,
   commentAs,
+  createEventAs,
   deleteCommentsByBodyPrefix,
+  deleteEventsByTitlePrefix,
   deletePostAs,
   deletePostsByCaptionPrefix,
+  demoEventBody,
   foreignCommentId,
   insertExpiredStoryRow,
   insertLongRow,
   insertNotificationRows,
+  insertReminderRow,
   likeCommentAs,
   publishPostAs,
   rowsOf,
   seedLongThread,
   softDeleteComment,
+  updateEventAs,
 } from './notifications-admin';
 import { ensureWorker } from './worker';
 
@@ -771,5 +776,161 @@ test.describe('notifications tipos', () => {
     } finally {
       await restore();
     }
+  });
+});
+
+/**
+ * EVENT-07 / D-226 / UI-D-251 / D-232 (plan 07-05 Task 2), on the phone and the desktop: the new
+ * event row names its creator and prints the when-line in the TENANT's clock (São Paulo), even on a
+ * device in Manaus; the actor-less reminder row sits on the clock disc; every event row opens
+ * `/eventos/{id}`; and an edit stays silent (D-214). The event is created through the REAL API and
+ * the worker's fan-out (`ensureWorker` in the file's `beforeAll`); the reminder row is a fixture,
+ * because its job fires an hour before the start.
+ */
+const EVENTOS_PREFIX = 'Eventos e2e';
+const EVENTS_ZONE = 'America/Sao_Paulo';
+
+/** The catalog's own rendering of a sentence, with the `<b>` actor tag flattened to its text. */
+const tr = createTranslator({
+  locale: 'pt-BR',
+  messages: notificationMessages,
+  namespace: 'notifications',
+}) as unknown as {
+  (key: string, values?: Record<string, string>): string;
+  rich: (key: string, values: Record<string, unknown>) => unknown;
+};
+const flat = (node: unknown): string =>
+  Array.isArray(node) ? node.map(flat).join('') : typeof node === 'string' ? node : '';
+
+/** `19:00` and `seg., 12 de out.` in a zone (the formats of `lib/events-view.ts`, UI-D-203). */
+const eventTime = (iso: string, timeZone: string) =>
+  new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(iso));
+const eventDate = (iso: string, timeZone: string) =>
+  new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(iso));
+
+/** The new-event sentence as the catalog renders it for `title` at `startsAt` in `timeZone`. */
+function eventSentence(title: string, startsAt: string, timeZone: string): string {
+  const when = tr('kinds.eventWhen', {
+    date: eventDate(startsAt, timeZone),
+    time: eventTime(startsAt, timeZone),
+  });
+  return flat(
+    tr.rich('kinds.event', {
+      actor: seededFeed.demoAuthor,
+      title,
+      when,
+      b: (chunks: unknown) => flat(chunks),
+    }),
+  );
+}
+
+test.describe('notifications eventos', () => {
+  test.beforeEach(async () => {
+    await clearNotifications('rede-demo');
+  });
+
+  test.afterAll(async () => {
+    await deleteEventsByTitlePrefix(EVENTOS_PREFIX);
+  });
+
+  test('a new event reaches the member list with the tenant-clock when-line and opens the event', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const title = `${EVENTOS_PREFIX} novo ${testInfo.project.name} ${Date.now()}`;
+    const event = await createEventAs(users.demoAdmin, title);
+    await waitForRows(users.demoMember, 'events.event', 1);
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/notificacoes`);
+    const row = page.getByTestId('notification-item').filter({ hasText: `“${title}”` });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText(eventSentence(title, event.startsAt, EVENTS_ZONE));
+    // The creator's avatar leads the row, with the calendar glyph on its disc.
+    await expect(row.locator('svg.lucide-calendar-days')).toHaveCount(1);
+    await expect(row.locator('.font-bold', { hasText: seededFeed.demoAuthor })).toBeVisible();
+
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${event.id}$`));
+  });
+
+  test('an actor-less reminder row sits on the clock disc and reads "Daqui a 1 hora"', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(90_000);
+    const title = `${EVENTOS_PREFIX} lembrete ${testInfo.project.name} ${Date.now()}`;
+    const event = await createEventAs(users.demoAdmin, title);
+    await waitForRows(users.demoMember, 'events.event', 1);
+    await clearNotifications('rede-demo');
+    await insertReminderRow(users.demoMember, { ...event, title }, '1h');
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/notificacoes`);
+    const row = page.getByTestId('notification-item').filter({ hasText: `“${title}”` });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText(
+      tr('kinds.reminder1h', { title, time: eventTime(event.startsAt, EVENTS_ZONE) }),
+    );
+    // Actor-less (UI-D-251): the 40px tertiary disc with the clock glyph, and no bold actor.
+    await expect(row.locator('.bg-bg-tertiary.rounded-full svg.lucide-calendar-clock')).toHaveCount(
+      1,
+    );
+    await expect(row.locator('.font-bold')).toHaveCount(0);
+    await expect(row.locator('img')).toHaveCount(0);
+
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${event.id}$`));
+  });
+
+  test("D-214: editing the event's title adds no new row", async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    const title = `${EVENTOS_PREFIX} editado ${testInfo.project.name} ${Date.now()}`;
+    const event = await createEventAs(users.demoAdmin, title);
+    await waitForRows(users.demoMember, 'events.event', 1);
+
+    const renamed = `${title} renomeado`;
+    await updateEventAs(users.demoAdmin, event.id, { ...demoEventBody(title), title: renamed });
+    // The worker is live: give it the time a fan-out takes, then the count must not have moved.
+    await page.waitForTimeout(3_000);
+    await expect.poll(() => rowsOf(users.demoMember, 'events.event'), { timeout: 3_000 }).toBe(1);
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/notificacoes`);
+    const about = page.getByTestId('notification-item').filter({ hasText: EVENTOS_PREFIX });
+    await expect(about).toHaveCount(1);
+  });
+
+  test.describe('on a device in another timezone', () => {
+    test.use({ timezoneId: 'America/Manaus' });
+
+    test('the row reads the TENANT wall clock, not the device one', async ({ page }, testInfo) => {
+      test.setTimeout(120_000);
+      const title = `${EVENTOS_PREFIX} fuso ${testInfo.project.name} ${Date.now()}`;
+      const event = await createEventAs(users.demoAdmin, title);
+      await waitForRows(users.demoMember, 'events.event', 1);
+
+      await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+      expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(
+        'America/Manaus',
+      );
+      await page.goto(`${hosts.demo}/notificacoes`);
+      const row = page.getByTestId('notification-item').filter({ hasText: `“${title}”` });
+      await expect(row).toHaveCount(1);
+      const tenantTime = eventTime(event.startsAt, EVENTS_ZONE);
+      const deviceTime = eventTime(event.startsAt, 'America/Manaus');
+      expect(tenantTime).not.toBe(deviceTime);
+      await expect(row).toContainText(eventSentence(title, event.startsAt, EVENTS_ZONE));
+      await expect(row).not.toContainText(deviceTime);
+    });
   });
 });

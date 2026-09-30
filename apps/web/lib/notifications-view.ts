@@ -22,6 +22,16 @@ export type NotificationTranslator = {
 };
 
 /**
+ * What a sentence may need beyond its facts (07-05): the tenant's timezone
+ * (`bootstrap.tenant.timezone`, so an event's `{when}` reads the tenant's wall clock on any device,
+ * UI-D-203) and the request's ONE instant (UI-D-14).
+ */
+export interface NotificationRenderContext {
+  timeZone: string;
+  nowMs: number;
+}
+
+/**
  * One kind's renderer: its glyph, its leading form, its sentence and its target (D-232, UI-D-251).
  *
  * `leading: 'glyph'` draws the actor-less 40px disc even when the row names an actor (the generic
@@ -37,6 +47,7 @@ export interface NotificationRenderer {
     facts: NotificationRow['facts'],
     t: NotificationTranslator,
     actorName: string,
+    ctx: NotificationRenderContext,
   ) => ReactNode;
   href: (facts: NotificationRow['facts'], nowMs: number) => string;
 }
@@ -77,10 +88,13 @@ export function notificationRowView(
   {
     t,
     nowMs,
+    timeZone,
     renderers,
   }: {
     t: NotificationTranslator;
     nowMs: number;
+    /** `bootstrap.tenant.timezone` (07-05): the event and reminder rows format in it. */
+    timeZone: string;
     renderers: Partial<Record<string, NotificationRenderer>>;
   },
 ): NotificationRowView {
@@ -114,7 +128,7 @@ export function notificationRowView(
   return {
     ...base,
     href: renderer.href(row.facts, nowMs),
-    sentence: renderer.sentence(row.facts, t, actorName),
+    sentence: renderer.sentence(row.facts, t, actorName, { timeZone, nowMs }),
     preview: row.preview
       ? { assetId: row.preview.assetId, widths: row.preview.variantWidths }
       : null,

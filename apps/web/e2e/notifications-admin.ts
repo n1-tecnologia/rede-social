@@ -138,7 +138,7 @@ export async function insertNotificationRows(
 /** One authenticated API call as `email` on the demo host; throws on an unexpected status. */
 async function apiAs(
   email: string,
-  method: 'POST' | 'DELETE',
+  method: 'POST' | 'PUT' | 'DELETE',
   path: string,
   body?: unknown,
   expected = [200, 201, 204],
@@ -320,4 +320,90 @@ export async function insertLongRow(
 /** Deletes the comments this spec wrote, by body prefix (the rows pointing at them go with clear). */
 export async function deleteCommentsByBodyPrefix(prefix: string): Promise<void> {
   await sql()`delete from public.feed_comments where body like ${`${prefix}%`}`;
+}
+
+/* ── 07-05: the event kinds e2e (`notifications eventos`) ─────────────────────────────────────── */
+
+/** `YYYY-MM-DD` of the São Paulo calendar day `days` from now (the demo tenant's zone). */
+function demoDate(days: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(Date.now() + days * 86_400_000));
+}
+
+/** An online demo event body `days` from now, 19:00-21:00 in the tenant's wall clock. */
+export function demoEventBody(title: string, days = 3) {
+  const date = demoDate(days);
+  return {
+    title,
+    description: '',
+    format: 'online',
+    meetingUrl: 'https://meet.example.test/e2e-notificacoes',
+    start: { date, time: '19:00' },
+    end: { date, time: '21:00' },
+  };
+}
+
+/**
+ * Creates a demo event as `email` through the REAL API (`POST /v1/events`), so `event.published`
+ * crosses the bus, the sink and the worker's fan-out exactly as the admin form does.
+ */
+export async function createEventAs(
+  email: string,
+  title: string,
+  days = 3,
+): Promise<{ id: string; startsAt: string }> {
+  return (await apiAs(email, 'POST', '/v1/events', demoEventBody(title, days))) as {
+    id: string;
+    startsAt: string;
+  };
+}
+
+/** Replaces a demo event as `email` through the real API (`PUT /v1/events/{id}`, an edit). */
+export async function updateEventAs(
+  email: string,
+  eventId: string,
+  body: ReturnType<typeof demoEventBody>,
+): Promise<void> {
+  await apiAs(email, 'PUT', `/v1/events/${eventId}`, body);
+}
+
+/**
+ * The member's actor-less reminder row for `eventId` (UI-D-251), written as the migration role: a
+ * reminder needs a job to fire an hour before the start, which no test can wait for. The facts are
+ * the ones the events source writes (`eventId`, `title`, `startsAt`, `previewAssetId`).
+ */
+export async function insertReminderRow(
+  email: string,
+  event: { id: string; title: string; startsAt: string },
+  window: '24h' | '1h',
+): Promise<void> {
+  const [who] = await sql()<{ tenant_id: string; user_id: string }[]>`
+    select t.id::text as tenant_id, u.id::text as user_id
+      from public.tenants t, auth.users u
+     where t.slug = 'rede-demo' and u.email = ${email}`;
+  if (!who) throw new Error(`no ${email} in rede-demo`);
+  await sql()`
+    insert into public.notifications
+      (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id, actor_user_id, payload)
+    values (${who.tenant_id}::uuid, ${who.user_id}::uuid, ${`events.reminder_${window}`},
+            ${`events.reminder_${window}:${event.id}`}, 'event', ${event.id}::uuid, null,
+            ${sql().json({
+              eventId: event.id,
+              title: event.title,
+              startsAt: event.startsAt,
+              previewAssetId: null,
+            })})`;
+}
+
+/** Deletes the demo events this spec wrote, by title prefix, and the rows pointing at them. */
+export async function deleteEventsByTitlePrefix(prefix: string): Promise<void> {
+  await sql()`
+    delete from public.notifications
+     where subject_type = 'event'
+       and subject_id in (select id from public.events where title like ${`${prefix}%`})`;
+  await sql()`delete from public.events where title like ${`${prefix}%`}`;
 }

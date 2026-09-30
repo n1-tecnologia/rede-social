@@ -155,6 +155,7 @@ describe('event.reminder_due source (EVENT-07)', () => {
   const reminderRow = {
     id: E,
     title: 'Encontro anual',
+    cover_asset_id: COVER,
     starts_at: STARTS_AT,
     timezone: 'America/Sao_Paulo',
     seconds_left: 3_590,
@@ -174,7 +175,12 @@ describe('event.reminder_due source (EVENT-07)', () => {
     expect(intent?.dedupeKey).toBe(`events.reminder_24h:${E}`);
     expect(intent?.subject).toEqual({ type: 'event', id: E });
     expect(intent?.actorUserId).toBeNull();
-    expect(intent?.facts).toEqual({ eventId: E, title: 'Encontro anual', startsAt: STARTS_AT });
+    expect(intent?.facts).toEqual({
+      eventId: E,
+      title: 'Encontro anual',
+      startsAt: STARTS_AT,
+      previewAssetId: COVER,
+    });
     const hex = E.replaceAll('-', '');
     expect(intent?.push).toEqual({
       title: 'tenant',

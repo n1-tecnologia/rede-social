@@ -7,7 +7,7 @@ import {
 } from '@rede-social/module-notifications/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import { getNotifications } from '@/lib/notifications';
 import {
   type NotificationRowView,
@@ -73,10 +73,29 @@ async function fetchSection(
   }
 }
 
-async function toViews(items: Loaded['items'], nowMs: number): Promise<NotificationRowView[]> {
+/**
+ * 07-05: the event and reminder rows format in the tenant's timezone, read from the bootstrap (the
+ * `eventos/actions.ts` precedent). A refused bootstrap redirects like a refused section read; any
+ * other failure is the generic error, never a thrown action.
+ */
+async function tenantTimeZone(): Promise<{ timeZone: string | null; refusal: string | null }> {
+  try {
+    return { timeZone: (await getBootstrap()).tenant.timezone, refusal: null };
+  } catch (error) {
+    const refusal = error instanceof ApiClientError ? bootstrapRedirectPath(error) : null;
+    if (!refusal) console.error('notifications.bootstrap_failed', { error: String(error) });
+    return { timeZone: null, refusal };
+  }
+}
+
+async function toViews(
+  items: Loaded['items'],
+  nowMs: number,
+  timeZone: string,
+): Promise<NotificationRowView[]> {
   const t = (await getTranslations('notifications')) as unknown as NotificationTranslator;
   return items.map((row) =>
-    notificationRowView(row, { t, nowMs, renderers: notificationRenderers }),
+    notificationRowView(row, { t, nowMs, timeZone, renderers: notificationRenderers }),
   );
 }
 
@@ -94,10 +113,17 @@ export async function loadMoreNotificationsAction(
   const { page, refusal } = await fetchSection(section, cursor ?? undefined);
   if (refusal) redirect(refusal);
   if (!page) return { ok: false, code: 'generic' };
+  const zone = await tenantTimeZone();
+  if (zone.refusal) redirect(zone.refusal);
+  if (!zone.timeZone) return { ok: false, code: 'generic' };
 
   // ONE clock read per action.
   const nowMs = Date.now();
-  return { ok: true, items: await toViews(page.items, nowMs), nextCursor: page.nextCursor };
+  return {
+    ok: true,
+    items: await toViews(page.items, nowMs, zone.timeZone),
+    nextCursor: page.nextCursor,
+  };
 }
 
 /** Page 1 of Novas again, plus page 1 of Anteriores when Novas has no next page — what a pull calls. */
@@ -113,16 +139,20 @@ export async function refreshNotificationsAction(): Promise<NotificationsRefresh
     if (!read.page) return { ok: false, code: 'generic' };
     readPage = read.page;
   }
+  const zone = await tenantTimeZone();
+  if (zone.refusal) redirect(zone.refusal);
+  if (!zone.timeZone) return { ok: false, code: 'generic' };
+  const { timeZone } = zone;
 
   const nowMs = Date.now();
   return {
     ok: true,
     unread: {
-      items: await toViews(unread.page.items, nowMs),
+      items: await toViews(unread.page.items, nowMs, timeZone),
       nextCursor: unread.page.nextCursor,
     },
     read: readPage
-      ? { items: await toViews(readPage.items, nowMs), nextCursor: readPage.nextCursor }
+      ? { items: await toViews(readPage.items, nowMs, timeZone), nextCursor: readPage.nextCursor }
       : null,
   };
 }

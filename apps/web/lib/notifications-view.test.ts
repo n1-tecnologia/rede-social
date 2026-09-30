@@ -45,8 +45,13 @@ function row(overrides: Partial<NotificationRow> = {}): NotificationRow {
   };
 }
 
-const view = (overrides: Partial<NotificationRow> = {}) =>
-  notificationRowView(row(overrides), { t, nowMs: NOW, renderers: notificationRenderers });
+const view = (overrides: Partial<NotificationRow> = {}, timeZone = 'America/Sao_Paulo') =>
+  notificationRowView(row(overrides), {
+    t,
+    nowMs: NOW,
+    timeZone,
+    renderers: notificationRenderers,
+  });
 
 const markup = (node: unknown) => renderToStaticMarkup(node as never);
 
@@ -203,5 +208,90 @@ describe('notificationRowView — 07-04 kinds, expiry and the removed variant', 
     expect(removed?.glyph).toBe('Bell');
     expect(removed?.href).toBeNull();
     expect(markup(removed?.sentence)).toBe('Este conteúdo foi removido.');
+  });
+});
+
+const EVENT = '66666666-6666-4666-8666-666666666666';
+/** Monday 12 October 2026, 22:00Z: 19:00 in São Paulo, 18:00 in Manaus. */
+const EVENT_START = '2026-10-12T22:00:00.000000Z';
+
+describe('notificationRowView — 07-05 event kinds and actor-less reminders', () => {
+  const eventFacts = { eventId: EVENT, title: 'Encontro anual', startsAt: EVENT_START };
+
+  it('a new event names its creator, quotes the title and prints the tenant-clock when-line', () => {
+    const created = view({
+      kind: 'events.event',
+      subject: { type: 'event', id: EVENT },
+      facts: { ...eventFacts, previewAssetId: null },
+    });
+    expect(created?.href).toBe(`/eventos/${EVENT}`);
+    expect(created?.glyph).toBe('CalendarDays');
+    expect(created?.leading).toEqual({ avatar: { src: expect.any(String), alt: 'Ana Souza' } });
+    expect(markup(created?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> criou o evento “Encontro anual” · seg., 12 de out. · 19:00',
+    );
+  });
+
+  it('a reactivated event uses the CalendarCheck glyph and its own sentence', () => {
+    const reactivated = view({
+      kind: 'events.event_reactivated',
+      subject: { type: 'event', id: EVENT },
+      facts: { ...eventFacts, previewAssetId: null },
+    });
+    expect(reactivated?.href).toBe(`/eventos/${EVENT}`);
+    expect(reactivated?.glyph).toBe('CalendarCheck');
+    expect(markup(reactivated?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> reativou o evento “Encontro anual” · seg., 12 de out. · 19:00',
+    );
+  });
+
+  it('the reminders are actor-less, on the CalendarClock disc, and open the event', () => {
+    const day = view({
+      kind: 'events.reminder_24h',
+      subject: { type: 'event', id: EVENT },
+      actor: null,
+      facts: eventFacts,
+    });
+    const hour = view({
+      kind: 'events.reminder_1h',
+      subject: { type: 'event', id: EVENT },
+      actor: null,
+      facts: eventFacts,
+    });
+    for (const reminder of [day, hour]) {
+      expect(reminder?.leading).toEqual({ glyph: true });
+      expect(reminder?.glyph).toBe('CalendarClock');
+      expect(reminder?.href).toBe(`/eventos/${EVENT}`);
+    }
+    expect(markup(day?.sentence)).toBe(
+      'Amanhã às 19:00: “Encontro anual”. Você confirmou presença.',
+    );
+    expect(markup(hour?.sentence)).toBe('Daqui a 1 hora: “Encontro anual” começa às 19:00.');
+  });
+
+  it('a reminder row keeps the glyph leading even if a row ever names an actor', () => {
+    const named = view({ kind: 'events.reminder_1h', facts: eventFacts });
+    expect(named?.leading).toEqual({ glyph: true });
+  });
+
+  it('the tenant timezone decides the wall clock: Manaus reads 18:00 for the same instant', () => {
+    const manaus = 'America/Manaus';
+    expect(
+      markup(
+        view({ kind: 'events.reminder_1h', actor: null, facts: eventFacts }, manaus)?.sentence,
+      ),
+    ).toBe('Daqui a 1 hora: “Encontro anual” começa às 18:00.');
+    expect(
+      markup(
+        view({ kind: 'events.event', facts: { ...eventFacts, previewAssetId: null } }, manaus)
+          ?.sentence,
+      ),
+    ).toContain('“Encontro anual” · seg., 12 de out. · 18:00');
+  });
+
+  it('a missing event id degrades to Início, never a broken URL', () => {
+    expect(view({ kind: 'events.reminder_24h', actor: null, facts: { title: 'x' } })?.href).toBe(
+      '/inicio',
+    );
   });
 });

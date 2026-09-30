@@ -41,7 +41,12 @@ export default async function NotificationsPage() {
   // Every row renders (07-04): an unknown kind is the generic row, never a filtered-out gap.
   const toViews = (items: NonNullable<typeof unreadPage>['items']): NotificationRowView[] =>
     items.map((row) =>
-      notificationRowView(row, { t: translator, nowMs, renderers: notificationRenderers }),
+      notificationRowView(row, {
+        t: translator,
+        nowMs,
+        timeZone: bootstrap.tenant.timezone,
+        renderers: notificationRenderers,
+      }),
     );
 
   // A failed Anteriores read (with Novas fine) is not a first-load failure: the list starts that

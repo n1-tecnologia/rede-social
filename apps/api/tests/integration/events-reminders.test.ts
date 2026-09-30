@@ -349,6 +349,7 @@ describe('events-reminders: the audience is the Vou list, once per window', () =
       eventId: event.id,
       title: `${TEST_TITLE_PREFIX} lista`,
       startsAt: event.startsAt,
+      previewAssetId: null,
     });
   });
 });
