@@ -1,5 +1,7 @@
 'use client';
 
+import { REALTIME_EVENTS, tenantTopic, userTopic } from '@rede-social/contracts/realtime';
+import { useRealtimeTopic } from '@rede-social/core/ui';
 import { NotificationItem, NotificationList } from '@rede-social/module-notifications/ui';
 import {
   Button,
@@ -28,7 +30,15 @@ export interface NotificationsSurfaceProps {
   initialError?: boolean;
   /** The tenant's display name, for the region label and the empty body. */
   tenantName: string;
+  /** The tenant of record and the member (bootstrap), for the two live topics (07-03). */
+  tenantId: string;
+  userId: string;
 }
+
+/** The own-topic markers the seen/read routes publish: they never add a row to this list. */
+const MARK_KINDS = new Set(['seen', 'read']);
+
+const LIVE_EVENTS = [REALTIME_EVENTS.notificationsChanged];
 
 /** One row's geometry: a 40px circle, two text bars at 14px and 12px, `px-4 py-3` (UI-D-265). */
 function NotificationRowSkeleton() {
@@ -70,6 +80,14 @@ export function NotificationsSkeleton({ count }: { count: number }) {
  * - **Mark all.** Visible while any loaded row is unread; `aria-busy` and disabled during the POST;
  *   clears every tint optimistically, restores them and fires the error toast on failure.
  *
+ * - **Live merge (07-03, D-240).** On a `notifications.changed` signal on the member's own topic or
+ *   the tenant topic, on every (re-)join and on every return to visible, page 1 of Novas is read again
+ *   (`refreshNotificationsAction`) and rows not on screen yet are merged at the TOP by id; nothing
+ *   already shown moves. When something was added and the page is visible, seen is POSTed again so
+ *   the bell stays at zero. The list is NOT a live region and raises no toast (UI-SPEC Interaction).
+ *   The seen/read markers on the own topic are ignored here (they add no row), so the seen POST can
+ *   never loop back into another refetch.
+ *
  * No clock is read and no catalog is formatted here beyond fixed labels: every sentence and relative
  * time arrives finished from the server (the page and the two actions).
  */
@@ -81,6 +99,8 @@ export function NotificationsSurface({
   readStarted: initialReadStarted,
   initialError,
   tenantName,
+  tenantId,
+  userId,
 }: NotificationsSurfaceProps) {
   const t = useTranslations('notifications');
   const te = useTranslations('app.error');
@@ -117,6 +137,60 @@ export function NotificationsSurface({
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
+
+  // ── live merge: new rows at the top, never a move (07-03, D-240) ───────────────────────────────
+  const shown = useRef({ unread, read });
+  shown.current = { unread, read };
+  const merging = useRef<{ busy: boolean; again: boolean }>({ busy: false, again: false });
+
+  const mergeLatest = useCallback(async () => {
+    if (merging.current.busy) {
+      merging.current.again = true;
+      return;
+    }
+    merging.current.busy = true;
+    try {
+      do {
+        merging.current.again = false;
+        const result = await refreshNotificationsAction().catch(() => null);
+        if (!result?.ok) continue;
+        const known = new Set([...shown.current.unread, ...shown.current.read].map((v) => v.id));
+        const fresh = result.unread.items.filter((view) => !known.has(view.id));
+        if (fresh.length === 0) continue;
+        setUnread((previous) => {
+          const onScreen = new Set(previous.map((view) => view.id));
+          const add = fresh.filter((view) => !onScreen.has(view.id));
+          return add.length > 0 ? [...add, ...previous] : previous;
+        });
+        setFirstLoadFailed(false);
+        if (document.visibilityState === 'visible') {
+          void fetch('/api/notifications/seen', { method: 'POST' }).catch(() => {});
+        }
+      } while (merging.current.again);
+    } finally {
+      merging.current.busy = false;
+    }
+  }, []);
+
+  const onLiveSignal = useCallback(
+    (_event: string, payload: unknown) => {
+      const kind = (payload as { kind?: unknown } | null)?.kind;
+      if (typeof kind === 'string' && MARK_KINDS.has(kind)) return;
+      void mergeLatest();
+    },
+    [mergeLatest],
+  );
+  const liveOptions = { onSubscribed: () => void mergeLatest() };
+  useRealtimeTopic(userTopic(tenantId, userId), LIVE_EVENTS, onLiveSignal, liveOptions);
+  useRealtimeTopic(tenantTopic(tenantId), LIVE_EVENTS, onLiveSignal, liveOptions);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void mergeLatest();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [mergeLatest]);
 
   const isUnread = useCallback(
     (view: NotificationRowView) => view.unread && !locallyRead.has(view.id),

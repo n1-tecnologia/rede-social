@@ -68,6 +68,8 @@ export default async function NotificationsPage() {
         readStarted={readStarted}
         initialError={unreadPage === null}
         tenantName={bootstrap.tenant.displayName}
+        tenantId={bootstrap.tenant.id}
+        userId={bootstrap.user.id}
       />
     </div>
   );

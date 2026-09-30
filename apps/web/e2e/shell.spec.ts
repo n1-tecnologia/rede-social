@@ -11,6 +11,11 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 
 /** The bell's label comes from the catalog (07-01), never a literal. */
 const BELL = notificationMessages.notifications.nav;
+/**
+ * 07-03 (UI-D-253): with unseen rows the slot's accessible name carries its state after the plain
+ * label ("Notificações, 2 novas"), so the name is the label alone or the label plus that suffix.
+ */
+const BELL_NAME = new RegExp(`^${BELL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(, .+)?$`);
 
 /** The bell slot in whichever chrome is visible: the TopBar on the phone, the rail's bottom group on desktop. */
 const bellSlot = (page: Page) =>
@@ -113,7 +118,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     // phone and a rail bottom-group row on desktop, OUTSIDE the tab tree above (the tab list is
     // unchanged). Exactly one copy is visible.
     await expect(bellSlot(page)).toHaveCount(1);
-    await expect(bellSlot(page)).toHaveAttribute('aria-label', BELL);
+    await expect(bellSlot(page)).toHaveAttribute('aria-label', BELL_NAME);
 
     // D-42: the enabled module's home slot renders; the "Em breve" card does not. Since 04-10 that
     // slot is the FEED's — the reference module that used to fill it was deleted with D-19.

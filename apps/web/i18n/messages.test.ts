@@ -1355,6 +1355,23 @@ describe('07 — notifications list strings and placeholders', () => {
     expect(t('region', { tenant: 'Rede Demo' })).toBe('Notificações de Rede Demo');
   });
 
+  it('07-03: navBadge is the bell slot stateful accessible name, and no string says "Conectando"', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'notifications',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    // UI-D-253: the state follows the plain label, so a screen reader hears the slot, then its count.
+    for (const count of [1, 3, 120]) {
+      expect(t('navBadge', { count }).startsWith(`${String(lookup('notifications.nav'))}, `)).toBe(
+        true,
+      );
+    }
+    // UI-D-265: Realtime down shows nothing — there is no connecting indicator to translate.
+    expect(JSON.stringify(lookup('notifications')).toLowerCase()).not.toContain('conectando');
+  });
+
   it('the row sentences format through t.rich with the <b> actor tag and curly quotes', async () => {
     const { createTranslator } = await import('next-intl');
     const t = createTranslator({
