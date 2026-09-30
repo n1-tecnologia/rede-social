@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(153);
+select plan(157);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -121,6 +121,10 @@ insert into public.notifications (tenant_id, user_id, kind, dedupe_key, subject_
   ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'k',
    'k:0f000000-0000-4000-8000-0000000000f1', 'post', '0f000000-0000-4000-8000-0000000000f1');
 
+-- 07-08 reshaped the chat stubs: a message now carries `author_side`, and its `seq` is assigned by
+-- the BEFORE INSERT trigger (no writer supplies one). The bodies stay IDENTICAL on both sides
+-- (adjacency). The policies are participant/staff-aware, so every chat read below is made through a
+-- lane opened as the conversation's own member, the user every lane in this file opens as.
 insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values
   ('0a000000-0000-4000-8000-000000000004', '0a000000-0000-4000-8000-000000000001', 'support',
    '0a000000-0000-4000-8000-000000000002'),
@@ -133,11 +137,11 @@ insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
   ('0b000000-0000-4000-8000-000000000004', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-000000000002', 'member');
 
-insert into public.chat_messages (tenant_id, conversation_id, seq, author_user_id, body) values
-  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000004', 1,
-   '0a000000-0000-4000-8000-000000000002', 'oi'),
-  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000004', 1,
-   '0b000000-0000-4000-8000-000000000002', 'oi');
+insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000004',
+   '0a000000-0000-4000-8000-000000000002', 'member', 'oi'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000004',
+   '0b000000-0000-4000-8000-000000000002', 'member', 'oi');
 
 -- 03-01: one live asset each, plus a SOFT-DELETED one for A. Same mime and byte count on both
 -- sides, so a leak cannot hide behind "the rows look different anyway" (TENANT-05 adjacency).
@@ -809,6 +813,35 @@ select is_empty(
   $$ select user_id from public.chat_participants
       where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
   'chat_participants: B''s rows are invisible'
+);
+select results_eq(
+  $$ select id::text from public.chat_conversations $$,
+  ARRAY['0a000000-0000-4000-8000-000000000004'],
+  'chat_conversations: positive control, A''s member lane reads exactly its own conversation'
+);
+select results_eq(
+  $$ with u as (
+       update public.chat_conversations set subject = subject
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'chat_conversations: USING — an update aimed at B''s rows touches nothing'
+);
+select results_eq(
+  $$ with u as (
+       update public.chat_participants set last_read_seq = last_read_seq
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'chat_participants: USING — an update aimed at B''s rows touches nothing'
+);
+select results_eq(
+  $$ with u as (
+       update public.chat_messages set body = body
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'chat_messages: USING — an update aimed at B''s rows touches nothing'
 );
 select is_empty(
   $$ select id from public.notifications

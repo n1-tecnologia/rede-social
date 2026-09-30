@@ -1,4 +1,10 @@
-import { REALTIME_EVENTS, tenantTopic, userTopic } from '@rede-social/contracts/realtime';
+import {
+  convTopic,
+  inboxTopic,
+  REALTIME_EVENTS,
+  tenantTopic,
+  userTopic,
+} from '@rede-social/contracts/realtime';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -33,18 +39,27 @@ import { adminSql, api, HOSTS, runNotificationJobs, SEED_PASSWORD, signInAs } fr
  *  7. Read-only browser: a subscribed client's `channel.send` reaches no other subscriber (no INSERT
  *     policy on `realtime.messages`, T-07-16).
  *
+ * `realtime chat (live)` (07-08): the chat triggers' ids-only signals, on a support thread that
+ * `SECOND` (a demo member) opens through the real API in chat case 1. Her own conversation and user
+ * topics receive `chat.message` / `chat.unread` when the support user replies; the support user's
+ * `support-inbox` and `conv:` channels receive her messages; `MEMBER` (another member of the same
+ * tenant) can join neither her `conv:` nor `support-inbox`; with `chat` disabled a fresh `conv:` join
+ * is refused; and a staff message inserted inside a rolled-back transaction delivers nothing (A3).
+ *
  * Order and cleanup: every client is disconnected in `afterEach`; posts carry a caption prefix and
  * are swept with the demo tenant's notification rows before and after the file; waiting fan-out jobs
- * other files left behind are closed, never run.
+ * other files left behind are closed, never run. `SECOND`'s support conversation is swept too (the
+ * seeded thread belongs to `MEMBER` and is never touched here).
  */
 
 const MEMBER = 'member@rede-demo.local';
 const ADMIN = 'admin@rede-demo.local';
 const SECOND = 'iris.munoz@rede-demo.local';
 const LAB_MEMBER = 'member@rede-lab.local';
+const SUPPORT = 'support@rede-demo.local';
 const CAPTION = 'Realtime ao vivo de teste';
 
-const ids = { demo: '', lab: '', member: '', second: '', labMember: '' };
+const ids = { demo: '', lab: '', member: '', second: '', labMember: '', support: '' };
 
 /** Observed join statuses, printed once for the plan's SUMMARY. */
 const observed: Record<string, string> = {};
@@ -63,6 +78,11 @@ async function sweep(): Promise<void> {
   await adminSql`
     update pgboss.job_common set state = 'completed', completed_on = now()
      where name = 'notifications.fanout' and state = 'created'`;
+  if (ids.second) {
+    await adminSql`
+      delete from public.chat_conversations
+       where tenant_id = ${ids.demo}::uuid and created_by_user_id = ${ids.second}::uuid`;
+  }
 }
 
 beforeAll(async () => {
@@ -74,6 +94,7 @@ beforeAll(async () => {
   ids.member = await idOf(MEMBER);
   ids.second = await idOf(SECOND);
   ids.labMember = await idOf(LAB_MEMBER);
+  ids.support = await idOf(SUPPORT);
   await sweep();
 });
 
@@ -278,5 +299,157 @@ describe('realtime authorisation (live)', () => {
     await signal(ids.demo, 'all', REALTIME_EVENTS.notificationsChanged, { kind: 'probe' });
     const got = await waitForBroadcast(to, REALTIME_EVENTS.notificationsChanged, 10_000);
     expect(got?.payload.kind).toBe('probe');
+  });
+});
+
+/* ── 07-08: the chat signals, live ──────────────────────────────────────────────────────────── */
+
+/** `SECOND`'s support conversation, created through the API by chat case 1. */
+const chat = { conversationId: '' };
+
+const chatRequest = (path: string, token: string, body: unknown) =>
+  api.request(path, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'x-tenant-host': HOSTS.demo,
+    },
+    body: JSON.stringify(body),
+  });
+
+describe('realtime chat (live)', () => {
+  it('1. the member hears the reply on conv: and the dot on its own user topic, ids only', async () => {
+    const memberToken = await signInAs(SECOND, SEED_PASSWORD);
+    const first = await chatRequest('/v1/chat/support/messages', memberToken, {
+      body: 'Oi, a equipe pode me ajudar?',
+    });
+    expect(first.status).toBe(201);
+    chat.conversationId = ((await first.json()) as { conversationId: string }).conversationId;
+
+    const { client } = await connectAs(SECOND);
+    const conv = await joinTopic(client, convTopic(ids.demo, chat.conversationId));
+    const own = await joinTopic(client, userTopic(ids.demo, ids.second));
+    observed['chat 1 own conv'] = conv.status;
+    expect(conv.status).toBe('SUBSCRIBED');
+    expect(own.status).toBe('SUBSCRIBED');
+
+    const supportToken = await signInAs(SUPPORT, SEED_PASSWORD);
+    const reply = await chatRequest(
+      `/v1/chat/conversations/${chat.conversationId}/messages`,
+      supportToken,
+      { body: 'Claro! Estamos aqui.' },
+    );
+    expect(reply.status).toBe(201);
+
+    const message = await waitForBroadcast(conv, REALTIME_EVENTS.chatMessage, 10_000);
+    expect(message, 'chat.message on conv:').not.toBeNull();
+    expect(Object.keys(message?.payload ?? {}).sort()).toEqual(['conversationId', 'id', 'seq']);
+    expect(message?.payload).toMatchObject({ conversationId: chat.conversationId, seq: 2 });
+    const unread = await waitForBroadcast(own, REALTIME_EVENTS.chatUnread, 10_000);
+    expect(unread, 'chat.unread on the member topic').not.toBeNull();
+    expect(unread?.payload).toMatchObject({ conversationId: chat.conversationId, seq: 2 });
+  });
+
+  it("2. the support user hears the member's message on support-inbox and conv:", async () => {
+    const { client } = await connectAs(SUPPORT);
+    const inbox = await joinTopic(client, inboxTopic(ids.demo));
+    const conv = await joinTopic(client, convTopic(ids.demo, chat.conversationId));
+    observed['chat 2 staff inbox'] = inbox.status;
+    observed['chat 2 staff conv'] = conv.status;
+    expect(inbox.status).toBe('SUBSCRIBED');
+    expect(conv.status).toBe('SUBSCRIBED');
+
+    const memberToken = await signInAs(SECOND, SEED_PASSWORD);
+    const sent = await chatRequest('/v1/chat/support/messages', memberToken, {
+      body: 'Obrigada!',
+    });
+    expect(sent.status).toBe(201);
+
+    for (const joined of [inbox, conv]) {
+      const got = await waitForBroadcast(joined, REALTIME_EVENTS.chatMessage, 10_000);
+      expect(got, `chat.message on ${joined.topic}`).not.toBeNull();
+      expect(got?.payload).toMatchObject({ conversationId: chat.conversationId, seq: 3 });
+    }
+  });
+
+  it("3. negatives: another demo member joins neither the first member's conv: nor support-inbox", async () => {
+    const [foreignConv, inbox] = await Promise.all([
+      (async () =>
+        joinTopic((await connectAs(MEMBER)).client, convTopic(ids.demo, chat.conversationId)))(),
+      (async () => joinTopic((await connectAs(MEMBER)).client, inboxTopic(ids.demo)))(),
+    ]);
+    observed['chat 3 other member conv'] = foreignConv.status;
+    observed['chat 3 member inbox'] = inbox.status;
+    expectNotSubscribed(foreignConv);
+    expectNotSubscribed(inbox);
+
+    // Positive control in the same test: the thread's own member joins it.
+    const owner = await connectAs(SECOND);
+    const own = await joinTopic(owner.client, convTopic(ids.demo, chat.conversationId));
+    expect(own.status).toBe('SUBSCRIBED');
+
+    const supportToken = await signInAs(SUPPORT, SEED_PASSWORD);
+    expect(
+      (
+        await chatRequest(`/v1/chat/conversations/${chat.conversationId}/messages`, supportToken, {
+          body: 'Mais alguma coisa?',
+        })
+      ).status,
+    ).toBe(201);
+    expect(await waitForBroadcast(own, REALTIME_EVENTS.chatMessage, 10_000)).not.toBeNull();
+    await sleep(1_500);
+    expect(foreignConv.received).toEqual([]);
+    expect(inbox.received).toEqual([]);
+  }, 60_000);
+
+  it('4. module gate: with chat disabled, a fresh conv: join is refused while user: still joins', async () => {
+    const { client } = await connectAs(SECOND);
+    try {
+      await adminSql`
+        update public.tenant_modules set enabled = false
+         where tenant_id = ${ids.demo}::uuid and module_key = 'chat'`;
+      moduleFlags.invalidate(ids.demo);
+      const conv = await joinTopic(client, convTopic(ids.demo, chat.conversationId));
+      const own = await joinTopic(client, userTopic(ids.demo, ids.second));
+      observed['chat 4 conv (disabled)'] = conv.status;
+      expectNotSubscribed(conv);
+      expect(own.status).toBe('SUBSCRIBED');
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${ids.demo}::uuid and module_key = 'chat'`;
+      moduleFlags.invalidate(ids.demo);
+    }
+  });
+
+  it('5. A3 for chat: a staff message inside a rolled-back transaction delivers nothing', async () => {
+    const { client } = await connectAs(SECOND);
+    const conv = await joinTopic(client, convTopic(ids.demo, chat.conversationId));
+    expect(conv.status).toBe('SUBSCRIBED');
+
+    const rollback = new Error('rollback on purpose');
+    await expect(
+      adminSql.begin(async (tx) => {
+        await tx`
+          insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+          values (${ids.demo}::uuid, ${chat.conversationId}::uuid, ${ids.support}::uuid, 'staff',
+                  'nunca enviada')`;
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+    expect(await waitForBroadcast(conv, REALTIME_EVENTS.chatMessage, 2_000)).toBeNull();
+
+    // Control: the same staff message, committed through the API, arrives, and took the NEXT seq
+    // (the rolled-back insert left no gap).
+    const supportToken = await signInAs(SUPPORT, SEED_PASSWORD);
+    const reply = await chatRequest(
+      `/v1/chat/conversations/${chat.conversationId}/messages`,
+      supportToken,
+      { body: 'Agora sim.' },
+    );
+    expect(reply.status).toBe(201);
+    const got = await waitForBroadcast(conv, REALTIME_EVENTS.chatMessage, 10_000);
+    expect(got?.payload).toMatchObject({ conversationId: chat.conversationId, seq: 5 });
   });
 });

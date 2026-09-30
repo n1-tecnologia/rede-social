@@ -1390,6 +1390,82 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("b12. chat: a lab member's thread is a bare 404 to demo members and demo staff, a second demo member cannot read the first's, and a demo session on the lab host is refused (07-08)", async () => {
+    // Support threads are the first data private between members of the SAME tenant (T-07-50), on
+    // top of the tenant boundary (T-07-51). The seeded demo thread (`SEED_SUPPORT_CONVERSATION_ID`,
+    // `member@rede-demo.local`) is the positive control; the lab thread is written here with the
+    // SAME first body (adjacency). rede-lab has `chat` OFF in the seed, so it is turned on for this
+    // case (the lab thread is then live and readable by its own member, the strongest negative) and
+    // restored in `finally`.
+    const seeded = '1d000000-0000-4000-8000-000000000001';
+    const labConversation = '0b120000-0000-4000-8000-000000000001';
+    const [labUser] = await adminSql<{ id: string }[]>`
+      select id::text as id from auth.users where email = 'member@rede-lab.local'`;
+    const demoSupport = await signInAs('support@rede-demo.local', SEED_PASSWORD);
+    const demoSecond = await signInAs('joao.goncalves@rede-demo.local', SEED_PASSWORD);
+    const [labFlag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+    const messages = (token: string, host: string, id: string) =>
+      request(`/v1/chat/conversations/${id}/messages`, token, { [TENANT_HOST_HEADER]: host });
+    /** One bare NOT_FOUND: no details, nothing that tells "another tenant's" from "unknown". */
+    const expectBare404 = async (res: Response) => {
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error).not.toHaveProperty('details');
+    };
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+      await adminSql`
+        insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+        values (${labConversation}::uuid, ${tenantIds.lab}::uuid, 'support', ${labUser?.id ?? ''}::uuid)`;
+      await adminSql`
+        insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+        values (${labConversation}::uuid, ${tenantIds.lab}::uuid, ${labUser?.id ?? ''}::uuid, 'member')`;
+      await adminSql`
+        insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+        values (${tenantIds.lab}::uuid, ${labConversation}::uuid, ${labUser?.id ?? ''}::uuid, 'member',
+                'Oi, preciso de ajuda com meu cadastro.')`;
+
+      // Positive controls: the demo member and the demo support user read the seeded demo thread,
+      // and the lab member reads its own.
+      const own = await messages(tokens.demoMember, HOSTS.demo, seeded);
+      expect(own.status).toBe(200);
+      expect(((await own.json()) as { items: unknown[] }).items.length).toBeGreaterThan(0);
+      expect((await messages(demoSupport, HOSTS.demo, seeded)).status).toBe(200);
+      expect((await messages(tokens.labMember, HOSTS.lab, labConversation)).status).toBe(200);
+
+      // T-07-51: the lab thread through a demo lane is the bare 404, for a member and for staff.
+      await expectBare404(await messages(tokens.demoMember, HOSTS.demo, labConversation));
+      await expectBare404(await messages(demoSupport, HOSTS.demo, labConversation));
+
+      // T-07-50: a SECOND demo member reading the first member's thread is the same bare 404.
+      await expectBare404(await messages(demoSecond, HOSTS.demo, seeded));
+
+      // A demo session presented on the lab's registered host is refused before any read (D-23).
+      const mismatch = await messages(tokens.demoMember, HOSTS.lab, labConversation);
+      expect(mismatch.status).toBe(403);
+      expect(await code(mismatch)).toBe('TENANT_HOST_MISMATCH');
+    } finally {
+      await adminSql`delete from public.chat_conversations where id = ${labConversation}::uuid`;
+      if (labFlag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${labFlag.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,
