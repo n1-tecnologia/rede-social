@@ -88,6 +88,9 @@ const REQUIRED_KEYS = [
   // 07-01: the bell's destination. It reads the session and the request instant (relative times)
   // per request, and its server render must never be a cached copy of another member's rows.
   '/(app)/notificacoes/page',
+  // 07-09: the member's support thread (CHAT-02). It reads the session, the member's own
+  // conversation and the request instant (day labels such as "Hoje"), so it may never be prerendered.
+  '/(app)/suporte/page',
   // 06-04: the admin's form routes. Both read the session and the composed manage permission per
   // request (and the edit route the manage-only edit read), so neither may be prerendered.
   '/(app)/eventos/novo/page',

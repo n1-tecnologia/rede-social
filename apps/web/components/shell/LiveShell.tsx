@@ -1,6 +1,11 @@
 'use client';
 
-import { tenantTopic, userTopic } from '@rede-social/contracts/realtime';
+import {
+  inboxTopic,
+  REALTIME_EVENTS,
+  tenantTopic,
+  userTopic,
+} from '@rede-social/contracts/realtime';
 import {
   BeforeLogoutProvider,
   type LiveCounters,
@@ -32,10 +37,23 @@ export interface LiveShellProps {
   initialCounters: LiveCounters;
   /** `notifications` is enabled for the tenant: only then may the member join `tenant:<t>:all`. */
   notificationsEnabled: boolean;
+  /**
+   * 07-09: the viewer holds `chat.support` (from `bootstrap.permissions`, never a role comparison), so
+   * the shell also joins `tenant:<t>:support-inbox` to keep the staff's awaiting count live.
+   */
+  supportInbox?: boolean;
   /** `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (07-07); null leaves push out entirely. */
   vapidPublicKey?: string | null;
   children: ReactNode;
 }
+
+/** Every signal that can move a badge: the bell, the member's dot and the staff count. */
+const COUNTER_EVENTS = [
+  REALTIME_EVENTS.notificationsChanged,
+  REALTIME_EVENTS.chatUnread,
+  REALTIME_EVENTS.chatMessage,
+  REALTIME_EVENTS.chatRead,
+] as const;
 
 /**
  * The tenant shell's live layer (07-03, NOTIF-02): ONE Realtime client for the window, the counters
@@ -45,6 +63,11 @@ export interface LiveShellProps {
  * `notifications` is on, `tenant:<t>:all` (broadcast kinds). Both are built by the contract builders.
  * The `all` join is left out when the module is off: the database would refuse it anyway, and a
  * refused channel only costs retries.
+ *
+ * Chat (07-09, D-237..D-240): the counters also refetch on `chat.unread` (the member's dot, published
+ * on their user topic) and, for holders of `chat.support`, on `chat.message` / `chat.read` on the
+ * support inbox (the staff's awaiting count). A message arriving outside an open thread raises no
+ * toast: the badge is the signal (UI-D-253).
  *
  * Push (07-07): once after mount, with a VAPID key and permission already granted, the current
  * subscription is re-saved or re-made under a rotated key (`syncPushOnOpen`, never a prompt). The shell
@@ -61,10 +84,12 @@ export function LiveShell({
   userId,
   initialCounters,
   notificationsEnabled,
+  supportInbox = false,
   vapidPublicKey = null,
   children,
 }: LiveShellProps) {
   const t = useTranslations('notifications');
+  const tChat = useTranslations('chat');
 
   useEffect(() => {
     if (!vapidPublicKey) return;
@@ -83,18 +108,23 @@ export function LiveShell({
     await disablePush(await pushRegistrationWithin());
   }, []);
 
-  const topics = useMemo(
-    () =>
-      notificationsEnabled
-        ? [userTopic(tenantId, userId), tenantTopic(tenantId)]
-        : [userTopic(tenantId, userId)],
-    [tenantId, userId, notificationsEnabled],
-  );
+  const topics = useMemo(() => {
+    const list = [userTopic(tenantId, userId)];
+    if (notificationsEnabled) list.push(tenantTopic(tenantId));
+    if (supportInbox) list.push(inboxTopic(tenantId));
+    return list;
+  }, [tenantId, userId, notificationsEnabled, supportInbox]);
 
-  // UI-D-253: "Notificações, 1 nova" / "Notificações, 3 novas". 07-09 adds the chat label.
+  // UI-D-253: "Notificações, 1 nova" / "Notificações, 3 novas"; the chat slot reads "Suporte, nova
+  // resposta da equipe" for a member's dot and "Suporte, 2 aguardando resposta" for the staff count.
   const labelFor = useCallback<SlotBadgeLabel>(
-    (badge, count) => (badge === 'unreadNotifications' ? t('navBadge', { count }) : undefined),
-    [t],
+    (badge, count, style) => {
+      if (badge === 'unreadNotifications') return t('navBadge', { count });
+      if (badge === 'unreadConversations')
+        return style === 'dot' ? tChat('navBadge.member') : tChat('navBadge.staff', { count });
+      return undefined;
+    },
+    [t, tChat],
   );
 
   return (
@@ -107,6 +137,7 @@ export function LiveShell({
         initial={initialCounters}
         countersUrl="/api/me/counters"
         topics={topics}
+        events={COUNTER_EVENTS}
       >
         <SlotBadgeLabelsProvider value={labelFor}>
           <BeforeLogoutProvider value={forgetDevice}>{children}</BeforeLogoutProvider>

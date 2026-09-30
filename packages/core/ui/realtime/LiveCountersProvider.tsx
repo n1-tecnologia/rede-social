@@ -17,7 +17,17 @@ import { useRealtime } from './RealtimeProvider';
 export interface LiveCounters {
   unreadNotifications: number;
   unreadConversations: number;
+  /**
+   * 07-08/07-09 (D-237, D-238): how the chat slot draws `unreadConversations`: a member's `dot` (0 or
+   * 1, "the team answered") or the staff `count` of conversations awaiting a reply. Absent means
+   * `count` (the platform shell, older callers).
+   */
+  conversationsBadge?: 'dot' | 'count';
 }
+
+/** The chat slot's style, defaulting to the count. */
+export const conversationsBadgeOf = (counters: LiveCounters): 'dot' | 'count' =>
+  counters.conversationsBadge === 'dot' ? 'dot' : 'count';
 
 const LiveCountersContext = createContext<LiveCounters | null>(null);
 
@@ -29,28 +39,51 @@ export function useLiveCounters(): LiveCounters | null {
 const isCount = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
+const isBadgeStyle = (value: unknown): boolean =>
+  value === undefined || value === 'dot' || value === 'count';
+
 const isCounters = (value: unknown): value is LiveCounters =>
   typeof value === 'object' &&
   value !== null &&
   isCount((value as LiveCounters).unreadNotifications) &&
-  isCount((value as LiveCounters).unreadConversations);
+  isCount((value as LiveCounters).unreadConversations) &&
+  isBadgeStyle((value as LiveCounters).conversationsBadge);
+
+const sameCounters = (a: LiveCounters, b: LiveCounters): boolean =>
+  a.unreadNotifications === b.unreadNotifications &&
+  a.unreadConversations === b.unreadConversations &&
+  a.conversationsBadge === b.conversationsBadge;
+
+const copyCounters = (value: LiveCounters): LiveCounters => ({
+  unreadNotifications: value.unreadNotifications,
+  unreadConversations: value.unreadConversations,
+  ...(value.conversationsBadge ? { conversationsBadge: value.conversationsBadge } : {}),
+});
 
 export interface LiveCountersProviderProps {
   /** The bootstrap's `counters`: what the server rendered, shown until the first refetch. */
   initial: LiveCounters;
   /** The BFF counters route, `/api/me/counters` in the web app (a GET route handler, `no-store`). */
   countersUrl: string;
-  /** The private topics whose `notifications.changed` signal means "refetch". */
+  /** The private topics whose signals mean "refetch". */
   topics: ReadonlyArray<string>;
+  /**
+   * The signal events that mean "refetch" (default: `notifications.changed` only). 07-09's shell
+   * adds the chat events: `chat.unread` on the member's user topic (the dot), and `chat.message` /
+   * `chat.read` on the support inbox for staff (the awaiting count).
+   */
+  events?: ReadonlyArray<string>;
   children: ReactNode;
 }
+
+const DEFAULT_EVENTS: ReadonlyArray<string> = [REALTIME_EVENTS.notificationsChanged];
 
 /**
  * NOTIF-02 live bell (07-03, D-239, D-240, UI-D-265). Holds the counters, seeded from the bootstrap,
  * and refetches them from `countersUrl`:
  *
- * - on every `notifications.changed` signal on `topics` (the signal carries ids only; the numbers
- *   always come from the API);
+ * - on every signal in `events` (default `notifications.changed`; the chat events since 07-09) on
+ *   `topics` (the signal carries ids only; the numbers always come from the API);
  * - on every `SUBSCRIBED`, first join and re-join alike, and on every `visibilitychange` to visible:
  *   a signal missed while the window was away or the socket was down never matters (D-240);
  * - a failed refetch keeps the last value: with Realtime or the route down, the bell still shows the
@@ -62,22 +95,28 @@ export function LiveCountersProvider({
   initial,
   countersUrl,
   topics,
+  events = DEFAULT_EVENTS,
   children,
 }: LiveCountersProviderProps) {
   const [counters, setCounters] = useState<LiveCounters>(initial);
   const realtime = useRealtime();
 
   // A newer server render (a navigation that re-rendered the layout) re-seeds the value.
-  const seeded = useRef(`${initial.unreadNotifications}:${initial.unreadConversations}`);
+  const seeded = useRef(
+    `${initial.unreadNotifications}:${initial.unreadConversations}:${initial.conversationsBadge}`,
+  );
   useEffect(() => {
-    const key = `${initial.unreadNotifications}:${initial.unreadConversations}`;
+    const key = `${initial.unreadNotifications}:${initial.unreadConversations}:${initial.conversationsBadge}`;
     if (key === seeded.current) return;
     seeded.current = key;
-    setCounters({
-      unreadNotifications: initial.unreadNotifications,
-      unreadConversations: initial.unreadConversations,
-    });
-  }, [initial.unreadNotifications, initial.unreadConversations]);
+    setCounters(
+      copyCounters({
+        unreadNotifications: initial.unreadNotifications,
+        unreadConversations: initial.unreadConversations,
+        conversationsBadge: initial.conversationsBadge,
+      }),
+    );
+  }, [initial.unreadNotifications, initial.unreadConversations, initial.conversationsBadge]);
 
   // Out-of-order answers: only an answer newer than the last one applied may land.
   const issued = useRef(0);
@@ -94,15 +133,8 @@ export function LiveCountersProvider({
       const body: unknown = await res.json();
       if (!isCounters(body) || seq < applied.current) return;
       applied.current = seq;
-      setCounters((previous) =>
-        previous.unreadNotifications === body.unreadNotifications &&
-        previous.unreadConversations === body.unreadConversations
-          ? previous
-          : {
-              unreadNotifications: body.unreadNotifications,
-              unreadConversations: body.unreadConversations,
-            },
-      );
+      const next = copyCounters(body);
+      setCounters((previous) => (sameCounters(previous, next) ? previous : next));
     } catch {
       // Keep the last value (UI-D-265).
     }
@@ -112,15 +144,17 @@ export function LiveCountersProvider({
   refetchRef.current = refetch;
 
   const topicsKey = topics.join('\n');
+  const eventsKey = events.join('\n');
   useEffect(() => {
     if (!realtime || !topicsKey) return;
+    const list = eventsKey.split('\n').filter(Boolean);
     const leaves = topicsKey
       .split('\n')
       .filter(Boolean)
       .map((topic) =>
         realtime.join(
           topic,
-          [REALTIME_EVENTS.notificationsChanged],
+          list,
           () => void refetchRef.current(),
           () => void refetchRef.current(),
         ),
@@ -128,7 +162,7 @@ export function LiveCountersProvider({
     return () => {
       for (const leave of leaves) leave();
     };
-  }, [realtime, topicsKey]);
+  }, [realtime, topicsKey, eventsKey]);
 
   useEffect(() => {
     const onVisibility = () => {

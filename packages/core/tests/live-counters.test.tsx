@@ -164,6 +164,55 @@ describe('RealtimeProvider + LiveCountersProvider (07-03)', () => {
     expect(counterFetches()).toBe(0);
   });
 
+  it('07-09: with the chat events, a chat.unread signal refetches and carries the dot style', async () => {
+    const fake = fakeRealtime();
+    function ChatCount() {
+      const counters = useLiveCounters();
+      return (
+        <span data-testid="chat">
+          {counters ? `${counters.unreadConversations}:${counters.conversationsBadge}` : 'none'}
+        </span>
+      );
+    }
+    render(
+      <RealtimeProvider
+        supabaseUrl="http://supabase.test"
+        publishableKey="pk"
+        tokenUrl="/api/realtime/token"
+        clientFactory={fake.factory}
+      >
+        <LiveCountersProvider
+          initial={{ unreadNotifications: 0, unreadConversations: 0, conversationsBadge: 'dot' }}
+          countersUrl="/api/me/counters"
+          topics={TOPICS}
+          events={['notifications.changed', 'chat.unread', 'chat.message', 'chat.read']}
+        >
+          <ChatCount />
+        </LiveCountersProvider>
+      </RealtimeProvider>,
+    );
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('chat')).toHaveTextContent('0:dot');
+
+    answers.push({
+      unreadNotifications: 0,
+      unreadConversations: 1,
+      conversationsBadge: 'dot',
+    } as never);
+    fake.emit(TOPICS[0] as string, 'chat.unread', { conversationId: 'x' });
+    await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('1:dot'));
+    expect(counterFetches()).toBe(1);
+
+    answers.push({
+      unreadNotifications: 0,
+      unreadConversations: 0,
+      conversationsBadge: 'dot',
+    } as never);
+    fake.emit(TOPICS[0] as string, 'chat.message', { conversationId: 'x', seq: 2 });
+    await waitFor(() => expect(screen.getByTestId('chat')).toHaveTextContent('0:dot'));
+    expect(counterFetches()).toBe(2);
+  });
+
   it('D-240: SUBSCRIBED (first join and re-join) refetches', async () => {
     const fake = fakeRealtime();
     await mounted(fake, 0);
@@ -300,5 +349,63 @@ describe('TopBar reads the live counters and the host slot label (UI-D-253)', ()
   it('without a provider the static prop (0) is shown', () => {
     render(bar(null));
     expect(screen.getByRole('link', { name: 'Notificações' })).not.toHaveTextContent(/\d/);
+  });
+
+  const chat = {
+    key: 'chat',
+    href: '/suporte',
+    icon: 'message-circle',
+    label: 'Suporte',
+    badge: 'unreadConversations' as const,
+  };
+
+  function chatBar(counters: {
+    unreadNotifications: number;
+    unreadConversations: number;
+    conversationsBadge: 'dot' | 'count';
+  }) {
+    return (
+      <LiveCountersProvider initial={counters} countersUrl="/api/me/counters" topics={[]}>
+        <SlotBadgeLabelsProvider
+          value={(badge, count, style) =>
+            badge === 'unreadConversations'
+              ? style === 'dot'
+                ? 'Suporte, nova resposta da equipe'
+                : `Suporte, ${count} aguardando resposta`
+              : undefined
+          }
+        >
+          <TopBar
+            brand={{ displayName: 'Rede Demo', logoUrl: null }}
+            slots={[bell, chat]}
+            counters={{ unreadNotifications: 0, unreadConversations: 0 }}
+            avatar={{ src: null, alt: 'Maria' }}
+            profileLabel="Meu perfil"
+          />
+        </SlotBadgeLabelsProvider>
+      </LiveCountersProvider>
+    );
+  }
+
+  it('07-09 (D-237): a member with a staff reply sees the 12px dot with no numeral', () => {
+    render(chatBar({ unreadNotifications: 0, unreadConversations: 1, conversationsBadge: 'dot' }));
+    const link = screen.getByRole('link', { name: 'Suporte, nova resposta da equipe' });
+    expect(link.querySelector('[data-badge-dot]')).not.toBeNull();
+    expect(link).not.toHaveTextContent(/\d/);
+  });
+
+  it('07-09 (D-238): staff see the awaiting count, 99+ above 99', () => {
+    render(
+      chatBar({ unreadNotifications: 0, unreadConversations: 120, conversationsBadge: 'count' }),
+    );
+    const link = screen.getByRole('link', { name: 'Suporte, 120 aguardando resposta' });
+    expect(link).toHaveTextContent('99+');
+    expect(link.querySelector('[data-badge-dot]')).toBeNull();
+  });
+
+  it('07-09: at zero the chat slot has no badge and the bare label', () => {
+    render(chatBar({ unreadNotifications: 0, unreadConversations: 0, conversationsBadge: 'dot' }));
+    const link = screen.getByRole('link', { name: 'Suporte' });
+    expect(link.querySelector('[aria-hidden] span, [data-badge-dot]')).toBeNull();
   });
 });

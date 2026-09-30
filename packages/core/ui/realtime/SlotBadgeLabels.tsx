@@ -8,8 +8,15 @@ import type { NavBadge } from '../nav';
  * kernel ships no words, and a server layout cannot hand a function to a client component, so the
  * host supplies the label function through this context from a client component of its own
  * (`apps/web/components/shell/LiveShell.tsx`). Answer `undefined` to keep the slot's plain label.
+ *
+ * `style` (07-09, D-237/D-238) is how the badge is drawn: the chat slot is a member's `dot` ("Suporte,
+ * nova resposta da equipe") or the staff `count` ("Suporte, 2 aguardando resposta").
  */
-export type SlotBadgeLabel = (badge: NavBadge, count: number) => string | undefined;
+export type SlotBadgeLabel = (
+  badge: NavBadge,
+  count: number,
+  style: 'dot' | 'count',
+) => string | undefined;
 
 const SlotBadgeLabelsContext = createContext<SlotBadgeLabel | null>(null);
 
@@ -38,7 +45,19 @@ export function slotAccessibleName(
   badge: NavBadge | undefined,
   count: number,
   labelFor: SlotBadgeLabel | null,
+  style: 'dot' | 'count' = 'count',
 ): string {
   if (!badge || count <= 0 || !labelFor) return label;
-  return labelFor(badge, count) ?? label;
+  return labelFor(badge, count, style) ?? label;
+}
+
+/**
+ * How a slot's badge is drawn: the chat slot follows `conversationsBadge`, every other badge is a
+ * count.
+ */
+export function slotBadgeStyle(
+  badge: NavBadge | undefined,
+  conversationsBadge: 'dot' | 'count' | undefined,
+): 'dot' | 'count' {
+  return badge === 'unreadConversations' && conversationsBadge === 'dot' ? 'dot' : 'count';
 }

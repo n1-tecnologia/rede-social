@@ -7,13 +7,18 @@ import type { ReactNode } from 'react';
 import { useBeforeLogout, useLogoutSubmit } from './BeforeLogout';
 import { activeTabKey, iconFor, isNavItemActive, type NavItem, type ShellNav } from './nav';
 import { useLiveCounters } from './realtime/LiveCountersProvider';
-import { slotAccessibleName, useSlotBadgeLabel } from './realtime/SlotBadgeLabels';
+import { slotAccessibleName, slotBadgeStyle, useSlotBadgeLabel } from './realtime/SlotBadgeLabels';
 import { TenantLogo } from './TenantLogo';
 
 export interface DesktopRailProps {
   brand: { displayName: string; logoUrl: string | null };
   nav: ShellNav;
-  counters: { unreadNotifications: number; unreadConversations: number };
+  counters: {
+    unreadNotifications: number;
+    unreadConversations: number;
+    /** 07-09: the chat slot draws a member's `dot` or the staff `count` (default). */
+    conversationsBadge?: 'dot' | 'count';
+  };
   labels: { mainNav: string; settings: string; logout: string; theme: string };
   settingsHref: string;
   logoutAction: () => Promise<void>;
@@ -26,13 +31,24 @@ const rowBase =
 const rowIdle = 'text-text-secondary hover:bg-bg-hover';
 const rowActive = 'bg-[var(--theme-chip)] font-bold text-brand';
 
-function RailLink({ item, active, count }: { item: NavItem; active: boolean; count?: number }) {
+function RailLink({
+  item,
+  active,
+  count,
+  style = 'count',
+}: {
+  item: NavItem;
+  active: boolean;
+  count?: number;
+  style?: 'dot' | 'count';
+}) {
   const Icon = iconFor(item.icon);
   const labelFor = useSlotBadgeLabel();
   return (
     <Link
       href={item.href}
-      aria-label={slotAccessibleName(item.label, item.badge, count ?? 0, labelFor)}
+      data-slot={item.key}
+      aria-label={slotAccessibleName(item.label, item.badge, count ?? 0, labelFor, style)}
       aria-current={active ? 'page' : undefined}
       className={cn(rowBase, active ? rowActive : rowIdle)}
     >
@@ -40,7 +56,8 @@ function RailLink({ item, active, count }: { item: NavItem; active: boolean; cou
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
       {count !== undefined && count > 0 ? (
         <span aria-hidden className="inline-flex">
-          <Badge count={count} />
+          {/* The rail's dot sits on the row ground, so it drops the TopBar's separating ring. */}
+          <Badge count={count} variant={style} className={style === 'dot' ? 'ring-0' : undefined} />
         </span>
       ) : null}
     </Link>
@@ -102,6 +119,7 @@ export function DesktopRail({
             item={slot}
             active={isNavItemActive(pathname, slot.href)}
             count={slot.badge ? shown[slot.badge] : undefined}
+            style={slotBadgeStyle(slot.badge, shown.conversationsBadge)}
           />
         ))}
 

@@ -31,6 +31,7 @@ export {
 } from './nav';
 export { appBadgeCount, applyAppBadge, type BadgeCounters } from './realtime/app-badge';
 export {
+  conversationsBadgeOf,
   type LiveCounters,
   LiveCountersProvider,
   type LiveCountersProviderProps,
@@ -54,6 +55,7 @@ export {
   SlotBadgeLabelsProvider,
   type SlotBadgeLabelsProviderProps,
   slotAccessibleName,
+  slotBadgeStyle,
   useSlotBadgeLabel,
 } from './realtime/SlotBadgeLabels';
 export {

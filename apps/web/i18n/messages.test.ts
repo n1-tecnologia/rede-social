@@ -1567,3 +1567,78 @@ describe('07-07 — the push strings (soft-ask, switch row, toasts, install hint
     expect(lookup('pwa.install.dismiss')).toBe('Agora não');
   });
 });
+
+/**
+ * 07-09 — the `chat` catalog, member side (UI-SPEC Copywriting Contract, "Support chat", "Nav, badges
+ * and list" and the thread error rows), verbatim. Every placeholder is pinned and the ICU plural of
+ * the new-messages pill and the counter's number format are FORMATTED, so a lost brace fails here.
+ */
+describe('07-09 — chat member thread strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['chat.nav', 'Suporte'],
+    ['chat.navBadge.member', 'Suporte, nova resposta da equipe'],
+    ['chat.navBadge.staff', 'Suporte, {count} aguardando resposta'],
+    ['chat.member.title', 'Equipe {tenant}'],
+    ['chat.member.back', 'Voltar para o início'],
+    ['chat.member.empty.title', 'Fale com a equipe de {tenant}'],
+    [
+      'chat.member.empty.body',
+      'Mande sua dúvida ou pedido por aqui. Avisamos quando a equipe responder.',
+    ],
+    ['chat.thread.label', 'Mensagens'],
+    ['chat.thread.older', 'Carregar mensagens anteriores'],
+    ['chat.thread.retry', 'Tentar novamente'],
+    ['chat.thread.errors.load.title', 'Não foi possível carregar a conversa.'],
+    ['chat.thread.errors.load.body', 'Verifique sua conexão e tente de novo.'],
+    ['chat.thread.errors.older', 'Não foi possível carregar as mensagens anteriores.'],
+    ['chat.sender.staffSr', ', da equipe'],
+    ['chat.sender.you', 'Você'],
+    ['chat.day.today', 'Hoje'],
+    ['chat.day.yesterday', 'Ontem'],
+    ['chat.composer.label', 'Mensagem'],
+    ['chat.composer.placeholder', 'Escreva uma mensagem'],
+    ['chat.composer.send', 'Enviar mensagem'],
+    ['chat.composer.sending', 'Enviando…'],
+    ['chat.composer.counter', '{count}/2.000'],
+    [
+      'chat.composer.errors.failed',
+      'Não foi possível enviar. Sua mensagem continua no campo. Tente de novo.',
+    ],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('formats the placeholders, the pill plural and the counter number', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'chat',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    expect(t('member.title', { tenant: 'Rede Demo' })).toBe('Equipe Rede Demo');
+    expect(t('member.empty.title', { tenant: 'Rede Demo' })).toBe('Fale com a equipe de Rede Demo');
+    expect(t('navBadge.staff', { count: 2 })).toBe('Suporte, 2 aguardando resposta');
+    expect(t('thread.newMessages', { count: 1 })).toBe('1 nova mensagem');
+    expect(t('thread.newMessages', { count: 3 })).toBe('3 novas mensagens');
+    // The host formats the number (pt-BR grouping) and hands it in, matching the literal "2.000".
+    expect(t('composer.counter', { count: (1800).toLocaleString('pt-BR') })).toBe('1.800/2.000');
+    // The member's stateful name follows the plain label (UI-D-253).
+    expect(
+      String(lookup('chat.navBadge.member')).startsWith(`${String(lookup('chat.nav'))}, `),
+    ).toBe(true);
+  });
+
+  it('uses the product vocabulary: no ticket words, no connecting indicator (UI-D-265)', () => {
+    const all = JSON.stringify(lookup('chat')).toLowerCase();
+    for (const word of ['ticket', 'chamado', 'protocolo', 'conectando', 'anexo'])
+      expect(all).not.toContain(word);
+  });
+});

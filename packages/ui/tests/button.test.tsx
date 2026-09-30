@@ -74,6 +74,21 @@ describe('Badge', () => {
   it('renders nothing for a non-positive count', () => {
     const { container } = render(<Badge count={0} />);
     expect(container).toBeEmptyDOMElement();
+    const { container: dot } = render(<Badge count={0} variant="dot" />);
+    expect(dot).toBeEmptyDOMElement();
+  });
+
+  it('caps the numeral at 99+', () => {
+    render(<Badge count={120} />);
+    expect(screen.getByText('99+')).toBeInTheDocument();
+  });
+
+  it('draws the 12px dot with no numeral, aria-hidden (UI-D-253, D-237)', () => {
+    const { container } = render(<Badge count={1} variant="dot" />);
+    const dot = container.firstElementChild as HTMLElement;
+    expect(dot).toHaveAttribute('aria-hidden', 'true');
+    expect(dot.className).toContain('h-3 w-3 rounded-full bg-danger ring-2 ring-bg-secondary');
+    expect(dot).toHaveTextContent('');
   });
 });
 
