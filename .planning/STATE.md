@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-08-PLAN.md
-last_updated: "2026-09-30T19:36:35.649Z"
+stopped_at: Completed 07-09-PLAN.md
+last_updated: "2026-09-30T20:23:36.454Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-08 complete: support chat server side (@rede-social/module-chat, gapless seq trigger under the conversation row lock, ids-only signal trigger on conv:/support-inbox/user:, participant/staff-aware RLS, lazy member send, staff reply with 409 member_blocked/member_removed, seq catch-up, keyset inbox, shared staff read, member dot / staff count via conversationsBadge, chat.support moved to the chat manifest, push-only support source, pgTAP 152, seeded support users); next 07-09 (Wave 8)"
-state_head: bee86849c16c708b28995f9033fddf5bdd178e27
+last_activity_desc: "07-09 complete: member support thread (/suporte for members with ThreadHeader and greeting, fixed-height ThreadPane with afterSeq catch-up on signal/subscribe/refocus, 80px auto-scroll or pill, keepalive read marks, optimistic send via server action, BFF messages GET and read POST, the shared linkifier re-homed into @rede-social/ui, Badge dot on the chat slot with stateful names, LiveShell chat events and support-inbox join, chat membro e2e 16/16); staff /suporte is not-found until 07-10; next 07-10"
+state_head: fbb36b3a902764f52dd7413edcbe0b1a71085a6c
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 109
-  completed_plans: 103
+  completed_plans: 104
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 8 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half, 07-08 chat server side); next: 07-09. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
+Plan: 9 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half, 07-08 chat server side, 07-09 member support thread); next: 07-10. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
 Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-08 (support chat API: member thread, staff inbox and reply, shared read state, dot/count badges, push-only support pushes; the Suporte slot links to /suporte, whose page is 07-09; the API must deploy before the web for counters.conversationsBadge; full API integration 701/702 with only signup case 2 failing on the tria-* env hosts)
+Last activity: 2026-09-30 — Completed 07-09 (the member's support thread at /suporte with live append, catch-up and read marks, the chat dot and stateful slot names, the shared linkifier in @rede-social/ui; staff /suporte is the not-found screen until 07-10; plan-level e2e green apart from the known cold-run feed-comments mobile flake)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -163,6 +163,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P06 | 25 min | 3 tasks | 36 files |
 | Phase 07 P07 | 26 min | 3 tasks | 32 files |
 | Phase 07 P08 | 37 min | 3 tasks | 44 files |
+| Phase 07 P09 | 42min | 3 tasks | 53 files |
 
 ## Accumulated Context
 
@@ -528,6 +529,10 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-08: chat.support moved from KERNEL_ROLE_PERMISSIONS to the chat manifest for admin_tenant and support_tenant (support_tenant kernel grant is now []); members get chat.support.contact; manifest counters receive the caller's composed permissions
 - [Phase 07]: 07-08: bootstrap.counters gains conversationsBadge ('dot' member, 'count' staff, default 'count'); the API must deploy before the web (07-11)
 - [Phase 07]: 07-08: chat.message_sent is push-only (chat.support_reply to the member titled 'team', chat.member_message to live staff), 32-hex conversation tag/topic, renotify, urgency high, TTL 259200; never a notifications row
+- [Phase 07]: 07-09: the URL matcher moved with the linkifier into @rede-social/ui behind a React-free ./text/url entry; the feed contracts re-export the same objects, so unfurl and every linkified surface keep one rule
+- [Phase 07]: 07-09: chat views carry the tenant-local dayKey and a server-formatted time; day labels are recomputed on the client from server-provided todayKey/yesterdayKey without reading a clock
+- [Phase 07]: 07-09: LiveShell joins the tenant support-inbox topic only when bootstrap.permissions includes chat.support (supportInbox prop from the (app) layout), and refetches counters on chat.unread, chat.message and chat.read
+- [Phase 07]: 07-09: with experimental.useOffline a transport-failed server action is retried by Next instead of rejecting; the composer's draft restore covers server errors, and an offline send stays 'Enviando…' until it goes through
 
 ### Pending Todos
 
@@ -598,6 +603,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T19:36:14.695Z
-Stopped at: Completed 07-08-PLAN.md
+Last session: 2026-09-30T20:23:18.535Z
+Stopped at: Completed 07-09-PLAN.md
 Resume file: None
