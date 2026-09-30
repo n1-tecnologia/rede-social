@@ -783,3 +783,20 @@ declare module '@rede-social/contracts' {
     'story.unhighlighted': StoryUnhighlighted;
   }
 }
+
+/* ── Notifications (07-04) ─────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The notification kinds the stories module produces (07-04, D-226), the `kind` of a `notifications`
+ * row. `story` is a BROADCAST kind (every live `member`, D-229), sourced from `story.published` ONLY:
+ * `story.highlighted` follows `story.published` for a born-attached story, so a second source there
+ * would notify twice (RESEARCH Pitfall 11). `storyCommented` is PERSONAL (the story's author, staff
+ * included). Both route to `/stories/{storyId}`, or to Início's expired notice once `expiresAt` has
+ * passed (D-232, UI-D-254).
+ */
+export const STORIES_NOTIFICATION_KINDS = {
+  story: 'stories.story',
+  storyCommented: 'stories.story_commented',
+} as const;
+export type StoriesNotificationKind =
+  (typeof STORIES_NOTIFICATION_KINDS)[keyof typeof STORIES_NOTIFICATION_KINDS];

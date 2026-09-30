@@ -155,7 +155,9 @@ const toRow = (row: NotificationDbRow): NotificationRow => ({
           displayName: row.actor_removed ? null : row.actor_display_name,
           avatarAssetId: row.actor_removed ? null : row.actor_avatar_asset_id,
         },
-  facts: toFacts(row.payload),
+  // 07-04 keep-and-mark: a retracted row's payload is exactly `{"removed": true}`, which is a flag and
+  // not a fact, so a removed row answers NO facts at all (nothing about the taken-down target).
+  facts: row.removed ? {} : toFacts(row.payload),
   preview:
     !row.removed && row.preview_asset_id !== null && (row.preview_variant_widths ?? []).length > 0
       ? { assetId: row.preview_asset_id, variantWidths: row.preview_variant_widths ?? [] }

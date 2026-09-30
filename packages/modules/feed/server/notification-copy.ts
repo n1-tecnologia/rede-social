@@ -22,7 +22,20 @@ export const FEED_PUSH_COPY = {
   reel: () => 'Novo reel',
   /** Only when the author's name is unavailable at publish time: the bare fact, no actor. */
   postBare: () => 'Novo post',
+  /** 07-04: a reply to the recipient's comment. Likes are NEVER pushed (D-235), so no copy exists. */
+  commentReplied: (actor: string, excerpt: string) =>
+    `${actor} respondeu ao seu comentário: ${excerpt}`,
+  /** Only when the replier's name is unavailable at fan-out time (a departed member). */
+  actorFallback: 'Alguém',
 } as const;
+
+/** The reply banner body (07-04), cut like every other body. */
+export function feedReplyPushCopy(actorName: string | null, excerpt: string | null): string {
+  return cutOnWord(
+    FEED_PUSH_COPY.commentReplied(actorName ?? FEED_PUSH_COPY.actorFallback, excerpt ?? ''),
+    PUSH_BODY_MAX,
+  );
+}
 
 /** The facts a push body is rendered from. */
 export interface FeedPushFacts {

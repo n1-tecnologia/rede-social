@@ -564,3 +564,300 @@ describe('notifications list and marks', () => {
     }
   });
 });
+
+/* ── 07-04 Task 1: every other feed and stories kind, and the retractions ─────────────────────── */
+
+describe('notifications tipos', () => {
+  const kinds = { other: '', otherId: '' };
+  const TIPOS_HIGHLIGHT = 'Notif destaque';
+  const createdAssets: string[] = [];
+  const createdStories: string[] = [];
+
+  /** Every notification row of the demo tenant about `subjectId`, as the migration role sees it. */
+  async function rowsAbout(subjectId: string) {
+    return adminSql<
+      {
+        user_id: string;
+        kind: string;
+        object_id: string | null;
+        actor_user_id: string | null;
+        dedupe_key: string;
+        payload: Record<string, unknown>;
+      }[]
+    >`
+      select user_id::text as user_id, kind, object_id::text as object_id,
+             actor_user_id::text as actor_user_id, dedupe_key, payload
+        from public.notifications
+       where tenant_id = ${ids.demo}::uuid and subject_id = ${subjectId}::uuid
+       order by created_at, id`;
+  }
+
+  async function adminPost(label: string): Promise<string> {
+    const res = await request('/v1/feed/posts', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ caption: `${TEST_CAPTION_PREFIX} ${label}` }),
+    });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    await runNotificationJobs(ids.demo);
+    return id;
+  }
+
+  async function comment(
+    token: string,
+    postId: string,
+    body: string,
+    parentId?: string,
+  ): Promise<string> {
+    const res = await request(`/v1/feed/posts/${postId}/comments`, token, {
+      method: 'POST',
+      body: JSON.stringify(parentId ? { body, parentId } : { body }),
+    });
+    expect(res.status, `comment ${body}`).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  const likeComment = (token: string, commentId: string, method: 'POST' | 'DELETE' = 'POST') =>
+    request(`/v1/feed/comments/${commentId}/like`, token, { method });
+
+  /** A ready `purpose: 'story'` image of the demo admin, then `POST /v1/stories`. */
+  async function adminStory(extra: Record<string, unknown> = {}): Promise<string> {
+    const assetId = crypto.randomUUID();
+    createdAssets.push(assetId);
+    await adminSql`
+      insert into public.media_assets
+        (id, tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+      values (${assetId}::uuid, ${ids.demo}::uuid, ${ids.demoAdmin}::uuid, 'image', 'story', 'ready',
+              'supabase', 'image/webp', 1024, '{640,1080}'::int[])`;
+    const res = await request('/v1/stories', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ mediaAssetId: assetId, mediaKind: 'image', caption: '', ...extra }),
+    });
+    expect(res.status, 'story published').toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    createdStories.push(id);
+    return id;
+  }
+
+  /** The demo tenant's LIVE `member`-role memberships (the broadcast audience, D-229). */
+  async function liveMemberIds(): Promise<string[]> {
+    const rows = await adminSql<{ user_id: string }[]>`
+      select user_id::text as user_id from public.memberships
+       where tenant_id = ${ids.demo}::uuid and role = 'member' and status = 'active'
+         and blocked_at is null and deleted_at is null`;
+    return rows.map((row) => row.user_id);
+  }
+
+  beforeAll(async () => {
+    const [other] = await adminSql<{ email: string; id: string }[]>`
+      select u.email, u.id::text as id from public.users u
+        join public.memberships m on m.user_id = u.id
+       where m.tenant_id = ${ids.demo}::uuid and m.role = 'member' and m.status = 'active'
+         and m.deleted_at is null and u.email <> 'member@rede-demo.local'
+       order by u.email limit 1`;
+    if (!other) throw new Error('the seed must provide a second demo member');
+    kinds.other = await signInAs(other.email, SEED_PASSWORD ?? '');
+    kinds.otherId = other.id;
+  });
+
+  afterAll(async () => {
+    if (createdStories.length > 0) {
+      await adminSql`delete from public.stories where id = any(${createdStories}::uuid[])`;
+    }
+    await adminSql`
+      delete from public.story_highlights
+       where tenant_id = ${ids.demo}::uuid and title = ${TIPOS_HIGHLIGHT}`;
+    if (createdAssets.length > 0) {
+      await adminSql`delete from public.stories where media_asset_id = any(${createdAssets}::uuid[])`;
+      await adminSql`delete from public.media_assets where id = any(${createdAssets}::uuid[])`;
+    }
+  });
+
+  it("D-226/D-235: a like on a member's comment is ONE in-app row for its author; unlike + re-like keeps one; a self-like none", async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const postId = await adminPost('curtida');
+    const mine = await comment(tokens.demoMember, postId, 'Meu comentário');
+    await runNotificationJobs(ids.demo);
+
+    expect((await likeComment(kinds.other, mine)).status).toBe(200);
+    await runNotificationJobs(ids.demo);
+    const liked = (await rowsAbout(postId)).filter((row) => row.kind === 'feed.comment_liked');
+    expect(liked).toHaveLength(1);
+    expect(liked[0]).toMatchObject({
+      user_id: ids.demoMember,
+      object_id: mine,
+      actor_user_id: kinds.otherId,
+      dedupe_key: `feed.comment_liked:${mine}:${kinds.otherId}`,
+    });
+    expect(liked[0]?.payload).toEqual({ postId, commentId: mine, excerpt: 'Meu comentário' });
+
+    // NOTIF-01 adjacency: an unlike then a re-like by the same actor collapses onto the same row.
+    expect((await likeComment(kinds.other, mine, 'DELETE')).status).toBe(200);
+    expect((await likeComment(kinds.other, mine)).status).toBe(200);
+    await runNotificationJobs(ids.demo);
+    expect(
+      (await rowsAbout(postId)).filter((row) => row.kind === 'feed.comment_liked'),
+    ).toHaveLength(1);
+
+    // The member liking their OWN comment notifies nobody.
+    expect((await likeComment(tokens.demoMember, mine)).status).toBe(200);
+    await runNotificationJobs(ids.demo);
+    const after = (await rowsAbout(postId)).filter((row) => row.kind === 'feed.comment_liked');
+    expect(after).toHaveLength(1);
+    expect(after.some((row) => row.actor_user_id === ids.demoMember)).toBe(false);
+  });
+
+  it("D-226/D-229: a reply is ONE row for the ROOT's author, staff included; a self-reply none", async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const postId = await adminPost('resposta');
+    const mine = await comment(tokens.demoMember, postId, 'Pergunta do membro');
+    const adminRoot = await comment(tokens.demoAdmin, postId, 'Comentário da equipe');
+    await runNotificationJobs(ids.demo);
+    // Root comments notify nobody (NOTIF-01 covers comments on the member's COMMENTS).
+    expect((await rowsAbout(postId)).filter((row) => row.kind.startsWith('feed.comment'))).toEqual(
+      [],
+    );
+
+    const reply = await comment(kinds.other, postId, 'Resposta ao membro', mine);
+    const toAdmin = await comment(tokens.demoMember, postId, 'Resposta à equipe', adminRoot);
+    await comment(tokens.demoMember, postId, 'Resposta a mim mesmo', mine);
+    await runNotificationJobs(ids.demo);
+
+    const replied = (await rowsAbout(postId)).filter((row) => row.kind === 'feed.comment_replied');
+    expect(replied.map((row) => [row.user_id, row.object_id])).toEqual([
+      [ids.demoMember, reply],
+      [ids.demoAdmin, toAdmin],
+    ]);
+    expect(replied[0]?.payload).toEqual({
+      postId,
+      commentId: reply,
+      rootCommentId: mine,
+      excerpt: 'Resposta ao membro',
+    });
+  });
+
+  it('D-226/D-229: a story is ONE stories.story row per live member, none for staff or the author, even when born in a highlight', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const members = await liveMemberIds();
+    const plain = await adminStory();
+    const inHighlight = await adminStory({
+      newHighlight: { communityId: null, title: TIPOS_HIGHLIGHT },
+    });
+    await runNotificationJobs(ids.demo);
+
+    for (const storyId of [plain, inHighlight]) {
+      const rows = await rowsAbout(storyId);
+      expect(rows.every((row) => row.kind === 'stories.story')).toBe(true);
+      expect(rows.map((row) => row.user_id).sort()).toEqual([...members].sort());
+      expect(rows.some((row) => row.user_id === ids.demoAdmin)).toBe(false);
+      expect(rows[0]?.dedupe_key).toBe(`stories.story:${storyId}`);
+      expect(rows[0]?.payload.storyId).toBe(storyId);
+      expect(typeof rows[0]?.payload.expiresAt).toBe('string');
+    }
+  });
+
+  it("D-226/D-229: a member's comment on the admin's story is ONE stories.story_commented row for the admin", async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const storyId = await adminStory();
+    await runNotificationJobs(ids.demo);
+    const res = await request(`/v1/stories/${storyId}/comments`, tokens.demoMember, {
+      method: 'POST',
+      body: JSON.stringify({ body: 'Que lindo!' }),
+    });
+    expect(res.status).toBe(201);
+    const { id: commentId } = (await res.json()) as { id: string };
+    await runNotificationJobs(ids.demo);
+    const rows = (await rowsAbout(storyId)).filter((row) => row.kind === 'stories.story_commented');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      user_id: ids.demoAdmin,
+      object_id: commentId,
+      actor_user_id: ids.demoMember,
+    });
+    expect(rows[0]?.payload).toMatchObject({ storyId, commentId, excerpt: 'Que lindo!' });
+  });
+
+  it('retraction: deleting the post marks its post, like and reply rows EXACTLY {removed: true}; the API answers removed with no facts', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const postId = await adminPost('apagado');
+    const mine = await comment(tokens.demoMember, postId, 'Comentário que some');
+    await likeComment(kinds.other, mine);
+    await comment(kinds.other, postId, 'Resposta que some', mine);
+    await runNotificationJobs(ids.demo);
+    const before = await rowsAbout(postId);
+    expect(new Set(before.map((row) => row.kind))).toEqual(
+      new Set(['feed.post', 'feed.comment_liked', 'feed.comment_replied']),
+    );
+
+    const removed = await request(`/v1/feed/posts/${postId}`, tokens.demoAdmin, {
+      method: 'DELETE',
+    });
+    expect(removed.status).toBe(200);
+    await runNotificationJobs(ids.demo);
+    const after = await rowsAbout(postId);
+    expect(after).toHaveLength(before.length);
+    for (const row of after) expect(row.payload).toEqual({ removed: true });
+
+    const page = await list(tokens.demoMember, '?section=unread&limit=50');
+    const mineRows = page.items.filter((row) => row.subject.id === postId);
+    expect(mineRows.length).toBeGreaterThan(0);
+    for (const row of mineRows) {
+      expect(row.removed).toBe(true);
+      expect(row.facts).toEqual({});
+      expect(row.preview).toBeNull();
+    }
+  });
+
+  it('retraction: deleting a comment marks only the rows whose OBJECT is that comment', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const postId = await adminPost('comentario apagado');
+    const mine = await comment(tokens.demoMember, postId, 'Vai sumir');
+    const kept = await comment(tokens.demoMember, postId, 'Vai ficar');
+    await likeComment(kinds.other, mine);
+    await likeComment(kinds.other, kept);
+    await runNotificationJobs(ids.demo);
+
+    const res = await request(`/v1/feed/comments/${mine}`, tokens.demoMember, {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(200);
+    await runNotificationJobs(ids.demo);
+    const rows = await rowsAbout(postId);
+    const gone = rows.find((row) => row.object_id === mine);
+    const stays = rows.find((row) => row.object_id === kept);
+    expect(gone?.payload).toEqual({ removed: true });
+    expect(stays?.payload).toEqual({ postId, commentId: kept, excerpt: 'Vai ficar' });
+    // The post's own broadcast rows (no object) are untouched.
+    for (const row of rows.filter((r) => r.kind === 'feed.post')) {
+      expect(row.payload.removed).toBeUndefined();
+    }
+  });
+
+  it('retraction: deleting a story marks its broadcast and comment rows', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const storyId = await adminStory();
+    await request(`/v1/stories/${storyId}/comments`, tokens.demoMember, {
+      method: 'POST',
+      body: JSON.stringify({ body: 'Comentário no story' }),
+    });
+    await runNotificationJobs(ids.demo);
+    const before = await rowsAbout(storyId);
+    expect(new Set(before.map((row) => row.kind))).toEqual(
+      new Set(['stories.story', 'stories.story_commented']),
+    );
+
+    const res = await request(`/v1/stories/${storyId}`, tokens.demoAdmin, { method: 'DELETE' });
+    expect(res.status).toBe(204);
+    await runNotificationJobs(ids.demo);
+    const after = await rowsAbout(storyId);
+    expect(after).toHaveLength(before.length);
+    for (const row of after) expect(row.payload).toEqual({ removed: true });
+  });
+});

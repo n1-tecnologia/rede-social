@@ -1,8 +1,12 @@
 import type { Tx } from '@rede-social/core/db/tenant-tx';
 import { describe, expect, it } from 'vitest';
 import { FEED_NOTIFICATION_KINDS } from '../contracts/index';
-import { feedPushCopy } from '../server/notification-copy';
-import { FEED_EXCERPT_MAX, feedNotificationSources } from '../server/notifications';
+import { feedPushCopy, feedReplyPushCopy } from '../server/notification-copy';
+import {
+  FEED_EXCERPT_MAX,
+  feedNotificationRetractions,
+  feedNotificationSources,
+} from '../server/notifications';
 
 /**
  * The feed's `post.published` source (07-01, D-226/D-227/D-229), pinned with a fake `tx` returning a
@@ -61,8 +65,12 @@ async function resolve(row: Partial<Row>) {
 }
 
 describe('feed post.published source', () => {
-  it('listens to post.published only', () => {
-    expect(feedNotificationSources.map((s) => s.event)).toEqual(['post.published']);
+  it('declares exactly the post.published, comment.liked and comment.created sources (07-04)', () => {
+    expect(feedNotificationSources.map((s) => s.event)).toEqual([
+      'post.published',
+      'comment.liked',
+      'comment.created',
+    ]);
   });
 
   it('a plain post yields ONE feed.post intent to members, excluding the author', async () => {
@@ -156,5 +164,169 @@ describe('feedPushCopy (UI-SPEC §Push banner copy)', () => {
     expect(
       feedPushCopy({ kind: 'feed.reel', excerpt: 'oi', actorName: 'Ana', communityName: null }),
     ).toBe('Novo reel');
+  });
+});
+
+/* ── 07-04: the comment kinds and the retractions ──────────────────────────────────────────────── */
+
+const CM = '55555555-5555-4555-8555-555555555555';
+const ROOT = '66666666-6666-4666-8666-666666666666';
+const LIKER = '77777777-7777-4777-8777-777777777777';
+const COMMENT_AUTHOR = '88888888-8888-4888-8888-888888888888';
+
+function sourceFor(event: string) {
+  const found = feedNotificationSources.find((s) => s.event === event);
+  if (!found) throw new Error(`no ${event} source`);
+  return found;
+}
+
+/** A fake tx answering every statement with `rows`, and recording that it was asked. */
+function recordingTx(rows: unknown[]): { tx: Tx; calls: () => number } {
+  let n = 0;
+  return {
+    tx: {
+      execute: async () => {
+        n += 1;
+        return rows;
+      },
+    } as unknown as Tx,
+    calls: () => n,
+  };
+}
+
+describe('feed comment.liked source (D-226, D-235)', () => {
+  const liked = sourceFor('comment.liked');
+  const payload = {
+    tenantId: T,
+    commentId: CM,
+    commentAuthorUserId: COMMENT_AUTHOR,
+    actorUserId: LIKER,
+  };
+  const row = {
+    comment_id: CM,
+    post_id: P,
+    body: 'Meu comentário',
+    author_user_id: COMMENT_AUTHOR,
+  };
+
+  it("yields ONE in-app-only intent to the comment's author, never pushed", async () => {
+    const intents = await liked.resolve(fakeTx([row] as never), payload, { sinkAt: 'x' });
+    expect(intents).toHaveLength(1);
+    const [intent] = intents;
+    expect(intent?.kind).toBe(FEED_NOTIFICATION_KINDS.commentLiked);
+    expect(intent?.audience).toEqual({ type: 'users', userIds: [COMMENT_AUTHOR] });
+    expect(intent?.excludeUserIds).toEqual([LIKER]);
+    expect(intent?.dedupeKey).toBe(`feed.comment_liked:${CM}:${LIKER}`);
+    expect(intent?.subject).toEqual({ type: 'post', id: P });
+    expect(intent?.object).toEqual({ type: 'comment', id: CM });
+    expect(intent?.actorUserId).toBe(LIKER);
+    expect(intent?.facts).toEqual({ postId: P, commentId: CM, excerpt: 'Meu comentário' });
+    expect(intent?.channels).toEqual(['in_app']);
+    expect(intent?.push).toBeNull();
+  });
+
+  it('a self-like yields nothing', async () => {
+    const self = { ...payload, actorUserId: COMMENT_AUTHOR };
+    expect(await liked.resolve(fakeTx([row] as never), self, { sinkAt: 'x' })).toEqual([]);
+  });
+
+  it('a missing or deleted comment (no row) yields nothing', async () => {
+    expect(await liked.resolve(fakeTx([]), payload, { sinkAt: 'x' })).toEqual([]);
+  });
+});
+
+describe('feed comment.created source: replies only (D-226)', () => {
+  const created = sourceFor('comment.created');
+  const payload = {
+    tenantId: T,
+    postId: P,
+    commentId: CM,
+    parentCommentId: ROOT,
+    postAuthorUserId: A,
+    parentAuthorUserId: COMMENT_AUTHOR,
+    actorUserId: LIKER,
+  };
+  const row = {
+    comment_id: CM,
+    post_id: P,
+    body: 'Concordo com você',
+    root_comment_id: ROOT,
+    root_author_user_id: COMMENT_AUTHOR,
+    actor_name: 'Bia',
+  };
+
+  it("a reply yields ONE pushed intent to the ROOT's author", async () => {
+    const [intent, ...rest] = await created.resolve(fakeTx([row] as never), payload, {
+      sinkAt: 'x',
+    });
+    expect(rest).toEqual([]);
+    expect(intent?.kind).toBe(FEED_NOTIFICATION_KINDS.commentReplied);
+    expect(intent?.audience).toEqual({ type: 'users', userIds: [COMMENT_AUTHOR] });
+    expect(intent?.excludeUserIds).toEqual([LIKER]);
+    expect(intent?.dedupeKey).toBe(`feed.comment_replied:${CM}`);
+    expect(intent?.subject).toEqual({ type: 'post', id: P });
+    expect(intent?.object).toEqual({ type: 'comment', id: CM });
+    expect(intent?.facts).toEqual({
+      postId: P,
+      commentId: CM,
+      rootCommentId: ROOT,
+      excerpt: 'Concordo com você',
+    });
+    expect(intent?.channels).toEqual(['in_app', 'push']);
+    expect(intent?.push).toEqual({
+      title: 'tenant',
+      body: 'Bia respondeu ao seu comentário: Concordo com você',
+      url: `/post/${P}?comentario=${CM}`,
+      tag: 'feed-comment-replied',
+      topic: 'feed-comment-replied',
+      ttlSeconds: 86_400,
+      urgency: 'normal',
+      renotify: true,
+    });
+  });
+
+  it('a ROOT comment yields nothing, without even reading', async () => {
+    const { tx, calls } = recordingTx([row]);
+    const root = { ...payload, parentCommentId: null, parentAuthorUserId: null };
+    expect(await created.resolve(tx, root, { sinkAt: 'x' })).toEqual([]);
+    expect(calls()).toBe(0);
+  });
+
+  it("a self-reply (the root's author answering themselves) yields nothing", async () => {
+    const self = { ...payload, actorUserId: COMMENT_AUTHOR };
+    expect(await created.resolve(fakeTx([row] as never), self, { sinkAt: 'x' })).toEqual([]);
+  });
+
+  it('a reply removed before the job ran (no row) yields nothing', async () => {
+    expect(await created.resolve(fakeTx([]), payload, { sinkAt: 'x' })).toEqual([]);
+  });
+});
+
+describe('feed retractions (keep-and-mark)', () => {
+  it('post.deleted retracts on the subject post; comment.deleted on the object comment', () => {
+    expect(feedNotificationRetractions.map((r) => r.event)).toEqual([
+      'post.deleted',
+      'comment.deleted',
+    ]);
+    const [post, comment] = feedNotificationRetractions;
+    expect(
+      post?.match({ tenantId: T, postId: P, authorUserId: A, actorUserId: A, occurredAt: 'x' }),
+    ).toEqual({ on: 'subject', type: 'post', id: P });
+    expect(comment?.match({ tenantId: T, commentId: CM, actorUserId: A })).toEqual({
+      on: 'object',
+      type: 'comment',
+      id: CM,
+    });
+  });
+});
+
+describe('feedReplyPushCopy (UI-SPEC §Push banner copy)', () => {
+  it('renders the verbatim reply body, cut to 100 graphemes', () => {
+    expect(feedReplyPushCopy('Ana', 'oi')).toBe('Ana respondeu ao seu comentário: oi');
+    const long = feedReplyPushCopy('Ana', 'palavra '.repeat(30));
+    expect(long.endsWith('…')).toBe(true);
+    expect(
+      Array.from(new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(long)).length,
+    ).toBeLessThanOrEqual(100);
   });
 });

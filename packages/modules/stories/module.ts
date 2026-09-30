@@ -1,6 +1,7 @@
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { STORY_PERMISSIONS } from './contracts/index';
+import { storiesNotificationRetractions, storiesNotificationSources } from './server/notifications';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-stories');
@@ -40,6 +41,11 @@ export const storiesModule = defineModule({
   key: 'stories',
   home: [{ order: 5 }],
   routes: () => import('./server/routes').then((m) => m.storiesRoutes),
+  // 07-04 (RESEARCH Pattern 1): the module DECLARES who is notified of its own events, reading its
+  // own tables in the worker; the notifications module never imports it (MOD-02). No source on the
+  // highlight event (Pitfall 11): `story.published` alone announces a story.
+  notificationSources: storiesNotificationSources,
+  notificationRetractions: storiesNotificationRetractions,
   events: [
     {
       event: 'story.published',

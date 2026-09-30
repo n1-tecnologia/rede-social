@@ -2,11 +2,12 @@ import { cutOnWord } from '@rede-social/contracts/text';
 import type { Tx } from '@rede-social/core/db/tenant-tx';
 import type {
   NotificationIntent,
+  NotificationRetraction,
   NotificationSource,
 } from '@rede-social/core/server/notifications/source';
 import { sql } from 'drizzle-orm';
 import { FEED_NOTIFICATION_KINDS } from '../contracts/index';
-import { feedPushCopy } from './notification-copy';
+import { feedPushCopy, feedReplyPushCopy } from './notification-copy';
 
 /**
  * The feed's notification sources (07-01, RESEARCH Pattern 1): the feed DECLARES who is notified of
@@ -130,9 +131,183 @@ async function resolvePostPublished(
   ];
 }
 
-export const feedNotificationSources: NotificationSource<'post.published'>[] = [
+type CommentLikedRow = {
+  comment_id: string;
+  post_id: string;
+  body: string;
+  author_user_id: string;
+};
+
+/**
+ * `comment.liked` (07-04, D-226) → one PERSONAL intent to the comment's author (staff included,
+ * D-229), unless the liker IS the author. Reads, in the given `tx`, the live comment on a live POST
+ * (a story comment cannot be liked, and a comment or post removed before the job ran yields `[]`).
+ *
+ * **Never pushed (D-235):** `channels: ['in_app']`, `push: null`. The dedupe key names the ACTOR, so
+ * an unlike then re-like by the same member lands on the same row (NOTIF-01 adjacency), while a second
+ * member's like is a row of its own.
+ */
+async function resolveCommentLiked(
+  tx: Tx,
+  payload: { tenantId: string; commentId: string; actorUserId: string },
+): Promise<NotificationIntent[]> {
+  const rows = await tx.execute<CommentLikedRow>(sql`
+    select c.id as comment_id,
+           c.post_id,
+           c.body,
+           c.author_user_id
+      from feed_comments c
+      join feed_posts p
+        on p.id = c.post_id
+       and p.tenant_id = c.tenant_id
+       and p.deleted_at is null
+     where c.tenant_id = ${payload.tenantId}::uuid
+       and c.id = ${payload.commentId}::uuid
+       and c.deleted_at is null
+     limit 1`);
+  const row = rows[0];
+  if (!row) return [];
+  if (row.author_user_id === payload.actorUserId) return [];
+
+  return [
+    {
+      kind: FEED_NOTIFICATION_KINDS.commentLiked,
+      audience: { type: 'users', userIds: [row.author_user_id] },
+      excludeUserIds: [payload.actorUserId],
+      dedupeKey: `feed.comment_liked:${row.comment_id}:${payload.actorUserId}`,
+      subject: { type: 'post', id: row.post_id },
+      object: { type: 'comment', id: row.comment_id },
+      actorUserId: payload.actorUserId,
+      facts: {
+        postId: row.post_id,
+        commentId: row.comment_id,
+        excerpt: cutOnWord(row.body ?? '', FEED_EXCERPT_MAX) || null,
+      },
+      channels: ['in_app'],
+      push: null,
+    },
+  ];
+}
+
+type CommentRepliedRow = {
+  comment_id: string;
+  post_id: string;
+  body: string;
+  root_comment_id: string;
+  root_author_user_id: string;
+  actor_name: string | null;
+};
+
+/**
+ * `comment.created` (07-04, D-226) → for a REPLY only, one PERSONAL intent to the ROOT comment's
+ * author (staff included, D-229), unless the replier IS that author. A root comment yields `[]`:
+ * NOTIF-01 covers comments on the member's COMMENTS, and a comment on a post is not one (RESEARCH A11,
+ * closed by the UI-SPEC). Reads, in the given `tx`: the live reply, its live root and live post, and
+ * the replier's display name for the push body.
+ */
+async function resolveCommentCreated(
+  tx: Tx,
+  payload: {
+    tenantId: string;
+    postId: string;
+    commentId: string;
+    parentCommentId: string | null;
+    actorUserId: string;
+  },
+): Promise<NotificationIntent[]> {
+  if (payload.parentCommentId === null) return [];
+
+  const rows = await tx.execute<CommentRepliedRow>(sql`
+    select c.id as comment_id,
+           c.post_id,
+           c.body,
+           root.id as root_comment_id,
+           root.author_user_id as root_author_user_id,
+           mp.display_name as actor_name
+      from feed_comments c
+      join feed_comments root
+        on root.id = c.parent_id
+       and root.tenant_id = c.tenant_id
+       and root.deleted_at is null
+      join feed_posts p
+        on p.id = c.post_id
+       and p.tenant_id = c.tenant_id
+       and p.deleted_at is null
+      left join memberships ms
+             on ms.tenant_id = c.tenant_id
+            and ms.user_id = c.author_user_id
+            and ms.deleted_at is null
+      left join member_profiles mp on mp.membership_id = ms.id
+     where c.tenant_id = ${payload.tenantId}::uuid
+       and c.id = ${payload.commentId}::uuid
+       and c.parent_id = ${payload.parentCommentId}::uuid
+       and c.deleted_at is null
+     limit 1`);
+  const row = rows[0];
+  if (!row) return [];
+  if (row.root_author_user_id === payload.actorUserId) return [];
+
+  const excerpt = cutOnWord(row.body ?? '', FEED_EXCERPT_MAX) || null;
+
+  return [
+    {
+      kind: FEED_NOTIFICATION_KINDS.commentReplied,
+      audience: { type: 'users', userIds: [row.root_author_user_id] },
+      excludeUserIds: [payload.actorUserId],
+      dedupeKey: `feed.comment_replied:${row.comment_id}`,
+      subject: { type: 'post', id: row.post_id },
+      object: { type: 'comment', id: row.comment_id },
+      actorUserId: payload.actorUserId,
+      facts: {
+        postId: row.post_id,
+        commentId: row.comment_id,
+        rootCommentId: row.root_comment_id,
+        excerpt,
+      },
+      channels: ['in_app', 'push'],
+      push: {
+        title: 'tenant',
+        body: feedReplyPushCopy(row.actor_name, excerpt),
+        url: `/post/${row.post_id}?comentario=${row.comment_id}`,
+        // A personal kind: a second reply re-alerts (renotify) under its own tag (planning decision 5).
+        tag: 'feed-comment-replied',
+        topic: 'feed-comment-replied',
+        ttlSeconds: 86_400,
+        urgency: 'normal',
+        renotify: true,
+      },
+    },
+  ];
+}
+
+export const feedNotificationSources = [
   {
     event: 'post.published',
     resolve: (tx, payload) => resolvePostPublished(tx, payload),
-  },
-];
+  } satisfies NotificationSource<'post.published'>,
+  {
+    event: 'comment.liked',
+    resolve: (tx, payload) => resolveCommentLiked(tx, payload),
+  } satisfies NotificationSource<'comment.liked'>,
+  {
+    event: 'comment.created',
+    resolve: (tx, payload) => resolveCommentCreated(tx, payload),
+  } satisfies NotificationSource<'comment.created'>,
+] as NotificationSource[];
+
+/**
+ * Retractions (07-04, keep-and-mark): a deleted post blanks every row ABOUT it (subject `post`: the
+ * post, like and reply kinds alike), and a deleted comment blanks only the rows whose OBJECT is that
+ * comment. `app.notifications_retract` replaces the payload wholesale with `{"removed": true}`, in the
+ * payload's tenant only, so no excerpt of taken-down content survives in anyone's bell.
+ */
+export const feedNotificationRetractions = [
+  {
+    event: 'post.deleted',
+    match: (payload) => ({ on: 'subject', type: 'post', id: payload.postId }),
+  } satisfies NotificationRetraction<'post.deleted'>,
+  {
+    event: 'comment.deleted',
+    match: (payload) => ({ on: 'object', type: 'comment', id: payload.commentId }),
+  } satisfies NotificationRetraction<'comment.deleted'>,
+] as NotificationRetraction[];

@@ -22,10 +22,15 @@ begin;
 --    BY NAME, on a 4,000-row ANALYZEd fixture, with predicates and order copied VERBATIM from
 --    `listNotifications` (`packages/modules/notifications/server/service.ts`): edit both together.
 -- 9. `notifications_unseen_idx` serves the bell's count (`countUnseen`).
+-- 10. (07-04) `app.notifications_retract` is a hardened definer; on the OBJECT it blanks only the rows
+--     about that comment; on the SUBJECT it blanks every remaining row about the post; the payload
+--     becomes EXACTLY `{"removed": true}`; the same subject id in B is untouched (adjacency, T-07-21);
+--     a row about another target is untouched; a second call changes nothing (idempotent); a lane
+--     without a tenant claim, or an unknown `p_on`, is refused (42501).
 --
 -- Fixture ids use the `15100000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(27);
+select plan(38);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-nt-a', 'Notificacoes A', '15100000-0000-4000-8000-000000000001');
@@ -237,6 +242,84 @@ select results_eq(
   ARRAY[2],
   'fact 7: …and the colleague''s rows are intact and still unread'
 );
+
+-- ── 10. retraction (07-04, keep-and-mark) ─────────────────────────────────────────────────────
+select ok(
+  (select prosecdef and 'search_path=""' = any(proconfig) from pg_proc
+    where oid = 'app.notifications_retract(text,text,uuid)'::regprocedure),
+  'fact 10: app.notifications_retract is SECURITY DEFINER with search_path pinned to ""'
+);
+select ok(
+  not has_function_privilege('anon', 'app.notifications_retract(text,text,uuid)', 'execute')
+  and has_function_privilege('authenticated', 'app.notifications_retract(text,text,uuid)', 'execute'),
+  'fact 10: anon cannot execute it; authenticated (the worker''s tenant lane) can'
+);
+select tests.as_tenant('15100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select app.notifications_retract('object', 'comment', '15100000-0000-4000-8000-0000000000f2') $$,
+  ARRAY[2],
+  'fact 10: on the OBJECT, only the two rows about that comment (m2, the admin) are marked'
+);
+reset role;
+select results_eq(
+  $$ select count(*)::int from public.notifications
+      where tenant_id = '15100000-0000-4000-8000-000000000001'
+        and subject_id = '15100000-0000-4000-8000-0000000000f1'
+        and payload = '{"removed": true}'::jsonb $$,
+  ARRAY[2],
+  'fact 10: …the post rows about the same subject are not yet marked (object, not subject)'
+);
+select tests.as_tenant('15100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select app.notifications_retract('subject', 'post', '15100000-0000-4000-8000-0000000000f1') $$,
+  ARRAY[2],
+  'fact 10: on the SUBJECT, the two remaining rows about the post are marked (already-marked rows skipped)'
+);
+select results_eq(
+  $$ select app.notifications_retract('subject', 'post', '15100000-0000-4000-8000-0000000000f1') $$,
+  ARRAY[0],
+  'fact 10: a second call marks nothing (idempotent)'
+);
+reset role;
+select results_eq(
+  $$ select count(*)::int,
+            count(*) filter (where payload = '{"removed": true}'::jsonb)::int
+       from public.notifications
+      where tenant_id = '15100000-0000-4000-8000-000000000001'
+        and subject_id = '15100000-0000-4000-8000-0000000000f1' $$,
+  $$ values (4, 4) $$,
+  'fact 10: every A row about the post now holds EXACTLY {"removed": true} (no excerpt survives)'
+);
+select results_eq(
+  $$ select payload from public.notifications
+      where tenant_id = '15100000-0000-4000-8000-000000000011'
+        and subject_id = '15100000-0000-4000-8000-0000000000f1' $$,
+  $$ values ('{}'::jsonb) $$,
+  'fact 10 adjacency: B''s row about the SAME subject id is untouched (T-07-21)'
+);
+select results_eq(
+  $$ select count(*)::int from public.notifications
+      where dedupe_key = 'k:15100000-0000-4000-8000-0000000000d1'
+        and coalesce(payload->>'removed', '') <> 'true' $$,
+  ARRAY[1],
+  'fact 10 positive control: a row about ANOTHER post is untouched'
+);
+select tests.as_tenant_without_claims();
+select throws_ok(
+  $$ select app.notifications_retract('subject', 'post', '15100000-0000-4000-8000-0000000000f1') $$,
+  '42501',
+  null,
+  'fact 10: a lane without a tenant claim is refused (42501)'
+);
+reset role;
+select tests.as_tenant('15100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select throws_ok(
+  $$ select app.notifications_retract('everything', 'post', '15100000-0000-4000-8000-0000000000f1') $$,
+  '42501',
+  null,
+  'fact 10: an unknown p_on is refused (42501)'
+);
+reset role;
 
 -- ── 8 / 9. the list statements and the count ride their indexes, by name ──────────────────────
 -- 20 recipients x 200 rows = 4,000 rows, half read, half seen, then `analyze`. The plan asked for

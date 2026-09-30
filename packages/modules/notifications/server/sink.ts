@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { DomainEventName } from '@rede-social/contracts';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { enqueueInTx } from '@rede-social/core/server/jobs/boss';
@@ -21,6 +22,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * - The enqueue is `enqueueInTx` inside a tenant-lane transaction of the event's tenant, and
  *   `sinkAt` is stamped ONCE here, so a retried job reuses it unchanged (07-05's reactivations).
  *
+ * **Every delivery is its own job (07-04 fix).** Every queue is created with the `short` policy, whose
+ * `job_common_i1` unique index keys `(name, coalesce(singleton_key, ''))` over `created` jobs: without
+ * a key, a SECOND event enqueued while the first job still waits for the worker was silently dropped
+ * (`send` returned null). Each sink call therefore carries a fresh `singletonKey`; idempotency lives
+ * where it always did, in the fan-out's dedupe key, not in the queue.
+ *
  * **Delivery guarantee: at-most-once** (RESEARCH open question 2, RESOLVED). The bus flushes after
  * commit and swallows handler failures, so an instance dying between commit and this enqueue loses
  * the bell row (logged as `domain_event.handler_failed`). The D-240 refetch keeps the badge honest;
@@ -39,11 +46,11 @@ export async function notificationsSink(event: DomainEventName, payload: unknown
   if (!(await moduleFlags.isEnabled(ctx, 'notifications'))) return;
 
   await withTenantTx(ctx, (tx) =>
-    enqueueInTx(tx, NOTIFICATIONS_QUEUES.fanout, {
-      event,
-      tenantId,
-      payload,
-      sinkAt: new Date().toISOString(),
-    }),
+    enqueueInTx(
+      tx,
+      NOTIFICATIONS_QUEUES.fanout,
+      { event, tenantId, payload, sinkAt: new Date().toISOString() },
+      { singletonKey: `${event}:${randomUUID()}` },
+    ),
   );
 }

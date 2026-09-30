@@ -2,7 +2,7 @@ import { moduleLogger } from '@rede-social/core/server/logging';
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { FEED_PERMISSIONS } from './contracts/index';
 import { feedUnfurlJob } from './server/jobs';
-import { feedNotificationSources } from './server/notifications';
+import { feedNotificationRetractions, feedNotificationSources } from './server/notifications';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-feed');
@@ -36,6 +36,8 @@ export const feedModule = defineModule({
   // tables in the worker. The app registry registers these on the kernel seam; the notifications
   // module never imports the feed (MOD-02).
   notificationSources: feedNotificationSources,
+  // 07-04: a deleted post or comment blanks the rows about it (keep-and-mark, no excerpt survives).
+  notificationRetractions: feedNotificationRetractions,
   events: [
     {
       event: 'post.published',
