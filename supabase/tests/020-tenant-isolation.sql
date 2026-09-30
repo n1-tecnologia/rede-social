@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(148);
+select plan(150);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -111,9 +111,15 @@ insert into public.community_members (id, tenant_id, community_id, user_id, role
   ('0b000000-0000-4000-8000-0000000000c2', '0b000000-0000-4000-8000-000000000001',
    '0b000000-0000-4000-8000-0000000000c1', '0b000000-0000-4000-8000-000000000002', 'member');
 
-insert into public.notifications (tenant_id, user_id, kind) values
-  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'k'),
-  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'k');
+-- 07-01 reshaped the stub: a row now carries a natural dedupe key and a subject. The dedupe key and
+-- the subject are IDENTICAL on both sides (adjacency), and each row's recipient is the tenant's own
+-- member, the user every lane in this file opens as: `notifications_owner_select` is owner-scoped, so
+-- a lane only ever reads its OWN rows, and a lane opened as anyone else would read nothing at all.
+insert into public.notifications (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'k',
+   'k:0f000000-0000-4000-8000-0000000000f1', 'post', '0f000000-0000-4000-8000-0000000000f1'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'k',
+   'k:0f000000-0000-4000-8000-0000000000f1', 'post', '0f000000-0000-4000-8000-0000000000f1');
 
 insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id) values
   ('0a000000-0000-4000-8000-000000000004', '0a000000-0000-4000-8000-000000000001', 'support',
@@ -795,6 +801,20 @@ select is_empty(
   $$ select id from public.notifications
       where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
   'notifications: B''s rows are invisible'
+);
+select results_eq(
+  $$ select tenant_id::text from public.notifications
+      where dedupe_key = 'k:0f000000-0000-4000-8000-0000000000f1' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'notifications: adjacency — identical dedupe keys on both sides, the lane returns only A''s own row'
+);
+select results_eq(
+  $$ with u as (
+       update public.notifications set read_at = now()
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'notifications: USING — an update aimed at B''s rows touches nothing'
 );
 
 -- 03-01 (MEDIA-01/TENANT-04): the asset ROW is tenant-scoped like every other row. The OBJECT is

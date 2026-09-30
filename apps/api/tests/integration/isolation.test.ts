@@ -1205,6 +1205,104 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("b10. notifications: a lab member's row never reaches a demo member's walk, and a demo session on the lab host is refused (07-01)", async () => {
+    // The table is OWNER-scoped (T-07-03): a row reaches only its recipient, in its tenant. The
+    // fixture is adjacent on purpose: the demo row and the lab row carry the SAME kind, dedupe key
+    // and subject, so only the ids can tell them apart. rede-lab has notifications OFF in the seed,
+    // so it is turned on for this case (the lab row is then a live, readable row for its own member,
+    // the strongest negative) and restored in `finally`.
+    const userIdOf = async (email: string) => {
+      const [row] = await adminSql<
+        { id: string }[]
+      >`select id::text as id from auth.users where email = ${email}`;
+      return row?.id ?? '';
+    };
+    const demoUser = await userIdOf('member@rede-demo.local');
+    const labUser = await userIdOf('member@rede-lab.local');
+    const subject = '0b100000-0000-4000-8000-000000000001';
+    const dedupe = `isolation.b10:${RUN}`;
+    const [labFlag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'notifications'`;
+    const inserted: string[] = [];
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'notifications', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+      const rows = await adminSql<{ id: string; tenant_id: string }[]>`
+        insert into public.notifications
+          (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id, read_at)
+        values
+          (${tenantIds.demo}::uuid, ${demoUser}::uuid, 'feed.post', ${dedupe}, 'post', ${subject}::uuid, null),
+          (${tenantIds.lab}::uuid, ${labUser}::uuid, 'feed.post', ${dedupe}, 'post', ${subject}::uuid, null),
+          (${tenantIds.lab}::uuid, ${labUser}::uuid, 'feed.post', ${`${dedupe}:read`}, 'post', ${subject}::uuid, now())
+        returning id::text as id, tenant_id::text as tenant_id`;
+      inserted.push(...rows.map((row) => row.id));
+      const demoRow = rows.find((row) => row.tenant_id === tenantIds.demo)?.id;
+      const labRows = rows.filter((row) => row.tenant_id === tenantIds.lab).map((row) => row.id);
+
+      /** Every id of one section, walked with the returned cursors at limit 1. */
+      const walk = async (token: string, host: string, section: 'unread' | 'read') => {
+        const seen: string[] = [];
+        let cursor: string | null = null;
+        for (let guard = 0; guard < 200; guard++) {
+          const query: string = cursor
+            ? `?section=${section}&limit=1&cursor=${encodeURIComponent(cursor)}`
+            : `?section=${section}&limit=1`;
+          const res = await request(`/v1/notifications${query}`, token, {
+            [TENANT_HOST_HEADER]: host,
+          });
+          expect(res.status).toBe(200);
+          const body = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+          seen.push(...body.items.map((item) => item.id));
+          cursor = body.nextCursor;
+          if (cursor === null) break;
+        }
+        return seen;
+      };
+
+      const demoSeen = [
+        ...(await walk(tokens.demoMember, HOSTS.demo, 'unread')),
+        ...(await walk(tokens.demoMember, HOSTS.demo, 'read')),
+      ];
+      // Positive control: the demo member reaches its OWN row, so the negative below is not vacuous.
+      expect(demoSeen).toContain(demoRow);
+      for (const id of labRows) expect(demoSeen).not.toContain(id);
+
+      // …and the lab member, symmetrically, reaches its own rows and never the demo one.
+      const labSeen = [
+        ...(await walk(tokens.labMember, HOSTS.lab, 'unread')),
+        ...(await walk(tokens.labMember, HOSTS.lab, 'read')),
+      ];
+      for (const id of labRows) expect(labSeen).toContain(id);
+      expect(labSeen).not.toContain(demoRow);
+
+      // A demo session presented on the lab's registered host is refused before any read (D-23).
+      const mismatch = await request('/v1/notifications', tokens.demoMember, {
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      });
+      expect(mismatch.status).toBe(403);
+      expect(await code(mismatch)).toBe('TENANT_HOST_MISMATCH');
+    } finally {
+      if (inserted.length > 0) {
+        await adminSql`delete from public.notifications where id = any(${inserted}::uuid[])`;
+      }
+      // The lab's row goes back EXACTLY as found (the seed keeps notifications off for rede-lab).
+      if (labFlag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${labFlag.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'notifications'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'notifications'`;
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,
