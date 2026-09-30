@@ -2,6 +2,7 @@ import { tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
   index,
+  integer,
   jsonb,
   pgPolicy,
   pgTable,
@@ -112,3 +113,71 @@ export const notifications = pgTable(
 ).enableRLS();
 
 export type Notification = typeof notifications.$inferSelect;
+
+/**
+ * A member's Web Push subscriptions (07-06, NOTIF-03): one row per browser profile (endpoint) that
+ * turned push on in this tenant. CONTEXT's Claude's Discretion item, decided in 07-06.
+ *
+ * Facts a reviewer must not "fix":
+ *
+ * 1. **Owner-only select and delete, no insert and no update policy.** `push_subscriptions_owner_*`
+ *    are `tenant_id = app.tenant_id() and user_id = app.user_id()`: a member sees and removes ONLY
+ *    their own devices (T-07-36), and the tenant conjunct keeps a raw Supabase JWT (no `tenant_id`)
+ *    from reading its own rows over PostgREST (the notifications rule, RESEARCH Pattern 5).
+ * 2. **Writes go through definers** (`*_push_subscriptions_functions.sql`): `app.push_subscription_upsert`
+ *    for the member, and the worker's `app.push_subscriptions_for` / `…_delete_dead` / `…_report`.
+ *    The upsert REPLACES any row of the same endpoint in the tenant, so a device handed from user A to
+ *    user B stops receiving A's pushes (T-07-34).
+ * 3. **Endpoint uniqueness is per tenant**, `(tenant_id, endpoint)` (07-06 planning decision 3): an
+ *    endpoint is bound to one origin, so one tenant, and a tenant-first unique index never lets a
+ *    tenant lane touch another tenant's row.
+ * 4. **The endpoint is attacker-controlled input** the worker later POSTs to: the API refuses anything
+ *    but `https:` on a known push-service host (`isAllowedPushEndpoint`, T-07-33) before it gets here.
+ * 5. **Keys are stored as the browser sent them** (base64url `p256dh` 65 bytes, `auth` 16 bytes); they
+ *    are encryption material for the payload, not credentials, and never leave the worker.
+ */
+export const pushSubscriptions = pgTable(
+  'push_subscriptions',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** The subscribing member. A deleted user takes their devices with them. */
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The push service URL the browser handed out (fact 4). */
+    endpoint: text().notNull(),
+    /** The browser's P-256 ECDH public key, base64url (65 raw bytes). */
+    p256dh: text().notNull(),
+    /** The browser's auth secret, base64url (16 raw bytes). */
+    auth: text().notNull(),
+    /** Informational only (at most 512 characters, API-bounded): which device this is. */
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Stamped on every 201/202 from the push service. */
+    lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+    /** Consecutive failed sends (400/413/429/5xx/network); reset to 0 by a success. */
+    failureCount: integer('failure_count').notNull().default(0),
+  },
+  (t) => [
+    // Fact 3: one row per endpoint per tenant; the upsert's conflict target.
+    uniqueIndex('push_subscriptions_tenant_endpoint_uq').on(t.tenantId, t.endpoint),
+    // The worker's per-recipient lookup (`app.push_subscriptions_for`) and the owner's own list.
+    index('push_subscriptions_tenant_user_idx').on(t.tenantId, t.userId),
+    // Fact 1: owner-only, ANDed with the tenant claim.
+    pgPolicy('push_subscriptions_owner_select', {
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
+    }),
+    pgPolicy('push_subscriptions_owner_delete', {
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
+    }),
+  ],
+).enableRLS();
+
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;

@@ -5,7 +5,7 @@ import { z } from 'zod';
  * Kernel environment. `DATABASE_URL` must be the `api_user` connection (never `postgres`/service role).
  *
  * Every adapter is selected here — Phase 2's domain provider, auth allow-list and mail transport,
- * plus Phase 3's video provider. Every selector defaults to its LOCAL implementation
+ * Phase 3's video provider and Phase 7's push transport. Every selector defaults to its LOCAL implementation
  * (`fake` / `local`) so a clean machine or a misconfigured deploy never talks to Vercel, Resend, the
  * Supabase Management API or Mux by accident; `assertProductionEnv()` refuses a real selection that
  * is missing its credentials (T-02-10, T-03-43).
@@ -64,6 +64,31 @@ export const env = createEnv({
      */
     FAKE_VIDEO_WEBHOOK_SECRET: z.string().min(1).optional(),
 
+    /**
+     * Web Push transport (07-06, the `VIDEO_PROVIDER=fake` precedent). `fake` records every send in
+     * memory and answers the status a `/status/<code>` endpoint path asks for, so no automated run
+     * ever reaches FCM, Mozilla, Apple or WNS; `webpush` signs with the VAPID pair below and POSTs to
+     * the subscription's push service.
+     */
+    PUSH_TRANSPORT: z.enum(['fake', 'webpush']).default('fake'),
+    /**
+     * The VAPID application-server key pair (base64url, `web-push generate-vapid-keys`). The browser
+     * subscribes with the PUBLIC half (its Vercel twin is `NEXT_PUBLIC_VAPID_PUBLIC_KEY`), and every
+     * stored subscription is bound to it: **rotating the pair invalidates every subscription** (a
+     * one-way door; 07-07's key-mismatch resync re-subscribes granted devices on their next open).
+     */
+    VAPID_PUBLIC_KEY: z.string().min(1).optional(),
+    /**
+     * The PRIVATE half: mounted from GCP Secret Manager on the API/worker only. Never on Vercel, never
+     * behind a `NEXT_PUBLIC_*` name, never in git.
+     */
+    VAPID_PRIVATE_KEY: z.string().min(1).optional(),
+    /**
+     * The VAPID `sub` claim: a `mailto:` or `https:` contact for the push services. Apple rejects a
+     * subject naming `localhost` (`BadJwtToken`), so `assertProductionEnv` refuses one.
+     */
+    VAPID_SUBJECT: z.string().min(1).optional(),
+
     /** Send Email Hook transport (RESEARCH Pattern 6). `local` posts to Mailpit's HTTP API. */
     MAIL_TRANSPORT: z.enum(['local', 'resend']).default('local'),
     RESEND_API_KEY: z.string().min(1).optional(),
@@ -109,6 +134,10 @@ export function assertProductionEnv(
     | 'MUX_SIGNING_KEY_ID'
     | 'MUX_SIGNING_KEY_PRIVATE'
     | 'MUX_WEBHOOK_SECRET'
+    | 'PUSH_TRANSPORT'
+    | 'VAPID_PUBLIC_KEY'
+    | 'VAPID_PRIVATE_KEY'
+    | 'VAPID_SUBJECT'
   > = env,
 ): void {
   const missing: string[] = [];
@@ -136,6 +165,20 @@ export function assertProductionEnv(
       'MUX_WEBHOOK_SECRET',
     ] as const) {
       if (!e[key]) missing.push(`${key} (required when VIDEO_PROVIDER=mux)`);
+    }
+  }
+  // 07-06 (NOTIF-03): all three VAPID values, or no real push. A partial set would boot, accept
+  // subscriptions and then fail every send; a `localhost` or non-`mailto:`/`https:` subject is
+  // refused by the push services themselves (Apple answers `BadJwtToken`).
+  if (e.PUSH_TRANSPORT === 'webpush') {
+    for (const key of ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT'] as const) {
+      if (!e[key]) missing.push(`${key} (required when PUSH_TRANSPORT=webpush)`);
+    }
+    const subject = e.VAPID_SUBJECT;
+    if (subject && (!/^(mailto:|https:)/.test(subject) || /localhost/i.test(subject))) {
+      missing.push(
+        'VAPID_SUBJECT (must start with mailto: or https: and must not name localhost when PUSH_TRANSPORT=webpush)',
+      );
     }
   }
   if (missing.length > 0) {

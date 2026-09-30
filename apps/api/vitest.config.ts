@@ -84,6 +84,8 @@ export default mergeConfig(
         // this entry is what guarantees no automated test ever reaches a real video vendor. It is
         // deliberately NOT in `KEYS`: no run of this suite wants anything but the fake.
         VIDEO_PROVIDER: 'fake',
+        // 07-06: the same rule for Web Push. No automated run may reach FCM, Mozilla, Apple or WNS.
+        PUSH_TRANSPORT: 'fake',
       },
       globalSetup: integrationRun ? ['tests/integration/global-setup.ts'] : [],
       fileParallelism: false,

@@ -1,5 +1,6 @@
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { notificationsFanoutJob } from './server/fanout-job';
+import { pushSendJob } from './server/push/send-job';
 import { countUnseen } from './server/service';
 
 /**
@@ -12,6 +13,7 @@ import { countUnseen } from './server/service';
  * and every `/v1/notifications` route answers 404 `MODULE_DISABLED`.
  *
  * `jobs`: the fan-out runs in the WORKER (`notifications.fanout`); the bus subscriber only enqueues.
+ * `notifications.push-send` (07-06) delivers the Web Push the fan-out's push channel enqueued.
  * `counters`: this module's share of the bootstrap counters, computed inside the caller's tenant
  * lane; only an EFFECTIVE module contributes, so a disabled one reads zero.
  * `sweepFunctions`: the 90-day prune (D-231), run by the kernel's hourly sweeper for EVERY tenant,
@@ -34,7 +36,7 @@ export const notificationsModule = defineModule({
     order: 10,
   },
   routes: () => import('./server/routes').then((m) => m.notificationsRoutes),
-  jobs: [notificationsFanoutJob],
+  jobs: [notificationsFanoutJob, pushSendJob],
   counters: async (tx, ctx) => ({ unreadNotifications: await countUnseen(tx, ctx) }),
   // D-231 (07-04): rows older than 90 days are deleted by the kernel's EXISTING hourly sweeper, which
   // runs `app.notifications_prune(batch)` through the admin lane. The kernel never names this table.

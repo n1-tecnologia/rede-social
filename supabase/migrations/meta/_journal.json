@@ -351,6 +351,20 @@
       "when": 1790778232914,
       "tag": "20260930142352_notifications_prune",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1790791334591,
+      "tag": "20260930180214_push_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1790791347361,
+      "tag": "20260930180227_push_subscriptions_functions",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,8 @@ export default mergeConfig(
         DATABASE_URL: 'postgres://api_user:postgres@127.0.0.1:54322/postgres',
         SUPABASE_URL: 'http://127.0.0.1:54321',
         SUPABASE_SERVICE_KEY: 'unit-test-placeholder',
+        // 07-06: no module test may reach a real push service.
+        PUSH_TRANSPORT: 'fake',
       },
     },
   }),

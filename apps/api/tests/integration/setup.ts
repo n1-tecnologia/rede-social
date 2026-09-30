@@ -231,3 +231,49 @@ export async function runEventReminderJobs(
   }
   return outcomes;
 }
+
+/** One `notifications.push-send` row as the integration suites assert it (07-06). */
+export type PushSendJobRow = {
+  id: string;
+  state: string;
+  singleton_key: string | null;
+  start_after: Date;
+  data: {
+    tenantId: string;
+    kind: string;
+    dedupeKey: string;
+    userIds: string[];
+    push: Record<string, unknown>;
+    attempt: number;
+    subscriptionIds?: string[];
+  };
+};
+
+/** Every `notifications.push-send` job enqueued for `tenantId`, oldest first (any state). */
+export async function pushSendJobsOf(tenantId: string): Promise<PushSendJobRow[]> {
+  return adminSql<PushSendJobRow[]>`
+    select id, state::text as state, singleton_key, start_after, data
+      from pgboss.job_common
+     where name = 'notifications.push-send' and data->>'tenantId' = ${tenantId}
+     order by created_on, singleton_key`;
+}
+
+/**
+ * Plays the worker for `tenantId`'s waiting `notifications.push-send` jobs (the `runInviteSendJobs`
+ * clone), IGNORING `start_after` so a re-try runs at once: each `created` row's payload goes through
+ * the real `pushSendJob.handler` on the transport the env selects (`PUSH_TRANSPORT=fake`, pinned by
+ * `vitest.config.ts`), errors propagate and the row stays `created`; a row whose handler resolved is
+ * marked `completed` like `boss.work` would. Only the rows waiting when it starts run, so a re-try the
+ * run enqueues waits for the NEXT call. Returns how many handlers ran.
+ */
+export async function runPushSendJobs(tenantId: string): Promise<number> {
+  const { pushSendJob } = await import('@rede-social/module-notifications/server');
+  const rows = (await pushSendJobsOf(tenantId)).filter((row) => row.state === 'created');
+  for (const row of rows) {
+    await pushSendJob.handler(row.data as Parameters<typeof pushSendJob.handler>[0]);
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name = 'notifications.push-send' and id = ${row.id}::uuid`;
+  }
+  return rows.length;
+}

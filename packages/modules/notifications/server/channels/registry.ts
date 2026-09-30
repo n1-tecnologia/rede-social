@@ -14,8 +14,20 @@ const log = moduleLogger('module-notifications');
  */
 const channels = new Map<NotificationChannelKey, NotificationChannel>();
 
-/** Delivery order: in-app first, because push (07-06) is gated on the rows in-app NEWLY inserted. */
-const CANONICAL_ORDER: readonly NotificationChannelKey[] = ['in_app', 'push'];
+/**
+ * Delivery order: in-app first, because push (07-06) is gated on the rows in-app NEWLY inserted. It is
+ * also the list of every `NotificationChannelKey` (the `satisfies` below fails the build when a key is
+ * added to the union without a place here), which the assumption-delta invariant test walks.
+ */
+const CANONICAL_ORDER = ['in_app', 'push'] as const satisfies readonly NotificationChannelKey[];
+
+/** Every channel key, in delivery order (tests: the registry invariant). */
+export const CHANNEL_KEYS: readonly NotificationChannelKey[] = CANONICAL_ORDER;
+
+type MissingKey = Exclude<NotificationChannelKey, (typeof CANONICAL_ORDER)[number]>;
+/** Compile-time: a `NotificationChannelKey` member missing from `CANONICAL_ORDER` is a type error. */
+const everyKeyOrdered: MissingKey extends never ? true : never = true;
+void everyKeyOrdered;
 
 /** Called at module import time. Registering a key again replaces it (tests). */
 export function registerChannel(adapter: NotificationChannel): void {

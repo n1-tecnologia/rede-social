@@ -3,7 +3,13 @@ import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { requireModule } from '@rede-social/core/server/modules/require-module';
-import { notificationPageSchema, notificationQuerySchema } from '../contracts/index';
+import {
+  notificationPageSchema,
+  notificationQuerySchema,
+  pushSubscriptionDeleteSchema,
+  pushSubscriptionInputSchema,
+} from '../contracts/index';
+import { deletePushSubscription, pushInputError, savePushSubscription } from './push-subscriptions';
 import { listNotifications, markAllRead, markAllSeen, markRead } from './service';
 
 /**
@@ -12,7 +18,8 @@ import { listNotifications, markAllRead, markAllSeen, markRead } from './service
  *
  * `requireAuth` (401) -> `requireModule('notifications')` (404 `MODULE_DISABLED` when the tenant
  * does not have notifications). There is no permission: every member reads and marks ONLY their own
- * rows, which `notifications_owner_select` / `…_update` enforce in the database.
+ * rows, which `notifications_owner_select` / `…_update` enforce in the database, and saves or forgets
+ * ONLY their own push devices (`push_subscriptions_owner_*` plus the upsert definer, 07-06).
  */
 const notifications = new OpenAPIHono<AppEnv>({
   defaultHook: (result) => {
@@ -91,6 +98,65 @@ const readAllRoute = createRoute({
   },
 });
 
+const savePushRoute = createRoute({
+  method: 'post',
+  path: '/push-subscriptions',
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: pushSubscriptionInputSchema } },
+    },
+  },
+  responses: {
+    204: {
+      description:
+        "NOTIF-03: saves THIS device's Web Push subscription for the caller (what `PushSubscription.toJSON()` returns, plus an optional user agent). Saving an endpoint that another member of the tenant had registered moves it to the caller (the device changed hands); saving it again refreshes its keys. Requires a live membership.",
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.push`: `endpoint_invalid` when the endpoint is not `https:` on a known push-service host (FCM, Mozilla, Apple, WNS), carries userinfo, a port or an IP literal; `keys_invalid` when `p256dh` is not a 65-byte uncompressed P-256 point or `auth` not 16 bytes (base64url). An unknown key is a plain `VALIDATION_FAILED`.',
+    },
+  },
+});
+
+const deletePushRoute = createRoute({
+  method: 'delete',
+  path: '/push-subscriptions',
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: pushSubscriptionDeleteSchema } },
+    },
+  },
+  responses: {
+    204: {
+      description:
+        "Forgets one of the CALLER's own devices by endpoint (the push switch turned off, or a logout on a shared device). Idempotent: an endpoint the caller does not own, or none at all, is the same silent 204.",
+    },
+  },
+});
+
+/**
+ * The save route's own validation hook: a refused KEY is `details.push = 'keys_invalid'`, a refused
+ * endpoint `endpoint_invalid` (the same shape the service's host rule answers with); anything else,
+ * such as an unknown key, is the module's generic `VALIDATION_FAILED` with its issues.
+ */
+function refusePushInput(issues: readonly { path: PropertyKey[]; message: string }[]): never {
+  const first = issues[0]?.path[0];
+  if (first === 'keys' && issues.every((issue) => issue.path[0] === 'keys')) {
+    throw pushInputError('keys_invalid');
+  }
+  if (first === 'endpoint' && issues.every((issue) => issue.path[0] === 'endpoint')) {
+    throw pushInputError('endpoint_invalid');
+  }
+  throw new ApiError(400, 'VALIDATION_FAILED', {
+    issues: issues.map((issue) => ({
+      path: issue.path.map(String).join('.'),
+      message: issue.message,
+    })),
+  });
+}
+
 export const notificationsRoutes = notifications
   .openapi(listRoute, async (c) =>
     c.json(await listNotifications(c.get('ctx'), c.req.valid('query')), 200),
@@ -105,5 +171,20 @@ export const notificationsRoutes = notifications
   })
   .openapi(readRoute, async (c) => {
     await markRead(c.get('ctx'), c.req.valid('param').notificationId);
+    return noContent();
+  })
+  .openapi(
+    savePushRoute,
+    async (c) => {
+      await savePushSubscription(c.get('ctx'), c.req.valid('json'));
+      return noContent();
+    },
+    (result) => {
+      if (!result.success) refusePushInput(result.error.issues);
+      return undefined;
+    },
+  )
+  .openapi(deletePushRoute, async (c) => {
+    await deletePushSubscription(c.get('ctx'), c.req.valid('json').endpoint);
     return noContent();
   });
