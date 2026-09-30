@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-07-PLAN.md
-last_updated: "2026-09-30T18:54:50.164Z"
+stopped_at: Completed 07-08-PLAN.md
+last_updated: "2026-09-30T19:36:35.649Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-07 complete: Web Push browser half (service-worker push/click/resubscribe with a zod-free payload mirror, lib/push.ts tap-only flow with the iPadOS-aware iOS gate and VAPID-rotation resync, BFF /api/push/subscriptions, PushSwitchRow in Configurações, the soft-ask card, InstallHint push variant, logout unsubscribe via the kernel BeforeLogout seam, push.spec 17+1 skipped); next 07-08 (Wave 7)"
-state_head: 56da25b6935814273e48f6a9b1acd378dfc16602
+last_activity_desc: "07-08 complete: support chat server side (@rede-social/module-chat, gapless seq trigger under the conversation row lock, ids-only signal trigger on conv:/support-inbox/user:, participant/staff-aware RLS, lazy member send, staff reply with 409 member_blocked/member_removed, seq catch-up, keyset inbox, shared staff read, member dot / staff count via conversationsBadge, chat.support moved to the chat manifest, push-only support source, pgTAP 152, seeded support users); next 07-09 (Wave 8)"
+state_head: bee86849c16c708b28995f9033fddf5bdd178e27
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 109
-  completed_plans: 102
+  completed_plans: 103
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 7 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half); next: 07-08. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
+Plan: 8 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half, 07-08 chat server side); next: 07-09. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
 Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-07 (push on/off from a tap in Configurações and on the /notificacoes soft-ask, iOS/iPadOS install gate, SW banner/foreground/badge/click, logout forgets the device; NEXT_PUBLIC_VAPID_PUBLIC_KEY local test key must be added to apps/web/.env.local by the developer; NOTIF-03/PWA-02 stay open for sibling plans)
+Last activity: 2026-09-30 — Completed 07-08 (support chat API: member thread, staff inbox and reply, shared read state, dot/count badges, push-only support pushes; the Suporte slot links to /suporte, whose page is 07-09; the API must deploy before the web for counters.conversationsBadge; full API integration 701/702 with only signup case 2 failing on the tria-* env hosts)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -162,6 +162,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P05 | 31 min | 2 tasks | 24 files |
 | Phase 07 P06 | 25 min | 3 tasks | 36 files |
 | Phase 07 P07 | 26 min | 3 tasks | 32 files |
+| Phase 07 P08 | 37 min | 3 tasks | 44 files |
 
 ## Accumulated Context
 
@@ -522,6 +523,11 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-07: push saves send subscriptionBody() {endpoint, keys, userAgent}; the strict API schema refuses toJSON()'s expirationTime
 - [Phase 07]: 07-07: kernel BeforeLogoutProvider/useLogoutSubmit lets the desktop rail await LiveShell's forget-this-device cleanup (2 s bound); Configurações uses the web LogoutForm
 - [Phase 07]: 07-07: NEXT_PUBLIC_VAPID_PUBLIC_KEY is optional; a LOCAL-ONLY test public key lives in apps/web/.env.example, ci.yml and scripts/local-env.sh (private half discarded)
+- [Phase 07]: 07-08: chat seq is assigned by a BEFORE INSERT definer that increments chat_conversations.last_seq under the row lock (gapless, commit order = seq order); no writer may use ON CONFLICT on chat_messages because the trigger fires before the arbiter and would burn a seq
+- [Phase 07]: 07-08: chat signals are published by an AFTER INSERT definer: chat.message on conv: and support-inbox, chat.unread on the member's user topic for staff messages; delivered payload keys are conversationId, id, seq (realtime.send injects id)
+- [Phase 07]: 07-08: chat.support moved from KERNEL_ROLE_PERMISSIONS to the chat manifest for admin_tenant and support_tenant (support_tenant kernel grant is now []); members get chat.support.contact; manifest counters receive the caller's composed permissions
+- [Phase 07]: 07-08: bootstrap.counters gains conversationsBadge ('dot' member, 'count' staff, default 'count'); the API must deploy before the web (07-11)
+- [Phase 07]: 07-08: chat.message_sent is push-only (chat.support_reply to the member titled 'team', chat.member_message to live staff), 32-hex conversation tag/topic, renotify, urgency high, TTL 259200; never a notifications row
 
 ### Pending Todos
 
@@ -591,6 +597,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T18:54:50.056Z
-Stopped at: Completed 07-07-PLAN.md
+Last session: 2026-09-30T19:36:14.695Z
+Stopped at: Completed 07-08-PLAN.md
 Resume file: None
