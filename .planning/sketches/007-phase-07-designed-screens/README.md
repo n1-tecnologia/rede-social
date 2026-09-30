@@ -15,11 +15,11 @@ screens:
   - s9-ponto-do-suporte-e-numero-do-sino (UI-D-253)
   - delta-a-rotulo-do-remetente-acima-e-neutro (UI-D-259)
   - delta-b-compositor-sem-anexo-ate-cinco-linhas (UI-D-260)
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: igor.vboas
+approved_at: 2026-09-30
+approval_kind: provisional
 changes_requested: []
 winner: null
 gated_tasks:
