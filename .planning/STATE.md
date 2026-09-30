@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-04-PLAN.md
-last_updated: "2026-09-30T17:21:58.033Z"
+stopped_at: Completed 07-05-PLAN.md
+last_updated: "2026-09-30T17:56:10.363Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-04 complete: feed and stories kinds, keep-and-mark retraction, 90-day prune via sweepFunctions, comment-thread pin and highlight, generic and removed rows, expired-story notice; sketch 007 approved (provisional, igor.vboas, 2026-09-30); next 07-05 (Wave 4)"
-state_head: b5210895d1e98a3c88086948f7f294e06481192b
+last_activity_desc: "07-05 complete: EVENT-07 reminders (in-transaction events.reminder jobs, fire-time checks, event.reminder_due), new/reactivated event kinds, silent edits and cancels, actor-less reminder rows, scripts/arm-event-reminders.ts backfill; next 07-06 (Wave 4)"
+state_head: 74fce215804aead246bac54c6232f882e6179e04
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 109
-  completed_plans: 99
+  completed_plans: 100
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 4 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds); next: 07-05 (Wave 4, event sources and reminders). Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
+Plan: 5 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders); next: 07-06 (Web Push). Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
 Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-04 (feed/stories kinds, keep-and-mark retraction, 90-day prune, comment highlight deep link; NOTIF-01 stays open for 07-05 events/reminders and 07-08 support replies; env hosts still tria-*)
+Last activity: 2026-09-30 — Completed 07-05 (EVENT-07 reminders armed in-transaction and re-checked at fire time, event kinds, backfill script for DEPLOY.md; EVENT-07 stays open for 07-11, NOTIF-01 for 07-08/07-11; env hosts still tria-*, now also failing events.spec's not-found case)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -159,6 +159,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P01 | 52 min | 3 tasks | 80 files |
 | Phase 07 P03 | 29min | 3 tasks | 30 files |
 | Phase 07 P04 | 3h10m | 3 tasks | 55 files |
+| Phase 07 P05 | 31 min | 2 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -509,6 +510,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-04: the kernel sweeper runs module SQL by name via ModuleManifest.sweepFunctions (app.notifications_prune, service_role only, 90 days)
 - [Phase 07]: 07-04: sketch 007 approved by the developer (igor.vboas) by hand on 2026-09-30, provisional; unblocks 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1-T2
 - [Phase 07]: 07-04: /post/{id}?comentario= pins the root thread first via GET /v1/feed/comments/{id}/thread; expired story rows land on /inicio?aviso=story-expirado
+- [Phase 07]: 07-05: EVENT-07 reminders are deferred events.reminder jobs armed inside createEvent / updateEvent (timesChanged) / setEventStatus (reactivate), re-checked at fire time (active, not removed, same start, not started, at most 30 min late); reminder Topic = 32-hex event id, tag events-reminder-{hex32}
+- [Phase 07]: 07-05: scripts/arm-event-reminders.ts restates the events module queue, offsets, key and payload (the root workspace may not import a module); run once after deploy, --dry-run first (07-11 DEPLOY.md)
 
 ### Pending Todos
 
@@ -578,6 +581,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T17:21:57.924Z
-Stopped at: Completed 07-04-PLAN.md
+Last session: 2026-09-30T17:56:10.102Z
+Stopped at: Completed 07-05-PLAN.md
 Resume file: None
