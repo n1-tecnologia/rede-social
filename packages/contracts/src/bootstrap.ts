@@ -58,6 +58,10 @@ export const bootstrapSchema = z.object({
   counters: z.object({
     unreadNotifications: z.number(),
     unreadConversations: z.number(),
+    // 07-08 (D-237, D-238): how the chat slot draws `unreadConversations`, a member's `dot` or the
+    // staff `count`. It MUST be declared here: this plain `z.object` strips unknown keys on parse, so
+    // the API ships it BEFORE the web reads it (the 06-01 deploy-order precedent).
+    conversationsBadge: z.enum(['dot', 'count']),
   }),
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;

@@ -205,19 +205,24 @@ setPermissionResolver(permissionsFor);
  * D-40 / RESEARCH Pattern 13: `bootstrap.counters`, composed from every EFFECTIVE module's manifest
  * `counters` over zeros, inside the caller's tenant-lane transaction. A disabled module (or one whose
  * `requires` are off) contributes nothing, so its badge reads zero rather than a stale count.
+ *
+ * 07-08 (planning decision 4): each contributor also receives the caller's composed permission set
+ * (`permissionsFor`, the same value the route guards read), so the chat module picks the staff count
+ * or the member dot by `chat.support` rather than by a role literal.
  */
 export async function countersFor(
   tx: Tx,
   ctx: RequestContext,
-  enabled: Set<ModuleKey>,
+  flags: { keys: Set<ModuleKey>; settings: Map<ModuleKey, Record<string, unknown>> },
 ): Promise<Counters> {
   const counters: Counters = { ...ZERO_COUNTERS };
-  for (const key of effectiveKeys(enabled)) {
+  const permissions = permissionsFor(ctx.role, flags.keys, flags.settings);
+  for (const key of effectiveKeys(flags.keys)) {
     const contribute = MODULE_REGISTRY[key]?.counters;
-    if (contribute) Object.assign(counters, await contribute(tx, ctx));
+    if (contribute) Object.assign(counters, await contribute(tx, ctx, permissions));
   }
   return counters;
 }
 
 /** The kernel's counters seam (`setCountersResolver`, the permission inversion again). */
-setCountersResolver(async (tx, ctx) => countersFor(tx, ctx, (await moduleFlags.flags(ctx)).keys));
+setCountersResolver(async (tx, ctx) => countersFor(tx, ctx, await moduleFlags.flags(ctx)));

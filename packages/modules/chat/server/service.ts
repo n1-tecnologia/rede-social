@@ -1,14 +1,24 @@
+import { REALTIME_EVENTS, topicSuffix } from '@rede-social/contracts/realtime';
+import { cutOnWord } from '@rede-social/contracts/text';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import type { Counters } from '@rede-social/core/server/modules/counters';
+import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { permissionsForRequest } from '@rede-social/core/server/rbac/permissions';
 import { sql } from 'drizzle-orm';
 import {
   CHAT_PAGE_SIZE,
   CHAT_PERMISSIONS,
+  CHAT_PREVIEW_GRAPHEMES,
   type ChatSide,
+  type ConversationDetail,
+  type ConversationMember,
+  type InboxPage,
+  type InboxQuery,
+  type InboxRow,
   type MessagePage,
   type MessageQuery,
   type MessageRow,
@@ -409,4 +419,359 @@ export async function replyToConversation(
     'chat message sent',
   );
   return result;
+}
+
+/* ── 07-08 Task 3: the staff side and the badges ────────────────────────────────────────────────── */
+
+/**
+ * The member behind a support thread, projected for STAFF (the feed's author rule): the member's
+ * membership in THIS tenant, whatever its state, and its profile. A soft-deleted or missing
+ * membership is `removed` with every identity field null (UI-D-24); a blocked one keeps its name.
+ * The avatar id is nulled when the asset is gone (`media_assets_tenant_select` hides a retired one).
+ */
+const memberIdentity = sql`
+           case
+             when ms.id is null or ms.deleted_at is not null then 'removed'
+             when ms.blocked_at is not null or ms.status = 'blocked' then 'blocked'
+             else 'active'
+           end as member_state,
+           case when ms.deleted_at is null then ms.id end as member_membership_id,
+           case when ms.deleted_at is null then mp.display_name end as member_display_name,
+           case when ms.deleted_at is null and a.id is not null then mp.avatar_asset_id end
+             as member_avatar_asset_id`;
+
+const memberJoins = sql`
+      left join memberships ms
+             on ms.tenant_id = c.tenant_id
+            and ms.user_id = c.created_by_user_id
+      left join member_profiles mp on mp.membership_id = ms.id
+      left join media_assets a on a.id = mp.avatar_asset_id`;
+
+type MemberIdentityRow = {
+  member_state: MemberState;
+  member_membership_id: string | null;
+  member_display_name: string | null;
+  member_avatar_asset_id: string | null;
+};
+
+const toMember = (row: MemberIdentityRow): ConversationMember =>
+  row.member_state === 'removed'
+    ? { membershipId: null, displayName: null, avatarAssetId: null, state: 'removed' }
+    : {
+        membershipId: row.member_membership_id,
+        displayName: row.member_display_name,
+        avatarAssetId: row.member_avatar_asset_id,
+        state: row.member_state,
+      };
+
+/**
+ * `GET /v1/chat/conversations/{id}` (D-224): staff get the member behind the thread and the team's
+ * read position; the thread's member gets their own position. Anyone else (another member, another
+ * tenant, an unknown id, or staff on a non-support conversation) gets one bare 404.
+ */
+export async function getConversation(
+  ctx: RequestContext,
+  conversationId: string,
+): Promise<ConversationDetail> {
+  const staff = await isStaff(ctx);
+  return withTenantTx(ctx, async (tx) => {
+    if (staff) {
+      const rows = await tx.execute<
+        MemberIdentityRow & { id: string; last_seq: number; staff_last_read_seq: number }
+      >(sql`
+        select c.id,
+               c.last_seq::int as last_seq,
+               c.staff_last_read_seq::int as staff_last_read_seq,
+               ${memberIdentity}
+          from chat_conversations c
+          ${memberJoins}
+         where c.id = ${conversationId}::uuid
+           and c.tenant_id = ${ctx.tenantId}::uuid
+           and c.kind = 'support'`);
+      const row = rows[0];
+      if (!row) throw new ApiError(404, 'NOT_FOUND');
+      return {
+        viewer: 'staff',
+        id: row.id,
+        member: toMember(row),
+        lastSeq: Number(row.last_seq),
+        staffLastReadSeq: Number(row.staff_last_read_seq),
+      };
+    }
+    const rows = await tx.execute<{
+      id: string;
+      last_seq: number;
+      last_staff_seq: number;
+      last_read_seq: number;
+    }>(sql`
+      select c.id,
+             c.last_seq::int as last_seq,
+             c.last_staff_seq::int as last_staff_seq,
+             p.last_read_seq::int as last_read_seq
+        from chat_conversations c
+        join chat_participants p
+          on p.conversation_id = c.id
+         and p.tenant_id = c.tenant_id
+         and p.user_id = ${ctx.userId}::uuid
+       where c.id = ${conversationId}::uuid
+         and c.tenant_id = ${ctx.tenantId}::uuid`);
+    const row = rows[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    return {
+      viewer: 'member',
+      id: row.id,
+      lastSeq: Number(row.last_seq),
+      lastReadSeq: Number(row.last_read_seq),
+      lastStaffSeq: Number(row.last_staff_seq),
+    };
+  });
+}
+
+/**
+ * `POST /v1/chat/conversations/{id}/read { seq }` (D-225, D-237, D-238): the caller has seen the
+ * thread up to `seq`. Positions only move FORWARD and never past the conversation's `last_seq`, so a
+ * stale or forged seq can neither un-read a thread nor pre-read a message that does not exist yet.
+ *
+ * - **Staff** (`chat.support`) move the TEAM's shared position,
+ *   `staff_last_read_seq = greatest(staff_last_read_seq, least(seq, last_seq))`: one staff read clears
+ *   "awaiting" for every staff member. When it moved, `chat.read` is signalled on `support-inbox` so
+ *   every staff badge and inbox refetches.
+ * - **The thread's member** moves their participant row's `last_read_seq` the same way and stamps
+ *   `last_read_at`. When it moved, `chat.unread` is signalled on their own user topic so their other
+ *   devices clear the dot.
+ *
+ * Both signals are published by the definer inside this transaction (ids only). Any other caller, or
+ * an unknown or foreign id, is one bare 404.
+ */
+export async function markConversationRead(
+  ctx: RequestContext,
+  conversationId: string,
+  seq: number,
+): Promise<void> {
+  const staff = await isStaff(ctx);
+  await withTenantTx(ctx, async (tx) => {
+    if (staff) {
+      const rows = await tx.execute<{ prior: number; current_seq: number }>(sql`
+        with target as (
+          select c.id, c.staff_last_read_seq as prior
+            from chat_conversations c
+           where c.id = ${conversationId}::uuid
+             and c.tenant_id = ${ctx.tenantId}::uuid
+             and c.kind = 'support'
+             for update
+        )
+        update chat_conversations c
+           set staff_last_read_seq = greatest(c.staff_last_read_seq, least(${seq}::bigint, c.last_seq))
+          from target
+         where c.id = target.id
+        returning target.prior::int as prior, c.staff_last_read_seq::int as current_seq`);
+      const row = rows[0];
+      if (!row) throw new ApiError(404, 'NOT_FOUND');
+      if (Number(row.current_seq) > Number(row.prior)) {
+        await tx.execute(
+          sql`select app.realtime_signal(${topicSuffix.inbox()}, ${REALTIME_EVENTS.chatRead}, ${JSON.stringify({ conversationId, seq: Number(row.current_seq) })}::jsonb)`,
+        );
+      }
+      return;
+    }
+    const rows = await tx.execute<{ prior: number; current_seq: number }>(sql`
+      with target as (
+        select p.conversation_id, p.last_read_seq as prior, c.last_seq
+          from chat_participants p
+          join chat_conversations c
+            on c.id = p.conversation_id
+           and c.tenant_id = p.tenant_id
+         where p.conversation_id = ${conversationId}::uuid
+           and p.tenant_id = ${ctx.tenantId}::uuid
+           and p.user_id = ${ctx.userId}::uuid
+           for update of p
+      )
+      update chat_participants p
+         set last_read_seq = greatest(p.last_read_seq, least(${seq}::bigint, target.last_seq)),
+             last_read_at = now()
+        from target
+       where p.conversation_id = target.conversation_id
+         and p.tenant_id = ${ctx.tenantId}::uuid
+         and p.user_id = ${ctx.userId}::uuid
+      returning target.prior::int as prior, p.last_read_seq::int as current_seq`);
+    const row = rows[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    if (Number(row.current_seq) > Number(row.prior)) {
+      await tx.execute(
+        sql`select app.realtime_signal(${topicSuffix.user(ctx.userId)}, ${REALTIME_EVENTS.chatUnread}, ${JSON.stringify({ conversationId, seq: Number(row.current_seq) })}::jsonb)`,
+      );
+    }
+  });
+}
+
+/**
+ * A cursor's `n` must be an instant this service could have issued before it reaches a
+ * `::timestamptz` cast (T-06-04): a tampered `n` degrades to page 1, never a 500.
+ */
+const CURSOR_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?Z$/;
+
+function decodeInstantCursor(raw: string | undefined) {
+  const decoded = decodeCursor(raw);
+  if (!decoded) return null;
+  const match = CURSOR_INSTANT.exec(decoded.n);
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const at = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  const valid =
+    year >= 1000 &&
+    at.getUTCFullYear() === year &&
+    at.getUTCMonth() === month - 1 &&
+    at.getUTCDate() === day &&
+    at.getUTCHours() === hour &&
+    at.getUTCMinutes() === minute &&
+    at.getUTCSeconds() === second;
+  return valid ? decoded : null;
+}
+
+type InboxDbRow = MemberIdentityRow & {
+  id: string;
+  last_message_at: string | null;
+  awaiting: boolean;
+  lm_seq: number | null;
+  lm_body: string | null;
+  lm_side: ChatSide | null;
+  lm_author_name: string | null;
+};
+
+const toInboxRow = (row: InboxDbRow): InboxRow => ({
+  conversationId: row.id,
+  member: toMember(row),
+  lastMessage:
+    row.lm_seq === null || row.lm_side === null
+      ? null
+      : {
+          seq: Number(row.lm_seq),
+          preview: cutOnWord(row.lm_body ?? '', CHAT_PREVIEW_GRAPHEMES),
+          side: row.lm_side,
+          authorFirstName: row.lm_side === 'staff' ? firstNameOf(row.lm_author_name) : null,
+        },
+  lastMessageAt: row.last_message_at,
+  awaiting: row.awaiting,
+});
+
+/**
+ * `GET /v1/chat/inbox?cursor=&limit=` (CHAT-03, D-221, D-224): every support conversation of the
+ * tenant, most recent activity first (`last_message_at desc, id desc`, so an exact tie on the instant
+ * is broken by id and a `limit=1` walk visits each thread once), over `chat_conversations_inbox_idx`
+ * (pgTAP 152 fact 7 explains this predicate by name). There are no open/resolved sections (D-221).
+ *
+ * Per row: the member (membership id, display name, avatar, state), the latest message as a
+ * one-line preview of `CHAT_PREVIEW_GRAPHEMES` graphemes with its side and, for a team message, the
+ * author's first name, the instant, and `awaiting` (the latest message is the member's and the team
+ * has not read up to it). Over-fetch by one: `nextCursor` is non-null exactly when another row exists.
+ */
+export async function listInbox(ctx: RequestContext, query: InboxQuery): Promise<InboxPage> {
+  const limit = query.limit;
+  const after = decodeInstantCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<InboxDbRow>(sql`
+      select c.id,
+             to_char(c.last_message_at at time zone 'utc', ${ISO_MICROSECONDS}) as last_message_at,
+             (c.last_message_side = 'member' and c.last_seq > c.staff_last_read_seq) as awaiting,
+             ${memberIdentity},
+             lm.seq::int as lm_seq,
+             lm.body as lm_body,
+             lm.author_side as lm_side,
+             lmp.display_name as lm_author_name
+        from chat_conversations c
+        ${memberJoins}
+        left join lateral (
+          select m.seq, m.body, m.author_side, m.author_user_id
+            from chat_messages m
+           where m.tenant_id = c.tenant_id
+             and m.conversation_id = c.id
+             and m.deleted_at is null
+           order by m.seq desc
+           limit 1
+        ) lm on true
+        left join memberships lms
+               on lm.author_side = 'staff'
+              and lms.tenant_id = c.tenant_id
+              and lms.user_id = lm.author_user_id
+              and lms.deleted_at is null
+        left join member_profiles lmp on lmp.membership_id = lms.id
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'support'
+         and (
+           ${afterAt}::timestamptz is null
+           or (c.last_message_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by c.last_message_at desc, c.id desc
+       limit ${limit + 1}`),
+  );
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last?.last_message_at
+      ? encodeCursor({ n: last.last_message_at, id: last.id })
+      : null;
+  log.info(
+    {
+      event: 'chat.inbox',
+      tenantId: ctx.tenantId,
+      requestId: ctx.requestId,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'chat inbox listed',
+  );
+  return { items: page.map(toInboxRow), nextCursor };
+}
+
+/**
+ * The chat module's share of `bootstrap.counters` (D-237, D-238), inside the caller's tenant lane,
+ * decided by the caller's composed PERMISSIONS (planning decision 4), never by a role literal:
+ * - `chat.support` (staff): `count` = support threads awaiting the team, i.e. the latest message is
+ *   the member's and the team's shared position is below it;
+ * - `chat.support.contact` (member): `dot` = 1 exactly while the team wrote something past the
+ *   member's own read position, else 0;
+ * - neither: nothing (the zeros stand).
+ */
+export async function chatCounters(
+  tx: Tx,
+  ctx: RequestContext,
+  permissions: readonly string[],
+): Promise<Partial<Counters>> {
+  if (permissions.includes(CHAT_PERMISSIONS.answer)) {
+    const rows = await tx.execute<{ awaiting: number }>(sql`
+      select count(*)::int as awaiting
+        from chat_conversations c
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.kind = 'support'
+         and c.last_message_side = 'member'
+         and c.last_seq > c.staff_last_read_seq`);
+    return { unreadConversations: Number(rows[0]?.awaiting ?? 0), conversationsBadge: 'count' };
+  }
+  if (permissions.includes(CHAT_PERMISSIONS.contact)) {
+    const rows = await tx.execute<{ unread: boolean }>(sql`
+      select exists (
+        select 1
+          from chat_conversations c
+          join chat_participants p
+            on p.conversation_id = c.id
+           and p.tenant_id = c.tenant_id
+           and p.user_id = ${ctx.userId}::uuid
+         where c.tenant_id = ${ctx.tenantId}::uuid
+           and c.kind = 'support'
+           and c.created_by_user_id = ${ctx.userId}::uuid
+           and c.last_staff_seq > p.last_read_seq
+      ) as unread`);
+    return { unreadConversations: rows[0]?.unread ? 1 : 0, conversationsBadge: 'dot' };
+  }
+  return {};
 }

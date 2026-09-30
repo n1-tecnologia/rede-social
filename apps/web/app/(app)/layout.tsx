@@ -70,7 +70,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <AppShell
         brand={{ displayName: tp('title'), logoUrl: null }}
         nav={nav}
-        counters={{ unreadNotifications: 0, unreadConversations: 0 }}
+        counters={{ unreadNotifications: 0, unreadConversations: 0, conversationsBadge: 'count' }}
         avatar={{ src: null, alt: '' }}
         labels={labels}
         settingsHref="/configuracoes"

@@ -6,13 +6,25 @@ import { requireModule } from '@rede-social/core/server/modules/require-module';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   CHAT_ISSUE_SET,
+  conversationDetailSchema,
+  inboxPageSchema,
+  inboxQuerySchema,
   messagePageSchema,
   messageQuerySchema,
+  readInputSchema,
   sendMessageInputSchema,
   sendResultSchema,
   supportThreadSchema,
 } from '../contracts/index';
-import { getSupportThread, listMessages, replyToConversation, sendSupportMessage } from './service';
+import {
+  getConversation,
+  getSupportThread,
+  listInbox,
+  listMessages,
+  markConversationRead,
+  replyToConversation,
+  sendSupportMessage,
+} from './service';
 
 /**
  * The module owns its guard chain: the mount in `apps/api/src/app.ts` is a plain
@@ -23,10 +35,13 @@ import { getSupportThread, listMessages, replyToConversation, sendSupportMessage
  *  - the member's own thread (`GET /support`, `POST /support/messages`) requires
  *    `chat.support.contact`, which only members hold, so staff of either role are never offered a
  *    support conversation of their own (403);
- *  - answering (`POST /conversations/{id}/messages`) requires `chat.support`, which the chat manifest
- *    grants to both staff roles, so disabling chat revokes it;
- *  - the catch-up read (`GET /conversations/{id}/messages`) carries no permission: who may read a
- *    thread is decided by the participant/staff-aware policies plus the service's predicates.
+ *  - answering (`POST /conversations/{id}/messages`) and the inbox (`GET /inbox`) require
+ *    `chat.support`, which the chat manifest grants to both staff roles, so disabling chat revokes it;
+ *  - the catch-up read (`GET /conversations/{id}/messages`), the detail (`GET /conversations/{id}`)
+ *    and the read mark (`POST /conversations/{id}/read`) carry no route permission: they serve the
+ *    thread's member AND staff, and the service branches on `chat.support` (the staff read moves the
+ *    team's shared position only for a holder of it) while the participant/staff-aware policies plus
+ *    the service's predicates decide who may touch the thread at all.
  *
  * Machine codes live under `details.chat` (the closed `CHAT_ISSUES` vocabulary).
  */
@@ -135,6 +150,56 @@ const replyRoute = createRoute({
   },
 });
 
+const detailRoute = createRoute({
+  method: 'get',
+  path: '/conversations/{conversationId}',
+  request: { params: conversationParamSchema },
+  responses: {
+    200: {
+      description:
+        "D-224: `viewer: 'staff'` answers the member behind the thread (membership id, display name, avatar, state `active` | `blocked` | `removed`) and the team's shared read position; `viewer: 'member'` answers the member's own position.",
+      content: { 'application/json': { schema: conversationDetailSchema } },
+    },
+    404: { description: 'A bare `NOT_FOUND` for anyone who may not read the thread.' },
+  },
+});
+
+const readRoute = createRoute({
+  method: 'post',
+  path: '/conversations/{conversationId}/read',
+  request: {
+    params: conversationParamSchema,
+    body: { required: true, content: { 'application/json': { schema: readInputSchema } } },
+  },
+  responses: {
+    204: {
+      description:
+        "The caller has seen the thread up to `seq`. Staff move the TEAM's shared position (one read clears 'awaiting' for every staff member, D-225); the member moves their own (clearing the dot, D-237). A position only moves forward and never past the latest message.",
+    },
+    400: { description: '`VALIDATION_FAILED`: `seq` missing or not a non-negative integer.' },
+    404: { description: 'A bare `NOT_FOUND` for anyone who may not read the thread.' },
+  },
+});
+
+const inboxRoute = createRoute({
+  method: 'get',
+  path: '/inbox',
+  middleware: [requirePermission('chat.support')] as const,
+  request: { query: inboxQuerySchema },
+  responses: {
+    200: {
+      description:
+        "CHAT-03: every support conversation of the tenant, latest activity first (`last_message_at desc, id desc`), with the member, a one-line preview of the latest message, its side and the team author's first name, the instant and `awaiting`. No open/resolved sections (D-221). `nextCursor` is opaque; `limit` clamps.",
+      content: { 'application/json': { schema: inboxPageSchema } },
+    },
+    403: { description: '`FORBIDDEN` without `chat.support`.' },
+  },
+});
+
+/** A 204 that no cache may keep: read positions are the caller's own state. */
+const noContent = () =>
+  new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+
 export const chatRoutes = chat
   .openapi(supportThreadRoute, async (c) => c.json(await getSupportThread(c.get('ctx')), 200))
   .openapi(supportSendRoute, async (c) =>
@@ -155,4 +220,18 @@ export const chatRoutes = chat
       ),
       201,
     ),
+  )
+  .openapi(detailRoute, async (c) =>
+    c.json(await getConversation(c.get('ctx'), c.req.valid('param').conversationId), 200),
+  )
+  .openapi(readRoute, async (c) => {
+    await markConversationRead(
+      c.get('ctx'),
+      c.req.valid('param').conversationId,
+      c.req.valid('json').seq,
+    );
+    return noContent();
+  })
+  .openapi(inboxRoute, async (c) =>
+    c.json(await listInbox(c.get('ctx'), c.req.valid('query')), 200),
   );

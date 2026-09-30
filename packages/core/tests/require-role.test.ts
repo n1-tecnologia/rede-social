@@ -60,10 +60,12 @@ describe('requireRole — 403 FORBIDDEN for the wrong role', () => {
     expect(await code(res)).toBe('UNAUTHENTICATED');
   });
 
-  it('5. KERNEL_ROLE_PERMISSIONS: admins manage, support answers chat, members consume (V1)', () => {
+  it('5. KERNEL_ROLE_PERMISSIONS: admins manage, members consume (V1); chat grants support', () => {
     expect(KERNEL_ROLE_PERMISSIONS.admin_tenant).toContain('tenant.manage');
     expect(KERNEL_ROLE_PERMISSIONS.admin_tenant).toContain('content.publish');
-    expect(KERNEL_ROLE_PERMISSIONS.support_tenant).toEqual(['chat.support']);
+    // 07-08 (D-223): `chat.support` moved to the chat manifest, so disabling chat revokes it.
+    expect(KERNEL_ROLE_PERMISSIONS.support_tenant).toEqual([]);
+    expect(Object.values(KERNEL_ROLE_PERMISSIONS).flat()).not.toContain('chat.support');
     expect(KERNEL_ROLE_PERMISSIONS.member).toEqual([]);
   });
 });

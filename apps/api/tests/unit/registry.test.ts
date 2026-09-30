@@ -216,7 +216,8 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
 
   it('6. permissions: kernel defaults, plus only the ENABLED modules’ contributions', () => {
     expect(permissionsFor('member')).toEqual([]);
-    expect(permissionsFor('support_tenant')).toEqual(['chat.support']);
+    // 07-08 (D-223): the kernel grants support nothing; `chat.support` comes from the chat manifest.
+    expect(permissionsFor('support_tenant')).toEqual([]);
     expect(permissionsFor('admin_tenant')).toEqual([
       'content.publish',
       'members.manage',

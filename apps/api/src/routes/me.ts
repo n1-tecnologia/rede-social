@@ -162,7 +162,7 @@ export const meRoutes = me
         const profile = await profileForBootstrap(tx, ctx);
         // D-40: the badge counters, composed from the EFFECTIVE modules' manifests in this same
         // transaction (07-01), so the bell and the rest of the bootstrap are one snapshot.
-        const counters = await countersFor(tx, ctx, flags.keys);
+        const counters = await countersFor(tx, ctx, flags);
         return { tenant, user, membership, profile, counters };
       });
 
@@ -217,7 +217,7 @@ export const meRoutes = me
     async (c) => {
       const ctx = c.get('ctx');
       const flags = await moduleFlags.flags(ctx);
-      const counters = await withTenantTx(ctx, (tx) => countersFor(tx, ctx, flags.keys));
+      const counters = await withTenantTx(ctx, (tx) => countersFor(tx, ctx, flags));
       c.header('Cache-Control', 'no-store');
       return c.json(countersSchema.parse(counters), 200);
     },

@@ -315,6 +315,7 @@ describe('GET /v1/me/counters — the live refetch answers exactly the bootstrap
       const body: unknown = await res.json();
       // Exactly the contract's keys: the refetch can never carry more than the bootstrap does.
       expect(Object.keys(body as object).sort()).toEqual([
+        'conversationsBadge',
         'unreadConversations',
         'unreadNotifications',
       ]);
@@ -327,5 +328,20 @@ describe('GET /v1/me/counters — the live refetch answers exactly the bootstrap
     } finally {
       await sweep();
     }
+  });
+
+  it("16. 07-08 (D-237, D-238): conversationsBadge is the member's dot and the staff count", async () => {
+    const badgeOf = async (email: string) => {
+      const res = await api.request('/v1/me/bootstrap', {
+        headers: { authorization: `Bearer ${await signInAs(email, SEED_PASSWORD)}` },
+      });
+      expect(res.status).toBe(200);
+      return bootstrapSchema.parse(await res.json()).counters.conversationsBadge;
+    };
+    expect(await badgeOf(MEMBER)).toBe('dot');
+    expect(await badgeOf('support@rede-demo.local')).toBe('count');
+    expect(await badgeOf('admin@rede-demo.local')).toBe('count');
+    // rede-lab has chat OFF: no chat contribution, the kernel default stands.
+    expect(await badgeOf('member@rede-lab.local')).toBe('count');
   });
 });

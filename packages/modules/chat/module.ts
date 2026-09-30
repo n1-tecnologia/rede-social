@@ -1,4 +1,6 @@
 import { defineModule } from '@rede-social/core/server/modules/manifest';
+import { chatNotificationSources } from './server/notifications';
+import { chatCounters } from './server/service';
 
 /**
  * The manifest: everything the kernel needs to know about the chat module, as data (MOD-01).
@@ -13,6 +15,11 @@ import { defineModule } from '@rede-social/core/server/modules/manifest';
  * for a tenant therefore revokes it (the inbox, the staff reply and the staff read all require it).
  * Members get `chat.support.contact` instead, the right to write to the team; staff never hold it,
  * so they are never offered a support conversation of their own.
+ *
+ * `counters` (D-237, D-238): the member's dot or the staff count, decided from the caller's composed
+ * permissions. `notificationSources` (D-228): `chat.message_sent` becomes a PUSH-ONLY intent to the
+ * other side of the thread, delivered by the notifications module's push channel through the kernel
+ * seam; chat never imports that module, and support messages never write a bell row.
  */
 export const chatModule = defineModule({
   key: 'chat',
@@ -30,4 +37,6 @@ export const chatModule = defineModule({
     support_tenant: ['chat.support'],
     member: ['chat.support.contact'],
   },
+  counters: chatCounters,
+  notificationSources: chatNotificationSources,
 });

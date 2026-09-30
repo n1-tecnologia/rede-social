@@ -118,8 +118,16 @@ export interface ModuleManifest {
    * 07-01 (RESEARCH Pattern 13): this module's share of `bootstrap.counters`, computed inside the
    * caller's tenant-lane transaction. Only EFFECTIVE modules contribute (the app registry's
    * `countersFor`), so a disabled module's badge reads zero rather than a stale count.
+   *
+   * 07-08 (planning decision 4): `permissions` is the caller's COMPOSED permission set (the same one
+   * the route guards and the bootstrap read), so a module decides what to count by a permission
+   * (`chat.support` → the staff count) instead of re-listing roles in TypeScript.
    */
-  counters?: (tx: Tx, ctx: RequestContext) => Promise<Partial<Counters>>;
+  counters?: (
+    tx: Tx,
+    ctx: RequestContext,
+    permissions: readonly string[],
+  ) => Promise<Partial<Counters>>;
   /**
    * 07-04 (planning decision 3): SQL functions the kernel's hourly sweeper runs for this module. Each
    * name `n` must be an `app.n(p_batch int) returns int` that deletes at most `p_batch` rows and

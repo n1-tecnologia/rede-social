@@ -167,6 +167,112 @@ export const sendResultSchema = z
   .strict();
 export type SendResult = z.infer<typeof sendResultSchema>;
 
+/** `POST /v1/chat/conversations/{id}/read`: the highest seq the reader has seen. */
+export const readInputSchema = z.object({ seq: z.int().min(0) }).strict();
+export type ReadInput = z.infer<typeof readInputSchema>;
+
+/** A conversation member's membership as staff see it (CONTEXT's discretion item, decided). */
+export const MEMBER_STATES = ['active', 'blocked', 'removed'] as const;
+export type MemberStateValue = (typeof MEMBER_STATES)[number];
+
+/**
+ * The member behind a support thread, for STAFF only. A soft-deleted (or missing) membership is
+ * `removed` with every identity field null (the feed's UI-D-24 rule); a blocked one keeps its name
+ * and is marked `blocked` (the thread is then read-only for the team).
+ */
+export const conversationMemberSchema = z
+  .object({
+    membershipId: z.uuid().nullable(),
+    displayName: z.string().nullable(),
+    avatarAssetId: z.uuid().nullable(),
+    state: z.enum(MEMBER_STATES),
+  })
+  .strict();
+export type ConversationMember = z.infer<typeof conversationMemberSchema>;
+
+/**
+ * `GET /v1/chat/conversations/{id}`: staff get the member and the team's read position; the member
+ * gets their own position. `viewer` says which shape arrived.
+ */
+export const conversationDetailSchema = z.discriminatedUnion('viewer', [
+  z
+    .object({
+      viewer: z.literal('staff'),
+      id: z.uuid(),
+      member: conversationMemberSchema,
+      lastSeq: z.int().min(0),
+      staffLastReadSeq: z.int().min(0),
+    })
+    .strict(),
+  z
+    .object({
+      viewer: z.literal('member'),
+      id: z.uuid(),
+      lastSeq: z.int().min(0),
+      lastReadSeq: z.int().min(0),
+      lastStaffSeq: z.int().min(0),
+    })
+    .strict(),
+]);
+export type ConversationDetail = z.infer<typeof conversationDetailSchema>;
+
+/**
+ * `GET /v1/chat/inbox?cursor=&limit=` (CHAT-03). `limit` clamps to `1..CHAT_MAX_INBOX_PAGE_SIZE`;
+ * an over-long or undecodable cursor degrades to page 1.
+ */
+export const CHAT_MAX_INBOX_PAGE_SIZE = 50;
+export const inboxQuerySchema = z
+  .object({
+    cursor: z
+      .string()
+      .optional()
+      .transform((value) =>
+        value !== undefined && value.length > CHAT_MAX_CURSOR_LENGTH ? undefined : value,
+      ),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(CHAT_INBOX_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), CHAT_MAX_INBOX_PAGE_SIZE))
+      .default(CHAT_INBOX_PAGE_SIZE),
+  })
+  .strict();
+export type InboxQuery = z.infer<typeof inboxQuerySchema>;
+
+/**
+ * One inbox row. `lastMessage.preview` is ONE line (newlines as spaces) of at most
+ * `CHAT_PREVIEW_GRAPHEMES` graphemes, cut on a word; `authorFirstName` names the team member who
+ * wrote it when the side is `staff`. `awaiting` is the shared D-225 state: the latest message is the
+ * member's and the team has not read up to it.
+ */
+export const inboxRowSchema = z
+  .object({
+    conversationId: z.uuid(),
+    member: conversationMemberSchema,
+    lastMessage: z
+      .object({
+        seq: z.int().positive(),
+        preview: z.string(),
+        side: z.enum(CHAT_SIDES),
+        authorFirstName: z.string().nullable(),
+      })
+      .strict()
+      .nullable(),
+    lastMessageAt: z.string().nullable(),
+    awaiting: z.boolean(),
+  })
+  .strict();
+export type InboxRow = z.infer<typeof inboxRowSchema>;
+
+/** One keyset page of the inbox, `last_message_at desc, id desc`. `nextCursor` is opaque. */
+export const inboxPageSchema = z
+  .object({
+    items: z.array(inboxRowSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type InboxPage = z.infer<typeof inboxPageSchema>;
+
 /** 07-08's notification kinds. Push-only (D-228): neither ever writes a bell row. */
 export const CHAT_NOTIFICATION_KINDS = {
   /** A staff reply, pushed to the member (title "Equipe {tenant}"). */

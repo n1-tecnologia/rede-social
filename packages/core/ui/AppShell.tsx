@@ -11,7 +11,15 @@ export interface AppShellProps {
   brand: { displayName: string; logoUrl: string | null };
   /** `buildNav(bootstrap.modules, labels)` — never a hard-coded list (MOD-04). */
   nav: ShellNav;
-  counters: { unreadNotifications: number; unreadConversations: number };
+  /**
+   * The bootstrap's counters. `conversationsBadge` (07-08) says how the chat slot draws its count, a
+   * member's dot or the staff number; 07-09 renders it, and it is optional until then.
+   */
+  counters: {
+    unreadNotifications: number;
+    unreadConversations: number;
+    conversationsBadge?: 'dot' | 'count';
+  };
   avatar: { src: string | null; alt: string };
   labels: { mainNav: string; profile: string; settings: string; logout: string; theme: string };
   settingsHref: string;
