@@ -337,6 +337,20 @@
       "when": 1790777695710,
       "tag": "20260930141455_notifications_retract_prune",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790778230336,
+      "tag": "20260930142350_notifications_prune_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1790778232914,
+      "tag": "20260930142352_notifications_prune",
+      "breakpoints": true
     }
   ]
 }

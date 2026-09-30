@@ -27,10 +27,15 @@ begin;
 --     becomes EXACTLY `{"removed": true}`; the same subject id in B is untouched (adjacency, T-07-21);
 --     a row about another target is untouched; a second call changes nothing (idempotent); a lane
 --     without a tenant claim, or an unknown `p_on`, is refused (42501).
+-- 11. (07-04, D-231) `app.notifications_prune` is SECURITY INVOKER, executable by `service_role` only
+--     (`authenticated` gets 42501); as `service_role` it deletes oldest first, at most `p_batch` rows
+--     (2 of 3 old rows), then the rest; the 90-days-plus-1-minute row goes and the 89-days-23-hours row
+--     stays (NOTIF-02 boundary); its inner select is served by `notifications_created_idx` BY NAME on
+--     the ANALYZEd fixture of fact 8.
 --
 -- Fixture ids use the `15100000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(38);
+select plan(47);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-nt-a', 'Notificacoes A', '15100000-0000-4000-8000-000000000001');
@@ -433,6 +438,88 @@ select matches(
 );
 select ok(
   (select plan from notification_plans where name = 'unseen') not like '%Seq Scan%',
+  '…and it is not a sequential scan'
+);
+
+-- ── 11. the 90-day prune (07-04, D-231) ───────────────────────────────────────────────────────
+select ok(
+  (select not prosecdef and 'search_path=""' = any(proconfig) from pg_proc
+    where oid = 'app.notifications_prune(int)'::regprocedure),
+  'fact 11: app.notifications_prune is SECURITY INVOKER with search_path pinned to ""'
+);
+select ok(
+  has_function_privilege('service_role', 'app.notifications_prune(int)', 'execute')
+  and not has_function_privilege('authenticated', 'app.notifications_prune(int)', 'execute')
+  and not has_function_privilege('anon', 'app.notifications_prune(int)', 'execute'),
+  'fact 11: only service_role (the admin lane) may execute it'
+);
+select tests.as_tenant('15100000-0000-4000-8000-000000000001', '15100000-0000-4000-8000-0000000000a2');
+select throws_ok(
+  $$ select app.notifications_prune(10) $$,
+  '42501',
+  null,
+  'fact 11: a tenant lane (authenticated) calling the cross-tenant prune is refused (42501)'
+);
+reset role;
+-- Three rows past the boundary (95 d, 91 d, 90 d + 1 min) and one inside it (89 d 23 h), in A and B.
+insert into public.notifications
+  (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id, created_at)
+values
+  ('15100000-0000-4000-8000-000000000001', '15100000-0000-4000-8000-0000000000a2', 'feed.post',
+   'prune:95d', 'post', gen_random_uuid(), now() - interval '95 days'),
+  ('15100000-0000-4000-8000-000000000011', '15100000-0000-4000-8000-0000000000b1', 'feed.post',
+   'prune:91d', 'post', gen_random_uuid(), now() - interval '91 days'),
+  ('15100000-0000-4000-8000-000000000001', '15100000-0000-4000-8000-0000000000a3', 'feed.post',
+   'prune:90d1m', 'post', gen_random_uuid(), now() - interval '90 days 1 minute'),
+  ('15100000-0000-4000-8000-000000000001', '15100000-0000-4000-8000-0000000000a2', 'feed.post',
+   'prune:89d23h', 'post', gen_random_uuid(), now() - interval '89 days 23 hours');
+set local role service_role;
+select results_eq(
+  $$ select app.notifications_prune(2) $$,
+  ARRAY[2],
+  'fact 11: a batch of 2 deletes exactly 2 of the 3 old rows'
+);
+reset role;
+select results_eq(
+  $$ select dedupe_key from public.notifications where dedupe_key like 'prune:%' order by 1 $$,
+  ARRAY['prune:89d23h', 'prune:90d1m'],
+  'fact 11: …the OLDEST two (95 d in A, 91 d in B: the prune is cross-tenant), oldest first'
+);
+set local role service_role;
+select results_eq(
+  $$ select app.notifications_prune(500) $$,
+  ARRAY[1],
+  'fact 11: the next call deletes the remaining old row and returns fewer than the batch'
+);
+reset role;
+select results_eq(
+  $$ select dedupe_key from public.notifications where dedupe_key like 'prune:%' $$,
+  ARRAY['prune:89d23h'],
+  'fact 11 boundary: 90 days + 1 minute is gone, 89 days 23 hours stays'
+);
+
+analyze public.notifications;
+do $$
+declare
+  v_plan text;
+begin
+  execute $q$
+    explain (format json)
+    select id
+      from public.notifications
+     where created_at < now() - interval '90 days'
+     order by created_at
+     limit 500 $q$ into v_plan;
+  insert into notification_plans values ('prune', v_plan);
+end
+$$;
+select matches(
+  (select plan from notification_plans where name = 'prune'),
+  'notifications_created_idx',
+  'fact 11: the prune''s inner select is served by notifications_created_idx, BY NAME'
+);
+select ok(
+  (select plan from notification_plans where name = 'prune') not like '%Seq Scan%',
   '…and it is not a sequential scan'
 );
 

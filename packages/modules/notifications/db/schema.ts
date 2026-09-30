@@ -85,11 +85,17 @@ export const notifications = pgTable(
       .where(sql`read_at is not null`),
     // The bell's count: `count(*) … where seen_at is null` (pgTAP 151 fact 9).
     index('notifications_unseen_idx').on(t.tenantId, t.userId).where(sql`seen_at is null`),
-    // Retraction (07-04): `delete … where subject_type/subject_id` or `object_type/object_id`.
+    // Retraction (07-04): `app.notifications_retract` blanks the payload `where subject_type/subject_id`
+    // or `object_type/object_id` (keep-and-mark, never a delete).
     index('notifications_subject_idx').on(t.tenantId, t.subjectType, t.subjectId),
     index('notifications_object_idx')
       .on(t.tenantId, t.objectType, t.objectId)
       .where(sql`object_id is not null`),
+    // D-231 pruning (07-04): `app.notifications_prune` deletes rows older than 90 days, oldest first,
+    // ACROSS tenants on purpose (the hourly sweeper runs it through the admin lane). This is the
+    // documented exception to SCHEMA-CONVENTIONS' tenant-first rule: a deliberately cross-tenant prune
+    // has no tenant to lead with. The table still has tenant-first indexes above (pgTAP 040).
+    index('notifications_created_idx').on(t.createdAt),
     // Fact 1: owner-only, and still ANDed with the tenant claim.
     pgPolicy('notifications_owner_select', {
       for: 'select',

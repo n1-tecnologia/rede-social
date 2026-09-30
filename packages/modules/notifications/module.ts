@@ -14,6 +14,8 @@ import { countUnseen } from './server/service';
  * `jobs`: the fan-out runs in the WORKER (`notifications.fanout`); the bus subscriber only enqueues.
  * `counters`: this module's share of the bootstrap counters, computed inside the caller's tenant
  * lane; only an EFFECTIVE module contributes, so a disabled one reads zero.
+ * `sweepFunctions`: the 90-day prune (D-231), run by the kernel's hourly sweeper for EVERY tenant,
+ * enabled or not (a disabled tenant's old rows still expire).
  *
  * No `defaultRolePermissions`: every member reads and marks only their own rows, and the database's
  * owner-only policies are what enforce it.
@@ -34,4 +36,7 @@ export const notificationsModule = defineModule({
   routes: () => import('./server/routes').then((m) => m.notificationsRoutes),
   jobs: [notificationsFanoutJob],
   counters: async (tx, ctx) => ({ unreadNotifications: await countUnseen(tx, ctx) }),
+  // D-231 (07-04): rows older than 90 days are deleted by the kernel's EXISTING hourly sweeper, which
+  // runs `app.notifications_prune(batch)` through the admin lane. The kernel never names this table.
+  sweepFunctions: ['notifications_prune'],
 });

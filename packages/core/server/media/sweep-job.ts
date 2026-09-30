@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { mediaAssets } from '../../db/schema';
+import { registeredSweepFunctions } from '../jobs/sweep-functions';
 import { moduleLogger } from '../logging';
 import type { JobDefinition } from '../modules/manifest';
 import { MEDIA_SWEEP_QUEUE } from './index';
@@ -52,6 +53,14 @@ import { type ReconcilableVideo, reconcileVideoAsset } from './video/reconcile';
  * and the batch continues; the re-arm happens whatever the outcome, so a bad row cannot stop the
  * cadence.
  *
+ * **A third pass runs the registered sweep functions** (07-04, planning decision 3). Every name a
+ * module manifest declared in `sweepFunctions` is executed as `select app.<name>(<batch>)` through
+ * the admin lane, repeated while it deletes a full batch, at most `SWEEP_FUNCTION_MAX_CALLS` times per
+ * run. The kernel never names the table behind it (MOD-02): it only knows the function contract
+ * (`../jobs/sweep-functions.ts`). Each name has its own try/catch, AFTER the media passes and BEFORE
+ * the re-arm, so a failing function stops neither another function, nor the media collection, nor
+ * the cadence.
+ *
  * Import direction is service -> job only: the queue NAME and the singleton key come from `./index`
  * (where `MEDIA_DERIVE_QUEUE` lives), never from this file, so `service.ts` can own `purgeAsset` and
  * `armSweeper` without a cycle.
@@ -72,6 +81,31 @@ export {
 } from './limits';
 
 const seconds = (ms: number): number => ms / 1000;
+
+/** Rows one sweep-function call may delete (07-04). The functions clamp to their own ceiling too. */
+export const SWEEP_FUNCTION_BATCH = 500;
+
+/** Calls per name per hourly run: at most `SWEEP_FUNCTION_BATCH * 20` rows, then the next hour. */
+export const SWEEP_FUNCTION_MAX_CALLS = 20;
+
+/**
+ * One registered sweep function, repeated while it returns a full batch. Returns the rows deleted.
+ * `name` was validated at registration and still travels only as an IDENTIFIER, never as text.
+ */
+async function runSweepFunction(name: string): Promise<number> {
+  let deleted = 0;
+  for (let call = 0; call < SWEEP_FUNCTION_MAX_CALLS; call += 1) {
+    const rows = await withAdminTx(async (tx) =>
+      tx.execute<{ n: number | null }>(
+        sql`select ${sql.identifier('app')}.${sql.identifier(name)}(${SWEEP_FUNCTION_BATCH}::int) as n`,
+      ),
+    );
+    const n = Number(rows[0]?.n ?? 0);
+    deleted += n;
+    if (n < SWEEP_FUNCTION_BATCH) break;
+  }
+  return deleted;
+}
 
 /** A video younger than this is left to its webhook and to the browser's readiness poll. */
 const RECONCILE_SWEEP_MIN_AGE_S = 300;
@@ -191,6 +225,23 @@ export const sweepOrphansJob: JobDefinition<Record<string, never>> = {
         },
         'kernel.media-sweep-orphans failed unexpectedly',
       );
+    }
+
+    // 07-04: the registered sweep functions, each isolated from the others and from the media passes.
+    for (const name of registeredSweepFunctions()) {
+      try {
+        const deleted = await runSweepFunction(name);
+        log.info({ event: 'sweep.function', name, deleted }, 'sweep function ran');
+      } catch (error) {
+        log.error(
+          {
+            event: 'sweep.function_failed',
+            name,
+            err: error instanceof Error ? error.message : String(error),
+          },
+          'a sweep function failed; the others and the re-arm still run',
+        );
+      }
     }
 
     // Outside the try/catch above so the cadence survives ANY failure inside the batch: a run that

@@ -120,6 +120,15 @@ export interface ModuleManifest {
    * `countersFor`), so a disabled module's badge reads zero rather than a stale count.
    */
   counters?: (tx: Tx, ctx: RequestContext) => Promise<Partial<Counters>>;
+  /**
+   * 07-04 (planning decision 3): SQL functions the kernel's hourly sweeper runs for this module. Each
+   * name `n` must be an `app.n(p_batch int) returns int` that deletes at most `p_batch` rows and
+   * returns how many it deleted. The kernel executes `app.<name>(batch)` THROUGH THE ADMIN LANE
+   * (`withAdminTx`), repeating while a full batch comes back (bounded per run), and one function's
+   * failure never stops another or the media passes. Names must match `^[a-z_]+$`
+   * (`../jobs/sweep-functions.ts`); the app registry registers them at import time.
+   */
+  sweepFunctions?: readonly string[];
 }
 
 /**

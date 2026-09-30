@@ -8,6 +8,7 @@ import type { Tx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { subscribe } from '@rede-social/core/server/events/bus';
 import { registerJobQueues } from '@rede-social/core/server/jobs/boss';
+import { registerSweepFunctions } from '@rede-social/core/server/jobs/sweep-functions';
 import {
   type Counters,
   setCountersResolver,
@@ -55,13 +56,17 @@ export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
  *  - every manifest's event subscriptions land on the kernel bus, so a module never reaches into
  *    the bus itself and the set of live subscribers is exactly what this registry holds;
  *  - every job name is registered with the kernel's queue list, which the worker creates at start
- *    and the API's lazy enqueue path re-creates idempotently. Nothing here opens a connection.
+ *    and the API's lazy enqueue path re-creates idempotently;
+ *  - every `sweepFunctions` name (07-04) is registered for the kernel's hourly sweeper. Nothing here
+ *    opens a connection.
  */
 for (const manifest of Object.values(MODULE_REGISTRY)) {
   for (const subscription of manifest?.events ?? []) {
     subscribe(subscription.event, subscription.handler);
   }
   registerJobQueues((manifest?.jobs ?? []).map((job) => job.name));
+  // 07-04: the hourly sweeper runs these through the admin lane; a bad name throws HERE, at import.
+  registerSweepFunctions(manifest?.sweepFunctions ?? []);
 }
 
 /**
