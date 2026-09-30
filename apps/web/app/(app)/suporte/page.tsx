@@ -2,6 +2,8 @@ import { resolveBranding } from '@rede-social/contracts';
 import { TenantLogo } from '@rede-social/core/ui';
 import { CHAT_PERMISSIONS } from '@rede-social/module-chat/contracts';
 import { ThreadHeader } from '@rede-social/module-chat/ui';
+import { EmptyState } from '@rede-social/ui';
+import { MessageCircle } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
@@ -15,8 +17,9 @@ import { ThreadPane } from './ThreadPane';
  * hub, no ticket, no subject.
  *
  * **Who gets what is decided by permission, never by role** (D-223, D-224):
- * - a holder of `chat.support` (staff) gets the not-found screen FOR NOW; 07-10 replaces this branch
- *   with the inbox;
+ * - a holder of `chat.support` (staff) gets the inbox from the shared `/suporte` layout (07-10), and
+ *   THIS page is only the right pane's idle state "Escolha uma conversa", drawn from `lg` (below `lg`
+ *   the layout shows the list instead and hides this pane);
  * - a caller without `chat.support.contact` (the chat module is off for the tenant, D-40) gets the
  *   not-found screen too;
  * - everyone else is a member and gets the thread.
@@ -33,8 +36,20 @@ import { ThreadPane } from './ThreadPane';
 export default async function SupportPage() {
   const [bootstrap, t] = await Promise.all([requireBootstrap(), getTranslations('chat')]);
 
-  // 07-10 swaps this branch for the staff inbox.
-  if (bootstrap.permissions.includes(CHAT_PERMISSIONS.answer)) notFound();
+  // 07-10 (UI-D-264): staff see the inbox from the layout; this is the split's idle right pane.
+  if (bootstrap.permissions.includes(CHAT_PERMISSIONS.answer)) {
+    return (
+      <div data-support-idle className="hidden min-h-0 flex-1 items-center justify-center lg:flex">
+        <EmptyState
+          variant="plain"
+          icon={MessageCircle}
+          title={t('inbox.idle.title')}
+          body={t('inbox.idle.body')}
+          className="justify-center"
+        />
+      </div>
+    );
+  }
   if (!bootstrap.permissions.includes(CHAT_PERMISSIONS.contact)) notFound();
 
   const thread = await getSupportThread();

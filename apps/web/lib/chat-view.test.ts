@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import type { MessageRow } from '@rede-social/module-chat/contracts';
+import type { InboxRow, MessageRow } from '@rede-social/module-chat/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
@@ -8,6 +8,8 @@ import {
   chatDayLabel,
   chatMessageView,
   chatRuns,
+  inboxRowView,
+  inboxTime,
   tenantDayKeys,
 } from './chat-view';
 
@@ -200,5 +202,131 @@ describe('chatRuns — separators, runs and the time on the last bubble', () => 
     const last = items.at(-1);
     expect(last).toMatchObject({ kind: 'message', key: 'pending-1', pending: true });
     expect(last && last.kind === 'message' ? last.pendingLabel : null).toBe('Enviando…');
+  });
+});
+
+const MEMBERSHIP = '2a000000-0000-4000-8000-000000000001';
+const AVATAR = '3a000000-0000-4000-8000-000000000001';
+
+function inboxRow(overrides: Partial<InboxRow> = {}): InboxRow {
+  return {
+    conversationId: '1d000000-0000-4000-8000-000000000001',
+    member: {
+      membershipId: MEMBERSHIP,
+      displayName: 'Ana Souza',
+      avatarAssetId: AVATAR,
+      state: 'active',
+    },
+    lastMessage: {
+      seq: 3,
+      preview: 'Quero trocar meu e-mail.',
+      side: 'member',
+      authorFirstName: null,
+    },
+    lastMessageAt: '2026-09-30T17:02:00.000000Z',
+    awaiting: true,
+    ...overrides,
+  };
+}
+
+describe('inboxTime / inboxRowView — the staff inbox row (UI-D-262)', () => {
+  // "Now" is 01:30Z on Oct 1st: São Paulo is still on Sep 30th (22:30), Manaus on Sep 30th (21:30).
+  const now = at('2026-10-01T01:30:00Z');
+  const keys = tenantDayKeys(now, SP);
+  const ontem = { yesterday: 'Ontem' };
+
+  it('13. today is HH:mm in the tenant clock, even past the UTC midnight', () => {
+    // 01:10Z on the 1st is 22:10 on the 30th in São Paulo: still today for the tenant.
+    expect(inboxTime('2026-10-01T01:10:00Z', keys, SP, ontem)).toBe('22:10');
+    expect(inboxTime('2026-09-30T12:05:00Z', keys, SP, ontem)).toBe('09:05');
+  });
+
+  it('14. the tenant yesterday is the catalog word, and older days are dd/MM', () => {
+    // 02:59Z on the 30th is 23:59 on the 29th in São Paulo.
+    expect(inboxTime('2026-09-30T02:59:00Z', keys, SP, ontem)).toBe('Ontem');
+    expect(inboxTime('2026-09-29T03:00:00Z', keys, SP, ontem)).toBe('Ontem');
+    // 02:59Z on the 29th is 23:59 on the 28th: two tenant days ago.
+    expect(inboxTime('2026-09-29T02:59:00Z', keys, SP, ontem)).toBe('28/09');
+    expect(inboxTime('2026-01-05T15:00:00Z', keys, SP, ontem)).toBe('05/01');
+  });
+
+  it('15. the same instants in a Manaus tenant follow the Manaus clock', () => {
+    const manausKeys = tenantDayKeys(now, MANAUS);
+    expect(inboxTime('2026-10-01T01:10:00Z', manausKeys, MANAUS, ontem)).toBe('21:10');
+    expect(inboxTime('2026-09-30T03:30:00Z', manausKeys, MANAUS, ontem)).toBe('Ontem');
+  });
+
+  it('16. a member message previews as-is; a team message is prefixed with the first name', () => {
+    const member = inboxRowView(inboxRow(), { timeZone: SP, keys, t });
+    expect(member).toMatchObject({
+      href: '/suporte/1d000000-0000-4000-8000-000000000001',
+      name: 'Ana Souza',
+      avatar: `/v1/media/${AVATAR}/w128`,
+      preview: 'Quero trocar meu e-mail.',
+      time: '14:02',
+      awaiting: true,
+      state: 'active',
+    });
+    const team = inboxRowView(
+      inboxRow({
+        lastMessage: { seq: 4, preview: 'Pronto!', side: 'staff', authorFirstName: 'Carla' },
+        awaiting: false,
+      }),
+      { timeZone: SP, keys, t },
+    );
+    expect(team.preview).toBe('Carla: Pronto!');
+    expect(team.awaiting).toBe(false);
+    // An agent who left the tenant has no first name: the text alone, never ": Pronto!".
+    const gone = inboxRowView(
+      inboxRow({
+        lastMessage: { seq: 4, preview: 'Pronto!', side: 'staff', authorFirstName: '' },
+      }),
+      { timeZone: SP, keys, t },
+    );
+    expect(gone.preview).toBe('Pronto!');
+  });
+
+  it('17. a multi-line preview is one line, and a departed member is "Membro removido" with no photo', () => {
+    const multi = inboxRowView(
+      inboxRow({
+        lastMessage: {
+          seq: 5,
+          preview: 'Segue a lista:\n1. crachá\r\n2. estacionamento',
+          side: 'member',
+          authorFirstName: null,
+        },
+      }),
+      { timeZone: SP, keys, t },
+    );
+    expect(multi.preview).toBe('Segue a lista: 1. crachá 2. estacionamento');
+
+    const departed = inboxRowView(
+      inboxRow({
+        member: { membershipId: null, displayName: null, avatarAssetId: null, state: 'removed' },
+      }),
+      { timeZone: SP, keys, t },
+    );
+    expect(departed).toMatchObject({ name: 'Membro removido', avatar: null, state: 'removed' });
+
+    const blocked = inboxRowView(inboxRow({ member: { ...inboxRow().member, state: 'blocked' } }), {
+      timeZone: SP,
+      keys,
+      t,
+    });
+    expect(blocked).toMatchObject({ name: 'Ana Souza', state: 'blocked' });
+    expect(blocked.avatar).not.toBeNull();
+  });
+
+  it('18. a conversation with no message yet has no preview and no time', () => {
+    const empty = inboxRowView(
+      inboxRow({ lastMessage: null, lastMessageAt: null, awaiting: false }),
+      {
+        timeZone: SP,
+        keys,
+        t,
+      },
+    );
+    expect(empty.preview).toBe('');
+    expect(empty.time).toBe('');
   });
 });

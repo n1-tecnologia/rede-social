@@ -1,4 +1,8 @@
 import {
+  type ConversationDetail,
+  conversationDetailSchema,
+  type InboxPage,
+  inboxPageSchema,
   type MessagePage,
   messagePageSchema,
   type SendResult,
@@ -69,18 +73,20 @@ export async function getSupportThread(): Promise<SupportThread | null> {
 export type MessageCursor = { afterSeq: number } | { beforeSeq: number };
 
 /**
- * `GET /v1/chat/conversations/{id}/messages?afterSeq=|beforeSeq=` (D-240). Throws `ApiClientError`
- * on a non-2xx answer (a foreign or unknown id is the API's bare 404).
+ * `GET /v1/chat/conversations/{id}/messages?afterSeq=|beforeSeq=` (D-240), or the LATEST page with
+ * `cursor: null` (the staff thread's first render, 07-10). Throws `ApiClientError` on a non-2xx answer
+ * (a foreign or unknown id is the API's bare 404).
  */
 export async function fetchMessages(
   conversationId: string,
-  cursor: MessageCursor,
+  cursor: MessageCursor | null,
 ): Promise<MessagePage> {
   const search = new URLSearchParams();
-  if ('afterSeq' in cursor) search.set('afterSeq', String(cursor.afterSeq));
-  else search.set('beforeSeq', String(cursor.beforeSeq));
+  if (cursor && 'afterSeq' in cursor) search.set('afterSeq', String(cursor.afterSeq));
+  else if (cursor) search.set('beforeSeq', String(cursor.beforeSeq));
+  const query = search.toString();
   const res = await apiFetch(
-    `/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages?${search.toString()}`,
+    `/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages${query ? `?${query}` : ''}`,
   );
   if (!res.ok) throw await apiError(res);
   return messagePageSchema.parse(await res.json());
@@ -89,7 +95,7 @@ export async function fetchMessages(
 /** `fetchMessages`, or `null` on any failure (logged by shape). Never navigates. */
 export async function getMessages(
   conversationId: string,
-  cursor: MessageCursor,
+  cursor: MessageCursor | null,
 ): Promise<MessagePage | null> {
   try {
     return await fetchMessages(conversationId, cursor);
@@ -122,6 +128,97 @@ export async function sendSupportMessage(body: string): Promise<SendResult> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ body }),
   });
+  if (!res.ok) throw await apiError(res);
+  return sendResultSchema.parse(await res.json());
+}
+
+/**
+ * `GET /v1/chat/inbox?cursor=` (CHAT-03, 07-10): one keyset page of the staff inbox, latest activity
+ * first. `cursor: null` is page 1. Throws `ApiClientError` on a non-2xx (403 without `chat.support`).
+ */
+export async function fetchInbox({ cursor }: { cursor: string | null }): Promise<InboxPage> {
+  const query = cursor ? `?${new URLSearchParams({ cursor }).toString()}` : '';
+  const res = await apiFetch(`/v1/chat/inbox${query}`);
+  if (!res.ok) throw await apiError(res);
+  return inboxPageSchema.parse(await res.json());
+}
+
+/**
+ * `fetchInbox` for a server render: the page, or `null` when the API could not answer (the list then
+ * renders its first-load error). A refusal `bootstrapRedirectPath` knows becomes a navigation,
+ * performed OUTSIDE the try/catch (Next 16: `redirect()` throws). Logs carry the shape only.
+ */
+export async function getInbox({ cursor }: { cursor: string | null }): Promise<InboxPage | null> {
+  let path: string | null = null;
+  let page: InboxPage | null = null;
+  try {
+    page = await fetchInbox({ cursor });
+  } catch (error) {
+    if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
+    if (!path)
+      console.error('chat.inbox_read_failed', {
+        status: error instanceof ApiClientError ? error.status : null,
+        code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
+      });
+  }
+  if (path) redirect(path);
+  return page;
+}
+
+/** `GET /v1/chat/conversations/{id}` (D-224). Throws `ApiClientError` on a non-2xx. */
+export async function fetchConversation(conversationId: string): Promise<ConversationDetail> {
+  const res = await apiFetch(`/v1/chat/conversations/${encodeURIComponent(conversationId)}`);
+  if (!res.ok) throw await apiError(res);
+  return conversationDetailSchema.parse(await res.json());
+}
+
+/**
+ * The staff thread's conversation, three ways (07-10, D-23): `ok` with the detail; `not-found` for
+ * the API's bare 404 (an unknown id, another tenant's, another member's), which the page renders as
+ * the ONE not-found screen; `error` for anything else (the pane's load error, never "not found").
+ */
+export type ConversationResult =
+  | { status: 'ok'; detail: ConversationDetail }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
+export async function getConversation(conversationId: string): Promise<ConversationResult> {
+  let path: string | null = null;
+  let result: ConversationResult = { status: 'error' };
+  try {
+    result = { status: 'ok', detail: await fetchConversation(conversationId) };
+  } catch (error) {
+    if (error instanceof ApiClientError && (error.status === 404 || error.status === 400)) {
+      return { status: 'not-found' };
+    }
+    if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
+    if (!path)
+      console.error('chat.conversation_read_failed', {
+        status: error instanceof ApiClientError ? error.status : null,
+        code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
+      });
+  }
+  if (path) redirect(path);
+  return result;
+}
+
+/**
+ * `POST /v1/chat/conversations/{id}/messages { body }` (CHAT-03, D-225): any staff member answers any
+ * support conversation. Throws `ApiClientError` on a non-2xx: a blocked or departed member is a 409
+ * with `details.chat` `member_blocked` / `member_removed`.
+ */
+export async function replyToConversation(
+  conversationId: string,
+  body: string,
+): Promise<SendResult> {
+  const res = await apiFetch(
+    `/v1/chat/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body }),
+    },
+  );
   if (!res.ok) throw await apiError(res);
   return sendResultSchema.parse(await res.json());
 }

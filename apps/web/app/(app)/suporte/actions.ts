@@ -1,11 +1,17 @@
 'use server';
 
-import { sendMessageInputSchema } from '@rede-social/module-chat/contracts';
+import { CHAT_MAX_CURSOR_LENGTH, sendMessageInputSchema } from '@rede-social/module-chat/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
-import { sendSupportMessage } from '@/lib/chat';
-import { type ChatMessageView, chatMessageView } from '@/lib/chat-view';
+import { fetchInbox, sendSupportMessage } from '@/lib/chat';
+import {
+  type ChatMessageView,
+  chatMessageView,
+  type InboxRowView,
+  inboxRowView,
+  tenantDayKeys,
+} from '@/lib/chat-view';
 
 /**
  * The member thread's send (CHAT-02, UI-D-260), in the `notificacoes/actions.ts` conventions: the SAME
@@ -59,6 +65,51 @@ export async function sendSupportMessageAction(body: unknown): Promise<SendSuppo
       });
   }
 
+  if (path) redirect(path);
+  return result;
+}
+
+/* ── 07-10: the staff inbox ─────────────────────────────────────────────────────────────────────── */
+
+export type InboxPageResult =
+  | { ok: true; items: InboxRowView[]; nextCursor: string | null }
+  | { ok: false };
+
+/**
+ * The staff inbox's next keyset page (CHAT-03, UI-D-262): what `InfiniteScroll` calls at the
+ * sentinel. A user-paced read, so a server action (the paging paradigm); the realtime-triggered page-1
+ * refetch is the `GET /api/chat/inbox` route instead. The cursor is opaque and capped at the API's
+ * own ceiling before the request; the rows come back formatted in the tenant zone from ONE clock read.
+ * A refusal the bootstrap knows becomes a navigation outside the try/catch; anything else is
+ * `{ ok: false }` (the list's inline load-more line).
+ */
+export async function loadMoreInboxAction(cursor: unknown): Promise<InboxPageResult> {
+  if (typeof cursor !== 'string' || cursor.length === 0 || cursor.length > CHAT_MAX_CURSOR_LENGTH) {
+    return { ok: false };
+  }
+  let path: string | null = null;
+  let result: InboxPageResult = { ok: false };
+  try {
+    const [bootstrap, t, page] = await Promise.all([
+      getBootstrap(),
+      getTranslations('chat'),
+      fetchInbox({ cursor }),
+    ]);
+    const timeZone = bootstrap.tenant.timezone;
+    const keys = tenantDayKeys(Date.now(), timeZone);
+    result = {
+      ok: true,
+      items: page.items.map((row) => inboxRowView(row, { timeZone, keys, t })),
+      nextCursor: page.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
+    if (!path)
+      console.error('chat.inbox_page_failed', {
+        status: error instanceof ApiClientError ? error.status : null,
+        code: error instanceof ApiClientError ? error.code : 'TRANSPORT',
+      });
+  }
   if (path) redirect(path);
   return result;
 }

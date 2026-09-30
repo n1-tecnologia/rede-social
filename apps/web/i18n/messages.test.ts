@@ -1642,3 +1642,52 @@ describe('07-09 — chat member thread strings and placeholders', () => {
       expect(all).not.toContain(word);
   });
 });
+
+/**
+ * 07-10 — the `chat` catalog, staff side (UI-SPEC Copywriting Contract, "Core contract" and "Support
+ * chat"), verbatim, with every placeholder FORMATTED so a lost brace fails here. No status words: the
+ * inbox has no Abertas / Resolvidas chips (D-221).
+ */
+describe('07-10 — chat staff inbox strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['chat.inbox.title', 'Suporte'],
+    ['chat.inbox.back', 'Voltar para o início'],
+    ['chat.inbox.empty.title', 'Nenhuma conversa ainda'],
+    ['chat.inbox.empty.body', 'Quando um membro mandar mensagem, a conversa aparece aqui.'],
+    ['chat.inbox.idle.title', 'Escolha uma conversa'],
+    [
+      'chat.inbox.idle.body',
+      'Qualquer pessoa da equipe pode responder. Quando alguém abre a conversa, ela deixa de aparecer como aguardando para toda a equipe.',
+    ],
+    ['chat.inbox.errors.loadMore', 'Não foi possível carregar mais conversas.'],
+    ['chat.inbox.teamPreview', '{firstName}: {preview}'],
+    ['chat.inbox.awaitingSr', ', aguardando resposta'],
+    ['chat.blocked.pill', 'Bloqueado'],
+    ['chat.removed.name', 'Membro removido'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('formats the team preview and keeps the inbox free of status words (D-221)', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'chat',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    expect(t('inbox.teamPreview', { firstName: 'Carla', preview: 'Pronto!' })).toBe(
+      'Carla: Pronto!',
+    );
+    const all = JSON.stringify(lookup('chat')).toLowerCase();
+    for (const word of ['abertas', 'resolvidas', 'resolvido', 'atribu'])
+      expect(all).not.toContain(word);
+  });
+});

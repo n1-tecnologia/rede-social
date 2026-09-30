@@ -10,6 +10,7 @@ export {
   type ChatComposerProps,
 } from './ChatComposer';
 export { DaySeparator, type DaySeparatorProps } from './DaySeparator';
+export { InboxRow, type InboxRowProps, type InboxRowState } from './InboxRow';
 export {
   MessageBubble,
   type MessageBubbleLabel,

@@ -43,6 +43,29 @@
       "errors": {
         "failed": "Não foi possível enviar. Sua mensagem continua no campo. Tente de novo."
       }
+    },
+    "inbox": {
+      "title": "Suporte",
+      "back": "Voltar para o início",
+      "empty": {
+        "title": "Nenhuma conversa ainda",
+        "body": "Quando um membro mandar mensagem, a conversa aparece aqui."
+      },
+      "idle": {
+        "title": "Escolha uma conversa",
+        "body": "Qualquer pessoa da equipe pode responder. Quando alguém abre a conversa, ela deixa de aparecer como aguardando para toda a equipe."
+      },
+      "errors": {
+        "loadMore": "Não foi possível carregar mais conversas."
+      },
+      "teamPreview": "{firstName}: {preview}",
+      "awaitingSr": ", aguardando resposta"
+    },
+    "blocked": {
+      "pill": "Bloqueado"
+    },
+    "removed": {
+      "name": "Membro removido"
     }
   }
 }

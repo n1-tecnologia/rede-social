@@ -1,5 +1,10 @@
-import type { MessageRow } from '@rede-social/module-chat/contracts';
-import type { MessageBubbleLabel, MessageListItem } from '@rede-social/module-chat/ui';
+import { avatarUrlFor } from '@rede-social/contracts/profiles';
+import type { InboxRow, MessageRow } from '@rede-social/module-chat/contracts';
+import type {
+  InboxRowState,
+  MessageBubbleLabel,
+  MessageListItem,
+} from '@rede-social/module-chat/ui';
 import type { getTranslations } from 'next-intl/server';
 import { formatEventTime, tenantDayKey } from './events-view';
 
@@ -186,4 +191,81 @@ export function chatRuns(
     });
   }
   return items;
+}
+
+/** `dd/MM` in the tenant zone: the inbox's older-than-yesterday time (UI-D-262). */
+function formatDayMonthNumeric(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('pt-BR', { timeZone, day: '2-digit', month: '2-digit' }).format(
+    new Date(iso),
+  );
+}
+
+/**
+ * The inbox time (UI-D-262): "HH:mm" when the instant falls on the tenant's today, the catalog's
+ * "Ontem" on the tenant's yesterday, else `dd/MM`. Absolute on purpose (no relative ticking), and
+ * clock-free: `keys` come from the caller's ONE `Date.now()`.
+ */
+export function inboxTime(
+  iso: string,
+  keys: ChatDayKeys,
+  timeZone: string,
+  words: Pick<ChatDayWords, 'yesterday'>,
+): string {
+  const dayKey = tenantDayKey(iso, timeZone);
+  if (dayKey === keys.todayKey) return formatEventTime(iso, timeZone);
+  if (dayKey === keys.yesterdayKey) return words.yesterday;
+  return formatDayMonthNumeric(iso, timeZone);
+}
+
+/** One inbox row, formatted for `InboxRow`. Serializable: the layout hands these to the client list. */
+export interface InboxRowView {
+  conversationId: string;
+  href: string;
+  name: string;
+  avatar: string | null;
+  preview: string;
+  time: string;
+  awaiting: boolean;
+  state: InboxRowState;
+}
+
+/** Newlines (and any run of whitespace) as one space: the preview is ONE line (UI E11/long-text). */
+const oneLine = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+/**
+ * One API inbox row as the staff list draws it (UI-D-262):
+ * - a team message previews as "{firstName}: {preview}" (`chat.inbox.teamPreview`); an agent who has
+ *   since left (empty first name) previews the text alone;
+ * - a departed member reads `chat.removed.name` with no avatar (UI-D-24); a blocked one keeps name and
+ *   photo, and the row draws the "Bloqueado" pill;
+ * - the time is `inboxTime` in the tenant zone.
+ */
+export function inboxRowView(
+  row: InboxRow,
+  { timeZone, keys, t }: { timeZone: string; keys: ChatDayKeys; t: Translator },
+): InboxRowView {
+  const removed = row.member.state === 'removed';
+  const name = removed ? t('removed.name') : (row.member.displayName ?? t('removed.name'));
+  const message = row.lastMessage;
+  let preview = '';
+  if (message) {
+    const text = oneLine(message.preview);
+    const firstName = message.authorFirstName ?? '';
+    preview =
+      message.side === 'staff' && firstName
+        ? t('inbox.teamPreview', { firstName, preview: text })
+        : text;
+  }
+  return {
+    conversationId: row.conversationId,
+    href: `/suporte/${row.conversationId}`,
+    name,
+    avatar: removed ? null : avatarUrlFor(row.member.avatarAssetId),
+    preview,
+    time: row.lastMessageAt
+      ? inboxTime(row.lastMessageAt, keys, timeZone, { yesterday: t('day.yesterday') })
+      : '',
+    awaiting: row.awaiting,
+    state: row.member.state,
+  };
 }
