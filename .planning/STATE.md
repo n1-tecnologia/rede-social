@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 7
+current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Phase 7 UI-SPEC approved
-last_updated: "2026-09-30T10:07:45.874Z"
-last_activity: 2026-09-29
-last_activity_desc: "06-09 complete: tenant timezone everywhere (feed + media pins retired), SCHEMA-CONVENTIONS (l) Secrets inside a tenant, phase6-smoke witness, pnpm verify green (e2e 555/0 failed, e2e:pwa 46 with events-prefetch). Phase 6: 9/9 plans; verify-work + phone UAT (blocked on 01.1) next"
-state_head: 4636ae5a254ebd83ec40afc3e2cc0d19f1605cd6
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-09-30T11:43:59.181Z"
+last_activity: 2026-09-30
+last_activity_desc: "07-02 complete: sketch 007 (nine prototype-less Phase 7 surfaces + two proto deltas) drawn and registered, D-33 gate armed approved: false; next 07-01 (Wave 1)"
+state_head: 7fd206186a2a0a9b3f6d7e54bf61a3580a0c82e0
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 109
-  completed_plans: 95
+  completed_plans: 96
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 6 — Events
+**Current focus:** Phase 07 — Notifications, Web Push & Chat
 
 ## Current Position
 
-Phase: 7 (Notifications, Web Push & Chat) — READY TO EXECUTE
-Plan: 9 of 9 complete (06-01 … 06-09); next: /gsd-verify-work 6 (phone UAT items 1-10 carried, blocked on 01.1), then phase close
-Status: Plans complete, awaiting verification — local exit gate `pnpm verify` green 2026-09-27 23:50 São Paulo; sketch 006 approved (provisional, 2026-09-27); real-phone UAT waits on 01.1
-Last activity: 2026-09-29 - Completed quick task 260929-ltf: reconcile pending Mux videos without the webhook and fix the post composer video spinner
+Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
+Plan: 1 of 11 complete (07-02, the D-33 sketch 007); next: 07-01 (Wave 1 tracer). The sketch 007 gate (approved: false) blocks 07-04 T3, 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and T2 until the user approves
+Status: Executing Phase 07
+Last activity: 2026-09-30 — Completed 07-02 (sketch 007 drawn, D-33 gate armed)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -155,6 +155,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 06 P07 | 23min | 2 tasks | 28 files |
 | Phase 06 P08 | 45 min | 2 tasks | 26 files |
 | Phase 06 P09 | 5h 43m | 2 tasks | 27 files |
+| Phase 07 P02 | 22 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -491,6 +492,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-09: every tenant timestamp is formatted in bootstrap.tenant.timezone (required argument in postCardView, commentView, MediaAssetRow); the platform panel's PANEL_TIME_ZONE stays the platform's own
 - [Phase 06]: 06-09: seed events anchor to the tenant-local noon of the seed day; now-relative e2e fixtures that read local-day copy take their window from sameDayWindow (events-admin.ts)
 - [Phase 06]: 06-09: SCHEMA-CONVENTIONS (l) Secrets inside a tenant is the reference for Phase 7 secrets/definers; the 06-06 rule (side-effecting or externally redirecting route handlers answer 204 no-store to prefetch/RSC requests) carries forward
+- [Phase 07]: 07-02: sketch 007 ships the D-33 gate closed (approved: false); 07-04 T3, 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and 07-10 T2 halt on their precondition until the user pastes the approval keys into .planning/sketches/007-phase-07-designed-screens/README.md
+- [Phase 07]: 07-02: two drawing findings are left for the D-33 review. (1) The shipped InstallHint puts the inline Share icon at the end of the body, far from Compartilhar in the push copy. (2) max-h-30 is measured border-box and shows about 4.3 composer lines, not five.
 
 ### Pending Todos
 
@@ -560,6 +563,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T08:40:24.698Z
-Stopped at: Phase 7 UI-SPEC approved
-Resume file: .planning/phases/07-notifications-web-push-chat/07-UI-SPEC.md
+Last session: 2026-09-30T11:43:32.695Z
+Stopped at: Completed 07-02-PLAN.md
+Resume file: None
