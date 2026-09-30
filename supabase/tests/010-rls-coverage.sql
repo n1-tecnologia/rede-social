@@ -134,7 +134,12 @@ select is_empty(
         -- as its siblings, and it matters for a second one: in 05.2 the API reads only the caller's
         -- own rows, and the policy is what keeps every other path (a worker, a psql session, V2's
         -- "quem viu") inside one tenant.
-        ('story_views')
+        ('story_views'),
+        -- Phase 7 (07-06). `push_subscriptions` carries `tenant_id` and OWNER-only select/delete
+        -- policies ANDed with the tenant claim, so assertions 1-2 already cover it; it is listed for
+        -- the same reason as its siblings, and its rows are the most sensitive in the notifications
+        -- module: the endpoint and keys of a member's device. NOT exempted anywhere.
+        ('push_subscriptions')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,

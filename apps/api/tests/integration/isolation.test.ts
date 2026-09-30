@@ -1303,6 +1303,93 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("b11. push subscriptions: a demo member cannot forget a lab member's device, and a demo session on the lab host is refused (07-06)", async () => {
+    // `push_subscriptions` is OWNER-scoped and tenant-ANDed (T-07-36). The fixture is adjacent on
+    // purpose: the demo and lab devices carry the SAME endpoint string (uniqueness is per tenant), so
+    // only the tenant and the owner can tell them apart. rede-lab has notifications OFF in the seed,
+    // so it is turned on for this case (the lab member saves through the real route) and restored in
+    // `finally`.
+    const { createECDH, randomBytes } = await import('node:crypto');
+    const keys = () => {
+      const ecdh = createECDH('prime256v1');
+      ecdh.generateKeys();
+      return {
+        p256dh: ecdh.getPublicKey().toString('base64url'),
+        auth: randomBytes(16).toString('base64url'),
+      };
+    };
+    const push = (method: 'POST' | 'DELETE', token: string, host: string, body: object) =>
+      api.request('/v1/notifications/push-subscriptions', {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          [TENANT_HOST_HEADER]: host,
+        },
+        body: JSON.stringify(body),
+      });
+    const endpoint = `https://push.fake.test/sub/isolation-b11-${RUN}`;
+    const rowsFor = () =>
+      adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text as tenant_id from public.push_subscriptions
+         where endpoint = ${endpoint} order by tenant_id`;
+    const [labFlag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = 'notifications'`;
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'notifications', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+
+      expect(
+        (await push('POST', tokens.labMember, HOSTS.lab, { endpoint, keys: keys() })).status,
+      ).toBe(204);
+      expect(
+        (await push('POST', tokens.demoMember, HOSTS.demo, { endpoint, keys: keys() })).status,
+      ).toBe(204);
+      // Adjacency: the same endpoint is a separate row per tenant; the demo save moved nothing.
+      expect((await rowsFor()).map((row) => row.tenant_id).sort()).toEqual(
+        [tenantIds.demo, tenantIds.lab].sort(),
+      );
+
+      // The demo member forgets "the lab's" endpoint: 204 (no oracle), and the lab row still exists.
+      await adminSql`
+        delete from public.push_subscriptions
+         where tenant_id = ${tenantIds.demo}::uuid and endpoint = ${endpoint}`;
+      expect((await push('DELETE', tokens.demoMember, HOSTS.demo, { endpoint })).status).toBe(204);
+      expect((await rowsFor()).map((row) => row.tenant_id)).toEqual([tenantIds.lab]);
+
+      // Positive control: the demo member deleting its OWN device removes exactly that row.
+      expect(
+        (await push('POST', tokens.demoMember, HOSTS.demo, { endpoint, keys: keys() })).status,
+      ).toBe(204);
+      expect((await push('DELETE', tokens.demoMember, HOSTS.demo, { endpoint })).status).toBe(204);
+      expect((await rowsFor()).map((row) => row.tenant_id)).toEqual([tenantIds.lab]);
+
+      // A demo session presented on the lab's registered host is refused before any write (D-23).
+      const mismatch = await push('POST', tokens.demoMember, HOSTS.lab, { endpoint, keys: keys() });
+      expect(mismatch.status).toBe(403);
+      expect(await code(mismatch)).toBe('TENANT_HOST_MISMATCH');
+      const mismatchDelete = await push('DELETE', tokens.demoMember, HOSTS.lab, { endpoint });
+      expect(mismatchDelete.status).toBe(403);
+      expect((await rowsFor()).map((row) => row.tenant_id)).toEqual([tenantIds.lab]);
+    } finally {
+      await adminSql`delete from public.push_subscriptions where endpoint = ${endpoint}`;
+      if (labFlag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${labFlag.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'notifications'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'notifications'`;
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,

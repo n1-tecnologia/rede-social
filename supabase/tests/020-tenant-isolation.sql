@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(150);
+select plan(153);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -226,6 +226,19 @@ insert into public.event_checkin_attempts (tenant_id, event_id, user_id, failed_
    '0a000000-0000-4000-8000-000000000002', 2),
   ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000000e9',
    '0b000000-0000-4000-8000-000000000002', 2);
+reset role;
+
+-- 07-06: ONE push subscription per tenant with the IDENTICAL endpoint string (adjacency: the endpoint
+-- is unique per TENANT, so the same browser URL is legal on both sides). Written through the only
+-- writer, `app.push_subscription_upsert`, with each lane opened as the owning member (the table has
+-- no insert policy).
+select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
+select app.push_subscription_upsert(
+  'https://push.fake.test/sub/0f000000-0000-4000-8000-0000000000f1', 'p256dh-x', 'auth-x', null);
+reset role;
+select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
+select app.push_subscription_upsert(
+  'https://push.fake.test/sub/0f000000-0000-4000-8000-0000000000f1', 'p256dh-x', 'auth-x', null);
 reset role;
 
 -- 03-06/03-08: provider webhook traffic. The table carries NO tenant_id (a provider's event id is
@@ -815,6 +828,26 @@ select results_eq(
      ) select count(*)::int from u $$,
   ARRAY[0],
   'notifications: USING — an update aimed at B''s rows touches nothing'
+);
+-- 07-06: push_subscriptions, owner-only select/delete ANDed with the tenant claim.
+select is_empty(
+  $$ select id from public.push_subscriptions
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'push_subscriptions: B''s rows are invisible'
+);
+select results_eq(
+  $$ select tenant_id::text from public.push_subscriptions
+      where endpoint = 'https://push.fake.test/sub/0f000000-0000-4000-8000-0000000000f1' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'push_subscriptions: adjacency — identical endpoints on both sides, the lane returns only A''s own row'
+);
+select results_eq(
+  $$ with d as (
+       delete from public.push_subscriptions
+        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from d $$,
+  ARRAY[0],
+  'push_subscriptions: USING — a delete aimed at B''s rows touches nothing'
 );
 
 -- 03-01 (MEDIA-01/TENANT-04): the asset ROW is tenant-scoped like every other row. The OBJECT is
