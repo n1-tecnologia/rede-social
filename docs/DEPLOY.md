@@ -153,6 +153,9 @@ Readable by `RUNTIME_SA` only. Names are referenced literally in `deploy-api.yml
 | `mux-signing-key-id-prod` | `MUX_SIGNING_KEY_ID` | `api`, `worker` (signed playback, D-44) |
 | `mux-signing-key-private-prod` | `MUX_SIGNING_KEY_PRIVATE` | `api`, `worker` (base64 PEM) |
 | `mux-webhook-secret-prod` | `MUX_WEBHOOK_SECRET` | `api` (the webhook's only authentication) |
+| `vapid-public-key-prod` | `VAPID_PUBLIC_KEY` | `api`, `worker` (Web Push, NOTIF-03 — see "Phase 7 release"; the same value is Vercel's `NEXT_PUBLIC_VAPID_PUBLIC_KEY`) |
+| `vapid-private-key-prod` | `VAPID_PRIVATE_KEY` | `api`, `worker` (signs every push; never leaves Secret Manager) |
+| `vapid-subject-prod` | `VAPID_SUBJECT` | `api`, `worker` (a `mailto:` contact, never `localhost`) |
 
 `DATABASE_URL` is always the **`api_user`** connection through the Supavisor **transaction** pooler
 (port 6543); `BOSS_DATABASE_URL` is the same role through the **session** pooler (port 5432) because
@@ -170,6 +173,7 @@ Root Directory `apps/web`; Build Command `turbo build`; Ignored Build Step
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | not provisioned (no staging project) | production publishable key |
 | `API_URL` | not provisioned (no staging project) | `api` Cloud Run URL |
 | `PLATFORM_HOST` | *(unset — every Preview host is a generic host, D-21)* | `rede-social-woad.vercel.app` |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | *(unset — every push surface reads "unsupported")* | the PUBLIC half of the production VAPID pair, the same value as `vapid-public-key-prod` (Phase 7 release, step 3). Inlined at build time, so set it BEFORE the push that ships Phase 7 |
 
 No `SITE_URL` anywhere: every absolute URL, including the password-recovery `redirect_to`, is derived
 from the request origin (D-22). Only publishable keys ever reach Vercel — the service key lives in
@@ -444,6 +448,132 @@ that disappears (`route moved or renamed — update REQUIRED_KEYS`) is also a fa
   `branding.spec.ts`'s remote-capable tests are the ones without `isRemote` skips.
 - `otp_expiry = 86400` on the hosted project — now committed as `[remotes.production.auth.email]`
   in `supabase/config.toml`; it lands with the next `supabase config push` (section above).
+
+## Phase 7 release (notifications, Web Push, chat)
+
+**Every step below is run by the developer, in this order, by hand.** Nothing in the repository
+runs them, and no plan has run them: production is live, so the secrets, the Realtime toggle, the
+push, the reminder backfill and the device run are user actions (plan 07-11). The commands never
+print a secret; do not paste a key into a terminal that records history, a chat or an issue.
+
+What ships: 11 migrations (`20260930123126_notifications.sql` … `20260930190229_chat_functions.sql`,
+applied by `supabase db push` in `deploy-api.yml`), the `notifications` and `chat` modules, the
+`notifications.fanout` / `notifications.push-send` / `events.reminder` / `notifications.prune`
+worker jobs, and the web's bell, Notificações, Configurações push row, soft-ask card and Suporte
+screens. Both modules are per-tenant flags: a tenant sees nothing until the platform panel turns
+`notifications` / `chat` on for it.
+
+1. **Generate the production VAPID pair, once, on your own machine.**
+   `npx web-push generate-vapid-keys` prints a public and a private key (base64url). The private key
+   goes ONLY into Secret Manager (step 2); it is never committed, never put on Vercel and never
+   shared. Keep the pair: **rotating it invalidates every stored subscription** (a one-way door).
+   After a rotation, a device whose permission is still granted re-subscribes on its next open
+   (07-07's key-mismatch resync); every other device has to be turned on again by its member.
+2. **Create the three secrets in Secret Manager BEFORE pushing** (project `api-dere-social`). A
+   secret that `deploy-api.yml` references but that does not exist fails the deploy loudly, which is
+   why this comes first.
+
+   | Secret | Value |
+   |---|---|
+   | `vapid-public-key-prod` | the public key from step 1 |
+   | `vapid-private-key-prod` | the private key from step 1 |
+   | `vapid-subject-prod` | a `mailto:` contact (for example `mailto:suporte@n1marketingdigital.com.br`). Never `localhost`: Apple rejects it (`BadJwtToken`), and `assertProductionEnv()` refuses to boot with one |
+
+   Create each with `printf '%s' '<value>' | gcloud secrets create <name> --data-file=- --project=api-dere-social`
+   (or Security → Secret Manager → Create secret in the console, which keeps the value out of the
+   shell history). Then confirm `RUNTIME_SA` (`rede-social-runtime@…`) can read them: it holds
+   `roles/secretmanager.secretAccessor`; if that grant is per secret rather than project-wide, add it
+   to each of the three with
+   `gcloud secrets add-iam-policy-binding <name> --member=serviceAccount:<RUNTIME_SA> --role=roles/secretmanager.secretAccessor --project=api-dere-social`.
+   `deploy-api.yml` mounts them as `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` on
+   **both** `api` and `worker`, with `PUSH_TRANSPORT=webpush` on both (the worker sends; the API only
+   enqueues, but its subscription-endpoint rule refuses the local fake push host only under
+   `webpush`, and it boots the same `assertProductionEnv()`).
+3. **Set `NEXT_PUBLIC_VAPID_PUBLIC_KEY` on Vercel, Production only**, to the same value as
+   `vapid-public-key-prod` (Project → Settings → Environment Variables). It is inlined at build time,
+   so it must exist before the build that ships Phase 7. Leave Preview unset (every push surface then
+   reads "unsupported"). The private key never reaches Vercel.
+4. **Turn Realtime public access off** (`private_only`). Dashboard → project `rede-social` →
+   Realtime → Settings → disable "Allow public access"; or, with your own Supabase access token in
+   the environment (never pasted inline),
+   `curl -X PATCH "https://api.supabase.com/v1/projects/qjjhtduxquvlfppybpqq/config/realtime" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d '{"private_only": true}'`.
+   Every channel the app joins and every signal the database publishes is already private (07-01,
+   07-03); this closes the door on a public join of the same topic (T-07-73). There is no
+   `config.toml` key for it, so it is a dashboard/Management API setting that `supabase config push`
+   does not touch.
+5. **Confirm the hosted access-token expiry is at most 3600 s** (Dashboard → Authentication →
+   Sessions / JWT settings: "Access token expiry"). `supabase config push` in the deploy re-applies
+   `[auth] jwt_expiry = 3600` from `config.toml`, so re-check it after step 7. It bounds how long a
+   member blocked in the database keeps an already-open Realtime socket (signals are ids only and
+   every read goes through the API, which refuses a blocked member at once; T-07-74, accepted).
+6. **Check that the reshaped tables are empty in production** (read-only, Dashboard → SQL editor):
+   `select (select count(*) from public.notifications) as notifications, (select count(*) from public.chat_messages) as chat_messages;`
+   Both must be `0`. `20260930123126_notifications.sql` adds `dedupe_key`, `subject_type` and
+   `subject_id` as `NOT NULL`, and `20260930190151_chat.sql` adds `chat_messages.author_side
+   NOT NULL`, all without a default: they apply cleanly only to the empty tables no earlier release
+   ever wrote. A non-zero count means stop and ask before pushing.
+7. **Push `master` and deploy the API and worker BEFORE the web serves the new build.** The bootstrap
+   contract gained `counters.conversationsBadge` (07-08): the web parses the API's bootstrap with a
+   schema that requires it, so a web build that goes live before the API revision that sends it
+   breaks every signed-in page until the API catches up (the 06-01 precedent,
+   `deferred-items.md`). A push to `master` starts BOTH pipelines at once, and the API one waits for
+   `checks` (~20 min) and the `production` approval, so the Vercel build normally finishes first.
+   Hold the web back:
+   1. before pushing, in Vercel → Project → Settings → Environments → Production, turn off the
+      automatic assignment of the production domains to new production deployments (Vercel's
+      staged production deployments), so the push builds the web but `rede-social-woad.vercel.app`
+      keeps serving the current deployment;
+   2. push `master`; approve the `production` environment in GitHub Actions once `checks` and
+      `build` are green; `deploy-api.yml` runs `supabase db push` (the 11 migrations), deploys
+      `api`, then `worker`, then its deep health check;
+   3. when the workflow is green, promote that SHA's production deployment in Vercel (Deployments →
+      the deployment → Promote), then turn the automatic domain assignment back on.
+
+   This promotes a **production** build of the same `master` SHA, built with the Production
+   variables, not a Preview (see "Production is never a promoted preview" under the Production
+   gate). If the web did go live first, roll it back (Vercel → Instant Rollback to the previous
+   production deployment) until the API revision is serving, then promote the new one.
+8. **Optional: arm the reminders of events created before this release** (07-05). Events created or
+   edited after the deploy arm their own 24 h and 1 h `events.reminder` jobs; older upcoming events
+   have none until this runs. From a clean checkout, with ONLY the production `DATABASE_URL` (the
+   `api-database-url-prod` value: the `api_user` connection through the transaction pooler)
+   exported in the shell for the duration of the command, and never printed:
+   ```bash
+   DATABASE_URL="$(gcloud secrets versions access latest --secret=api-database-url-prod --project=api-dere-social)" \
+     pnpm exec tsx scripts/arm-event-reminders.ts --dry-run   # plans only: { events, armed, skipped }
+   DATABASE_URL="$(gcloud secrets versions access latest --secret=api-database-url-prod --project=api-dere-social)" \
+     pnpm exec tsx scripts/arm-event-reminders.ts             # arms; re-running arms nothing new
+   ```
+   The script loads `apps/api/.env.local` for the other kernel variables, but a variable already in
+   the environment wins, so the production `DATABASE_URL` above is the one it uses. Run it only after
+   the worker from step 7 is live (it creates the `events.reminder` queue itself if the worker has
+   not yet). A window already in the past is skipped, never sent late.
+9. **Staff for support.** Production has no `support_tenant` user: a tenant's `admin_tenant` holds
+   `chat.support` and answers from the same Suporte slot (D-223) until Phase 8's role management can
+   create a `support_tenant` membership.
+10. **Run the real-device test plan**, [`docs/phase-07-device-test-plan.md`](phase-07-device-test-plan.md),
+    against production (a real iPhone on iOS 16.4+, a real iPad and a real Android phone), and
+    record every row in the Phase 7 UAT. Until a row has run on a device it stays
+    `blocked — not run`; no automated run counts for it.
+
+### Realtime quota (Free plan)
+
+Supabase **Free** allows **200 concurrent Realtime connections**, **100 messages/s** and **2 M
+messages/month** (each broadcast counts one message sent plus one per receiving client), with no
+overage billing. Sizing for a 300-member pilot with about 40 app windows open at the peak (07-RESEARCH
+Pattern 4): one tenant-wide signal per publication (never one per member), personal signals for
+personal notifications, and conversation + support-inbox + user signals per chat message come to
+**about 600 messages a day** (about 18 k a month), **under 1 % of the quota**, with connections
+around 40 of 200.
+
+The connection hygiene is already built (07-03): **one Realtime client per window** (every channel is
+multiplexed on it), **disconnected after 60 s hidden** and reconnected on refocus, with the counters
+and the open thread refetched through the API on every re-join (D-240), so a dropped signal is never
+a wrong number.
+
+**Upgrade trigger:** more than about **150 simultaneous foreground windows**, or any observed
+`too_many_connections` / `tenant_events` error in the Realtime logs (Dashboard → Logs → Realtime),
+means moving the project to **Pro** (V2-PLAT-06: 500 connections, 500 messages/s).
 
 ## Production gate (D-12)
 

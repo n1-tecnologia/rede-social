@@ -133,6 +133,11 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.DEPLOY_SA }}
 
+      # Web Push (07-06, 07-11): both services run the `webpush` transport with the three VAPID
+      # secrets. The worker sends; the API only enqueues, but it validates subscription endpoints
+      # (the fake push host is refused only under webpush) and boots the same assertProductionEnv.
+      # The secrets must exist BEFORE this runs: a missing one fails the deploy (docs/DEPLOY.md
+      # "Phase 7 release", step 2).
       - uses: google-github-actions/deploy-cloudrun@v3
         id: api
         with:
@@ -146,6 +151,7 @@ jobs:
             VIDEO_PROVIDER=mux
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
+            PUSH_TRANSPORT=webpush
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-prod:latest
@@ -155,6 +161,9 @@ jobs:
             MUX_SIGNING_KEY_ID=mux-signing-key-id-prod:latest
             MUX_SIGNING_KEY_PRIVATE=mux-signing-key-private-prod:latest
             MUX_WEBHOOK_SECRET=mux-webhook-secret-prod:latest
+            VAPID_PUBLIC_KEY=vapid-public-key-prod:latest
+            VAPID_PRIVATE_KEY=vapid-private-key-prod:latest
+            VAPID_SUBJECT=vapid-subject-prod:latest
             RESEND_API_KEY=resend-api-key-prod:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
@@ -173,6 +182,7 @@ jobs:
             VIDEO_PROVIDER=mux
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
+            PUSH_TRANSPORT=webpush
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             BOSS_DATABASE_URL=worker-database-url-prod:latest
@@ -183,6 +193,9 @@ jobs:
             MUX_SIGNING_KEY_ID=mux-signing-key-id-prod:latest
             MUX_SIGNING_KEY_PRIVATE=mux-signing-key-private-prod:latest
             MUX_WEBHOOK_SECRET=mux-webhook-secret-prod:latest
+            VAPID_PUBLIC_KEY=vapid-public-key-prod:latest
+            VAPID_PRIVATE_KEY=vapid-private-key-prod:latest
+            VAPID_SUBJECT=vapid-subject-prod:latest
             RESEND_API_KEY=resend-api-key-prod:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
           flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --no-cpu-throttling --no-allow-unauthenticated
