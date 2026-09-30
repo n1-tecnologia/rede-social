@@ -1,6 +1,8 @@
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { EVENT_PERMISSIONS } from './contracts/index';
+import { eventsNotificationSources } from './server/notifications';
+import { eventReminderJob } from './server/reminders';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-events');
@@ -26,6 +28,12 @@ export const eventsModule = defineModule({
   nav: { placement: 'tab', label: 'Eventos', icon: 'calendar-days', href: '/eventos', order: 40 },
   home: [{ order: 7 }],
   routes: () => import('./server/routes').then((m) => m.eventsRoutes),
+  // 07-05 (EVENT-07, RESEARCH Pattern 8): the deferred per-event reminder job, armed inside the
+  // module's own write transactions and checked again when it fires. No cron, no cross-tenant scan.
+  jobs: [eventReminderJob],
+  // 07-05 (D-226): new and reactivated events, and the reminders, through the kernel seam. No source
+  // on `event.updated` or `event.cancelled` (D-201, D-214): edits and cancels are silent.
+  notificationSources: eventsNotificationSources,
   events: [
     {
       event: 'event.published',
@@ -67,6 +75,13 @@ export const eventsModule = defineModule({
       handler: async (payload) => {
         // Shape only (06-05): once per member per event, on the FIRST check-in; never the code.
         log.info({ event: 'event.checked_in', ...payload }, 'event checked in');
+      },
+    },
+    {
+      event: 'event.reminder_due',
+      handler: async (payload) => {
+        // Shape only (07-05): ids, the window and one instant; never a title (T-07-31).
+        log.info({ event: 'event.reminder_due', ...payload }, 'event reminder due');
       },
     },
   ],

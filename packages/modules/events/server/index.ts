@@ -3,6 +3,18 @@
  * file path inside the package (the `exports` map has no `./server/*`).
  */
 export { generateCheckinCode, normalizeCheckinCode } from './checkin-code';
+export { eventsPushCopy, eventTime, eventWhen } from './notification-copy';
+export { eventsNotificationSources, reminderKind, reminderTagAndTopic } from './notifications';
+export {
+  armEventReminders,
+  eventReminderJob,
+  planEventReminders,
+  type ReminderArm,
+  reminderFireAtMs,
+  reminderSingletonKey,
+  reminderSkipReason,
+  runEventReminder,
+} from './reminders';
 export { eventsRoutes } from './routes';
 export {
   checkInEvent,
@@ -20,3 +32,4 @@ export {
   setEventStatus,
   updateEvent,
 } from './service';
+export { EVENTS_SYSTEM_USER_ID, eventsSystemCtx } from './system-context';

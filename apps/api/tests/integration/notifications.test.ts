@@ -861,3 +861,166 @@ describe('notifications tipos', () => {
     for (const row of after) expect(row.payload).toEqual({ removed: true });
   });
 });
+
+/* ── 07-05 Task 1: the event kinds (D-226), and the silent edit and cancel (D-201, D-214) ─────── */
+
+describe('notifications eventos', () => {
+  const EVENT_TITLE_PREFIX = 'Notif evento';
+
+  /** Every notification row of the demo tenant about `eventId`, as the migration role sees it. */
+  async function rowsAbout(eventId: string) {
+    return adminSql<
+      {
+        user_id: string;
+        kind: string;
+        actor_user_id: string | null;
+        dedupe_key: string;
+        payload: Record<string, unknown>;
+      }[]
+    >`
+      select user_id::text as user_id, kind, actor_user_id::text as actor_user_id, dedupe_key,
+             payload
+        from public.notifications
+       where tenant_id = ${ids.demo}::uuid and subject_id = ${eventId}::uuid
+       order by created_at, user_id`;
+  }
+
+  /** The demo tenant's LIVE `member`-role memberships (the broadcast audience, D-229). */
+  async function liveMemberIds(): Promise<string[]> {
+    const rows = await adminSql<{ user_id: string }[]>`
+      select user_id::text as user_id from public.memberships
+       where tenant_id = ${ids.demo}::uuid and role = 'member' and status = 'active'
+         and blocked_at is null and deleted_at is null`;
+    return rows.map((row) => row.user_id).sort();
+  }
+
+  /** `YYYY-MM-DD` of the São Paulo calendar day `days` from now. */
+  function tenantDate(days: number): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(Date.now() + days * 86_400_000));
+  }
+
+  function eventBody(suffix: string) {
+    const date = tenantDate(4);
+    return {
+      title: `${EVENT_TITLE_PREFIX} ${suffix}`,
+      description: '',
+      format: 'online',
+      meetingUrl: 'https://meet.example.test/notif',
+      start: { date, time: '19:00' },
+      end: { date, time: '21:00' },
+    };
+  }
+
+  async function createEvent(suffix: string): Promise<{ id: string; startsAt: string }> {
+    const res = await request('/v1/events', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify(eventBody(suffix)),
+    });
+    expect(res.status).toBe(201);
+    return (await res.json()) as { id: string; startsAt: string };
+  }
+
+  const setStatus = (eventId: string, status: 'cancelled' | 'active') =>
+    request(`/v1/events/${eventId}`, tokens.demoAdmin, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+
+  afterAll(async () => {
+    await adminSql`delete from public.events where title like ${`${EVENT_TITLE_PREFIX}%`}`;
+  });
+
+  it('D-226/D-229: a new event is ONE events.event row per live member; none for the creator or staff', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const members = await liveMemberIds();
+    const event = await createEvent('novo');
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+
+    const rows = await rowsAbout(event.id);
+    expect(rows.every((row) => row.kind === 'events.event')).toBe(true);
+    expect(rows.map((row) => row.user_id).sort()).toEqual(members);
+    expect(rows.some((row) => row.user_id === ids.demoAdmin)).toBe(false);
+    expect(rows[0]?.actor_user_id).toBe(ids.demoAdmin);
+    expect(rows[0]?.dedupe_key).toBe(`events.event:${event.id}`);
+    expect(rows[0]?.payload).toEqual({
+      eventId: event.id,
+      title: `${EVENT_TITLE_PREFIX} novo`,
+      startsAt: event.startsAt,
+      previewAssetId: null,
+    });
+  });
+
+  it('D-201/D-214: an edit and a cancel add NO row and enqueue no fan-out', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const event = await createEvent('silencio');
+    await runNotificationJobs(ids.demo);
+    const before = await rowsAbout(event.id);
+
+    const edited = await request(`/v1/events/${event.id}`, tokens.demoAdmin, {
+      method: 'PUT',
+      body: JSON.stringify({ ...eventBody('silencio'), title: `${EVENT_TITLE_PREFIX} silencio 2` }),
+    });
+    expect(edited.status).toBe(200);
+    // A moved start is an edit too: it re-arms reminders, and still notifies nobody.
+    const moved = await request(`/v1/events/${event.id}`, tokens.demoAdmin, {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...eventBody('silencio'),
+        title: `${EVENT_TITLE_PREFIX} silencio 2`,
+        start: { date: tenantDate(4), time: '20:00' },
+        end: { date: tenantDate(4), time: '22:00' },
+      }),
+    });
+    expect(moved.status).toBe(200);
+    expect((await setStatus(event.id, 'cancelled')).status).toBe(200);
+
+    expect((await notificationJobsOf(ids.demo)).filter((job) => job.state === 'created')).toEqual(
+      [],
+    );
+    expect(await runNotificationJobs(ids.demo)).toBe(0);
+    expect(await rowsAbout(event.id)).toEqual(before);
+  });
+
+  it('D-226: two reactivations are two events.event_reactivated rows per member; a re-run of one job adds none', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const members = await liveMemberIds();
+    const event = await createEvent('reativado');
+    await closeWaitingJobs();
+
+    for (let round = 0; round < 2; round++) {
+      expect((await setStatus(event.id, 'cancelled')).status).toBe(200);
+      expect((await setStatus(event.id, 'active')).status).toBe(200);
+      expect(await runNotificationJobs(ids.demo)).toBe(1);
+    }
+    const reactivated = (await rowsAbout(event.id)).filter(
+      (row) => row.kind === 'events.event_reactivated',
+    );
+    expect(reactivated).toHaveLength(members.length * 2);
+    for (const member of members) {
+      expect(reactivated.filter((row) => row.user_id === member)).toHaveLength(2);
+    }
+    expect(reactivated.some((row) => row.user_id === ids.demoAdmin)).toBe(false);
+    expect(new Set(reactivated.map((row) => row.dedupe_key)).size).toBe(2);
+
+    // A retried job for the SAME reactivation reuses its sinkAt: nothing new.
+    const { notificationsFanoutJob } = await import('@rede-social/module-notifications/server');
+    const [job] = (await notificationJobsOf(ids.demo)).filter(
+      (row) => row.data.event === 'event.reactivated',
+    );
+    expect(job).toBeDefined();
+    await notificationsFanoutJob.handler(
+      job?.data as Parameters<typeof notificationsFanoutJob.handler>[0],
+    );
+    expect(
+      (await rowsAbout(event.id)).filter((row) => row.kind === 'events.event_reactivated'),
+    ).toHaveLength(members.length * 2);
+  });
+});

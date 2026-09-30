@@ -623,6 +623,77 @@ export interface EventCheckedIn {
 }
 
 /**
+ * EVENT-07 (07-05): the two reminder windows, in firing order. `24h` fires 24 hours before
+ * `starts_at`, `1h` one hour before.
+ */
+export const EVENT_REMINDER_WINDOWS = ['24h', '1h'] as const;
+export type EventReminderWindow = (typeof EVENT_REMINDER_WINDOWS)[number];
+
+/** How long before `starts_at` each window fires, in milliseconds. */
+export const EVENT_REMINDER_OFFSET_MS: Readonly<Record<EventReminderWindow, number>> = {
+  '24h': 24 * 60 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+};
+
+/**
+ * A reminder job that wakes more than this long after its fire time sends nothing (CONTEXT: a late
+ * worker never delivers a stale reminder). Inclusive: `now <= fireAt + 30 min` still sends.
+ */
+export const EVENT_REMINDER_LATE_TOLERANCE_MINUTES = 30;
+
+/** The events module's pg-boss queues (07-05). */
+export const EVENTS_QUEUES = { reminder: 'events.reminder' } as const;
+
+/**
+ * The notification kinds the events module produces (D-226, 07-05). The web registry renders each
+ * one from its facts; nothing here is a sentence.
+ */
+export const EVENTS_NOTIFICATION_KINDS = {
+  event: 'events.event',
+  reactivated: 'events.event_reactivated',
+  reminder24h: 'events.reminder_24h',
+  reminder1h: 'events.reminder_1h',
+} as const;
+export type EventsNotificationKind =
+  (typeof EVENTS_NOTIFICATION_KINDS)[keyof typeof EVENTS_NOTIFICATION_KINDS];
+
+/**
+ * The `events.reminder` job payload AND the `event.reminder_due` event payload (07-05, EVENT-07):
+ * ids, the window and one instant. **Never a title** (T-07-31): the job row sits in `pgboss.job`
+ * for hours and the event is logged verbatim, so the title is read by the source at fan-out time.
+ *
+ * `tenantId` is DATA, not authority: the handler re-enters that tenant's lane and RLS plus the
+ * explicit predicates confine every read to it (T-07-29).
+ */
+export const eventReminderPayloadSchema = z
+  .object({
+    tenantId: z.uuid(),
+    eventId: z.uuid(),
+    window: z.enum(EVENT_REMINDER_WINDOWS),
+    // The UTC shape this module's own `to_char` produces (microseconds optional), and a real
+    // instant: anything else would raise at the `::timestamptz` cast and be retried forever.
+    startsAt: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/)
+      .refine((value) => Number.isFinite(Date.parse(value)), {
+        message: 'startsAt must be an ISO instant',
+      }),
+  })
+  .strict();
+export type EventReminderJob = z.infer<typeof eventReminderPayloadSchema>;
+
+/**
+ * Payload of `event.reminder_due` (07-05): emitted by the `events.reminder` job once its fire-time
+ * checks pass, and flushed before the job returns. The same four keys as the job payload.
+ */
+export interface EventReminderDue {
+  tenantId: string;
+  eventId: string;
+  window: EventReminderWindow;
+  startsAt: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
@@ -634,5 +705,6 @@ declare module '@rede-social/contracts' {
     'event.cancelled': EventCancelled;
     'event.reactivated': EventReactivated;
     'event.checked_in': EventCheckedIn;
+    'event.reminder_due': EventReminderDue;
   }
 }

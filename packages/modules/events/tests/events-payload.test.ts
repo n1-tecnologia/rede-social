@@ -7,6 +7,7 @@ import type {
   EventInput,
   EventPublished,
   EventReactivated,
+  EventReminderDue,
   EventRsvp,
   EventUpdated,
 } from '../contracts/index';
@@ -37,6 +38,12 @@ import type {
  * value is never bound), the in-lane 404 first, a tampered cursor degrading to page 1, the two
  * "confirmados" numbers under their own names, and a regenerated code that is always new and never
  * logged or emitted.
+ *
+ * 07-05 adds the reminder arming (EVENT-07): a create arms both windows IN its transaction, a moved
+ * start re-arms, a reactivation re-arms, a cancel, an unmoved edit and an identical body arm nothing;
+ * and `event.reminder_due`, emitted by the reminder job, carries exactly four keys (ids, the window
+ * and one instant, never a title). `enqueueInTx` is mocked at the module boundary (the kernel's
+ * pg-boss wrapper), so the arming is observed without a database.
  *
  * `withTenantTx` is the seam; the bus under test is the real one.
  */
@@ -103,6 +110,20 @@ vi.mock('@rede-social/core/db/tenant-tx', () => ({
   withTenantTx: <T>(_ctx: unknown, fn: (t: unknown) => Promise<T>): Promise<T> => fn(tx),
 }));
 
+/** 07-05: every reminder the service armed, in order (the pg-boss wrapper is the seam). */
+const armed = vi.hoisted(() => [] as { name: string; payload: unknown; opts: unknown }[]);
+vi.mock('@rede-social/core/server/jobs/boss', () => ({
+  enqueueInTx: async (_tx: unknown, name: string, payload: unknown, opts: unknown) => {
+    armed.push({ name, payload, opts });
+    return 'job-id';
+  },
+}));
+
+/** A clock well before `STARTS_AT`, so both windows are in the future whatever day the suite runs. */
+const BEFORE_START = Date.parse('2026-10-01T12:00:00.000Z');
+
+const { runEventReminder } = await import('../server/reminders');
+
 const {
   checkInEvent,
   createEvent,
@@ -140,6 +161,9 @@ let received: EventPublished[] = [];
 let unsubscribe: () => void = () => {};
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(BEFORE_START);
+  armed.length = 0;
   script = null;
   transaction = 'commit';
   executeCall = 0;
@@ -152,6 +176,7 @@ beforeEach(() => {
 
 afterEach(() => {
   unsubscribe();
+  vi.useRealTimers();
 });
 
 describe('event.published — after commit, exactly once, ids and instants only', () => {
@@ -193,8 +218,42 @@ describe('event.published — after commit, exactly once, ids and instants only'
     expect(statements[0]).toContain('insert into events');
     expect(statements[1]).toContain('insert into event_secrets');
 
+    // 07-05: both reminder windows were armed in the same transaction, from the stored instant,
+    // with ids and the instant only in the job payload (T-07-31).
+    const startsSeconds = Math.floor(Date.parse(STARTS_AT) / 1000);
+    expect(armed).toEqual([
+      {
+        name: 'events.reminder',
+        payload: { tenantId: TENANT_ID, eventId: EVENT_ID, window: '24h', startsAt: STARTS_AT },
+        opts: {
+          startAfter: new Date(Date.parse(STARTS_AT) - 24 * 3_600_000),
+          singletonKey: `${EVENT_ID}:24h:${startsSeconds}`,
+        },
+      },
+      {
+        name: 'events.reminder',
+        payload: { tenantId: TENANT_ID, eventId: EVENT_ID, window: '1h', startsAt: STARTS_AT },
+        opts: {
+          startAfter: new Date(Date.parse(STARTS_AT) - 3_600_000),
+          singletonKey: `${EVENT_ID}:1h:${startsSeconds}`,
+        },
+      },
+    ]);
+
     await flush(ctx);
     expect(received).toHaveLength(1);
+  });
+
+  it('1b. a create 2 h before the start arms only the 1 h job; 30 min before, none (never late)', async () => {
+    vi.setSystemTime(Date.parse(STARTS_AT) - 2 * 3_600_000);
+    await createEvent(context(), input);
+    expect(armed.map((job) => (job.payload as { window: string }).window)).toEqual(['1h']);
+
+    armed.length = 0;
+    executeCall = 0;
+    vi.setSystemTime(Date.parse(STARTS_AT) - 30 * 60_000);
+    await createEvent(context(), input);
+    expect(armed).toEqual([]);
   });
 
   it('2. a create whose transaction throws queues NOTHING (rollback)', async () => {
@@ -393,18 +452,31 @@ describe('06-04 — event.updated, event.cancelled, event.reactivated: exact key
   });
 
   it('11. a moved start emits timesChanged true; a URL-only change still emits, with false', async () => {
-    script = [locked, [{ starts_at: MOVED_START, ends_at: ENDS_AT }], [], [row]];
+    const movedRow = { ...row, starts_at: MOVED_START };
+    script = [locked, [{ starts_at: MOVED_START, ends_at: ENDS_AT }], [], [movedRow]];
     const ctx = context();
     await updateEvent(ctx, EVENT_ID, input);
     await flush(ctx);
     expect(updates[0]?.timesChanged).toBe(true);
+    // 07-05: the move re-armed both windows at the NEW start (new singleton keys).
+    const movedSeconds = Math.floor(Date.parse(MOVED_START) / 1000);
+    expect(armed.map((job) => (job.opts as { singletonKey: string }).singletonKey)).toEqual([
+      `${EVENT_ID}:24h:${movedSeconds}`,
+      `${EVENT_ID}:1h:${movedSeconds}`,
+    ]);
+    expect(
+      armed.every((job) => (job.payload as { startsAt: string }).startsAt === MOVED_START),
+    ).toBe(true);
 
+    armed.length = 0;
     script = [locked, [], [{ event_id: EVENT_ID }], [row]];
     const second = context();
     await updateEvent(second, EVENT_ID, input);
     await flush(second);
     expect(updates).toHaveLength(2);
     expect(updates[1]?.timesChanged).toBe(false);
+    // An edit that moved no instant arms nothing.
+    expect(armed).toEqual([]);
   });
 
   it('12. an identical body writes no row and emits NOTHING', async () => {
@@ -414,6 +486,7 @@ describe('06-04 — event.updated, event.cancelled, event.reactivated: exact key
     expect(ctx.events).toHaveLength(0);
     await flush(ctx);
     expect(updates).toHaveLength(0);
+    expect(armed).toEqual([]);
   });
 
   it('13. an unknown event is a bare 404, and events_window_chk maps to end_before_start', async () => {
@@ -455,6 +528,8 @@ describe('06-04 — event.updated, event.cancelled, event.reactivated: exact key
       startsAt: STARTS_AT,
       endsAt: ENDS_AT,
     });
+    // 07-05: a cancel arms nothing and cancels nothing (the fire-time check does the rest).
+    expect(armed).toEqual([]);
 
     script = [[], [{ status: 'cancelled' }], [cancelledRow]];
     const repeat = context();
@@ -480,11 +555,16 @@ describe('06-04 — event.updated, event.cancelled, event.reactivated: exact key
       'tenantId',
     ]);
     expect(cancels).toHaveLength(0);
+    // 07-05: the cancelled -> active transition re-arms both windows at the stored start.
+    expect(armed.map((job) => (job.payload as { window: string }).window)).toEqual(['24h', '1h']);
 
+    armed.length = 0;
     script = [[], [{ status: 'active' }], [row]];
     const repeat = context();
     await setEventStatus(repeat, EVENT_ID, { status: 'active' });
     expect(repeat.events).toHaveLength(0);
+    // A repeat (no transition) arms nothing.
+    expect(armed).toEqual([]);
   });
 
   it('16. the refusals: event_ended, reactivate_started, and a bare 404', async () => {
@@ -800,5 +880,51 @@ describe('06-07 — attendance reads and code regeneration', () => {
     const miss = regenerateCheckinCode(context(), EVENT_ID);
     await expect(miss).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     await expect(miss).rejects.not.toHaveProperty('details.event');
+  });
+});
+
+describe('07-05 — event.reminder_due: ids, the window and one instant, exactly four keys', () => {
+  let due: EventReminderDue[] = [];
+  let stop: () => void = () => {};
+  beforeEach(() => {
+    due = [];
+    stop = subscribe('event.reminder_due', async (payload) => {
+      due.push(payload);
+    });
+  });
+  afterEach(() => {
+    stop();
+  });
+
+  it('30. a passing reminder job emits ONE event.reminder_due and flushes it before returning', async () => {
+    script = [[{ status: 'active', deleted: false, starts_at: STARTS_AT, starts_match: true }]];
+    const fireAt = Date.parse(STARTS_AT) - 24 * 3_600_000;
+    const outcome = await runEventReminder(
+      { tenantId: TENANT_ID, eventId: EVENT_ID, window: '24h', startsAt: STARTS_AT },
+      fireAt,
+    );
+    expect(outcome).toBe('emitted');
+    // Already delivered: the job flushed its own context.
+    expect(due).toHaveLength(1);
+    expect(Object.keys(due[0] ?? {}).sort()).toEqual(['eventId', 'startsAt', 'tenantId', 'window']);
+    expect(due[0]).toEqual({
+      tenantId: TENANT_ID,
+      eventId: EVENT_ID,
+      window: '24h',
+      startsAt: STARTS_AT,
+    });
+    // The fire-time read is ONE statement, and no title is ever read or carried.
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).not.toContain('title');
+  });
+
+  it('31. a skipped reminder emits nothing', async () => {
+    script = [[{ status: 'cancelled', deleted: false, starts_at: STARTS_AT, starts_match: true }]];
+    const outcome = await runEventReminder(
+      { tenantId: TENANT_ID, eventId: EVENT_ID, window: '1h', startsAt: STARTS_AT },
+      Date.parse(STARTS_AT) - 3_600_000,
+    );
+    expect(outcome).toBe('skipped');
+    expect(due).toHaveLength(0);
   });
 });

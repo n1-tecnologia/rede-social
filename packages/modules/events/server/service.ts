@@ -33,6 +33,7 @@ import type {
 } from '../contracts/index';
 import { enterResultSchema } from '../contracts/index';
 import { generateCheckinCode } from './checkin-code';
+import { armEventReminders } from './reminders';
 
 const log = moduleLogger('module-events');
 
@@ -461,6 +462,10 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
          limit 1`);
       const row = rows[0];
       if (!row) throw new ApiError(500, 'INTERNAL');
+
+      // EVENT-07 (07-05): the reminders are armed IN this transaction, from the stored instant, so
+      // a rolled-back create arms nothing. A window already past is skipped, never sent late.
+      await armEventReminders(tx, { tenantId: ctx.tenantId, eventId: id, startsAt: row.starts_at });
       return row;
     });
   } catch (error) {
@@ -904,6 +909,16 @@ export async function updateEvent(
          limit 1`);
       const row = rows[0];
       if (!row) throw new ApiError(500, 'INTERNAL');
+
+      // EVENT-07 (07-05): a moved start (or end) re-arms in this transaction. The old jobs are left
+      // alone: their fire-time check sees the new `starts_at` and does nothing.
+      if (timesChanged) {
+        await armEventReminders(tx, {
+          tenantId: ctx.tenantId,
+          eventId: row.id,
+          startsAt: row.starts_at,
+        });
+      }
       return {
         row,
         changed: moved !== undefined || secrets.length > 0,
@@ -1021,6 +1036,17 @@ export async function setEventStatus(
        limit 1`);
     const after = rows[0];
     if (!after) throw new ApiError(500, 'INTERNAL');
+
+    // EVENT-07 (07-05): cancelled -> active re-arms in this transaction. If the old jobs for the same
+    // start still wait, the `short` policy drops the duplicates and the old ones fire. A cancel arms
+    // and cancels nothing: the fire-time status check makes the waiting jobs no-ops.
+    if (!cancel && written.length > 0) {
+      await armEventReminders(tx, {
+        tenantId: ctx.tenantId,
+        eventId: after.id,
+        startsAt: after.starts_at,
+      });
+    }
     return { row: after, transitioned: written.length > 0 };
   });
 

@@ -186,3 +186,48 @@ export async function runNotificationJobs(tenantId: string): Promise<number> {
   }
   return rows.length;
 }
+
+/** One `events.reminder` row as the integration suites assert it (07-05). */
+export type EventReminderJobRow = {
+  id: string;
+  state: string;
+  singleton_key: string | null;
+  start_after: Date;
+  data: { tenantId: string; eventId: string; window: '24h' | '1h'; startsAt: string };
+};
+
+/** Every `events.reminder` job armed for `tenantId`, oldest first (any state). */
+export async function eventReminderJobsOf(tenantId: string): Promise<EventReminderJobRow[]> {
+  return adminSql<EventReminderJobRow[]>`
+    select id, state::text as state, singleton_key, start_after, data
+      from pgboss.job_common
+     where name = 'events.reminder' and data->>'tenantId' = ${tenantId}
+     order by created_on, singleton_key`;
+}
+
+/**
+ * Plays the worker for `tenantId`'s waiting `events.reminder` jobs (the `runInviteSendJobs` clone),
+ * IGNORING `start_after` and passing `nowMs` as the fire-time clock (07-05 planning decision 3), so a
+ * test drives moved, late and cancelled cases without waiting. `only` narrows the rows (one window,
+ * one event, one start). Each row's payload goes through the real `runEventReminder` (errors
+ * propagate, the row stays `created`); a row whose handler resolved is marked `completed` like
+ * `boss.work` would. Returns each run row's outcome, in order.
+ */
+export async function runEventReminderJobs(
+  tenantId: string,
+  nowMs: number,
+  only: (row: EventReminderJobRow) => boolean = () => true,
+): Promise<('emitted' | 'skipped' | 'dropped')[]> {
+  const { runEventReminder } = await import('@rede-social/module-events/server');
+  const rows = (await eventReminderJobsOf(tenantId)).filter(
+    (row) => row.state === 'created' && only(row),
+  );
+  const outcomes: ('emitted' | 'skipped' | 'dropped')[] = [];
+  for (const row of rows) {
+    outcomes.push(await runEventReminder(row.data, nowMs));
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name = 'events.reminder' and id = ${row.id}::uuid`;
+  }
+  return outcomes;
+}
