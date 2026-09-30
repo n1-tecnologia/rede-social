@@ -8,6 +8,7 @@ import {
   commentPageSchema,
   commentSchema,
   commentsQuerySchema,
+  commentThreadSchema,
   createCommentSchema,
   createPostSchema,
   FEED_COMMUNITY_ISSUES,
@@ -24,6 +25,7 @@ import {
   createComment,
   createPost,
   deleteComment,
+  getCommentThread,
   getPost,
   likeComment,
   likePost,
@@ -344,6 +346,23 @@ const listRepliesRoute = createRoute({
   },
 });
 
+const commentThreadRoute = createRoute({
+  method: 'get',
+  path: '/comments/{commentId}/thread',
+  request: { params: commentIdParam },
+  responses: {
+    200: {
+      description:
+        "07-04 (UI-D-254): the ROOT thread holding this live post comment — the root, its replies oldest first up to the replies page cap, and the target appended when it lies beyond that cap. What the post page's `?comentario=` highlight pins first.",
+      content: { 'application/json': { schema: commentThreadSchema } },
+    },
+    404: {
+      description:
+        'No such live post comment is visible to this tenant — unknown, foreign, deleted, a story comment, or on a removed post. One bare code for all.',
+    },
+  },
+});
+
 export const feedRoutes = feed
   // ONE route, two predicates (D-73/COMM-03): the parameter chooses which page this is, and both
   // are built by the same projection, the same ordering expression and the same cursor envelope.
@@ -406,4 +425,8 @@ export const feedRoutes = feed
   .openapi(listRepliesRoute, async (c) => {
     const { commentId } = c.req.valid('param');
     return c.json(await listReplies(c.get('ctx'), commentId, c.req.valid('query')), 200);
+  })
+  .openapi(commentThreadRoute, async (c) => {
+    const { commentId } = c.req.valid('param');
+    return c.json(await getCommentThread(c.get('ctx'), commentId), 200);
   });

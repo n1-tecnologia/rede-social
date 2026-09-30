@@ -3,14 +3,25 @@ import { fileURLToPath } from 'node:url';
 import { type Browser, expect, type Page, test } from '@playwright/test';
 import { createTranslator } from 'next-intl';
 import postgres from 'postgres';
+import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import notificationMessages from '../messages/pt-BR/notifications.json' with { type: 'json' };
-import { hosts, login, SEED_PASSWORD, seededFeed, users } from './fixtures';
+import { hosts, login, SEED_PASSWORD, seededFeed, seededFeedPaging, users } from './fixtures';
 import {
   clearNotifications,
   closeNotificationsAdmin,
+  commentAs,
+  deleteCommentsByBodyPrefix,
+  deletePostAs,
   deletePostsByCaptionPrefix,
+  foreignCommentId,
+  insertExpiredStoryRow,
+  insertLongRow,
   insertNotificationRows,
+  likeCommentAs,
   publishPostAs,
+  rowsOf,
+  seedLongThread,
+  softDeleteComment,
 } from './notifications-admin';
 import { ensureWorker } from './worker';
 
@@ -493,5 +504,272 @@ test.describe('notifications ao vivo', () => {
     await page.goto(`${hosts.demo}/notificacoes`);
     await expect(page.getByTestId('notification-item')).toHaveCount(2);
     await expect(page.getByText(/conectando/i)).toHaveCount(0);
+  });
+});
+
+/**
+ * NOTIF-01 kinds, D-232 routing, UI-D-251 variants and UI-D-254 landings (plan 07-04 Task 3), on the
+ * phone and the desktop. Producers run through the REAL API and the worker's fan-out
+ * (`ensureWorker` in the file's `beforeAll`); fixture rows cover only what no producer can reach on
+ * demand (an expired story, a 60-character actor).
+ */
+const F = feedMessages.feed;
+const TIPOS_PREFIX = 'Tipos e2e';
+
+/** Waits until the worker has written `count` rows of `kind` for `email` (the fan-out is async). */
+async function waitForRows(email: string, kind: string, count: number, removed?: boolean) {
+  await expect
+    .poll(() => rowsOf(email, kind, removed === undefined ? {} : { removed }), {
+      timeout: 60_000,
+      intervals: [500, 1_000, 2_000],
+    })
+    .toBe(count);
+}
+
+test.describe('notifications tipos', () => {
+  test.beforeEach(async () => {
+    await clearNotifications('rede-demo');
+  });
+
+  test.afterAll(async () => {
+    await deleteCommentsByBodyPrefix(TIPOS_PREFIX);
+    await deletePostsByCaptionPrefix(TIPOS_PREFIX);
+  });
+
+  test('a like and a reply on the member comment reach the bell, and the reply lands tinted first', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(150_000);
+    const stamp = `${testInfo.project.name} ${Date.now()}`;
+    const postId = await publishPostAs(users.demoAdmin, `${TIPOS_PREFIX} post ${stamp}`);
+    const mine = await commentAs(users.demoMember, postId, `${TIPOS_PREFIX} meu ${stamp}`);
+    // A NEWER root by someone else: without the pin, the member comment would not be first.
+    await commentAs(users.demoAdmin, postId, `${TIPOS_PREFIX} outra raiz ${stamp}`);
+    await likeCommentAs(users.demoAdmin, mine);
+    const replyBody = `${TIPOS_PREFIX} resposta ${stamp}`;
+    const reply = await commentAs(users.demoAdmin, postId, replyBody, mine);
+    await waitForRows(users.demoMember, 'feed.comment_liked', 1);
+    await waitForRows(users.demoMember, 'feed.comment_replied', 1);
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/notificacoes`);
+
+    const liked = page
+      .getByTestId('notification-item')
+      .filter({ hasText: 'curtiu seu comentário' });
+    await expect(liked).toHaveCount(1);
+    await expect(liked).toContainText(`“${TIPOS_PREFIX} meu ${stamp}”`);
+    // UI-D-08: the one coloured glyph.
+    await expect(liked.locator('svg.text-like')).toHaveCount(1);
+
+    const replied = page
+      .getByTestId('notification-item')
+      .filter({ hasText: 'respondeu ao seu comentário' });
+    await expect(replied).toHaveCount(1);
+    await expect(replied.locator('svg.text-like')).toHaveCount(0);
+    await replied.click();
+
+    await expect(page).toHaveURL(new RegExp(`/post/${postId}\\?comentario=${reply}$`));
+    const rows = page.locator('[data-comments-rows]').filter({ visible: true });
+    await expect(rows.locator('[data-comment-kind="root"]').first()).toHaveAttribute(
+      'data-comment-id',
+      mine,
+    );
+    const target = rows.locator(`[data-comment-id="${reply}"]`);
+    await expect(target).toBeVisible();
+    await expect(target).toContainText(replyBody);
+    await expect(target).toHaveAttribute('data-comment-highlighted', 'true');
+    await expect(target).toHaveClass(/bg-brand\/10/);
+    // The tint fades after 2.4 s; the row stays exactly where it is.
+    await expect(target).not.toHaveAttribute('data-comment-highlighted', 'true', {
+      timeout: 6_000,
+    });
+    await expect(target).toBeVisible();
+  });
+
+  test('E08 backstop: a target deep in a 200-comment post is first, tinted, and never repeats', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+    const { postId, targetId } = await seedLongThread(
+      `${TIPOS_PREFIX} longo ${testInfo.project.name} ${Date.now()}`,
+    );
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/post/${postId}?comentario=${targetId}`);
+
+    // The visible list only: a route the router keeps hidden for back navigation is not the page.
+    const rows = page.locator('[data-comments-rows]').filter({ visible: true });
+    await expect(rows).toHaveCount(1);
+    const roots = rows.locator('[data-comment-kind="root"]');
+    await expect(roots.first()).toHaveAttribute('data-comment-id', targetId);
+    await expect(roots.first()).toHaveAttribute('data-comment-highlighted', 'true');
+    await expect(roots.first()).toBeInViewport();
+
+    // Page to the end: 200 roots in pages of 20, with the pinned one drawn exactly once.
+    const loadMore = page.getByRole('button', { name: F.comments.loadMore });
+    for (let pageNo = 1; pageNo <= 12 && (await loadMore.count()) > 0; pageNo++) {
+      await loadMore.click();
+      // Page N adds 20 roots under the pinned one (the pinned root's own page adds 19).
+      await expect
+        .poll(() => roots.count())
+        .toBeGreaterThanOrEqual(Math.min(1 + 20 * (pageNo + 1) - 1, 200));
+    }
+    await expect(loadMore).toHaveCount(0);
+    await expect(roots).toHaveCount(200);
+    await expect(rows.locator(`[data-comment-id="${targetId}"]`)).toHaveCount(1);
+  });
+
+  test('a foreign or deleted comentario shows the post and the missing toast; junk is ignored', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(90_000);
+    const stamp = `${testInfo.project.name} ${Date.now()}`;
+    const postId = await publishPostAs(users.demoAdmin, `${TIPOS_PREFIX} ausente ${stamp}`);
+    const gone = await commentAs(users.demoMember, postId, `${TIPOS_PREFIX} apagado ${stamp}`);
+    await softDeleteComment(gone);
+    const foreign = await foreignCommentId();
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    for (const id of [foreign, gone]) {
+      await page.goto(`${hosts.demo}/post/${postId}?comentario=${id}`);
+      await expect(
+        page.getByText(`${TIPOS_PREFIX} ausente ${stamp}`).filter({ visible: true }),
+      ).toBeVisible();
+      await expect(page.getByText(F.comments.targetMissing)).toHaveCount(1);
+      await expect(page.locator('[data-comment-highlighted]')).toHaveCount(0);
+      // The notice fires once: the parameter leaves the address, so a reload is silent.
+      await expect(page).toHaveURL(new RegExp(`/post/${postId}$`));
+    }
+
+    await page.goto(`${hosts.demo}/post/${postId}?comentario=nao-e-um-id`);
+    await expect(
+      page.getByText(`${TIPOS_PREFIX} ausente ${stamp}`).filter({ visible: true }),
+    ).toBeVisible();
+    await page.waitForTimeout(1_000);
+    await expect(page.getByText(F.comments.targetMissing)).toHaveCount(0);
+  });
+
+  test('an expired story row lands on Início with "Este story expirou." once', async ({ page }) => {
+    test.setTimeout(90_000);
+    await insertExpiredStoryRow(users.demoMember);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/notificacoes`);
+
+    const story = page
+      .getByTestId('notification-item')
+      .filter({ hasText: 'publicou um novo story' });
+    await expect(story).toHaveCount(1);
+    await expect(story).toHaveAttribute('href', '/inicio?aviso=story-expirado');
+    await story.click();
+
+    await expect(page).toHaveURL(/\/inicio$/);
+    await expect(page.getByText(N.fallback.storyExpired)).toHaveCount(1);
+
+    await page.reload();
+    await page.waitForTimeout(1_500);
+    await expect(page.getByText(N.fallback.storyExpired)).toHaveCount(0);
+
+    // Any other `aviso` is ignored in silence (D-93).
+    await page.goto(`${hosts.demo}/inicio?aviso=qualquer-coisa`);
+    await page.waitForTimeout(1_000);
+    await expect(page.getByText(N.fallback.storyExpired)).toHaveCount(0);
+  });
+
+  test('deleting the post turns its rows into the removed button, and a tap toasts', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(150_000);
+    const stamp = `${testInfo.project.name} ${Date.now()}`;
+    const postId = await publishPostAs(users.demoAdmin, `${TIPOS_PREFIX} removido ${stamp}`);
+    const mine = await commentAs(users.demoMember, postId, `${TIPOS_PREFIX} alvo ${stamp}`);
+    await likeCommentAs(users.demoAdmin, mine);
+    await waitForRows(users.demoMember, 'feed.comment_liked', 1);
+    await waitForRows(users.demoMember, 'feed.post', 1);
+
+    await deletePostAs(users.demoAdmin, postId);
+    await waitForRows(users.demoMember, 'feed.comment_liked', 1, true);
+    await waitForRows(users.demoMember, 'feed.post', 1, true);
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/notificacoes`);
+
+    const removed = page.locator('[data-testid="notification-item"][data-removed="true"]');
+    await expect(removed).toHaveCount(2);
+    await expect(page.getByTestId('notification-item').filter({ hasText: stamp })).toHaveCount(0);
+    for (const row of await removed.all()) {
+      await expect(row).toHaveText(new RegExp(N.kinds.removed.replace(/[.]/g, '\\.')));
+      expect(await row.evaluate((node) => node.tagName)).toBe('BUTTON');
+    }
+
+    const first = removed.first();
+    await expect(first).toHaveAttribute('data-unread', 'true');
+    await first.click();
+    await expect(page).toHaveURL(/\/notificacoes$/);
+    await expect(page.getByText(N.fallback.removed)).toHaveCount(1);
+    await expect(first).toHaveAttribute('data-unread', 'false');
+  });
+
+  test('E03 backstop: a 60-char actor with an 80-char excerpt clamps at three lines at 320px', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const displayName60 = 'Maria Aparecida dos Santos Figueiredo de Albuquerque Monteir';
+    const excerpt80 =
+      'Atenção: a reunião de planejamento do segundo semestre mudou para a sala 3 do p…';
+    expect(displayName60).toHaveLength(60);
+    expect([...excerpt80]).toHaveLength(80);
+    const restore = await insertLongRow(users.demoMember, {
+      longName: seededFeedPaging.longDisplayName,
+      displayName60,
+      excerpt80,
+      community: 'Núcleo de Voluntários do Programa de Formação',
+    });
+    try {
+      await page.setViewportSize({ width: 320, height: 720 });
+      await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+      await page.goto(`${hosts.demo}/notificacoes`);
+
+      const row = page.getByTestId('notification-item').filter({ hasText: displayName60 });
+      await expect(row).toHaveCount(1);
+      const sentence = row.locator('.line-clamp-3');
+      // Measured only once the row is laid out (a count alone does not wait for layout).
+      await expect(sentence).toBeVisible();
+      await expect.poll(async () => (await sentence.boundingBox())?.height ?? 0).toBeGreaterThan(0);
+      // The clamped height, against the same text laid out unclamped at the same width: the
+      // sentence really is longer than three lines, and the row shows exactly three of them.
+      const clamp = await sentence.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        const clone = node.cloneNode(true) as HTMLElement;
+        clone.classList.remove('line-clamp-3');
+        Object.assign(clone.style, {
+          display: 'block',
+          position: 'absolute',
+          visibility: 'hidden',
+          width: `${rect.width}px`,
+        });
+        node.parentElement?.appendChild(clone);
+        const full = clone.getBoundingClientRect().height;
+        clone.remove();
+        return {
+          height: rect.height,
+          full,
+          lineHeight: Number.parseFloat(getComputedStyle(node).lineHeight),
+        };
+      });
+      expect(clamp.height).toBeLessThanOrEqual(clamp.lineHeight * 3 + 1);
+      expect(clamp.height).toBeGreaterThan(clamp.lineHeight * 2);
+      expect(clamp.full).toBeGreaterThan(clamp.height + clamp.lineHeight);
+
+      const preview = row.locator('.h-11.w-11');
+      await expect(preview).toBeVisible();
+      const [rowBox, previewBox] = await Promise.all([row.boundingBox(), preview.boundingBox()]);
+      expect(previewBox?.width).toBe(44);
+      expect((previewBox?.x ?? 0) + (previewBox?.width ?? 0)).toBeLessThanOrEqual(
+        (rowBox?.x ?? 0) + (rowBox?.width ?? 0),
+      );
+      expect(rowBox?.width).toBeLessThanOrEqual(320);
+    } finally {
+      await restore();
+    }
   });
 });

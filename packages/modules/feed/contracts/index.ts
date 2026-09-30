@@ -676,6 +676,36 @@ export const commentPageSchema = z
 export type FeedCommentPage = z.infer<typeof commentPageSchema>;
 
 /**
+ * The most replies the comment-thread read returns before the target (07-04): the replies page cap,
+ * so the pinned thread is never longer than one expanded page a member could have asked for.
+ */
+export const COMMENT_THREAD_REPLIES_CAP = REPLIES_MAX_PAGE_SIZE;
+
+/**
+ * `GET /v1/feed/comments/{commentId}/thread` (07-04, UI-D-254) — the ROOT thread holding one live
+ * comment, so a notification tap can show that comment first and highlighted.
+ *
+ * - `postId` is the thread's post: the page ignores a thread whose post is not the one it renders
+ *   (T-07-22), so a `?comentario=` naming another post's comment never pins it.
+ * - `root` is the root comment (the target itself when the target is a root).
+ * - `replies` is the root's live replies, oldest first (D-62), up to `COMMENT_THREAD_REPLIES_CAP`,
+ *   plus the target APPENDED when it lies beyond that cap, so the target is always in the answer.
+ * - `repliesCursor` continues the replies keyset after the last in-order reply (null when the cap
+ *   held them all); the list dedupes the out-of-order target when it pages on.
+ * - `targetId` is the comment the tap named.
+ */
+export const commentThreadSchema = z
+  .object({
+    postId: z.uuid(),
+    root: commentSchema,
+    replies: z.array(commentSchema),
+    repliesCursor: z.string().nullable(),
+    targetId: z.uuid(),
+  })
+  .strict();
+export type FeedCommentThread = z.infer<typeof commentThreadSchema>;
+
+/**
  * The answer to every like and unlike, on a post or on a comment: the CURRENT state, read back in
  * the same transaction that wrote it. A repeat like returns the identical body with a 200 — never a
  * 409 (FEED-04, idempotent toggle).

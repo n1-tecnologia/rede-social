@@ -67,6 +67,51 @@ describe('NotificationItem', () => {
   });
 });
 
+describe('NotificationItem variants (07-04, UI-D-251)', () => {
+  it('the removed variant is a BUTTON, never an anchor, with no preview and the tertiary sentence', () => {
+    const onActivate = vi.fn();
+    const { container } = item({
+      removed: true,
+      href: null,
+      onActivate,
+      sentence: 'removed-sentinel',
+      preview: { assetId: ASSET, widths: [320] },
+    });
+    expect(screen.queryByRole('link')).toBeNull();
+    const button = screen.getByRole('button');
+    expect(button).toHaveAttribute('type', 'button');
+    expect(button).toHaveAttribute('data-removed', 'true');
+    expect(button).toHaveClass('bg-brand/10');
+    expect(screen.getByText('unread-sentinel')).toHaveClass('sr-only');
+    expect(screen.getByText(/removed-sentinel/)).toHaveClass('text-text-tertiary');
+    expect(container.querySelector('.h-11.w-11')).toBeNull();
+    fireEvent.click(button);
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it('an actor-less row draws the 40px glyph disc instead of an avatar', () => {
+    const { container } = item({ leading: { glyph: true }, glyph: 'Bell' });
+    const disc = container.querySelector('.h-10.w-10.rounded-full.bg-bg-tertiary');
+    expect(disc).not.toBeNull();
+    expect(screen.queryByRole('img', { name: 'actor-sentinel' })).toBeNull();
+  });
+
+  it('only the like glyph carries the like tone', () => {
+    const liked = item({ glyph: 'Heart', glyphTone: 'like' });
+    expect(liked.container.querySelector('svg.text-like.fill-like')).not.toBeNull();
+    liked.unmount();
+    const neutral = item({ glyph: 'MessageCircleReply' });
+    expect(neutral.container.querySelector('svg.text-like')).toBeNull();
+    expect(neutral.container.querySelector('svg.text-text-secondary')).not.toBeNull();
+  });
+
+  it('a read removed row carries no unread label and no tint', () => {
+    item({ removed: true, href: null, unread: false, sentence: 'removed-sentinel' });
+    expect(screen.getByRole('button')).not.toHaveClass('bg-brand/10');
+    expect(screen.queryByText('unread-sentinel')).toBeNull();
+  });
+});
+
 describe('NotificationList', () => {
   it('renders Novas above Anteriores, and a section with no rows is absent', () => {
     const { rerender } = render(

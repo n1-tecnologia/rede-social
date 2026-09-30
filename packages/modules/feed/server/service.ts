@@ -13,6 +13,7 @@ import type {
   CreatePost,
   FeedComment,
   FeedCommentPage,
+  FeedCommentThread,
   FeedPage,
   FeedPost,
   FeedQuery,
@@ -27,6 +28,7 @@ import type {
   VideoCommunities,
 } from '../contracts/index';
 import {
+  COMMENT_THREAD_REPLIES_CAP,
   FEED_MAX_ATTACHMENTS,
   FEED_MAX_IMAGES,
   FEED_UNFURL_QUEUE,
@@ -1744,6 +1746,101 @@ export async function listReplies(
   );
 
   return { items: page.map((row) => toComment(row, ctx.userId)), nextCursor };
+}
+
+/**
+ * `GET /v1/feed/comments/{commentId}/thread` (07-04, UI-D-254, D-232) — the ROOT thread holding one
+ * live comment, for the post page's `?comentario=` highlight.
+ *
+ * ONE transaction, in the member's lane (RLS) with the tenant stated explicitly as well (T-07-22):
+ *  1. the target must be a live POST comment (never a story comment) on a live post, else a bare
+ *     404 — unknown, foreign, deleted, story and removed-post ids are indistinguishable;
+ *  2. its root (itself, or `parent_id`) must be live too: a reply under a deleted root is not on the
+ *     post's list either, so pinning it would show something the page otherwise hides;
+ *  3. the root's live replies, oldest first (D-62), up to `COMMENT_THREAD_REPLIES_CAP`, over the same
+ *     projection the lists use (UI-D-24's left join included);
+ *  4. the target itself, APPENDED, when it is a reply beyond that cap — so a comment deep in a long
+ *     thread is still in the answer (UI E08 long-text).
+ *
+ * `repliesCursor` continues the SAME replies keyset `listReplies` walks, after the last in-order
+ * reply, so the list's "Ver mais respostas" pages on normally.
+ */
+export async function getCommentThread(
+  ctx: RequestContext,
+  commentId: string,
+): Promise<FeedCommentThread> {
+  const cap = COMMENT_THREAD_REPLIES_CAP;
+  const { postId, root, replies, extra } = await withTenantTx(ctx, async (tx) => {
+    const targets = await tx.execute<{ post_id: string; root_id: string }>(sql`
+      select c.post_id, coalesce(c.parent_id, c.id) as root_id
+        from feed_comments c
+        join feed_posts p on p.id = c.post_id and p.deleted_at is null
+       where c.id = ${commentId}::uuid
+         and c.tenant_id = ${ctx.tenantId}::uuid
+         and c.post_id is not null
+         and c.deleted_at is null`);
+    const target = targets[0];
+    if (!target) throw new ApiError(404, 'NOT_FOUND');
+
+    const roots = await tx.execute<CommentRow>(sql`
+      ${commentProjection(ctx.userId)}
+       where c.id = ${target.root_id}::uuid
+         and c.tenant_id = ${ctx.tenantId}::uuid
+         and c.deleted_at is null`);
+    const rootRow = roots[0];
+    if (!rootRow) throw new ApiError(404, 'NOT_FOUND');
+
+    const replyRows = await tx.execute<CommentRow>(sql`
+      ${commentProjection(ctx.userId)}
+       where c.parent_id = ${target.root_id}::uuid
+         and c.tenant_id = ${ctx.tenantId}::uuid
+         and c.deleted_at is null
+       order by c.created_at asc, c.id asc
+       limit ${cap + 1}`);
+
+    const inOrder = replyRows.slice(0, cap);
+    let extraRow: CommentRow | null = null;
+    if (target.root_id !== commentId && !inOrder.some((row) => row.id === commentId)) {
+      const rows = await tx.execute<CommentRow>(sql`
+        ${commentProjection(ctx.userId)}
+         where c.id = ${commentId}::uuid
+           and c.tenant_id = ${ctx.tenantId}::uuid
+           and c.deleted_at is null`);
+      extraRow = rows[0] ?? null;
+    }
+    return {
+      postId: target.post_id,
+      root: rootRow,
+      replies: { rows: inOrder, hasMore: replyRows.length > cap },
+      extra: extraRow,
+    };
+  });
+
+  const last = replies.rows[replies.rows.length - 1];
+  const repliesCursor =
+    replies.hasMore && last ? encodeCursor({ n: last.created_at, id: last.id }) : null;
+
+  // Shape only: a comment body is member content and never reaches a log line (T-04-19).
+  log.info(
+    {
+      event: 'feed.comment.thread',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      commentId,
+      replies: replies.rows.length,
+      targetBeyondCap: extra !== null,
+    },
+    'comment thread read',
+  );
+
+  return {
+    postId,
+    root: toComment(root, ctx.userId),
+    replies: [...replies.rows, ...(extra ? [extra] : [])].map((row) => toComment(row, ctx.userId)),
+    repliesCursor,
+    targetId: commentId,
+  };
 }
 
 /**

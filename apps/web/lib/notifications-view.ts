@@ -21,21 +21,30 @@ export type NotificationTranslator = {
   rich: (key: string, values: Record<string, unknown>) => ReactNode;
 };
 
-/** One kind's renderer: its glyph, its sentence and its target (D-232). */
+/**
+ * One kind's renderer: its glyph, its leading form, its sentence and its target (D-232, UI-D-251).
+ *
+ * `leading: 'glyph'` draws the actor-less 40px disc even when the row names an actor (the generic
+ * row); the default `'actor'` draws the actor's avatar with the kind disc, falling back to the glyph
+ * disc when the row has no actor at all (reminders). `href` receives the request's ONE instant, so a
+ * time-bounded target (an expired story) is decided on the server, never by a client clock.
+ */
 export interface NotificationRenderer {
   glyph: NotificationGlyph;
   glyphTone?: 'neutral' | 'like';
+  leading?: 'actor' | 'glyph';
   sentence: (
     facts: NotificationRow['facts'],
     t: NotificationTranslator,
     actorName: string,
   ) => ReactNode;
-  href: (facts: NotificationRow['facts']) => string;
+  href: (facts: NotificationRow['facts'], nowMs: number) => string;
 }
 
 export interface NotificationRowView {
   id: string;
-  href: string;
+  /** `null` exactly for the removed variant, which is a button with nowhere to go (UI-D-254). */
+  href: string | null;
   unread: boolean;
   leading: { avatar: { src: string | null; alt: string } } | { glyph: true };
   glyph: NotificationGlyph;
@@ -43,11 +52,25 @@ export interface NotificationRowView {
   sentence: ReactNode;
   time: string;
   preview: { assetId: string; widths: number[] } | null;
+  /** 07-04 keep-and-mark: the target was deleted and the server dropped every fact. */
+  removed: boolean;
 }
 
 /**
- * The row's view, or `null` when no renderer knows its kind. 07-01 FILTERS such rows out; 07-04
- * replaces the filter with the generic row once its sketch is approved.
+ * UI-D-251's generic row: a kind the web registry does not know yet (a module shipped it before the
+ * web did) renders "Você tem uma nova notificação." on the `Bell` disc and opens Início. It never
+ * throws and never filters the row out, so a new producer can never break the list.
+ */
+export const genericNotificationRenderer: NotificationRenderer = {
+  glyph: 'Bell',
+  leading: 'glyph',
+  sentence: (_facts, t) => t('kinds.generic'),
+  href: () => '/inicio',
+};
+
+/**
+ * The row's view. Every row renders: an unmapped kind takes the generic renderer, and a removed row
+ * (07-04) keeps its actor and kind glyph but answers the removed sentence, no preview and no href.
  */
 export function notificationRowView(
   row: NotificationRow,
@@ -60,9 +83,8 @@ export function notificationRowView(
     nowMs: number;
     renderers: Partial<Record<string, NotificationRenderer>>;
   },
-): NotificationRowView | null {
-  const renderer = renderers[row.kind];
-  if (!renderer) return null;
+): NotificationRowView {
+  const renderer = renderers[row.kind] ?? genericNotificationRenderer;
 
   const actorName =
     row.actor === null
@@ -71,20 +93,31 @@ export function notificationRowView(
         ? t('actorRemoved')
         : (row.actor.displayName ?? t('actorRemoved'));
 
-  return {
+  const leading: NotificationRowView['leading'] =
+    row.actor === null || renderer.leading === 'glyph'
+      ? { glyph: true }
+      : { avatar: { src: avatarUrlFor(row.actor.avatarAssetId), alt: actorName } };
+
+  const base = {
     id: row.id,
-    href: renderer.href(row.facts),
     unread: row.readAt === null,
-    leading:
-      row.actor === null
-        ? { glyph: true }
-        : { avatar: { src: avatarUrlFor(row.actor.avatarAssetId), alt: actorName } },
+    leading,
     glyph: renderer.glyph,
     glyphTone: renderer.glyphTone ?? 'neutral',
-    sentence: renderer.sentence(row.facts, t, actorName),
     time: relativeFrom(row.createdAt, nowMs),
+  } as const;
+
+  if (row.removed) {
+    return { ...base, href: null, sentence: t('kinds.removed'), preview: null, removed: true };
+  }
+
+  return {
+    ...base,
+    href: renderer.href(row.facts, nowMs),
+    sentence: renderer.sentence(row.facts, t, actorName),
     preview: row.preview
       ? { assetId: row.preview.assetId, widths: row.preview.variantWidths }
       : null,
+    removed: false,
   };
 }

@@ -159,6 +159,22 @@ export type CommentsListProps = {
   onUnlikeComment: (commentId: string) => Promise<CommentLikeOutcome>;
   /** `+1` / `-1` as the post's comment count moves, so the card's meta row follows the sheet. */
   onCountChange?: (delta: number) => void;
+  /**
+   * 07-04 (UI-D-254): the ROOT thread a notification tap named (`/post/{id}?comentario=`), rendered
+   * FIRST. Its root is filtered out of every page below it by id, so it never repeats however far
+   * the member pages; its replies are seeded (expanded when the target is a reply, collapsed but
+   * pre-loaded when the target is the root) and `repliesCursor` continues their keyset.
+   */
+  pinnedThread?: PinnedThread;
+  /** The comment to scroll to and tint (UI-D-254); it lies inside `pinnedThread`. */
+  highlightCommentId?: string;
+};
+
+/** The pinned root thread, already mapped by the host. */
+export type PinnedThread = {
+  root: CommentView;
+  replies: CommentView[];
+  repliesCursor: string | null;
 };
 
 /** One root's reply thread. Absent from the map until the member first expands that root. */
@@ -223,18 +239,49 @@ export function CommentsList({
   onLikeComment,
   onUnlikeComment,
   onCountChange,
+  pinnedThread,
+  highlightCommentId,
 }: CommentsListProps) {
   // D-82. Read once, near the top, because six things below branch on it and a scattered
   // `variant === 'flat'` is how the two lists start becoming two components.
   const flat = variant === 'flat';
 
-  const [items, setItems] = useState<CommentView[]>(initialItems ?? []);
+  // UI-D-254: the pinned root leads the list and is dropped from every page by id, so a thread the
+  // server also returns on page 1 (or page 8) is never drawn twice.
+  const pinnedRoot = flat ? null : (pinnedThread?.root ?? null);
+  const withPinned = useCallback(
+    (rows: CommentView[]) =>
+      pinnedRoot ? [pinnedRoot, ...rows.filter((row) => row.id !== pinnedRoot.id)] : rows,
+    [pinnedRoot],
+  );
+  const withoutPinned = useCallback(
+    (rows: CommentView[]) => (pinnedRoot ? rows.filter((row) => row.id !== pinnedRoot.id) : rows),
+    [pinnedRoot],
+  );
+
+  const [items, setItems] = useState<CommentView[]>(() =>
+    initialItems === undefined ? [] : withPinned(initialItems),
+  );
   const [cursor, setCursor] = useState<string | null>(initialCursor);
   const [loading, setLoading] = useState(initialItems === undefined && !initialError);
   const [listError, setListError] = useState(initialError);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const [threads, setThreads] = useState<Record<string, ReplyThread>>({});
+  const [threads, setThreads] = useState<Record<string, ReplyThread>>(() =>
+    pinnedThread && !flat
+      ? {
+          [pinnedThread.root.id]: {
+            // Expanded exactly when the target is one of the replies (UI-D-254 partial).
+            expanded:
+              highlightCommentId !== undefined && highlightCommentId !== pinnedThread.root.id,
+            items: pinnedThread.replies,
+            cursor: pinnedThread.repliesCursor,
+            loading: false,
+            error: false,
+          },
+        }
+      : {},
+  );
   const [replyTarget, setReplyTarget] = useState<{ commentId: string; name: string } | null>(null);
   const [focusKey, setFocusKey] = useState(0);
   const [submitError, setSubmitError] = useState<
@@ -264,9 +311,9 @@ export function CommentsList({
       setListError(true);
       return;
     }
-    setItems(page.items);
+    setItems(withPinned(page.items));
     setCursor(page.nextCursor);
-  }, [onLoadComments, targetId]);
+  }, [onLoadComments, targetId, withPinned]);
 
   // Fetch page 1 exactly once when nothing was seeded (the sheet). A seeded list never runs this.
   const fetched = useRef(false);
@@ -292,9 +339,9 @@ export function CommentsList({
       setListError(true);
       return;
     }
-    setItems((previous) => [...previous, ...page.items]);
+    setItems((previous) => [...previous, ...withoutPinned(page.items)]);
     setCursor(page.nextCursor);
-  }, [cursor, loadingMore, onLoadComments, targetId]);
+  }, [cursor, loadingMore, onLoadComments, targetId, withoutPinned]);
 
   /** Fetch (or re-fetch) ONE root's first page of replies. The retry and the first tap share it. */
   const fetchReplies = useCallback(
@@ -363,11 +410,14 @@ export function CommentsList({
       }
       setThreads((previous) => {
         const current = previous[rootId] ?? EMPTY_THREAD;
+        // A pinned thread may already hold a reply from beyond its first page (the highlighted
+        // target, UI-D-254): paging on must not draw it a second time.
+        const held = new Set(current.items.map((row) => row.id));
         return {
           ...previous,
           [rootId]: {
             ...current,
-            items: [...current.items, ...page.items],
+            items: [...current.items, ...page.items.filter((row) => !held.has(row.id))],
             cursor: page.nextCursor,
             loading: false,
             error: false,
@@ -638,6 +688,7 @@ export function CommentsList({
             // one-level cap is visible here, not merely refused by the database.
             onDelete={reply.canDelete ? setConfirming : undefined}
             onToggleLike={(row) => void toggleLike(row)}
+            highlighted={reply.id === highlightCommentId}
           />
         ))}
 
@@ -719,6 +770,7 @@ export function CommentsList({
               onReply={flat ? undefined : startReply}
               onDelete={comment.canDelete ? setConfirming : undefined}
               onToggleLike={flat ? undefined : (row) => void toggleLike(row)}
+              highlighted={!flat && comment.id === highlightCommentId}
             >
               {renderToggle(comment)}
             </CommentItem>

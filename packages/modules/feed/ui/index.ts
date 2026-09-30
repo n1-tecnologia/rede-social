@@ -26,6 +26,7 @@ export {
   type CommentsListProps,
   CommentsListSkeleton,
   type CommentViewer,
+  type PinnedThread,
 } from './CommentsList';
 export { ComposeFab, type ComposeFabProps } from './ComposeFab';
 export {

@@ -9,8 +9,9 @@ import {
   unlikePostAction,
 } from '@/app/(app)/inicio/feed-actions';
 import { PostDetail } from '@/components/feed/PostDetail';
+import { NoticeToast } from '@/components/feedback/NoticeToast';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { loadPost, loadPostComments } from '@/lib/feed';
+import { type CommentThreadResult, getCommentThread, loadPost, loadPostComments } from '@/lib/feed';
 import { commentView, postCardView } from '@/lib/feed-view';
 import { feedCommentsProps, postCardLabels, postMenuLabels } from '@/lib/registry';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
@@ -45,12 +46,32 @@ import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
  * list (`scripts/check-static-routes.sh`).
  *
  * `redirect()` and `notFound()` both throw (Next 16), so both sit OUTSIDE any try/catch.
+ *
+ * **`?comentario={commentId}` (07-04, UI-D-254, D-232)** is where a "curtiu / respondeu ao seu
+ * comentário" notification lands. Only a single lowercase uuid is read; any other value is ignored
+ * in silence. The page asks the feed for the ROOT thread holding that comment and, when the thread
+ * belongs to THIS post, pins it first in the list with the target scrolled to and tinted. An
+ * unknown, deleted, foreign or other-post comment renders the post normally plus the info toast
+ * "Este comentário não está mais disponível." (T-07-22: a thread of another post is never pinned).
+ * A failed read is neither: the post renders plainly, with no toast claiming the comment is gone.
  */
-export default async function PostPage({ params }: { params: Promise<{ postId: string }> }) {
+const COMMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export default async function PostPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ postId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
-  const { postId } = await params;
+  const [{ postId }, query] = await Promise.all([params, searchParams]);
+  const comentario =
+    typeof query.comentario === 'string' && COMMENT_ID.test(query.comentario)
+      ? query.comentario
+      : null;
   const [tf, te, locale, bootstrap, shareOrigin, result] = await Promise.all([
     getTranslations('feed'),
     getTranslations('app.error'),
@@ -99,9 +120,26 @@ export default async function PostPage({ params }: { params: Promise<{ postId: s
   // The post is readable, so its comments are asked for SECOND rather than in the `Promise.all`
   // above: a miss must not pay for a comment page nobody will see, and the cross-tenant probe must
   // not cost the API a second query either.
-  const commentPage = await loadPostComments(result.post.id);
+  const [commentPage, threadResult] = await Promise.all([
+    loadPostComments(result.post.id),
+    comentario
+      ? getCommentThread(comentario)
+      : Promise.resolve<CommentThreadResult>({ status: 'error' }),
+  ]);
   const now = Date.now();
   const nowLabel = tf('comments.now');
+  const toView = (comment: Parameters<typeof commentView>[0]) =>
+    commentView(comment, now, nowLabel, bootstrap.tenant.timezone);
+
+  // Pinned only when the thread is THIS post's (T-07-22); a miss or another post's comment toasts.
+  const thread =
+    threadResult.status === 'ok' && threadResult.thread.postId === result.post.id
+      ? threadResult.thread
+      : null;
+  const targetMissing =
+    comentario !== null &&
+    (threadResult.status === 'not-found' ||
+      (threadResult.status === 'ok' && threadResult.thread.postId !== result.post.id));
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
@@ -122,16 +160,24 @@ export default async function PostPage({ params }: { params: Promise<{ postId: s
         }}
         comments={{
           ...feedCommentsProps(locale, tf, bootstrap),
-          initialItems:
-            commentPage === null
-              ? undefined
-              : commentPage.items.map((comment) =>
-                  commentView(comment, now, nowLabel, bootstrap.tenant.timezone),
-                ),
+          initialItems: commentPage === null ? undefined : commentPage.items.map(toView),
           initialCursor: commentPage?.nextCursor ?? null,
           initialError: commentPage === null,
+          ...(thread
+            ? {
+                pinnedThread: {
+                  root: toView(thread.root),
+                  replies: thread.replies.map(toView),
+                  repliesCursor: thread.repliesCursor,
+                },
+                highlightCommentId: thread.targetId,
+              }
+            : {}),
         }}
       />
+      {targetMissing ? (
+        <NoticeToast message={tf('comments.targetMissing')} param="comentario" />
+      ) : null}
     </div>
   );
 }

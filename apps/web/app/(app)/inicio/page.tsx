@@ -3,6 +3,7 @@ import { HomeSlots, TenantLogo } from '@rede-social/core/ui';
 import { EmptyState } from '@rede-social/ui';
 import { Sparkles } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { NoticeToast } from '@/components/feedback/NoticeToast';
 import { ProfileNudgeCard } from '@/components/profile/ProfileNudgeCard';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { requirePlatformTenants } from '@/lib/platform';
@@ -19,12 +20,23 @@ import { getHostTenant } from '@/lib/tenant-host';
  * client loading state for the brand, the nudge or the widgets.
  *
  * On the platform host it renders the D-21 landing (02-12 owns the panel at `/plataforma`).
+ *
+ * `?aviso=story-expirado` (07-04, UI-D-254) is where a notification about a story that has passed
+ * its 24 h lands: Início renders the info toast "Este story expirou." once. Only that exact single
+ * value maps to a catalog key; any other `aviso` is ignored in silence (D-93, T-07-23).
  */
-export default async function InicioPage() {
-  const [hostTenant, t, tp] = await Promise.all([
+const STORY_EXPIRED_NOTICE = 'story-expirado';
+
+export default async function InicioPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [hostTenant, t, tp, query] = await Promise.all([
     getHostTenant(),
     getTranslations('app'),
     getTranslations('platform'),
+    searchParams,
   ]);
 
   if (hostTenant.mode === 'platform') {
@@ -61,7 +73,12 @@ export default async function InicioPage() {
   const bootstrap = await requireBootstrap();
   const { tenant } = bootstrap;
   const branding = resolveBranding(tenant.branding);
-  const [slots, profile] = await Promise.all([homeSlotsFor(bootstrap), loadOwnProfile()]);
+  const [slots, profile, tn] = await Promise.all([
+    homeSlotsFor(bootstrap),
+    loadOwnProfile(),
+    getTranslations('notifications'),
+  ]);
+  const storyExpired = query.aviso === STORY_EXPIRED_NOTICE;
 
   return (
     <div className="flex flex-col gap-6 px-4 md:px-0">
@@ -97,6 +114,8 @@ export default async function InicioPage() {
           />
         }
       />
+
+      {storyExpired ? <NoticeToast message={tn('fallback.storyExpired')} param="aviso" /> : null}
     </div>
   );
 }

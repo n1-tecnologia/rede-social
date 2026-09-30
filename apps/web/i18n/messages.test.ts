@@ -1394,4 +1394,51 @@ describe('07 — notifications list strings and placeholders', () => {
       '[Ana] publicou um novo reel.',
     );
   });
+
+  /**
+   * 07-04 — the remaining row kinds, the generic and removed rows, and the three fallback toasts
+   * (UI-SPEC Copywriting Contract, "Notification rows" and "Fallbacks and toasts"), verbatim.
+   */
+  it.each([
+    ['notifications.kinds.story', '<b>{actor}</b> publicou um novo story.'],
+    ['notifications.kinds.commentLiked', '<b>{actor}</b> curtiu seu comentário: “{excerpt}”'],
+    [
+      'notifications.kinds.commentReplied',
+      '<b>{actor}</b> respondeu ao seu comentário: “{excerpt}”',
+    ],
+    ['notifications.kinds.storyCommented', '<b>{actor}</b> comentou no seu story: “{excerpt}”'],
+    ['notifications.kinds.generic', 'Você tem uma nova notificação.'],
+    ['notifications.kinds.removed', 'Este conteúdo foi removido.'],
+    ['notifications.fallback.storyExpired', 'Este story expirou.'],
+    ['notifications.fallback.removed', 'Este conteúdo não está mais disponível.'],
+    ['feed.comments.targetMissing', 'Este comentário não está mais disponível.'],
+  ])('07-04: %s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('07-04: the comment and story sentences format with the <b> actor and the excerpt', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'notifications',
+    }) as unknown as {
+      rich: (key: string, values: Record<string, unknown>) => unknown;
+    };
+    const flat = (node: unknown): string =>
+      Array.isArray(node) ? node.map(flat).join('') : typeof node === 'string' ? node : '';
+    const bold = (chunks: unknown) => `[${flat(chunks)}]`;
+    expect(flat(t.rich('kinds.commentLiked', { actor: 'Bruno', excerpt: 'Oi', b: bold }))).toBe(
+      '[Bruno] curtiu seu comentário: “Oi”',
+    );
+    expect(flat(t.rich('kinds.commentReplied', { actor: 'Bruno', excerpt: 'Oi', b: bold }))).toBe(
+      '[Bruno] respondeu ao seu comentário: “Oi”',
+    );
+    expect(flat(t.rich('kinds.storyCommented', { actor: 'Ana', excerpt: 'Linda', b: bold }))).toBe(
+      '[Ana] comentou no seu story: “Linda”',
+    );
+    expect(flat(t.rich('kinds.story', { actor: 'Ana', b: bold }))).toBe(
+      '[Ana] publicou um novo story.',
+    );
+  });
 });

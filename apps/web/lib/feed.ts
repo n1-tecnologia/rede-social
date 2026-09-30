@@ -3,9 +3,11 @@ import {
   type CreatePost,
   commentPageSchema,
   commentSchema,
+  commentThreadSchema,
   FEED_PAGE_SIZE,
   type FeedComment,
   type FeedCommentPage,
+  type FeedCommentThread,
   type FeedPage,
   type FeedPost,
   feedPageSchema,
@@ -370,4 +372,42 @@ export async function loadPostComments(
 
   if (path) redirect(path);
   return page;
+}
+
+/** The comment-thread read's three outcomes (07-04): pinned, gone, or unanswered. */
+export type CommentThreadResult =
+  | { status: 'ok'; thread: FeedCommentThread }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/feed/comments/{commentId}/thread` (07-04, UI-D-254) — the root thread holding the comment
+ * a notification tap named, for the post page's `?comentario=` highlight.
+ *
+ * The API answers ONE bare 404 for an unknown, foreign, deleted or story comment and a 400 for a
+ * non-uuid; both are `not-found`, which the page turns into the "Este comentário não está mais
+ * disponível." toast. A transport or 5xx failure is `error`: the page then renders the post plainly
+ * with NO toast, because "we could not ask" is not "the comment is gone". A refusal
+ * `bootstrapRedirectPath` knows becomes a navigation, OUTSIDE the try/catch (Next 16).
+ */
+export async function getCommentThread(commentId: string): Promise<CommentThreadResult> {
+  let path: string | null = null;
+  let result: CommentThreadResult = { status: 'error' };
+  try {
+    const res = await apiFetch(`/v1/feed/comments/${encodeURIComponent(commentId)}/thread`);
+    if (res.ok) {
+      result = { status: 'ok', thread: commentThreadSchema.parse(await res.json()) };
+    } else if (res.status === 404 || res.status === 400) {
+      result = { status: 'not-found' };
+    } else {
+      const error = await apiError(res);
+      path = bootstrapRedirectPath(error);
+      if (!path) console.error('feed.thread_failed', { status: res.status, code: error.code });
+    }
+  } catch (error) {
+    console.error('feed.thread_failed', { error: String(error) });
+  }
+
+  if (path) redirect(path);
+  return result;
 }

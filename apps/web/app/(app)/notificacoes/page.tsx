@@ -38,12 +38,11 @@ export default async function NotificationsPage() {
   // ONE clock read for the whole page: every relative label is computed from the same instant.
   const nowMs = Date.now();
   const translator = t as unknown as NotificationTranslator;
-  const toViews = (items: NonNullable<typeof unreadPage>['items']) =>
-    items
-      .map((row) =>
-        notificationRowView(row, { t: translator, nowMs, renderers: notificationRenderers }),
-      )
-      .filter((view): view is NotificationRowView => view !== null);
+  // Every row renders (07-04): an unknown kind is the generic row, never a filtered-out gap.
+  const toViews = (items: NonNullable<typeof unreadPage>['items']): NotificationRowView[] =>
+    items.map((row) =>
+      notificationRowView(row, { t: translator, nowMs, renderers: notificationRenderers }),
+    );
 
   // A failed Anteriores read (with Novas fine) is not a first-load failure: the list starts that
   // section again from the sentinel, exactly as it would after a scroll.

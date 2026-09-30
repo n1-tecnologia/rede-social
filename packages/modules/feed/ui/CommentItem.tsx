@@ -2,6 +2,7 @@
 
 import { Avatar, cn, IconButton } from '@rede-social/ui';
 import { Heart, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { linkify } from './linkify';
 import type { CountTemplates } from './meta';
 import { formatCountLabel } from './meta';
@@ -95,7 +96,25 @@ export type CommentItemProps = {
   onToggleLike?: (comment: CommentView) => void;
   /** Rendered beneath the body by the LIST: the replies toggle, its skeleton, its retry, its rows. */
   children?: React.ReactNode;
+  /**
+   * 07-04 (UI-D-254): this is the comment a notification tap named. After mount the row scrolls to
+   * the centre and wears `rounded-xl bg-brand/10` (the unread row's tint, so "this is what you were
+   * told about" reads the same on both screens) for `HIGHLIGHT_HOLD_MS`, then fades over
+   * `HIGHLIGHT_FADE_MS`. Under `prefers-reduced-motion: reduce` there is no transition and the tint
+   * stays until the member's first tap, key or scroll gesture.
+   */
+  highlighted?: boolean;
 };
+
+/** UI-D-254: how long the highlight tint holds, and how long it takes to fade. */
+export const HIGHLIGHT_HOLD_MS = 2_400;
+export const HIGHLIGHT_FADE_MS = 600;
+
+/**
+ * The gestures that end a reduced-motion highlight. `wheel` and `touchmove` stand for "the member
+ * scrolled": listening to `scroll` itself would end the tint on the row's OWN `scrollIntoView`.
+ */
+const HIGHLIGHT_END_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchmove'] as const;
 
 export function CommentItem({
   comment,
@@ -105,20 +124,56 @@ export function CommentItem({
   onDelete,
   onToggleLike,
   children,
+  highlighted = false,
 }: CommentItemProps) {
   const { author, authorRemoved, isReply, pending } = comment;
   const name = authorRemoved ? labels.removedAuthor : (author.displayName ?? labels.removedAuthor);
   const likeLabel = formatCountLabel(comment.likeCount, labels.likes, locale);
 
+  const rowRef = useRef<HTMLElement>(null);
+  const [tinted, setTinted] = useState(highlighted);
+
+  useEffect(() => {
+    if (!highlighted) return;
+    setTinted(true);
+    rowRef.current?.scrollIntoView({ block: 'center' });
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) {
+      const end = () => setTinted(false);
+      for (const type of HIGHLIGHT_END_EVENTS) {
+        window.addEventListener(type, end, { once: true, passive: true, capture: true });
+      }
+      return () => {
+        for (const type of HIGHLIGHT_END_EVENTS) {
+          window.removeEventListener(type, end, { capture: true });
+        }
+      };
+    }
+    const timer = window.setTimeout(() => setTinted(false), HIGHLIGHT_HOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [highlighted]);
+
   return (
     <article
+      ref={rowRef}
       data-comment-id={comment.id}
       data-comment-kind={isReply ? 'reply' : 'root'}
       data-comment-author-removed={authorRemoved ? 'true' : undefined}
+      data-comment-highlighted={highlighted && tinted ? 'true' : undefined}
       aria-busy={pending || undefined}
       // `pl-14` overrides the row's own left gutter for the reply indent **[proto]**; the avatar is
       // `shrink-0`, so at 320px the indent is preserved by pushing the BODY in, never by clipping.
-      className={cn('flex gap-3 px-4 py-3', isReply && 'pl-14', pending && 'opacity-60')}
+      // A highlighted row trades 8px of gutter for 8px of margin on each side so its `rounded-xl`
+      // tint reads as a shape, with the content exactly where it was (UI-D-254, sketch 007 item 8).
+      className={cn(
+        'flex gap-3 px-4 py-3',
+        isReply && 'pl-14',
+        highlighted &&
+          'mx-2 rounded-xl px-2 transition-colors duration-[600ms] motion-reduce:transition-none',
+        highlighted && isReply && 'pl-12',
+        highlighted && tinted && 'bg-brand/10',
+        pending && 'opacity-60',
+      )}
     >
       <Avatar src={author.avatarUrl} alt={name} size="sm" />
 

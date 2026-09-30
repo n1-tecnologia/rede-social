@@ -74,6 +74,7 @@
       "viewerAvatar": "Sua foto de perfil",
       "now": "agora",
       "empty": "Nenhum comentário ainda. Seja o primeiro!",
+      "targetMissing": "Este comentário não está mais disponível.",
       "retry": "Tentar novamente",
       "loadMore": "Ver mais comentários",
       "loadMoreReplies": "Ver mais respostas",

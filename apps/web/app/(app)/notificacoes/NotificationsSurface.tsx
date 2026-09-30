@@ -77,6 +77,8 @@ export function NotificationsSkeleton({ count }: { count: number }) {
  * - **Read on tap, in place.** A row's activation fires `/api/notifications/{id}/read` with
  *   `keepalive` WITHOUT awaiting it, clears that row's tint locally and lets the anchor navigate. The
  *   row moves to Anteriores only on the next load (moving rows under the finger is what this avoids).
+ *   A REMOVED row (07-04 keep-and-mark) is a button: the same read, the same tint, and the info toast
+ *   "Este conteúdo não está mais disponível." instead of a navigation (UI-D-254).
  * - **Mark all.** Visible while any loaded row is unread; `aria-busy` and disabled during the POST;
  *   clears every tint optimistically, restores them and fires the error toast on failure.
  *
@@ -207,8 +209,9 @@ export function NotificationsSurface({
         }).catch(() => {});
       }
       setLocallyRead((previous) => new Set(previous).add(view.id));
+      if (view.removed) show({ tone: 'info', message: t('fallback.removed') });
     },
-    [isUnread],
+    [isUnread, show, t],
   );
 
   // ── mark all: optimistic, restored on failure ─────────────────────────────────────────────────
@@ -301,6 +304,7 @@ export function NotificationsSurface({
       sentence={view.sentence}
       time={view.time}
       preview={view.preview}
+      removed={view.removed}
       unreadLabel={t('unreadLabel')}
     />
   );

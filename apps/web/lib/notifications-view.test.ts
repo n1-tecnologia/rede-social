@@ -105,8 +105,14 @@ describe('notificationRowView (07-01, UI-D-251)', () => {
     expect(view()?.glyph).toBe('Newspaper');
   });
 
-  it('filters out a kind no renderer knows (07-04 adds the generic row)', () => {
-    expect(view({ kind: 'stories.story' })).toBeNull();
+  it('renders a kind no renderer knows as the generic row (07-04, never filtered)', () => {
+    const generic = view({ kind: 'made.up', facts: { anything: 'x' } });
+    expect(generic).not.toBeNull();
+    expect(generic?.href).toBe('/inicio');
+    expect(generic?.glyph).toBe('Bell');
+    expect(generic?.leading).toEqual({ glyph: true });
+    expect(markup(generic?.sentence)).toBe('Você tem uma nova notificação.');
+    expect(generic?.removed).toBe(false);
   });
 
   it('carries the preview ladder only when the row has one', () => {
@@ -115,5 +121,87 @@ describe('notificationRowView (07-01, UI-D-251)', () => {
       assetId: AVATAR,
       widths: [320, 640],
     });
+  });
+});
+
+const COMMENT = '44444444-4444-4444-8444-444444444444';
+const STORY = '55555555-5555-4555-8555-555555555555';
+
+describe('notificationRowView — 07-04 kinds, expiry and the removed variant', () => {
+  it('a comment like opens the post at the comment, with the like-toned heart', () => {
+    const liked = view({
+      kind: 'feed.comment_liked',
+      object: { type: 'comment', id: COMMENT },
+      facts: { postId: POST, commentId: COMMENT, excerpt: 'Vou levar as crianças' },
+    });
+    expect(liked?.href).toBe(`/post/${POST}?comentario=${COMMENT}`);
+    expect(liked?.glyph).toBe('Heart');
+    expect(liked?.glyphTone).toBe('like');
+    expect(markup(liked?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> curtiu seu comentário: “Vou levar as crianças”',
+    );
+  });
+
+  it('a reply opens the post at the reply, with the neutral reply glyph', () => {
+    const replied = view({
+      kind: 'feed.comment_replied',
+      facts: { postId: POST, commentId: COMMENT, rootCommentId: POST, excerpt: 'Concordo' },
+    });
+    expect(replied?.href).toBe(`/post/${POST}?comentario=${COMMENT}`);
+    expect(replied?.glyph).toBe('MessageCircleReply');
+    expect(replied?.glyphTone).toBe('neutral');
+    expect(markup(replied?.sentence)).toContain('respondeu ao seu comentário: “Concordo”');
+  });
+
+  it("a story opens the story until expiresAt and Início's notice from expiresAt on", () => {
+    const at = (expiresAt: string) =>
+      view({
+        kind: 'stories.story',
+        subject: { type: 'story', id: STORY },
+        facts: { storyId: STORY, expiresAt, previewAssetId: null },
+      });
+    expect(at(new Date(NOW + 1).toISOString())?.href).toBe(`/stories/${STORY}`);
+    expect(at(new Date(NOW).toISOString())?.href).toBe('/inicio?aviso=story-expirado');
+    expect(at(new Date(NOW - 1).toISOString())?.href).toBe('/inicio?aviso=story-expirado');
+    expect(at(new Date(NOW + 1).toISOString())?.glyph).toBe('Sparkles');
+    expect(markup(at(new Date(NOW + 1).toISOString())?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> publicou um novo story.',
+    );
+  });
+
+  it('a story comment follows the same expiry rule', () => {
+    const commented = (expiresAt: string) =>
+      view({
+        kind: 'stories.story_commented',
+        facts: { storyId: STORY, commentId: COMMENT, expiresAt, excerpt: 'Que foto linda!' },
+      });
+    expect(commented(new Date(NOW + 60_000).toISOString())?.href).toBe(`/stories/${STORY}`);
+    expect(commented(new Date(NOW).toISOString())?.href).toBe('/inicio?aviso=story-expirado');
+    expect(commented(new Date(NOW + 60_000).toISOString())?.glyph).toBe('MessageCircle');
+    expect(markup(commented(new Date(NOW + 60_000).toISOString())?.sentence)).toContain(
+      'comentou no seu story: “Que foto linda!”',
+    );
+  });
+
+  it('a removed row keeps the actor and glyph, drops the preview and has no href', () => {
+    const removed = view({
+      kind: 'feed.comment_liked',
+      facts: {},
+      removed: true,
+      preview: { assetId: AVATAR, variantWidths: [320] },
+    });
+    expect(removed?.removed).toBe(true);
+    expect(removed?.href).toBeNull();
+    expect(removed?.preview).toBeNull();
+    expect(removed?.glyph).toBe('Heart');
+    expect(removed?.leading).toEqual({ avatar: { src: expect.any(String), alt: 'Ana Souza' } });
+    expect(markup(removed?.sentence)).toBe('Este conteúdo foi removido.');
+  });
+
+  it('a removed row of an unknown kind is still the removed sentence on the Bell disc', () => {
+    const removed = view({ kind: 'made.up', facts: {}, removed: true });
+    expect(removed?.glyph).toBe('Bell');
+    expect(removed?.href).toBeNull();
+    expect(markup(removed?.sentence)).toBe('Este conteúdo foi removido.');
   });
 });

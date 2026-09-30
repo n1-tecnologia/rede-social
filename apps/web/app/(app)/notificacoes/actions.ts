@@ -75,9 +75,9 @@ async function fetchSection(
 
 async function toViews(items: Loaded['items'], nowMs: number): Promise<NotificationRowView[]> {
   const t = (await getTranslations('notifications')) as unknown as NotificationTranslator;
-  return items
-    .map((row) => notificationRowView(row, { t, nowMs, renderers: notificationRenderers }))
-    .filter((view): view is NotificationRowView => view !== null);
+  return items.map((row) =>
+    notificationRowView(row, { t, nowMs, renderers: notificationRenderers }),
+  );
 }
 
 /**

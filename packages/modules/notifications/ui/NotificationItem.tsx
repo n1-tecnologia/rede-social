@@ -35,10 +35,22 @@ const GLYPHS = {
 export type NotificationGlyph = keyof typeof GLYPHS;
 
 export interface NotificationItemProps {
-  /** Where a tap lands (D-232). The whole row is ONE `<a>`. */
-  href: string;
-  /** Fired on activation, before the anchor navigates (07-01 Task 3: the fire-and-forget read). */
-  onActivate?: MouseEventHandler<HTMLAnchorElement>;
+  /**
+   * Where a tap lands (D-232). The whole row is ONE `<a>`. Ignored by the removed variant, which
+   * has nowhere to go.
+   */
+  href: string | null;
+  /**
+   * Fired on activation: before the anchor navigates (07-01 Task 3: the fire-and-forget read), or,
+   * for the removed variant, as the button's whole behaviour (the host marks it read and toasts).
+   */
+  onActivate?: MouseEventHandler<HTMLElement>;
+  /**
+   * 07-04 keep-and-mark (UI-D-251, UI-D-254): the target was deleted and the row's facts were
+   * dropped on the server. The row becomes a `<button>` (never an `<a>` to a broken route), the
+   * sentence is the host's removed sentence in 14/400 tertiary, and no preview is drawn.
+   */
+  removed?: boolean;
   /** `read_at` is null: the brand tint plus the `sr-only` unread label (never colour alone). */
   unread: boolean;
   /**
@@ -78,23 +90,19 @@ export function NotificationItem({
   time,
   preview,
   unreadLabel,
+  removed = false,
   className,
 }: NotificationItemProps) {
   const Glyph = GLYPHS[glyph];
   const toneClass = glyphTone === 'like' ? 'text-like fill-like' : 'text-text-secondary';
+  const rowClass = cn(
+    'flex min-h-16 items-start gap-3 px-4 py-3 transition-colors hover:bg-bg-hover active:bg-bg-active',
+    unread && 'bg-brand/10',
+    className,
+  );
 
-  return (
-    <a
-      href={href}
-      onClick={onActivate}
-      data-testid="notification-item"
-      data-unread={unread ? 'true' : 'false'}
-      className={cn(
-        'flex min-h-16 items-start gap-3 px-4 py-3 transition-colors hover:bg-bg-hover active:bg-bg-active',
-        unread && 'bg-brand/10',
-        className,
-      )}
-    >
+  const content = (
+    <>
       <span className="relative h-10 w-10 shrink-0">
         {'avatar' in leading ? (
           <>
@@ -117,14 +125,19 @@ export function NotificationItem({
       </span>
 
       <span className="min-w-0 flex-1">
-        <span className="line-clamp-3 text-sm text-text-secondary [overflow-wrap:anywhere]">
+        <span
+          className={cn(
+            'line-clamp-3 text-sm [overflow-wrap:anywhere]',
+            removed ? 'text-text-tertiary' : 'text-text-secondary',
+          )}
+        >
           {unread ? <span className="sr-only">{unreadLabel} </span> : null}
           {sentence}
         </span>
         <span className="mt-1 block text-xs text-text-tertiary">{time}</span>
       </span>
 
-      {preview ? (
+      {preview && !removed ? (
         <span className="h-11 w-11 shrink-0 overflow-hidden rounded-lg">
           <MediaImage
             assetId={preview.assetId}
@@ -136,6 +149,33 @@ export function NotificationItem({
           />
         </span>
       ) : null}
+    </>
+  );
+
+  if (removed || href === null) {
+    return (
+      <button
+        type="button"
+        onClick={onActivate}
+        data-testid="notification-item"
+        data-unread={unread ? 'true' : 'false'}
+        data-removed="true"
+        className={cn(rowClass, 'w-full text-left')}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      onClick={onActivate}
+      data-testid="notification-item"
+      data-unread={unread ? 'true' : 'false'}
+      className={rowClass}
+    >
+      {content}
     </a>
   );
 }

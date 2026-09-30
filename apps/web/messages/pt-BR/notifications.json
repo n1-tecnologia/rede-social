@@ -29,7 +29,17 @@
       "reel": {
         "withExcerpt": "<b>{actor}</b> publicou um novo reel: “{excerpt}”",
         "plain": "<b>{actor}</b> publicou um novo reel."
-      }
+      },
+      "story": "<b>{actor}</b> publicou um novo story.",
+      "commentLiked": "<b>{actor}</b> curtiu seu comentário: “{excerpt}”",
+      "commentReplied": "<b>{actor}</b> respondeu ao seu comentário: “{excerpt}”",
+      "storyCommented": "<b>{actor}</b> comentou no seu story: “{excerpt}”",
+      "generic": "Você tem uma nova notificação.",
+      "removed": "Este conteúdo foi removido."
+    },
+    "fallback": {
+      "storyExpired": "Este story expirou.",
+      "removed": "Este conteúdo não está mais disponível."
     },
     "errors": {
       "loadMore": "Não foi possível carregar mais notificações.",
