@@ -273,6 +273,22 @@ export function firstUrlIn(text: string): string | null {
 export const FEED_UNFURL_QUEUE = 'feed.unfurl-link';
 
 /**
+ * The notification kinds the feed produces (07-01, D-226/D-227), the `kind` of a `notifications` row.
+ * One `post.published` yields exactly ONE of the first three per recipient, all sharing the dedupe
+ * key `feed.post:{postId}`: `reel` when the post's `media_kind` is `video`, `communityPost` when it
+ * carries a `community_id`, `post` otherwise. 07-04 produces the two comment kinds.
+ */
+export const FEED_NOTIFICATION_KINDS = {
+  post: 'feed.post',
+  communityPost: 'feed.community_post',
+  reel: 'feed.reel',
+  commentLiked: 'feed.comment_liked',
+  commentReplied: 'feed.comment_replied',
+} as const;
+export type FeedNotificationKind =
+  (typeof FEED_NOTIFICATION_KINDS)[keyof typeof FEED_NOTIFICATION_KINDS];
+
+/**
  * The unfurl job's payload.
  *
  * `tenantId` is DATA, NOT AUTHORITY (T-07-03). The handler re-enters the tenant lane with it and

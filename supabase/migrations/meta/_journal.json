@@ -302,6 +302,34 @@
       "when": 1790585500063,
       "tag": "20260928085140_event_check_in_ceiling",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1790771486111,
+      "tag": "20260930123126_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790771493316,
+      "tag": "20260930123133_notifications_drop_event_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1790771533234,
+      "tag": "20260930123213_realtime_authorization",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1790771534808,
+      "tag": "20260930123214_notifications_functions",
+      "breakpoints": true
     }
   ]
 }

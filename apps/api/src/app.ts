@@ -5,6 +5,7 @@ import { ApiError, errorEnvelope } from '@rede-social/core/server/http/api-error
 import { communitiesRoutes } from '@rede-social/module-communities/server';
 import { eventsRoutes } from '@rede-social/module-events/server';
 import { feedRoutes } from '@rede-social/module-feed/server';
+import { notificationsRoutes } from '@rede-social/module-notifications/server';
 import { storiesRoutes } from '@rede-social/module-stories/server';
 import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
@@ -87,7 +88,12 @@ const routes = app
   // `requirePermission('events.event.manage')` on the write
   // (packages/modules/events/server/routes.ts). Turning the module off 404s every route below and
   // removes the Eventos tab from the bootstrap — no migration, no edit here (MOD-04, D-55).
-  .route('/v1/events', eventsRoutes);
+  .route('/v1/events', eventsRoutes)
+  // Same shape (07-01): the notifications module carries its own `requireAuth` +
+  // `requireModule('notifications')` chain and no permission: every member reads and marks only
+  // their OWN rows, which the owner-only policies enforce in the database. Turning the module off
+  // 404s every route below and removes the bell slot from the bootstrap (D-40).
+  .route('/v1/notifications', notificationsRoutes);
 
 export type AppType = typeof routes;
 export { app };

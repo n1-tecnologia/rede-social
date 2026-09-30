@@ -27,6 +27,7 @@
     "@rede-social/module-communities": "workspace:*",
     "@rede-social/module-events": "workspace:*",
     "@rede-social/module-feed": "workspace:*",
+    "@rede-social/module-notifications": "workspace:*",
     "@rede-social/module-reels": "workspace:*",
     "@rede-social/module-stories": "workspace:*",
     "@rede-social/ui": "workspace:*",

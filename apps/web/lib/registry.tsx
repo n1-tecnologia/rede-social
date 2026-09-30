@@ -1,7 +1,10 @@
 import type { Bootstrap, ModuleKey } from '@rede-social/contracts';
 import type { HomeSlot } from '@rede-social/core/ui';
 import { NextEventCard } from '@rede-social/module-events/ui';
-import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
+import {
+  FEED_CAPTION_TRUNCATE_AT,
+  FEED_NOTIFICATION_KINDS,
+} from '@rede-social/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@rede-social/module-feed/ui';
 import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { EmptyState } from '@rede-social/ui';
@@ -37,6 +40,7 @@ import { loadNextEvent } from '@/lib/events';
 import { type NextEventCta, nextEventCardView } from '@/lib/events-view';
 import { loadFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
+import type { NotificationRenderer } from '@/lib/notifications-view';
 import { loadHighlights, loadStories } from '@/lib/stories';
 import {
   highlightGroupView,
@@ -551,6 +555,52 @@ export const WEB_MODULE_REGISTRY: Partial<Record<ModuleKey, WebModule>> = {
   feed: { home: [feedHome] },
   stories: { home: [storiesHome] },
   events: { home: [eventsHome] },
+};
+
+/**
+ * 07-01 (CONTEXT: "row renderers keyed by `kind`", UI-D-251): the notification row renderers, each
+ * contributed per kind at this composition point, so the notifications module never enumerates
+ * another module's kinds. A renderer turns the row's FACTS into the sentence (the actor in a leading
+ * bold span, the excerpt in curly quotes, both from the catalog) and names its target (D-232).
+ *
+ * A kind absent from this map is filtered out of the list in 07-01; 07-04 adds the generic row.
+ */
+const actorBold = (chunks: ReactNode) => <span className="font-bold text-text">{chunks}</span>;
+
+/** The one sentence shape of the three post kinds: `withExcerpt` when there is text, else `plain`. */
+const postSentence =
+  (key: 'post' | 'communityPost' | 'reel'): NotificationRenderer['sentence'] =>
+  (facts, t, actorName) => {
+    const excerpt =
+      typeof facts.excerpt === 'string' && facts.excerpt !== '' ? facts.excerpt : null;
+    const community = typeof facts.communityName === 'string' ? facts.communityName : '';
+    return t.rich(`kinds.${key}.${excerpt ? 'withExcerpt' : 'plain'}`, {
+      actor: actorName,
+      excerpt: excerpt ?? '',
+      community,
+      b: actorBold,
+    });
+  };
+
+const postHref = (facts: Record<string, unknown>) =>
+  typeof facts.postId === 'string' ? `/post/${encodeURIComponent(facts.postId)}` : '/inicio';
+
+export const notificationRenderers: Partial<Record<string, NotificationRenderer>> = {
+  [FEED_NOTIFICATION_KINDS.post]: {
+    glyph: 'Newspaper',
+    sentence: postSentence('post'),
+    href: postHref,
+  },
+  [FEED_NOTIFICATION_KINDS.communityPost]: {
+    glyph: 'Newspaper',
+    sentence: postSentence('communityPost'),
+    href: postHref,
+  },
+  [FEED_NOTIFICATION_KINDS.reel]: {
+    glyph: 'Film',
+    sentence: postSentence('reel'),
+    href: postHref,
+  },
 };
 
 /**

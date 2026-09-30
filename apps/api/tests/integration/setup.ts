@@ -149,3 +149,40 @@ export async function runInviteSendJobs(tenantId: string): Promise<number> {
   }
   return rows.length;
 }
+
+/** One `notifications.fanout` row as the integration suites assert it (07-01). */
+export type NotificationJobRow = {
+  id: string;
+  state: string;
+  data: Record<string, unknown>;
+};
+
+/** Every `notifications.fanout` job enqueued for `tenantId`, oldest first (any state). */
+export async function notificationJobsOf(tenantId: string): Promise<NotificationJobRow[]> {
+  return adminSql<NotificationJobRow[]>`
+    select id, state::text as state, data
+      from pgboss.job_common
+     where name = 'notifications.fanout' and data->>'tenantId' = ${tenantId}
+     order by created_on`;
+}
+
+/**
+ * Plays the worker for `tenantId`'s waiting `notifications.fanout` jobs (the `runInviteSendJobs`
+ * clone): each `created` row's payload goes through the real `notificationsFanoutJob.handler`
+ * (errors propagate, the row stays `created`), and a row whose handler resolved is marked
+ * `completed` like `boss.work` would. The module job is imported INSIDE the function (this file's
+ * "heavy imports" rule). Returns how many handlers ran.
+ */
+export async function runNotificationJobs(tenantId: string): Promise<number> {
+  const { notificationsFanoutJob } = await import('@rede-social/module-notifications/server');
+  const rows = (await notificationJobsOf(tenantId)).filter((row) => row.state === 'created');
+  for (const row of rows) {
+    await notificationsFanoutJob.handler(
+      row.data as Parameters<typeof notificationsFanoutJob.handler>[0],
+    );
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name = 'notifications.fanout' and id = ${row.id}::uuid`;
+  }
+  return rows.length;
+}

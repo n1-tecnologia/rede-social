@@ -29,7 +29,7 @@ import { membershipOfRecord } from '@rede-social/core/server/tenancy/membership-
 import { eq } from 'drizzle-orm';
 import type { ZodError } from 'zod';
 import { createOpenApiApp } from '../http/openapi';
-import { enabledModulesForBootstrap, permissionsFor } from '../modules/registry';
+import { countersFor, enabledModulesForBootstrap, permissionsFor } from '../modules/registry';
 
 const me = createOpenApiApp();
 me.use('*', requireAuth);
@@ -159,10 +159,13 @@ export const meRoutes = me
         // `bootstrapSchema` is untouched — the sub-shape is exactly `{ displayName, avatarUrl, bio }`
         // and new profile facts (the nudge, `avatarAssetId`) live on `GET /v1/me/profile` instead.
         const profile = await profileForBootstrap(tx, ctx);
-        return { tenant, user, membership, profile };
+        // D-40: the badge counters, composed from the EFFECTIVE modules' manifests in this same
+        // transaction (07-01), so the bell and the rest of the bootstrap are one snapshot.
+        const counters = await countersFor(tx, ctx, flags.keys);
+        return { tenant, user, membership, profile, counters };
       });
 
-      const { tenant, user, membership, profile } = data;
+      const { tenant, user, membership, profile, counters } = data;
       if (!tenant || !user || !membership) throw new ApiError(500, 'INTERNAL');
       if (!isTenantRole(membership.role) || !isStatus(membership.status)) {
         throw new ApiError(500, 'INTERNAL');
@@ -187,7 +190,7 @@ export const meRoutes = me
         // Enabled keys from `tenant_modules`, decorated by the registry and sorted by nav order.
         modules: enabledModulesForBootstrap(flags.keys, flags.settings),
         permissions: permissionsFor(membership.role, flags.keys, flags.settings),
-        counters: { unreadNotifications: 0, unreadConversations: 0 },
+        counters,
       };
       return c.json(body, 200);
     },

@@ -1,0 +1,34 @@
+{
+  "notifications": {
+    "nav": "Notificações",
+    "navBadge": "Notificações, {count, plural, one {# nova} other {# novas}}",
+    "title": "Notificações",
+    "back": "Voltar para o início",
+    "region": "Notificações de {tenant}",
+    "sections": {
+      "unread": "Novas",
+      "read": "Anteriores"
+    },
+    "unreadLabel": "Não lida.",
+    "retention": "Mostramos as notificações dos últimos 90 dias.",
+    "actorRemoved": "Membro removido",
+    "empty": {
+      "title": "Nenhuma notificação por enquanto",
+      "body": "Quando {tenant} publicar novidades ou alguém responder você, avisamos aqui."
+    },
+    "kinds": {
+      "post": {
+        "withExcerpt": "<b>{actor}</b> publicou um novo post: “{excerpt}”",
+        "plain": "<b>{actor}</b> publicou um novo post."
+      },
+      "communityPost": {
+        "withExcerpt": "<b>{actor}</b> publicou em {community}: “{excerpt}”",
+        "plain": "<b>{actor}</b> publicou em {community}."
+      },
+      "reel": {
+        "withExcerpt": "<b>{actor}</b> publicou um novo reel: “{excerpt}”",
+        "plain": "<b>{actor}</b> publicou um novo reel."
+      }
+    }
+  }
+}

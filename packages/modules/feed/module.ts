@@ -2,6 +2,7 @@ import { moduleLogger } from '@rede-social/core/server/logging';
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { FEED_PERMISSIONS } from './contracts/index';
 import { feedUnfurlJob } from './server/jobs';
+import { feedNotificationSources } from './server/notifications';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-feed');
@@ -31,6 +32,10 @@ export const feedModule = defineModule({
   // MEDIA-04: the link unfurl runs in the WORKER, never in a request. The kernel creates the queue
   // from this array and the worker binds the handler through MODULE_REGISTRY.
   jobs: [feedUnfurlJob],
+  // 07-01 (RESEARCH Pattern 1): the feed DECLARES who is notified of its own events, reading its own
+  // tables in the worker. The app registry registers these on the kernel seam; the notifications
+  // module never imports the feed (MOD-02).
+  notificationSources: feedNotificationSources,
   events: [
     {
       event: 'post.published',

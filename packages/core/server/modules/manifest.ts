@@ -5,7 +5,10 @@ import {
   TOGGLEABLE_MODULES,
 } from '@rede-social/contracts';
 import type { Hono } from 'hono';
-import type { AppEnv } from '../auth/context';
+import type { Tx } from '../../db/tenant-tx';
+import type { AppEnv, RequestContext } from '../auth/context';
+import type { NotificationRetraction, NotificationSource } from '../notifications/source';
+import type { Counters } from './counters';
 
 /** Where a module's navigation entry renders in the shell (D-40): a BottomNav/rail tab or a TopBar/rail slot. */
 export type ModuleNavPlacement = 'tab' | 'topbar';
@@ -98,6 +101,25 @@ export interface ModuleManifest {
    * not by the kernel, which never sees another module's manifest.
    */
   requires?: readonly ModuleKey[];
+  /**
+   * 07-01 (RESEARCH Pattern 1): the notifications THIS module produces, one source per domain event.
+   * Each `resolve` runs in the worker inside the event tenant's lane, reads this module's OWN tables
+   * and returns intents (data, never sentences). The app registry registers them on the kernel seam
+   * (`../notifications/source.ts`) and subscribes the notification sink once per distinct event, so
+   * the notifications module never imports a producer and a producer never imports it (MOD-02).
+   */
+  notificationSources?: NotificationSource[];
+  /**
+   * 07-01 (consumed by 07-04): which notification rows a deleted target retracts, per domain event.
+   * Same registration path as `notificationSources`.
+   */
+  notificationRetractions?: NotificationRetraction[];
+  /**
+   * 07-01 (RESEARCH Pattern 13): this module's share of `bootstrap.counters`, computed inside the
+   * caller's tenant-lane transaction. Only EFFECTIVE modules contribute (the app registry's
+   * `countersFor`), so a disabled module's badge reads zero rather than a stale count.
+   */
+  counters?: (tx: Tx, ctx: RequestContext) => Promise<Partial<Counters>>;
 }
 
 /**

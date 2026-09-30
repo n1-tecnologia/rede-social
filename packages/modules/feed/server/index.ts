@@ -3,6 +3,8 @@
  * path inside the package (the `exports` map has no `./server/*`, and Biome blocks deep imports).
  */
 export { feedUnfurlJob } from './jobs';
+export { FEED_PUSH_COPY, feedPushCopy } from './notification-copy';
+export { FEED_EXCERPT_MAX, feedNotificationSources, feedPostKind } from './notifications';
 export { feedRoutes } from './routes';
 export {
   createComment,

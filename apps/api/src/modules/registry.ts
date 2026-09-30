@@ -4,15 +4,31 @@ import {
   type ModuleKey,
   type TenantRole,
 } from '@rede-social/contracts';
+import type { Tx } from '@rede-social/core/db/tenant-tx';
+import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { subscribe } from '@rede-social/core/server/events/bus';
 import { registerJobQueues } from '@rede-social/core/server/jobs/boss';
+import {
+  type Counters,
+  setCountersResolver,
+  ZERO_COUNTERS,
+} from '@rede-social/core/server/modules/counters';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { ModuleManifest } from '@rede-social/core/server/modules/manifest';
+import { notificationSink, setNotificationSink } from '@rede-social/core/server/notifications/sink';
+import {
+  notificationEvents,
+  registerNotificationRetraction,
+  registerNotificationSource,
+} from '@rede-social/core/server/notifications/source';
 import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions';
 import { KERNEL_ROLE_PERMISSIONS } from '@rede-social/core/server/rbac/require-role';
 import { communitiesModule } from '@rede-social/module-communities/module';
 import { eventsModule } from '@rede-social/module-events/module';
 import { FEED_PERMISSIONS, feedSettingsSchema } from '@rede-social/module-feed/contracts';
 import { feedModule } from '@rede-social/module-feed/module';
+import { notificationsModule } from '@rede-social/module-notifications/module';
+import { notificationsSink } from '@rede-social/module-notifications/server';
 import { reelsModule } from '@rede-social/module-reels/module';
 import { storiesModule } from '@rede-social/module-stories/module';
 
@@ -29,6 +45,7 @@ export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
   communities: communitiesModule,
   events: eventsModule,
   feed: feedModule,
+  notifications: notificationsModule,
   reels: reelsModule,
   stories: storiesModule,
 };
@@ -45,6 +62,25 @@ for (const manifest of Object.values(MODULE_REGISTRY)) {
     subscribe(subscription.event, subscription.handler);
   }
   registerJobQueues((manifest?.jobs ?? []).map((job) => job.name));
+}
+
+/**
+ * 07-01 (RESEARCH Pattern 1): the notification seam, composed HERE and only here. Every manifest's
+ * `notificationSources` / `notificationRetractions` land on the kernel map, then the bus gets ONE
+ * subscription per distinct event name that any of them listens to, which hands the payload to
+ * whatever sink is registered. The notifications module registers the sink; without it the kernel's
+ * default is a no-op, so removing the module removes only its half (MOD-03). Producers and the
+ * notifications module never import each other (MOD-02).
+ */
+for (const manifest of Object.values(MODULE_REGISTRY)) {
+  for (const source of manifest?.notificationSources ?? []) registerNotificationSource(source);
+  for (const retraction of manifest?.notificationRetractions ?? []) {
+    registerNotificationRetraction(retraction);
+  }
+}
+setNotificationSink(notificationsSink);
+for (const event of notificationEvents()) {
+  subscribe(event, (payload) => notificationSink()(event, payload));
 }
 
 /**
@@ -157,3 +193,24 @@ export function permissionsFor(
  * above for queue names. Done at import time, and only here.
  */
 setPermissionResolver(permissionsFor);
+
+/**
+ * D-40 / RESEARCH Pattern 13: `bootstrap.counters`, composed from every EFFECTIVE module's manifest
+ * `counters` over zeros, inside the caller's tenant-lane transaction. A disabled module (or one whose
+ * `requires` are off) contributes nothing, so its badge reads zero rather than a stale count.
+ */
+export async function countersFor(
+  tx: Tx,
+  ctx: RequestContext,
+  enabled: Set<ModuleKey>,
+): Promise<Counters> {
+  const counters: Counters = { ...ZERO_COUNTERS };
+  for (const key of effectiveKeys(enabled)) {
+    const contribute = MODULE_REGISTRY[key]?.counters;
+    if (contribute) Object.assign(counters, await contribute(tx, ctx));
+  }
+  return counters;
+}
+
+/** The kernel's counters seam (`setCountersResolver`, the permission inversion again). */
+setCountersResolver(async (tx, ctx) => countersFor(tx, ctx, (await moduleFlags.flags(ctx)).keys));

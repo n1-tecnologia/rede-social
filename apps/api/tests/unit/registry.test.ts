@@ -64,7 +64,25 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
     // `stories`, 05.3-01 added `reels` and 06-01 added `events`. The list is sorted so a new entry is one line, and this
     // assertion is what makes a silently-dropped registration fail rather than pass.
-    expect(keys.sort()).toEqual(['communities', 'events', 'feed', 'reels', 'stories']);
+    expect(keys.sort()).toEqual([
+      'communities',
+      'events',
+      'feed',
+      'notifications',
+      'reels',
+      'stories',
+    ]);
+    // D-40 / UI-D-268 (07-01): the bell is a TOPBAR slot at order 10, badged by the unread count.
+    expect(MODULE_REGISTRY.notifications?.nav).toEqual({
+      placement: 'topbar',
+      label: 'Notificações',
+      icon: 'bell',
+      badge: 'unreadNotifications',
+      href: '/notificacoes',
+      order: 10,
+    });
+    expect(MODULE_REGISTRY.notifications?.counters).toBeTypeOf('function');
+    expect(MODULE_REGISTRY.notifications?.defaultRolePermissions).toBeUndefined();
     // D-55 (amends D-40): the feed contributes a HOME SLOT and no navigation tab, so Phases 5 and 6
     // keep the tab budget they are planning against. A nav entry here is a regression, not a feature.
     expect(MODULE_REGISTRY.feed?.nav).toBeUndefined();
