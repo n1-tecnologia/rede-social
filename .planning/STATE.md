@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-09-30T11:43:59.181Z"
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-09-30T13:23:17.247Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-02 complete: sketch 007 (nine prototype-less Phase 7 surfaces + two proto deltas) drawn and registered, D-33 gate armed approved: false; next 07-01 (Wave 1)"
-state_head: 7fd206186a2a0a9b3f6d7e54bf61a3580a0c82e0
+last_activity_desc: "07-01 complete: notifications tracer (module, kernel seam, Realtime authorisation, fan-out, /notificacoes with seen/read/mark-all); next 07-03 (Wave 2, live counters)"
+state_head: 82124e8334cd3051692913a1b83077a3849b8f49
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 109
-  completed_plans: 96
+  completed_plans: 97
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 1 of 11 complete (07-02, the D-33 sketch 007); next: 07-01 (Wave 1 tracer). The sketch 007 gate (approved: false) blocks 07-04 T3, 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and T2 until the user approves
-Status: Executing Phase 07
-Last activity: 2026-09-30 — Completed 07-02 (sketch 007 drawn, D-33 gate armed)
+Plan: 2 of 11 complete (07-02 sketch 007, 07-01 tracer); next: 07-03 (Wave 2, live counters; its @supabase/realtime-js install has a blocking checkpoint). The sketch 007 gate (approved: false) blocks 07-04 T3, 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and T2 until the user approves
+Status: Ready to execute
+Last activity: 2026-09-30 — Completed 07-01 (notifications tracer; env hosts still tria-*, see 07-01 deferred-items)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -156,6 +156,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 06 P08 | 45 min | 2 tasks | 26 files |
 | Phase 06 P09 | 5h 43m | 2 tasks | 27 files |
 | Phase 07 P02 | 22 min | 2 tasks | 3 files |
+| Phase 07 P01 | 52 min | 3 tasks | 80 files |
 
 ## Accumulated Context
 
@@ -494,6 +495,10 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-09: SCHEMA-CONVENTIONS (l) Secrets inside a tenant is the reference for Phase 7 secrets/definers; the 06-06 rule (side-effecting or externally redirecting route handlers answer 204 no-store to prefetch/RSC requests) carries forward
 - [Phase 07]: 07-02: sketch 007 ships the D-33 gate closed (approved: false); 07-04 T3, 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and 07-10 T2 halt on their precondition until the user pastes the approval keys into .planning/sketches/007-phase-07-designed-screens/README.md
 - [Phase 07]: 07-02: two drawing findings are left for the D-33 review. (1) The shipped InstallHint puts the inline Share icon at the end of the body, far from Compartilhar in the push copy. (2) max-h-30 is measured border-box and shows about 4.3 composer lines, not five.
+- [Phase 07]: 07-01: producers declare notificationSources on the kernel seam; the notifications module never imports a producer, and the app registry subscribes the sink once per event
+- [Phase 07]: 07-01: every Realtime signal comes from definer code (app.realtime_signal); the only realtime.messages policy is SELECT via app.realtime_topic_allowed, which checks each id segment's canonical uuid shape before any cast
+- [Phase 07]: 07-01: notifications rows are owner-only (tenant_id AND user_id), written only by app.notifications_fanout; delivered signal payloads are {id, kind} because realtime.send injects the message id
+- [Phase 07]: 07-01: developer chose backup-then-reset for the local DB (backup ~/rede-social-local-backups/pre-07-reset.sql, outside the repo); resets are phase-wide from now on
 
 ### Pending Todos
 
@@ -563,6 +568,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T11:43:32.695Z
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-09-30T13:23:07.780Z
+Stopped at: Completed 07-01-PLAN.md
 Resume file: None

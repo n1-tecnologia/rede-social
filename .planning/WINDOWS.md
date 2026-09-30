@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 36
+open_count: 41
 waived_count: 0
 fixed_count: 19
-total_count: 55
-last_updated: 2026-09-29T15:08:34.703Z
+total_count: 60
+last_updated: 2026-09-30T13:22:38.902Z
 ---
 
 # Broken Windows Ledger
@@ -70,6 +70,11 @@ last_updated: 2026-09-29T15:08:34.703Z
 | 53 | 6 | stub | apps/web/app/(app)/eventos/EventsList.tsx |  | Empty Próximos renders only the member body; manager body and Criar evento CTA arrive with 06-04 | fixed |  | 2026-09-27T15:36:43.992Z | 2026-09-27T18:46:11.297Z |
 | 54 | quick-260929-g0s | unrun-verify | apps/web/e2e/invite.spec.ts |  | e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (tria-* seed, tria_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first | open |  | 2026-09-29T15:08:34.622Z |  |
 | 55 | quick-260929-g0s | unrun-verify | apps/api/tests/integration/platform-domains.test.ts |  | platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at tria-demo; re-run after pnpm db:reset + db:seed | open |  | 2026-09-29T15:08:34.703Z |  |
+| 56 | 7 | stub | apps/web/lib/notifications-view.ts | 61 | Unknown notification kinds are filtered out instead of the generic row (07-04 replaces) | open |  | 2026-09-30T13:22:38.605Z |  |
+| 57 | 7 | stub | apps/web/messages/pt-BR/notifications.json |  | notifications.navBadge ICU label not yet consumed by the shell bell (07-03 live counters) | open |  | 2026-09-30T13:22:38.678Z |  |
+| 58 | 7 | stub | packages/modules/notifications/server/channels/registry.ts |  | push channel unregistered; intents log notifications.channel_unavailable (07-06 registers it) | open |  | 2026-09-30T13:22:38.756Z |  |
+| 59 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 378 | 07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still tria-*), cases 2-5 did not run | open |  | 2026-09-30T13:22:38.830Z |  |
+| 60 | 7 | unrun-verify | apps/api/tests/integration/signup.test.ts | 142 | signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01) | open |  | 2026-09-30T13:22:38.902Z |  |
 
 ````json
 [
@@ -731,6 +736,66 @@ last_updated: 2026-09-29T15:08:34.703Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-29T15:08:34.703Z",
+    "resolved_at": null
+  },
+  {
+    "id": 56,
+    "kind": "stub",
+    "phase": "7",
+    "file": "apps/web/lib/notifications-view.ts",
+    "line": 61,
+    "description": "Unknown notification kinds are filtered out instead of the generic row (07-04 replaces)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-30T13:22:38.605Z",
+    "resolved_at": null
+  },
+  {
+    "id": 57,
+    "kind": "stub",
+    "phase": "7",
+    "file": "apps/web/messages/pt-BR/notifications.json",
+    "line": null,
+    "description": "notifications.navBadge ICU label not yet consumed by the shell bell (07-03 live counters)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-30T13:22:38.678Z",
+    "resolved_at": null
+  },
+  {
+    "id": 58,
+    "kind": "stub",
+    "phase": "7",
+    "file": "packages/modules/notifications/server/channels/registry.ts",
+    "line": null,
+    "description": "push channel unregistered; intents log notifications.channel_unavailable (07-06 registers it)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-30T13:22:38.756Z",
+    "resolved_at": null
+  },
+  {
+    "id": 59,
+    "kind": "unrun-verify",
+    "phase": "7",
+    "file": "apps/web/e2e/phase2-smoke.spec.ts",
+    "line": 378,
+    "description": "07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still tria-*), cases 2-5 did not run",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-30T13:22:38.830Z",
+    "resolved_at": null
+  },
+  {
+    "id": 60,
+    "kind": "unrun-verify",
+    "phase": "7",
+    "file": "apps/api/tests/integration/signup.test.ts",
+    "line": 142,
+    "description": "signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-30T13:22:38.902Z",
     "resolved_at": null
   }
 ]
