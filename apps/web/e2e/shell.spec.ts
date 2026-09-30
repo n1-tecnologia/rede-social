@@ -222,9 +222,10 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/configuracoes`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Configurações');
-    // ONE "Em breve" pill is left: 03-04 turned "Editar perfil" into a real navigating row, and
-    // "Notificações" keeps its placeholder until Phase 7 wires push (broken-windows 10).
-    await expect(page.getByText('Em breve', { exact: true })).toHaveCount(1);
+    // No "Em breve" pill is left: 03-04 turned "Editar perfil" into a real navigating row, and 07-07
+    // replaced the "Notificações" placeholder with this device's push row (broken-windows 10).
+    await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);
+    await expect(page.locator('main [data-push-row]')).toHaveCount(1);
     await expect(page.locator('main a[href="/perfil/editar"]')).toBeVisible();
     await page.locator('main').getByRole('button', { name: 'Sair' }).click();
     await expect(page).toHaveURL(/\/entrar$/);

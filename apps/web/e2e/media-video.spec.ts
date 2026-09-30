@@ -121,7 +121,8 @@ test.describe('MEDIA-03 — the admin media screen', () => {
     await expect(mediaRow(page)).toHaveCount(0);
     // The rest of the settings page is unchanged for a member.
     await expect(page.getByText('Editar perfil')).toBeVisible();
-    await expect(page.getByText('Em breve')).toBeVisible();
+    // 07-07: the Notificações row is the push switch now, no longer an "Em breve" pill.
+    await expect(page.locator('main [data-push-row]')).toBeVisible();
 
     await page.goto('/configuracoes/midia');
     await expectNotFound(page);

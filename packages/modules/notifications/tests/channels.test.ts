@@ -99,7 +99,13 @@ describe('channel registry', () => {
  * path. This goes red the moment a plan adds a delivery path outside `registerChannel`.
  */
 describe('assumption-delta invariant: every delivery goes through the registry', () => {
-  it('importing the server entry registers an adapter for EVERY channel key, in canonical order', async () => {
+  // 07-11: this case re-imports the WHOLE server entry after `vi.resetModules()`, so it pays a cold
+  // transform of the module graph. That takes about 0.4 s alone but exceeded Vitest's default 5 s
+  // under `pnpm verify`'s parallel turbo run with an empty cache (every package building and
+  // type-checking at once). The bound below covers the import only; no assertion changed.
+  it('importing the server entry registers an adapter for EVERY channel key, in canonical order', {
+    timeout: 30_000,
+  }, async () => {
     vi.resetModules();
     await import('../server/index');
     const fresh = await import('../server/channels/registry');

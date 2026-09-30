@@ -63,8 +63,10 @@ test.describe('PROF-01 — /perfil and /perfil/editar', () => {
       await expect(page.locator('main').getByRole('link', { name })).toHaveAttribute('href', href);
     }
 
-    // UI-D-01: the Phase 2 role pill is gone — no role word appears anywhere on the screen.
-    await expect(page.getByText(/^(Administrador|Membro|Suporte)$/)).toHaveCount(0);
+    // UI-D-01: the Phase 2 role pill is gone — no role word appears anywhere in the profile. Scoped
+    // to `main` since 07-08: the shell's chat slot is labelled "Suporte" (the support conversation,
+    // not a role), and it lives in the TopBar / rail, outside the profile.
+    await expect(page.locator('main').getByText(/^(Administrador|Membro|Suporte)$/)).toHaveCount(0);
   });
 
   test('a member renames themselves and writes a bio, and it persists', async ({ page }) => {
@@ -276,13 +278,15 @@ test.describe('PROF-01 — the states of the profile screens', () => {
     await expect(page.locator('main img[src^="/v1/media/"]')).toHaveCount(0);
   });
 
-  test('E7: the settings "Editar perfil" row is a real link now, and Notificações keeps its pill', async ({
+  test('E7: the settings "Editar perfil" row is a real link now, and Notificações is the push row (07-07)', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto('/configuracoes');
 
-    await expect(page.locator('main').getByText('Em breve')).toHaveCount(1); // Notificações only
+    // 07-07 (UI-D-256) replaced the last "Em breve" pill with this device's push switch.
+    await expect(page.locator('main').getByText('Em breve')).toHaveCount(0);
+    await expect(page.locator('main [data-push-row]')).toHaveCount(1);
     await page.locator('main').getByRole('link', { name: 'Editar perfil' }).click();
     await expect(page).toHaveURL(/\/perfil\/editar$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Editar perfil' })).toBeVisible();

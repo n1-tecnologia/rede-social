@@ -46,7 +46,7 @@ test('AUTH-06/D-09 — blocked on the next request, session cleared, same screen
 
   // 3. The very next request is refused and the device is signed out.
   await page.goto('/inicio');
-  await expect(page).toHaveURL(/\/acesso-suspenso\?t=Rede Social%20Demo$/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/acesso-suspenso\?t=Rede%20Demo$/, { timeout: 30_000 });
   await expect(page.getByText(SUSPENDED)).toBeVisible();
   expect(await page.locator('body').innerText()).not.toMatch(/motivo/i);
   expect((await context.cookies()).filter((c) => c.name.startsWith('sb-'))).toHaveLength(0);
