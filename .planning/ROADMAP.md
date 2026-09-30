@@ -571,7 +571,7 @@ Plans:
   3. Member can open their single support conversation and send text messages; `support_tenant` sees an inbox of member conversations ordered by last activity with unread indicators and can open and reply to any of them; new messages appear in real time on both sides in per-conversation sequence order (catch-up after reconnect loses nothing), and the member sees an unread badge on the chat entry when support replied.
   4. Realtime signals reach only their audience: a browser subscribing to another tenant's user topic, another user's conversation topic or the support inbox without the role is rejected by RLS on `realtime.messages` (covered by the isolation suite); payloads carry ids only and the client refetches through the API; blocking a member drops their Realtime access and push subscriptions.
 
-**Plans**: 2/11 plans executed
+**Plans**: 3/11 plans executed
 
 Plans:
 
@@ -582,7 +582,7 @@ Plans:
 
 **Wave 2**
 
-- [ ] 07-03-PLAN.md — Live bell: `@supabase/realtime-js@2.116.0` behind a legitimacy checkpoint, the BFF token route, the kernel `RealtimeProvider`/`LiveCountersProvider`, `/v1/me/counters`, the live SC 4 negatives, the app badge
+- [x] 07-03-PLAN.md — Live bell: `@supabase/realtime-js@2.116.0` behind a legitimacy checkpoint, the BFF token route, the kernel `RealtimeProvider`/`LiveCountersProvider`, `/v1/me/counters`, the live SC 4 negatives, the app badge
 
 **Wave 3** *(Task 3 blocked on the sketch approval)*
 
@@ -719,7 +719,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
-| 7. Notifications, Web Push & Chat | 2/11 | In Progress|  |
+| 7. Notifications, Web Push & Chat | 3/11 | In Progress|  |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |

@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-09-30T13:23:17.247Z"
+stopped_at: Completed 07-03-PLAN.md
+last_updated: "2026-09-30T14:09:41.267Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-01 complete: notifications tracer (module, kernel seam, Realtime authorisation, fan-out, /notificacoes with seen/read/mark-all); next 07-03 (Wave 2, live counters)"
-state_head: 82124e8334cd3051692913a1b83077a3849b8f49
+last_activity_desc: "07-03 complete: live bell (kernel RealtimeProvider + LiveCountersProvider, /v1/me/counters, BFF token and counters routes, live SC 4 suite, live e2e); next 07-04 (Wave 3)"
+state_head: 7cfcab1b7be7b0a8e612c83cb31a314bf181a17c
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 109
-  completed_plans: 97
+  completed_plans: 98
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 2 of 11 complete (07-02 sketch 007, 07-01 tracer); next: 07-03 (Wave 2, live counters; its @supabase/realtime-js install has a blocking checkpoint). The sketch 007 gate (approved: false) blocks 07-04 T3, 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and T2 until the user approves
+Plan: 3 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell); next: 07-04 (Wave 3, retractions and the generic row). The sketch 007 gate (approved: false) blocks 07-04 T3, 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and T2 until the user approves
 Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-01 (notifications tracer; env hosts still tria-*, see 07-01 deferred-items)
+Last activity: 2026-09-30 — Completed 07-03 (live bell over Realtime; @supabase/realtime-js 2.116.0 approved and pinned; env hosts still tria-*)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -157,6 +157,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 06 P09 | 5h 43m | 2 tasks | 27 files |
 | Phase 07 P02 | 22 min | 2 tasks | 3 files |
 | Phase 07 P01 | 52 min | 3 tasks | 80 files |
+| Phase 07 P03 | 29min | 3 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -499,6 +500,9 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-01: every Realtime signal comes from definer code (app.realtime_signal); the only realtime.messages policy is SELECT via app.realtime_topic_allowed, which checks each id segment's canonical uuid shape before any cast
 - [Phase 07]: 07-01: notifications rows are owner-only (tenant_id AND user_id), written only by app.notifications_fanout; delivered signal payloads are {id, kind} because realtime.send injects the message id
 - [Phase 07]: 07-01: developer chose backup-then-reset for the local DB (backup ~/rede-social-local-backups/pre-07-reset.sql, outside the repo); resets are phase-wide from now on
+- [Phase 07]: 07-03: @supabase/realtime-js@2.116.0 approved verbatim ("approved", 2026-09-30) at the package-legitimacy gate; exact pin in core and api (dev), 2.117.2 not installed
+- [Phase 07]: 07-03: RealtimeProvider awaits client.setAuth() before any subscribe (and after a hidden-tab resume): realtime-js builds the first join synchronously before its async accessToken callback resolves, so the first private join was refused
+- [Phase 07]: 07-03: LiveShell joins tenant:<t>:all only while notifications is enabled; the /notificacoes live merge ignores seen/read markers and re-posts seen only when a row was added
 
 ### Pending Todos
 
@@ -568,6 +572,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T13:23:07.780Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-09-30T14:09:41.161Z
+Stopped at: Completed 07-03-PLAN.md
 Resume file: None

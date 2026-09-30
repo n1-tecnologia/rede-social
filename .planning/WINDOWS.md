@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 41
+open_count: 40
 waived_count: 0
-fixed_count: 19
+fixed_count: 20
 total_count: 60
-last_updated: 2026-09-30T13:22:38.902Z
+last_updated: 2026-09-30T14:07:37.060Z
 ---
 
 # Broken Windows Ledger
@@ -71,7 +71,7 @@ last_updated: 2026-09-30T13:22:38.902Z
 | 54 | quick-260929-g0s | unrun-verify | apps/web/e2e/invite.spec.ts |  | e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (tria-* seed, tria_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first | open |  | 2026-09-29T15:08:34.622Z |  |
 | 55 | quick-260929-g0s | unrun-verify | apps/api/tests/integration/platform-domains.test.ts |  | platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at tria-demo; re-run after pnpm db:reset + db:seed | open |  | 2026-09-29T15:08:34.703Z |  |
 | 56 | 7 | stub | apps/web/lib/notifications-view.ts | 61 | Unknown notification kinds are filtered out instead of the generic row (07-04 replaces) | open |  | 2026-09-30T13:22:38.605Z |  |
-| 57 | 7 | stub | apps/web/messages/pt-BR/notifications.json |  | notifications.navBadge ICU label not yet consumed by the shell bell (07-03 live counters) | open |  | 2026-09-30T13:22:38.678Z |  |
+| 57 | 7 | stub | apps/web/messages/pt-BR/notifications.json |  | notifications.navBadge ICU label not yet consumed by the shell bell (07-03 live counters) | fixed |  | 2026-09-30T13:22:38.678Z | 2026-09-30T14:07:37.060Z |
 | 58 | 7 | stub | packages/modules/notifications/server/channels/registry.ts |  | push channel unregistered; intents log notifications.channel_unavailable (07-06 registers it) | open |  | 2026-09-30T13:22:38.756Z |  |
 | 59 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 378 | 07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still tria-*), cases 2-5 did not run | open |  | 2026-09-30T13:22:38.830Z |  |
 | 60 | 7 | unrun-verify | apps/api/tests/integration/signup.test.ts | 142 | signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01) | open |  | 2026-09-30T13:22:38.902Z |  |
@@ -757,10 +757,10 @@ last_updated: 2026-09-30T13:22:38.902Z
     "file": "apps/web/messages/pt-BR/notifications.json",
     "line": null,
     "description": "notifications.navBadge ICU label not yet consumed by the shell bell (07-03 live counters)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-30T13:22:38.678Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T14:07:37.060Z"
   },
   {
     "id": 58,
