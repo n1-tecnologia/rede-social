@@ -1,0 +1,1776 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rede Social — Fase 7 · Notificações, Push e Suporte · telas [designed] (mockup estático para revisão do time de design)</title>
+<style>
+/* =====================================================================================
+   0. NENHUM ASSET EXTERNO. Um arquivo, zero rede: nenhuma fonte remota, nenhum script
+      remoto, nenhuma folha de estilo remota, nenhum quadro incorporado, nenhuma imagem
+      real. O arquivo abre offline e pode ser enviado por e-mail ao time de design como
+      está. Manrope renderiza se estiver instalada na máquina (`local()` abaixo); sem ela
+      o fallback do sistema renderiza com as MESMAS medidas de tipo. Os links que aparecem
+      como TEXTO dentro das bolhas são conteúdo de mensagem, não pedidos de rede: todo
+      atributo de link deste arquivo aponta para uma âncora interna.
+
+   1. TOKENS — packages/ui/src/styles/tokens.css copiado verbatim (mesmos nomes, mesmos
+      valores, mesmas camadas). A Fase 7 NÃO acrescenta nenhum token, nenhuma medida de
+      espaçamento, nenhum tamanho de tipo (12 / 14 / 16 / 24) e nenhum peso (400 / 700).
+      Um valor que pareça novo é defeito do desenho, não proposta. As únicas exceções são
+      internas de primitivas JÁ ENTREGUES e desenhadas como estão: o numeral do `Badge`
+      (10px), a linha do `Row` de Configurações (`py-3.5`) e o respiro de 6px do
+      `CommentItem`.
+
+   2. CONTEÚDO SIMULADO — os gradientes em `.ph-*` são fotos (avatar, capa, prévia) e o
+      logotipo em `.logo-*` é a imagem do tenant: conteúdo, não tokens e não cor de
+      interface — o mesmo recurso dos sketches 005 e 006.
+   ===================================================================================== */
+@font-face { font-family: "Manrope"; src: local("Manrope"), local("Manrope Regular"); font-weight: 400; }
+@font-face { font-family: "Manrope"; src: local("Manrope Bold"), local("Manrope-Bold"); font-weight: 700; }
+
+:root, [data-theme="light"] {
+  --theme-bg: #f5f7fb;
+  --theme-bg-secondary: #ffffff;
+  --theme-bg-tertiary: #e9eef7;
+  --theme-bg-input: #eef2f9;
+  --theme-bg-hover: rgba(31, 58, 95, 0.04);
+  --theme-bg-active: rgba(31, 58, 95, 0.08);
+  --theme-text: #16233b;
+  --theme-text-secondary: #51617c;
+  --theme-text-tertiary: #8595ad;
+  --theme-text-inverse: #ffffff;
+  --theme-border: rgba(22, 35, 59, 0.1);
+  --theme-border-secondary: rgba(22, 35, 59, 0.16);
+  --theme-divider: rgba(22, 35, 59, 0.06);
+  --theme-card: #ffffff;
+  --theme-card-hover: #f8fafd;
+  --theme-overlay: rgba(10, 18, 32, 0.4);
+  --theme-handle: #c3cede;
+  --color-like: #ef4444;
+  --theme-glass-bar: rgba(255, 255, 255, 0.82);
+  --theme-rim-strong: rgba(22, 35, 59, 0.22);
+  --theme-rim-faint: rgba(22, 35, 59, 0.06);
+  --theme-bar-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -1px 0 rgba(255, 255, 255, 0.3),
+    0 12px 32px rgba(15, 23, 42, 0.16);
+  --theme-chip: rgba(22, 35, 59, 0.06);
+}
+:root {
+  --brand-primary: #2e6fd0;
+  --brand-secondary: #5b9cf8;
+  --brand-on-primary: #ffffff;
+  --brand-primary-dark: #5b9cf8;
+  --brand-on-primary-dark: #0f1118;
+  --color-success: #16a34a;
+  --color-danger: #ef4444;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
+  /* valores de mockup para max(env(safe-area-inset-*), …) */
+  --safe-top: 12px;
+  --safe-bottom: 8px;
+  --nav-height: 64px;
+}
+[data-theme="dark"] {
+  --theme-bg: #0f1118;
+  --theme-bg-secondary: #181c26;
+  --theme-bg-tertiary: #232937;
+  --theme-bg-input: #232937;
+  --theme-bg-hover: rgba(255, 255, 255, 0.06);
+  --theme-bg-active: rgba(255, 255, 255, 0.1);
+  --theme-text: #f2f5fa;
+  --theme-text-secondary: #a6b1c4;
+  --theme-text-tertiary: #64718a;
+  --theme-text-inverse: #0f1118;
+  --theme-border: rgba(255, 255, 255, 0.08);
+  --theme-border-secondary: rgba(255, 255, 255, 0.12);
+  --theme-divider: rgba(255, 255, 255, 0.05);
+  --theme-card: #181c26;
+  --theme-card-hover: #232937;
+  --theme-overlay: rgba(0, 0, 0, 0.7);
+  --theme-handle: #3c4658;
+  --color-like: #ef4444;
+  --theme-glass-bar: rgba(24, 28, 38, 0.82);
+  --theme-rim-strong: rgba(255, 255, 255, 0.22);
+  --theme-rim-faint: rgba(255, 255, 255, 0.04);
+  --theme-bar-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(255, 255, 255, 0.03),
+    0 12px 32px rgba(0, 0, 0, 0.55);
+  --theme-chip: rgba(255, 255, 255, 0.1);
+}
+/* Layer 1b — aliases derivados, redeclarados em todo escopo (D-25, D-41) */
+* {
+  --brand-primary-hover: color-mix(in oklch, var(--brand-primary), black 12%);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+}
+[data-theme="dark"], [data-theme="dark"] * {
+  --brand-accent: var(--brand-primary-dark);
+  --brand-on-accent: var(--brand-on-primary-dark);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), #0f1118 80%);
+}
+
+/* =====================================================================================
+   2. BASE + CHROME DO MOCKUP — fora do produto
+   ===================================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { font-family: Manrope, system-ui, -apple-system, sans-serif; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--theme-bg); color: var(--theme-text); font-size: 14px; line-height: 1.5; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+h1, h2, h3, h4, p, ol, ul { margin: 0; }
+ol, ul { padding: 0; list-style: none; }
+svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.i-12 { width: 12px !important; height: 12px !important; } .i-16 { width: 16px !important; height: 16px !important; }
+.i-18 { width: 18px !important; height: 18px !important; } .i-20 { width: 20px !important; height: 20px !important; }
+.i-28 { width: 28px !important; height: 28px !important; } .i-40 { width: 40px !important; height: 40px !important; }
+.sw2 { stroke-width: 2 !important; }
+
+.toolbar { position: sticky; top: 0; z-index: 200; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 24px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); }
+.toolbar .brandname { font-weight: 700; letter-spacing: -0.02em; font-size: 16px; }
+.toolbar .brandname small { font-weight: 400; color: var(--theme-text-secondary); margin-left: 8px; font-size: 12px; }
+.toolbar label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--theme-text-secondary); }
+.toolbar input[type="color"] { width: 32px; height: 32px; padding: 0; border: 1px solid var(--theme-border); border-radius: 8px; background: none; }
+.toolbar .preset, .toolbar .toggle { height: 32px; padding: 0 12px; border-radius: 999px; background: var(--theme-bg-input); font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); display: inline-flex; align-items: center; gap: 8px; }
+.toolbar .toggle { background: var(--theme-bg-tertiary); color: var(--theme-text); }
+.toolbar .preset:hover { background: var(--theme-bg-tertiary); }
+.toolbar nav { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; width: 100%; }
+.toolbar nav a { color: var(--theme-text-tertiary); } .toolbar nav a:hover { color: var(--brand-accent); }
+.readout { font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+
+main.sheet { max-width: 1440px; margin: 0 auto; padding: 24px 24px 120px; }
+section.screen { padding: 40px 0; border-bottom: 1px solid var(--theme-divider); }
+section.screen > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+section.screen > header h2 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+section.screen > header code { font-size: 12px; color: var(--theme-text-tertiary); background: var(--theme-bg-input); padding: 2px 8px; border-radius: 6px; }
+section.screen > header p { width: 100%; margin: 0; font-size: 12px; color: var(--theme-text-secondary); max-width: 1040px; }
+h3.sub { font-size: 14px; font-weight: 700; margin: 32px 0 12px; color: var(--theme-text-secondary); }
+.frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.framewrap { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.caption { font-size: 12px; color: var(--theme-text-tertiary); margin: 0; max-width: 390px; }
+.caption.w320 { max-width: 320px; }
+.note { font-size: 12px; color: var(--theme-text-secondary); margin: 16px 0 0; max-width: 1040px; }
+.label-tag { font-size: 12px; font-weight: 700; color: var(--theme-text-tertiary); }
+.label-tag code { font-weight: 400; }
+.finding { font-size: 12px; color: var(--theme-text-secondary); border-left: 2px solid var(--color-warning); padding-left: 8px; max-width: 1040px; margin: 16px 0 0; }
+.zgrid { display: grid; grid-template-columns: repeat(auto-fill, 358px); gap: 24px; }
+.zcell { display: flex; flex-direction: column; gap: 8px; }
+.anno { font-size: 12px; color: var(--theme-text-tertiary); border-left: 2px solid var(--theme-border-secondary); padding-left: 8px; }
+
+/* =====================================================================================
+   3. MOLDURAS — telefone 390px, telefone estreito 320px, desktop 1280px com o trilho de
+      240px e a coluna de 680px (D-39)
+   ===================================================================================== */
+.phone { width: 390px; height: 800px; border: 1px solid var(--theme-border-secondary); border-radius: 40px; overflow: hidden; background: var(--theme-bg); position: relative; flex: none; display: flex; flex-direction: column; }
+.phone.narrow { width: 320px; }
+.phone.short { height: 560px; }
+.phone.tall { height: 1040px; }
+.phone.auto { height: auto; }
+.phone .body { flex: 1; overflow: auto; scrollbar-width: none; min-height: 0; }
+.phone .body::-webkit-scrollbar { display: none; }
+.phone .body.nav-pad { padding-bottom: 120px; }
+.statusbar { height: 32px; flex: none; background: var(--theme-bg-secondary); }
+.navspace { height: 84px; flex: none; }
+.bottomnav { position: absolute; left: 14px; width: calc(100% - 28px); bottom: calc(var(--safe-bottom) + 8px); border-radius: 999px; padding: 4px 6px; display: flex; z-index: 50; background: var(--theme-glass-bar); border: 1px solid var(--theme-border-secondary); box-shadow: var(--theme-bar-shadow); backdrop-filter: blur(2px) saturate(1.5); }
+.bottomnav a { flex: 1; display: grid; place-items: center; padding: 6px 0; }
+.bottomnav .tab { width: 50px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--theme-text-tertiary); }
+.bottomnav a[aria-current="page"] .tab { background: var(--theme-chip); color: var(--brand-accent); }
+.desk { width: 1280px; border: 1px solid var(--theme-border-secondary); border-radius: 16px; background: var(--theme-bg); display: flex; overflow: hidden; flex: none; }
+.desk.w900 { width: 900px; }
+.desk .rail { width: 240px; flex: none; border-right: 1px solid var(--theme-border); padding: 24px 12px; display: flex; flex-direction: column; gap: 4px; background: var(--theme-bg-secondary); }
+.desk .rail .rlogo { padding: 0 4px 32px; }
+.desk .rail a, .desk .rail .rrow { position: relative; display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 12px; border-radius: 12px; font-size: 14px; color: var(--theme-text-secondary); }
+.desk .rail a span.lbl2 { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk .rail a[aria-current="page"] { background: var(--theme-chip); color: var(--brand-accent); font-weight: 700; }
+.desk .rail .rbottom { margin-top: auto; border-top: 1px solid var(--theme-divider); padding-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+.desk .main { flex: 1; display: flex; justify-content: center; padding: 24px; min-width: 0; }
+.desk .column { width: 100%; max-width: 680px; min-width: 0; }
+.desk.w900 .column { max-width: 480px; }
+
+/* =====================================================================================
+   4. PRIMITIVAS @rede-social/ui e @rede-social/core/ui — mesmas medidas, em CSS puro
+   ===================================================================================== */
+/* TopBar [shipped]: h-12 px-4 bg-bg-secondary border-b; grupo direito gap-3 com slots 44×44 */
+.topbar { flex: none; height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; background: var(--theme-bg-secondary); border-bottom: 1px solid var(--theme-border); }
+.topbar .tl { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.topbar .tname { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.narrow .topbar .tname { display: none; } /* o nome some abaixo de 360px (shipped) */
+.topbar .tr { display: flex; align-items: center; gap: 12px; flex: none; }
+.slot { position: relative; width: 44px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--theme-text); }
+.slot[aria-current="page"] { color: var(--brand-accent); }
+.slot[aria-current="page"] svg { stroke-width: 2; }
+.me { display: inline-flex; border-radius: 999px; border: 2px solid transparent; }
+.me[aria-current="page"] { border-color: var(--brand-accent); }
+/* Badge [shipped]: bg-danger branco 700, 18px; o numeral de 10px é interno da primitiva entregue */
+.badge { position: absolute; top: 2px; right: 2px; display: inline-flex; align-items: center; justify-content: center; height: 18px; min-width: 18px; padding: 0 4px; border-radius: 999px; background: var(--color-danger); color: #ffffff; font-size: 10px; font-weight: 700; line-height: 1; }
+.rail .badge { position: static; }
+/* Badge variant="dot" [extended] UI-D-253: h-3 w-3 bg-danger ring-2 ring-bg-secondary, sem numeral */
+.badge.dot { width: 12px; height: 12px; min-width: 12px; padding: 0; box-shadow: 0 0 0 2px var(--theme-bg-secondary); top: 2px; right: 2px; }
+.rail .badge.dot { box-shadow: none; }
+/* PageHeader [shipped]: sticky, bg/95, px-2 py-1, gap-1, título 16/700 truncado */
+.page-header { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: color-mix(in srgb, var(--theme-bg) 95%, transparent); backdrop-filter: blur(4px); }
+.page-header h1 { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.back { width: 44px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--theme-text); flex: none; }
+.icon-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--theme-text); flex: none; }
+/* Button: rounded-xl, 700; md h-11 px-5 text-14 gap-2 · sm h-9 px-4 text-12 (internos da primitiva) */
+.btn { height: 44px; padding: 0 20px; border-radius: 12px; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
+.btn.sm { height: 36px; padding: 0 16px; font-size: 12px; gap: 6px; }
+.btn.full { width: 100%; }
+.btn.brand { background: var(--brand-accent); color: var(--brand-on-accent); }
+.btn.secondary { background: var(--theme-bg-tertiary); color: var(--theme-text); }
+.btn.outline { border: 1px solid var(--theme-border-secondary); color: var(--theme-text); }
+.btn.ghost { color: var(--brand-accent); }
+.btn[aria-disabled="true"], .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn[aria-busy="true"] { opacity: 0.75; cursor: progress; }
+.card { background: var(--theme-card); border-radius: 12px; box-shadow: 0 1px 3px rgba(22, 35, 59, 0.06); overflow: hidden; }
+[data-theme="dark"] .card { border: 1px solid var(--theme-border); }
+/* Avatar [shipped]: sm 32, md 40; fallback neutro com o ícone User */
+.av { width: 40px; height: 40px; border-radius: 999px; overflow: hidden; position: relative; flex: none; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; }
+.av.sm { width: 32px; height: 32px; }
+.av > .photo { position: absolute; inset: 0; }
+.t12 { font-size: 12px; } .t12b { font-size: 12px; font-weight: 700; }
+.t14 { font-size: 14px; } .t14b { font-size: 14px; font-weight: 700; }
+.t16b { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.sec { color: var(--theme-text-secondary); } .ter { color: var(--theme-text-tertiary); } .dgr { color: var(--color-danger); }
+.num { font-variant-numeric: tabular-nums; }
+.trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sr-note { font-size: 12px; font-weight: 400; color: var(--theme-text-tertiary); font-style: italic; }
+.skel { background: linear-gradient(90deg, var(--theme-bg-tertiary), var(--theme-bg-secondary), var(--theme-bg-tertiary)); border-radius: 12px; }
+.skel.text { height: 14px; border-radius: 6px; }
+.skel.circle { border-radius: 999px; flex: none; }
+/* EmptyState [shipped]: py-16 px-6 gap-3, círculo 64 bg-tertiary, ícone 28 terciário, título 16/700, corpo 14 max 260 */
+.empty { padding: 64px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.empty .circle { width: 64px; height: 64px; border-radius: 999px; background: var(--theme-bg-tertiary); color: var(--theme-text-tertiary); display: grid; place-items: center; margin-bottom: 4px; }
+.empty p { max-width: 260px; font-size: 14px; color: var(--theme-text-secondary); line-height: 1.625; }
+.empty h3 { font-size: 16px; font-weight: 700; line-height: 1.25; }
+.toast { display: inline-flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; background: var(--theme-text); color: var(--theme-bg); font-size: 14px; max-width: 358px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.2); }
+.toast .dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
+.toast-slot { position: absolute; left: 16px; right: 16px; bottom: 104px; display: flex; justify-content: center; z-index: 60; }
+/* StatusPill [shipped] neutral: chipBase rounded-full px-3.5 py-1.5 12/700 */
+.spill { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 700; line-height: 1.5; }
+.spill.neutral { background: var(--theme-bg-tertiary); color: var(--theme-text-secondary); }
+/* Switch [shipped]: h-6 w-11 px-0.5 rounded-full; polegar h-5 w-5 branco; ligado = trilho da marca (item 6) */
+.switch { display: inline-flex; flex: none; align-items: center; width: 44px; height: 24px; padding: 0 2px; border-radius: 999px; background: var(--theme-bg-tertiary); justify-content: flex-start; }
+.switch > i { width: 20px; height: 20px; border-radius: 999px; background: #ffffff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); }
+.switch[aria-checked="true"] { background: var(--brand-accent); justify-content: flex-end; }
+.switch:disabled { opacity: 0.5; cursor: not-allowed; }
+.switch[aria-busy="true"] { opacity: 0.75; cursor: progress; }
+
+/* FOTOS SIMULADAS (conteúdo do tenant, não tokens) */
+.photo { position: absolute; inset: 0; }
+.ph-a { background: radial-gradient(circle at 70% 30%, #f4c27a 0%, transparent 35%), linear-gradient(160deg, #1d2a44 0%, #3d4f73 50%, #8a6a4a 100%); }
+.ph-b { background: radial-gradient(circle at 30% 40%, #9fd3b5 0%, transparent 40%), linear-gradient(200deg, #1f4037 0%, #4f8a6e 60%, #c8d9a0 100%); }
+.ph-c { background: radial-gradient(circle at 60% 60%, #ffcf99 0%, transparent 30%), linear-gradient(140deg, #3a1c71 0%, #b24d6a 55%, #f0955f 100%); }
+.ph-d { background: radial-gradient(circle at 50% 20%, #ffffff 0%, transparent 40%), linear-gradient(180deg, #b9d3ec 0%, #e8dcc2 70%, #cdb68e 100%); }
+.ph-e { background: radial-gradient(circle at 25% 75%, #e84f4f 0%, transparent 30%), linear-gradient(170deg, #202833 0%, #4a5a6e 60%, #9aa7b5 100%); }
+.ph-f { background: radial-gradient(circle at 40% 35%, #f2d3b6 0%, #c79a78 30%, transparent 31%), linear-gradient(180deg, #6b7fa3 0%, #394a6a 100%); }
+.ph-g { background: radial-gradient(circle at 50% 38%, #e8c2a0 0%, #b3825f 28%, transparent 29%), linear-gradient(180deg, #7a9a7e 0%, #3f5c46 100%); }
+.ph-h { background: radial-gradient(circle at 48% 36%, #d9a88a 0%, #9c6b4e 28%, transparent 29%), linear-gradient(180deg, #a36b7f 0%, #5b3547 100%); }
+/* LOGOTIPO SIMULADO (a imagem do tenant, contida e nunca cortada — D-26) */
+.logo-sim { display: block; color: var(--theme-text); }
+/* seletores simples: o conteúdo de <use> casa contra os elementos do <symbol> original */
+.mk { fill: var(--brand-primary); }
+.wd { fill: currentColor; }
+.wd2 { fill: currentColor; opacity: 0.55; }
+.tl-topbar { height: 28px; max-width: 120px; display: inline-flex; align-items: center; }
+.tl-topbar .logo-sim { height: 28px; width: auto; max-width: 120px; }
+/* TenantLogo size="thread" [extended] UI-D-258: caixa h-8 max-w-[64px], imagem max-h-8, contida */
+.tl-thread { height: 32px; max-width: 64px; display: inline-flex; align-items: center; flex: none; }
+.tl-thread .logo-sim { max-height: 32px; max-width: 64px; width: 64px; height: auto; }
+.tl-home { height: 64px; display: inline-flex; align-items: center; }
+.tl-home .logo-sim { height: 64px; width: auto; }
+
+/* =====================================================================================
+   5. FASE 7 — /notificacoes · NotificationItem [proto] + variantes [designed] · UI-D-250/251/252
+   ===================================================================================== */
+.nlist { display: flex; flex-direction: column; padding-bottom: 24px; }
+.nsec { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 16px 8px; min-height: 44px; }
+.nsec.prev { padding-top: 24px; }
+.nsec h2 { font-size: 14px; font-weight: 700; color: var(--theme-text-secondary); }
+.nrow { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; min-height: 64px; width: 100%; text-align: left; }
+.nrow.unread { background: color-mix(in oklch, var(--brand-accent), transparent 90%); }
+.lead { position: relative; width: 40px; height: 40px; flex: none; }
+/* disco do glifo do tipo: 20px bg-bg-secondary ring-2 ring-bg, glifo 12 neutro (UI-D-42) */
+.kdisc { position: absolute; bottom: -4px; right: -4px; width: 20px; height: 20px; border-radius: 999px; background: var(--theme-bg-secondary); box-shadow: 0 0 0 2px var(--theme-bg); display: grid; place-items: center; color: var(--theme-text-secondary); }
+/* sem ator: disco de 40px bg-bg-tertiary text-text-secondary, glifo 20 */
+.adisc { width: 40px; height: 40px; border-radius: 999px; background: var(--theme-bg-tertiary); color: var(--theme-text-secondary); display: grid; place-items: center; flex: none; }
+.like-g { color: var(--color-like); fill: var(--color-like); }
+.nbody { min-width: 0; flex: 1; }
+.nsent { font-size: 14px; line-height: 1.5; color: var(--theme-text-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.nsent b { font-weight: 700; color: var(--theme-text); }
+.nsent.removed { color: var(--theme-text-tertiary); }
+.ntime { font-size: 12px; color: var(--theme-text-tertiary); margin-top: 4px; }
+.nprev { position: relative; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; flex: none; }
+.nfoot { font-size: 12px; color: var(--theme-text-tertiary); text-align: center; padding: 24px 16px 0; }
+.srbadge { display: inline-block; font-size: 12px; font-weight: 700; color: var(--theme-text-tertiary); border: 1px dashed var(--theme-border-secondary); border-radius: 6px; padding: 0 4px; margin-right: 4px; }
+
+/* soft-ask [designed] UI-D-255: Card mx-4 mt-4 p-4 flex gap-3 items-start */
+.softask { margin: 16px 16px 0; padding: 16px; display: flex; gap: 12px; align-items: flex-start; }
+.bdisc { width: 40px; height: 40px; border-radius: 999px; background: color-mix(in oklch, var(--brand-accent), transparent 90%); color: var(--brand-accent); display: grid; place-items: center; flex: none; }
+.bdisc.big { width: 56px; height: 56px; }
+.sa-col { min-width: 0; flex: 1; }
+.sa-title { font-size: 14px; font-weight: 700; color: var(--theme-text); }
+.sa-body { font-size: 12px; color: var(--theme-text-secondary); margin-top: 4px; }
+.sa-x { width: 44px; height: 44px; margin: -8px -8px 0 0; border-radius: 12px; display: grid; place-items: center; color: var(--theme-text-tertiary); flex: none; }
+.sa-cta { margin-top: 12px; }
+
+/* =====================================================================================
+   6. FASE 7 — /post/[id]?comentario= · o destaque do comentário [designed] UI-D-254
+   ===================================================================================== */
+.pcard-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.pcard-text { padding: 0 16px 12px; font-size: 14px; line-height: 1.5; }
+.pactions { display: flex; gap: 16px; padding: 8px 16px 12px; color: var(--theme-text-secondary); }
+.pactions span { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; }
+.ctitle { font-size: 14px; font-weight: 700; color: var(--theme-text-secondary); padding: 16px 16px 8px; }
+/* CommentItem [shipped]: flex gap-3 px-4 py-3, resposta pl-14; o respiro de 6px da linha de meta é interno */
+.crow { display: flex; gap: 12px; padding: 12px 16px; }
+.crow.reply { padding-left: 56px; }
+.crow .cc { min-width: 0; flex: 1; }
+.crow .ct { font-size: 14px; line-height: 1.625; white-space: pre-wrap; }
+.crow .ct b { font-weight: 700; }
+.crow .cm { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--theme-text-tertiary); }
+.crow .cm b { font-weight: 700; }
+/* o alvo: rounded-xl bg-brand/10 por 2.400 ms, depois some em 600 ms */
+.crow.hl { border-radius: 12px; background: color-mix(in oklch, var(--brand-accent), transparent 90%); }
+.crow.faded { border-radius: 12px; background: transparent; outline: 1px dashed var(--theme-border-secondary); outline-offset: -1px; }
+.strip { display: flex; gap: 16px; padding: 12px 16px; overflow: hidden; }
+.strip .circ { width: 68px; height: 68px; border-radius: 999px; padding: 2px; border: 2px solid var(--brand-accent); flex: none; position: relative; }
+.strip .circ > i { display: block; width: 100%; height: 100%; border-radius: 999px; }
+
+/* =====================================================================================
+   7. FASE 7 — Configurações · PushSwitchRow [designed] UI-D-256
+   ===================================================================================== */
+.gtitle { font-size: 14px; font-weight: 700; color: var(--theme-text-secondary); padding: 16px 16px 8px; }
+.gsec + .gsec { border-top: 1px solid var(--theme-border); }
+/* Row [shipped]: flex w-full items-center gap-3 px-4 py-3.5 (os 14px são a geometria entregue da Fase 2) */
+.srow { display: flex; width: 100%; align-items: center; gap: 12px; padding: 14px 16px; }
+.srow > svg:first-child { color: var(--theme-text-secondary); }
+.scol { min-width: 0; flex: 1; }
+.slabel { font-size: 14px; color: var(--theme-text); }
+.ssub { font-size: 12px; color: var(--theme-text-tertiary); margin-top: 4px; min-height: 18px; }
+.rowcard { background: var(--theme-bg); border: 1px solid var(--theme-border); border-radius: 12px; }
+
+/* =====================================================================================
+   8. FASE 7 — InstallHint variant="push" [extended] UI-D-257 (BottomSheet [shipped])
+   ===================================================================================== */
+.scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 70; }
+.bsheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 71; background: var(--theme-bg-secondary); border-radius: 16px 16px 0 0; padding-bottom: var(--safe-bottom); box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.2); }
+.bsheet .handle { display: flex; justify-content: center; padding: 12px 0 8px; }
+.bsheet .handle i { width: 48px; height: 4px; border-radius: 999px; background: var(--theme-handle); }
+.bsheet .sbody { padding: 16px; }
+.hint-col { margin: 0 auto; max-width: 384px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+.hint-col h2 { font-size: 16px; font-weight: 700; line-height: 1.25; }
+.hint-col p { font-size: 14px; line-height: 1.625; color: var(--theme-text-secondary); }
+.hint-col p svg { display: inline-block; vertical-align: text-bottom; margin: 0 4px; }
+.hint-col .acts { width: 100%; display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+
+/* =====================================================================================
+   9. FASE 7 — chat: cabeçalho da conversa, bolhas, separadores, compositor · UI-D-258..261
+   ===================================================================================== */
+.pane { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.pane.fixed { flex: none; }
+.thead { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px; background: color-mix(in srgb, var(--theme-bg) 95%, transparent); backdrop-filter: blur(4px); border-bottom: 1px solid var(--theme-border); }
+.thead h1 { min-width: 0; font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thead .plink { display: flex; min-width: 0; align-items: center; gap: 8px; border-radius: 12px; }
+.scroller { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; position: relative; }
+.scroller::-webkit-scrollbar { display: none; }
+.older { display: flex; justify-content: center; min-height: 44px; align-items: center; padding-top: 8px; }
+/* <ol role="log">: flex flex-col gap-2 px-4 py-4 */
+.msgs { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
+.m { display: flex; flex-direction: column; align-items: flex-start; }
+.m.own { align-items: flex-end; }
+/* rótulo do remetente [proto → movido para FORA da bolha e neutro] 12/700 text-secondary px-1 mb-1 gap-1 */
+.slbl { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); padding: 0 4px; margin-bottom: 4px; }
+/* bolhas [proto]: max-w-85% rounded-2xl px-3 py-2, cauda rounded-br-md / rounded-bl-md */
+.bub { max-width: 85%; border-radius: 16px; padding: 8px 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.m.own .bub { border-bottom-right-radius: 6px; background: var(--brand-accent); color: var(--brand-on-accent); }
+.m.other .bub { border-bottom-left-radius: 6px; background: var(--theme-bg-secondary); border: 1px solid var(--theme-border); color: var(--theme-text); }
+.m.own .bub a { color: inherit; text-decoration: underline; }
+.m.other .bub a { color: var(--brand-accent); text-underline-offset: 2px; }
+.m.pending .bub { opacity: 0.75; }
+.btime { font-size: 12px; color: var(--theme-text-tertiary); padding: 0 4px; margin-top: 4px; }
+.dsep { align-self: center; border-radius: 999px; background: var(--theme-bg-tertiary); padding: 4px 12px; font-size: 12px; font-weight: 700; color: var(--theme-text-secondary); }
+/* o compositor [proto − anexos] UI-D-260: border-t bg-bg-secondary px-4 py-2; form flex items-end gap-2 */
+.composer { flex: none; border-top: 1px solid var(--theme-border); background: var(--theme-bg-secondary); padding: 8px 16px; position: relative; }
+.composer .cform { display: flex; align-items: flex-end; gap: 8px; }
+.cfield { flex: 1; min-width: 0; font-size: 16px; line-height: 24px; border-radius: 16px; background: var(--theme-bg-input); border: 1px solid var(--theme-border); padding: 8px 16px; color: var(--theme-text); white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; scrollbar-width: thin; }
+.cfield.ph { color: var(--theme-text-tertiary); }
+.cfield.focused { border-color: var(--brand-accent); }
+/* cinco linhas de CONTEÚDO (5 × 24px) antes de rolar — ver o achado da Superfície (b) */
+.cfield.max5 { max-height: 138px; }
+.sendb { width: 44px; height: 44px; border-radius: 999px; background: var(--brand-accent); color: var(--brand-on-accent); display: grid; place-items: center; flex: none; }
+.sendb:disabled, .sendb[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.ccount { text-align: right; font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+.ccount.cap { color: var(--color-danger); }
+.cerr { font-size: 14px; color: var(--color-danger); margin-bottom: 8px; }
+/* a pílula de novas mensagens: absolute bottom-full mb-2 centralizada, Button secondary sm + ArrowDown 16 */
+.newpill { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 8px; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12); }
+.greet { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 48px 32px; }
+.greet h2 { font-size: 16px; font-weight: 700; line-height: 1.25; }
+.greet p { font-size: 14px; color: var(--theme-text-secondary); line-height: 1.625; }
+/* aviso só leitura da conversa da equipe UI-D-263: border-t bg-bg-secondary px-4 py-3 flex gap-3 */
+.ronly { flex: none; border-top: 1px solid var(--theme-border); background: var(--theme-bg-secondary); padding: 12px 16px; display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--theme-text-secondary); }
+.ronly svg { color: var(--theme-text-tertiary); }
+.proto-bub { max-width: 85%; border-radius: 16px; border-bottom-left-radius: 6px; padding: 8px 12px; background: var(--theme-bg-secondary); border: 1px solid var(--theme-border); font-size: 14px; }
+.proto-bub .plbl { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--brand-accent); margin-bottom: 4px; }
+.proto-att { width: 44px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--theme-text-secondary); flex: none; }
+.strike { position: relative; opacity: 0.5; }
+.strike::after { content: ""; position: absolute; left: -4px; right: -4px; top: 50%; border-top: 2px solid var(--color-danger); transform: rotate(-12deg); }
+
+/* =====================================================================================
+   10. FASE 7 — caixa de entrada da equipe · InboxRow [designed] UI-D-262 · divisão UI-D-264
+   ===================================================================================== */
+.irow { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-height: 72px; border-bottom: 1px solid var(--theme-divider); }
+.irow[aria-current="page"] { background: var(--theme-bg-active); }
+.irow .icol { min-width: 0; flex: 1; }
+.irow .iname { font-size: 14px; font-weight: 700; color: var(--theme-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.irow .iname.removed { font-weight: 400; color: var(--theme-text-tertiary); }
+.irow .iprev { font-size: 14px; color: var(--theme-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.irow.awaiting .iprev { color: var(--theme-text); }
+.irow .itrail { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.irow .itime { font-size: 12px; color: var(--theme-text-tertiary); font-variant-numeric: tabular-nums; }
+.adot { width: 8px; height: 8px; border-radius: 999px; background: var(--brand-accent); }
+.adot-slot { height: 8px; }
+.irow .spill { padding: 2px 10px; }
+/* o cartão dividido a partir de lg: grid-cols-[288px_1fr] h-[calc(var(--screen-h)-7rem)] rounded-xl bg-card */
+.split { display: grid; grid-template-columns: 288px 1fr; height: 688px; border-radius: 12px; background: var(--theme-card); overflow: hidden; box-shadow: 0 1px 3px rgba(22, 35, 59, 0.06); }
+[data-theme="dark"] .split { border: 1px solid var(--theme-border); }
+.split .lpane { border-right: 1px solid var(--theme-border); overflow-y: auto; scrollbar-width: none; }
+.split .lpane .lhead { padding: 12px 16px; border-bottom: 1px solid var(--theme-border); }
+.split .lpane .lhead h1 { font-size: 16px; font-weight: 700; }
+.split .rpane { min-width: 0; display: flex; flex-direction: column; }
+.split .rpane .thead { background: var(--theme-card); backdrop-filter: none; }
+.split .rpane .scroller { background: var(--theme-bg); }
+.arrow { align-self: center; font-size: 24px; font-weight: 700; color: var(--theme-text-tertiary); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-reels" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m10 8 6 4-6 4Z"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></symbol>
+  <symbol id="i-cal-check" viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></symbol>
+  <symbol id="i-cal-clock" viewBox="0 0 24 24"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h5"/><circle cx="16" cy="16" r="6"/><path d="M16 14v2.2l1.6 1"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-bell-ring" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M4 2C2.8 3.7 2 5.7 2 8"/><path d="M22 8c0-2.3-.8-4.3-2-6"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+  <symbol id="i-msg-reply" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="m10 15-3-3 3-3"/><path d="M7 12h7a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-news" viewBox="0 0 24 24"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.9 15.5A2 2 0 0 0 8.5 14.1l-6.1-1.6a.5.5 0 0 1 0-1l6.1-1.6A2 2 0 0 0 9.9 8.5l1.6-6.1a.5.5 0 0 1 1 0l1.6 6.1a2 2 0 0 0 1.4 1.4l6.1 1.6a.5.5 0 0 1 0 1l-6.1 1.6a2 2 0 0 0-1.4 1.4l-1.6 6.1a.5.5 0 0 1-1 0Z"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 5.7a5 5 0 0 0-7 0l-.9.9-.9-.9a5 5 0 0 0-7 7l8 8 8-8a5 5 0 0 0 0-7Z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.7 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1Z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.5 21.7a.5.5 0 0 0 .9 0L22 2.5a.5.5 0 0 0-.6-.6L2.3 8.6a.5.5 0 0 0 0 .9l8 3.2a2 2 0 0 1 1.1 1.1Z"/><path d="m21.9 2.1-10.9 10.9"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 2v13"/><path d="m16 6-4-4-4 4"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
+  <symbol id="i-image-plus" viewBox="0 0 24 24"><path d="M16 5h6"/><path d="M19 2v6"/><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/><circle cx="9" cy="9" r="2"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.2 2h-.4a2 2 0 0 0-2 2v.2a2 2 0 0 1-1 1.7l-.4.3a2 2 0 0 1-2 0l-.2-.1a2 2 0 0 0-2.7.7l-.2.4a2 2 0 0 0 .7 2.7l.2.1a2 2 0 0 1 1 1.7v.5a2 2 0 0 1-1 1.7l-.2.1a2 2 0 0 0-.7 2.7l.2.4a2 2 0 0 0 2.7.7l.2-.1a2 2 0 0 1 2 0l.4.3a2 2 0 0 1 1 1.7v.2a2 2 0 0 0 2 2h.4a2 2 0 0 0 2-2v-.2a2 2 0 0 1 1-1.7l.4-.3a2 2 0 0 1 2 0l.2.1a2 2 0 0 0 2.7-.7l.2-.4a2 2 0 0 0-.7-2.7l-.2-.1a2 2 0 0 1-1-1.7v-.5a2 2 0 0 1 1-1.7l.2-.1a2 2 0 0 0 .7-2.7l-.2-.4a2 2 0 0 0-2.7-.7l-.2.1a2 2 0 0 1-2 0l-.4-.3a2 2 0 0 1-1-1.7V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.2 6.8a2.8 2.8 0 0 0-4-4L3.8 16.2a2 2 0 0 0-.5.8l-1.3 4.4a.5.5 0 0 0 .6.6l4.4-1.3a2 2 0 0 0 .8-.5Z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 20.5l1.6-4.8A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5Z"/></symbol>
+  <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.4 11-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></symbol>
+  <!-- logotipos simulados: um símbolo + uma "palavra" larga (4:1) e só o símbolo (1:1) -->
+  <symbol id="logo-wide" viewBox="0 0 128 32"><circle class="mk" cx="16" cy="16" r="14"/><rect class="wd" x="36" y="7" width="90" height="8" rx="4"/><rect class="wd2" x="36" y="19" width="60" height="6" rx="3"/></symbol>
+</svg>
+
+<!-- ============ barra do mockup (não é superfície do produto) ============ -->
+<div class="toolbar" role="region" aria-label="Controles do mockup">
+  <span class="brandname">Rede Social · Fase 7 · Notificações, Push e Suporte <small>as nove telas [designed] + dois deltas [proto] · 07-UI-SPEC.md · tokens reais de @rede-social/ui</small></span>
+  <button class="toggle" id="theme-toggle" type="button" aria-pressed="false"><svg class="i i-16"><use href="#i-moon"/></svg><span id="theme-label">Tema escuro</span></button>
+  <label>Cor primária <input type="color" id="pick-primary" value="#2e6fd0" aria-label="Cor primária do tenant"></label>
+  <label>Cor secundária <input type="color" id="pick-secondary" value="#5b9cf8" aria-label="Cor secundária do tenant"></label>
+  <span>
+    <button class="preset" type="button" data-p="#2e6fd0" data-s="#5b9cf8">Rede Social (neutro)</button>
+    <button class="preset" type="button" data-p="#7c3aed" data-s="#a78bfa">Demo (roxo)</button>
+    <button class="preset" type="button" data-p="#0f766e" data-s="#14b8a6">Lab (verde)</button>
+    <button class="preset" type="button" data-p="#f5c518" data-s="#ffe27a">Amarelo (tinta escura)</button>
+  </span>
+  <span class="readout" id="brand-readout"></span>
+  <nav aria-label="Telas">
+    <a href="#s9">9 · selos (sino e suporte)</a>
+    <a href="#s7">7 · linhas da lista</a>
+    <a href="#s3">3 · cartão de pedido</a>
+    <a href="#s8">8 · destaque do comentário</a>
+    <a href="#s4">4 · linha de push</a>
+    <a href="#s5">5 · InstallHint push</a>
+    <a href="#s6">6 · conversa do membro</a>
+    <a href="#da">a · rótulo do remetente</a>
+    <a href="#db">b · compositor</a>
+    <a href="#s1">1 · caixa de entrada</a>
+    <a href="#st">conversa da equipe</a>
+    <a href="#s2">2 · divisão no desktop</a>
+  </nav>
+</div>
+
+<main class="sheet">
+
+<section class="screen" id="leia">
+  <header><h2>Como ler este arquivo</h2><code>07-UI-SPEC.md · D-33 · UI-04 · D-66</code>
+    <p><strong>Relógio fictício do mockup:</strong> agora = seg., 14 de out. de 2030, 14:20, no fuso do tenant (America/Sao_Paulo; o ano só existe para os dias da semana baterem com o sketch 006). "Ontem" é dom., 13 de out.; "12/10" é sáb., 12 de out. O tenant de exemplo é <strong>Rede Demo</strong>; troque a marca na barra acima — tudo que é da marca recolore, e só isso. <strong>[designed]</strong> = superfície sem protótipo, desenhada aqui para ser aprovada antes de ser codada. <strong>[proto]</strong> = portada do protótipo; aparece aqui como contexto em volta de uma peça [designed] ou onde a Fase 7 muda o que o time de design desenhou (os dois deltas a e b). Cada texto vem do §Copywriting Contract de <code>07-UI-SPEC.md</code>: aprovar o desenho aprova o texto e a geometria juntos.</p>
+    <p><strong>As nove superfícies [designed]:</strong> (1) a caixa de entrada da equipe no celular — UI-D-262; (2) a divisão lista + conversa no desktop a partir de <code>lg</code> — UI-D-264; (3) o cartão de pedido de push — UI-D-255; (4) a linha de push de Configurações, nos seis estados mais o ocupado — UI-D-256; (5) a variante push do <code>InstallHint</code> — UI-D-257; (6) o cabeçalho da conversa do membro e a saudação vazia — UI-D-258; (7) as linhas sem ator e de conteúdo removido — UI-D-251; (8) o destaque do comentário na página do post — UI-D-254; (9) o ponto no slot do suporte ao lado do número do sino — UI-D-253. <strong>Os dois deltas [proto]:</strong> (a) o rótulo do remetente sobe para fora da bolha e fica neutro — UI-D-259; (b) o compositor perde o anexo e cresce até cinco linhas — UI-D-260.</p>
+  </header>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 9 — OS SELOS: O NÚMERO DO SINO E O PONTO DO SUPORTE
+     ===================================================================================== -->
+<section id="s9" class="screen">
+  <header><h2>Superfície 9 — os selos: o número do sino e o ponto no slot do suporte</h2><code>TopBar · DesktopRail · Badge variant="dot" · LiveCountersProvider · [designed] · UI-D-253, UI-D-268, D-40, D-237, D-238</code>
+    <p>O sino e o balão de conversa são <strong>slots</strong> da TopBar e do trilho, não abas (D-40): Sino · Suporte · avatar. O sino mostra o <code>Badge</code> de contagem que já existe (<code>bg-danger</code>, 18px, "99+"). O slot do suporte muda de estilo pelo papel: para o <strong>membro</strong>, um <strong>ponto de 12px sem numeral</strong> ("a equipe respondeu", sem sugerir uma fila — D-237); para a <strong>equipe</strong>, o mesmo <code>Badge</code> de contagem com o número de conversas aguardando resposta (uma carga de trabalho — D-238). Nenhum selo anima. O nome acessível do slot passa a carregar o estado (o selo visual fica <code>aria-hidden</code>), o que corrige a TopBar de hoje, que só anuncia "Notificações".</p>
+  </header>
+  <div class="frames">
+    <div class="framewrap">
+      <span class="label-tag">Membro · TopBar · 390px · sino 3 + ponto do suporte</span>
+      <div class="card" style="width:390px;border-radius:12px">
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span>
+          <span class="tr"><a class="slot" href="#s7" aria-label="Notificações, 3 novas"><svg class="i"><use href="#i-bell"/></svg><span class="badge" aria-hidden="true">3</span></a><a class="slot" href="#s6" aria-label="Suporte, nova resposta da equipe"><svg class="i"><use href="#i-msg"/></svg><span class="badge dot" aria-hidden="true"></span></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+      </div>
+      <p class="caption">Nomes acessíveis: <strong>"Notificações, 3 novas"</strong> · <strong>"Suporte, nova resposta da equipe"</strong>. O ponto fica no mesmo lugar do número (<code>absolute top-0.5 right-0.5</code>), com o anel <code>ring-bg-secondary</code> de 2px que o separa do glifo.</p>
+    </div>
+    <div class="framewrap">
+      <span class="label-tag">Equipe · TopBar · 390px · sino 12 + suporte 2</span>
+      <div class="card" style="width:390px;border-radius:12px">
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span>
+          <span class="tr"><a class="slot" href="#s7" aria-label="Notificações, 12 novas"><svg class="i"><use href="#i-bell"/></svg><span class="badge" aria-hidden="true">12</span></a><a class="slot" href="#s1" aria-label="Suporte, 2 aguardando resposta"><svg class="i"><use href="#i-msg"/></svg><span class="badge" aria-hidden="true">2</span></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-g"></span></span></a></span></div>
+      </div>
+      <p class="caption">Nomes acessíveis: "Notificações, 12 novas" · <strong>"Suporte, 2 aguardando resposta"</strong>. Para a equipe o sino só traz os tipos pessoais (curtidas e respostas nos próprios comentários, D-229); o slot do suporte é o número de conversas cuja última mensagem é do membro e que ninguém da equipe leu (D-238).</p>
+    </div>
+    <div class="framewrap">
+      <span class="label-tag">Transbordo "99+" · zerado</span>
+      <div class="card" style="width:390px;border-radius:12px">
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span>
+          <span class="tr"><a class="slot" href="#s7" aria-label="Notificações, 140 novas"><svg class="i"><use href="#i-bell"/></svg><span class="badge" aria-hidden="true">99+</span></a><a class="slot" href="#s1" aria-label="Suporte, 104 aguardando resposta"><svg class="i"><use href="#i-msg"/></svg><span class="badge" aria-hidden="true">99+</span></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-g"></span></span></a></span></div>
+      </div>
+      <div class="card" style="width:390px;border-radius:12px;margin-top:8px">
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span>
+          <span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+      </div>
+      <p class="caption">Acima de 99, "99+" (a primitiva entregue). Com zero, nenhum selo e o nome acessível é só o rótulo: "Notificações" · "Suporte".</p>
+    </div>
+    <div class="framewrap">
+      <span class="label-tag">320px · o grupo direito fixo de 144px</span>
+      <div class="card narrow" style="width:320px;border-radius:12px">
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 128 32" style="width:112px"><use href="#logo-wide"/></svg></span><span class="tname">Rede Demo</span></span>
+          <span class="tr"><a class="slot" href="#s7" aria-label="Notificações, 3 novas"><svg class="i"><use href="#i-bell"/></svg><span class="badge" aria-hidden="true">3</span></a><a class="slot" href="#s6" aria-label="Suporte, nova resposta da equipe"><svg class="i"><use href="#i-msg"/></svg><span class="badge dot" aria-hidden="true"></span></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+      </div>
+      <p class="caption w320">44 + 12 + 44 + 12 + 32 = 144px: sobra ao logotipo o seu <code>max-w-[120px]</code> (o nome de exibição já some abaixo de 360px). Nenhum selo alarga a barra.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Desktop · trilho de 240px · grupo de baixo · membro e equipe</span>
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div class="desk" style="width:auto">
+          <div class="rail" style="height:420px">
+            <div class="rlogo"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 128 32" style="width:120px"><use href="#logo-wide"/></svg></span></div>
+            <a href="#s9"><svg class="i i-20"><use href="#i-home"/></svg><span class="lbl2">Início</span></a>
+            <a href="#s9"><svg class="i i-20"><use href="#i-users"/></svg><span class="lbl2">Comunidades</span></a>
+            <a href="#s9"><svg class="i i-20"><use href="#i-cal"/></svg><span class="lbl2">Eventos</span></a>
+            <div class="rbottom">
+              <a href="#s7" aria-label="Notificações, 3 novas"><svg class="i i-20"><use href="#i-bell"/></svg><span class="lbl2">Notificações</span><span class="badge" aria-hidden="true">3</span></a>
+              <a href="#s6" aria-label="Suporte, nova resposta da equipe"><svg class="i i-20"><use href="#i-msg"/></svg><span class="lbl2">Suporte</span><span class="badge dot" aria-hidden="true"></span></a>
+              <a href="#s4"><svg class="i i-20"><use href="#i-settings"/></svg><span class="lbl2">Configurações</span></a>
+              <a href="#s9"><svg class="i i-20"><use href="#i-logout"/></svg><span class="lbl2">Sair</span></a>
+            </div>
+          </div>
+        </div>
+        <div class="desk" style="width:auto">
+          <div class="rail" style="height:420px">
+            <div class="rlogo"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 128 32" style="width:120px"><use href="#logo-wide"/></svg></span></div>
+            <a href="#s9"><svg class="i i-20"><use href="#i-home"/></svg><span class="lbl2">Início</span></a>
+            <a href="#s9"><svg class="i i-20"><use href="#i-users"/></svg><span class="lbl2">Comunidades</span></a>
+            <a href="#s9"><svg class="i i-20"><use href="#i-cal"/></svg><span class="lbl2">Eventos</span></a>
+            <div class="rbottom">
+              <a href="#s7" aria-label="Notificações, 12 novas"><svg class="i i-20"><use href="#i-bell"/></svg><span class="lbl2">Notificações</span><span class="badge" aria-hidden="true">12</span></a>
+              <a href="#s1" aria-current="page" aria-label="Suporte, 2 aguardando resposta"><svg class="i i-20"><use href="#i-msg"/></svg><span class="lbl2">Suporte</span><span class="badge" aria-hidden="true">2</span></a>
+              <a href="#s4"><svg class="i i-20"><use href="#i-settings"/></svg><span class="lbl2">Configurações</span></a>
+              <a href="#s9"><svg class="i i-20"><use href="#i-logout"/></svg><span class="lbl2">Sair</span></a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption" style="max-width:560px">No trilho, os slots são as linhas do grupo de baixo que já existem, com os mesmos selos no fim da linha: o número (sino, e suporte da equipe) ou o ponto (suporte do membro). Um só <code>LiveCountersProvider</code> alimenta a TopBar e o trilho, então os dois nunca discordam. À direita, a equipe com <code>/suporte</code> aberto (linha ativa <code>--theme-chip</code> + texto da marca, já entregue). O ícone do app no aparelho soma sino + suporte (<code>setAppBadge</code>, D-239) e não tem interface própria.</p>
+    </div>
+  </div>
+  <p class="note"><strong>Sem sinal duplo:</strong> uma notificação ou mensagem que chega com a conversa fechada <strong>não</strong> levanta toast no app; o selo é o sinal (UI-D-253). Quando o Realtime cai, nada aparece: o selo guarda o último valor e se atualiza no próximo sinal ou ao voltar para o app (D-240).</p>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 7 — AS LINHAS DA LISTA: SEM ATOR, REMOVIDO, DESCONHECIDO, ATOR QUE SAIU
+     ===================================================================================== -->
+<section id="s7" class="screen">
+  <header><h2>Superfície 7 — as linhas de <code>/notificacoes</code>: sem ator, conteúdo removido, tipo desconhecido e ator que saiu</h2><code>/notificacoes · NotificationItem [proto] + variantes [designed] · UI-D-251, UI-D-250, UI-D-252, D-230, D-231, D-232</code>
+    <p>A linha com ator é a do protótipo (avatar com o disco do glifo do tipo, o nome em negrito, a frase, o tempo, a prévia de 44px), agora como <strong>um único <code>&lt;a&gt;</code></strong> que leva ao alvo (D-232) e com a tinta da marca <code>bg-brand/10</code> enquanto não lida (o <code>bg-accent/5</code> do protótipo, subido para /10 para sobreviver ao tema escuro, nt-1). O que o protótipo não desenhou: <strong>(i)</strong> a linha <strong>sem ator</strong> (lembretes de evento, tipos desconhecidos): um disco de 40px <code>bg-bg-tertiary</code> com o glifo em 20; <strong>(ii)</strong> a linha <strong>genérica</strong> para um tipo que o registro ainda não conhece, que nunca quebra a lista; <strong>(iii)</strong> a linha de <strong>conteúdo removido</strong>, que existe porque 07-04 mantém a linha de um alvo apagado e só descarta o trecho: vira um <code>&lt;button&gt;</code>, sem prévia; <strong>(iv)</strong> o <strong>ator que saiu</strong>, "Membro removido" em negrito com o avatar neutro. Os glifos são neutros (a normalização UI-D-42 do <code>text-accent</code> do protótipo), com uma exceção: o <code>Heart</code> da curtida no comentário, na cor da curtida (UI-D-08).</p>
+  </header>
+  <div class="frames">
+
+    <div class="framewrap">
+      <span class="label-tag">Membro · /notificacoes · Novas e Anteriores · 390px</span>
+      <div class="phone tall">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-current="page" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-label="Suporte, nova resposta da equipe"><svg class="i"><use href="#i-msg"/></svg><span class="badge dot" aria-hidden="true"></span></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="body nav-pad">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div>
+          <div class="nlist" role="region" aria-label="Notificações de Rede Demo">
+            <div class="nsec"><h2>Novas</h2><button class="btn ghost sm" type="button">Marcar todas como lidas</button></div>
+            <a class="nrow unread" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Marina Costa</b> publicou um novo post: “Assembleia anual: pauta e horários confirmados para sábado”</p><p class="ntime">há 5 min</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+            <a class="nrow unread" href="#s8"><span class="lead"><span class="av"><span class="photo ph-g"></span></span><span class="kdisc"><svg class="i i-12 like-g"><use href="#i-heart"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Bruno Santos</b> curtiu seu comentário: “Vou levar as crianças também!”</p><p class="ntime">há 20 min</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+            <a class="nrow unread" href="#s7"><span class="adisc"><svg class="i i-20"><use href="#i-cal-clock"/></svg></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent">Daqui a 1 hora: “Encontro anual” começa às 19:00.</p><p class="ntime">há 1 h</p></span><span class="nprev"><span class="photo ph-c"></span></span></a>
+            <button class="nrow unread" type="button"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent removed">Este conteúdo foi removido.</p><p class="ntime">há 3 h</p></span></button>
+            <div class="nsec prev"><h2>Anteriores</h2></div>
+            <a class="nrow" href="#s8"><span class="lead"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="kdisc"><svg class="i i-12"><use href="#i-msg-reply"/></svg></span></span><span class="nbody"><p class="nsent"><b>Membro removido</b> respondeu ao seu comentário: “Concordo, o horário da tarde é melhor para quem trabalha.”</p><p class="ntime">ontem</p></span></a>
+            <a class="nrow" href="#s7"><span class="adisc"><svg class="i i-20"><use href="#i-bell"/></svg></span><span class="nbody"><p class="nsent">Você tem uma nova notificação.</p><p class="ntime">ontem</p></span></a>
+            <a class="nrow" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-cal"/></svg></span></span><span class="nbody"><p class="nsent"><b>Marina Costa</b> criou o evento “Encontro anual de associados” · sáb., 19 de out. · 19:00</p><p class="ntime">há 2 dias</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+            <a class="nrow" href="#s7"><span class="adisc"><svg class="i i-20"><use href="#i-cal-clock"/></svg></span><span class="nbody"><p class="nsent">Amanhã às 19:00: “Encontro anual de associados”. Você confirmou presença.</p><p class="ntime">há 2 dias</p></span></a>
+            <a class="nrow" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-film"/></svg></span></span><span class="nbody"><p class="nsent"><b>Marina Costa</b> publicou um novo reel: “Bastidores da montagem do palco”</p><p class="ntime">há 3 dias</p></span><span class="nprev"><span class="photo ph-e"></span></span></a>
+            <a class="nrow" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-sparkles"/></svg></span></span><span class="nbody"><p class="nsent"><b>Marina Costa</b> publicou um novo story.</p><p class="ntime">há 4 dias</p></span><span class="nprev"><span class="photo ph-b"></span></span></a>
+            <p class="nfoot">Mostramos as notificações dos últimos 90 dias.</p>
+          </div>
+        </div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption"><strong>Novas</strong> (<code>read_at</code> nulo) e <strong>Anteriores</strong> [proto], cada uma da mais nova para a mais antiga; uma seção sem linhas some com o cabeçalho. As linhas ficam no chão da página, sem cartão e sem divisórias [proto]. "Marcar todas como lidas" (<code>ghost sm</code>) mora no cabeçalho de Novas, e só enquanto houver linha não lida carregada. Ao abrir a lista, o selo do sino zera (visto, D-230), mas a tinta de cada linha só sai quando ela é tocada (lida). A linha tocada <strong>não muda de seção</strong> sob o dedo: ela vai para Anteriores na próxima carga. No fim da lista, a nota dos 90 dias (D-231).</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Cada variante, não lida (em cima) e lida (embaixo) · a linha inteira de 390px</span>
+      <div class="zgrid" style="grid-template-columns:repeat(2,390px)">
+        <div class="zcell"><span class="label-tag">[proto] com ator — para comparação</span><div class="rowcard">
+          <a class="nrow unread" href="#s7" style="border-radius:12px 12px 0 0"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Marina Costa</b> publicou em Núcleo Jovem: “Inscrições para o mutirão vão até sexta.”</p><p class="ntime">há 5 min</p></span><span class="nprev"><span class="photo ph-b"></span></span></a>
+          <a class="nrow" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><p class="nsent"><b>Marina Costa</b> publicou um novo post.</p><p class="ntime">há 2 dias</p></span></a></div>
+          <p class="caption">Com ator: <code>Avatar md</code> + o disco de 20px do glifo (<code>bg-bg-secondary ring-2 ring-bg</code>). Sem prévia → nenhum espaço reservado à direita. Sem texto no post → a frase curta, sem aspas vazias.</p></div>
+        <div class="zcell"><span class="label-tag">Sem ator — lembrete de 1 h e de 24 h</span><div class="rowcard">
+          <a class="nrow unread" href="#s7" style="border-radius:12px 12px 0 0"><span class="adisc"><svg class="i i-20"><use href="#i-cal-clock"/></svg></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent">Daqui a 1 hora: “Encontro anual” começa às 19:00.</p><p class="ntime">há 1 h</p></span><span class="nprev"><span class="photo ph-c"></span></span></a>
+          <a class="nrow" href="#s7"><span class="adisc"><svg class="i i-20"><use href="#i-cal-clock"/></svg></span><span class="nbody"><p class="nsent">Amanhã às 19:00: “Encontro anual”. Você confirmou presença.</p><p class="ntime">ontem</p></span></a></div>
+          <p class="caption">O disco de 40px <code>bg-bg-tertiary text-text-secondary</code> no lugar do avatar, com <code>CalendarClock</code> 20. A capa do evento, quando existe, vira a prévia.</p></div>
+        <div class="zcell"><span class="label-tag">Tipo desconhecido — a linha genérica</span><div class="rowcard">
+          <a class="nrow unread" href="#s7" style="border-radius:12px 12px 0 0"><span class="adisc"><svg class="i i-20"><use href="#i-bell"/></svg></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent">Você tem uma nova notificação.</p><p class="ntime">há 10 min</p></span></a>
+          <a class="nrow" href="#s7"><span class="adisc"><svg class="i i-20"><use href="#i-bell"/></svg></span><span class="nbody"><p class="nsent">Você tem uma nova notificação.</p><p class="ntime">ontem</p></span></a></div>
+          <p class="caption">Um tipo que o registro do app ainda não conhece: disco com <code>Bell</code>, o texto genérico, e o toque leva ao Início. Um módulo que publica um tipo novo antes do app nunca quebra a lista.</p></div>
+        <div class="zcell"><span class="label-tag">Conteúdo removido — um botão, sem prévia</span><div class="rowcard">
+          <button class="nrow unread" type="button" style="border-radius:12px 12px 0 0"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent removed">Este conteúdo foi removido.</p><p class="ntime">há 3 h</p></span></button>
+          <button class="nrow" type="button"><span class="lead"><span class="av"><span class="photo ph-g"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-msg-reply"/></svg></span></span><span class="nbody"><p class="nsent removed">Este conteúdo foi removido.</p><p class="ntime">ontem</p></span></button></div>
+          <p class="caption">O post (ou o comentário) foi apagado depois do aviso: a frase vira "Este conteúdo foi removido." em 14/400 terciário, a prévia some, o trecho já foi descartado no servidor, e a linha é um <code>&lt;button&gt;</code>. Tocar marca como lida e mostra o toast "Este conteúdo não está mais disponível." (ver Superfície 8).</p></div>
+        <div class="zcell"><span class="label-tag">Ator que saiu do tenant</span><div class="rowcard">
+          <a class="nrow unread" href="#s8" style="border-radius:12px 12px 0 0"><span class="lead"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="kdisc"><svg class="i i-12"><use href="#i-msg-reply"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Membro removido</b> respondeu ao seu comentário: “Concordo, o horário da tarde é melhor.”</p><p class="ntime">há 2 h</p></span></a>
+          <a class="nrow" href="#s8"><span class="lead"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="kdisc"><svg class="i i-12 like-g"><use href="#i-heart"/></svg></span></span><span class="nbody"><p class="nsent"><b>Membro removido</b> curtiu seu comentário: “Vou levar as crianças também!”</p><p class="ntime">ontem</p></span></a></div>
+          <p class="caption"><code>{actor}</code> = "Membro removido", o avatar vira o <code>User</code> neutro; a linha continua levando ao alvo.</p></div>
+        <div class="zcell"><span class="label-tag">Curtida — o único glifo colorido</span><div class="rowcard">
+          <a class="nrow unread" href="#s8" style="border-radius:12px 12px 0 0"><span class="lead"><span class="av"><span class="photo ph-g"></span></span><span class="kdisc"><svg class="i i-12 like-g"><use href="#i-heart"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Bruno Santos</b> curtiu seu comentário: “Vou levar as crianças também!”</p><p class="ntime">há 20 min</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+          <a class="nrow" href="#s8"><span class="lead"><span class="av"><span class="photo ph-f"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-msg"/></svg></span></span><span class="nbody"><p class="nsent"><b>Ana Lúcia Ferreira</b> comentou no seu story: “Que foto linda!”</p><p class="ntime">ontem</p></span><span class="nprev"><span class="photo ph-b"></span></span></a></div>
+          <p class="caption"><code>Heart</code> 12 em <code>text-like fill-like</code> (UI-D-08) — o mesmo coração do feed. Curtidas nunca viram push (D-235). Abaixo, o comentário no story, com o glifo neutro.</p></div>
+        <div class="zcell"><span class="label-tag">O que o leitor de tela ouve (anotado)</span><div class="rowcard">
+          <a class="nrow unread" href="#s7" style="border-radius:12px"><span class="adisc"><svg class="i i-20"><use href="#i-cal-clock"/></svg></span><span class="nbody"><p class="nsent"><span class="srbadge">sr-only</span><span class="sr-note">Não lida.</span> Daqui a 1 hora: “Encontro anual” começa às 19:00.</p><p class="ntime">há 1 h</p></span></a></div>
+          <p class="caption">O estado não depende só da cor: cada linha não lida leva um <code>sr-only</code> <strong>"Não lida."</strong> antes da frase (aqui mostrado de propósito, tracejado). A lista <strong>não</strong> é uma região ao vivo: o nome do slot já carrega a contagem.</p></div>
+      </div>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">320px · ator de 60 caracteres, trecho de 80 e comunidade</span>
+      <div class="phone narrow short">
+        <div class="statusbar"></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div>
+          <div class="nlist">
+            <div class="nsec"><h2>Novas</h2><button class="btn ghost sm" type="button">Marcar todas como lidas</button></div>
+            <a class="nrow unread" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Maria Aparecida dos Santos Figueiredo de Albuquerque Monte</b> publicou em Núcleo de Voluntários do Programa de Formação: “Atenção: a reunião de planejamento do segundo semestre mudou para a sala 3 do…”</p><p class="ntime">há 5 min</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+            <a class="nrow unread" href="#s7"><span class="lead"><span class="av"><span class="photo ph-g"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-msg-reply"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Bruno Santos</b> respondeu ao seu comentário: “https://www.exemplo.com.br/eventos/2030/encontro-anual-de-associados/programacao”</p><p class="ntime">há 9 min</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+            <div class="nsec prev"><h2>Anteriores</h2></div>
+            <a class="nrow" href="#s7"><span class="adisc"><svg class="i i-20"><use href="#i-cal-clock"/></svg></span><span class="nbody"><p class="nsent">Amanhã às 08:30: “Encontro regional de associados, voluntários e parceiros do programa de formação continuada”. Você confirmou presença.</p><p class="ntime">ontem</p></span></a>
+          </div>
+        </div>
+      </div>
+      <p class="caption w320">Backstop E03: a frase para em <strong>três linhas</strong> com reticências (<code>line-clamp-3</code>), o avatar e a prévia de 44px são <code>shrink-0</code> e continuam na linha, e uma URL longa e sem espaços no trecho quebra onde precisar (<code>overflow-wrap:anywhere</code>) sem alargar nada. "Marcar todas como lidas" cabe ao lado de "Novas" em 320px.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Vazio · carregando · erro ao carregar mais</span>
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div class="phone short">
+          <div class="statusbar"></div>
+          <div class="body">
+            <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div>
+            <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-bell"/></svg></div><h3>Nenhuma notificação por enquanto</h3><p>Quando Rede Demo publicar novidades ou alguém responder você, avisamos aqui.</p></div>
+          </div>
+        </div>
+        <div class="phone short" aria-hidden="true">
+          <div class="statusbar"></div>
+          <div class="body">
+            <div class="page-header"><span class="back"><svg class="i i-28"><use href="#i-chev-l"/></svg></span><h1>Notificações</h1></div>
+            <div style="padding-top:16px">
+              <div class="nrow"><span class="skel circle" style="width:40px;height:40px"></span><span class="nbody" style="display:flex;flex-direction:column;gap:8px"><span class="skel text" style="width:80%"></span><span class="skel text" style="width:30%;height:12px"></span></span></div>
+              <div class="nrow"><span class="skel circle" style="width:40px;height:40px"></span><span class="nbody" style="display:flex;flex-direction:column;gap:8px"><span class="skel text" style="width:64%"></span><span class="skel text" style="width:24%;height:12px"></span></span></div>
+              <div class="nrow"><span class="skel circle" style="width:40px;height:40px"></span><span class="nbody" style="display:flex;flex-direction:column;gap:8px"><span class="skel text" style="width:72%"></span><span class="skel text" style="width:28%;height:12px"></span></span></div>
+              <div class="nrow"><span class="skel circle" style="width:40px;height:40px"></span><span class="nbody" style="display:flex;flex-direction:column;gap:8px"><span class="skel text" style="width:56%"></span><span class="skel text" style="width:32%;height:12px"></span></span></div>
+              <div class="nrow"><span class="skel circle" style="width:40px;height:40px"></span><span class="nbody" style="display:flex;flex-direction:column;gap:8px"><span class="skel text" style="width:76%"></span><span class="skel text" style="width:24%;height:12px"></span></span></div>
+              <div class="nrow"><span class="skel circle" style="width:40px;height:40px"></span><span class="nbody" style="display:flex;flex-direction:column;gap:8px"><span class="skel text" style="width:60%"></span><span class="skel text" style="width:28%;height:12px"></span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="phone short">
+          <div class="statusbar"></div>
+          <div class="body">
+            <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div>
+            <div class="nlist">
+              <div class="nsec prev" style="padding-top:16px"><h2>Anteriores</h2></div>
+              <a class="nrow" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><p class="nsent"><b>Marina Costa</b> publicou um novo post.</p><p class="ntime">há 20 dias</p></span></a>
+              <a class="nrow" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-cal"/></svg></span></span><span class="nbody"><p class="nsent"><b>Marina Costa</b> criou o evento “Mutirão de limpeza do parque” · sáb., 21 de set. · 09:00</p><p class="ntime">há 25 dias</p></span></a>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px">
+                <p class="t14 dgr">Não foi possível carregar mais notificações.</p>
+                <button class="btn outline" type="button">Tentar novamente</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption" style="max-width:1220px">Vazio: <code>EmptyState</code> com o círculo de 64px e <code>Bell</code> (o cartão de pedido de push ainda pode aparecer acima dele). <code>loading.tsx</code>: o cabeçalho + 6 esqueletos de linha (círculo de 40 e duas barras). Erro ao carregar mais: a linha em <code>text-danger</code> + "Tentar novamente", com as linhas já carregadas mantidas. Aqui só Anteriores: sem cabeçalho de Novas e sem "Marcar todas como lidas".</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 3 — O CARTÃO DE PEDIDO DE PUSH (SOFT-ASK)
+     ===================================================================================== -->
+<section id="s3" class="screen">
+  <header><h2>Superfície 3 — o cartão de pedido de push, no topo da lista</h2><code>/notificacoes · SoftAskCard · [designed] · UI-D-255, D-233, D-234</code>
+    <p>O pedido aparece <strong>onde o valor é óbvio</strong>: a lista que o push vai alimentar. <code>Card mx-4 mt-4 p-4</code>, o disco de 40px <code>bg-brand/10 text-brand</code> com <code>BellRing</code> 20 (a família do disco do <code>InstallHint</code>, nt-4), o título travado "Ative as notificações para não perder nada" (D-233), o corpo do membro ou da equipe, o único preenchimento da marca da tela ("Ativar notificações" com <code>Bell</code> 16) e o <code>X</code> de dispensar 44×44. <strong>O cartão nunca dispara o aviso do sistema sozinho</strong>: só um toque em "Ativar notificações" chama o pedido de permissão, como primeira chamada do toque (a regra do iOS). Ele só aparece quando o aparelho pode receber push (ou é um iPhone/iPad fora da Tela de Início), ainda não está inscrito, a permissão não foi negada e o aviso não foi dispensado neste aparelho. O servidor não renderiza nada: a decisão é do cliente depois de montar.</p>
+  </header>
+  <div class="frames">
+
+    <div class="framewrap">
+      <span class="label-tag">Membro · o cartão acima de Novas · 390px</span>
+      <div class="phone">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-current="page" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="body nav-pad">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div>
+          <div class="card softask"><span class="bdisc"><svg class="i i-20"><use href="#i-bell-ring"/></svg></span><div class="sa-col"><p class="sa-title">Ative as notificações para não perder nada</p><p class="sa-body">Receba um aviso quando Rede Demo publicar novidades e quando a equipe responder você.</p><button class="btn brand sa-cta" type="button"><svg class="i i-16"><use href="#i-bell"/></svg>Ativar notificações</button></div><button class="sa-x" type="button" aria-label="Dispensar aviso"><svg class="i i-20"><use href="#i-x"/></svg></button></div>
+          <div class="nlist">
+            <div class="nsec"><h2>Novas</h2><button class="btn ghost sm" type="button">Marcar todas como lidas</button></div>
+            <a class="nrow unread" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Marina Costa</b> publicou um novo post: “Assembleia anual: pauta e horários confirmados para sábado”</p><p class="ntime">há 5 min</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+            <a class="nrow unread" href="#s7"><span class="adisc"><svg class="i i-20"><use href="#i-cal-clock"/></svg></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent">Daqui a 1 hora: “Encontro anual” começa às 19:00.</p><p class="ntime">há 1 h</p></span></a>
+            <div class="nsec prev"><h2>Anteriores</h2></div>
+            <a class="nrow" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-sparkles"/></svg></span></span><span class="nbody"><p class="nsent"><b>Marina Costa</b> publicou um novo story.</p><p class="ntime">ontem</p></span><span class="nprev"><span class="photo ph-b"></span></span></a>
+          </div>
+        </div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">O orçamento da marca desta tela: <strong>um</strong> preenchimento (o CTA do cartão), as tintas das linhas não lidas e o texto do <code>ghost</code>. O <code>X</code> fica <code>-mt-2 -mr-2</code> para o glifo alinhar com o respiro do cartão, e o título nunca passa por baixo dele. Dispensar move o foco para o cabeçalho "Novas".</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">As variantes do cartão · 358px (a largura real dentro do mx-4 de 390px)</span>
+      <div class="stack" style="display:flex;flex-direction:column;gap:12px;width:358px">
+        <div class="card softask" style="margin:0"><span class="bdisc"><svg class="i i-20"><use href="#i-bell-ring"/></svg></span><div class="sa-col"><p class="sa-title">Ative as notificações para não perder nada</p><p class="sa-body">Receba um aviso quando um membro mandar mensagem para o suporte.</p><button class="btn brand sa-cta" type="button"><svg class="i i-16"><use href="#i-bell"/></svg>Ativar notificações</button></div><button class="sa-x" type="button" aria-label="Dispensar aviso"><svg class="i i-20"><use href="#i-x"/></svg></button></div>
+        <p class="caption">Equipe (<code>admin_tenant</code> / <code>support_tenant</code>): o corpo da equipe. A equipe não recebe os tipos de difusão (D-229), então o valor do push para ela é o suporte.</p>
+        <div class="card softask" style="margin:0"><span class="bdisc"><svg class="i i-20"><use href="#i-bell-ring"/></svg></span><div class="sa-col"><p class="sa-title">Ative as notificações para não perder nada</p><p class="sa-body">Receba um aviso quando Rede Demo publicar novidades e quando a equipe responder você.</p><button class="btn brand sa-cta" type="button" aria-busy="true" disabled><svg class="i i-16"><use href="#i-loader"/></svg>Ativar notificações</button></div><button class="sa-x" type="button" aria-label="Dispensar aviso" disabled style="opacity:.5"><svg class="i i-20"><use href="#i-x"/></svg></button></div>
+        <p class="caption">Ocupado: o CTA fica <code>loading</code> enquanto o aviso do sistema está aberto e a inscrição é salva. Concedido e salvo → o cartão sai (opacidade, 150 ms) + toast de sucesso. Negado → o cartão sai + o toast "bloqueadas". Aviso fechado sem escolha → nada muda. Erro → toast de erro, o cartão fica.</p>
+      </div>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">320px · o título quebra, o X fica no canto</span>
+      <div class="phone narrow short">
+        <div class="statusbar"></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div>
+          <div class="card softask"><span class="bdisc"><svg class="i i-20"><use href="#i-bell-ring"/></svg></span><div class="sa-col"><p class="sa-title">Ative as notificações para não perder nada</p><p class="sa-body">Receba um aviso quando Associação de Moradores do Sul publicar novidades e quando a equipe responder você.</p><button class="btn brand sa-cta" type="button"><svg class="i i-16"><use href="#i-bell"/></svg>Ativar notificações</button></div><button class="sa-x" type="button" aria-label="Dispensar aviso"><svg class="i i-20"><use href="#i-x"/></svg></button></div>
+          <div class="empty" style="padding:32px 24px"><div class="circle"><svg class="i i-28"><use href="#i-bell"/></svg></div><h3>Nenhuma notificação por enquanto</h3><p>Quando Associação de Moradores do Sul publicar novidades ou alguém responder você, avisamos aqui.</p></div>
+        </div>
+      </div>
+      <p class="caption w320">Em 320px, com um nome de tenant de 30 caracteres: título e corpo quebram dentro da coluna <code>min-w-0 flex-1</code>, nada trunca, e o CTA <code>md</code> fica na largura automática. Aqui com a lista vazia: o cartão pode aparecer acima do vazio.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Dispensado · a lista começa na primeira seção</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div>
+          <div class="nlist">
+            <div class="nsec"><h2>Novas</h2><button class="btn ghost sm" type="button">Marcar todas como lidas</button></div>
+            <a class="nrow unread" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Marina Costa</b> publicou um novo post: “Assembleia anual: pauta e horários confirmados para sábado”</p><p class="ntime">há 5 min</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+            <div class="nsec prev"><h2>Anteriores</h2></div>
+            <a class="nrow" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-sparkles"/></svg></span></span><span class="nbody"><p class="nsent"><b>Marina Costa</b> publicou um novo story.</p><p class="ntime">ontem</p></span><span class="nprev"><span class="photo ph-b"></span></span></a>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Depois do <code>X</code> (gravado neste aparelho, para sempre — D-233), ou com o aparelho já inscrito, a permissão negada ou sem suporte: nenhum cartão e nenhum espaço reservado. A outra porta do push continua em Configurações (Superfície 4).</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Os toasts do fluxo de ativação</span>
+      <div style="display:flex;flex-direction:column;gap:12px;width:390px">
+        <div class="toast" role="status"><span class="dot" style="background:var(--color-success)"></span>Notificações ativadas neste aparelho.</div>
+        <div class="toast" role="status"><span class="dot" style="background:var(--color-info)"></span>As notificações estão bloqueadas neste aparelho. Libere nos ajustes para ativar.</div>
+        <div class="toast" role="status"><span class="dot" style="background:var(--color-danger)"></span>Não foi possível ativar as notificações. Tente novamente.</div>
+      </div>
+      <p class="caption">Sucesso · negado no aviso do sistema · falha ao inscrever ou salvar. O mesmo fluxo (<code>apps/web/lib/push.ts</code>) serve o cartão e a linha de Configurações. Em um iPhone ou iPad fora da Tela de Início, "Ativar notificações" abre o <code>InstallHint</code> push (Superfície 5) e o cartão fica.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 8 — O DESTAQUE DO COMENTÁRIO E OS AVISOS DE ALVO AUSENTE
+     ===================================================================================== -->
+<section id="s8" class="screen">
+  <header><h2>Superfície 8 — o destaque do comentário na página do post, e os avisos de alvo ausente</h2><code>/post/[postId]?comentario={id} · /inicio?aviso=story-expirado · CommentsList highlightCommentId · [designed] · UI-D-254, D-232</code>
+    <p>Uma curtida ou uma resposta no comentário do membro abre o post <strong>no comentário</strong> (D-232). A página carrega a conversa-raiz que contém o alvo e a mostra <strong>primeiro</strong> na lista de comentários, com as respostas expandidas quando o alvo é uma resposta. Depois de montar, rola o alvo para o centro e pinta a linha com <code>rounded-xl bg-brand/10</code> — a mesma tinta da linha não lida, então "isto é o que te avisaram" lê igual nas duas telas (nt-1). A tinta fica 2.400 ms e some em 600 ms; com movimento reduzido ela fica até o primeiro toque ou rolagem. Os alvos que sumiram viram um toast informativo e nunca uma rota quebrada: o comentário que não existe mais, o story que expirou (o Início recebe <code>?aviso=story-expirado</code>) e a linha de conteúdo removido.</p>
+  </header>
+  <div class="frames">
+
+    <div class="framewrap">
+      <span class="label-tag">/post/[id]?comentario= · o alvo é uma resposta · a tinta</span>
+      <div class="phone">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="body nav-pad">
+          <div class="page-header"><a class="back" href="#s7" aria-label="Voltar"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Publicação</h1></div>
+          <div class="card" style="margin:0 16px">
+            <div class="pcard-head"><span class="av"><span class="photo ph-h"></span></span><span style="min-width:0"><span class="t14b trunc" style="display:block">Marina Costa</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
+            <p class="pcard-text">Assembleia anual: pauta e horários confirmados para sábado. Tragam as crianças, vai ter recreação no saguão.</p>
+            <div class="pactions"><span><svg class="i i-20"><use href="#i-heart"/></svg>24</span><span><svg class="i i-20"><use href="#i-chat"/></svg>31</span><span><svg class="i i-20"><use href="#i-share"/></svg></span></div>
+          </div>
+          <p class="ctitle">Comentários</p>
+          <div role="region" aria-label="Comentários da publicação">
+            <div class="crow"><span class="av sm"><span class="photo ph-f"></span></span><div class="cc"><p class="ct"><b>Ana Lúcia Ferreira</b> Alguém sabe se vai ter estacionamento?</p><div class="cm"><span>há 1 h</span><b>3 curtidas</b><b>Responder</b><b>Ocultar 2 respostas</b></div></div></div>
+            <div class="crow reply"><span class="av sm"><span class="photo ph-h"></span></span><div class="cc"><p class="ct"><b>Marina Costa</b> Sim, no subsolo, acesso pela rua lateral.</p><div class="cm"><span>há 58 min</span><b>1 curtida</b><b>Responder</b></div></div></div>
+            <div class="crow reply hl" style="margin:0 8px;padding-right:8px;padding-left:48px"><span class="av sm"><span class="photo ph-f"></span></span><div class="cc"><p class="ct"><b>Você</b> Vou levar as crianças também!</p><div class="cm"><span>há 40 min</span><b>1 curtida</b><b>Responder</b></div></div></div>
+            <div class="crow"><span class="av sm"><span class="photo ph-g"></span></span><div class="cc"><p class="ct"><b>Bruno Santos</b> Estarei lá com a família.</p><div class="cm"><span>há 2 h</span><b>Responder</b></div></div></div>
+            <div class="crow"><span class="av sm"><svg class="i i-16"><use href="#i-user"/></svg></span><div class="cc"><p class="ct"><b>Membro removido</b> Ótima notícia!</p><div class="cm"><span>há 2 h</span><b>Responder</b></div></div></div>
+          </div>
+        </div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">Veio de "Bruno Santos curtiu seu comentário". O alvo é uma <strong>resposta</strong>, então a raiz (Ana Lúcia) vem primeiro com as respostas expandidas, e o alvo está tingido e centralizado. A tinta ganha 8px de recuo de cada lado para o <code>rounded-xl</code> ler como uma forma, sem mudar a geometria da linha. As outras conversas seguem abaixo na ordem normal, e a paginação continua normal depois delas (backstop E08: um alvo além da primeira página de 20 aparece primeiro do mesmo jeito).</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Depois do sumiço (2,4 s + 0,6 s) · o contorno tracejado só marca onde estava</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s7" aria-label="Voltar"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Publicação</h1></div>
+          <p class="ctitle">Comentários</p>
+          <div class="crow"><span class="av sm"><span class="photo ph-f"></span></span><div class="cc"><p class="ct"><b>Ana Lúcia Ferreira</b> Alguém sabe se vai ter estacionamento?</p><div class="cm"><span>há 1 h</span><b>3 curtidas</b><b>Responder</b><b>Ocultar 2 respostas</b></div></div></div>
+          <div class="crow reply"><span class="av sm"><span class="photo ph-h"></span></span><div class="cc"><p class="ct"><b>Marina Costa</b> Sim, no subsolo, acesso pela rua lateral.</p><div class="cm"><span>há 58 min</span><b>1 curtida</b><b>Responder</b></div></div></div>
+          <div class="crow reply faded" style="margin:0 8px;padding-right:8px;padding-left:48px"><span class="av sm"><span class="photo ph-f"></span></span><div class="cc"><p class="ct"><b>Você</b> Vou levar as crianças também!</p><div class="cm"><span>há 40 min</span><b>1 curtida</b><b>Responder</b></div></div></div>
+          <div class="crow"><span class="av sm"><span class="photo ph-g"></span></span><div class="cc"><p class="ct"><b>Bruno Santos</b> Estarei lá com a família.</p><div class="cm"><span>há 2 h</span><b>Responder</b></div></div></div>
+        </div>
+      </div>
+      <p class="caption">A linha volta a ser transparente e a página é uma página de post normal. (O contorno tracejado é anotação do mockup, não produto.) Um <code>?comentario=</code> com qualquer outro valor é ignorado em silêncio.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Comentário ausente · o post normal + o toast informativo</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s7" aria-label="Voltar"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Publicação</h1></div>
+          <div class="card" style="margin:0 16px">
+            <div class="pcard-head"><span class="av"><span class="photo ph-h"></span></span><span style="min-width:0"><span class="t14b trunc" style="display:block">Marina Costa</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
+            <p class="pcard-text">Assembleia anual: pauta e horários confirmados para sábado.</p>
+            <div class="pactions"><span><svg class="i i-20"><use href="#i-heart"/></svg>24</span><span><svg class="i i-20"><use href="#i-chat"/></svg>30</span><span><svg class="i i-20"><use href="#i-share"/></svg></span></div>
+          </div>
+          <p class="ctitle">Comentários</p>
+          <div class="crow"><span class="av sm"><span class="photo ph-g"></span></span><div class="cc"><p class="ct"><b>Bruno Santos</b> Estarei lá com a família.</p><div class="cm"><span>há 2 h</span><b>Responder</b></div></div></div>
+        </div>
+        <div class="toast-slot" style="bottom:24px"><div class="toast" role="status"><span class="dot" style="background:var(--color-info)"></span>Este comentário não está mais disponível.</div></div>
+      </div>
+      <p class="caption">O comentário foi apagado, é de outro tenant ou o id não existe: o post abre normalmente e o toast informativo explica o salto. Um post apagado cai na tela de "não encontrado" que já existe (D-23).</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Story expirado · o Início + "Este story expirou."</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="body">
+          <div class="strip" aria-label="Stories"><span class="circ"><i class="ph-b"></i></span><span class="circ"><i class="ph-c"></i></span><span class="circ"><i class="ph-d"></i></span><span class="circ"><i class="ph-e"></i></span></div>
+          <div class="card" style="margin:12px 16px 0">
+            <div class="pcard-head"><span class="av"><span class="photo ph-h"></span></span><span style="min-width:0"><span class="t14b trunc" style="display:block">Marina Costa</span><span class="t12 ter" style="display:block">há 2 h</span></span></div>
+            <div style="position:relative;aspect-ratio:4/5"><span class="photo ph-a"></span></div>
+          </div>
+        </div>
+        <div class="toast-slot" style="bottom:24px"><div class="toast" role="status"><span class="dot" style="background:var(--color-info)"></span>Este story expirou.</div></div>
+      </div>
+      <p class="caption">A notificação de um story que já passou das 24 h leva a <code>/inicio?aviso=story-expirado</code>, e o Início mostra o toast uma vez (o padrão <code>ActionToast</code>). Qualquer outro valor de <code>aviso</code> é ignorado em silêncio.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Linha de conteúdo removido tocada · o toast</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div>
+          <div class="nlist">
+            <div class="nsec"><h2>Novas</h2><button class="btn ghost sm" type="button">Marcar todas como lidas</button></div>
+            <a class="nrow unread" href="#s7"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><span class="sr-only">Não lida.</span><p class="nsent"><b>Marina Costa</b> publicou um novo post: “Assembleia anual: pauta e horários confirmados para sábado”</p><p class="ntime">há 5 min</p></span><span class="nprev"><span class="photo ph-a"></span></span></a>
+            <button class="nrow" type="button"><span class="lead"><span class="av"><span class="photo ph-h"></span></span><span class="kdisc"><svg class="i i-12"><use href="#i-news"/></svg></span></span><span class="nbody"><p class="nsent removed">Este conteúdo foi removido.</p><p class="ntime">há 3 h</p></span></button>
+          </div>
+        </div>
+        <div class="toast-slot" style="bottom:24px"><div class="toast" role="status"><span class="dot" style="background:var(--color-info)"></span>Este conteúdo não está mais disponível.</div></div>
+      </div>
+      <p class="caption">A linha de conteúdo removido é um botão: o toque marca como lida (a tinta sai no lugar) e mostra o toast. Nenhuma navegação.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 4 — A LINHA DE PUSH EM CONFIGURAÇÕES
+     ===================================================================================== -->
+<section id="s4" class="screen">
+  <header><h2>Superfície 4 — a linha "Notificações" de Configurações, um liga/desliga para este aparelho</h2><code>/configuracoes · PushSwitchRow · [designed] · UI-D-256, D-233, D-234</code>
+    <p>A linha que hoje diz "Em breve" vira um <strong><code>Switch</code> para este aparelho</strong>, na geometria do <code>Row</code> que a página já usa (o mesmo vocabulário da linha do tema). O que um interruptor sozinho não explica vai na <strong>linha de estado</strong> 12/400 terciária embaixo do rótulo: por que está desabilitado, o que fazer no iPhone, e o que "bloqueado" quer dizer — o app nunca pode pedir de novo, então o estado negado diz o caminho. Seis estados mais o ocupado. Desligar é um toque, sem confirmação (volta com outro toque). Só existe nos hosts de tenant; o host da plataforma não tem a linha.</p>
+  </header>
+  <div class="frames">
+
+    <div class="framewrap">
+      <span class="label-tag">Membro · /configuracoes · Preferências · desligado · 390px</span>
+      <div class="phone">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="body nav-pad">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Configurações</h1></div>
+          <div class="gsec"><p class="gtitle">Conta</p>
+            <a class="srow" href="#s4"><svg class="i i-20"><use href="#i-pencil"/></svg><span class="scol slabel trunc">Editar perfil</span><svg class="i i-18 ter"><use href="#i-chev-r"/></svg></a></div>
+          <div class="gsec"><p class="gtitle">Preferências</p>
+            <div class="srow"><svg class="i i-20"><use href="#i-moon"/></svg><span class="scol slabel trunc">Tema escuro</span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro"><i></i></button></div>
+            <div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Receba avisos de novidades e respostas neste aparelho.</span></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Notificações neste aparelho"><i></i></button></div></div>
+          <div class="gsec"><p class="gtitle">Sobre</p>
+            <div class="srow"><svg class="i i-20"><use href="#i-info"/></svg><span class="scol slabel trunc">Versão 0.7.0</span></div></div>
+        </div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">Nada mais muda na página: a linha de push é um controle entre as linhas de Preferências. <code>Bell</code> 20 <code>text-text-secondary</code>, o rótulo "Notificações" (a chave existente) e o nome acessível do interruptor "Notificações neste aparelho". Desligar → cancela a inscrição, apaga o registro e mostra "Notificações desativadas neste aparelho.".</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Os seis estados + ocupado · a linha inteira de 390px</span>
+      <div class="zgrid" style="grid-template-columns:repeat(2,390px)">
+        <div class="zcell"><span class="label-tag">1 · verificando (renderização do servidor)</span><div class="rowcard"><div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block"></span></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Notificações neste aparelho" disabled><i></i></button></div></div>
+          <p class="caption">Antes de montar: desligado e desabilitado, com a linha de estado vazia reservando <code>min-h-[18px]</code> — a linha não pula quando o estado real chega.</p></div>
+        <div class="zcell"><span class="label-tag">2 · sem suporte (inclui iOS abaixo de 16.4)</span><div class="rowcard"><div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Este navegador não recebe notificações.</span></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Notificações neste aparelho" disabled><i></i></button></div></div>
+          <p class="caption">Sem <code>PushManager</code>/<code>Notification</code>: desligado e desabilitado.</p></div>
+        <div class="zcell"><span class="label-tag">3 · iPhone / iPad fora da Tela de Início</span><div class="rowcard"><div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Instale o app na Tela de Início para ativar.</span></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Notificações neste aparelho"><i></i></button></div></div>
+          <p class="caption">Desligado mas <strong>habilitado</strong>: o toque abre o <code>InstallHint</code> push (Superfície 5) e o interruptor continua desligado. Vale para qualquer navegador do iOS, porque o push exige a instalação na Tela de Início em todos.</p></div>
+        <div class="zcell"><span class="label-tag">4 · desligado</span><div class="rowcard"><div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Receba avisos de novidades e respostas neste aparelho.</span></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Notificações neste aparelho"><i></i></button></div></div>
+          <p class="caption">Desligado → ligado roda o fluxo do cartão (UI-D-255), com o aviso do sistema como primeira chamada do toque. Também é o estado de "ressincronizar": permissão concedida mas sem inscrição guardada (depois de sair da conta) — ligar reinscreve sem aviso.</p></div>
+        <div class="zcell"><span class="label-tag">5 · ligado</span><div class="rowcard"><div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Ativadas neste aparelho.</span></span><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Notificações neste aparelho"><i></i></button></div></div>
+          <p class="caption">O trilho da marca (item 6 da lista de reservas) — o único preenchimento da marca em Configurações.</p></div>
+        <div class="zcell"><span class="label-tag">6 · bloqueado nos ajustes</span><div class="rowcard"><div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Bloqueadas nos ajustes do aparelho. Libere as notificações de Rede Demo nos ajustes do navegador ou do aparelho e volte aqui.</span></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Notificações neste aparelho" disabled><i></i></button></div></div>
+          <p class="caption"><code>Notification.permission === 'denied'</code>: desligado e desabilitado. O app não pode pedir de novo, então a linha diz o caminho. O interruptor fica centrado na vertical e <code>shrink-0</code> enquanto o texto quebra.</p></div>
+        <div class="zcell"><span class="label-tag">ocupado · inscrevendo ou cancelando</span><div class="rowcard"><div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Receba avisos de novidades e respostas neste aparelho.</span></span><button class="switch" type="button" role="switch" aria-checked="true" aria-busy="true" aria-label="Notificações neste aparelho"><i></i></button></div></div>
+          <p class="caption"><code>Switch busy</code> (a primitiva entregue) enquanto a inscrição roda. Erro → o interruptor volta e o toast de erro aparece.</p></div>
+      </div>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">320px · bloqueado · nome de tenant de 30 caracteres</span>
+      <div class="phone narrow short">
+        <div class="statusbar"></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Configurações</h1></div>
+          <div class="gsec"><p class="gtitle">Preferências</p>
+            <div class="srow"><svg class="i i-20"><use href="#i-moon"/></svg><span class="scol slabel trunc">Tema escuro</span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro"><i></i></button></div>
+            <div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Bloqueadas nos ajustes do aparelho. Libere as notificações de Associação de Moradores do Sul nos ajustes do navegador ou do aparelho e volte aqui.</span></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Notificações neste aparelho" disabled><i></i></button></div></div>
+        </div>
+        <div class="toast-slot" style="bottom:24px"><div class="toast" role="status"><span class="dot" style="background:var(--color-success)"></span>Notificações desativadas neste aparelho.</div></div>
+      </div>
+      <p class="caption w320">Backstop E06: em 320px, com "Associação de Moradores do Sul" (30 caracteres), o texto quebra em várias linhas e o trilho de 44×24 continua na linha, sem ser empurrado para fora. Embaixo, o toast de desligar (de outro momento, empilhado aqui para a revisão).</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 5 — A VARIANTE PUSH DO INSTALLHINT
+     ===================================================================================== -->
+<section id="s5" class="screen">
+  <header><h2>Superfície 5 — a variante push do <code>InstallHint</code> (o portão do iOS)</h2><code>InstallHint variant="push" · BottomSheet · [extended] · UI-D-257, D-234, PWA-02</code>
+    <p>No iPhone e no iPad, o push só chega com o app instalado na Tela de Início. Tocar em "Ativar notificações" (o cartão) ou no interruptor (Configurações) fora da Tela de Início abre a folha de instalação da Fase 2 com o <strong>texto do push</strong>, que diz <em>por que</em> instalar importa aqui. A geometria é a da folha entregue: o disco de 56px <code>bg-brand/10 text-brand</code> com <code>Share</code> 28, o título 16/700 e o corpo 14/400 com o <code>Share</code> 16 em linha. Diferente da variante de instalação: <strong>um só</strong> botão cheio "Entendi", <strong>sem "Agora não"</strong>, e nenhuma dispensa de 14 dias gravada — a folha responde a um toque do membro, não é um lembrete. Ela é montada só pelo fluxo do push, nunca de forma global. A detecção cobre o iPadOS (que se anuncia como Mac com toque).</p>
+  </header>
+  <div class="frames">
+    <div class="framewrap">
+      <span class="label-tag">iPhone no Safari · a folha sobre Configurações · 390px</span>
+      <div class="phone">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Configurações</h1></div>
+          <div class="gsec"><p class="gtitle">Preferências</p>
+            <div class="srow"><svg class="i i-20"><use href="#i-moon"/></svg><span class="scol slabel trunc">Tema escuro</span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Tema escuro"><i></i></button></div>
+            <div class="srow"><svg class="i i-20"><use href="#i-bell"/></svg><span class="scol"><span class="slabel" style="display:block">Notificações</span><span class="ssub" style="display:block">Instale o app na Tela de Início para ativar.</span></span><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Notificações neste aparelho"><i></i></button></div></div>
+        </div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-labelledby="ih-1">
+          <div class="handle"><i></i></div>
+          <div class="sbody">
+            <div class="hint-col">
+              <span class="bdisc big"><svg class="i i-28"><use href="#i-share"/></svg></span>
+              <h2 id="ih-1">Instale o app para receber notificações</h2>
+              <p>No iPhone e no iPad, as notificações só chegam com o app na Tela de Início. No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”. Então abra o app pela Tela de Início e ative as notificações.<svg class="i i-16"><use href="#i-share"/></svg></p>
+              <div class="acts"><button class="btn brand full" type="button">Entendi</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">"Entendi" e Esc fecham a folha; o interruptor continua desligado e a linha continua dizendo o que fazer. Instalado a partir do iOS 16.4, o mesmo toque mostra o aviso do sistema (backstop E07: confere num iPhone e num iPad reais).</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">320px · a folha rola se precisar</span>
+      <div class="phone narrow short">
+        <div class="statusbar"></div>
+        <div class="body"><div class="page-header"><a class="back" href="#s9" aria-label="Voltar"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Notificações</h1></div></div>
+        <div class="scrim"></div>
+        <div class="bsheet" role="dialog" aria-labelledby="ih-2">
+          <div class="handle"><i></i></div>
+          <div class="sbody">
+            <div class="hint-col">
+              <span class="bdisc big"><svg class="i i-28"><use href="#i-share"/></svg></span>
+              <h2 id="ih-2">Instale o app para receber notificações</h2>
+              <p>No iPhone e no iPad, as notificações só chegam com o app na Tela de Início. No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”. Então abra o app pela Tela de Início e ative as notificações.<svg class="i i-16"><use href="#i-share"/></svg></p>
+              <div class="acts"><button class="btn brand full" type="button">Entendi</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption w320">Aberta a partir do cartão de <code>/notificacoes</code>. O corpo é texto fixo do catálogo, dentro da coluna <code>max-w-sm</code> da folha.</p>
+    </div>
+
+    <div class="framewrap" style="max-width:420px">
+      <span class="label-tag">Para comparar · a variante de instalação que já existe</span>
+      <div class="card" style="width:390px;border-radius:16px 16px 0 0">
+        <div class="handle" style="display:flex;justify-content:center;padding:12px 0 8px"><i style="width:48px;height:4px;border-radius:999px;background:var(--theme-handle)"></i></div>
+        <div class="sbody" style="padding:16px">
+          <div class="hint-col">
+            <span class="bdisc big"><svg class="i i-28"><use href="#i-share"/></svg></span>
+            <h2>Adicione à Tela de Início</h2>
+            <p>No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início” para receber notificações.<svg class="i i-16"><use href="#i-share"/></svg></p>
+            <div class="acts"><button class="btn brand full" type="button">Entendi</button><button class="btn ghost full" type="button">Agora não</button></div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">A variante <code>install</code> [shipped], sem mudança: dois botões e a dispensa de 14 dias. A variante <code>push</code> tira o "Agora não" porque responde a um pedido explícito.</p>
+    </div>
+  </div>
+  <p class="finding"><strong>Achado do próprio desenho:</strong> na folha entregue, o <code>Share</code> 16 em linha fica <strong>no fim</strong> do corpo (<code>ml-1</code> depois do texto). O corpo de instalação termina perto de "Compartilhar", mas o corpo push termina em "ative as notificações.", e o ícone fica longe da palavra que ele ilustra. Opção barata: interpolar o ícone logo depois de "Compartilhar" (<code>t.rich</code> com uma marcação no catálogo). O desenho mostra o comportamento atual.</p>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 6 — A CONVERSA DO MEMBRO: CABEÇALHO, SAUDAÇÃO VAZIA, CONVERSA CHEIA
+     ===================================================================================== -->
+<section id="s6" class="screen">
+  <header><h2>Superfície 6 — a conversa do membro com a equipe: o cabeçalho e a saudação vazia</h2><code>/suporte (membro) · ThreadHeader { logo } · TenantLogo size="thread" · MessageList · ThreadPane · [designed] · UI-D-258, UI-D-259, UI-D-261, D-220, D-222</code>
+    <p>O balão da TopBar abre <strong>direto</strong> a única conversa do membro com a equipe — sem central de ajuda, sem protocolo, sem assunto (D-220). O cabeçalho põe a identidade da organização onde um mensageiro põe o contato (D-222): voltar 44×44, o <strong>logotipo do tenant no tamanho novo <code>thread</code></strong> (caixa <code>h-8 max-w-[64px]</code>, a imagem contida e nunca cortada, para um logotipo largo não roubar a largura de "Equipe {tenant}" em 320px) e o título "Equipe Rede Demo". Sem subtítulo, sem status, sem avatar de atendente — o membro nunca vê avatares da equipe. Sem logotipo, o título fica sozinho (sem marcador no lugar). A conversa é um painel de altura fixa entre a TopBar e a BottomNav: só as mensagens rolam, a página não, e não há puxar-para-atualizar. <strong>Abrir não cria nada</strong>: a primeira mensagem enviada cria a conversa e substitui a saudação.</p>
+  </header>
+  <div class="frames">
+
+    <div class="framewrap">
+      <span class="label-tag">Membro · vazia · logotipo largo · 390px</span>
+      <div class="phone">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações, 3 novas"><svg class="i"><use href="#i-bell"/></svg><span class="badge" aria-hidden="true">3</span></a><a class="slot" href="#s6" aria-current="page" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><span class="tl-thread"><svg class="logo-sim" viewBox="0 0 128 32" role="img" aria-label="Rede Demo"><use href="#logo-wide"/></svg></span><h1>Equipe Rede Demo</h1></div>
+          <div class="scroller" style="display:flex;flex-direction:column;justify-content:center">
+            <div class="greet"><span class="tl-home"><svg class="logo-sim" viewBox="0 0 128 32" role="img" aria-label="Rede Demo" style="width:256px"><use href="#logo-wide"/></svg></span><h2>Fale com a equipe de Rede Demo</h2><p>Mande sua dúvida ou pedido por aqui. Avisamos quando a equipe responder.</p></div>
+          </div>
+          <div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+        </div>
+        <div class="navspace"></div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">Um logotipo largo (4:1) cabe na caixa de 64px e fica pequeno de propósito: o nome da organização já está no título. A saudação fica centrada no painel (<code>px-8 py-12 gap-3</code>): o logotipo no tamanho <code>home</code> (64px de altura), "Fale com a equipe de Rede Demo" 16/700 e o corpo 14/400. O compositor está logo abaixo e habilitado — é o único controle da tela. O slot do suporte está ativo e sem ponto (a conversa aberta marca como lida).</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Membro · vazia · tenant sem logotipo · 320px</span>
+      <div class="phone narrow">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tname" style="display:inline">Associação de Moradores…</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-current="page" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Equipe Associação de Moradores do Sul</h1></div>
+          <div class="scroller" style="display:flex;flex-direction:column;justify-content:center">
+            <div class="greet"><h2>Fale com a equipe de Associação de Moradores do Sul</h2><p>Mande sua dúvida ou pedido por aqui. Avisamos quando a equipe responder.</p></div>
+          </div>
+          <div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+        </div>
+        <div class="navspace"></div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption w320">Sem logotipo: o cabeçalho é só o título, que <code>truncate</code> numa linha (o nome inteiro já está na saudação); a saudação omite a imagem. Aqui com um nome de 30 caracteres em 320px. (Na TopBar, sem logotipo, o nome aparece como texto — o comportamento entregue de D-26.)</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Membro · conversa cheia · dias, sequências, horários, "Enviando…" · 390px</span>
+      <div class="phone tall" style="height:1200px">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-current="page" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><span class="tl-thread"><svg class="logo-sim" viewBox="0 0 128 32" role="img" aria-label="Rede Demo"><use href="#logo-wide"/></svg></span><h1>Equipe Rede Demo</h1></div>
+          <div class="scroller">
+            <div class="older"><button class="btn ghost sm" type="button">Carregar mensagens anteriores</button></div>
+            <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+              <li class="dsep">sáb., 12 de out.</li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Carla<span class="sr-only">, da equipe</span></span><p class="bub">Oi, Ana! Como posso ajudar?</p><span class="btime">10:02</span></li>
+              <li class="m own"><p class="bub">Quero trocar o e-mail da minha conta.</p></li>
+              <li class="m own"><p class="bub">O antigo era o da escola e não uso mais.</p><span class="btime">10:05</span></li>
+              <li class="dsep">Ontem</li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Rafael<span class="sr-only">, da equipe</span></span><p class="bub">Pronto, Ana! Mandamos um e-mail de confirmação para o endereço novo. O passo a passo está aqui: <a href="#s6">https://ajuda.exemplo.com.br/trocar-email</a></p><span class="btime">16:40</span></li>
+              <li class="dsep">Hoje</li>
+              <li class="m own"><p class="bub">Achei! Confirmei por este link:
+<a href="#s6">https://www.exemplo.com.br/confirmar</a></p><span class="btime">14:02</span></li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Carla<span class="sr-only">, da equipe</span></span><p class="bub">Perfeito.</p></li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Carla<span class="sr-only">, da equipe</span></span><p class="bub">Mais alguma coisa?</p><span class="btime">14:05</span></li>
+              <li class="m own pending"><p class="bub">Não, obrigada!</p><span class="btime">Enviando…</span></li>
+            </ol>
+          </div>
+          <div class="composer"><div class="cform"><div class="cfield ph focused" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+        </div>
+        <div class="navspace"></div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">As bolhas [proto]: as do membro à direita na cor da marca (nt-2), as da equipe à esquerda em <code>bg-bg-secondary</code> com borda. <strong>Toda</strong> bolha da equipe leva o rótulo acima — <code>ShieldCheck</code> 12 + o primeiro nome, neutro (delta a). O horário 12/400 terciário vai só sob a <strong>última bolha de uma sequência</strong> (mesmo autor, mesmo dia, até 5 min entre elas), em <code>HH:mm</code> no fuso do tenant. Separadores "Hoje" / "Ontem" / a data. A bolha otimista mostra "Enviando…" no lugar do horário. Links: <code>text-brand</code> na bolha da equipe, <code>text-on-brand underline</code> na bolha do membro. "Carregar mensagens anteriores" (<code>ghost sm</code>) no topo enquanto houver histórico; carrega 50 e mantém a mensagem que estava no topo no lugar.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Lendo mais acima · chega mensagem · a pílula</span>
+      <div class="phone">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s6" aria-current="page" aria-label="Suporte"><svg class="i"><use href="#i-msg"/></svg></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-f"></span></span></a></span></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><span class="tl-thread"><svg class="logo-sim" viewBox="0 0 128 32" role="img" aria-label="Rede Demo"><use href="#logo-wide"/></svg></span><h1>Equipe Rede Demo</h1></div>
+          <div class="scroller">
+            <div class="older" style="flex-direction:column;gap:8px"><p class="t14 dgr">Não foi possível carregar as mensagens anteriores.</p><button class="btn outline sm" type="button">Tentar novamente</button></div>
+            <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+              <li class="dsep">sáb., 12 de out.</li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Carla<span class="sr-only">, da equipe</span></span><p class="bub">Oi, Ana! Como posso ajudar?</p><span class="btime">10:02</span></li>
+              <li class="m own"><p class="bub">Quero trocar o e-mail da minha conta.</p></li>
+              <li class="m own"><p class="bub">O antigo era o da escola e não uso mais.</p><span class="btime">10:05</span></li>
+              <li class="dsep">Ontem</li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Rafael<span class="sr-only">, da equipe</span></span><p class="bub">Pronto, Ana! Mandamos um e-mail de confirmação para o endereço novo.</p><span class="btime">16:40</span></li>
+            </ol>
+          </div>
+          <div class="composer"><button class="btn secondary sm newpill" type="button"><svg class="i i-16"><use href="#i-arrow-down"/></svg>2 novas mensagens</button><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+        </div>
+        <div class="navspace"></div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">Quem está a mais de 80px do fim não é puxado para baixo: a pílula <code>secondary sm</code> com <code>ArrowDown</code> 16 e "{n} novas mensagens" (ICU) aparece acima do compositor; tocar rola até o fim e some com ela (a regra dos mensageiros). No topo, a falha ao pedir o histórico: a linha em <code>text-danger</code> + "Tentar novamente". Sem indicador de "Conectando…": a conversa sempre renderiza pela API.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Mensagem de 2.000 caracteres com quebras · URL de 300 caracteres sem espaço</span>
+      <div class="phone auto">
+        <div class="statusbar"></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><span class="tl-thread"><svg class="logo-sim" viewBox="0 0 128 32" role="img" aria-label="Rede Demo"><use href="#logo-wide"/></svg></span><h1>Equipe Rede Demo</h1></div>
+          <div class="scroller" style="overflow:visible">
+            <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+              <li class="dsep">Hoje</li>
+              <li class="m own"><p class="bub">Oi, equipe! Seguem os dados que vocês pediram para atualizar o meu cadastro e o da minha família.
+
+Número de associada: 203048
+1. Nome completo: Ana Lúcia Ferreira de Souza (o sobrenome Souza entrou depois do casamento).
+2. E-mail novo: o pessoal, que já confirmei pelo link que vocês mandaram ontem.
+3. Telefone: continua o mesmo, com WhatsApp.
+4. Endereço: mudamos em setembro para a Rua das Acácias, 120, apartamento 302, no Centro.
+5. Dependentes: minha filha Beatriz (14 anos) e meu filho Pedro (9 anos).
+
+Sobre o encontro anual de sábado:
+- Vamos os quatro, contando com o meu marido, que ainda não é associado.
+- O Pedro usa cadeira de rodas, então preciso saber se o auditório tem rampa ou elevador.
+- A Beatriz quer participar da oficina de fotografia; ainda tem vaga?
+- Chegamos por volta das 18:30, porque saio do trabalho às 17:30.
+- Posso levar um bolo para o café? Minha mãe faz um de laranja que todo mundo adora.
+
+Sobre a anuidade:
+- Paguei a de 2030 em março, mas o aplicativo ainda mostra como pendente.
+- Guardei o comprovante e posso mandar por e-mail se precisarem.
+- Se tiver alguma diferença de valor por causa dos dependentes, me avisem que eu acerto.
+
+Sobre o grupo de voluntários:
+- Tenho as manhãs de sábado livres e gostaria de ajudar na organização dos próximos eventos.
+- Já ajudei no mutirão do parque em setembro, com a equipe da Carla.
+
+Sobre o aplicativo:
+- As notificações dos eventos estão chegando certinho no meu celular, obrigada!
+- Só não achei onde mudo a minha foto de perfil. Fica em Configurações?
+- O meu marido tentou criar uma conta pelo link, mas disse que o e-mail dele já estava em uso.
+
+- Também posso ajudar com fotos, porque a Beatriz me ensinou a usar melhor a câmera do celular.
+- Se precisarem de alguém para a recepção, tenho experiência com credenciamento.
+PS: o Pedro pediu para agradecer pela festa das crianças do mês passado. Ele adorou!
+
+Obrigada pela atenção e pela paciência com a mensagem longa!
+Um abraço,
+Ana Lúcia Ferreira de Souza</p><span class="btime">13:58</span></li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Carla<span class="sr-only">, da equipe</span></span><p class="bub">Recebemos tudo, obrigada! Para acompanhar o cadastro, use este link: <a href="#s6">https://www.exemplo.com.br/associados/cadastro/atualizacao/documentos-comprovante-anuidade-2030-dependentes-beatriz-pedro-endereco-rua-das-acacias-120-apartamento-302-centro-documentos-comprovante-anuidade-2030-dependentes-beatriz-pedro-endereco-rua-das-acacias-120-apartamento-302-centro-documentos-</a></p><span class="btime">14:01</span></li>
+              <li class="m own"><p class="bub">E este é o link que me mandaram antes: <a href="#s6">https://www.exemplo.com.br/associados/cadastro/atualizacao/documentos-comprovante-anuidade-2030-dependentes-beatriz-pedro-endereco-rua-das-acacias-120-apartamento-302-centro-documentos-comprovante-anuidade-2030-dependentes-beatriz-pedro-endereco-rua-das-acacias-120-apartamento-302-centro-documentos-</a></p><span class="btime">14:02</span></li>
+            </ol>
+          </div>
+          <div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+        </div>
+      </div>
+      <p class="caption">Backstops E09: a mensagem de 2.000 caracteres aparece inteira, com as quebras de linha preservadas (<code>whitespace-pre-wrap</code>), e a URL de 300 caracteres sem espaço quebra <strong>dentro</strong> da bolha (<code>[overflow-wrap:anywhere]</code>), nas duas cores de bolha — o painel nunca rola para o lado. Moldura sem altura fixa para mostrar a bolha inteira; no produto, o painel rola e fica no fim depois que a mensagem chega.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     DELTA (a) — O RÓTULO DO REMETENTE SOBE PARA FORA DA BOLHA E FICA NEUTRO
+     ===================================================================================== -->
+<section id="da" class="screen">
+  <header><h2>Delta (a) — o rótulo do remetente sai de dentro da bolha, sobe e fica neutro</h2><code>MessageBubble · [proto] + UI-D-259, D-222</code>
+    <p>No protótipo, o nome do atendente ficava <strong>dentro</strong> da bolha da equipe, em texto pequeno na cor de destaque. A Fase 7 muda isso por dois motivos. <strong>(1)</strong> Nenhum texto pequeno pode ficar sobre uma cor de tenant: na visão da equipe, as bolhas da equipe são as da marca, e um rótulo de 12px dentro delas dependeria do contraste de cada tenant. <strong>(2)</strong> A mesma peça serve às duas visões. Então o rótulo sai da bolha, fica <strong>acima</strong> dela, em 12/700 <code>text-text-secondary</code>, sempre no chão neutro da página. Na visão do membro: <strong>toda</strong> bolha da equipe leva <code>ShieldCheck</code> 12 + o primeiro nome do atendente (D-222: "cada bolha da equipe"), e as do membro não levam nada. Na visão da equipe: toda bolha da equipe leva o primeiro nome de quem escreveu, ou "Você", e as do membro não levam nada (o cabeçalho já diz quem é).</p>
+  </header>
+  <div class="frames">
+    <div class="framewrap" style="width:358px">
+      <span class="label-tag">Antes · o protótipo · o nome dentro, na cor da marca</span>
+      <div style="display:flex;flex-direction:column;align-items:flex-start;padding:16px;background:var(--theme-bg);border:1px solid var(--theme-border);border-radius:12px">
+        <div class="proto-bub"><p class="plbl"><svg class="i i-12"><use href="#i-shield"/></svg>Carla</p><p>Oi, Ana! Como posso ajudar?</p></div>
+      </div>
+      <p class="caption">[proto], para comparação (o nome ali era de 11px; aqui já normalizado para 12px).</p>
+    </div>
+    <div class="framewrap" style="width:358px">
+      <span class="label-tag">Depois · Fase 7 · o nome acima, neutro</span>
+      <div style="padding:16px;background:var(--theme-bg);border:1px solid var(--theme-border);border-radius:12px">
+        <ol class="msgs" style="padding:0"><li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Carla<span class="sr-only">, da equipe</span></span><p class="bub">Oi, Ana! Como posso ajudar?</p><span class="btime">10:02</span></li></ol>
+      </div>
+      <p class="caption"><code>px-1 mb-1 gap-1</code>. Para leitores de tela o nome ganha o sufixo ", da equipe".</p>
+    </div>
+  </div>
+
+  <h3 class="sub">A mesma conversa nas duas visões</h3>
+  <div class="frames">
+    <div class="framewrap">
+      <span class="label-tag">Visão do membro (Ana) · /suporte</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><span class="tl-thread"><svg class="logo-sim" viewBox="0 0 128 32" role="img" aria-label="Rede Demo"><use href="#logo-wide"/></svg></span><h1>Equipe Rede Demo</h1></div>
+          <div class="scroller">
+            <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+              <li class="dsep">Hoje</li>
+              <li class="m own"><p class="bub">O link do evento de sábado não abre.</p><span class="btime">13:47</span></li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Carla<span class="sr-only">, da equipe</span></span><p class="bub">Oi, Ana! Vou verificar.</p><span class="btime">13:50</span></li>
+              <li class="m other"><span class="slbl"><svg class="i i-12"><use href="#i-shield"/></svg>Rafael<span class="sr-only">, da equipe</span></span><p class="bub">Corrigido! Pode tentar de novo pelo evento.</p><span class="btime">14:01</span></li>
+              <li class="m own"><p class="bub">Funcionou, obrigada!</p><span class="btime">14:02</span></li>
+            </ol>
+          </div>
+          <div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+        </div>
+      </div>
+      <p class="caption">Carla e Rafael responderam — cada bolha da equipe diz quem. O membro nunca vê avatares da equipe.</p>
+    </div>
+    <div class="framewrap">
+      <span class="label-tag">Visão da equipe (Rafael) · /suporte/[conversationId]</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s1" aria-label="Voltar para as conversas"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><a class="plink" href="#st" aria-label="Ver o perfil de Ana Lúcia Ferreira"><span class="av sm"><span class="photo ph-f"></span></span><h1>Ana Lúcia Ferreira</h1></a></div>
+          <div class="scroller">
+            <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+              <li class="dsep">Hoje</li>
+              <li class="m other"><p class="bub">O link do evento de sábado não abre.</p><span class="btime">13:47</span></li>
+              <li class="m own"><span class="slbl">Carla</span><p class="bub">Oi, Ana! Vou verificar.</p><span class="btime">13:50</span></li>
+              <li class="m own"><span class="slbl">Você</span><p class="bub">Corrigido! Pode tentar de novo pelo evento.</p><span class="btime">14:01</span></li>
+              <li class="m other"><p class="bub">Funcionou, obrigada!</p><span class="btime">14:02</span></li>
+            </ol>
+          </div>
+          <div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+        </div>
+      </div>
+      <p class="caption">Para a equipe, o lado "próprio" é <strong>toda</strong> mensagem da equipe, de qualquer atendente, na cor da marca à direita; o membro fica à esquerda sem rótulo. Os rótulos da equipe ficam acima e fora da bolha da marca — por isso o delta.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     DELTA (b) — O COMPOSITOR SEM ANEXO, ATÉ CINCO LINHAS
+     ===================================================================================== -->
+<section id="db" class="screen">
+  <header><h2>Delta (b) — o compositor: sem anexo, campo de 16px, até cinco linhas, contador a partir de 1.800</h2><code>ChatComposer · [proto] − anexos · UI-D-260, D-225, V2-CHAT-02</code>
+    <p>O compositor do protótipo <strong>menos a V2</strong>: saem o botão de imagem, o seletor de arquivo, a faixa de anexos e a dica "anexe prints" (anexos são V2-CHAT-02), e sai o botão de encerrar a conversa (não existe status, D-221). O campo cresce de uma até <strong>cinco linhas</strong> e depois rola por dentro — o máximo que um celular consegue guardar acima do teclado sem esconder o contexto. O texto do campo sobe de 14px para <strong>16px</strong> (abaixo disso o iOS dá zoom ao focar). O enviar é um círculo de 44×44 da marca com <code>Send</code> 20, desabilitado com o texto vazio ou durante um envio. Teclas: com mouse, Enter envia e Shift+Enter quebra a linha; no toque, Enter quebra a linha e só o botão envia. Texto puro, de 1 a 2.000 caracteres depois de tirar os espaços.</p>
+  </header>
+  <div class="zgrid" style="grid-template-columns:repeat(auto-fill,390px)">
+    <div class="zcell"><span class="label-tag">Antes · o protótipo (o que sai, riscado)</span>
+      <div class="rowcard" style="overflow:hidden"><div class="composer"><div class="cform"><span class="proto-att strike"><svg class="i i-20"><use href="#i-image-plus"/></svg></span><div class="cfield ph" style="font-size:14px">Escreva uma resposta...</div><button class="sendb" type="button" aria-label="Enviar" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div><p class="t12 ter strike" style="display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:0 4px"><svg class="i i-12"><use href="#i-paperclip"/></svg>Anexe prints para acelerar o atendimento</p></div></div>
+      <p class="caption">[proto], com o botão de anexo e a dica riscados. O campo de 14px vira 16px.</p></div>
+    <div class="zcell"><span class="label-tag">Vazio · enviar desabilitado</span>
+      <div class="rowcard" style="overflow:hidden"><div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div></div>
+      <p class="caption">Campo vazio ou só com espaços: enviar desabilitado (opacidade 50). Nenhum erro antes da primeira tentativa.</p></div>
+    <div class="zcell"><span class="label-tag">Uma linha · focado</span>
+      <div class="rowcard" style="overflow:hidden"><div class="composer"><div class="cform"><div class="cfield focused" role="textbox" aria-label="Mensagem">Quero trocar o e-mail da minha conta.</div><button class="sendb" type="button" aria-label="Enviar mensagem"><svg class="i i-20"><use href="#i-send"/></svg></button></div></div></div>
+      <p class="caption"><code>rows={1}</code>, <code>rounded-2xl bg-bg-input px-4 py-2</code>. O enviar vem para 100% assim que há texto.</p></div>
+    <div class="zcell"><span class="label-tag">Cresceu até cinco linhas</span>
+      <div class="rowcard" style="overflow:hidden"><div class="composer"><div class="cform"><div class="cfield focused max5" role="textbox" aria-label="Mensagem">Oi! Tenho três dúvidas:
+1. O evento de sábado tem estacionamento?
+2. Posso levar convidados?
+3. Onde retiro o crachá?
+Obrigada!</div><button class="sendb" type="button" aria-label="Enviar mensagem"><svg class="i i-20"><use href="#i-send"/></svg></button></div></div></div>
+      <p class="caption">Cinco linhas de 24px. O enviar fica alinhado com a <strong>última</strong> linha (<code>items-end</code>), perto do polegar.</p></div>
+    <div class="zcell"><span class="label-tag">Passou de cinco linhas · rola por dentro</span>
+      <div class="rowcard" style="overflow:hidden"><div class="composer"><div class="cform"><div class="cfield focused max5" role="textbox" aria-label="Mensagem" id="scrolled-field">Oi! Tenho algumas dúvidas:
+1. O evento de sábado tem estacionamento?
+2. Posso levar convidados?
+3. Onde retiro o crachá?
+4. Tem recreação para as crianças?
+5. Vai ter transmissão para quem não puder ir?
+Obrigada!</div><button class="sendb" type="button" aria-label="Enviar mensagem"><svg class="i i-20"><use href="#i-send"/></svg></button></div></div></div>
+      <p class="caption">A partir da sexta linha o campo para de crescer e rola por dentro, mostrando o fim do texto (onde está o cursor).</p></div>
+    <div class="zcell"><span class="label-tag">Contador a partir de 1.800</span>
+      <div class="rowcard" style="overflow:hidden"><div class="composer"><p class="ccount">1.800/2.000</p><div class="cform"><div class="cfield focused max5" role="textbox" aria-label="Mensagem">…e por fim, sobre o crachá: minha filha também é associada, mas o cadastro dela ainda está no nome antigo. Dá para retirar os dois crachás juntos no sábado, ou ela precisa ir pessoalmente?</div><button class="sendb" type="button" aria-label="Enviar mensagem"><svg class="i i-20"><use href="#i-send"/></svg></button></div></div></div>
+      <p class="caption">Uma linha 12/400 terciária acima do campo, à direita: "1.800/2.000". Antes de 1.800 não há contador.</p></div>
+    <div class="zcell"><span class="label-tag">No limite · 2.000</span>
+      <div class="rowcard" style="overflow:hidden"><div class="composer"><p class="ccount cap">2.000/2.000</p><div class="cform"><div class="cfield focused max5" role="textbox" aria-label="Mensagem">…então fico no aguardo. Se precisar de algum documento, me avisem por aqui que eu mando. Obrigada pela paciência com a mensagem longa!</div><button class="sendb" type="button" aria-label="Enviar mensagem"><svg class="i i-20"><use href="#i-send"/></svg></button></div></div></div>
+      <p class="caption">Em 2.000 o contador fica <code>text-danger</code> e o campo não aceita mais (<code>maxLength</code>). Enviar continua possível.</p></div>
+    <div class="zcell"><span class="label-tag">Falha no envio · rascunho de volta ao campo</span>
+      <div class="rowcard" style="overflow:hidden"><div class="composer"><p class="cerr" role="alert">Não foi possível enviar. Sua mensagem continua no campo. Tente de novo.</p><div class="cform"><div class="cfield focused" role="textbox" aria-label="Mensagem">Quero trocar o e-mail da minha conta.</div><button class="sendb" type="button" aria-label="Enviar mensagem"><svg class="i i-20"><use href="#i-send"/></svg></button></div></div></div>
+      <p class="caption">A bolha otimista some, o rascunho volta para o campo e a linha 14/400 em <code>text-danger</code> aparece acima dele (a regra do <code>CommentInput</code> entregue). A próxima tecla apaga a linha. Nenhuma mensagem se perde numa oscilação de rede.</p></div>
+  </div>
+  <p class="finding"><strong>Achado do próprio desenho:</strong> o UI-SPEC fixa o teto do campo em <code>max-h-30</code> (120px = 5 × 24px). Com o <code>box-sizing: border-box</code> do Tailwind, esses 120px incluem o <code>py-2</code> e a borda, e o campo mostra só <strong>~4,3 linhas</strong> antes de rolar. Para cinco linhas cheias o teto precisa contar o conteúdo (≈138px de caixa). O desenho mostra cinco linhas de conteúdo. Opções baratas: aceitar ~4 linhas e manter <code>max-h-30</code>, ou calcular o teto pelo <code>scrollHeight</code> do auto-grow (5 × a altura da linha + o respiro).</p>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 1 — A CAIXA DE ENTRADA DA EQUIPE (CELULAR)
+     ===================================================================================== -->
+<section id="s1" class="screen">
+  <header><h2>Superfície 1 — a caixa de entrada da equipe, no celular</h2><code>/suporte (equipe) · InboxRow · SupportInbox · [designed] · UI-D-262, D-221, D-224, D-225, D-238</code>
+    <p>O mesmo balão da TopBar leva a equipe (quem tem <code>chat.support</code>: <code>support_tenant</code> e <code>admin_tenant</code>, D-223) à <strong>caixa de entrada</strong> em vez de uma conversa (D-224). Uma lista só, ordenada pela última atividade, da mais recente para a mais antiga, paginada e com puxar-para-atualizar. <strong>Sem chips de status e sem filtros</strong> (D-221): cada membro tem uma conversa contínua, para sempre, e nada é atribuído a ninguém — qualquer pessoa da equipe responde, e quando alguém lê a última mensagem do membro, a conversa deixa de aguardar para a equipe toda (D-225). A linha leva os quatro fatos de D-224: avatar e nome, prévia de uma linha, horário e o indicador. O indicador é um <strong>ponto de 8px da marca</strong> (nt-3), não um selo de perigo: "aguardando" é informação, e a contagem já está no slot.</p>
+  </header>
+  <div class="frames">
+
+    <div class="framewrap">
+      <span class="label-tag">Equipe · /suporte · 390px</span>
+      <div class="phone">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s1" aria-current="page" aria-label="Suporte, 2 aguardando resposta"><svg class="i"><use href="#i-msg"/></svg><span class="badge" aria-hidden="true">2</span></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-g"></span></span></a></span></div>
+        <div class="body nav-pad">
+          <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Suporte</h1></div>
+          <ul>
+            <li><a class="irow awaiting" href="#st"><span class="av"><span class="photo ph-f"></span></span><span class="icol"><p class="iname">Ana Lúcia Ferreira<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Oi! O link do evento de sábado não abre no meu celular.</p></span><span class="itrail"><span class="itime">14:02</span><span class="adot" aria-hidden="true"></span></span></a></li>
+            <li><a class="irow awaiting" href="#st"><span class="av"><span class="photo ph-g"></span></span><span class="icol"><p class="iname">Bruno Santos<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Obrigado! Vou tentar de novo à noite.</p></span><span class="itrail"><span class="itime">13:47</span><span class="adot" aria-hidden="true"></span></span></a></li>
+            <li><a class="irow" href="#st"><span class="av"><span class="photo ph-h"></span></span><span class="icol"><p class="iname">Joana Silveira</p><p class="iprev">Carla: Pronto, seu e-mail foi atualizado.</p></span><span class="itrail"><span class="itime">Ontem</span><span class="adot-slot"></span></span></a></li>
+            <li><a class="irow" href="#st"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="icol"><p class="iname">Heitor Pacheco</p><p class="iprev">Quero cancelar minha inscrição no evento.</p></span><span class="itrail"><span class="itime">12/10</span><span class="spill neutral">Bloqueado</span></span></a></li>
+            <li><a class="irow" href="#st"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="icol"><p class="iname removed">Membro removido</p><p class="iprev">Rafael: Qualquer dúvida, estamos por aqui.</p></span><span class="itrail"><span class="itime">07/10</span><span class="adot-slot"></span></span></a></li>
+            <li><a class="irow" href="#st"><span class="av"><span class="photo ph-e"></span></span><span class="icol"><p class="iname">Kátia Lemos</p><p class="iprev">Bom dia! Segue a lista: 1. crachá 2. estacionamento 3. convidados 4. horário</p></span><span class="itrail"><span class="itime">05/10</span><span class="adot-slot"></span></span></a></li>
+          </ul>
+        </div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption"><strong>Aguardando</strong> (a última mensagem é do membro e ninguém da equipe leu, D-238): prévia em <code>text-text</code> + o ponto. Senão, prévia em <code>text-text-secondary</code> e sem ponto. Uma mensagem da equipe aparece com o prefixo "Carla: ". Horário "HH:mm" hoje, "Ontem", ou "dd/MM" — absoluto, sem relógio correndo. <strong>Bloqueado</strong>: a pílula neutra no lugar do ponto. <strong>Membro que saiu</strong>: "Membro removido" 14/400 terciário, avatar neutro. Uma mensagem de várias linhas vira uma linha com as quebras como espaços, e trunca. Para leitores de tela, as linhas que aguardam somam ", aguardando resposta" ao nome.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Vazia · esqueletos · erro ao carregar mais</span>
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div class="phone short">
+          <div class="statusbar"></div>
+          <div class="body">
+            <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Suporte</h1></div>
+            <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-msg"/></svg></div><h3>Nenhuma conversa ainda</h3><p>Quando um membro mandar mensagem, a conversa aparece aqui.</p></div>
+          </div>
+        </div>
+        <div class="phone short">
+          <div class="statusbar"></div>
+          <div class="body">
+            <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Suporte</h1></div>
+            <ul>
+              <li><a class="irow awaiting" href="#st"><span class="av"><span class="photo ph-f"></span></span><span class="icol"><p class="iname">Ana Lúcia Ferreira<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Oi! O link do evento de sábado não abre no meu celular.</p></span><span class="itrail"><span class="itime">14:02</span><span class="adot" aria-hidden="true"></span></span></a></li>
+              <li><a class="irow" href="#st"><span class="av"><span class="photo ph-h"></span></span><span class="icol"><p class="iname">Joana Silveira</p><p class="iprev">Carla: Pronto, seu e-mail foi atualizado.</p></span><span class="itrail"><span class="itime">Ontem</span><span class="adot-slot"></span></span></a></li>
+            </ul>
+            <div aria-hidden="true">
+              <div class="irow"><span class="skel circle" style="width:40px;height:40px"></span><span class="icol" style="display:flex;flex-direction:column;gap:8px"><span class="skel text" style="width:52%"></span><span class="skel text" style="width:80%"></span></span><span class="skel text" style="width:32px;height:12px;flex:none"></span></div>
+              <div class="irow"><span class="skel circle" style="width:40px;height:40px"></span><span class="icol" style="display:flex;flex-direction:column;gap:8px"><span class="skel text" style="width:44%"></span><span class="skel text" style="width:72%"></span></span><span class="skel text" style="width:32px;height:12px;flex:none"></span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px">
+              <p class="t14 dgr">Não foi possível carregar mais conversas.</p>
+              <button class="btn outline" type="button">Tentar novamente</button>
+            </div>
+          </div>
+        </div>
+        <div class="phone narrow short">
+          <div class="statusbar"></div>
+          <div class="body">
+            <div class="page-header"><a class="back" href="#s9" aria-label="Voltar para o início"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1>Suporte</h1></div>
+            <ul>
+              <li><a class="irow awaiting" href="#st"><span class="av"><span class="photo ph-f"></span></span><span class="icol"><p class="iname">Maria Aparecida dos Santos Figueiredo de Albuquerque<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Bom dia! Não consigo entrar no evento online de amanhã</p></span><span class="itrail"><span class="itime">14:02</span><span class="adot" aria-hidden="true"></span></span></a></li>
+              <li><a class="irow" href="#st"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="icol"><p class="iname">Heitor Pacheco Vasconcelos de Almeida</p><p class="iprev">Quero cancelar minha inscrição no evento.</p></span><span class="itrail"><span class="itime">12/10</span><span class="spill neutral">Bloqueado</span></span></a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <p class="caption" style="max-width:1100px">Vazia: o <code>EmptyState</code> com <code>MessageCircle</code>. Carregando mais: esqueletos na geometria de 72px da linha (círculo de 40, duas barras, e a barrinha de 12px à direita do horário). Erro ao carregar mais: a linha em <code>text-danger</code> + "Tentar novamente", com as linhas já carregadas mantidas. Em 320px nome e prévia <code>truncate</code> dentro de <code>min-w-0 flex-1</code>, e a coluna da direita (horário, ponto ou pílula) é <code>shrink-0</code>. Um sinal ao vivo recarrega a página 1 e junta pelo id da conversa: a linha sobe para o topo.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     A CONVERSA NA VISÃO DA EQUIPE: CABEÇALHO COM LINK DO PERFIL, BLOQUEADO, SAIU
+     ===================================================================================== -->
+<section id="st" class="screen">
+  <header><h2>A conversa na visão da equipe — o link do perfil, o membro bloqueado e o membro que saiu</h2><code>/suporte/[conversationId] · ThreadHeader { avatar, profileHref } · UI-D-263, D-224</code>
+    <p>Parte da Superfície 1 e da Superfície 2 (é o painel da direita na divisão). O cabeçalho usa a mesma barra do membro: voltar 44×44 → <code>/suporte</code> "Voltar para as conversas", e <strong>um só link</strong> com o avatar de 32px e o nome do membro, "Ver o perfil de {name}", que abre o perfil de membro que já existe. <strong>Sem painel lateral</strong> (D-224). Membro bloqueado ou que saiu: a conversa fica só para leitura, e um aviso ocupa o lugar do compositor — o histórico continua disponível, e a equipe não recebe uma resposta que a API recusaria.</p>
+  </header>
+  <div class="frames">
+    <div class="framewrap">
+      <span class="label-tag">Equipe · conversa · 390px</span>
+      <div class="phone">
+        <div class="statusbar"></div>
+        <div class="topbar"><span class="tl"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 32 32"><circle class="mk" cx="16" cy="16" r="14"/></svg></span><span class="tname">Rede Demo</span></span><span class="tr"><a class="slot" href="#s7" aria-label="Notificações"><svg class="i"><use href="#i-bell"/></svg></a><a class="slot" href="#s1" aria-current="page" aria-label="Suporte, 1 aguardando resposta"><svg class="i"><use href="#i-msg"/></svg><span class="badge" aria-hidden="true">1</span></a><a class="me" href="#s9" aria-label="Meu perfil"><span class="av sm"><span class="photo ph-g"></span></span></a></span></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s1" aria-label="Voltar para as conversas"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><a class="plink" href="#st" aria-label="Ver o perfil de Ana Lúcia Ferreira"><span class="av sm"><span class="photo ph-f"></span></span><h1>Ana Lúcia Ferreira</h1></a></div>
+          <div class="scroller">
+            <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+              <li class="dsep">sáb., 12 de out.</li>
+              <li class="m other"><p class="bub">Quero trocar o e-mail da minha conta.</p><span class="btime">10:01</span></li>
+              <li class="m own"><span class="slbl">Carla</span><p class="bub">Oi, Ana! Como posso ajudar?</p><span class="btime">10:02</span></li>
+              <li class="dsep">Hoje</li>
+              <li class="m other"><p class="bub">Oi! O link do evento de sábado não abre no meu celular.</p><span class="btime">14:02</span></li>
+              <li class="m own"><span class="slbl">Você</span><p class="bub">Oi, Ana! Qual aparelho você usa? Vou testar aqui.</p><span class="btime">14:06</span></li>
+            </ol>
+          </div>
+          <div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+        </div>
+        <div class="navspace"></div>
+        <div class="bottomnav">
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-home"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-users"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-reels"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-cal"/></svg></span></a>
+          <a href="#s9"><span class="tab"><svg class="i"><use href="#i-user"/></svg></span></a>
+        </div>
+      </div>
+      <p class="caption">Abrir a conversa com a janela visível marca a última mensagem do membro como lida <strong>para a equipe toda</strong>: o ponto sai da linha e o número do slot desce para todos (D-225). O link do cabeçalho é <code>min-w-0</code> e o nome trunca, então um nome longo nunca empurra o voltar. Nada mostra responsável, atribuição ou "não lida por atendente".</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Membro bloqueado · só leitura</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s1" aria-label="Voltar para as conversas"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><a class="plink" href="#st" aria-label="Ver o perfil de Heitor Pacheco"><span class="av sm"><svg class="i i-16"><use href="#i-user"/></svg></span><h1>Heitor Pacheco</h1></a></div>
+          <div class="scroller">
+            <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+              <li class="dsep">sáb., 12 de out.</li>
+              <li class="m other"><p class="bub">Quero cancelar minha inscrição no evento.</p><span class="btime">09:12</span></li>
+              <li class="m own"><span class="slbl">Rafael</span><p class="bub">Oi, Heitor! Pode deixar, já cancelamos.</p><span class="btime">09:20</span></li>
+            </ol>
+          </div>
+          <div class="ronly"><svg class="i i-20"><use href="#i-ban"/></svg><span>Heitor Pacheco está bloqueado. A conversa fica disponível só para leitura.</span></div>
+        </div>
+      </div>
+      <p class="caption">O aviso ocupa o lugar do compositor: <code>border-t bg-bg-secondary px-4 py-3</code>, <code>Ban</code> 20 terciário, 14/400 secundário. Se o bloqueio acontecer enquanto alguém digita, a resposta volta para o campo, o mesmo texto aparece num toast, e o aviso entra ao atualizar.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Membro que saiu · só leitura, sem link</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="pane">
+          <div class="thead"><a class="back" href="#s1" aria-label="Voltar para as conversas"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><span class="av sm"><svg class="i i-16"><use href="#i-user"/></svg></span><h1 class="ter" style="font-weight:700">Membro removido</h1></div>
+          <div class="scroller">
+            <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+              <li class="dsep">seg., 7 de out.</li>
+              <li class="m other"><p class="bub">Obrigado pela ajuda com o cadastro!</p><span class="btime">11:30</span></li>
+              <li class="m own"><span class="slbl">Rafael</span><p class="bub">Qualquer dúvida, estamos por aqui.</p><span class="btime">11:34</span></li>
+            </ol>
+          </div>
+          <div class="ronly"><svg class="i i-20"><use href="#i-ban"/></svg><span>Este membro saiu da comunidade. A conversa fica disponível só para leitura.</span></div>
+        </div>
+      </div>
+      <p class="caption">O cabeçalho diz "Membro removido" <strong>sem link</strong> (não há perfil para abrir), com o avatar neutro, e o aviso de saída ocupa o lugar do compositor.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Conversa não encontrada · a tela única (D-23)</span>
+      <div class="phone short">
+        <div class="statusbar"></div>
+        <div class="body">
+          <div class="page-header"><a class="back" href="#s1" aria-label="Voltar para as conversas"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><h1></h1></div>
+          <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-msg"/></svg></div><h3>Conversa não encontrada</h3><p>Ela não existe ou não é de Rede Demo.</p><a class="btn outline" href="#s1" style="margin-top:4px">Ver conversas</a></div>
+        </div>
+        <div class="toast-slot" style="bottom:24px"><div class="toast" role="status"><span class="dot" style="background:var(--color-danger)"></span>Heitor Pacheco está bloqueado. A conversa fica disponível só para leitura.</div></div>
+      </div>
+      <p class="caption">Um id desconhecido, de outro tenant, malformado, ou um membro tentando abrir <code>/suporte/[id]</code>: a mesma tela, sem dizer qual caso é. (Embaixo, o toast da corrida de bloqueio, de outro momento, empilhado aqui para a revisão.)</p>
+    </div>
+  </div>
+</section>
+
+<!-- =====================================================================================
+     SUPERFÍCIE 2 — A DIVISÃO LISTA + CONVERSA NO DESKTOP (A PARTIR DE lg)
+     ===================================================================================== -->
+<section id="s2" class="screen">
+  <header><h2>Superfície 2 — a divisão lista + conversa no desktop, a partir de <code>lg</code></h2><code>/suporte · /suporte/[conversationId] · layout compartilhado · [designed] · UI-D-264, D-224, D-39, UI-D-47</code>
+    <p>A partir de <code>lg</code> (≥ 1.024px), onde a coluna chega aos 680px, as duas rotas da equipe viram <strong>um cartão dividido</strong>: <code>grid-cols-[288px_1fr]</code>, com a altura da tela menos 7rem, <code>rounded-xl bg-card</code>. À esquerda, o cabeçalho "Suporte" e as linhas da Superfície 1 (a da conversa aberta em <code>bg-bg-active</code> com <code>aria-current</code>), rolando por conta própria. À direita, a conversa da equipe — ou, em <code>/suporte</code> sem seleção, o painel ocioso. Tocar numa linha é uma <strong>navegação</strong> que troca só o painel da direita: a lista fica no lugar e mantém a rolagem (um segmento de layout compartilhado). Em <code>lg</code>, 288 + 392 dão uma bolha de 85% com ~330px — confortável. Nenhum componente ganha adorno que a versão de celular não tenha (UI-D-47).</p>
+  </header>
+  <div class="frames">
+    <div class="framewrap">
+      <span class="label-tag">Desktop 1.280px · equipe · conversa aberta</span>
+      <div class="desk">
+        <div class="rail">
+          <div class="rlogo"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 128 32" style="width:120px"><use href="#logo-wide"/></svg></span></div>
+          <a href="#s9"><svg class="i i-20"><use href="#i-home"/></svg><span class="lbl2">Início</span></a>
+          <a href="#s9"><svg class="i i-20"><use href="#i-users"/></svg><span class="lbl2">Comunidades</span></a>
+          <a href="#s9"><svg class="i i-20"><use href="#i-reels"/></svg><span class="lbl2">Reels</span></a>
+          <a href="#s9"><svg class="i i-20"><use href="#i-cal"/></svg><span class="lbl2">Eventos</span></a>
+          <div class="rbottom">
+            <a href="#s7" aria-label="Notificações"><svg class="i i-20"><use href="#i-bell"/></svg><span class="lbl2">Notificações</span></a>
+            <a href="#s2" aria-current="page" aria-label="Suporte, 1 aguardando resposta"><svg class="i i-20"><use href="#i-msg"/></svg><span class="lbl2">Suporte</span><span class="badge" aria-hidden="true">1</span></a>
+            <a href="#s4"><svg class="i i-20"><use href="#i-settings"/></svg><span class="lbl2">Configurações</span></a>
+            <a href="#s9"><svg class="i i-20"><use href="#i-logout"/></svg><span class="lbl2">Sair</span></a>
+          </div>
+        </div>
+        <div class="main"><div class="column">
+          <div class="split">
+            <div class="lpane">
+              <div class="lhead"><h1>Suporte</h1></div>
+              <ul>
+                <li><a class="irow" href="#s2" aria-current="page"><span class="av"><span class="photo ph-f"></span></span><span class="icol"><p class="iname">Ana Lúcia Ferreira</p><p class="iprev">Rafael: Oi, Ana! Qual aparelho você usa? Vou testar aqui.</p></span><span class="itrail"><span class="itime">14:06</span><span class="adot-slot"></span></span></a></li>
+                <li><a class="irow awaiting" href="#s2"><span class="av"><span class="photo ph-g"></span></span><span class="icol"><p class="iname">Bruno Santos<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Obrigado! Vou tentar de novo à noite.</p></span><span class="itrail"><span class="itime">13:47</span><span class="adot" aria-hidden="true"></span></span></a></li>
+                <li><a class="irow" href="#s2"><span class="av"><span class="photo ph-h"></span></span><span class="icol"><p class="iname">Joana Silveira</p><p class="iprev">Carla: Pronto, seu e-mail foi atualizado.</p></span><span class="itrail"><span class="itime">Ontem</span><span class="adot-slot"></span></span></a></li>
+                <li><a class="irow" href="#s2"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="icol"><p class="iname">Heitor Pacheco</p><p class="iprev">Quero cancelar minha inscrição no evento.</p></span><span class="itrail"><span class="itime">12/10</span><span class="spill neutral">Bloqueado</span></span></a></li>
+                <li><a class="irow" href="#s2"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="icol"><p class="iname removed">Membro removido</p><p class="iprev">Rafael: Qualquer dúvida, estamos por aqui.</p></span><span class="itrail"><span class="itime">07/10</span><span class="adot-slot"></span></span></a></li>
+                <li><a class="irow" href="#s2"><span class="av"><span class="photo ph-e"></span></span><span class="icol"><p class="iname">Kátia Lemos</p><p class="iprev">Bom dia! Segue a lista: 1. crachá 2. estacionamento 3. convidados</p></span><span class="itrail"><span class="itime">05/10</span><span class="adot-slot"></span></span></a></li>
+                <li><a class="irow" href="#s2"><span class="av"><span class="photo ph-b"></span></span><span class="icol"><p class="iname">Lucas Martins</p><p class="iprev">Carla: Até sábado!</p></span><span class="itrail"><span class="itime">03/10</span><span class="adot-slot"></span></span></a></li>
+              </ul>
+            </div>
+            <div class="rpane">
+              <div class="thead"><a class="back" href="#s2" aria-label="Voltar para as conversas"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><a class="plink" href="#st" aria-label="Ver o perfil de Ana Lúcia Ferreira"><span class="av sm"><span class="photo ph-f"></span></span><h1>Ana Lúcia Ferreira</h1></a></div>
+              <div class="scroller" data-scroll-end>
+                <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+                  <li class="dsep">sáb., 12 de out.</li>
+                  <li class="m other"><p class="bub">Quero trocar o e-mail da minha conta.</p><span class="btime">10:01</span></li>
+                  <li class="m own"><span class="slbl">Carla</span><p class="bub">Oi, Ana! Como posso ajudar?</p><span class="btime">10:02</span></li>
+                  <li class="m other"><p class="bub">O antigo era o da escola e não uso mais.</p><span class="btime">10:05</span></li>
+                  <li class="dsep">Ontem</li>
+                  <li class="m own"><span class="slbl">Rafael</span><p class="bub">Pronto, Ana! Mandamos um e-mail de confirmação para o endereço novo. O passo a passo está aqui: <a href="#s2">https://ajuda.exemplo.com.br/trocar-email</a></p><span class="btime">16:40</span></li>
+                  <li class="dsep">Hoje</li>
+                  <li class="m other"><p class="bub">Oi! O link do evento de sábado não abre no meu celular.</p><span class="btime">14:02</span></li>
+                  <li class="m own"><span class="slbl">Você</span><p class="bub">Oi, Ana! Qual aparelho você usa? Vou testar aqui.</p><span class="btime">14:06</span></li>
+                </ol>
+              </div>
+              <div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <p class="caption" style="max-width:1280px">O painel da esquerda tem 288px fixos e rola sozinho; o da direita é <code>min-w-0</code> e só as mensagens rolam. A linha aberta leva <code>bg-bg-active</code> (neutro, não é da marca) e já não aguarda: abrir marcou como lida. O único preenchimento da marca que se repete é o das bolhas da equipe e do enviar — a convenção dos mensageiros. Um painel que falha mostra o próprio erro e não apaga o outro.</p>
+    </div>
+
+    <div class="framewrap">
+      <span class="label-tag">Desktop 1.280px · /suporte sem seleção · o painel ocioso</span>
+      <div class="desk">
+        <div class="rail">
+          <div class="rlogo"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 128 32" style="width:120px"><use href="#logo-wide"/></svg></span></div>
+          <a href="#s9"><svg class="i i-20"><use href="#i-home"/></svg><span class="lbl2">Início</span></a>
+          <a href="#s9"><svg class="i i-20"><use href="#i-users"/></svg><span class="lbl2">Comunidades</span></a>
+          <a href="#s9"><svg class="i i-20"><use href="#i-reels"/></svg><span class="lbl2">Reels</span></a>
+          <a href="#s9"><svg class="i i-20"><use href="#i-cal"/></svg><span class="lbl2">Eventos</span></a>
+          <div class="rbottom">
+            <a href="#s7" aria-label="Notificações"><svg class="i i-20"><use href="#i-bell"/></svg><span class="lbl2">Notificações</span></a>
+            <a href="#s2" aria-current="page" aria-label="Suporte, 2 aguardando resposta"><svg class="i i-20"><use href="#i-msg"/></svg><span class="lbl2">Suporte</span><span class="badge" aria-hidden="true">2</span></a>
+            <a href="#s4"><svg class="i i-20"><use href="#i-settings"/></svg><span class="lbl2">Configurações</span></a>
+            <a href="#s9"><svg class="i i-20"><use href="#i-logout"/></svg><span class="lbl2">Sair</span></a>
+          </div>
+        </div>
+        <div class="main"><div class="column">
+          <div class="split">
+            <div class="lpane">
+              <div class="lhead"><h1>Suporte</h1></div>
+              <ul>
+                <li><a class="irow awaiting" href="#s2"><span class="av"><span class="photo ph-f"></span></span><span class="icol"><p class="iname">Ana Lúcia Ferreira<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Oi! O link do evento de sábado não abre no meu celular.</p></span><span class="itrail"><span class="itime">14:02</span><span class="adot" aria-hidden="true"></span></span></a></li>
+                <li><a class="irow awaiting" href="#s2"><span class="av"><span class="photo ph-g"></span></span><span class="icol"><p class="iname">Bruno Santos<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Obrigado! Vou tentar de novo à noite.</p></span><span class="itrail"><span class="itime">13:47</span><span class="adot" aria-hidden="true"></span></span></a></li>
+                <li><a class="irow" href="#s2"><span class="av"><span class="photo ph-h"></span></span><span class="icol"><p class="iname">Joana Silveira</p><p class="iprev">Carla: Pronto, seu e-mail foi atualizado.</p></span><span class="itrail"><span class="itime">Ontem</span><span class="adot-slot"></span></span></a></li>
+                <li><a class="irow" href="#s2"><span class="av"><svg class="i i-18"><use href="#i-user"/></svg></span><span class="icol"><p class="iname">Heitor Pacheco</p><p class="iprev">Quero cancelar minha inscrição no evento.</p></span><span class="itrail"><span class="itime">12/10</span><span class="spill neutral">Bloqueado</span></span></a></li>
+              </ul>
+            </div>
+            <div class="rpane" style="justify-content:center">
+              <div class="empty"><div class="circle"><svg class="i i-28"><use href="#i-msg"/></svg></div><h3>Escolha uma conversa</h3><p>Qualquer pessoa da equipe pode responder. Quando alguém abre a conversa, ela deixa de aparecer como aguardando para toda a equipe.</p></div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <p class="caption" style="max-width:1280px">O <code>EmptyState variant="plain"</code> com <code>MessageCircle</code>. O corpo explica, uma vez e no lugar certo, a regra compartilhada de D-225. Sem conversas: o vazio da Superfície 1 à esquerda e este painel à direita.</p>
+    </div>
+
+    <div class="framewrap" style="width:100%">
+      <span class="label-tag">Nota · entre <code>md</code> e <code>lg</code> (aqui 900px) a lista e a conversa são rotas separadas, como no celular</span>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+        <div class="desk w900">
+          <div class="rail" style="height:520px">
+            <div class="rlogo"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 128 32" style="width:120px"><use href="#logo-wide"/></svg></span></div>
+            <a href="#s9"><svg class="i i-20"><use href="#i-home"/></svg><span class="lbl2">Início</span></a>
+            <div class="rbottom"><a href="#s2" aria-current="page" aria-label="Suporte, 2 aguardando resposta"><svg class="i i-20"><use href="#i-msg"/></svg><span class="lbl2">Suporte</span><span class="badge" aria-hidden="true">2</span></a></div>
+          </div>
+          <div class="main"><div class="column">
+            <div class="page-header" style="padding-left:0"><h1 style="padding-left:12px">Suporte</h1></div>
+            <ul>
+              <li><a class="irow awaiting" href="#s2"><span class="av"><span class="photo ph-f"></span></span><span class="icol"><p class="iname">Ana Lúcia Ferreira<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Oi! O link do evento de sábado não abre no meu celular.</p></span><span class="itrail"><span class="itime">14:02</span><span class="adot" aria-hidden="true"></span></span></a></li>
+              <li><a class="irow awaiting" href="#s2"><span class="av"><span class="photo ph-g"></span></span><span class="icol"><p class="iname">Bruno Santos<span class="sr-only">, aguardando resposta</span></p><p class="iprev">Obrigado! Vou tentar de novo à noite.</p></span><span class="itrail"><span class="itime">13:47</span><span class="adot" aria-hidden="true"></span></span></a></li>
+              <li><a class="irow" href="#s2"><span class="av"><span class="photo ph-h"></span></span><span class="icol"><p class="iname">Joana Silveira</p><p class="iprev">Carla: Pronto, seu e-mail foi atualizado.</p></span><span class="itrail"><span class="itime">Ontem</span><span class="adot-slot"></span></span></a></li>
+            </ul>
+          </div></div>
+        </div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="desk w900">
+          <div class="rail" style="height:520px">
+            <div class="rlogo"><span class="tl-topbar"><svg class="logo-sim" viewBox="0 0 128 32" style="width:120px"><use href="#logo-wide"/></svg></span></div>
+            <a href="#s9"><svg class="i i-20"><use href="#i-home"/></svg><span class="lbl2">Início</span></a>
+            <div class="rbottom"><a href="#s2" aria-current="page" aria-label="Suporte, 1 aguardando resposta"><svg class="i i-20"><use href="#i-msg"/></svg><span class="lbl2">Suporte</span><span class="badge" aria-hidden="true">1</span></a></div>
+          </div>
+          <div class="main"><div class="column">
+            <div class="pane fixed" style="height:472px;border:1px solid var(--theme-border);border-radius:12px;overflow:hidden">
+              <div class="thead"><a class="back" href="#s2" aria-label="Voltar para as conversas"><svg class="i i-28"><use href="#i-chev-l"/></svg></a><a class="plink" href="#st" aria-label="Ver o perfil de Ana Lúcia Ferreira"><span class="av sm"><span class="photo ph-f"></span></span><h1>Ana Lúcia Ferreira</h1></a></div>
+              <div class="scroller" data-scroll-end>
+                <ol class="msgs" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensagens">
+                  <li class="dsep">Hoje</li>
+                  <li class="m other"><p class="bub">Oi! O link do evento de sábado não abre no meu celular.</p><span class="btime">14:02</span></li>
+                  <li class="m own"><span class="slbl">Você</span><p class="bub">Oi, Ana! Qual aparelho você usa? Vou testar aqui.</p><span class="btime">14:06</span></li>
+                </ol>
+              </div>
+              <div class="composer"><div class="cform"><div class="cfield ph" role="textbox" aria-label="Mensagem">Escreva uma mensagem</div><button class="sendb" type="button" aria-label="Enviar mensagem" disabled><svg class="i i-20"><use href="#i-send"/></svg></button></div></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+      <p class="caption" style="max-width:1300px">Com o trilho, a coluna entre <code>md</code> e <code>lg</code> tem só ~480px: uma lista de 288px deixaria ~190px para a conversa, e as bolhas quebrariam a cada poucas palavras. Então ali (e no celular) a lista e a conversa são rotas separadas: tocar na linha abre <code>/suporte/{id}</code>, e voltar retorna à lista. Redimensionar de 1.280px para 900px com uma conversa aberta mantém a URL dela (backstop E13).</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+(function () {
+  const html = document.documentElement;
+  const NEUTRAL = { primary: '#2e6fd0', secondary: '#5b9cf8' };
+  const state = { ...NEUTRAL };
+
+  /* a mesma derivação que brandStyleVars() faz no servidor (D-25/D-41) */
+  const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  const toHex = (rgb) => '#' + rgb.map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('');
+  const mixWhite = (c, amount) => toHex(hex(c).map((v) => v + (255 - v) * amount));
+  const lum = (c) => { const [r, g, b] = hex(c).map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+  const onColour = (c) => (ratio('#ffffff', c) >= ratio('#16233b', c) ? '#ffffff' : '#16233b');
+
+  function apply() {
+    const primary = state.primary, secondary = state.secondary;
+    const primaryDark = mixWhite(primary, 0.3);
+    const onPrimary = onColour(primary), onPrimaryDark = onColour(primaryDark);
+    const vars = {
+      '--brand-primary': primary,
+      '--brand-secondary': secondary,
+      '--brand-on-primary': onPrimary,
+      '--brand-primary-dark': primaryDark,
+      '--brand-on-primary-dark': onPrimaryDark,
+    };
+    for (const [k, v] of Object.entries(vars)) html.style.setProperty(k, v);
+    document.getElementById('pick-primary').value = primary;
+    document.getElementById('pick-secondary').value = secondary;
+    document.getElementById('brand-readout').textContent =
+      'primary ' + primary + ' · on ' + onPrimary + ' · dark ' + primaryDark + ' · on-dark ' + onPrimaryDark;
+  }
+
+  const setBrand = (p, s) => { state.primary = p.toLowerCase(); state.secondary = s.toLowerCase(); apply(); };
+  document.getElementById('pick-primary').addEventListener('input', (e) => setBrand(e.target.value, state.secondary));
+  document.getElementById('pick-secondary').addEventListener('input', (e) => setBrand(state.primary, e.target.value));
+  document.querySelectorAll('.preset').forEach((b) => b.addEventListener('click', () => setBrand(b.dataset.p, b.dataset.s)));
+
+  function setTheme(dark) {
+    html.setAttribute('data-theme', dark ? 'dark' : 'light');
+    const t = document.getElementById('theme-toggle');
+    t.setAttribute('aria-pressed', String(dark));
+    document.getElementById('theme-label').textContent = dark ? 'Tema claro' : 'Tema escuro';
+    t.querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+  }
+  const isDark = () => html.getAttribute('data-theme') === 'dark';
+  document.getElementById('theme-toggle').addEventListener('click', () => setTheme(!isDark()));
+  if (window.matchMedia('(prefers-color-scheme: dark)').matches) setTheme(true);
+
+  /* o painel da conversa abre no fim (UI-D-261); o campo que passou de cinco linhas mostra o fim do texto */
+  document.querySelectorAll('[data-scroll-end]').forEach((el) => { el.scrollTop = el.scrollHeight; });
+  const scrolled = document.getElementById('scrolled-field');
+  if (scrolled) scrolled.scrollTop = scrolled.scrollHeight;
+
+  /* mockup estático: nenhum link deixa a página */
+  document.querySelectorAll('a[href^="#"]').forEach((a) => a.addEventListener('click', (e) => { if (!a.closest('.toolbar')) e.preventDefault(); }));
+  apply();
+})();
+</script>
+</body>
+</html>
