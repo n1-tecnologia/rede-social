@@ -6,6 +6,7 @@
   "description": "Shared UI primitives ported from the design prototype: tokens, brand-bearing primitives, overlays, hooks and layout helpers (UI-01)",
   "exports": {
     ".": "./src/index.ts",
+    "./text/url": "./src/text/url.ts",
     "./styles/tokens.css": "./src/styles/tokens.css"
   },
   "scripts": {

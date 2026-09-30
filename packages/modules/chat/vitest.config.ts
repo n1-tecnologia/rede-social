@@ -1,4 +1,5 @@
 import { vitestBase } from '@rede-social/config/vitest.base';
+import react from '@vitejs/plugin-react';
 import { defineConfig, mergeConfig } from 'vitest/config';
 
 /**
@@ -7,16 +8,18 @@ import { defineConfig, mergeConfig } from 'vitest/config';
  * never open a transaction; the notification source runs against a fake `tx`). Integration coverage
  * lives in `apps/api/tests/integration/chat.test.ts`.
  *
- * Server-only for now: 07-09 adds the UI and, with it, the React plugin and the per-file
- * `// @vitest-environment happy-dom` opt-in the other modules use.
+ * The default environment stays `node`, so the server suites do not pay for a DOM. The COMPONENT
+ * suites (07-09: the message list and the composer) opt in per file with
+ * `// @vitest-environment happy-dom`, the way the other modules do.
  *
  * Each package owns its config: Vitest 5 no longer walks up directories looking for one.
  */
 export default mergeConfig(
   vitestBase,
   defineConfig({
+    plugins: [react()],
     test: {
-      include: ['tests/**/*.test.ts'],
+      include: ['tests/**/*.test.{ts,tsx}'],
       env: {
         DATABASE_URL: 'postgres://api_user:postgres@127.0.0.1:54322/postgres',
         SUPABASE_URL: 'http://127.0.0.1:54321',

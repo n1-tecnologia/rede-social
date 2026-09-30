@@ -73,3 +73,6 @@ export {
   type TabsProps,
 } from './primitives/Tabs';
 export { Textarea, type TextareaProps } from './primitives/Textarea';
+// Text: the ONE auto-linker (re-homed from the feed in 07-09, T-04-43) and its matcher.
+export { DEFAULT_LINK_CLASS, type LinkifyOptions, linkify } from './text/linkify';
+export { LINK_URL_PATTERN, LINK_URL_TRAILING_PUNCTUATION, trimMatchedUrl } from './text/url';

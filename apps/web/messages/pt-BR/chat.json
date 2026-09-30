@@ -1,0 +1,48 @@
+{
+  "chat": {
+    "nav": "Suporte",
+    "navBadge": {
+      "member": "Suporte, nova resposta da equipe",
+      "staff": "Suporte, {count} aguardando resposta"
+    },
+    "member": {
+      "title": "Equipe {tenant}",
+      "back": "Voltar para o início",
+      "empty": {
+        "title": "Fale com a equipe de {tenant}",
+        "body": "Mande sua dúvida ou pedido por aqui. Avisamos quando a equipe responder."
+      }
+    },
+    "thread": {
+      "label": "Mensagens",
+      "older": "Carregar mensagens anteriores",
+      "newMessages": "{count, plural, one {# nova mensagem} other {# novas mensagens}}",
+      "retry": "Tentar novamente",
+      "errors": {
+        "load": {
+          "title": "Não foi possível carregar a conversa.",
+          "body": "Verifique sua conexão e tente de novo."
+        },
+        "older": "Não foi possível carregar as mensagens anteriores."
+      }
+    },
+    "sender": {
+      "staffSr": ", da equipe",
+      "you": "Você"
+    },
+    "day": {
+      "today": "Hoje",
+      "yesterday": "Ontem"
+    },
+    "composer": {
+      "label": "Mensagem",
+      "placeholder": "Escreva uma mensagem",
+      "send": "Enviar mensagem",
+      "sending": "Enviando…",
+      "counter": "{count}/2.000",
+      "errors": {
+        "failed": "Não foi possível enviar. Sua mensagem continua no campo. Tente de novo."
+      }
+    }
+  }
+}

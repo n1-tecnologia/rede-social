@@ -1,4 +1,9 @@
 import { MEDIA_STATUSES } from '@rede-social/contracts/media';
+import {
+  LINK_URL_PATTERN,
+  LINK_URL_TRAILING_PUNCTUATION,
+  trimMatchedUrl,
+} from '@rede-social/ui/text/url';
 import { z } from 'zod';
 
 /**
@@ -244,21 +249,15 @@ export type CreatePost = z.infer<typeof createPostSchema>;
  * THE URL matcher, exported so the caption renderer and the create path can never disagree about
  * what counts as a link in a post.
  *
- * Two copies of this rule would mean a caption that renders a link the unfurler never saw, or a
- * preview card under a URL the caption did not turn blue. Deliberately conservative: a run of
- * non-space characters after `http://` or `https://`, with trailing sentence punctuation pushed
- * back into the text so "veja https://exemplo.com." matches the URL and not the full stop. The
- * scheme restriction is load-bearing — a `javascript:` or `data:` URL simply is not a match, so it
- * can never become an `href` and can never be enqueued.
+ * Since 07-09 the rule itself lives in `@rede-social/ui/text/url` (a React-free entry point), because
+ * the one linkifier moved into `@rede-social/ui` so the chat bubbles can share it (MOD-02). These are
+ * the same objects under the feed's historical names, so the create path still unfurls exactly the
+ * URL the caption turns blue. The scheme restriction is load-bearing: a `javascript:` or `data:` URL
+ * simply is not a match, so it can never become an `href` and can never be enqueued.
  */
-export const FEED_URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
-export const FEED_URL_TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
-
-/** One match, trimmed of trailing punctuation. `matchAll` clones the regex, so `lastIndex` is safe. */
-export function trimMatchedUrl(raw: string): string {
-  const trailing = FEED_URL_TRAILING_PUNCTUATION.exec(raw);
-  return trailing ? raw.slice(0, raw.length - trailing[0].length) : raw;
-}
+export const FEED_URL_PATTERN = LINK_URL_PATTERN;
+export const FEED_URL_TRAILING_PUNCTUATION = LINK_URL_TRAILING_PUNCTUATION;
+export { trimMatchedUrl };
 
 /** The FIRST link in a caption — the one, and only one, a post may preview. */
 export function firstUrlIn(text: string): string | null {

@@ -24,6 +24,7 @@
     "@tailwindcss/postcss": "4.3.3",
     "@rede-social/contracts": "workspace:*",
     "@rede-social/core": "workspace:*",
+    "@rede-social/module-chat": "workspace:*",
     "@rede-social/module-communities": "workspace:*",
     "@rede-social/module-events": "workspace:*",
     "@rede-social/module-feed": "workspace:*",

@@ -8,6 +8,7 @@
     "./module": "./module.ts",
     "./contracts": "./contracts/index.ts",
     "./server": "./server/index.ts",
+    "./ui": "./ui/index.ts",
     "./db": "./db/schema.ts"
   },
   "scripts": {
@@ -19,13 +20,27 @@
     "@hono/zod-openapi": "1.6.3",
     "@rede-social/contracts": "workspace:*",
     "@rede-social/core": "workspace:*",
+    "@rede-social/ui": "workspace:*",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.7",
+    "lucide-react": "1.46.0",
     "zod": "4.6.2"
+  },
+  "peerDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@rede-social/config": "workspace:*",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
     "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "happy-dom": "20.14.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "vitest": "5.0.0"
   }
 }
