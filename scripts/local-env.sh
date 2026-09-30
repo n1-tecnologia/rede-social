@@ -51,6 +51,9 @@ SUPABASE_SERVICE_KEY=${SERVICE_KEY}
 SUPABASE_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}
 NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}
+# Web Push (07-07): a LOCAL-ONLY test VAPID public key (its private half was discarded; local and CI
+# push run PUSH_TRANSPORT=fake). Production has its own pair (DEPLOY.md).
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=BJHs89NeHI8M9hJQWfvb1_irumrdO-cNFTwQZUHrWx3Lp3smi-NAifeRu5Pm4rWfwmQCL5GvEdK8_PVtNafxV1k
 # Local fallback (development only, recorded in 01-01-SUMMARY): the local Supavisor (54329) only knows its
 # own pooler user (api_user -> ENOIDENTIFIER, api_user.rede-social -> ENOTFOUND), so api_user connects on
 # the direct port. Hosted environments always use the transaction pooler URL from Secret Manager.

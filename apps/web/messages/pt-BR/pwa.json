@@ -10,7 +10,12 @@
       "title": "Adicione à Tela de Início",
       "body": "No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início” para receber notificações.",
       "confirm": "Entendi",
-      "dismiss": "Agora não"
+      "dismiss": "Agora não",
+      "push": {
+        "title": "Instale o app para receber notificações",
+        "body": "No iPhone e no iPad, as notificações só chegam com o app na Tela de Início. No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”. Então abra o app pela Tela de Início e ative as notificações.",
+        "confirm": "Entendi"
+      }
     }
   }
 }

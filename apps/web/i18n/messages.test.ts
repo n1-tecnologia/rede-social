@@ -1497,3 +1497,73 @@ describe('07 — notifications list strings and placeholders', () => {
     );
   });
 });
+
+describe('07-07 — the push strings (soft-ask, switch row, toasts, install hint push variant)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['notifications.softAsk.title', 'Ative as notificações para não perder nada'],
+    [
+      'notifications.softAsk.bodyMember',
+      'Receba um aviso quando {tenant} publicar novidades e quando a equipe responder você.',
+    ],
+    [
+      'notifications.softAsk.bodyStaff',
+      'Receba um aviso quando um membro mandar mensagem para o suporte.',
+    ],
+    ['notifications.softAsk.cta', 'Ativar notificações'],
+    ['notifications.softAsk.dismiss', 'Dispensar aviso'],
+    ['notifications.push.switchLabel', 'Notificações neste aparelho'],
+    ['notifications.push.state.unsupported', 'Este navegador não recebe notificações.'],
+    ['notifications.push.state.iosInstall', 'Instale o app na Tela de Início para ativar.'],
+    ['notifications.push.state.off', 'Receba avisos de novidades e respostas neste aparelho.'],
+    ['notifications.push.state.on', 'Ativadas neste aparelho.'],
+    [
+      'notifications.push.state.denied',
+      'Bloqueadas nos ajustes do aparelho. Libere as notificações de {tenant} nos ajustes do navegador ou do aparelho e volte aqui.',
+    ],
+    ['notifications.push.toasts.enabled', 'Notificações ativadas neste aparelho.'],
+    ['notifications.push.toasts.disabled', 'Notificações desativadas neste aparelho.'],
+    [
+      'notifications.push.toasts.denied',
+      'As notificações estão bloqueadas neste aparelho. Libere nos ajustes para ativar.',
+    ],
+    [
+      'notifications.push.errors.failed',
+      'Não foi possível ativar as notificações. Tente novamente.',
+    ],
+    ['pwa.install.push.title', 'Instale o app para receber notificações'],
+    [
+      'pwa.install.push.body',
+      'No iPhone e no iPad, as notificações só chegam com o app na Tela de Início. No Safari, toque em Compartilhar e depois em “Adicionar à Tela de Início”. Então abra o app pela Tela de Início e ative as notificações.',
+    ],
+    ['pwa.install.push.confirm', 'Entendi'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('the {tenant} placeholders format (the denied sub-line and the member body)', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'notifications' }) as (
+      key: string,
+      values?: Record<string, unknown>,
+    ) => string;
+    expect(t('push.state.denied', { tenant: 'Rede Demo' })).toContain(
+      'Libere as notificações de Rede Demo nos ajustes',
+    );
+    expect(t('softAsk.bodyMember', { tenant: 'Rede Demo' })).toBe(
+      'Receba um aviso quando Rede Demo publicar novidades e quando a equipe responder você.',
+    );
+  });
+
+  it('the install variant keeps its Phase 2 strings (the push variant adds, never replaces)', () => {
+    expect(lookup('pwa.install.title')).toBe('Adicione à Tela de Início');
+    expect(lookup('pwa.install.dismiss')).toBe('Agora não');
+  });
+});

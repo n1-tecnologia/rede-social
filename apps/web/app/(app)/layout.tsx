@@ -102,6 +102,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       userId={bootstrap.user.id}
       initialCounters={bootstrap.counters}
       notificationsEnabled={bootstrap.modules.some((m) => m.key === 'notifications')}
+      vapidPublicKey={env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null}
     >
       <AppShell
         brand={{ displayName: tenant.displayName, logoUrl: branding.logoUrl }}

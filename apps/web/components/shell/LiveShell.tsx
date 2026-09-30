@@ -2,6 +2,7 @@
 
 import { tenantTopic, userTopic } from '@rede-social/contracts/realtime';
 import {
+  BeforeLogoutProvider,
   type LiveCounters,
   LiveCountersProvider,
   RealtimeProvider,
@@ -9,7 +10,15 @@ import {
   SlotBadgeLabelsProvider,
 } from '@rede-social/core/ui';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, useCallback, useMemo } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo } from 'react';
+import {
+  disablePush,
+  type PushWindowLike,
+  pushRegistration,
+  pushRegistrationWithin,
+  pushSupport,
+  syncPushOnOpen,
+} from '@/lib/push';
 
 export interface LiveShellProps {
   /** `NEXT_PUBLIC_SUPABASE_URL`, passed by the server layout. */
@@ -23,6 +32,8 @@ export interface LiveShellProps {
   initialCounters: LiveCounters;
   /** `notifications` is enabled for the tenant: only then may the member join `tenant:<t>:all`. */
   notificationsEnabled: boolean;
+  /** `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (07-07); null leaves push out entirely. */
+  vapidPublicKey?: string | null;
   children: ReactNode;
 }
 
@@ -35,6 +46,11 @@ export interface LiveShellProps {
  * The `all` join is left out when the module is off: the database would refuse it anyway, and a
  * refused channel only costs retries.
  *
+ * Push (07-07): once after mount, with a VAPID key and permission already granted, the current
+ * subscription is re-saved or re-made under a rotated key (`syncPushOnOpen`, never a prompt). The shell
+ * also provides the kernel's `BeforeLogoutProvider` with "forget this device's push", which the
+ * desktop rail's "Sair" awaits (bounded to 2 s) before signing out.
+ *
  * Mounted by `app/(app)/layout.tsx` on the tenant branch only. Leaving the `(app)` segment (logout,
  * the blocked flow's `/acesso-suspenso`) unmounts it, and the provider disconnects on unmount.
  */
@@ -45,9 +61,27 @@ export function LiveShell({
   userId,
   initialCounters,
   notificationsEnabled,
+  vapidPublicKey = null,
   children,
 }: LiveShellProps) {
   const t = useTranslations('notifications');
+
+  useEffect(() => {
+    if (!vapidPublicKey) return;
+    if (pushSupport(window as unknown as PushWindowLike, vapidPublicKey) !== 'available') return;
+    if (Notification.permission !== 'granted') return;
+    let alive = true;
+    void pushRegistration().then((registration) => {
+      if (alive && registration) void syncPushOnOpen(registration, vapidPublicKey);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [vapidPublicKey]);
+
+  const forgetDevice = useCallback(async () => {
+    await disablePush(await pushRegistrationWithin());
+  }, []);
 
   const topics = useMemo(
     () =>
@@ -74,7 +108,9 @@ export function LiveShell({
         countersUrl="/api/me/counters"
         topics={topics}
       >
-        <SlotBadgeLabelsProvider value={labelFor}>{children}</SlotBadgeLabelsProvider>
+        <SlotBadgeLabelsProvider value={labelFor}>
+          <BeforeLogoutProvider value={forgetDevice}>{children}</BeforeLogoutProvider>
+        </SlotBadgeLabelsProvider>
       </LiveCountersProvider>
     </RealtimeProvider>
   );

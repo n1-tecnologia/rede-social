@@ -4,6 +4,7 @@ import { Badge, cn } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { useBeforeLogout, useLogoutSubmit } from './BeforeLogout';
 import { activeTabKey, iconFor, isNavItemActive, type NavItem, type ShellNav } from './nav';
 import { useLiveCounters } from './realtime/LiveCountersProvider';
 import { slotAccessibleName, useSlotBadgeLabel } from './realtime/SlotBadgeLabels';
@@ -69,6 +70,8 @@ export function DesktopRail({
   const SettingsIcon = iconFor('settings');
   const ThemeIcon = iconFor('sun');
   const LogoutIcon = iconFor('log-out');
+  // 07-07: the host's pre-logout cleanup (forget this device's push), bounded to 2 s.
+  const onLogoutSubmit = useLogoutSubmit(useBeforeLogout());
 
   return (
     <aside className="sticky top-0 hidden h-[var(--screen-h)] w-60 shrink-0 flex-col border-r border-border bg-bg-secondary px-3 py-6 md:flex">
@@ -119,7 +122,7 @@ export function DesktopRail({
           </div>
         ) : null}
 
-        <form action={logoutAction}>
+        <form action={logoutAction} onSubmit={onLogoutSubmit}>
           <button type="submit" className={cn(rowBase, rowIdle, 'hover:text-danger')}>
             <LogoutIcon aria-hidden size={22} strokeWidth={1.7} className="shrink-0" />
             <span className="min-w-0 flex-1 truncate text-left">{labels.logout}</span>

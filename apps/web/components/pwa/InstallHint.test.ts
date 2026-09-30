@@ -1,11 +1,63 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment happy-dom
+import path from 'node:path';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { NextIntlClientProvider } from 'next-intl';
+import { createElement, type ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadMessages } from '@/i18n/messages';
 import {
   INSTALL_HINT_DISMISS_MS,
   INSTALL_HINT_DISMISSED_KEY,
+  InstallHint,
   isIosSafari,
   isStandalone,
   shouldShowInstallHint,
 } from './InstallHint';
+
+/**
+ * `motion/react`, replaced by plain elements for the rendered push-variant cases (happy-dom's
+ * `Animation.cancel()` rejects a promise motion never catches; the ReelsHost.test.tsx precedent).
+ * ONE component per tag, cached, so the sheet's panel never remounts between renders.
+ */
+vi.mock('motion/react', async () => {
+  const { createElement, forwardRef } = await import('react');
+  const MOTION_ONLY = new Set([
+    'initial',
+    'animate',
+    'exit',
+    'transition',
+    'variants',
+    'layout',
+    'drag',
+    'dragConstraints',
+    'dragElastic',
+    'onDragEnd',
+  ]);
+  const cache = new Map<string, unknown>();
+  const proxy = new Proxy(
+    {},
+    {
+      get: (_target, tag: string) => {
+        const cached = cache.get(tag);
+        if (cached) return cached;
+        const component = forwardRef((props: Record<string, unknown>, ref: unknown) => {
+          const plain: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(props)) {
+            if (!MOTION_ONLY.has(key)) plain[key] = value;
+          }
+          return createElement(tag, { ...plain, ref });
+        });
+        cache.set(tag, component);
+        return component;
+      },
+    },
+  );
+  return {
+    motion: proxy,
+    AnimatePresence: ({ children }: { children?: unknown }) => children,
+    useReducedMotion: () => true,
+  };
+});
 
 const IPHONE_SAFARI =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
@@ -124,5 +176,63 @@ describe('InstallHint helpers — shouldShowInstallHint (14-day dismissal, T-02-
   it('10. constants: the storage key and the 14-day window', () => {
     expect(INSTALL_HINT_DISMISSED_KEY).toBe('rede_install_hint_dismissed');
     expect(INSTALL_HINT_DISMISS_MS).toBe(14 * DAY);
+  });
+});
+
+describe('InstallHint push variant (07-07, UI-D-257)', () => {
+  // happy-dom replaces `URL`, so the catalog is resolved from the package root (vitest's cwd).
+  const messages = loadMessages(path.resolve(process.cwd(), 'messages/pt-BR'));
+  const pwa = (messages as { pwa: { install: Record<string, unknown> } }).pwa.install;
+  const push = pwa.push as { title: string; body: string; confirm: string };
+
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+  });
+
+  // createElement's overloads infer neither `InstallHint`'s defaulted props parameter nor the
+  // provider's required `children` passed as the third argument; these typed views fix both.
+  const Hint = InstallHint as (props: NonNullable<Parameters<typeof InstallHint>[0]>) => ReactNode;
+  const Provider = NextIntlClientProvider as unknown as (props: {
+    locale: string;
+    messages: unknown;
+    timeZone: string;
+    children?: ReactNode;
+  }) => ReactNode;
+
+  function renderHint(onClose: () => void) {
+    return render(
+      createElement(
+        Provider,
+        { locale: 'pt-BR', messages, timeZone: 'America/Sao_Paulo' },
+        createElement(Hint, { open: true, variant: 'push', onClose }),
+      ),
+    );
+  }
+
+  it('11. shows the push copy and ONE "Entendi", never "Agora não"', async () => {
+    renderHint(vi.fn());
+    await act(async () => {});
+    expect(screen.getByText(push.title)).toBeTruthy();
+    expect(screen.getByText(push.body)).toBeTruthy();
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual([push.confirm]);
+    expect(screen.queryByText(String(pwa.dismiss))).toBeNull();
+  });
+
+  it('12. "Entendi" and Escape call onClose and write NO dismissal', async () => {
+    const onClose = vi.fn();
+    renderHint(onClose);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: push.confirm }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    const onEscape = vi.fn();
+    renderHint(onEscape);
+    await act(async () => {});
+    fireEvent.keyDown(screen.getByRole('button', { name: push.confirm }), { key: 'Escape' });
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(INSTALL_HINT_DISMISSED_KEY)).toBeNull();
   });
 });

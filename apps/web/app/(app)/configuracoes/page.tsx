@@ -1,12 +1,15 @@
 import { THEME_COOKIE } from '@rede-social/contracts/branding';
 import { iconFor, ThemeToggle } from '@rede-social/core/ui';
 import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
-import { Button, Card, PageHeader, SectionTitle, StatusPill } from '@rede-social/ui';
+import { Button, Card, PageHeader, SectionTitle } from '@rede-social/ui';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
+import { PushSettingRow } from '@/components/push/PushControls';
+import { LogoutForm } from '@/components/shell/LogoutForm';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { env } from '@/lib/env';
 import { requirePlatformTenants } from '@/lib/platform';
 import { getHostTenant } from '@/lib/tenant-host';
 import { logout, setTheme } from '../actions';
@@ -74,8 +77,8 @@ function Group({
 }
 
 /**
- * `/configuracoes` (D-42): the kernel's settings page — theme toggle (D-41), placeholder rows that
- * Phase 3 (profile) and Phase 7 (push) wire, the app version and "Sair" (D-08, this device only).
+ * `/configuracoes` (D-42): the kernel's settings page — theme toggle (D-41), the profile row (Phase 3),
+ * this device's push switch (Phase 7, UI-D-256), the app version and "Sair" (D-08, this device only).
  * Server-rendered: the Switch reads its initial state from the `rede_theme` cookie, so there is no
  * loading state (E05/loading). On the platform host only Preferências and Sair render.
  */
@@ -97,10 +100,12 @@ export default async function SettingsPage({
   // API, so V2 handing story management to another role is a settings flip with no web change.
   // A tenant without the `stories` module carries neither the permission nor the row.
   let canManageStories = false;
+  let tenantName = '';
   if (platform) await requirePlatformTenants();
   else {
     const bootstrap = await requireBootstrap();
     role = bootstrap.membership.role;
+    tenantName = bootstrap.tenant.displayName;
     canManageStories = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
   }
 
@@ -114,7 +119,6 @@ export default async function SettingsPage({
   const version =
     process.env.NEXT_PUBLIC_APP_VERSION ?? process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'dev';
   const LogoutIcon = iconFor('log-out');
-  const soon = <StatusPill tone="neutral">{t('settings.soon')}</StatusPill>;
 
   return (
     <div className="flex flex-col gap-4">
@@ -144,8 +148,13 @@ export default async function SettingsPage({
               <ThemeToggle initial={theme} label={t('settings.rows.darkTheme')} action={setTheme} />
             }
           />
+          {/* 07-07 (UI-D-256): this device's push switch replaces the "Em breve" pill. Its server
+              render is the `checking` state; the real one is decided after mount. */}
           {platform ? null : (
-            <Row icon="bell" label={t('settings.rows.notifications')} trailing={soon} />
+            <PushSettingRow
+              vapidKey={env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null}
+              tenantName={tenantName}
+            />
           )}
         </Group>
         {isTenantAdmin || canManageStories ? (
@@ -176,12 +185,13 @@ export default async function SettingsPage({
             <Row icon="info" label={t('settings.rows.version', { version })} trailing={null} />
           </Group>
         )}
-        <form action={logout} className="border-t border-border p-4">
+        {/* 07-07: forgets this device's push subscription before signing out (T-07-45). */}
+        <LogoutForm action={logout} className="border-t border-border p-4">
           <Button type="submit" variant="ghost" fullWidth className="text-danger">
             <LogoutIcon aria-hidden size={18} />
             {t('logout')}
           </Button>
-        </form>
+        </LogoutForm>
       </Card>
     </div>
   );

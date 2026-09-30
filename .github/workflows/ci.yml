@@ -65,6 +65,8 @@ jobs:
           API_URL: http://127.0.0.1:8787
           NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-build-placeholder
+          # 07-07: a LOCAL-ONLY test VAPID public key (private half discarded; CI push is fake).
+          NEXT_PUBLIC_VAPID_PUBLIC_KEY: BJHs89NeHI8M9hJQWfvb1_irumrdO-cNFTwQZUHrWx3Lp3smi-NAifeRu5Pm4rWfwmQCL5GvEdK8_PVtNafxV1k
       # ROADMAP Phase 2 criterion 1 build-output gate: no authenticated or host-branded route is static.
       - name: "Build output: no authenticated route is static"
         run: pnpm check:static-routes

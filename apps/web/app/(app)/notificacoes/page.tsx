@@ -1,6 +1,8 @@
 import { PageHeader } from '@rede-social/ui';
 import { getTranslations } from 'next-intl/server';
+import { SoftAsk } from '@/components/push/PushControls';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { env } from '@/lib/env';
 import { loadNotifications } from '@/lib/notifications';
 import {
   type NotificationRowView,
@@ -14,7 +16,9 @@ import { NotificationsSurface } from './NotificationsSurface';
  * `/notificacoes` (NOTIF-02, D-231, UI-D-250) — the bell's destination, reached from the TopBar /
  * rail slot the notifications module's manifest declares (D-40, UI-D-268).
  *
- * `PageHeader` "Notificações" (back to `/inicio`), then `NotificationsSurface`: the "Novas" section
+ * `PageHeader` "Notificações" (back to `/inicio`), then the one-time push soft-ask card (07-07,
+ * UI-D-255: a client component that renders nothing on the server and decides after mount), then
+ * `NotificationsSurface`: the "Novas" section
  * (unread, newest first, with "Marcar todas como lidas" in its header), "Anteriores" (read), the
  * `InfiniteScroll` sentinel and, at the true end, the 90-day footer. The two sections are two keysets
  * (planning decision 9): page 1 of Novas is read here, and Anteriores' page 1 too only when Novas has
@@ -26,6 +30,9 @@ import { NotificationsSurface } from './NotificationsSurface';
  * Every string and time is built HERE on the server from ONE request instant (UI-D-14), and a row's
  * sentence comes from the web registry's renderer for its `kind` (UI-D-251).
  */
+/** Staff who answer the support chat get the soft-ask's staff body (the kernel's permission key). */
+const CHAT_SUPPORT_PERMISSION = 'chat.support';
+
 export default async function NotificationsPage() {
   const [bootstrap, t] = await Promise.all([requireBootstrap(), getTranslations('notifications')]);
 
@@ -63,6 +70,11 @@ export default async function NotificationsPage() {
         backLabel={t('back')}
         stickyTop="0px"
         className="md:static md:px-0"
+      />
+      <SoftAsk
+        vapidKey={env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null}
+        tenantName={bootstrap.tenant.displayName}
+        staff={bootstrap.permissions.includes(CHAT_SUPPORT_PERMISSION)}
       />
       <NotificationsSurface
         initialUnread={toViews(unreadPage?.items ?? [])}

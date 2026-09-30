@@ -7,10 +7,16 @@ import { useCallback, useEffect, useState } from 'react';
 
 /**
  * iOS "Adicione à Tela de Início" coach mark (D-33 [designed] screen `install-hint`, UI-SPEC
- * §PWA + E20). BUILT FOR PWA-02 AND INTENTIONALLY NOT MOUNTED IN THIS PHASE: no layout or page
- * imports it. Phase 7 mounts it gated on iOS Safari + not standalone + before requesting push
- * permission (CLAUDE.md PWA §1 — iOS only delivers Web Push to Home-Screen installs). There is no
- * Android install-prompt event listener anywhere in apps/web (CONTEXT Deferred Ideas).
+ * §PWA + E20). It is never mounted globally: Phase 7 mounts it FROM THE PUSH FLOW only
+ * (`components/push/PushControls.tsx`), as `variant="push"`, when an iPhone or iPad outside the Home
+ * Screen app taps "Ativar" (D-234, UI-D-257; CLAUDE.md PWA §1 — iOS only delivers Web Push to
+ * Home-Screen installs). There is no Android install-prompt event listener anywhere in apps/web
+ * (CONTEXT Deferred Ideas).
+ *
+ * `variant="push"` (UI-D-257) keeps the sheet geometry, carries the push copy
+ * (`pwa.install.push.*`), shows ONE full-width "Entendi" and no "Agora não", and writes NO 14-day
+ * dismissal: the sheet answers the member's tap, it is not a nag. It is controlled by `open`, and
+ * "Entendi", Escape, the backdrop and a drag-down all call `onClose`.
  *
  * Behaviour: "Entendi" closes without persisting; "Agora não" writes `rede_install_hint_dismissed`
  * (= now, ms) to localStorage and the sheet stays hidden for 14 days; Escape / backdrop / drag-down
@@ -69,8 +75,19 @@ function readDismissedAt(): number | null {
   }
 }
 
-export function InstallHint({ open }: { open?: boolean } = {}) {
+export type InstallHintVariant = 'install' | 'push';
+
+export function InstallHint({
+  open,
+  variant = 'install',
+  onClose,
+}: {
+  open?: boolean;
+  variant?: InstallHintVariant;
+  onClose?: () => void;
+} = {}) {
   const t = useTranslations('pwa');
+  const push = variant === 'push';
   // Closed until the effect runs: the decision needs the UA, matchMedia and localStorage, none of
   // which exist on the server (never rendered in the first HTML).
   const [visible, setVisible] = useState(false);
@@ -90,7 +107,10 @@ export function InstallHint({ open }: { open?: boolean } = {}) {
     );
   }, [open]);
 
-  const close = useCallback(() => setVisible(false), []);
+  const close = useCallback(() => {
+    setVisible(false);
+    onClose?.();
+  }, [onClose]);
   const dismiss = useCallback(() => {
     try {
       window.localStorage.setItem(INSTALL_HINT_DISMISSED_KEY, String(Date.now()));
@@ -98,7 +118,8 @@ export function InstallHint({ open }: { open?: boolean } = {}) {
       // Storage unavailable (private mode quota): the sheet simply closes for this session.
     }
     setVisible(false);
-  }, []);
+    onClose?.();
+  }, [onClose]);
 
   return (
     <BottomSheet open={visible} onClose={close}>
@@ -106,18 +127,22 @@ export function InstallHint({ open }: { open?: boolean } = {}) {
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand/10 text-brand">
           <Share aria-hidden size={28} />
         </div>
-        <h2 className="text-base font-bold leading-tight text-text">{t('install.title')}</h2>
+        <h2 className="text-base font-bold leading-tight text-text">
+          {push ? t('install.push.title') : t('install.title')}
+        </h2>
         <p className="text-sm leading-relaxed text-text-secondary">
-          {t('install.body')}
+          {push ? t('install.push.body') : t('install.body')}
           <Share aria-hidden size={16} className="ml-1 inline-block align-text-bottom" />
         </p>
         <div className="flex w-full flex-col gap-2 pt-2">
-          <Button variant="brand" fullWidth onClick={close}>
-            {t('install.confirm')}
+          <Button variant="brand" fullWidth onClick={close} data-install-hint-confirm={variant}>
+            {push ? t('install.push.confirm') : t('install.confirm')}
           </Button>
-          <Button variant="ghost" fullWidth onClick={dismiss}>
-            {t('install.dismiss')}
-          </Button>
+          {push ? null : (
+            <Button variant="ghost" fullWidth onClick={dismiss}>
+              {t('install.dismiss')}
+            </Button>
+          )}
         </div>
       </div>
     </BottomSheet>

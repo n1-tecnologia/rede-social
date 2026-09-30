@@ -4,6 +4,14 @@
  * kernel's server or database code (enforced by the `packages/core/ui/**` Biome override).
  */
 export { AppShell, type AppShellProps } from './AppShell';
+export {
+  BEFORE_LOGOUT_TIMEOUT_MS,
+  type BeforeLogout,
+  BeforeLogoutProvider,
+  runBeforeLogout,
+  useBeforeLogout,
+  useLogoutSubmit,
+} from './BeforeLogout';
 export { BottomNav, type BottomNavProps } from './BottomNav';
 export { BrandPreview, type BrandPreviewLabels, type BrandPreviewProps } from './BrandPreview';
 export { DesktopRail, type DesktopRailProps } from './DesktopRail';
