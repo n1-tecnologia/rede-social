@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-06-PLAN.md
-last_updated: "2026-09-30T18:25:05.485Z"
+stopped_at: Completed 07-07-PLAN.md
+last_updated: "2026-09-30T18:54:50.164Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-06 complete: Web Push server half (push_subscriptions + four tenant-scoped definers, POST/DELETE /v1/notifications/push-subscriptions with the SSRF endpoint rule, pushChannel on the registry, notifications.push-send with badge, 3072-byte v1 payload, fake/webpush transport seam, failed-only re-enqueue, VAPID env rule, pgTAP 153); next 07-07 (Wave 6)"
-state_head: 38a7de87d2c9a924b0ada50a260273d53fdb219a
+last_activity_desc: "07-07 complete: Web Push browser half (service-worker push/click/resubscribe with a zod-free payload mirror, lib/push.ts tap-only flow with the iPadOS-aware iOS gate and VAPID-rotation resync, BFF /api/push/subscriptions, PushSwitchRow in Configurações, the soft-ask card, InstallHint push variant, logout unsubscribe via the kernel BeforeLogout seam, push.spec 17+1 skipped); next 07-08 (Wave 7)"
+state_head: 56da25b6935814273e48f6a9b1acd378dfc16602
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 109
-  completed_plans: 101
+  completed_plans: 102
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 6 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half); next: 07-07 (Web Push browser half). Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
+Plan: 7 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half); next: 07-08. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
 Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-06 (push subscriptions, push channel and push-send job on the fake transport; SC 4 cleanup via a tenant-wide dead-device sweep; NOTIF-03/NOTIF-04 stay open for sibling plans 07-07/07-08; env hosts still tria-*, full API integration 679/680 with only signup case 2 failing)
+Last activity: 2026-09-30 — Completed 07-07 (push on/off from a tap in Configurações and on the /notificacoes soft-ask, iOS/iPadOS install gate, SW banner/foreground/badge/click, logout forgets the device; NEXT_PUBLIC_VAPID_PUBLIC_KEY local test key must be added to apps/web/.env.local by the developer; NOTIF-03/PWA-02 stay open for sibling plans)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -161,6 +161,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P04 | 3h10m | 3 tasks | 55 files |
 | Phase 07 P05 | 31 min | 2 tasks | 24 files |
 | Phase 07 P06 | 25 min | 3 tasks | 36 files |
+| Phase 07 P07 | 26 min | 3 tasks | 32 files |
 
 ## Accumulated Context
 
@@ -517,6 +518,10 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-06: the push adapter enqueues notifications.push-send only for recipients with a live device, chunked 100 per job, keyed push:<dedupeKey>:<chunk>; likes (push: null) and empty fan-outs enqueue nothing
 - [Phase 07]: 07-06: PUSH_TRANSPORT=fake is the kernel default and is pinned in the API and notifications vitest configs; production needs vapid-public-key-prod, vapid-private-key-prod, vapid-subject-prod on the worker plus PUSH_TRANSPORT=webpush, and only NEXT_PUBLIC_VAPID_PUBLIC_KEY on Vercel (07-11)
 - [Phase 07]: 07-06: the push-send job throws only before any send; the report and failed-only re-enqueue step logs its own failure, so pg-boss never re-sends to subscriptions that already succeeded
+- [Phase 07]: 07-07: the service worker imports no zod; isPushPayloadV1 hand-mirrors the strict pushPayloadSchema (496 KB -> 44 KB), pinned by a parity unit test
+- [Phase 07]: 07-07: push saves send subscriptionBody() {endpoint, keys, userAgent}; the strict API schema refuses toJSON()'s expirationTime
+- [Phase 07]: 07-07: kernel BeforeLogoutProvider/useLogoutSubmit lets the desktop rail await LiveShell's forget-this-device cleanup (2 s bound); Configurações uses the web LogoutForm
+- [Phase 07]: 07-07: NEXT_PUBLIC_VAPID_PUBLIC_KEY is optional; a LOCAL-ONLY test public key lives in apps/web/.env.example, ci.yml and scripts/local-env.sh (private half discarded)
 
 ### Pending Todos
 
@@ -586,6 +591,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T18:24:41.331Z
-Stopped at: Completed 07-06-PLAN.md
+Last session: 2026-09-30T18:54:50.056Z
+Stopped at: Completed 07-07-PLAN.md
 Resume file: None
