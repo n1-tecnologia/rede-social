@@ -1466,6 +1466,377 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 7 sweep: every Phase 7 route answers a demo session about its own tenant only, each block beside its positive control (07-11, TENANT-05)', async () => {
+    // The route inventory this case closes (07-11). "b10/b11/b12" = already covered by that case;
+    // "sweep" = asserted below. Every negative sits beside a demo positive control in this test, and
+    // every route family is also refused on the lab's registered host (403 TENANT_HOST_MISMATCH).
+    //
+    // | Route                                              | Covered by   | Negative asserted here                         |
+    // |----------------------------------------------------|--------------|------------------------------------------------|
+    // | GET    /v1/notifications (unread + read sections)  | b10          | —                                              |
+    // | POST   /v1/notifications/seen                       | sweep        | the lab row keeps seen_at null                 |
+    // | POST   /v1/notifications/read-all                   | sweep        | the lab row keeps read_at null                 |
+    // | POST   /v1/notifications/{id}/read                  | sweep        | the lab id is a bare 404, the lab row unread   |
+    // | POST   /v1/notifications/push-subscriptions         | b11          | —                                              |
+    // | DELETE /v1/notifications/push-subscriptions         | b11          | —                                              |
+    // | GET    /v1/me/counters                              | sweep        | lab rows never move the demo member's counters |
+    // | GET    /v1/chat/support                             | sweep        | the demo member's own thread, never the lab's  |
+    // | POST   /v1/chat/support/messages                    | sweep        | creates a DEMO thread; the lab thread untouched|
+    // | GET    /v1/chat/conversations/{id}                  | sweep        | bare 404 for a demo member and demo staff      |
+    // | GET    /v1/chat/conversations/{id}/messages         | b12 + sweep  | bare 404 (b12); staff lane re-asserted here     |
+    // | POST   /v1/chat/conversations/{id}/messages         | sweep        | bare 404 for demo staff, 403 for a member      |
+    // | POST   /v1/chat/conversations/{id}/read             | sweep        | bare 404 for a demo member and demo staff      |
+    // | GET    /v1/chat/inbox                               | sweep        | a full demo staff walk never lists the lab one |
+    // | GET    /v1/feed/comments/{id}/thread                | sweep        | the lab comment id is a bare 404               |
+    //
+    // Realtime topics (`tenant:<t>:user:<u>`, `tenant:<t>:conv:<c>`, `tenant:<t>:support-inbox`) keep
+    // their cross-tenant negatives in `realtime.test.ts` (07-03, 07-08); the tables in
+    // `supabase/tests/020-tenant-isolation.sql`.
+    //
+    // A THROWAWAY demo member carries the demo side, so marking everything read or seen, and opening
+    // a support thread, never disturbs the seeded rows later files count. rede-lab has
+    // `notifications` and `chat` OFF in the seed: both are turned on here (the lab rows are then
+    // live and readable by their own users, the strongest negative) and restored in `finally`.
+    const labConversation = '0b130000-0000-4000-8000-000000000001';
+    const sweepEmail = `sweep-${RUN}@rede-demo.local`;
+    const sweepMember = await throwawayMember(tenantIds.demo, sweepEmail);
+    const sweepUser = throwawayUsers[throwawayUsers.length - 1] ?? '';
+    const [labUser] = await adminSql<{ id: string }[]>`
+      select id::text as id from auth.users where email = 'member@rede-lab.local'`;
+    const labUserId = labUser?.id ?? '';
+    const demoSupport = await signInAs('support@rede-demo.local', SEED_PASSWORD);
+    const labSupport = await signInAs('support@rede-lab.local', SEED_PASSWORD);
+    const subject = '0b130000-0000-4000-8000-0000000000aa';
+    const dedupe = `isolation.sweep:${RUN}`;
+
+    const call = (
+      method: 'GET' | 'POST',
+      path: string,
+      token: string,
+      host: string,
+      body?: object,
+    ) =>
+      api.request(path, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          ...(body ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    /** One bare NOT_FOUND: no details, nothing that tells "another tenant's" from "unknown". */
+    const expectBare404 = async (res: Response) => {
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error).not.toHaveProperty('details');
+    };
+    const expectHostMismatch = async (res: Response) => {
+      expect(res.status).toBe(403);
+      expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+    };
+    const counters = async (token: string, host: string) => {
+      const res = await call('GET', '/v1/me/counters', token, host);
+      expect(res.status).toBe(200);
+      return (await res.json()) as {
+        unreadNotifications: number;
+        unreadConversations: number;
+        conversationsBadge: string;
+      };
+    };
+    const labRow = async (id: string) => {
+      const [row] = await adminSql<{ read_at: string | null; seen_at: string | null }[]>`
+        select read_at::text, seen_at::text from public.notifications where id = ${id}::uuid`;
+      return row;
+    };
+
+    const flagsBefore = await adminSql<{ module_key: string; enabled: boolean }[]>`
+      select module_key, enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key in ('notifications', 'chat')`;
+    const insertedNotifications: string[] = [];
+    const commentIds: string[] = [];
+    let sweepConversation = '';
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'notifications', true), (${tenantIds.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+
+      // ── /v1/me/counters: the demo member's own numbers, which a lab row never moves ──────────
+      const demoCountersBefore = await counters(sweepMember, HOSTS.demo);
+      const labCountersBefore = await counters(tokens.labMember, HOSTS.lab);
+
+      // Adjacent notification rows: the SAME kind, dedupe key and subject on both sides.
+      const [labNotification] = await adminSql<{ id: string }[]>`
+        insert into public.notifications
+          (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id)
+        values (${tenantIds.lab}::uuid, ${labUserId}::uuid, 'feed.post', ${dedupe}, 'post', ${subject}::uuid)
+        returning id::text as id`;
+      const labNotificationId = labNotification?.id ?? '';
+      insertedNotifications.push(labNotificationId);
+      // A lab support thread with a message from the lab member: live in the lab inbox.
+      await adminSql`
+        insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+        values (${labConversation}::uuid, ${tenantIds.lab}::uuid, 'support', ${labUserId}::uuid)`;
+      await adminSql`
+        insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+        values (${labConversation}::uuid, ${tenantIds.lab}::uuid, ${labUserId}::uuid, 'member')`;
+      await adminSql`
+        insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+        values (${tenantIds.lab}::uuid, ${labConversation}::uuid, ${labUserId}::uuid, 'member',
+                'Oi, preciso de ajuda com meu cadastro.')`;
+
+      // The lab rows never reach the demo member's counters…
+      expect(await counters(sweepMember, HOSTS.demo)).toEqual(demoCountersBefore);
+      // …while the lab member's own counter moved (positive control: the counter is not dead).
+      const labCountersAfter = await counters(tokens.labMember, HOSTS.lab);
+      expect(labCountersAfter.unreadNotifications).toBe(labCountersBefore.unreadNotifications + 1);
+      // …and a DEMO row for the demo member does move its own counter.
+      const [demoNotification] = await adminSql<{ id: string }[]>`
+        insert into public.notifications
+          (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id)
+        values (${tenantIds.demo}::uuid, ${sweepUser}::uuid, 'feed.post', ${dedupe}, 'post', ${subject}::uuid)
+        returning id::text as id`;
+      const demoNotificationId = demoNotification?.id ?? '';
+      insertedNotifications.push(demoNotificationId);
+      expect((await counters(sweepMember, HOSTS.demo)).unreadNotifications).toBe(
+        demoCountersBefore.unreadNotifications + 1,
+      );
+      await expectHostMismatch(await call('GET', '/v1/me/counters', sweepMember, HOSTS.lab));
+
+      // ── /v1/notifications/{id}/read, /seen, /read-all ────────────────────────────────────────
+      await expectBare404(
+        await call('POST', `/v1/notifications/${labNotificationId}/read`, sweepMember, HOSTS.demo),
+      );
+      expect((await labRow(labNotificationId))?.read_at).toBeNull();
+      // Positive control: the demo member's own row reads.
+      const ownRead = await call(
+        'POST',
+        `/v1/notifications/${demoNotificationId}/read`,
+        sweepMember,
+        HOSTS.demo,
+      );
+      expect(ownRead.status).toBe(204);
+      expect((await labRow(demoNotificationId))?.read_at).not.toBeNull();
+      // A second unread demo row, so /seen and /read-all have something of their own to change.
+      const [demoSecond] = await adminSql<{ id: string }[]>`
+        insert into public.notifications
+          (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id)
+        values (${tenantIds.demo}::uuid, ${sweepUser}::uuid, 'feed.post', ${`${dedupe}:2`}, 'post', ${subject}::uuid)
+        returning id::text as id`;
+      const demoSecondId = demoSecond?.id ?? '';
+      insertedNotifications.push(demoSecondId);
+      expect((await call('POST', '/v1/notifications/seen', sweepMember, HOSTS.demo)).status).toBe(
+        204,
+      );
+      expect((await labRow(demoSecondId))?.seen_at).not.toBeNull();
+      expect((await labRow(labNotificationId))?.seen_at).toBeNull();
+      expect(
+        (await call('POST', '/v1/notifications/read-all', sweepMember, HOSTS.demo)).status,
+      ).toBe(204);
+      expect((await labRow(demoSecondId))?.read_at).not.toBeNull();
+      expect((await labRow(labNotificationId))?.read_at).toBeNull();
+      await expectHostMismatch(
+        await call('POST', '/v1/notifications/read-all', sweepMember, HOSTS.lab),
+      );
+      await expectHostMismatch(
+        await call('POST', `/v1/notifications/${labNotificationId}/read`, sweepMember, HOSTS.lab),
+      );
+      expect((await labRow(labNotificationId))?.read_at).toBeNull();
+
+      // ── /v1/chat/support and /v1/chat/support/messages ──────────────────────────────────────
+      // Before its first message the demo member has no thread (D-220), and never the lab's.
+      const before = await call('GET', '/v1/chat/support', sweepMember, HOSTS.demo);
+      expect(before.status).toBe(200);
+      expect(((await before.json()) as { conversation: unknown }).conversation).toBeNull();
+      const sent = await call('POST', '/v1/chat/support/messages', sweepMember, HOSTS.demo, {
+        body: 'Oi, preciso de ajuda com meu cadastro.',
+      });
+      expect(sent.status).toBe(201);
+      sweepConversation = ((await sent.json()) as { conversationId: string }).conversationId;
+      expect(sweepConversation).not.toBe(labConversation);
+      const [created] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text as tenant_id from public.chat_conversations
+         where id = ${sweepConversation}::uuid`;
+      expect(created?.tenant_id).toBe(tenantIds.demo);
+      const after = await call('GET', '/v1/chat/support', sweepMember, HOSTS.demo);
+      expect(((await after.json()) as { conversation: { id: string } }).conversation.id).toBe(
+        sweepConversation,
+      );
+      await expectHostMismatch(await call('GET', '/v1/chat/support', sweepMember, HOSTS.lab));
+      await expectHostMismatch(
+        await call('POST', '/v1/chat/support/messages', sweepMember, HOSTS.lab, { body: 'Oi.' }),
+      );
+
+      // ── /v1/chat/conversations/{id} (detail) ─────────────────────────────────────────────────
+      const conversation = (id: string) => `/v1/chat/conversations/${id}`;
+      expect(
+        (await call('GET', conversation(sweepConversation), sweepMember, HOSTS.demo)).status,
+      ).toBe(200);
+      expect(
+        (await call('GET', conversation(sweepConversation), demoSupport, HOSTS.demo)).status,
+      ).toBe(200);
+      expect(
+        (await call('GET', conversation(labConversation), tokens.labMember, HOSTS.lab)).status,
+      ).toBe(200);
+      await expectBare404(
+        await call('GET', conversation(labConversation), sweepMember, HOSTS.demo),
+      );
+      await expectBare404(
+        await call('GET', conversation(labConversation), demoSupport, HOSTS.demo),
+      );
+      await expectHostMismatch(
+        await call('GET', conversation(labConversation), demoSupport, HOSTS.lab),
+      );
+
+      // ── /v1/chat/conversations/{id}/messages (GET + POST) ────────────────────────────────────
+      const messagesPath = (id: string) => `${conversation(id)}/messages`;
+      expect(
+        (await call('GET', messagesPath(sweepConversation), demoSupport, HOSTS.demo)).status,
+      ).toBe(200);
+      await expectBare404(
+        await call('GET', messagesPath(labConversation), demoSupport, HOSTS.demo),
+      );
+      // Positive control: demo staff reply to the demo thread.
+      const reply = await call('POST', messagesPath(sweepConversation), demoSupport, HOSTS.demo, {
+        body: 'Olá! Já vamos te ajudar.',
+      });
+      expect(reply.status).toBe(201);
+      // Demo staff replying into the lab thread: the bare 404, and nothing is written there.
+      await expectBare404(
+        await call('POST', messagesPath(labConversation), demoSupport, HOSTS.demo, {
+          body: 'Olá! Já vamos te ajudar.',
+        }),
+      );
+      // A member never replies through the staff lane: FORBIDDEN before any lookup, whatever the id.
+      const memberReply = await call(
+        'POST',
+        messagesPath(labConversation),
+        sweepMember,
+        HOSTS.demo,
+        {
+          body: 'Olá.',
+        },
+      );
+      expect(memberReply.status).toBe(403);
+      const [labMessages] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.chat_messages where conversation_id = ${labConversation}::uuid`;
+      expect(labMessages?.n).toBe(1);
+      await expectHostMismatch(
+        await call('POST', messagesPath(labConversation), demoSupport, HOSTS.lab, { body: 'Olá.' }),
+      );
+
+      // ── /v1/chat/conversations/{id}/read ─────────────────────────────────────────────────────
+      const readPath = (id: string) => `${conversation(id)}/read`;
+      const labReadPositions = () =>
+        adminSql<{ staff: string; member: string }[]>`
+          select c.staff_last_read_seq::text as staff, p.last_read_seq::text as member
+            from public.chat_conversations c
+            join public.chat_participants p on p.conversation_id = c.id
+           where c.id = ${labConversation}::uuid`;
+      const labPositionsBefore = await labReadPositions();
+      expect(labPositionsBefore).toHaveLength(1);
+      expect(
+        (await call('POST', readPath(sweepConversation), sweepMember, HOSTS.demo, { seq: 1 }))
+          .status,
+      ).toBe(204);
+      expect(
+        (await call('POST', readPath(sweepConversation), demoSupport, HOSTS.demo, { seq: 1 }))
+          .status,
+      ).toBe(204);
+      await expectBare404(
+        await call('POST', readPath(labConversation), sweepMember, HOSTS.demo, { seq: 1 }),
+      );
+      await expectBare404(
+        await call('POST', readPath(labConversation), demoSupport, HOSTS.demo, { seq: 1 }),
+      );
+      expect(await labReadPositions()).toEqual(labPositionsBefore);
+      await expectHostMismatch(
+        await call('POST', readPath(labConversation), demoSupport, HOSTS.lab, { seq: 1 }),
+      );
+
+      // ── /v1/chat/inbox: a full demo staff walk never lists the lab thread ──────────────────────
+      const walkInbox = async (token: string, host: string) => {
+        const seen: string[] = [];
+        let cursor: string | null = null;
+        for (let guard = 0; guard < 200; guard++) {
+          const query: string = cursor
+            ? `?limit=5&cursor=${encodeURIComponent(cursor)}`
+            : '?limit=5';
+          const res = await call('GET', `/v1/chat/inbox${query}`, token, host);
+          expect(res.status).toBe(200);
+          const body = (await res.json()) as {
+            items: { conversationId: string }[];
+            nextCursor: string | null;
+          };
+          seen.push(...body.items.map((item) => item.conversationId));
+          cursor = body.nextCursor;
+          if (cursor === null) break;
+        }
+        return seen;
+      };
+      const demoInbox = await walkInbox(demoSupport, HOSTS.demo);
+      expect(demoInbox).toContain(sweepConversation);
+      expect(demoInbox).not.toContain(labConversation);
+      const labInbox = await walkInbox(labSupport, HOSTS.lab);
+      expect(labInbox).toContain(labConversation);
+      expect(labInbox).not.toContain(sweepConversation);
+      await expectHostMismatch(await call('GET', '/v1/chat/inbox', demoSupport, HOSTS.lab));
+
+      // ── /v1/feed/comments/{id}/thread ────────────────────────────────────────────────────────
+      const commentOn = async (tenantId: string, postId: string) => {
+        const [row] = await adminSql<{ id: string }[]>`
+          insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth)
+          select ${tenantId}::uuid, ${postId}::uuid, m.user_id, 'Comentário de teste.', 0, null, null
+            from public.memberships m
+           where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant'
+           limit 1
+          returning id::text as id`;
+        if (!row) throw new Error(`could not seed a comment in ${tenantId}`);
+        commentIds.push(row.id);
+        return row.id;
+      };
+      const demoComment = await commentOn(tenantIds.demo, postIds.demo);
+      const labComment = await commentOn(tenantIds.lab, postIds.lab);
+      const thread = (id: string) => `/v1/feed/comments/${id}/thread`;
+      const ownThread = await call('GET', thread(demoComment), tokens.demoMember, HOSTS.demo);
+      expect(ownThread.status).toBe(200);
+      expect(((await ownThread.json()) as { targetId: string }).targetId).toBe(demoComment);
+      expect((await call('GET', thread(labComment), tokens.labMember, HOSTS.lab)).status).toBe(200);
+      await expectBare404(await call('GET', thread(labComment), tokens.demoMember, HOSTS.demo));
+      await expectHostMismatch(await call('GET', thread(labComment), tokens.demoMember, HOSTS.lab));
+    } finally {
+      if (commentIds.length > 0) {
+        await adminSql`delete from public.feed_comments where id = any(${commentIds}::uuid[])`;
+      }
+      await adminSql`delete from public.chat_conversations where id = ${labConversation}::uuid`;
+      if (sweepConversation) {
+        await adminSql`delete from public.chat_conversations where id = ${sweepConversation}::uuid`;
+      }
+      if (insertedNotifications.length > 0) {
+        await adminSql`
+          delete from public.notifications where id = any(${insertedNotifications}::uuid[])`;
+      }
+      await adminSql`delete from public.notifications where user_id = ${sweepUser}::uuid`;
+      // The lab's rows go back EXACTLY as found (the seed keeps both modules off for rede-lab).
+      for (const key of ['notifications', 'chat'] as const) {
+        const found = flagsBefore.find((row) => row.module_key === key);
+        if (found) {
+          await adminSql`
+            update public.tenant_modules set enabled = ${found.enabled}
+             where tenant_id = ${tenantIds.lab}::uuid and module_key = ${key}`;
+        } else {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantIds.lab}::uuid and module_key = ${key}`;
+        }
+      }
+      moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,
