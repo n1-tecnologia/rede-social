@@ -905,19 +905,23 @@ Execution is sequential here (no parallel worktrees). Each plan leads with a ver
 | A11 | Story comments and post/story likes: only `story.commented` (to the story author) and `comment.liked` / replies notify; `post.liked`/`story.liked` do not (NOTIF-01 lists likes on *comments* only) | Pattern 6 | Missing or extra kinds; confirm at UI-SPEC |
 | A12 | A reel notification opens `/post/<id>` (no reel detail route exists) | UI constraints | UI-SPEC may prefer `/reels`; routing only |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Production backfill of reminders for already-scheduled events.**
    - Known: arming happens at write time; existing upcoming events have no jobs.
    - Unclear: whether production has any upcoming events at deploy.
    - Recommendation: ship `scripts/arm-event-reminders.ts` and list it in DEPLOY.md as an optional post-deploy step.
+   - RESOLVED: 07-05 ships `scripts/arm-event-reminders.ts` (a script, so the admin lane is allowed). It arms the same `events.reminder` jobs the write path arms, idempotent through the same `singletonKey`, and skips windows already past. 07-11 lists it in DEPLOY.md's "Phase 7 release" steps as a user-run, optional post-deploy command.
 2. **Durable domain-event delivery (bus at-most-once).**
    - Known: request-path emit is after commit and swallowed on failure.
    - Recommendation: accept for V1 bell rows; record `emitInTx` as a deferred item; revisit if the UAT shows lost notifications.
+   - RESOLVED: accepted for V1 bell rows (07-01 planning decision). Chat delivery stays durable because the message row and its trigger-published signal commit together (07-08). EVENT-07 stays durable because reminders are armed inside the events module's own write transactions (07-05). 07-01's SUMMARY records a kernel `emitInTx(tx, …)` as a deferred item in the phase's `deferred-items.md`.
 3. **Real-device push testing path.**
    - Known: phones cannot reach `*.localhost`; production is live; there is no staging.
    - Recommendation: run the real-iPhone + Android plan **against production** after the phase deploys, with a throwaway test tenant/domain (or the pilot tenant with test accounts). Document it as the UAT item, and default its status to blocked until it is run (memory: never record a pass without it).
+   - RESOLVED: 07-11 writes `docs/phase-07-device-test-plan.md` (iPhone standalone on iOS 16.4+ and Android Chrome: enable, receive with tenant name and icon, tap opens the target, focused suppression, tag replacement, the composer above the keyboard). It is run against production after the user-run release steps, and every real-device item is a UAT row that defaults to blocked until it has been run. No plan records an automated pass for it.
 4. **Should `support_tenant` see member profiles from the staff thread header?** D-224 links to the existing member profile, which `support_tenant` can already open (PROF-02, any member). No change is expected; confirm in the UI-SPEC.
+   - RESOLVED: yes, with no change. UI-SPEC UI-D-263 links the staff thread header to `/membros/{membershipId}` (PROF-02), and 07-10 builds that link. No permission or route changes.
 
 ## Environment Availability
 

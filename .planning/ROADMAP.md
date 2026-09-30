@@ -571,7 +571,51 @@ Plans:
   3. Member can open their single support conversation and send text messages; `support_tenant` sees an inbox of member conversations ordered by last activity with unread indicators and can open and reply to any of them; new messages appear in real time on both sides in per-conversation sequence order (catch-up after reconnect loses nothing), and the member sees an unread badge on the chat entry when support replied.
   4. Realtime signals reach only their audience: a browser subscribing to another tenant's user topic, another user's conversation topic or the support inbox without the role is rejected by RLS on `realtime.messages` (covered by the isolation suite); payloads carry ids only and the client refetches through the API; blocking a member drops their Realtime access and push subscriptions.
 
-**Plans**: TBD
+**Plans**: 11 plans
+
+Plans:
+
+**Wave 1**
+
+- [ ] 07-01-PLAN.md — Tracer: `@rede-social/module-notifications`, the kernel notification-source seam, the reshaped `notifications`, Realtime authorisation (`app.realtime_topic_allowed`, the `realtime.messages` policy, `app.realtime_signal`), the fan-out definer, the feed's `post.published` source, the list with seen/read, real bootstrap counters, pgTAP 150/151 (local reset gated on the developer's consent)
+- [ ] 07-02-PLAN.md — The D-33 design gate: sketch 007 of the nine prototype-less surfaces plus the two proto deltas, shipped `approved: false`
+
+**Wave 2**
+
+- [ ] 07-03-PLAN.md — Live bell: `@supabase/realtime-js@2.116.0` behind a legitimacy checkpoint, the BFF token route, the kernel `RealtimeProvider`/`LiveCountersProvider`, `/v1/me/counters`, the live SC 4 negatives, the app badge
+
+**Wave 3** *(Task 3 blocked on the sketch approval)*
+
+- [ ] 07-04-PLAN.md — Content kinds: likes/replies on a member's comments, stories, story comments, keep-and-mark retraction, 90-day prune through the sweeper, deep links with the comment highlight and the expired-story notice
+
+**Wave 4** *(Task 2 blocked on the sketch approval)*
+
+- [ ] 07-05-PLAN.md — Event kinds and EVENT-07: published/reactivated sources, in-transaction reminder arming, the `events.reminder` job with fire-time checks, `event.reminder_due`, the backfill script
+
+**Wave 5**
+
+- [ ] 07-06-PLAN.md — Push backend: `push_subscriptions`, the push channel on the registry, `notifications.push-send`, the fake/web-push transport seam, VAPID env rules, pgTAP 153
+
+**Wave 6** *(Task 2 blocked on the sketch approval)*
+
+- [ ] 07-07-PLAN.md — Push web: the service-worker handlers, the tap-only subscribe flow, the Configurações switch, the soft-ask card, the iOS `InstallHint` push variant, logout unsubscribe
+
+**Wave 7**
+
+- [ ] 07-08-PLAN.md — Chat backend: `@rede-social/module-chat`, the seq and signal triggers, participant-aware RLS, lazy support thread, staff reply and inbox, shared read state, dot/count counters, push-only support source, pgTAP 152
+
+**Wave 8** *(Task 2 blocked on the sketch approval)*
+
+- [ ] 07-09-PLAN.md — Chat web (member): the re-homed linkifier, bubbles and composer, `/suporte` thread with live append and catch-up, the dot badge
+
+**Wave 9** *(blocked on the sketch approval)*
+
+- [ ] 07-10-PLAN.md — Chat web (staff): the inbox, the staff thread with the profile link and read-only states, the desktop split view
+
+**Wave 10**
+
+- [ ] 07-11-PLAN.md — Phase gate: the isolation sweep, `phase7-smoke.spec.ts`, DEPLOY.md release steps (VAPID secrets, Realtime private-only, quota), the real-device test plan (blocked until run), `pnpm verify`
+
 **UI hint**: yes
 **Research needed**: Shape and cost of RLS policies on `realtime.messages` (membership join vs claim) and `realtime.send` vs `broadcast_changes` trigger choice; Realtime connection quota sizing on the Free plan; "new post to every member" fan-out strategy (eager rows vs hourly collapse) decided with pilot member count; iOS 16.4+ standalone push gating, Badging API support, push handlers in the Serwist service worker; per-conversation `seq` generation under concurrent inserts and catch-up cursor semantics; private-channel authorization tests for non-participants.
 **Notes**: Build order inside the phase: notifications + Realtime provider first (lowest-risk realtime consumer), then push (real-iPhone and Android test plan is a deliverable), then chat reusing topics, worker, push and unread patterns. Chat schema (`conversations` with `kind`, `participants` with `role`/`last_read_at`, `messages` with `seq`) is generic so V2 member-to-member chat is a `kind` value, not a migration; one open support conversation per member enforced by a partial unique index. Notification fan-out is idempotent on `(event_id, user_id)` and never runs inside the producing request. Member-to-member direct messages (CHAT-06), member blocking (CHAT-07) and the follower-scoped notification rules moved to Phase 11 (post-MVP) on 2026-09-25; they reuse this phase's conversations, topics, unread badge and push.
@@ -675,7 +719,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
-| 7. Notifications, Web Push & Chat | 0/TBD | Not started | - |
+| 7. Notifications, Web Push & Chat | 0/11 | Planned | - |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
