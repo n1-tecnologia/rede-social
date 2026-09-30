@@ -5,6 +5,7 @@ import { createTranslator } from 'next-intl';
 import postgres from 'postgres';
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import notificationMessages from '../messages/pt-BR/notifications.json' with { type: 'json' };
+import { closeChatAdmin, SEED_SUPPORT_CONVERSATION_ID, setMemberReadSeq } from './chat-admin';
 import { hosts, login, SEED_PASSWORD, seededFeed, seededFeedPaging, users } from './fixtures';
 import {
   clearNotifications,
@@ -74,6 +75,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await deletePostsByCaptionPrefix(CAPTION_PREFIX);
   await closeNotificationsAdmin();
+  await closeChatAdmin();
   await stopWorker();
 });
 
@@ -489,13 +491,17 @@ test.describe('notifications ao vivo', () => {
       });
     });
     await insertNotificationRows(users.demoMember, { unread: 3, read: 0 }, 'Icone');
+    // 07-09 (D-239, chat half): the seeded support thread (07-08) carries a staff reply the member
+    // has not read, so the icon also counts the member's chat dot as ONE. The read position is put
+    // back to the seed's 0 first, so a previous visit to /suporte cannot change the sum.
+    await setMemberReadSeq(SEED_SUPPORT_CONVERSATION_ID, 0);
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await expect(badgeOf(page)).toHaveText('3');
     await expect
       .poll(() =>
         page.evaluate(() => (window as unknown as { __appBadge: number[] }).__appBadge.at(-1)),
       )
-      .toBe(3);
+      .toBe(3 + 1);
   });
 
   test('UI-D-265: with Realtime unreachable the bell still shows the server count, and nothing says Conectando', async ({
