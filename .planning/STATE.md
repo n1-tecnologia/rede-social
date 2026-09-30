@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-09-PLAN.md
-last_updated: "2026-09-30T20:23:36.454Z"
+stopped_at: Completed 07-10-PLAN.md
+last_updated: "2026-09-30T21:06:07.881Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-09 complete: member support thread (/suporte for members with ThreadHeader and greeting, fixed-height ThreadPane with afterSeq catch-up on signal/subscribe/refocus, 80px auto-scroll or pill, keepalive read marks, optimistic send via server action, BFF messages GET and read POST, the shared linkifier re-homed into @rede-social/ui, Badge dot on the chat slot with stateful names, LiveShell chat events and support-inbox join, chat membro e2e 16/16); staff /suporte is not-found until 07-10; next 07-10"
-state_head: fbb36b3a902764f52dd7413edcbe0b1a71085a6c
+last_activity_desc: "07-10 complete: staff side of support (InboxRow, shared /suporte layout with SupportSplit (list persisted, one 288px|1fr card from lg), SupportInbox live page-1 refetch through GET /api/chat/inbox on support-inbox signals with keyset load-more, /suporte/[conversationId] staff thread with the profile-link ThreadHeader, staff bubbles, blocked/departed read-only notices and the 409 race, one not-found screen, chat equipe e2e; ledger 63 fixed); CHAT-03/04 stay open until 07-11; next 07-11"
+state_head: 2570b9632b0e17dd87f0ba5e0e1d2b5479c36594
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 109
-  completed_plans: 104
+  completed_plans: 105
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 9 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half, 07-08 chat server side, 07-09 member support thread); next: 07-10. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
+Plan: 10 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half, 07-08 chat server side, 07-09 member support thread, 07-10 staff inbox and thread); next: 07-11. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
 Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-09 (the member's support thread at /suporte with live append, catch-up and read marks, the chat dot and stateful slot names, the shared linkifier in @rede-social/ui; staff /suporte is the not-found screen until 07-10; plan-level e2e green apart from the known cold-run feed-comments mobile flake)
+Last activity: 2026-09-30 — Completed 07-10 (the staff inbox at /suporte with the live support-inbox refresh and keyset paging, the staff thread at /suporte/[conversationId] with the profile link, read-only notices and the block race, the lg split keeping the list in place; plan-level e2e chat + notifications + push 93 passed, 5 skipped by design)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -164,6 +164,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P07 | 26 min | 3 tasks | 32 files |
 | Phase 07 P08 | 37 min | 3 tasks | 44 files |
 | Phase 07 P09 | 42min | 3 tasks | 53 files |
+| Phase 07 P10 | 39min | 2 tasks | 27 files |
 
 ## Accumulated Context
 
@@ -533,6 +534,10 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-09: chat views carry the tenant-local dayKey and a server-formatted time; day labels are recomputed on the client from server-provided todayKey/yesterdayKey without reading a clock
 - [Phase 07]: 07-09: LiveShell joins the tenant support-inbox topic only when bootstrap.permissions includes chat.support (supportInbox prop from the (app) layout), and refetches counters on chat.unread, chat.message and chat.read
 - [Phase 07]: 07-09: with experimental.useOffline a transport-failed server action is retried by Next instead of rejecting; the composer's draft restore covers server errors, and an offline send stays 'Enviando…' until it goes through
+- [Phase 07]: 07-10: the staff inbox lives in the shared /suporte layout segment (list rendered once, streamed in its own Suspense boundary); a client SupportSplit reads useSelectedLayoutSegment() and lays out list/pane with CSS only, one 288px|1fr card from lg
+- [Phase 07]: 07-10: module inbox rows stay plain links; SupportInbox delegates plain left clicks to router.push(href, { scroll: false }) so the list keeps its state and scroll across thread navigations
+- [Phase 07]: 07-10: the inbox refetches page 1 through GET /api/chat/inbox on chat.message/chat.read/resubscribe/refocus and merges it at the top by conversation id; load-more is loadMoreInboxAction by keyset
+- [Phase 07]: 07-10: the conversation not-found screen names the caller's tenant from the bootstrap (host shell only as fallback); a staff reply racing a block restores the draft with the notice, toasts it and router.refresh() swaps in the read-only notice
 
 ### Pending Todos
 
@@ -603,6 +608,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T20:23:18.535Z
-Stopped at: Completed 07-09-PLAN.md
+Last session: 2026-09-30T21:05:59.029Z
+Stopped at: Completed 07-10-PLAN.md
 Resume file: None

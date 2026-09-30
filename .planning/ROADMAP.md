@@ -572,7 +572,7 @@ Plans:
   3. Member can open their single support conversation and send text messages; `support_tenant` sees an inbox of member conversations ordered by last activity with unread indicators and can open and reply to any of them; new messages appear in real time on both sides in per-conversation sequence order (catch-up after reconnect loses nothing), and the member sees an unread badge on the chat entry when support replied.
   4. Realtime signals reach only their audience: a browser subscribing to another tenant's user topic, another user's conversation topic or the support inbox without the role is rejected by RLS on `realtime.messages` (covered by the isolation suite); payloads carry ids only and the client refetches through the API; blocking a member drops their Realtime access and push subscriptions.
 
-**Plans**: 9/11 plans executed
+**Plans**: 10/11 plans executed
 
 Plans:
 
@@ -611,7 +611,7 @@ Plans:
 
 **Wave 9** *(blocked on the sketch approval)*
 
-- [ ] 07-10-PLAN.md — Chat web (staff): the inbox, the staff thread with the profile link and read-only states, the desktop split view
+- [x] 07-10-PLAN.md — Chat web (staff): the inbox, the staff thread with the profile link and read-only states, the desktop split view
 
 **Wave 10**
 
@@ -740,7 +740,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
-| 7. Notifications, Web Push & Chat | 9/11 | In Progress|  |
+| 7. Notifications, Web Push & Chat | 10/11 | In Progress|  |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
