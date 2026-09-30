@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-05-PLAN.md
-last_updated: "2026-09-30T17:56:10.363Z"
+stopped_at: Completed 07-06-PLAN.md
+last_updated: "2026-09-30T18:25:05.485Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-05 complete: EVENT-07 reminders (in-transaction events.reminder jobs, fire-time checks, event.reminder_due), new/reactivated event kinds, silent edits and cancels, actor-less reminder rows, scripts/arm-event-reminders.ts backfill; next 07-06 (Wave 4)"
-state_head: 74fce215804aead246bac54c6232f882e6179e04
+last_activity_desc: "07-06 complete: Web Push server half (push_subscriptions + four tenant-scoped definers, POST/DELETE /v1/notifications/push-subscriptions with the SSRF endpoint rule, pushChannel on the registry, notifications.push-send with badge, 3072-byte v1 payload, fake/webpush transport seam, failed-only re-enqueue, VAPID env rule, pgTAP 153); next 07-07 (Wave 6)"
+state_head: 38a7de87d2c9a924b0ada50a260273d53fdb219a
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 109
-  completed_plans: 100
+  completed_plans: 101
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 5 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders); next: 07-06 (Web Push). Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
+Plan: 6 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half); next: 07-07 (Web Push browser half). Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
 Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-05 (EVENT-07 reminders armed in-transaction and re-checked at fire time, event kinds, backfill script for DEPLOY.md; EVENT-07 stays open for 07-11, NOTIF-01 for 07-08/07-11; env hosts still tria-*, now also failing events.spec's not-found case)
+Last activity: 2026-09-30 — Completed 07-06 (push subscriptions, push channel and push-send job on the fake transport; SC 4 cleanup via a tenant-wide dead-device sweep; NOTIF-03/NOTIF-04 stay open for sibling plans 07-07/07-08; env hosts still tria-*, full API integration 679/680 with only signup case 2 failing)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -160,6 +160,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P03 | 29min | 3 tasks | 30 files |
 | Phase 07 P04 | 3h10m | 3 tasks | 55 files |
 | Phase 07 P05 | 31 min | 2 tasks | 24 files |
+| Phase 07 P06 | 25 min | 3 tasks | 36 files |
 
 ## Accumulated Context
 
@@ -512,6 +513,10 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-04: /post/{id}?comentario= pins the root thread first via GET /v1/feed/comments/{id}/thread; expired story rows land on /inicio?aviso=story-expirado
 - [Phase 07]: 07-05: EVENT-07 reminders are deferred events.reminder jobs armed inside createEvent / updateEvent (timesChanged) / setEventStatus (reactivate), re-checked at fire time (active, not removed, same start, not started, at most 30 min late); reminder Topic = 32-hex event id, tag events-reminder-{hex32}
 - [Phase 07]: 07-05: scripts/arm-event-reminders.ts restates the events module queue, offsets, key and payload (the root workspace may not import a module); run once after deploy, --dry-run first (07-11 DEPLOY.md)
+- [Phase 07]: 07-06: app.push_subscriptions_delete_dead(null) sweeps every stale device of the tenant, and the push adapter sweeps the audience before choosing recipients (in_app's live predicate already drops a blocked member from the recipient list, so a per-listed-user sweep could never reach them)
+- [Phase 07]: 07-06: the push adapter enqueues notifications.push-send only for recipients with a live device, chunked 100 per job, keyed push:<dedupeKey>:<chunk>; likes (push: null) and empty fan-outs enqueue nothing
+- [Phase 07]: 07-06: PUSH_TRANSPORT=fake is the kernel default and is pinned in the API and notifications vitest configs; production needs vapid-public-key-prod, vapid-private-key-prod, vapid-subject-prod on the worker plus PUSH_TRANSPORT=webpush, and only NEXT_PUBLIC_VAPID_PUBLIC_KEY on Vercel (07-11)
+- [Phase 07]: 07-06: the push-send job throws only before any send; the report and failed-only re-enqueue step logs its own failure, so pg-boss never re-sends to subscriptions that already succeeded
 
 ### Pending Todos
 
@@ -581,6 +586,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T17:56:10.102Z
-Stopped at: Completed 07-05-PLAN.md
+Last session: 2026-09-30T18:24:41.331Z
+Stopped at: Completed 07-06-PLAN.md
 Resume file: None
