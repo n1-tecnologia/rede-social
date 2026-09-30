@@ -9,6 +9,7 @@
       "unread": "Novas",
       "read": "Anteriores"
     },
+    "markAll": "Marcar todas como lidas",
     "unreadLabel": "Não lida.",
     "retention": "Mostramos as notificações dos últimos 90 dias.",
     "actorRemoved": "Membro removido",
@@ -29,6 +30,10 @@
         "withExcerpt": "<b>{actor}</b> publicou um novo reel: “{excerpt}”",
         "plain": "<b>{actor}</b> publicou um novo reel."
       }
+    },
+    "errors": {
+      "loadMore": "Não foi possível carregar mais notificações.",
+      "markAll": "Não foi possível marcar como lidas. Tente novamente."
     }
   }
 }

@@ -79,3 +79,28 @@ export async function loadNotifications(
   if (path) redirect(path);
   return page;
 }
+
+/**
+ * The three marks (D-230), each forwarded ONCE to the API by the BFF route handlers under
+ * `app/api/notifications/…`. They throw `ApiClientError` on a non-2xx so the handler answers the
+ * API's own status. Nothing here is a GET: a mark is a side effect, and a prefetch must never make it.
+ */
+async function post(path: string): Promise<void> {
+  const res = await apiFetch(path, { method: 'POST' });
+  if (!res.ok) throw await apiError(res);
+}
+
+/** `POST /v1/notifications/seen`: zeroes the bell, touches no tint. */
+export function markNotificationsSeen(): Promise<void> {
+  return post('/v1/notifications/seen');
+}
+
+/** `POST /v1/notifications/{id}/read`: one row read (and seen). A bare 404 for any foreign id. */
+export function markNotificationRead(notificationId: string): Promise<void> {
+  return post(`/v1/notifications/${encodeURIComponent(notificationId)}/read`);
+}
+
+/** `POST /v1/notifications/read-all`: every unread row of the caller read. */
+export function markAllNotificationsRead(): Promise<void> {
+  return post('/v1/notifications/read-all');
+}

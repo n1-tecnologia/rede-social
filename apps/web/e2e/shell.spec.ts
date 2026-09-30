@@ -6,7 +6,17 @@ import {
   type Page,
   test,
 } from '@playwright/test';
+import notificationMessages from '../messages/pt-BR/notifications.json' with { type: 'json' };
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+
+/** The bell's label comes from the catalog (07-01), never a literal. */
+const BELL = notificationMessages.notifications.nav;
+
+/** The bell slot in whichever chrome is visible: the TopBar on the phone, the rail's bottom group on desktop. */
+const bellSlot = (page: Page) =>
+  page
+    .locator('header a[href="/notificacoes"], aside a[href="/notificacoes"]')
+    .filter({ visible: true });
 
 /**
  * UI-03 / MOD-04 / D-39 / D-40 / D-42 (plan 02-07): the registry-driven, branded shell on both seed
@@ -99,6 +109,12 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     ]);
     await expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page');
 
+    // 07-01 (D-40, UI-D-268): rede-demo has notifications ON, so the bell is a TopBar slot on the
+    // phone and a rail bottom-group row on desktop, OUTSIDE the tab tree above (the tab list is
+    // unchanged). Exactly one copy is visible.
+    await expect(bellSlot(page)).toHaveCount(1);
+    await expect(bellSlot(page)).toHaveAttribute('aria-label', BELL);
+
     // D-42: the enabled module's home slot renders; the "Em breve" card does not. Since 04-10 that
     // slot is the FEED's — the reference module that used to fill it was deleted with D-19.
     await expect(
@@ -136,6 +152,8 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     // links too — a page-wide count would read those as tabs and fail for the wrong reason.
     // 06-01: rede-lab has `events` on (D-17), so the Eventos tab sits after Reels (order 40).
     expect(await navLinkNames(nav)).toEqual(['Início', 'Reels', 'Eventos', 'Perfil']);
+    // 07-01 (D-40): rede-lab keeps notifications OFF, so its chrome has no bell at all.
+    await expect(page.locator('a[href="/notificacoes"]')).toHaveCount(0);
     // UI-D-20: a module DID contribute a slot here, so the kernel placeholder must be absent and
     // the feed widget must be what fills the home column instead.
     await expect(page.getByText('Em breve', { exact: true })).toHaveCount(0);

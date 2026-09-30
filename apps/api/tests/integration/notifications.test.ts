@@ -1,9 +1,17 @@
 import type { Bootstrap } from '@rede-social/contracts';
-import type { NotificationPage } from '@rede-social/module-notifications/contracts';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { encodeCursor } from '@rede-social/core/server/paging';
+import {
+  NOTIF_MAX_CURSOR_LENGTH,
+  NOTIF_MAX_PAGE_SIZE,
+  type NotificationPage,
+  type NotificationRow,
+} from '@rede-social/module-notifications/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
   api,
+  authAdmin,
   HOSTS,
   notificationJobsOf,
   runNotificationJobs,
@@ -30,7 +38,7 @@ import {
  */
 
 const tokens = { demoAdmin: '', demoMember: '' };
-const ids = { demo: '', demoMember: '' };
+const ids = { demo: '', demoMember: '', demoAdmin: '', demoSecond: '' };
 
 /** The prefix every post THIS FILE writes carries, so the sweep can be exact. */
 const TEST_CAPTION_PREFIX = 'Notificacao de teste';
@@ -75,8 +83,18 @@ beforeAll(async () => {
     select id from public.tenants where slug = 'rede-demo'`;
   const [member] = await adminSql<{ id: string }[]>`
     select id from auth.users where email = 'member@rede-demo.local'`;
+  const [admin] = await adminSql<{ id: string }[]>`
+    select id from auth.users where email = 'admin@rede-demo.local'`;
   ids.demo = tenant?.id ?? '';
   ids.demoMember = member?.id ?? '';
+  ids.demoAdmin = admin?.id ?? '';
+  // Another live member of the demo tenant: the owner of the row the member must not reach.
+  const [second] = await adminSql<{ user_id: string }[]>`
+    select m.user_id::text as user_id from public.memberships m
+     where m.tenant_id = ${ids.demo}::uuid and m.role = 'member' and m.status = 'active'
+       and m.deleted_at is null and m.user_id <> ${ids.demoMember}::uuid
+     order by m.joined_at limit 1`;
+  ids.demoSecond = second?.user_id ?? '';
   await sweep();
 });
 
@@ -135,5 +153,414 @@ describe('notifications tracer', () => {
     expect(Object.keys(signals[0]?.payload ?? {}).sort()).toEqual(['id', 'kind']);
     expect(signals[0]?.payload.kind).toBe('feed.post');
     expect(signals[0]?.payload.id).toBe(signals[0]?.id);
+  });
+});
+
+/* ── 07-01 Task 3: the list, the marks and the fan-out battery ───────────────────────────────── */
+
+/** Removes every notification row of the demo tenant (the member starts each case from zero). */
+async function clearDemo(): Promise<void> {
+  await adminSql`delete from public.notifications where tenant_id = ${ids.demo}::uuid`;
+}
+
+/**
+ * A fixture row for `userId` in the demo tenant, written as the migration role. Returns its id.
+ *
+ * The instants are bound as TEXT and cast by Postgres: this raw postgres.js client serializes a
+ * parameter it infers as `timestamptz` through a JS `Date`, which truncates to milliseconds (the
+ * API's drizzle client installs pass-through serializers, so the service never loses the micros).
+ */
+async function insertRow(
+  userId: string,
+  opts: { createdAt?: string; readAt?: string | null; seenAt?: string | null; key?: string } = {},
+): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.notifications
+      (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id, payload, created_at, read_at, seen_at)
+    values (${ids.demo}::uuid, ${userId}::uuid, 'feed.post',
+            ${opts.key ?? `test07:${crypto.randomUUID()}`}, 'post', ${crypto.randomUUID()}::uuid,
+            ${adminSql.json({ postId: crypto.randomUUID(), excerpt: 'x' })},
+            coalesce(${opts.createdAt ?? null}::text::timestamptz, now()),
+            ${opts.readAt ?? null}::text::timestamptz, ${opts.seenAt ?? null}::text::timestamptz)
+    returning id::text as id`;
+  return row?.id ?? '';
+}
+
+/** Every id of one section, walked with the returned cursors at `limit`. */
+async function walk(section: 'unread' | 'read', limit = 1): Promise<NotificationRow[]> {
+  const seen: NotificationRow[] = [];
+  let cursor: string | null = null;
+  for (let guard = 0; guard < 200; guard++) {
+    const query: string = cursor
+      ? `?section=${section}&limit=${limit}&cursor=${encodeURIComponent(cursor)}`
+      : `?section=${section}&limit=${limit}`;
+    const page = await list(tokens.demoMember, query);
+    seen.push(...page.items);
+    cursor = page.nextCursor;
+    if (cursor === null) break;
+  }
+  expect(cursor, 'the walk terminated').toBeNull();
+  return seen;
+}
+
+const post = (path: string, token: string) => request(path, token, { method: 'POST' });
+
+async function counters(token: string): Promise<Bootstrap['counters']> {
+  const res = await request('/v1/me/bootstrap', token);
+  expect(res.status).toBe(200);
+  return ((await res.json()) as Bootstrap).counters;
+}
+
+async function signalsSince(topic: string, since: Date): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from realtime.messages
+     where topic = ${topic} and event = 'notifications.changed' and inserted_at >= ${since}`;
+  return row?.n ?? 0;
+}
+
+async function dbNow(): Promise<Date> {
+  const [row] = await adminSql<{ now: Date }[]>`select now() as now`;
+  return row?.now ?? new Date();
+}
+
+/** Plays the worker for ONE synthetic `post.published` of the demo tenant (the handler, directly). */
+async function fanOut(tenantId: string, postId: string, authorUserId: string): Promise<void> {
+  const { notificationsFanoutJob } = await import('@rede-social/module-notifications/server');
+  await notificationsFanoutJob.handler({
+    event: 'post.published',
+    tenantId,
+    payload: {
+      tenantId,
+      postId,
+      authorUserId,
+      communityId: null,
+      hasMedia: false,
+      occurredAt: new Date().toISOString(),
+    },
+    sinkAt: new Date().toISOString(),
+  });
+}
+
+describe('notifications list and marks', () => {
+  it('NOTIF-01/02 ordering: a limit=1 walk of each section visits every row once, created_at desc, id desc', async () => {
+    await clearDemo();
+    // A deliberate created_at tie (broken by id) plus two distinct instants, in each section.
+    const tie = '2026-09-01T10:00:00.000000Z';
+    const unreadIds = [
+      await insertRow(ids.demoMember, { createdAt: '2026-09-01T11:00:00.000000Z' }),
+      await insertRow(ids.demoMember, { createdAt: tie }),
+      await insertRow(ids.demoMember, { createdAt: tie }),
+      await insertRow(ids.demoMember, { createdAt: '2026-09-01T09:00:00.000000Z' }),
+    ];
+    const readIds = [
+      await insertRow(ids.demoMember, { createdAt: tie, readAt: tie, seenAt: tie }),
+      await insertRow(ids.demoMember, { createdAt: tie, readAt: tie, seenAt: tie }),
+      await insertRow(ids.demoMember, {
+        createdAt: '2026-09-01T08:00:00.000000Z',
+        readAt: tie,
+        seenAt: tie,
+      }),
+    ];
+    const tieOrder = (a: string, b: string) => (a < b ? 1 : -1);
+    const expectedUnread = [
+      unreadIds[0],
+      ...[unreadIds[1], unreadIds[2]].sort((a, b) => tieOrder(a as string, b as string)),
+      unreadIds[3],
+    ];
+    const expectedRead = [
+      ...[readIds[0], readIds[1]].sort((a, b) => tieOrder(a as string, b as string)),
+      readIds[2],
+    ];
+    expect((await walk('unread')).map((row) => row.id)).toEqual(expectedUnread);
+    expect((await walk('read')).map((row) => row.id)).toEqual(expectedRead);
+  });
+
+  it('NOTIF-02 precision: two rows one microsecond apart are neither skipped nor repeated', async () => {
+    await clearDemo();
+    const later = await insertRow(ids.demoMember, { createdAt: '2026-09-02T10:00:00.000001Z' });
+    const earlier = await insertRow(ids.demoMember, { createdAt: '2026-09-02T10:00:00.000000Z' });
+    const walked = await walk('unread');
+    expect(walked.map((row) => row.id)).toEqual([later, earlier]);
+    expect(walked[0]?.createdAt).toBe('2026-09-02T10:00:00.000001Z');
+  });
+
+  it('NOTIF-02 boundary: limit clamps, a hostile or overlong cursor is page 1, an unknown section is 400', async () => {
+    await clearDemo();
+    for (let i = 0; i < 3; i++) await insertRow(ids.demoMember);
+    expect((await list(tokens.demoMember, '?limit=0')).items).toHaveLength(1);
+    const big = await list(tokens.demoMember, '?limit=100000');
+    expect(big.items.length).toBeLessThanOrEqual(NOTIF_MAX_PAGE_SIZE);
+    expect(big.items).toHaveLength(3);
+
+    const first = await list(tokens.demoMember, '?limit=2');
+    const hostile = encodeCursor({ n: 'not-an-instant', id: 'x' });
+    const fromHostile = await list(
+      tokens.demoMember,
+      `?limit=2&cursor=${encodeURIComponent(hostile)}`,
+    );
+    expect(fromHostile.items.map((row) => row.id)).toEqual(first.items.map((row) => row.id));
+    const overlong = 'a'.repeat(NOTIF_MAX_CURSOR_LENGTH + 10);
+    const fromOverlong = await list(tokens.demoMember, `?limit=2&cursor=${overlong}`);
+    expect(fromOverlong.items.map((row) => row.id)).toEqual(first.items.map((row) => row.id));
+
+    for (const bad of ['READ', 'all']) {
+      const res = await request(`/v1/notifications?section=${bad}`, tokens.demoMember);
+      expect(res.status, `section=${bad}`).toBe(400);
+    }
+  });
+
+  it('D-230: seen zeroes the bell while every row stays unread, and signals the member once', async () => {
+    await clearDemo();
+    for (let i = 0; i < 3; i++) await insertRow(ids.demoMember);
+    expect((await counters(tokens.demoMember)).unreadNotifications).toBe(3);
+
+    const since = await dbNow();
+    const res = await post('/v1/notifications/seen', tokens.demoMember);
+    expect(res.status).toBe(204);
+    expect(res.headers.get('cache-control')).toContain('no-store');
+    expect((await counters(tokens.demoMember)).unreadNotifications).toBe(0);
+
+    const unread = await walk('unread', 10);
+    expect(unread).toHaveLength(3);
+    for (const row of unread) {
+      expect(row.readAt).toBeNull();
+      expect(row.seenAt).not.toBeNull();
+    }
+    expect(await signalsSince(`tenant:${ids.demo}:user:${ids.demoMember}`, since)).toBe(1);
+  });
+
+  it('NOTIF-02 empty: seen and read-all with nothing to change answer 204 and publish nothing', async () => {
+    await clearDemo();
+    const empty = await list(tokens.demoMember, '?section=unread');
+    expect(empty).toEqual({ items: [], nextCursor: null });
+    expect(await list(tokens.demoMember, '?section=read')).toEqual({ items: [], nextCursor: null });
+    expect((await counters(tokens.demoMember)).unreadNotifications).toBe(0);
+
+    const since = await dbNow();
+    expect((await post('/v1/notifications/seen', tokens.demoMember)).status).toBe(204);
+    expect((await post('/v1/notifications/read-all', tokens.demoMember)).status).toBe(204);
+    expect(await signalsSince(`tenant:${ids.demo}:user:${ids.demoMember}`, since)).toBe(0);
+  });
+
+  it("D-230: read sets both stamps; a colleague's id and an unknown id are the bare 404", async () => {
+    await clearDemo();
+    const mine = await insertRow(ids.demoMember);
+    const theirs = await insertRow(ids.demoSecond);
+
+    expect((await post(`/v1/notifications/${mine}/read`, tokens.demoMember)).status).toBe(204);
+    const [stamped] = await adminSql<{ read_at: Date | null; seen_at: Date | null }[]>`
+      select read_at, seen_at from public.notifications where id = ${mine}::uuid`;
+    expect(stamped?.read_at).not.toBeNull();
+    expect(stamped?.seen_at).not.toBeNull();
+
+    for (const id of [theirs, crypto.randomUUID()]) {
+      const res = await post(`/v1/notifications/${id}/read`, tokens.demoMember);
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: { code: string; details?: unknown } };
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.details).toBeUndefined();
+    }
+    const [untouched] = await adminSql<{ read_at: Date | null }[]>`
+      select read_at from public.notifications where id = ${theirs}::uuid`;
+    expect(untouched?.read_at).toBeNull();
+  });
+
+  it('D-230: read-all moves every unread row to section=read', async () => {
+    await clearDemo();
+    const rows = [
+      await insertRow(ids.demoMember),
+      await insertRow(ids.demoMember),
+      await insertRow(ids.demoMember),
+    ];
+    expect((await post('/v1/notifications/read-all', tokens.demoMember)).status).toBe(204);
+    expect((await walk('unread', 10)).map((row) => row.id)).toEqual([]);
+    expect((await walk('read', 10)).map((row) => row.id).sort()).toEqual([...rows].sort());
+  });
+
+  it('NOTIF-01 empty: a fan-out whose only member is the author inserts nothing and signals nothing', async () => {
+    const slug = `rede-notif-solo-${Date.now()}`.slice(0, 40);
+    const email = `solo-${Date.now()}@rede-notif.local`;
+    const [tenant] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${slug}, 'Comunidade Solo', 'Regras de teste.', 1)
+      returning id::text as id`;
+    const tenantId = tenant?.id ?? '';
+    const created = await authAdmin().createUser({
+      email,
+      password: 'Segredo123',
+      email_confirm: true,
+    });
+    const userId = created.data.user?.id ?? '';
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'notifications', true), (${tenantId}::uuid, 'feed', true)`;
+      await adminSql`
+        insert into public.memberships (tenant_id, user_id, role, status)
+        values (${tenantId}::uuid, ${userId}::uuid, 'member', 'active')`;
+      const [soloPost] = await adminSql<{ id: string }[]>`
+        insert into public.feed_posts (tenant_id, author_user_id, caption)
+        values (${tenantId}::uuid, ${userId}::uuid, ${`${TEST_CAPTION_PREFIX} solo`})
+        returning id::text as id`;
+      const since = await dbNow();
+      await fanOut(tenantId, soloPost?.id ?? '', userId);
+      const [count] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.notifications where tenant_id = ${tenantId}::uuid`;
+      expect(count?.n).toBe(0);
+      expect(await signalsSince(`tenant:${tenantId}:all`, since)).toBe(0);
+    } finally {
+      await adminSql`delete from public.notifications where tenant_id = ${tenantId}::uuid`;
+      await adminSql`delete from public.feed_posts where tenant_id = ${tenantId}::uuid`;
+      await adminSql`
+        delete from public.member_profiles
+         where membership_id in (select id from public.memberships where tenant_id = ${tenantId}::uuid)`;
+      await adminSql`delete from public.memberships where tenant_id = ${tenantId}::uuid`;
+      await adminSql`delete from public.tenants where id = ${tenantId}::uuid`;
+      if (userId) await authAdmin().deleteUser(userId);
+    }
+  });
+
+  it('NOTIF-01 empty: a post soft-deleted before the job ran yields no row', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const created = await request('/v1/feed/posts', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ caption: `${TEST_CAPTION_PREFIX} apagado` }),
+    });
+    expect(created.status).toBe(201);
+    const { id: postId } = (await created.json()) as { id: string };
+    await adminSql`update public.feed_posts set deleted_at = now() where id = ${postId}::uuid`;
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    const [count] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications where subject_id = ${postId}::uuid`;
+    expect(count?.n).toBe(0);
+  });
+
+  it('idempotency: the same fan-out job run twice keeps one row per member', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const created = await request('/v1/feed/posts', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ caption: `${TEST_CAPTION_PREFIX} duas vezes` }),
+    });
+    const { id: postId } = (await created.json()) as { id: string };
+    const [job] = (await notificationJobsOf(ids.demo)).filter((row) => row.state === 'created');
+    expect(job).toBeDefined();
+    const { notificationsFanoutJob } = await import('@rede-social/module-notifications/server');
+    const data = job?.data as Parameters<typeof notificationsFanoutJob.handler>[0];
+    await notificationsFanoutJob.handler(data);
+    const [once] = await adminSql<{ n: number; users: number }[]>`
+      select count(*)::int as n, count(distinct user_id)::int as users
+        from public.notifications where subject_id = ${postId}::uuid`;
+    await notificationsFanoutJob.handler(data);
+    const [twice] = await adminSql<{ n: number; users: number }[]>`
+      select count(*)::int as n, count(distinct user_id)::int as users
+        from public.notifications where subject_id = ${postId}::uuid`;
+    expect(once?.n).toBeGreaterThan(0);
+    expect(once?.n).toBe(once?.users);
+    expect(twice).toEqual(once);
+    await closeWaitingJobs();
+  });
+
+  it('D-229: neither the admin nor a support_tenant gets a feed.post row', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const email = `suporte-${Date.now()}@rede-demo.local`;
+    const created = await authAdmin().createUser({
+      email,
+      password: 'Segredo123',
+      email_confirm: true,
+    });
+    const supportId = created.data.user?.id ?? '';
+    try {
+      await adminSql`
+        insert into public.memberships (tenant_id, user_id, role, status)
+        values (${ids.demo}::uuid, ${supportId}::uuid, 'support_tenant', 'active')`;
+      const res = await request('/v1/feed/posts', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ caption: `${TEST_CAPTION_PREFIX} equipe` }),
+      });
+      const { id: postId } = (await res.json()) as { id: string };
+      expect(await runNotificationJobs(ids.demo)).toBe(1);
+      const staff = await adminSql<{ user_id: string }[]>`
+        select user_id::text as user_id from public.notifications
+         where subject_id = ${postId}::uuid and user_id = any(${[ids.demoAdmin, supportId]}::uuid[])`;
+      expect(staff).toEqual([]);
+      const [member] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.notifications
+         where subject_id = ${postId}::uuid and user_id = ${ids.demoMember}::uuid`;
+      expect(member?.n, 'positive control: the member got it').toBe(1);
+    } finally {
+      await adminSql`delete from public.notifications where user_id = ${supportId}::uuid`;
+      await adminSql`
+        delete from public.member_profiles
+         where membership_id in (select id from public.memberships where user_id = ${supportId}::uuid)`;
+      await adminSql`delete from public.memberships where user_id = ${supportId}::uuid`;
+      if (supportId) await authAdmin().deleteUser(supportId);
+    }
+  });
+
+  it('D-226/D-227: a community post is feed.community_post; a video post is feed.reel and never feed.post', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const [community] = await adminSql<{ id: string; name: string }[]>`
+      select id::text as id, name from public.communities
+       where tenant_id = ${ids.demo}::uuid and status = 'active' and deleted_at is null
+       order by created_at limit 1`;
+    expect(community, 'the demo seed has an active community').toBeDefined();
+    const res = await request('/v1/feed/posts', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({
+        caption: `${TEST_CAPTION_PREFIX} comunidade`,
+        communityId: community?.id,
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { id: communityPostId } = (await res.json()) as { id: string };
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    const inCommunity = (await walk('unread', 10)).filter(
+      (row) => row.subject.id === communityPostId,
+    );
+    expect(inCommunity.map((row) => row.kind)).toEqual(['feed.community_post']);
+    expect(inCommunity[0]?.facts.communityName).toBe(community?.name);
+
+    // A video post (written directly: the source reads `media_kind`, and a ready upload is the
+    // media suites' concern), fanned out by the real job handler.
+    const [video] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, author_user_id, caption, media_kind)
+      values (${ids.demo}::uuid, ${ids.demoAdmin}::uuid, ${`${TEST_CAPTION_PREFIX} video`}, 'video')
+      returning id::text as id`;
+    await fanOut(ids.demo, video?.id ?? '', ids.demoAdmin);
+    const kinds = await adminSql<{ kind: string }[]>`
+      select distinct kind from public.notifications where subject_id = ${video?.id ?? ''}::uuid`;
+    expect(kinds.map((row) => row.kind)).toEqual(['feed.reel']);
+  });
+
+  it('module flag: with notifications off, a publish enqueues nothing and the list is 404 MODULE_DISABLED', async () => {
+    await closeWaitingJobs();
+    const before = (await notificationJobsOf(ids.demo)).length;
+    try {
+      await adminSql`
+        update public.tenant_modules set enabled = false
+         where tenant_id = ${ids.demo}::uuid and module_key = 'notifications'`;
+      moduleFlags.invalidate(ids.demo);
+      const res = await request('/v1/feed/posts', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ caption: `${TEST_CAPTION_PREFIX} desligado` }),
+      });
+      expect(res.status).toBe(201);
+      expect((await notificationJobsOf(ids.demo)).length).toBe(before);
+
+      const disabled = await request('/v1/notifications', tokens.demoMember);
+      expect(disabled.status).toBe(404);
+      expect(((await disabled.json()) as { error: { code: string } }).error.code).toBe(
+        'MODULE_DISABLED',
+      );
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${ids.demo}::uuid and module_key = 'notifications'`;
+      moduleFlags.invalidate(ids.demo);
+    }
   });
 });

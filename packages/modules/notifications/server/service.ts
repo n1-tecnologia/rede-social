@@ -1,5 +1,7 @@
+import { REALTIME_EVENTS, topicSuffix } from '@rede-social/contracts/realtime';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { decodeCursor, encodeCursor, keysetComparison } from '@rede-social/core/server/paging';
 import { sql } from 'drizzle-orm';
@@ -250,4 +252,109 @@ export async function countUnseen(tx: Tx, ctx: RequestContext): Promise<number> 
        and n.user_id = ${ctx.userId}::uuid
        and n.seen_at is null`);
   return Number(rows[0]?.unseen ?? 0);
+}
+
+/**
+ * The caller's OTHER tabs and devices refetch (07-03 consumes it): one ids-only signal on the
+ * caller's own user topic, published by the definer inside the same transaction as the write, so a
+ * rolled-back write announces nothing. The payload is `{ kind }` with a fixed marker, never a row.
+ */
+async function signalOwnTopic(tx: Tx, ctx: RequestContext, kind: 'seen' | 'read'): Promise<void> {
+  await tx.execute(
+    sql`select app.realtime_signal(${topicSuffix.user(ctx.userId)}, ${REALTIME_EVENTS.notificationsChanged}, ${JSON.stringify({ kind })}::jsonb)`,
+  );
+}
+
+/**
+ * `POST /v1/notifications/seen` (D-230): stamps `seen_at` on every row the caller has not SEEN yet,
+ * leaving `read_at` untouched (seen and read never merge), which zeroes the bell. Signals the
+ * caller's own topic only when something changed; nothing to change is a silent no-op.
+ */
+export async function markAllSeen(ctx: RequestContext): Promise<number> {
+  const changed = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ changed: number }>(sql`
+      with u as (
+        update notifications
+           set seen_at = now()
+         where tenant_id = ${ctx.tenantId}::uuid
+           and user_id = ${ctx.userId}::uuid
+           and seen_at is null
+        returning 1
+      )
+      select count(*)::int as changed from u`);
+    const count = Number(rows[0]?.changed ?? 0);
+    if (count > 0) await signalOwnTopic(tx, ctx, 'seen');
+    return count;
+  });
+  log.info(
+    { event: 'notifications.seen', tenantId: ctx.tenantId, userId: ctx.userId, changed },
+    'notifications seen',
+  );
+  return changed;
+}
+
+/**
+ * `POST /v1/notifications/{id}/read` (D-230, D-232): the tapped row becomes read, and seen too when it
+ * was not (a read row is always seen). ONE bare 404 when no row of the caller's matched: an unknown
+ * id, another tenant's, or a colleague's are indistinguishable (D-23). Re-reading a read row keeps its
+ * first `read_at` and answers 204. Signals only on a real change.
+ */
+export async function markRead(ctx: RequestContext, notificationId: string): Promise<void> {
+  const outcome = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ matched: number; changed: number }>(sql`
+      with prev as (
+        select n.id, (n.read_at is null or n.seen_at is null) as changing
+          from notifications n
+         where n.tenant_id = ${ctx.tenantId}::uuid
+           and n.user_id = ${ctx.userId}::uuid
+           and n.id = ${notificationId}::uuid
+      ),
+      u as (
+        update notifications n
+           set read_at = coalesce(n.read_at, now()),
+               seen_at = coalesce(n.seen_at, now())
+          from prev
+         where n.id = prev.id
+        returning 1
+      )
+      select (select count(*)::int from u) as matched,
+             (select count(*)::int from prev where changing) as changed`);
+    const matched = Number(rows[0]?.matched ?? 0);
+    const changed = Number(rows[0]?.changed ?? 0);
+    if (changed > 0) await signalOwnTopic(tx, ctx, 'read');
+    return { matched, changed };
+  });
+  log.info(
+    { event: 'notifications.read', tenantId: ctx.tenantId, userId: ctx.userId, ...outcome },
+    'notification read',
+  );
+  if (outcome.matched === 0) throw new ApiError(404, 'NOT_FOUND');
+}
+
+/**
+ * `POST /v1/notifications/read-all` (D-230, UI-D-252): every unread row of the caller becomes read
+ * (and seen when it was not). Nothing to change answers 204 and publishes nothing.
+ */
+export async function markAllRead(ctx: RequestContext): Promise<number> {
+  const changed = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ changed: number }>(sql`
+      with u as (
+        update notifications
+           set read_at = now(),
+               seen_at = coalesce(seen_at, now())
+         where tenant_id = ${ctx.tenantId}::uuid
+           and user_id = ${ctx.userId}::uuid
+           and read_at is null
+        returning 1
+      )
+      select count(*)::int as changed from u`);
+    const count = Number(rows[0]?.changed ?? 0);
+    if (count > 0) await signalOwnTopic(tx, ctx, 'read');
+    return count;
+  });
+  log.info(
+    { event: 'notifications.read_all', tenantId: ctx.tenantId, userId: ctx.userId, changed },
+    'notifications read',
+  );
+  return changed;
 }

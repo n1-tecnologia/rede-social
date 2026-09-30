@@ -85,6 +85,9 @@ const REQUIRED_KEYS = [
   // 06-03: one event's detail. It reads the session, the viewer's own attendance and the request
   // instant (the hero countdown, the phase), so it may never be prerendered either.
   '/(app)/eventos/[eventId]/page',
+  // 07-01: the bell's destination. It reads the session and the request instant (relative times)
+  // per request, and its server render must never be a cached copy of another member's rows.
+  '/(app)/notificacoes/page',
   // 06-04: the admin's form routes. Both read the session and the composed manage permission per
   // request (and the edit route the manage-only edit read), so neither may be prerendered.
   '/(app)/eventos/novo/page',

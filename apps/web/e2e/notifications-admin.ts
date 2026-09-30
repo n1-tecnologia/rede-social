@@ -80,3 +80,55 @@ export async function deletePostsByCaptionPrefix(prefix: string): Promise<void> 
        and subject_id in (select id from public.feed_posts where caption like ${`${prefix}%`})`;
   await sql()`delete from public.feed_posts where caption like ${`${prefix}%`}`;
 }
+
+/** A live post of `tenantSlug` the fixture rows point at, so a tapped row lands on a real page. */
+async function anyLivePostId(tenantSlug: string): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    select p.id::text as id from public.feed_posts p
+      join public.tenants t on t.id = p.tenant_id
+     where t.slug = ${tenantSlug} and p.deleted_at is null and p.community_id is null
+     order by p.created_at desc limit 1`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no live post in ${tenantSlug}`);
+  return id;
+}
+
+/**
+ * Writes `unread` unread rows and `read` read rows for `email` in `tenantSlug`, as the migration role,
+ * each a `feed.post` whose excerpt is `${label} ${n}` (1-based, newest first: row 1 is the newest).
+ * Every row points at one live post. Returns the excerpts in list order (Novas first, then Anteriores).
+ */
+export async function insertNotificationRows(
+  email: string,
+  counts: { unread: number; read: number },
+  label = 'Linha',
+  tenantSlug = 'rede-demo',
+): Promise<{ unread: string[]; read: string[]; postId: string }> {
+  const postId = await anyLivePostId(tenantSlug);
+  const [who] = await sql()<{ tenant_id: string; user_id: string; actor: string }[]>`
+    select t.id::text as tenant_id, u.id::text as user_id,
+           (select m.user_id::text from public.memberships m
+             where m.tenant_id = t.id and m.role = 'admin_tenant' limit 1) as actor
+      from public.tenants t, auth.users u
+     where t.slug = ${tenantSlug} and u.email = ${email}`;
+  if (!who) throw new Error(`no ${email} in ${tenantSlug}`);
+  const unread: string[] = [];
+  const read: string[] = [];
+  const total = counts.unread + counts.read;
+  for (let n = 1; n <= total; n++) {
+    const isRead = n > counts.unread;
+    const excerpt = `${label} ${n}`;
+    (isRead ? read : unread).push(excerpt);
+    await sql()`
+      insert into public.notifications
+        (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id, actor_user_id, payload,
+         created_at, read_at, seen_at)
+      values (${who.tenant_id}::uuid, ${who.user_id}::uuid, 'feed.post',
+              ${`e2e:${label}:${n}:${Date.now()}`}, 'post', ${postId}::uuid, ${who.actor}::uuid,
+              ${sql().json({ postId, excerpt, communityId: null, communityName: null, previewAssetId: null })},
+              now() - make_interval(mins => ${n}),
+              case when ${isRead}::boolean then now() end,
+              case when ${isRead}::boolean then now() end)`;
+  }
+  return { unread, read, postId };
+}

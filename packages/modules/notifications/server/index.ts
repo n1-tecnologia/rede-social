@@ -19,7 +19,7 @@ export {
 export type { ChannelResult, DeliveryBatch, NotificationChannel } from './channels/types';
 export { notificationsFanoutJob } from './fanout-job';
 export { notificationsRoutes } from './routes';
-export { countUnseen, listNotifications } from './service';
+export { countUnseen, listNotifications, markAllRead, markAllSeen, markRead } from './service';
 export { notificationsSink } from './sink';
 export { NOTIFICATIONS_SYSTEM_USER_ID, notificationsSystemCtx } from './system-context';
 export { inAppChannel };

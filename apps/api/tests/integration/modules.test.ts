@@ -150,16 +150,32 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     // `reels` with `nav.order: 30` (D-123), so it sorts right after `communities` for the same reason,
     // and 06-01 added `events` with `nav.order: 40` (D-55, UI-D-215): after reels, ahead of every
     // manifest-less key.
+    // 07-01 added `notifications` with `nav.order: 10` (D-40, UI-D-268: the TopBar bell), the lowest
+    // order of any manifest, so it now heads the list; `chat` (no manifest yet) stays in the fallback
+    // bucket.
     expect(demoBody.modules.map((m) => m.key)).toEqual([
+      'notifications',
       'communities',
       'reels',
       'events',
       'chat',
       'feed',
-      'notifications',
       'stories',
     ]);
     for (const m of demoBody.modules) {
+      if (m.key === 'notifications') {
+        // 07-01 (D-40, UI-D-268): the bell, a TOPBAR slot badged by the unread count, verbatim.
+        expect(m.nav).toEqual({
+          placement: 'topbar',
+          label: 'Notificações',
+          icon: 'bell',
+          badge: 'unreadNotifications',
+          href: '/notificacoes',
+          order: 10,
+        });
+        expect(m.home).toBeUndefined();
+        continue;
+      }
       if (m.key === 'communities') {
         // The ONE navigable module in V1 (05-01). Its entry is the manifest's, verbatim — the shell
         // renders a `Comunidades` tab because of THIS payload, never because the shell changed.

@@ -1295,3 +1295,86 @@ describe('06-08 — events Início card strings and placeholders', () => {
     expect(t('home.open', { title: 'Encontro anual' })).toBe('Ver o evento Encontro anual');
   });
 });
+
+/**
+ * 07-01 — the `notifications` catalog (UI-SPEC Copywriting Contract, "Nav, badges and list",
+ * "Notification rows", the empty and error rows). Every placeholder is pinned, the `navBadge` ICU
+ * plural is FORMATTED, and the row sentences are formatted through `t.rich` with the `<b>` actor tag
+ * the web renderers use, so a lost brace or tag fails here rather than on a member's screen.
+ */
+describe('07 — notifications list strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['notifications.nav', 'Notificações'],
+    ['notifications.title', 'Notificações'],
+    ['notifications.back', 'Voltar para o início'],
+    ['notifications.sections.unread', 'Novas'],
+    ['notifications.sections.read', 'Anteriores'],
+    ['notifications.markAll', 'Marcar todas como lidas'],
+    ['notifications.unreadLabel', 'Não lida.'],
+    ['notifications.retention', 'Mostramos as notificações dos últimos 90 dias.'],
+    ['notifications.actorRemoved', 'Membro removido'],
+    ['notifications.empty.title', 'Nenhuma notificação por enquanto'],
+    ['notifications.errors.loadMore', 'Não foi possível carregar mais notificações.'],
+    ['notifications.errors.markAll', 'Não foi possível marcar como lidas. Tente novamente.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['notifications.navBadge', ['{count, plural']],
+    ['notifications.region', ['{tenant}']],
+    ['notifications.empty.body', ['{tenant}']],
+    ['notifications.kinds.post.withExcerpt', ['{actor}', '{excerpt}']],
+    ['notifications.kinds.post.plain', ['{actor}']],
+    ['notifications.kinds.communityPost.withExcerpt', ['{actor}', '{community}', '{excerpt}']],
+    ['notifications.kinds.communityPost.plain', ['{actor}', '{community}']],
+    ['notifications.kinds.reel.withExcerpt', ['{actor}', '{excerpt}']],
+    ['notifications.kinds.reel.plain', ['{actor}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('navBadge is an ICU plural: "1 nova" / "3 novas"', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'notifications',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    expect(t('navBadge', { count: 1 })).toBe('Notificações, 1 nova');
+    expect(t('navBadge', { count: 3 })).toBe('Notificações, 3 novas');
+    expect(t('region', { tenant: 'Rede Demo' })).toBe('Notificações de Rede Demo');
+  });
+
+  it('the row sentences format through t.rich with the <b> actor tag and curly quotes', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'notifications',
+    }) as unknown as {
+      rich: (key: string, values: Record<string, unknown>) => unknown;
+    };
+    const flat = (node: unknown): string =>
+      Array.isArray(node) ? node.map(flat).join('') : typeof node === 'string' ? node : '';
+    const bold = (chunks: unknown) => `[${flat(chunks)}]`;
+    expect(flat(t.rich('kinds.post.withExcerpt', { actor: 'Ana', excerpt: 'Olá', b: bold }))).toBe(
+      '[Ana] publicou um novo post: “Olá”',
+    );
+    expect(
+      flat(t.rich('kinds.communityPost.plain', { actor: 'Ana', community: 'Corredores', b: bold })),
+    ).toBe('[Ana] publicou em Corredores.');
+    expect(flat(t.rich('kinds.reel.plain', { actor: 'Ana', b: bold }))).toBe(
+      '[Ana] publicou um novo reel.',
+    );
+  });
+});
