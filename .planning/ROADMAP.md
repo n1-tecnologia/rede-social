@@ -653,11 +653,35 @@ Plans:
   4. Password recovery and auth e-mails started on tenant B's host carry B's branding and links. The `super_admin` invite flow (02-19 refusal `user_in_other_tenant`) is revisited so it adds a membership instead of refusing.
   5. The two-tenant isolation suite grows a shared-identity fixture. pgTAP and API negative tests prove that a user with memberships in A and B, acting on A's host, can never read or write B's rows, storage objects, Realtime topics or notifications, and the reverse.
 
-**Plans:** 0 plans
+**Plans:** 8 plans (planned 2026-09-30, ahead of Phases 7 and 8; plan 01 opens with a reconcile check against their code)
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 08.1 to break down)
+**Wave 1**
+
+- [ ] 08.1-01-PLAN.md — Tracer: reconcile with Phases 7/8, drop the one-tenant index, host-first `requireAuth`, `requireIdentity`, `/v1/join` in the admin lane, the shared `/participar` join screen after login on B
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08.1-02-PLAN.md — "Já tem conta" sign-up join on B's `/cadastro` (D-301, D-302)
+- [ ] 08.1-05-PLAN.md — Auth e-mails branded by the flow's host, recovery branded by the redirect host (D-315, D-317), shared-password notice (D-312)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08.1-03-PLAN.md — "Escolha a comunidade" picker on generic hosts (D-308)
+- [ ] 08.1-04-PLAN.md — Per-community names, expand step (D-310, D-311, D-313)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 08.1-06-PLAN.md — Invites to existing identities: tokenless B-branded mail, accept without a password step (D-314, D-316)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 08.1-07-PLAN.md — Shared-identity isolation suite (pgTAP 160, API, Realtime, push), DEPLOY.md two-release runbook, release-1 gate
+
+**Wave 6** *(blocked on production running release 1)*
+
+- [ ] 08.1-08-PLAN.md — Contract release: drop `app.membership_for_user` and `users.name` (D-318), full exit gate
 
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
