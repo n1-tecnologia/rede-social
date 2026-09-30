@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { activeTabKey, iconFor, isNavItemActive, type NavItem, type ShellNav } from './nav';
+import { useLiveCounters } from './realtime/LiveCountersProvider';
+import { slotAccessibleName, useSlotBadgeLabel } from './realtime/SlotBadgeLabels';
 import { TenantLogo } from './TenantLogo';
 
 export interface DesktopRailProps {
@@ -25,16 +27,21 @@ const rowActive = 'bg-[var(--theme-chip)] font-bold text-brand';
 
 function RailLink({ item, active, count }: { item: NavItem; active: boolean; count?: number }) {
   const Icon = iconFor(item.icon);
+  const labelFor = useSlotBadgeLabel();
   return (
     <Link
       href={item.href}
-      aria-label={item.label}
+      aria-label={slotAccessibleName(item.label, item.badge, count ?? 0, labelFor)}
       aria-current={active ? 'page' : undefined}
       className={cn(rowBase, active ? rowActive : rowIdle)}
     >
       <Icon aria-hidden size={22} strokeWidth={active ? 2.3 : 1.7} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-      {count !== undefined && count > 0 ? <Badge count={count} /> : null}
+      {count !== undefined && count > 0 ? (
+        <span aria-hidden className="inline-flex">
+          <Badge count={count} />
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -57,6 +64,8 @@ export function DesktopRail({
 }: DesktopRailProps) {
   const pathname = usePathname() ?? '';
   const active = activeTabKey(nav.tabs, pathname);
+  // Live counters inside the tenant shell's provider; the static prop otherwise (platform, tests).
+  const shown = useLiveCounters() ?? counters;
   const SettingsIcon = iconFor('settings');
   const ThemeIcon = iconFor('sun');
   const LogoutIcon = iconFor('log-out');
@@ -89,7 +98,7 @@ export function DesktopRail({
             key={slot.key}
             item={slot}
             active={isNavItemActive(pathname, slot.href)}
-            count={slot.badge ? counters[slot.badge] : undefined}
+            count={slot.badge ? shown[slot.badge] : undefined}
           />
         ))}
 

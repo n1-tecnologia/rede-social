@@ -19,7 +19,6 @@
   "dependencies": {
     "@hono/node-server": "2.1.1",
     "@hono/zod-openapi": "1.6.3",
-    "@t3-oss/env-core": "0.13.11",
     "@rede-social/contracts": "workspace:*",
     "@rede-social/core": "workspace:*",
     "@rede-social/module-communities": "workspace:*",
@@ -28,6 +27,7 @@
     "@rede-social/module-notifications": "workspace:*",
     "@rede-social/module-reels": "workspace:*",
     "@rede-social/module-stories": "workspace:*",
+    "@t3-oss/env-core": "0.13.11",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.7",
     "pg-boss": "12.31.0",
@@ -37,8 +37,9 @@
     "zod": "4.6.2"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "2.116.0",
     "@rede-social/config": "workspace:*",
+    "@supabase/realtime-js": "2.116.0",
+    "@supabase/supabase-js": "2.116.0",
     "@types/node": "24.13.4",
     "drizzle-kit": "0.31.10",
     "jose": "6.2.12",

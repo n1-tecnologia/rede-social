@@ -266,6 +266,9 @@ importers:
       '@rede-social/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@supabase/realtime-js':
+        specifier: 2.116.0
+        version: 2.116.0
       '@supabase/supabase-js':
         specifier: 2.116.0
         version: 2.116.0
@@ -463,6 +466,9 @@ importers:
       '@rede-social/ui':
         specifier: workspace:*
         version: link:../ui
+      '@supabase/realtime-js':
+        specifier: 2.116.0
+        version: 2.116.0
       '@supabase/supabase-js':
         specifier: 2.116.0
         version: 2.116.0

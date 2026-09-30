@@ -4,12 +4,18 @@ import { Avatar, Badge, cn } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { activeTabChrome, iconFor, isNavItemActive, type NavItem } from './nav';
+import { useLiveCounters } from './realtime/LiveCountersProvider';
+import { slotAccessibleName, useSlotBadgeLabel } from './realtime/SlotBadgeLabels';
 import { TenantLogo } from './TenantLogo';
 
 export interface TopBarProps {
   brand: { displayName: string; logoUrl: string | null };
   /** Registry `topbar` slots (bell, support chat …) in order; empty this phase. */
   slots: ReadonlyArray<NavItem>;
+  /**
+   * The server-rendered counters. Inside a `LiveCountersProvider` (the tenant shell) the live value
+   * wins; without one (the platform shell, tests) this static prop is what the slots show.
+   */
   counters: { unreadNotifications: number; unreadConversations: number };
   avatar: { src: string | null; alt: string };
   /** Accessible name of the avatar link (`/perfil`). */
@@ -48,6 +54,9 @@ export function TopBar({
 }: TopBarProps) {
   const pathname = usePathname() ?? '';
   const onProfile = isNavItemActive(pathname, profileHref);
+  const live = useLiveCounters();
+  const labelFor = useSlotBadgeLabel();
+  const shown = live ?? counters;
 
   if (tabs && activeTabChrome(tabs, pathname) === 'media') return null;
 
@@ -67,18 +76,18 @@ export function TopBar({
           {slots.map((slot) => {
             const Icon = iconFor(slot.icon);
             const active = isNavItemActive(pathname, slot.href);
-            const count = slot.badge ? counters[slot.badge] : 0;
+            const count = slot.badge ? shown[slot.badge] : 0;
             return (
               <Link
                 key={slot.key}
                 href={slot.href}
-                aria-label={slot.label}
+                aria-label={slotAccessibleName(slot.label, slot.badge, count, labelFor)}
                 aria-current={active ? 'page' : undefined}
                 className={cn(slotLinkClasses, active && 'text-brand')}
               >
                 <Icon aria-hidden size={24} strokeWidth={active ? 2 : 1.5} />
                 {count > 0 ? (
-                  <span className="absolute top-0.5 right-0.5">
+                  <span aria-hidden className="absolute top-0.5 right-0.5">
                     <Badge count={count} />
                   </span>
                 ) : null}

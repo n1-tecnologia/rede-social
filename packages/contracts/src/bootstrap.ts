@@ -61,3 +61,11 @@ export const bootstrapSchema = z.object({
   }),
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
+
+/**
+ * `GET /v1/me/counters` (07-03, D-240): the bootstrap's badge counters alone, for the live refetch the
+ * shell runs on every Realtime signal, re-join and refocus. It IS the bootstrap's sub-schema (not a
+ * copy), so the two answers cannot drift; 07-08 grows both at once.
+ */
+export const countersSchema = bootstrapSchema.shape.counters;
+export type Counters = z.infer<typeof countersSchema>;

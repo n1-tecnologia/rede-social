@@ -5,7 +5,9 @@ import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
+import { LiveShell } from '@/components/shell/LiveShell';
 import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
+import { env } from '@/lib/env';
 import { requirePlatformTenants } from '@/lib/platform';
 import { moduleLabelResolver } from '@/lib/registry';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -90,19 +92,30 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     module: moduleLabelResolver(tRoot),
   });
 
+  // 07-03 (NOTIF-02): the live layer — one Realtime client, the live counters and the stateful slot
+  // labels — wraps the tenant shell only. The platform branch above stays static.
   return (
-    <AppShell
-      brand={{ displayName: tenant.displayName, logoUrl: branding.logoUrl }}
-      nav={nav}
-      counters={bootstrap.counters}
-      avatar={{ src: membership.profile.avatarUrl, alt: membership.profile.displayName }}
-      labels={labels}
-      settingsHref="/configuracoes"
-      logoutAction={logout}
-      themeToggle={<ThemeToggle initial={theme} label={t('nav.theme')} action={setTheme} />}
-      style={brandStyleVars(branding)}
+    <LiveShell
+      supabaseUrl={env.NEXT_PUBLIC_SUPABASE_URL}
+      publishableKey={env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+      tenantId={tenant.id}
+      userId={bootstrap.user.id}
+      initialCounters={bootstrap.counters}
+      notificationsEnabled={bootstrap.modules.some((m) => m.key === 'notifications')}
     >
-      {children}
-    </AppShell>
+      <AppShell
+        brand={{ displayName: tenant.displayName, logoUrl: branding.logoUrl }}
+        nav={nav}
+        counters={bootstrap.counters}
+        avatar={{ src: membership.profile.avatarUrl, alt: membership.profile.displayName }}
+        labels={labels}
+        settingsHref="/configuracoes"
+        logoutAction={logout}
+        themeToggle={<ThemeToggle initial={theme} label={t('nav.theme')} action={setTheme} />}
+        style={brandStyleVars(branding)}
+      >
+        {children}
+      </AppShell>
+    </LiveShell>
   );
 }

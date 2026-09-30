@@ -1,12 +1,20 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { bootstrapSchema, hostTenantSchema } from '@rede-social/contracts';
+import { bootstrapSchema, countersSchema, hostTenantSchema } from '@rede-social/contracts';
 import { db, sqlClient } from '@rede-social/core/db';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { sql } from 'drizzle-orm';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import {
+  adminSql,
+  api,
+  authAdmin,
+  HOSTS,
+  runNotificationJobs,
+  SEED_PASSWORD,
+  signInAs,
+} from './setup';
 
 type Envelope = { error: { code: string; message: string; details?: unknown; requestId: string } };
 type Loose = { user: { id: string }; tenant: { id: string; slug: string } };
@@ -268,5 +276,56 @@ describe('scripts/seed.ts — D-24 idempotency', () => {
       ['rede-demo', 1],
       ['rede-lab', 1],
     ]);
+  });
+});
+
+describe('GET /v1/me/counters — the live refetch answers exactly the bootstrap counters (07-03)', () => {
+  const CAPTION = 'Contadores de teste 07-03';
+
+  const sweep = async () => {
+    await adminSql`delete from public.notifications
+                    where tenant_id = ${memberCtx.tenantId}::uuid`;
+    await adminSql`delete from public.feed_posts where caption like ${`${CAPTION}%`}`;
+    await adminSql`update pgboss.job_common set state = 'completed', completed_on = now()
+                    where name = 'notifications.fanout' and state = 'created'`;
+  };
+
+  it('15. after one fan-out, /v1/me/counters equals the bootstrap counters for the same member', async () => {
+    await sweep();
+    try {
+      const adminToken = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+      const created = await api.request('/v1/feed/posts', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+          'content-type': 'application/json',
+          'x-tenant-host': HOSTS.demo,
+        },
+        body: JSON.stringify({ caption: `${CAPTION} um` }),
+      });
+      expect(created.status).toBe(201);
+      expect(await runNotificationJobs(memberCtx.tenantId)).toBe(1);
+
+      const boot = bootstrapSchema.parse(await (await bootstrap()).json());
+      const res = await api.request('/v1/me/counters', {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      const body: unknown = await res.json();
+      // Exactly the contract's keys: the refetch can never carry more than the bootstrap does.
+      expect(Object.keys(body as object).sort()).toEqual([
+        'unreadConversations',
+        'unreadNotifications',
+      ]);
+      const counters = countersSchema.parse(body);
+      expect(counters).toEqual(boot.counters);
+      expect(counters.unreadNotifications).toBe(1);
+
+      // No token, no counters.
+      expect((await api.request('/v1/me/counters')).status).toBe(401);
+    } finally {
+      await sweep();
+    }
   });
 });

@@ -21,6 +21,40 @@ export {
   type NavModule,
   type ShellNav,
 } from './nav';
+export { appBadgeCount, applyAppBadge, type BadgeCounters } from './realtime/app-badge';
+export {
+  type LiveCounters,
+  LiveCountersProvider,
+  type LiveCountersProviderProps,
+  useLiveCounters,
+} from './realtime/LiveCountersProvider';
+export {
+  type BroadcastMessage,
+  HIDDEN_DISCONNECT_MS,
+  type RealtimeApi,
+  type RealtimeChannelLike,
+  type RealtimeClientFactory,
+  type RealtimeClientLike,
+  type RealtimeClientOptionsLike,
+  RealtimeProvider,
+  type RealtimeProviderProps,
+  type SignalHandler,
+  useRealtime,
+} from './realtime/RealtimeProvider';
+export {
+  type SlotBadgeLabel,
+  SlotBadgeLabelsProvider,
+  type SlotBadgeLabelsProviderProps,
+  slotAccessibleName,
+  useSlotBadgeLabel,
+} from './realtime/SlotBadgeLabels';
+export {
+  createTokenSource,
+  REFRESH_MARGIN_MS,
+  type RealtimeToken,
+  tokenFetcher,
+} from './realtime/token-source';
+export { type UseRealtimeTopicOptions, useRealtimeTopic } from './realtime/useRealtimeTopic';
 export { ScrollRoot, type ScrollRootProps } from './ScrollRoot';
 export { TenantLogo, type TenantLogoProps, type TenantLogoSize } from './TenantLogo';
 export { type Theme, ThemeToggle, type ThemeToggleProps } from './ThemeToggle';

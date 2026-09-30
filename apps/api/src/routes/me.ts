@@ -5,6 +5,7 @@ import {
   apiErrorEnvelopeSchema,
   type Bootstrap,
   bootstrapSchema,
+  countersSchema,
   resolveBranding,
   TENANT_ROLES,
 } from '@rede-social/contracts';
@@ -193,6 +194,32 @@ export const meRoutes = me
         counters,
       };
       return c.json(body, 200);
+    },
+  )
+  /**
+   * `GET /v1/me/counters` (07-03, NOTIF-02, D-240): the bootstrap's badge counters and nothing else,
+   * for the live refetch the shell runs on every Realtime signal, re-join and refocus. It reads the
+   * SAME flags through the same cache and runs the SAME `countersFor` in ONE tenant-lane transaction,
+   * so this answer and the bootstrap's `counters` cannot disagree for the same member. A signal only
+   * says "refetch"; the number always comes from here.
+   */
+  .openapi(
+    createRoute({
+      method: 'get',
+      path: '/counters',
+      responses: {
+        200: {
+          description: "The caller's badge counters (the bootstrap's `counters`)",
+          content: { 'application/json': { schema: countersSchema } },
+        },
+      },
+    }),
+    async (c) => {
+      const ctx = c.get('ctx');
+      const flags = await moduleFlags.flags(ctx);
+      const counters = await withTenantTx(ctx, (tx) => countersFor(tx, ctx, flags.keys));
+      c.header('Cache-Control', 'no-store');
+      return c.json(countersSchema.parse(counters), 200);
     },
   )
   /**
