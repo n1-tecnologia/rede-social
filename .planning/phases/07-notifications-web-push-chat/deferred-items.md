@@ -14,6 +14,7 @@
 - Local env hosts still carry the pre-rename `tria-*` values (07-01 execution note)
   status: open
   **What:** `pnpm db:seed` prints `platform=tria.localhost rede-demo=tria-demo.localhost rede-lab=tria-lab.localhost`, so `apps/api/.env.local` (and the web/Playwright env) still carry the old host values. Tests reading hosts from the env stay consistent, but two pre-existing tests hardcode `rede-*` hosts and fail only because of it: `apps/api/tests/integration/signup.test.ts` case 2 (`by-host?host=rede-demo.localhost` answers 404) and `apps/web/e2e/phase2-smoke.spec.ts` case 1 (the platform host defaults to `rede-social.localhost`, so the super_admin panel link is absent; cases 2-5 then do not run). Not worked around in 07-01 by instruction; the developer decides whether to regenerate the env files.
+  **07-05 addition:** a third symptom of the same cause. `apps/web/e2e/events.spec.ts` "events detalhe › an unknown id, another tenant’s event and a malformed id are ONE not-found screen" fails on both projects: the not-found body reads "…não é de rede-demo.localhost." instead of "…não é de Rede Demo.", because `getHostTenant()` cannot resolve the `rede-demo.localhost` host the e2e fixtures browse while the seed registered `tria-demo.localhost`. 07-05 does not touch that page or the host lookup; every other events.spec case passes.
 
 - `feed-comments.spec.ts` "a failed comment list renders the inline error…" races the Mux playback-token action (07-04 execution note)
   status: open

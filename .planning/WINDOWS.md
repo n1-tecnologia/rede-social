@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 40
+open_count: 41
 waived_count: 0
 fixed_count: 20
-total_count: 60
-last_updated: 2026-09-30T14:07:37.060Z
+total_count: 61
+last_updated: 2026-09-30T17:54:09.150Z
 ---
 
 # Broken Windows Ledger
@@ -75,6 +75,7 @@ last_updated: 2026-09-30T14:07:37.060Z
 | 58 | 7 | stub | packages/modules/notifications/server/channels/registry.ts |  | push channel unregistered; intents log notifications.channel_unavailable (07-06 registers it) | open |  | 2026-09-30T13:22:38.756Z |  |
 | 59 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 378 | 07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still tria-*), cases 2-5 did not run | open |  | 2026-09-30T13:22:38.830Z |  |
 | 60 | 7 | unrun-verify | apps/api/tests/integration/signup.test.ts | 142 | signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01) | open |  | 2026-09-30T13:22:38.902Z |  |
+| 61 | 7 | unrun-verify | apps/web/e2e/events.spec.ts | 422 | 07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still tria-* (pre-existing, same cause as #59/#60) | open |  | 2026-09-30T17:54:09.150Z |  |
 
 ````json
 [
@@ -796,6 +797,18 @@ last_updated: 2026-09-30T14:07:37.060Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-30T13:22:38.902Z",
+    "resolved_at": null
+  },
+  {
+    "id": 61,
+    "kind": "unrun-verify",
+    "phase": "7",
+    "file": "apps/web/e2e/events.spec.ts",
+    "line": 422,
+    "description": "07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still tria-* (pre-existing, same cause as #59/#60)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-30T17:54:09.150Z",
     "resolved_at": null
   }
 ]
