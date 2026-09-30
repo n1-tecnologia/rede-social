@@ -72,7 +72,8 @@ begin
   v_tenant := v_parts[2]::uuid;
 
   -- A LIVE membership of THAT tenant, in an ACTIVE tenant. No row: not a member there, blocked,
-  -- removed, invited, or the tenant is suspended.
+  -- removed, invited, or the tenant is suspended. At most one row by `memberships_tenant_user_uq`
+  -- (no row cap here: 040 pins `app.membership_for_user` as the only function that picks one row).
   select m.role
     into v_role
     from public.memberships m
@@ -82,8 +83,7 @@ begin
      and m.status = 'active'
      and m.blocked_at is null
      and m.deleted_at is null
-     and t.status = 'active'
-   limit 1;
+     and t.status = 'active';
   if v_role is null then
     return false;
   end if;
