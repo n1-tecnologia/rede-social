@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-03-PLAN.md
-last_updated: "2026-09-30T14:09:41.267Z"
+stopped_at: Completed 07-04-PLAN.md
+last_updated: "2026-09-30T17:21:58.033Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-03 complete: live bell (kernel RealtimeProvider + LiveCountersProvider, /v1/me/counters, BFF token and counters routes, live SC 4 suite, live e2e); next 07-04 (Wave 3)"
-state_head: 7cfcab1b7be7b0a8e612c83cb31a314bf181a17c
+last_activity_desc: "07-04 complete: feed and stories kinds, keep-and-mark retraction, 90-day prune via sweepFunctions, comment-thread pin and highlight, generic and removed rows, expired-story notice; sketch 007 approved (provisional, igor.vboas, 2026-09-30); next 07-05 (Wave 4)"
+state_head: b5210895d1e98a3c88086948f7f294e06481192b
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 109
-  completed_plans: 98
+  completed_plans: 99
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 3 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell); next: 07-04 (Wave 3, retractions and the generic row). The sketch 007 gate (approved: false) blocks 07-04 T3, 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and T2 until the user approves
+Plan: 4 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds); next: 07-05 (Wave 4, event sources and reminders). Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
 Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-03 (live bell over Realtime; @supabase/realtime-js 2.116.0 approved and pinned; env hosts still tria-*)
+Last activity: 2026-09-30 — Completed 07-04 (feed/stories kinds, keep-and-mark retraction, 90-day prune, comment highlight deep link; NOTIF-01 stays open for 07-05 events/reminders and 07-08 support replies; env hosts still tria-*)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -158,6 +158,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P02 | 22 min | 2 tasks | 3 files |
 | Phase 07 P01 | 52 min | 3 tasks | 80 files |
 | Phase 07 P03 | 29min | 3 tasks | 30 files |
+| Phase 07 P04 | 3h10m | 3 tasks | 55 files |
 
 ## Accumulated Context
 
@@ -503,6 +504,11 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-03: @supabase/realtime-js@2.116.0 approved verbatim ("approved", 2026-09-30) at the package-legitimacy gate; exact pin in core and api (dev), 2.117.2 not installed
 - [Phase 07]: 07-03: RealtimeProvider awaits client.setAuth() before any subscribe (and after a hidden-tab resume): realtime-js builds the first join synchronously before its async accessToken callback resolves, so the first private join was refused
 - [Phase 07]: 07-03: LiveShell joins tenant:<t>:all only while notifications is enabled; the /notificacoes live merge ignores seen/read markers and re-posts seen only when a row was added
+- [Phase 07]: 07-04: retraction is keep-and-mark; app.notifications_retract replaces payload with exactly {"removed": true} in the payload's tenant; the row renders a removed button
+- [Phase 07]: 07-04: personal-kind push tags feed-comment-replied and stories-comment (renotify true); likes never pushed
+- [Phase 07]: 07-04: the kernel sweeper runs module SQL by name via ModuleManifest.sweepFunctions (app.notifications_prune, service_role only, 90 days)
+- [Phase 07]: 07-04: sketch 007 approved by the developer (igor.vboas) by hand on 2026-09-30, provisional; unblocks 07-05 T2, 07-07 T2, 07-09 T2, 07-10 T1-T2
+- [Phase 07]: 07-04: /post/{id}?comentario= pins the root thread first via GET /v1/feed/comments/{id}/thread; expired story rows land on /inicio?aviso=story-expirado
 
 ### Pending Todos
 
@@ -572,6 +578,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T14:09:41.161Z
-Stopped at: Completed 07-03-PLAN.md
+Last session: 2026-09-30T17:21:57.924Z
+Stopped at: Completed 07-04-PLAN.md
 Resume file: None

@@ -118,7 +118,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### Notifications
 
 - [ ] **NOTIF-01**: A notification module records in-app notifications for: likes on the member's comments, comments/replies on the member's comments, new posts, new events and event reminders, support replies; all produced from domain events
-- [ ] **NOTIF-02**: Member has a notification center (bell) with unread count, list of notifications, and mark-as-read; the unread count updates in real time
+- [x] **NOTIF-02**: Member has a notification center (bell) with unread count, list of notifications, and mark-as-read; the unread count updates in real time
 - [ ] **NOTIF-03**: Member can enable Web Push in the installed PWA; push messages carry the tenant's name and icon and open the relevant screen; expired subscriptions are cleaned up
 - [ ] **NOTIF-04**: The notification module has a channel abstraction (in-app, push) so e-mail/WhatsApp can be added later as adapters
 
@@ -303,7 +303,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CHAT-06 | Phase 11 | Pending |
 | CHAT-07 | Phase 11 | Pending |
 | NOTIF-01 | Phase 7 | Pending |
-| NOTIF-02 | Phase 7 | Pending |
+| NOTIF-02 | Phase 7 | Complete |
 | NOTIF-03 | Phase 7 | Pending |
 | NOTIF-04 | Phase 7 | Pending |
 | MODER-01 | Phase 8 | Pending |
