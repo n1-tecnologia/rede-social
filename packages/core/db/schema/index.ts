@@ -1,4 +1,3 @@
-export * from './chat-stubs';
 export * from './consent-records';
 export * from './media-assets';
 export * from './media-provider-events';

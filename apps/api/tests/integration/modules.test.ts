@@ -151,14 +151,15 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     // and 06-01 added `events` with `nav.order: 40` (D-55, UI-D-215): after reels, ahead of every
     // manifest-less key.
     // 07-01 added `notifications` with `nav.order: 10` (D-40, UI-D-268: the TopBar bell), the lowest
-    // order of any manifest, so it now heads the list; `chat` (no manifest yet) stays in the fallback
-    // bucket.
+    // order of any manifest, so it now heads the list. 07-08 gave `chat` its manifest with
+    // `nav.order: 20` (D-40: the support slot right after the bell), which TIES `communities`; the tie
+    // falls back to the key, so `chat` sorts just ahead of `communities`.
     expect(demoBody.modules.map((m) => m.key)).toEqual([
       'notifications',
+      'chat',
       'communities',
       'reels',
       'events',
-      'chat',
       'feed',
       'stories',
     ]);
@@ -172,6 +173,20 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
           badge: 'unreadNotifications',
           href: '/notificacoes',
           order: 10,
+        });
+        expect(m.home).toBeUndefined();
+        continue;
+      }
+      if (m.key === 'chat') {
+        // 07-08 (D-40, D-224): the support chat, a TOPBAR slot badged by the conversations counter,
+        // verbatim. One href for everybody: the web picks the member's thread or the staff inbox.
+        expect(m.nav).toEqual({
+          placement: 'topbar',
+          label: 'Suporte',
+          icon: 'message-circle',
+          badge: 'unreadConversations',
+          href: '/suporte',
+          order: 20,
         });
         expect(m.home).toBeUndefined();
         continue;
@@ -237,9 +252,14 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     expect(admin.permissions).toContain('events.event.manage');
     expect(admin.permissions).toContain('events.attendance.read');
 
-    // …and a member only answers and checks in: the one module permission a V1 member holds.
+    // 07-08 (D-223): the chat manifest grants `chat.support` to the admin too.
+    expect(admin.permissions).toContain('chat.support');
+    expect(admin.permissions).not.toContain('chat.support.contact');
+
+    // …and a member only answers, checks in and writes to the team: the two module permissions a
+    // V1 member holds (07-08 added `chat.support.contact`, D-223).
     const member = (await (await bootstrap(tokens.demoMember)).json()) as BootstrapBody;
-    expect(member.permissions).toEqual(['events.attendance.respond']);
+    expect(member.permissions).toEqual(['chat.support.contact', 'events.attendance.respond']);
   });
 
   it('3. empty: a tenant with zero tenant_modules rows gets modules: []', async () => {
@@ -432,8 +452,8 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
     expect(enabled.status).toBe(200);
     expect(await enabled.json()).toEqual({ ok: true });
     const lab = (await (await bootstrap(tokens.labMember)).json()) as BootstrapBody;
-    // `events` (nav order 40) now sorts ahead of the manifest-less `chat` (06-01).
-    expect(lab.modules.map((m) => m.key)).toEqual(['reels', 'events', 'chat', 'feed']);
+    // 07-08: `chat` (nav order 20) now sorts ahead of every tab of the lab tenant.
+    expect(lab.modules.map((m) => m.key)).toEqual(['chat', 'reels', 'events', 'feed']);
 
     // Back off: the very next request is refused again.
     const off = await putModule(labId, 'chat', false);

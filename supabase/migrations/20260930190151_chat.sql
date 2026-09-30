@@ -1,0 +1,16 @@
+ALTER TABLE "chat_conversations" ADD COLUMN "last_seq" bigint DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "chat_conversations" ADD COLUMN "last_staff_seq" bigint DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "chat_conversations" ADD COLUMN "staff_last_read_seq" bigint DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "chat_conversations" ADD COLUMN "last_message_side" text;--> statement-breakpoint
+ALTER TABLE "chat_messages" ADD COLUMN "author_side" text NOT NULL;--> statement-breakpoint
+ALTER TABLE "chat_participants" ADD COLUMN "last_read_seq" bigint DEFAULT 0 NOT NULL;--> statement-breakpoint
+CREATE INDEX "chat_conversations_inbox_idx" ON "chat_conversations" USING btree ("tenant_id","last_message_at" DESC NULLS FIRST,"id" DESC NULLS FIRST) WHERE kind = 'support';--> statement-breakpoint
+ALTER TABLE "chat_conversations" ADD CONSTRAINT "chat_conversations_last_side_chk" CHECK ("chat_conversations"."last_message_side" is null or "chat_conversations"."last_message_side" in ('member','staff'));--> statement-breakpoint
+ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_author_side_chk" CHECK ("chat_messages"."author_side" in ('member','staff'));--> statement-breakpoint
+ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_body_chk" CHECK (char_length(btrim("chat_messages"."body", E' \t\n\r')) between 1 and 2000);--> statement-breakpoint
+DROP POLICY "chat_conversations_tenant_isolation" ON "chat_conversations" CASCADE;--> statement-breakpoint
+DROP POLICY "chat_messages_tenant_isolation" ON "chat_messages" CASCADE;--> statement-breakpoint
+DROP POLICY "chat_participants_tenant_isolation" ON "chat_participants" CASCADE;--> statement-breakpoint
+CREATE POLICY "chat_conversations_access" ON "chat_conversations" AS PERMISSIVE FOR ALL TO "authenticated" USING (tenant_id = app.tenant_id() and ((kind = 'support' and app.tenant_role() in ('admin_tenant', 'support_tenant')) or created_by_user_id = app.user_id() or exists (select 1 from public.chat_participants p where p.conversation_id = chat_conversations.id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id()))) WITH CHECK (tenant_id = app.tenant_id() and ((kind = 'support' and app.tenant_role() in ('admin_tenant', 'support_tenant')) or created_by_user_id = app.user_id() or exists (select 1 from public.chat_participants p where p.conversation_id = chat_conversations.id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id())));--> statement-breakpoint
+CREATE POLICY "chat_messages_access" ON "chat_messages" AS PERMISSIVE FOR ALL TO "authenticated" USING (tenant_id = app.tenant_id() and exists (select 1 from public.chat_conversations c where c.id = chat_messages.conversation_id)) WITH CHECK (tenant_id = app.tenant_id() and author_user_id = app.user_id() and exists (select 1 from public.chat_conversations c where c.id = chat_messages.conversation_id));--> statement-breakpoint
+CREATE POLICY "chat_participants_access" ON "chat_participants" AS PERMISSIVE FOR ALL TO "authenticated" USING (tenant_id = app.tenant_id() and (user_id = app.user_id() or app.tenant_role() in ('admin_tenant', 'support_tenant'))) WITH CHECK (tenant_id = app.tenant_id() and (user_id = app.user_id() or app.tenant_role() in ('admin_tenant', 'support_tenant')));

@@ -1,0 +1,31 @@
+{
+  "name": "@rede-social/module-chat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Chat module (CHAT-01..05): the member <-> support conversation. Owns the chat tables (moved from the Phase 1 stub and reshaped: per-conversation counters, a gapless seq assigned by a trigger under the conversation row lock, the shared staff read seq, the author side, the body CHECK and participant/staff-aware policies), the ids-only Realtime signals published by a definer trigger, the lazy member send, the staff reply, the seq catch-up reads, the staff inbox, the chat badges and the push-only support source.",
+  "exports": {
+    "./module": "./module.ts",
+    "./contracts": "./contracts/index.ts",
+    "./server": "./server/index.ts",
+    "./db": "./db/schema.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
+    "@rede-social/contracts": "workspace:*",
+    "@rede-social/core": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.7",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@rede-social/config": "workspace:*",
+    "@types/node": "24.13.4",
+    "vitest": "5.0.0"
+  }
+}

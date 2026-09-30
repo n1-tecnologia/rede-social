@@ -2,9 +2,10 @@
  * Idempotent seed (D-14, D-17, D-19, D-24).
  * Run: `SEED_PASSWORD=... SUPER_ADMIN_PASSWORD=... pnpm db:seed`.
  *
- * Creates the seed tenants (rede-demo, rede-lab), one admin_tenant + one member each, their
- * `tenant_modules` rows and their primary, verified `tenant_domains` rows, plus the platform's `super_admin`
- * in `platform_admins`. Safe to re-run. Passwords come from env only, never from git.
+ * Creates the seed tenants (rede-demo, rede-lab), one admin_tenant + one support_tenant + one member
+ * each (plus the named members below), their `tenant_modules` rows and their primary, verified
+ * `tenant_domains` rows, plus the platform's `super_admin` in `platform_admins`. Safe to re-run.
+ * Passwords come from env only, never from git.
  */
 import { createHash, randomInt } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -116,6 +117,8 @@ type SeedTenant = {
   host: string;
   /** Members beyond the tenant's admin and its original `member@<slug>.local`. */
   members: readonly SeedMember[];
+  /** 07-08: the tenant's `support_tenant` staff member, `support@<slug>.local` (D-223). */
+  supportName: string;
   /** Exactly the keys enabled for this tenant; every other key is written with `enabled = false`. */
   modules: readonly ModuleKey[];
   /** D-25 source colors; the derivations are computed by `deriveBrandColors` at seed time. */
@@ -143,6 +146,7 @@ const SEED_TENANTS: SeedTenant[] = [
     // Far from the neutral platform blue (#2e6fd0) and from rede-lab, so the brand smoke tells them apart.
     colors: { primary: '#7c3aed', secondary: '#a78bfa' },
     logoUrl: '/seed-logos/rede-demo.svg',
+    supportName: 'Carla Rocha',
     members: [
       {
         local: 'joao.goncalves',
@@ -186,6 +190,7 @@ const SEED_TENANTS: SeedTenant[] = [
     modules: ['feed', 'events', 'reels'],
     colors: { primary: '#0f766e', secondary: '#14b8a6' },
     logoUrl: '/seed-logos/rede-lab.svg',
+    supportName: 'Bruno Lima',
     members: [
       { local: 'alvaro.pinheiro', name: 'Álvaro Pinheiro', bio: 'Testando o isolamento.' },
       { local: 'helena.kuster', name: 'Helena Küster', bio: 'Trago o café.' },
@@ -193,6 +198,26 @@ const SEED_TENANTS: SeedTenant[] = [
     ],
   },
 ];
+
+/**
+ * 07-08 (CHAT-01..04): ONE seeded support conversation, in rede-demo only (rede-lab keeps `chat`
+ * off), between `member@rede-demo.local` and the team. Its three bodies are exported BY NAME so the
+ * e2e (07-09/07-10) asserts against the fixture, never a literal that could drift. The ids are fixed
+ * (the `1d…` range is free) so the pgTAP, integration and e2e suites can name the thread without a
+ * lookup. The seqs 1..3 are assigned and the signals published by the chat triggers, exactly as for
+ * an API write: the seed never writes a `seq`.
+ */
+export const SEED_SUPPORT_CONVERSATION_ID = '1d000000-0000-4000-8000-000000000001';
+export const SEED_SUPPORT_MESSAGES = {
+  memberFirst: 'Oi, preciso de ajuda com meu cadastro.',
+  staffReply: 'Oi! Como posso ajudar?',
+  memberSecond: 'Quero trocar meu e-mail.',
+} as const;
+const SEED_SUPPORT_MESSAGE_IDS = [
+  '1d000000-0000-4000-8000-000000000011',
+  '1d000000-0000-4000-8000-000000000012',
+  '1d000000-0000-4000-8000-000000000013',
+] as const;
 
 /**
  * The seeded feed (04-01, FEED-02). The two captions are IDENTICAL in both tenants ON PURPOSE:
@@ -1458,6 +1483,9 @@ for (const t of SEED_TENANTS) {
       email: `admin@${t.slug}.local`,
       name: `Admin ${t.displayName}`,
     },
+    // 07-08 (D-223): the team's staff member. `support_tenant` holds `chat.support` through the
+    // chat manifest (when chat is on) and is never counted among `memberUserIds` below.
+    { role: 'support_tenant' as const, email: `support@${t.slug}.local`, name: t.supportName },
     { role: 'member' as const, email: `member@${t.slug}.local`, name: `Membro ${t.displayName}` },
     // 03-02: a real community. The `member_profiles` row for each of these is created by the
     // `member_profiles_from_membership` trigger, with `display_name := users.name` — the seed never
@@ -1472,6 +1500,7 @@ for (const t of SEED_TENANTS) {
   let memberCount = 0;
   let photoCount = 0;
   let adminUserId: string | null = null;
+  let supportUserId: string | null = null;
   const memberUserIds: string[] = [];
   for (const p of people) {
     const userId = await ensureUser(p.email, p.name, seedPassword);
@@ -1479,6 +1508,7 @@ for (const t of SEED_TENANTS) {
       await tx.insert(memberships).values({ tenantId, userId, role: p.role }).onConflictDoNothing();
     });
     if (p.role === 'admin_tenant') adminUserId = userId;
+    if (p.role === 'support_tenant') supportUserId = userId;
     if (p.role === 'member') {
       memberCount += 1;
       memberUserIds.push(userId);
@@ -1534,6 +1564,60 @@ for (const t of SEED_TENANTS) {
         set: { tenantId, isPrimary: true, verifiedAt: new Date(), verificationStatus: 'verified' },
       });
   });
+
+  // 07-08: the demo support thread (see SEED_SUPPORT_MESSAGES). Written through the admin lane as
+  // raw SQL (the root workspace may not depend on a `module` package: the feed-post note below). The
+  // conversation and the member's participant row are idempotent on their keys. The messages are
+  // written ONLY when the thread is still empty, and never with `on conflict`: the seq trigger fires
+  // BEFORE the conflict arbiter, so a conflicting re-insert would still burn a seq (a gap). Each
+  // message is its own transaction so their instants differ, oldest first.
+  const supportMemberUserId = memberUserIds[0];
+  if (t.slug === 'rede-demo' && supportUserId && supportMemberUserId) {
+    const staffUserId: string = supportUserId;
+    await withAdminTx(async (tx) => {
+      await tx.execute(sql`
+        insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+        values (${SEED_SUPPORT_CONVERSATION_ID}::uuid, ${tenantId}::uuid, 'support',
+                ${supportMemberUserId}::uuid)
+        on conflict do nothing`);
+      await tx.execute(sql`
+        insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+        values (${SEED_SUPPORT_CONVERSATION_ID}::uuid, ${tenantId}::uuid,
+                ${supportMemberUserId}::uuid, 'member')
+        on conflict do nothing`);
+    });
+    const existing = await withAdminTx((tx) =>
+      tx.execute<{ n: number }>(sql`
+        select count(*)::int as n from public.chat_messages
+         where conversation_id = ${SEED_SUPPORT_CONVERSATION_ID}::uuid`),
+    );
+    if ((existing[0]?.n ?? 0) === 0) {
+      const thread: [string, string, 'member' | 'staff', string][] = [
+        [
+          SEED_SUPPORT_MESSAGE_IDS[0],
+          supportMemberUserId,
+          'member',
+          SEED_SUPPORT_MESSAGES.memberFirst,
+        ],
+        [SEED_SUPPORT_MESSAGE_IDS[1], staffUserId, 'staff', SEED_SUPPORT_MESSAGES.staffReply],
+        [
+          SEED_SUPPORT_MESSAGE_IDS[2],
+          supportMemberUserId,
+          'member',
+          SEED_SUPPORT_MESSAGES.memberSecond,
+        ],
+      ];
+      for (const [id, author, side, body] of thread) {
+        await withAdminTx(async (tx) => {
+          await tx.execute(sql`
+            insert into public.chat_messages (id, tenant_id, conversation_id, author_user_id, author_side, body)
+            values (${id}::uuid, ${tenantId}::uuid, ${SEED_SUPPORT_CONVERSATION_ID}::uuid,
+                    ${author}::uuid, ${side}, ${body})`);
+        });
+      }
+    }
+    console.log(`seed: tenant ${t.slug} — support user + 1 support conversation (3 messages)`);
+  }
 
   // 04-01: two posts per tenant, authored by that tenant's admin through the generic
   // `author_user_id` column (FEED-08 — "only the admin posts" is a permission value, never a schema

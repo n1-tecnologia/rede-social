@@ -62,9 +62,10 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     }
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
     // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
-    // `stories`, 05.3-01 added `reels` and 06-01 added `events`. The list is sorted so a new entry is one line, and this
+    // `stories`, 05.3-01 added `reels`, 06-01 added `events`, 07-01 `notifications` and 07-08 `chat`. The list is sorted so a new entry is one line, and this
     // assertion is what makes a silently-dropped registration fail rather than pass.
     expect(keys.sort()).toEqual([
+      'chat',
       'communities',
       'events',
       'feed',
@@ -83,6 +84,27 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     });
     expect(MODULE_REGISTRY.notifications?.counters).toBeTypeOf('function');
     expect(MODULE_REGISTRY.notifications?.defaultRolePermissions).toBeUndefined();
+    // D-40 / D-224 (07-08): the support chat is the TOPBAR slot after the bell, badged by the
+    // conversations counter, and ONE href for everybody (the web picks thread or inbox).
+    expect(MODULE_REGISTRY.chat?.nav).toEqual({
+      placement: 'topbar',
+      label: 'Suporte',
+      icon: 'message-circle',
+      badge: 'unreadConversations',
+      href: '/suporte',
+      order: 20,
+    });
+    // D-223: `chat.support` comes from the chat manifest for BOTH staff roles (so disabling chat
+    // revokes it), and members get only the right to write to the team.
+    expect(MODULE_REGISTRY.chat?.defaultRolePermissions).toEqual({
+      admin_tenant: ['chat.support'],
+      support_tenant: ['chat.support'],
+      member: ['chat.support.contact'],
+    });
+    expect(permissionsFor('admin_tenant', new Set<ModuleKey>(['chat']))).toContain('chat.support');
+    expect(permissionsFor('member', new Set<ModuleKey>(['chat']))).toEqual([
+      'chat.support.contact',
+    ]);
     // D-55 (amends D-40): the feed contributes a HOME SLOT and no navigation tab, so Phases 5 and 6
     // keep the tab budget they are planning against. A nav entry here is a regression, not a feature.
     expect(MODULE_REGISTRY.feed?.nav).toBeUndefined();

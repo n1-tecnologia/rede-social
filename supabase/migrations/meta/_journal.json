@@ -365,6 +365,20 @@
       "when": 1790791347361,
       "tag": "20260930180227_push_subscriptions_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1790794911664,
+      "tag": "20260930190151_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1790794949172,
+      "tag": "20260930190229_chat_functions",
+      "breakpoints": true
     }
   ]
 }

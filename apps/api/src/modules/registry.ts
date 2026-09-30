@@ -24,6 +24,7 @@ import {
 } from '@rede-social/core/server/notifications/source';
 import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions';
 import { KERNEL_ROLE_PERMISSIONS } from '@rede-social/core/server/rbac/require-role';
+import { chatModule } from '@rede-social/module-chat/module';
 import { communitiesModule } from '@rede-social/module-communities/module';
 import { eventsModule } from '@rede-social/module-events/module';
 import { FEED_PERMISSIONS, feedSettingsSchema } from '@rede-social/module-feed/contracts';
@@ -43,6 +44,7 @@ import { storiesModule } from '@rede-social/module-stories/module';
  * out the same way it went in.
  */
 export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
+  chat: chatModule,
   communities: communitiesModule,
   events: eventsModule,
   feed: feedModule,

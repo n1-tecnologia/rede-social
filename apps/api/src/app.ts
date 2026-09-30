@@ -2,6 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { flushEventsAfterHandler } from '@rede-social/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@rede-social/core/server/http/api-error';
+import { chatRoutes } from '@rede-social/module-chat/server';
 import { communitiesRoutes } from '@rede-social/module-communities/server';
 import { eventsRoutes } from '@rede-social/module-events/server';
 import { feedRoutes } from '@rede-social/module-feed/server';
@@ -93,7 +94,12 @@ const routes = app
   // `requireModule('notifications')` chain and no permission: every member reads and marks only
   // their OWN rows, which the owner-only policies enforce in the database. Turning the module off
   // 404s every route below and removes the bell slot from the bootstrap (D-40).
-  .route('/v1/notifications', notificationsRoutes);
+  .route('/v1/notifications', notificationsRoutes)
+  // Same shape (07-08): the chat module carries its own `requireAuth` + `requireModule('chat')` chain
+  // plus a per-route PERMISSION: `chat.support.contact` on the member's own thread, `chat.support` on
+  // the staff reply (packages/modules/chat/server/routes.ts). Turning the module off 404s every route
+  // below, removes the Suporte slot from the bootstrap and revokes `chat.support` (D-223).
+  .route('/v1/chat', chatRoutes);
 
 export type AppType = typeof routes;
 export { app };
