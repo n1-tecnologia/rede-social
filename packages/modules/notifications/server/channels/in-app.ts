@@ -10,10 +10,16 @@ import type { NotificationChannel } from './types';
  *   recipients (a retried job gets `[]` and signals nobody).
  * - A `members` audience publishes ONE signal on `tenant:<t>:all` (RESEARCH Pattern 4: never one per
  *   member, the Free plan's 100 msg/s); a `users` audience publishes once per new recipient on
- *   `tenant:<t>:user:<uid>`.
+ *   `tenant:<t>:user:<uid>`, up to `USER_SIGNAL_FANOUT_MAX` recipients. Above that (a reminder to a
+ *   400-person event, 07 review B-WR-06) it publishes ONE signal on `all` instead: one burst of
+ *   per-user messages in a transaction would exceed the plan's rate and get chat's signals throttled
+ *   tenant-wide. A member with no new row just refetches a count, which is cheap.
  * - The signal payload is `{ kind }` and nothing else (ids-only; `realtime.send` adds the message's
  *   own `id`). Every reader refetches through the API.
  */
+/** The most per-user signals one delivery publishes before it falls back to one `all` signal. */
+export const USER_SIGNAL_FANOUT_MAX = 20;
+
 export const inAppChannel: NotificationChannel = {
   key: 'in_app',
   async deliver(tx, { intent }) {
@@ -38,7 +44,7 @@ export const inAppChannel: NotificationChannel = {
 
     if (delivered.length > 0) {
       const signal = JSON.stringify({ kind: intent.kind });
-      if (audience.type === 'members') {
+      if (audience.type === 'members' || delivered.length > USER_SIGNAL_FANOUT_MAX) {
         await tx.execute(
           sql`select app.realtime_signal(${topicSuffix.all()}, ${REALTIME_EVENTS.notificationsChanged}, ${signal}::jsonb)`,
         );
