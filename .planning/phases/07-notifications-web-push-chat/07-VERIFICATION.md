@@ -307,7 +307,7 @@ covered_files:
   - "supabase/tests/151-notifications.sql"
   - "supabase/tests/152-chat.sql"
   - "supabase/tests/153-push-subscriptions.sql"
-covered_digest: v1:sha256:7da44485b881db9223af53e4e96ec5b3a9b48a79dc9c0f8cabed0f5b342ab747
+covered_digest: v1:sha256:36e88982240947d0c9dc29b9e1e72a69e61e761bfded735260abf5c679ef7015
 behavior_unverified: 0
 overrides_applied: 1
 overrides:
@@ -570,3 +570,5 @@ The status moved from human_needed to passed on that decision, not on new eviden
 ### Re-attestation (2026-10-01)
 
 `covered_digest` was recomputed with `computeCoveredDigest` after `phase.complete 07` updated `.planning/REQUIREMENTS.md` and `.planning/ROADMAP.md` (traceability and the completion checkbox). No code or test file changed since the verifier's run.
+
+Second re-attestation: commit eeee469 replaced old-brand host names and a local path in covered planning docs (SUMMARYs, deferred-items.md). Wording only; no code or test changed.
