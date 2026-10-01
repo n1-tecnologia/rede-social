@@ -513,12 +513,13 @@ screens. Both modules are per-tenant flags: a tenant sees nothing until the plat
    NOT NULL`, all without a default: they apply cleanly only to the empty tables no earlier release
    ever wrote. A non-zero count means stop and ask before pushing.
 7. **Push `master` and deploy the API and worker BEFORE the web serves the new build.** The bootstrap
-   contract gained `counters.conversationsBadge` (07-08): the web parses the API's bootstrap with a
-   schema that requires it, so a web build that goes live before the API revision that sends it
-   breaks every signed-in page until the API catches up (the 06-01 precedent,
-   `deferred-items.md`). A push to `master` starts BOTH pipelines at once, and the API one waits for
-   `checks` (~20 min) and the `production` approval, so the Vercel build normally finishes first.
-   Hold the web back:
+   contract gained `counters.conversationsBadge` (07-08). Since the 07 code review (A-WR-07) the web
+   reads it with a default (`count`), so a web build that goes live before the API revision no
+   longer breaks the signed-in pages the way the 06-01 precedent did (`deferred-items.md`); until the
+   API catches up, a member's chat slot shows a count instead of the dot, and the new `/suporte` and
+   `/notificacoes` routes answer their error states. A push to `master` starts BOTH pipelines at
+   once, and the API one waits for `checks` (~20 min) and the `production` approval, so the Vercel
+   build normally finishes first. Holding the web back is still the clean order:
    1. before pushing, in Vercel → Project → Settings → Environments → Production, turn off the
       automatic assignment of the production domains to new production deployments (Vercel's
       staged production deployments), so the push builds the web but `rede-social-woad.vercel.app`

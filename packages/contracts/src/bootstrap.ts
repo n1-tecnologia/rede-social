@@ -59,9 +59,13 @@ export const bootstrapSchema = z.object({
     unreadNotifications: z.number(),
     unreadConversations: z.number(),
     // 07-08 (D-237, D-238): how the chat slot draws `unreadConversations`, a member's `dot` or the
-    // staff `count`. It MUST be declared here: this plain `z.object` strips unknown keys on parse, so
-    // the API ships it BEFORE the web reads it (the 06-01 deploy-order precedent).
-    conversationsBadge: z.enum(['dot', 'count']),
+    // staff `count`. It MUST be declared here: this plain `z.object` strips unknown keys on parse.
+    // 07 review A-WR-07: TOLERANT on the reader side. An API revision older than the web (a deploy
+    // where Vercel wins the race, or an API rollback) does not send it, and a required field would
+    // fail the bootstrap parse on every signed-in page; absent reads as the kernel default `count`
+    // (over a zero, it draws nothing). The API still always sends it. Every future ADDITIVE
+    // bootstrap field follows this rule: `.default(...)` or `.optional()`, never required.
+    conversationsBadge: z.enum(['dot', 'count']).default('count'),
   }),
 });
 export type Bootstrap = z.infer<typeof bootstrapSchema>;
