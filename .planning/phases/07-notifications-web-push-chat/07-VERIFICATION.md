@@ -1,8 +1,8 @@
 ---
 phase: 07-notifications-web-push-chat
-verified: 2026-10-01T13:29:40Z
-status: gaps_found
-score: 17/22 must-haves verified
+verified: 2026-10-01T14:28:09Z
+status: human_needed
+score: 21/22 must-haves verified
 covered_files:
   - ".github/workflows/ci.yml"
   - ".github/workflows/deploy-api.yml"
@@ -37,6 +37,9 @@ covered_files:
   - ".planning/phases/07-notifications-web-push-chat/07-14-SUMMARY.md"
   - ".planning/phases/07-notifications-web-push-chat/07-15-PLAN.md"
   - ".planning/phases/07-notifications-web-push-chat/07-15-SUMMARY.md"
+  - ".planning/phases/07-notifications-web-push-chat/deferred-items.md"
+  - ".planning/quick/261001-ere-phase-7-leftovers-mark-all-busy-and-tapp/261001-ere-PLAN.md"
+  - ".planning/quick/261001-ere-phase-7-leftovers-mark-all-busy-and-tapp/261001-ere-SUMMARY.md"
   - "apps/api/.env.example"
   - "apps/api/package.json"
   - "apps/api/src/app.ts"
@@ -101,6 +104,7 @@ covered_files:
   - "apps/web/e2e/blocked.spec.ts"
   - "apps/web/e2e/chat-admin.ts"
   - "apps/web/e2e/chat.spec.ts"
+  - "apps/web/e2e/feed-admin.ts"
   - "apps/web/e2e/feed-comments.spec.ts"
   - "apps/web/e2e/feed.spec.ts"
   - "apps/web/e2e/fixtures.ts"
@@ -303,75 +307,37 @@ covered_files:
   - "supabase/tests/151-notifications.sql"
   - "supabase/tests/152-chat.sql"
   - "supabase/tests/153-push-subscriptions.sql"
-covered_digest: "v1:sha256:25088830dd71353919d42d441eca288ee97dc110d98d695e11262ba65c1958fe"
+covered_digest: "v1:sha256:054516bfb816686239c9c1836399b7b1fc6ef58c2875bd8223abe470e1057d00"
 behavior_unverified: 0
-overrides_applied: 0
+overrides_applied: 1
+overrides:
+  - must_have: "The local exit gate is green: TURBO_CACHE=local:r pnpm verify passes with every Phase 7 spec, pgTAP file and integration file included"
+    reason: "07-15 run: pgTAP 731/731, integration 708/708, compile 27/27, all four truth-15 gap items green, every Phase 7 e2e spec green except notifications.spec.ts:228, which quick 261001-ere fixed (notifications.spec.ts 45 passed / 1 skipped on both projects; WINDOWS 68 fixed). The three remaining reds are outside Phase 7 (05.2 highlight sheets phase52-smoke:294 and stories:1636 on mobile, Phase 2 Marca save phase2-smoke:378 on desktop; WINDOWS 69-71) and are deferred, tracked in deferred-items.md. e2e:pwa was not run in that gate run. Developer chose to close the phase without another full gate run."
+    accepted_by: "igor.vboas"
+    accepted_at: "2026-10-01T14:20:52Z"
 re_verification:
   previous_status: gaps_found
-  previous_score: 12/15
+  previous_score: 17/22
   gaps_closed:
-    - "Truth 14 (07 review C-WR-03 races in NotificationsSurface): was PRESENT_BEHAVIOR_UNVERIFIED, now VERIFIED by NotificationsSurface.test.tsx cases 1-2 (run by the verifier at HEAD: 3 passed, 2 expected fail; run against 583619c^: cases 1 and 2 fail, the control passes)"
-    - "Truth 15 gap item 1 (PLATFORM_HOST from the developer's env file): closed in the harness by 07-12; the 07-15 gate run passed every platform-host spec with nothing exported"
-    - "Truth 15 gap item 2 (desktop feed double tap): explained (a leftover like) and closed by 07-13's self-restoring FEED-04 cases; passed on both projects in the 07-15 gate run"
-    - "Truth 15 gap item 3 (feed-comments cold-run race): closed by 07-12's targeted failNextActions; passed on the cold post-reset server in the 07-15 gate run"
-    - "Truth 15 gap item 4 (turbo .next/types race): closed by 07-15's apps/web/turbo.json override; dry-run graph confirmed by the verifier, 0 ENOTEMPTY in the gate run"
-  gaps_remaining:
-    - "Truth 15: pnpm verify still exits 1 (4 different e2e reds; e2e:pwa did not run)"
-  regressions:
-    - "Truth 12 (UI state contracts E01-E14 hold in automated form) was VERIFIED in the previous report. 07-14 then proved UI E04 loading does not hold at HEAD. This is a newly evidenced failure, not a code change: NotificationsSurface.tsx is byte-identical to the previous verification"
-gaps:
-  - truth: "The local exit gate is green: `TURBO_CACHE=local:r pnpm verify` passes with every Phase 7 spec, pgTAP file and integration file included (07-11 must-have, 07-15 truth 2)"
-    status: failed
-    reason: "The single consented 07-15 run at 6dbc035 exited 1 at e2e: 651 passed, 4 failed, 124 skipped, 9 did not run. e2e:pwa never ran. All four previous gap items held. The four new reds are: notifications.spec.ts:228 mobile (a Phase 7 spec: the reload 44 ms after mark-all aborted the read-all POST, which has no keepalive); phase52-smoke.spec.ts:294 mobile (the Novo destaque sheet never opened); stories.spec.ts:1636 mobile (Escape did not close the Editar destaque sheet); phase2-smoke.spec.ts:378 desktop (Salvar alterações stayed disabled after #primary was filled). The cause of the last three is not established. No product file they exercise changed in 8b7415e..6dbc035, and the live layer issues no router.refresh, so a Phase 7 regression is not indicated. It is not excluded either."
-    artifacts:
-      - path: "apps/web/e2e/notifications.spec.ts"
-        issue: "line 228: page.reload() runs without waiting for POST /api/notifications/read-all. The case is green only when the POST beats the reload"
-      - path: "apps/web/app/(app)/notificacoes/NotificationsSurface.tsx"
-        issue: "line 234: read-all is a plain fetch with no keepalive, and the button unmounts optimistically (see the E04 gap), so nothing on screen waits for the POST"
-      - path: "apps/web/e2e/phase52-smoke.spec.ts"
-        issue: "line 255 (case at 294), mobile: the create sheet never opened; cases 2-6 did not run"
-      - path: "apps/web/e2e/stories.spec.ts"
-        issue: "line 1707 (case at 1636), mobile: Escape left the Editar destaque sheet open"
-      - path: "apps/web/e2e/phase2-smoke.spec.ts"
-        issue: "line 532 (case at 378), desktop: the Marca Save button re-rendered disabled and stayed disabled for 300 s; cases 2-5 did not run"
-    missing:
-      - "Fix the NotificationsSurface mark-all lifecycle (see the next gap). Keeping the button mounted and busy until the POST answers makes notifications.spec.ts:228's `toHaveCount(0)` wait for the response. Alternatively, make the spec wait for the read-all response before reloading, and decide whether read-all needs keepalive"
-      - "Run /gsd-debug on the two 05.2 highlight-sheet reds (mobile) and the desktop phase2-smoke Marca red, using the traces in apps/web/test-results/ (kept until the next Playwright run). Classify each as a regression or a flake before any fix"
-      - "Re-run `pnpm db:reset && pnpm db:seed && TURBO_CACHE=local:r VIDEO_PROVIDER=fake pnpm verify` once, through e2e:pwa, after the developer consents, or accept an override (see the report body)"
-  - truth: "UI E04 loading (UI-D-252, re-lifted by 07-14; part of truth 12): the 'Marcar todas como lidas' button is aria-busy and disabled while its POST runs"
-    status: failed
-    reason: "At HEAD the optimistic step clears every loaded row, so anyUnread turns false and the button unmounts for the whole POST (NotificationsSurface.tsx:366-379). `loading={markingAll}` is never visible. The verifier ran NotificationsSurface.test.tsx: the unchanged planned assertion lives in `it.fails('gap E04 loading')` and fails as expected. WINDOWS 66 is open. A double submit is still impossible."
-    artifacts:
-      - path: "apps/web/app/(app)/notificacoes/NotificationsSurface.tsx"
-        issue: "lines 366-379: `anyUnread ? <Button loading={markingAll}> : null` withdraws the control instead of showing it busy"
-      - path: "apps/web/app/(app)/notificacoes/NotificationsSurface.test.tsx"
-        issue: "lines 287-288: case 2 accepts `during === null || during.disabled` (review IN-03); tighten it when the fix lands"
-    missing:
-      - "Keep the button mounted while `markingAll` (for example `anyUnread || markingAll`), or amend UI-D-252 to say the control is withdrawn during the POST"
-      - "Turn `it.fails('gap E04 loading')` into a plain `it`, and tighten case 2 to `during?.disabled === true`"
-  - truth: "A row tapped while a mark-all is in flight is really marked read: its own read POST leaves, which is the premise of C-WR-03's scoped rollback (07-14 truth 2)"
-    status: failed
-    reason: "`activate` POSTs /read only while `isUnread(view)` (NotificationsSurface.tsx:208). During a mark-all every row is already in locallyRead, so no POST leaves. After a failed mark-all the row stays read on screen while the server keeps it unread until the next refresh. The product comment at lines 222-223 ('its own keepalive POST really marked it read') is untrue. Proven by `it.fails('gap own read POST')` (run by the verifier). WINDOWS 67 is open. Review WR-04: green case 2 certifies the UI-only state."
-    artifacts:
-      - path: "apps/web/app/(app)/notificacoes/NotificationsSurface.tsx"
-        issue: "line 208: the read POST is gated on the locally-unread view, not on the server-unread `view.unread`, while a mark-all is open"
-      - path: "apps/web/app/(app)/notificacoes/NotificationsSurface.test.tsx"
-        issue: "lines 290-304: asserts row b stays read without any read request for b (review WR-04)"
-    missing:
-      - "In `activate`, POST /read when `view.unread` is true and a mark-all is open (or roll the tapped row back with the rest)"
-      - "Turn `it.fails('gap own read POST')` into a plain `it`, and make case 2 assert the POST for b (or drop its b assertions), per WR-04"
-  - truth: "`feed.spec.ts` passes on mobile-chromium and desktop-chromium with `--repeat-each=3` (07-13 must-have)"
-    status: failed
-    reason: "07-13's own run: 64 passed, 9 skipped, 5 failed. All five are 'UI-D-20 — a community with nothing published' on iterations 2 and 3. The describe recreates its empty tenant under the same slug and host on every repeat, and the member lands on 'Endereço incorreto'. Reproduced by the executor with `-g \"UI-D-20\" --project=desktop-chromium --repeat-each=2` (2 passed, 2 failed). This is pre-existing (Phase 4 describe), and the non-repeated gate passes it. The verifier did not re-run it (e2e writes to the database)."
-    artifacts:
-      - path: "apps/web/e2e/feed.spec.ts"
-        issue: "UI-D-20 describe: emptyFeedSlug(project) is reused across repeats, so a cached tenant_domains lookup resolves the recreated host to the deleted tenant"
-    missing:
-      - "Include `testInfo.repeatEachIndex` in the empty tenant's slug, or drop the host cache entry in the fixture teardown"
+    - "Truth 12 (UI E04 loading, UI-D-252): the mark-all control now stays mounted, aria-busy and disabled for its whole POST (render condition `anyUnread || markingAll`, a5d5d6b). The verifier ran NotificationsSurface.test.tsx at HEAD: 5/5 passed, with no it.fails left. Against the pre-fix component (81e1c5e) the cases fail: 3 failed, 2 passed"
+    - "Truth 17 (own read POST during a mark-all): `activate` now posts a keepalive /read for a server-unread row that only the in-flight mark-all cleared, once per mark-all. Proven by the 'own read POST' case and the tightened case 2, both green at HEAD and red on the pre-fix component"
+    - "Truth 20 (feed.spec.ts --repeat-each=3): the UI-D-20 slug is now unique per project, run and repeat (c46b454). Verifier run on both projects: exit 0, 69 passed, 9 skipped, 0 failed. UI-D-20 passed 12/12. No feed-empty tenant was left afterwards"
+    - "Truth 15 (local exit gate): PASSED (override) under the developer-accepted override. Its only Phase 7 red, notifications.spec.ts:228, is fixed. The verifier's run of notifications.spec.ts on both projects exited 0 with 45 passed and 1 skipped; :228 passed on mobile and on desktop"
+  gaps_remaining: []
+  regressions: []
 deferred:
   - truth: "Real-device push and PWA behaviour (installed iPhone/Android/iPad: prompt from the Home Screen app, tenant name and icon in the OS banner, tag replacement, foreground suppression, app-icon badge, composer above the keyboard)"
     addressed_in: "Phase 8"
-    evidence: "Phase 8 success criterion 4: 'the pilot go-live gate passes: ... PWA install + push smoke tests on a real iPhone and Android'. The rows are written in docs/phase-07-device-test-plan.md and still listed under human verification."
+    evidence: "Phase 8 success criterion 4: 'the pilot go-live gate passes: ... PWA install + push smoke tests on a real iPhone and Android'. The rows are in docs/phase-07-device-test-plan.md and stay under human verification."
+  - truth: "phase52-smoke.spec.ts:294 mobile (05.2 'Novo destaque' create sheet never opened) red in the 07-15 gate (WINDOWS 69)"
+    addressed_in: "Developer deferral under the truth 15 override (no later roadmap phase names it)"
+    evidence: "Override accepted by igor.vboas 2026-10-01T14:20:52Z: 'The three remaining reds are outside Phase 7 ... (WINDOWS 69-71) and are deferred, tracked in deferred-items.md'. WINDOWS 69 open; deferred-items.md entry open."
+  - truth: "stories.spec.ts:1636 mobile (05.2 Escape did not close the 'Editar destaque' sheet) red in the 07-15 gate (WINDOWS 70)"
+    addressed_in: "Developer deferral under the truth 15 override (no later roadmap phase names it)"
+    evidence: "Same override. WINDOWS 70 open; deferred-items.md entry open."
+  - truth: "phase2-smoke.spec.ts:378 desktop (Phase 2 Marca 'Salvar alterações' stayed disabled) red in the 07-15 gate (WINDOWS 71); e2e:pwa not run in that gate"
+    addressed_in: "Developer deferral under the truth 15 override (no later roadmap phase names it)"
+    evidence: "Same override. WINDOWS 71 open; deferred-items.md entry open."
 human_verification:
   - test: "Real-device rows 1-17 of docs/phase-07-device-test-plan.md against production after the 'Phase 7 release' steps of docs/DEPLOY.md (VAPID secrets, Realtime private-only, JWT expiry, API before web)"
     expected: "Every row passes as written"
@@ -390,23 +356,18 @@ human_verification:
 # Phase 7: Notifications, Web Push & Chat Verification Report
 
 **Phase Goal:** Members are reached in real time - a notification bell with live unread count, Web Push in the installed PWA and a live 1:1 support conversation - all fed by domain events over one shared realtime infrastructure (Supabase Broadcast on private topics, ids only, data always through the API).
-**Verified:** 2026-10-01T13:29:40Z (HEAD 9ea8726; gate run at 6dbc035)
-**Status:** gaps_found
-**Re-verification:** Yes, after gap closure plans 07-12..07-15.
+**Verified:** 2026-10-01T14:28:09Z (HEAD 42a025f)
+**Status:** human_needed
+**Re-verification:** Yes, after quick task 261001-ere (commits a5d5d6b, c46b454, 42a025f) and the developer's truth 15 override.
 
 ## What changed since the previous report
 
-`git diff --stat c6e03b6..HEAD -- apps packages supabase scripts` touches 8 files. None is a product file:
-- `NotificationsSurface.test.tsx` (new)
-- `e2e/admin.ts`, `e2e/feed-comments.spec.ts`, `e2e/feed.spec.ts`, `e2e/fixtures.ts` and `e2e/hosts.ts` (new)
-- `playwright.config.ts`
-- `apps/web/turbo.json`
+`git diff --stat 81e1c5e..HEAD -- apps` touches 5 files. One of them is a product file:
+- `apps/web/app/(app)/notificacoes/NotificationsSurface.tsx` (product)
+- `NotificationsSurface.test.tsx`
+- `e2e/notifications.spec.ts`, `e2e/feed-admin.ts` and `e2e/feed.spec.ts`
 
-Every product surface behind truths 1-11 and 13 is byte-identical to the previous verification. Those truths get a regression check only. They are backed by the 07-15 gate stages that passed (orchestrator-confirmed):
-- pgTAP: 21 files, 731/731
-- integration: 42 files, 708/708
-- turbo typecheck/build/test: 27/27
-- e2e: phase7-smoke 8/0, chat 31/0, push 25/0, notifications 44/1
+Nothing under `packages/`, `supabase/` or `scripts/` changed. Every other product surface behind truths 1-11, 13, 14, 16, 18, 19, 21 and 22 is byte-identical to the previous verification, so those truths get a regression check only. The notifications surface is re-proven below by the unit file and the full `notifications.spec.ts`. The uncommitted change to this report before re-verification was only the developer's `overrides:` block, which was checked with `git diff`.
 
 ## Goal Achievement
 
@@ -414,102 +375,86 @@ Every product surface behind truths 1-11 and 13 is byte-identical to the previou
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | SC 1: in-app notifications from domain events, live bell, tap opens target, mark-as-read | ✓ VERIFIED | Regression only: no product change. Gate run: integration 708/708 (notifications, events-reminders, prune), phase7-smoke 8/8. |
-| 2 | SC 2 (automated half): Web Push, tap-only prompt, tenant name/icon/url, 404/410 cleanup, channel abstraction | ✓ VERIFIED | Regression only. Gate run: push.spec 25/0, push.test in 708/708. |
-| 3 | SC 3: single support thread, staff inbox, live both sides, seq catch-up, member dot | ✓ VERIFIED | Regression only. Gate run: chat.spec 31/0, chat.test and realtime.test in 708/708. |
-| 4 | SC 4: signals reach only their audience; ids-only payloads; blocking drops access | ✓ VERIFIED | Regression only. pgTAP 150-153 in 731/731, realtime.test live. |
-| 5 | NOTIF-04 channel registry | ✓ VERIFIED | Unchanged; unit tasks 27/27. |
-| 6 | EVENT-07 reminders | ✓ VERIFIED | Unchanged; events-reminders in 708/708. |
+| 1 | SC 1: in-app notifications from domain events, live bell, tap opens target, mark-as-read | ✓ VERIFIED | Regression check. The verifier ran `notifications.spec.ts` on both projects: exit 0, 45 passed, 1 skipped (mobile-only 320px case). Earlier 07-15 gate evidence: integration 708/708 and phase7-smoke 8/8 still stand, since no server file changed. |
+| 2 | SC 2 (automated half): Web Push, tap-only prompt, tenant name/icon/url, 404/410 cleanup, channel abstraction | ✓ VERIFIED | Regression only: push files are unchanged. Gate run: push.spec 25/0, push.test in 708/708. |
+| 3 | SC 3: single support thread, staff inbox, live both sides, seq catch-up, member dot | ✓ VERIFIED | Regression only: chat files are unchanged. Gate run: chat.spec 31/0, chat.test and realtime.test in 708/708. |
+| 4 | SC 4: signals reach only their audience; ids-only payloads; blocking drops access | ✓ VERIFIED | Regression only. pgTAP 150-153 in 731/731. |
+| 5 | NOTIF-04 channel registry | ✓ VERIFIED | Unchanged. |
+| 6 | EVENT-07 reminders | ✓ VERIFIED | Unchanged. The `notifications eventos` cases passed in the verifier's e2e run. |
 | 7 | CHAT-01 generic schema, one support conversation | ✓ VERIFIED | Unchanged; pgTAP 152. |
-| 8 | Review criticals A-CR-01 and C-CR-01 hold | ✓ VERIFIED | Unchanged; pgTAP 152 fact 8, chat e2e 4b in chat.spec 31/0. |
+| 8 | Review criticals A-CR-01 and C-CR-01 hold | ✓ VERIFIED | Unchanged. |
 | 9 | D-33 sketch gate | ✓ VERIFIED | Unchanged. |
 | 10 | Release steps and deploy wiring | ✓ VERIFIED | Unchanged. |
 | 11 | Real-device plan exists, all rows blocked | ✓ VERIFIED | Unchanged. |
-| 12 | UI state contracts E01-E14 hold in automated form | ✗ FAILED (partial) | Newly evidenced: **E04 loading** fails. The mark-all button is withdrawn during its POST instead of aria-busy/disabled. The verifier ran `it.fails('gap E04 loading')`, which fails as expected. WINDOWS 66. The other rows stand. |
+| 12 | UI state contracts E01-E14 hold in automated form (incl. E04 loading, UI-D-252) | ✓ VERIFIED | **Fixed.** `NotificationsSurface.tsx:393` renders the control while `anyUnread \|\| markingAll`, with `loading={markingAll}`. The real `@rede-social/ui` Button (not mocked) sets `disabled` and `aria-busy` (`Button.tsx:52-53`). Verifier run at HEAD: 5/5 passed, no `it.fails`. The case "E04 loading" asserts the control is busy and disabled during the POST and gone after a 204 with no toast. Case 2 asserts busy and disabled during the POST, that a click on it starts no second POST, and that the control is idle again after a failure. Against the pre-fix component: 3 failed, 2 passed. |
 | 13 | SC 2 (real-device half) | ? UNCERTAIN (backstop) | Unchanged. Deferred to Phase 8 SC 4 and listed for human verification. |
-| 14 | C-WR-03: a stale load-more page is dropped after a refresh, and a failed mark-all rolls back only what it added, keeping tapped rows read | ✓ VERIFIED | Verifier ran `NotificationsSurface.test.tsx` at HEAD: 3 passed, 2 expected fail. Against a temporary copy of `583619c^`: case 1 fails (`['n','a','b','c','d']` vs `['n','a','b']`), case 2 fails (row b `'true'`), and control case 3 passes. The temp files were deleted and git status is clean. The "stays read" half is UI-only; truth 17 covers the server side. |
-| 15 | The local exit gate is green (`pnpm verify` exits 0) | ✗ FAILED | 07-15 run exited 1 at e2e: 4 reds, `e2e:pwa` not run. See Gaps. |
-| 16 | 07-12: the harness gives its servers the platform host the specs browse; an exported value wins; one host source; the warning never prints the file's value | ✓ VERIFIED | Code read: `e2e/hosts.ts`, `playwright.config.ts:17-49`, `fixtures.ts:135`. Verifier ran `playwright test --list platform.spec.ts`. With no export it printed one `[e2e]` line naming only `rede-social.localhost`. With `PLATFORM_HOST=other.localhost` exported, nothing printed. Gate run: platform 8/0, platform-tenants 15/0, platform-branding 8/0, platform-domains 12/0, invite 8/0, signup 16/0. |
-| 17 | 07-14 premise: a row tapped during a mark-all sends its own read POST | ✗ FAILED | `activate` posts only while the row looks unread (line 208). Proven by `it.fails('gap own read POST')`. WINDOWS 67. |
-| 18 | 07-12: `failNextActions` fails only the comment-list or replies action (`next-action` header plus the target id) and asserts one failure; green on a cold server | ✓ VERIFIED | Code: `feed-comments.spec.ts:128-151`, with asserts at 353/382. Gate run: `:327` and `:361` passed as the first feed-comments run after the reset. Caveat (IN-01): `failedCount()` cannot exceed 1, so it cannot detect over-matching. |
-| 19 | 07-13: the double tap red is explained, and every FEED-04 case clears, guards and confirms its own like in the database | ✓ VERIFIED | Code: `admin.ts:567/593`, with 6 `clearFeedPostLike(` and 8 `feedPostLikeState(` calls in feed.spec.ts, plus the `double-tap-timing` annotation. Gate run: `feed.spec.ts` 23/0, including the desktop double tap. Caveat (WR-02): the one-request count is read after the first response only. |
-| 20 | 07-13: `feed.spec.ts` passes with `--repeat-each=3` on both projects | ✗ FAILED | The executor's own run had 5 failures, all UI-D-20 on iterations 2-3 (pre-existing). See Gaps. |
-| 21 | 07-15: web typecheck depends on web build; Vercel's build graph is unchanged | ✓ VERIFIED | Verifier dry run: `@rede-social/web#typecheck` deps include `@rede-social/web#build` (13 deps). `#build` deps are `^build` only (12), not typecheck. Gate compile stage: 27/27, 0 `ENOTEMPTY`. |
-| 22 | 07-15: records follow evidence; no override written; 07-VERIFICATION untouched by executors | ✓ VERIFIED | WINDOWS 59/64/65 are still `open`. 66-71 are `open`. The STATE blocker "Phase 7 local gate" is still listed. No 07-VERIFICATION change between c6e03b6 and this re-verification. |
+| 14 | C-WR-03: a stale load-more page is dropped after a refresh, and a failed mark-all rolls back only what it added, keeping tapped rows read | ✓ VERIFIED | Cases 1-3 green at HEAD. The rollback now uses `inFlight.added` minus `inFlight.tapped` (lines 259-263). The "tapped rows stay read" half is now backed on the server too (truth 17). |
+| 15 | The local exit gate is green (`pnpm verify` exits 0) | ✓ PASSED (override) | Override: "07-15 run: pgTAP 731/731, integration 708/708, compile 27/27 ... Developer chose to close the phase without another full gate run". Accepted by igor.vboas on 2026-10-01T14:20:52Z. Its only Phase 7 red (`notifications.spec.ts:228`) is fixed and re-run green by the verifier. WINDOWS 69-71 and `e2e:pwa` are deferred (see Deferred Items). |
+| 16 | 07-12: harness platform host rule | ✓ VERIFIED | Unchanged. The verifier's two Playwright runs started their servers with no PLATFORM_HOST problem. |
+| 17 | 07-14 premise: a row tapped during a mark-all sends its own read POST | ✓ VERIFIED | **Fixed.** In `activate` (lines 213-229), `clearedOnlyByMarkAll = marking && view.unread && marking.added.has(id) && !marking.tapped.has(id)` posts a keepalive `/read`. Proven at HEAD by the case "own read POST" (b posted, c not) and by case 2 (b posted exactly once; a, tapped before, posted once and not again; c, never tapped, 0). Both are red on the pre-fix component. The misleading comment from the previous report now matches the code. |
+| 18 | 07-12: targeted `failNextActions` | ✓ VERIFIED | Unchanged. |
+| 19 | 07-13: double-tap explained; FEED-04 self-restoring | ✓ VERIFIED | Unchanged code. The FEED-04 cases passed 3x on both projects in the verifier's `--repeat-each=3` run. |
+| 20 | 07-13: `feed.spec.ts` passes with `--repeat-each=3` on both projects | ✓ VERIFIED | **Fixed.** `emptyFeedSlug(project, RUN, repeatEachIndex)` plus `deleteStaleEmptyFeedTenants` (c46b454). Verifier run: exit 0, 69 passed, 9 skipped (mobile-only cases x3), 0 failed. UI-D-20 passed 12 times. `select count(*) ... slug like 'feed-empty%'` returned 0 afterwards. |
+| 21 | 07-15: web typecheck depends on web build | ✓ VERIFIED | Unchanged `apps/web/turbo.json`. |
+| 22 | 07-15: records follow evidence; no override written by an executor; 07-VERIFICATION untouched by executors | ✓ VERIFIED | The quick task did not touch this report (its 3 commits list no 07-VERIFICATION path). The only override is the developer's. WINDOWS 66/67/68 are `fixed` only with run evidence, which the verifier reproduced. 69-71 stay `open`. |
 
-**Score:** 17/22 truths verified (0 present-but-behavior-unverified, 1 uncertain/human, 4 failed)
+**Score:** 21/22 truths verified, including 1 by override (0 present-but-behavior-unverified, 1 uncertain/human, 0 failed)
 
-### Override suggestion for truth 15 (developer's call; not written by the verifier)
-
-The previous suggestion rested on "every Phase 7 spec passes". That no longer holds, because `notifications.spec.ts:228` is a Phase 7 spec. Its red also traces to the real product gap in truths 12 and 17: the mark-all lifecycle. The verifier therefore recommends fixing the NotificationsSurface gap first and only then weighing an override for the three non-Phase-7 reds. If the developer wants to accept the gate now anyway:
-
-```yaml
-overrides:
-  - must_have: "The local exit gate is green: TURBO_CACHE=local:r pnpm verify passes with every Phase 7 spec, pgTAP file and integration file included"
-    reason: "pgTAP 731/731, integration 708/708, compile 27/27 and every Phase 7 e2e spec but notifications.spec.ts:228 passed in the 07-15 run; the remaining reds (05.2 highlight sheets x2 mobile, Phase 2 Marca save desktop, and the notifications reload race) are tracked in deferred-items.md and WINDOWS 68-71; e2e:pwa not run"
-    accepted_by: "igor.vboas"
-    accepted_at: "<ISO timestamp>"
-```
-
-Even with that override, the status stays `gaps_found` because of truths 12, 17 and 20. Each needs a fix or its own override.
+Truths 12 and 17 are behavior-dependent (state transitions in the mark-all lifecycle). Each is VERIFIED on a passing named test, not on presence alone. Both were also shown non-vacuous against the pre-fix component.
 
 ### Deferred Items
 
 | # | Item | Addressed In | Evidence |
 |---|------|-------------|----------|
 | 1 | Real-device PWA install and push behaviour (truth 13) | Phase 8 | SC 4: "PWA install + push smoke tests on a real iPhone and Android" |
+| 2 | `phase52-smoke.spec.ts:294` mobile red (WINDOWS 69) | Developer deferral (truth 15 override) | deferred-items.md entry open; outside Phase 7 (05.2) |
+| 3 | `stories.spec.ts:1636` mobile red (WINDOWS 70) | Developer deferral (truth 15 override) | deferred-items.md entry open; outside Phase 7 (05.2) |
+| 4 | `phase2-smoke.spec.ts:378` desktop red (WINDOWS 71); `e2e:pwa` not run in the 07-15 gate | Developer deferral (truth 15 override) | deferred-items.md entry open; outside Phase 7 (Phase 2) |
 
-No gap was deferred: no later phase names the local gate, the mark-all lifecycle or the UI-D-20 fixture.
+Items 2-4 are not tied to a roadmap phase. They are tracked in WINDOWS and deferred-items.md and should be classified by a `/gsd-debug` pass before the next full gate run.
 
 ### Advisory (New Scope, Unevidenced)
 
-None. The new findings that block (truths 12, 17 and 20) carry deterministic evidence:
-- Truths 12 and 17: `it.fails` cases, run by the verifier.
-- Truth 20: a named reproduction command in 07-13-SUMMARY and deferred-items.md.
+None.
 
-The review warnings on test code are listed under Anti-Patterns as warnings.
-
-### Required Artifacts (gap plans)
+### Required Artifacts (quick 261001-ere)
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `apps/web/e2e/hosts.ts` | `e2eHosts()` and `e2ePlatformHostname()` | ✓ VERIFIED | Imports nothing from e2e; read at call time |
-| `apps/web/playwright.config.ts` | harness PLATFORM_HOST rule | ✓ VERIFIED | `exportedPlatformHost` captured before `loadEnvFile`; value-free warning |
-| `apps/web/e2e/fixtures.ts` | `hosts = e2eHosts()` | ✓ VERIFIED | line 135 |
-| `apps/web/e2e/feed-comments.spec.ts` | targeted `failNextActions` | ✓ VERIFIED | `next-action` + target id; `failedCount()` asserted twice |
-| `apps/web/e2e/admin.ts` | `feedPostLikeState`, `clearFeedPostLike` | ✓ VERIFIED | Scoped to one post id and one member e-mail (review confirmed) |
-| `apps/web/e2e/feed.spec.ts` | self-restoring FEED-04, `double-tap-timing` | ✓ VERIFIED | Present and wired; gate green for the file |
-| `apps/web/app/(app)/notificacoes/NotificationsSurface.test.tsx` | C-WR-03 regressions | ✓ VERIFIED | 396 lines; non-vacuous (red on `583619c^`) |
-| `apps/web/turbo.json` | `typecheck.dependsOn ["^build","build"]` | ✓ VERIFIED | Dry-run graph confirmed |
+| `apps/web/app/(app)/notificacoes/NotificationsSurface.tsx` | control mounted while `markingAll`; `inFlightMarkAll` ref; tapped-row POST; keepalive read-all | ✓ VERIFIED | Lines 206-269, 393-396 |
+| `apps/web/app/(app)/notificacoes/NotificationsSurface.test.tsx` | 5 plain cases, case 2 tightened | ✓ VERIFIED | No `it.fails`, no `during === null`; 5/5 green; 3 red on the pre-fix component |
+| `apps/web/e2e/notifications.spec.ts` | waits for read-all 204 before reload | ✓ VERIFIED | `waitForResponse` is armed before the click, and status 204 is asserted before the reload (lines 235-244) |
+| `apps/web/e2e/feed-admin.ts` | `emptyFeedSlug(project, run, repeat)`, `deleteStaleEmptyFeedTenants` | ✓ VERIFIED | Bound postgres.js parameters with `starts_with`, so no LIKE wildcard applies |
+| `apps/web/e2e/feed.spec.ts` | per-run, per-repeat slug in UI-D-20 `beforeAll` | ✓ VERIFIED | `RUN = Date.now().toString(36)`, `testInfo.repeatEachIndex` |
 
-### Key Link Verification (gap plans)
+### Key Link Verification
 
 | From | To | Via | Status |
 |------|----|-----|--------|
-| `playwright.config.ts` | `e2e/hosts.ts` | `e2ePlatformHostname()` sets `process.env.PLATFORM_HOST` before webServer spawn | ✓ WIRED (warning observed) |
-| `e2e/fixtures.ts` | `e2e/hosts.ts` | `export const hosts = e2eHosts()` | ✓ WIRED |
-| `feed-comments.spec.ts` | `inicio/feed-actions.ts` | `next-action` header + post/comment id in `postData()` | ✓ WIRED |
-| `feed.spec.ts` | `e2e/admin.ts` | `clearFeedPostLike` before login and in `finally`; `feedPostLikeState` after writes | ✓ WIRED |
-| `NotificationsSurface.test.tsx` | `NotificationsSurface.tsx` | deferred `loadMoreNotificationsAction` / `refreshNotificationsAction` / read-all fetch | ✓ WIRED (red on pre-fix proves the link) |
-| `apps/web/turbo.json` | root `turbo.json` | `extends ["//"]` + typecheck override | ✓ WIRED |
-| root `package.json` `verify` | `apps/web/turbo.json` | `pnpm turbo typecheck build test` | ✓ WIRED |
+| `NotificationsSurface` `markAll` | `/api/notifications/read-all` | `fetch(..., { method: 'POST', keepalive: true })`, awaited | ✓ WIRED (unit assert + e2e 204) |
+| `NotificationsSurface` `activate` | `/api/notifications/[id]/read` | keepalive POST when the row looks unread, or is server-unread and cleared only by the in-flight mark-all | ✓ WIRED (unit assert) |
+| markAll JSX | `@rede-social/ui` Button `loading` | `anyUnread \|\| markingAll`, `loading={markingAll}` → `disabled` + `aria-busy` | ✓ WIRED |
+| `feed.spec.ts` UI-D-20 `beforeAll` | `feed-admin.ts` | `deleteStaleEmptyFeedTenants` then `emptyFeedSlug(name, RUN, repeatEachIndex)` | ✓ WIRED (12/12 green) |
+
+The key links for 07-12..07-15 are unchanged from the previous report.
 
 ### Data-Flow Trace (Level 4)
 
-Unchanged from the previous report: the bell badge, chat counters, `/notificacoes` rows, thread bubbles and push banner all flow from DB queries. No product file changed.
+Unchanged. The bell badge, chat counters, `/notificacoes` rows, thread bubbles and push banner all flow from DB queries. The mark-all persistence path was exercised end to end by `notifications.spec.ts:228`: click, then the 204, then a reload with no Novas section.
 
 ### Behavioral Spot-Checks (run by the verifier)
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| C-WR-03 regressions at HEAD | `pnpm exec vitest run "app/(app)/notificacoes/NotificationsSurface.test.tsx"` | 3 passed, 2 expected fail | ✓ PASS |
-| Regressions are non-vacuous | same file importing a temporary copy of `583619c^`'s component (deleted afterwards) | cases 1 and 2 fail with the documented assertions; control passes | ✓ PASS |
-| E04 loading / own read POST gaps | the two `it.fails` cases in the same run | both fail as expected, so the gaps are real at HEAD | ✗ (gap evidence) |
-| Turbo ordering | `TURBO_CACHE=local:r pnpm turbo run typecheck build --filter=@rede-social/web --dry=json` | typecheck deps include `@rede-social/web#build`; build does not depend on typecheck | ✓ PASS |
-| Harness host rule | `playwright test --list platform.spec.ts`, without and with `PLATFORM_HOST=other.localhost` | one value-free `[e2e]` warning without the export, none with it; 8 tests listed | ✓ PASS |
-| Full exit gate | not re-run, by instruction; 07-15's single run at 6dbc035 | exit 1 at e2e (651/4/124/9), `e2e:pwa` not run | ✗ FAIL |
+| Mark-all lifecycle and C-WR-03 at HEAD | `pnpm exec vitest run "app/(app)/notificacoes/NotificationsSurface.test.tsx"` | 5 passed (5) | ✓ PASS |
+| The new assertions are non-vacuous | same file importing a temporary copy of the 81e1c5e component (deleted afterwards; `git status apps/` clean) | 3 failed (case 2, E04 loading, own read POST), 2 passed (cases 1 and 3) | ✓ PASS |
+| Notifications e2e, incl. `:228` | `playwright test e2e/notifications.spec.ts --project=mobile-chromium --project=desktop-chromium` | exit 0, 45 passed, 1 skipped (2.8 min); `:228` passed on mobile (2.0 s) and desktop (1.7 s) | ✓ PASS |
+| Feed e2e repeated | `playwright test e2e/feed.spec.ts --project=mobile-chromium --project=desktop-chromium --repeat-each=3` | exit 0, 69 passed, 9 skipped, 0 failed (1.7 min); UI-D-20 12/12 | ✓ PASS |
+| Fixture leaves no tenant behind | `select count(*) from public.tenants where slug like 'feed-empty%'` (local DB, read-only) | 0 | ✓ PASS |
+| Static checks on the 5 changed files | `biome check` on the files; `tsc --noEmit` in apps/web | no findings; exit 0 | ✓ PASS |
+| Full exit gate | not re-run (developer instruction); covered by the truth 15 override | - | PASSED (override) |
 
-No server was started. Ports 3000, 3100, 8787 and 8788 had no listener afterwards. No `.env*` file was read, and no reset or seed ran.
+Ports 3000, 3100, 8787 and 8788 were free before and after each Playwright run. The verifier did not run `db:reset`, `db:seed` or a full `pnpm verify`, and read no `.env*` file.
 
 ### Probe Execution
 
@@ -520,7 +465,7 @@ No `scripts/*/tests/probe-*.sh` is declared or present. Step 7c does not apply.
 | Requirement | Source Plan | Status | Evidence |
 |-------------|-------------|--------|----------|
 | NOTIF-01 | 07-01, 07-04, 07-05, 07-08, 07-11..07-13, 07-15 | ✓ SATISFIED | Truth 1 |
-| NOTIF-02 | 07-01..07-04, 07-11..07-15 | ✗ BLOCKED (partial) | The bell, list and live count hold (truths 1 and 14). Two mark-as-read gaps: E04 loading (truth 12) and the tapped-row server state after a failed mark-all (truth 17). Its own e2e case `notifications.spec.ts:228` was red in the gate. |
+| NOTIF-02 | 07-01..07-04, 07-11..07-15, quick 261001-ere | ✓ SATISFIED | Truths 1, 12, 14 and 17. Mark-as-read now holds in the UI and on the server; `notifications.spec.ts` green on both projects |
 | NOTIF-03 | 07-02, 07-06, 07-07, 07-11..07-13, 07-15 | ✓ SATISFIED (automated) / ? NEEDS HUMAN (device) | Truths 2 and 13 |
 | NOTIF-04 | 07-01, 07-06, 07-11..07-13, 07-15 | ✓ SATISFIED | Truth 5 |
 | EVENT-07 | 07-05, 07-11..07-13, 07-15 | ✓ SATISFIED | Truth 6 |
@@ -531,39 +476,41 @@ No `scripts/*/tests/probe-*.sh` is declared or present. Step 7c does not apply.
 | CHAT-04 | 07-08..07-13, 07-15 | ✓ SATISFIED | Truths 3 and 8 |
 | CHAT-05 | 07-02, 07-08, 07-09, 07-11..07-13, 07-15 | ✓ SATISFIED | Truth 3 |
 
-All 11 IDs are claimed by plans. REQUIREMENTS.md maps no other ID to Phase 7 (CHAT-06 and CHAT-07 are Phase 11). No requirement is orphaned. REQUIREMENTS.md still reads "Gaps Found" for all 11, which is consistent with this report.
+All 11 IDs are claimed by plans. REQUIREMENTS.md maps exactly these 11 to Phase 7 (CHAT-06 and CHAT-07 are Phase 11), so none is orphaned. REQUIREMENTS.md still reads "Gaps Found" for all 11. The orchestrator should update those rows. Note that REQUIREMENTS.md is in `covered_files`, so committing that edit after this report makes the digest stale until it is re-attested.
 
 ### Prohibitions (flagged; non-authoritative LLM verdicts, human review recommended)
 
 | Plan | Prohibition | LLM verdict | Basis |
 |------|-------------|-------------|-------|
-| 07-01 | Signals and logs never carry content | holds | Unchanged from the previous report |
+| 07-01 | Signals and logs never carry content | holds | Unchanged |
 | 07-02 | No prototype-less surface coded before its drawing is reviewed | holds | Unchanged |
-| 07-04 | No excerpt of deleted content kept, shown or pushed | holds, with a recorded partial | Unchanged (chat has no delete path in V1) |
+| 07-04 | No excerpt of deleted content kept, shown or pushed | holds, with a recorded partial | Unchanged |
 | 07-06 | Push copy never invents urgency or counts | holds | Unchanged |
 | 07-07 | No permission prompt without a tap; no re-ask | holds | Unchanged |
-| 07-07 | No pushes after logout or block | holds, with a residual | Unchanged (`?erro=sair` case) |
+| 07-07 | No pushes after logout or block | holds, with a residual | Unchanged |
 | 07-09 | Staff identity beyond the first name never shown | holds | Unchanged |
-| 07-12 | The harness never prints, rewrites or regenerates an env-file value; an exported value wins | holds, with a caveat | The warning names only the harness host (observed). No write path exists. Caveat (WR-03): with `reuseExistingServer`, an already-running server keeps the file value while the warning claims otherwise. |
-| 07-13 | A double tap on a not-liked post never sends an unlike; one double tap never sends more than one like request | holds on the evidence | 25 clean-start repeats in 07-13, plus the gate run. Caveat (WR-02): the count is read right after the first response. Product note: the feed double tap toggles by Phase 4 design, while Reels is like-only (D-128). |
-| 07-14 | A failed mark-all never restores a tapped row's tint; a stale load-more never appends or adopts its cursor | holds in the UI | Cases 1-2 were red on the pre-fix component and green at HEAD. The tapped-row half is UI-only: the server keeps the row unread (truth 17). |
-| 07-15 | The gate is never turned green by skipping, retrying, loosening, overriding or editing env files | holds | One run, recorded red. No override. No env file touched. 07-14's weaker disjunction is disclosed, with the planned assertion kept in `it.fails`. |
+| 07-12 | The harness never prints, rewrites or regenerates an env-file value; an exported value wins | holds, with a caveat (WR-03) | Unchanged |
+| 07-13 | A double tap on a not-liked post never sends an unlike; one double tap never sends more than one like request | holds on the evidence | Also green 3x per project in the verifier's repeat run |
+| 07-14 | A failed mark-all never restores a tapped row's tint; a stale load-more never appends or adopts its cursor | holds | The tapped-row half now also holds on the server: the tap sends its own read (truth 17) |
+| 07-15 | The gate is never turned green by skipping, retrying, loosening, overriding or editing env files | holds | No executor override. The truth 15 override is the developer's own, recorded with its reason. The quick task tightened assertions rather than loosening them. |
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| 8 gap-closure files | - | TBD/FIXME/XXX/TODO/HACK | none found | - |
-| `NotificationsSurface.tsx` | 222-223 | Comment claims "its own keepalive POST really marked it read", which is false at HEAD | ⚠️ Warning | Misleads the next reader; part of truth 17 |
-| `NotificationsSurface.test.tsx` | 290-304 | Green case certifies the UI-only "stays read" state (WR-04) | ⚠️ Warning | Masks truth 17 in the green suite |
-| `NotificationsSurface.test.tsx` | 287-288 | `during === null \|\| during.disabled` (IN-03) | ℹ️ Info | Tighten with the E04 fix |
-| `e2e/notifications.spec.ts` | 241-242 | Reload without awaiting the read-all response | ⚠️ Warning | Red 1 of the gate |
-| `e2e/feed.spec.ts` | 68-78 | Hydration probe on React's private `__reactProps` key; passive-effect reset can still land after it (WR-01) | ⚠️ Warning | Narrowed race, not closed |
-| `e2e/feed.spec.ts` | 446-447 | One-request count read after the first response (WR-02) | ⚠️ Warning | A late second toggle could slip through |
-| `playwright.config.ts` | 40-49 | Warning is inaccurate when a server is reused (WR-03) | ⚠️ Warning | Misdirects diagnosis on a developer machine |
-| `apps/web/turbo.json` | 14-16 | Typecheck now requires a full web build, including env validation (IN-06) | ℹ️ Info | Slower root typecheck; build errors hide type errors |
+| 5 quick-task files | - | TBD/FIXME/XXX/TODO/HACK | none found | - |
+| `NotificationsSurface.test.tsx` | - | "a second tap on the same row during one mark-all sends nothing new" (quick must-have 3) is guarded in code (`!marking.tapped.has(id)`) but no case taps twice | ℹ️ Info | Untested guard; low risk |
+| `e2e/feed.spec.ts` | 68-78 | Hydration probe on React's private `__reactProps` key (WR-01) | ⚠️ Warning | Carried from the previous report |
+| `e2e/feed.spec.ts` | 446-447 | One-request count read after the first response (WR-02) | ⚠️ Warning | Carried |
+| `playwright.config.ts` | 40-49 | Warning inaccurate when a server is reused (WR-03) | ⚠️ Warning | Carried |
+| `apps/web/turbo.json` | 14-16 | Typecheck requires a full web build (IN-06) | ℹ️ Info | Carried |
+| e2e runs (any spec) | - | `unhandledRejection: TypeError ... reading 'waiting'` after "Service Worker registration blocked by Playwright" | ℹ️ Info | Pre-existing Serwist register noise under the blocked SW (already noted in deferred-items.md); no test fails on it |
 
-Note: the developer's `apps/web/.env.local` `PLATFORM_HOST` still differs from `rede-social.localhost`. The harness warning fired in the verifier's `--list` run, without showing the value. This matters only for a hand-run `next dev`.
+All the previous warnings tied to the mark-all lifecycle are resolved:
+- the false comment at lines 222-223
+- WR-04 (the green case certified UI-only state)
+- IN-03 (the loose `during === null` assertion)
+- the `notifications.spec.ts` reload race
 
 ### Human Verification Required
 
@@ -587,24 +534,24 @@ Note: the developer's `apps/web/.env.local` `PLATFORM_HOST` still differs from `
 **Expected:** Confirmed, or a reason recorded.
 **Why human:** Judgment-tier items need a human sign-off.
 
-The previous item "NotificationsSurface races (C-WR-03)" is closed: it is now automated (truth 14).
-
 ### Gaps Summary
 
-The phase goal still holds in product code. Nothing under `packages/`, `supabase/` or the product parts of `apps/` changed since the previous report. The gap closure did what it set out to do: all four 07-11 gate items held in the 07-15 run, and the C-WR-03 races are now pinned by tests proven non-vacuous.
+No gap remains. The three code-level gaps of the previous report are closed in product and test code, and the verifier reproduced the evidence itself:
+- truth 12: E04 loading
+- truth 17: the tapped row's own read POST
+- truth 20: the UI-D-20 repeat slug
 
-What keeps the phase at `gaps_found`, grouped by root cause:
+Each fix is pinned by a test that is red on the pre-fix code. Truth 15 passes by the developer's override. Its one Phase 7 red is fixed and green on both projects. The three non-Phase-7 reds (WINDOWS 69-71) and the unrun `e2e:pwa` stage are recorded as deferred, not as gaps.
 
-1. **The mark-all lifecycle in `NotificationsSurface` (truths 12 and 17, and red 1 of truth 15).** The optimistic step withdraws the button, so it never shows busy (E04 loading). A row tapped during the request sends no read of its own. Nothing on screen waits for the read-all POST, and it has no keepalive, so the e2e reload aborted it. One small product change fixes the button, the tapped-row POST and probably `notifications.spec.ts:228`: keep the button mounted while `markingAll`, post `/read` on `view.unread` during a mark-all, and decide on keepalive. That change also flips both `it.fails` cases, and per WR-04/IN-03 the two loose assertions in case 2 should be tightened with it.
-2. **Three e2e reds outside Phase 7 surfaces (rest of truth 15).**
-   - 05.2 highlight sheets on mobile: `phase52-smoke:294` and `stories:1636`.
-   - Phase 2 Marca save on desktop: `phase2-smoke:378`.
-   No product file they exercise changed since they last passed, and the live layer issues no `router.refresh`. They need a `/gsd-debug` look at the kept traces to call each one a flake or a regression. `e2e:pwa` has not run since 07-11.
-3. **Test-fixture hygiene (truth 20).** The UI-D-20 describe reuses its tenant slug across `--repeat-each` iterations. It does not affect the non-repeated gate.
+The status is `human_needed`, not `passed`, because of four items:
+- the real-device rows (deferred to Phase 8 SC 4 and still listed)
+- the open-socket block residual
+- the C-WR-02 policy decision
+- the flagged-prohibition sign-off
 
-Suggested route: one gap plan for (1), a debug pass for (2), and a one-line slug fix for (3). Then one consented `pnpm verify` re-run through `e2e:pwa`. As an alternative to fixing, the developer can weigh the overrides above.
+None of the four blocks the product goal in the local stack. Each needs the developer's hand.
 
 ---
 
-_Verified: 2026-10-01T13:29:40Z_
+_Verified: 2026-10-01T14:28:09Z_
 _Verifier: Claude (gsd-verifier)_
