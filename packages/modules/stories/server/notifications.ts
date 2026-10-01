@@ -68,7 +68,8 @@ async function resolveStoryPublished(
        and s.id = ${payload.storyId}::uuid
        and s.deleted_at is null
        and s.expires_at > now()
-     limit 1`);
+     limit 1
+       for share of s`);
   const row = rows[0];
   if (!row) return [];
 
@@ -148,7 +149,8 @@ async function resolveStoryCommented(
        and c.id = ${payload.commentId}::uuid
        and c.story_id = ${payload.storyId}::uuid
        and c.deleted_at is null
-     limit 1`);
+     limit 1
+       for share of c, s`);
   const row = rows[0];
   if (!row) return [];
   if (row.story_author_user_id === payload.actorUserId) return [];
@@ -201,7 +203,11 @@ export const storiesNotificationSources = [
 ] as NotificationSource[];
 
 /**
- * Retractions (07-04, keep-and-mark): a deleted story blanks every row ABOUT it (subject), and a
+ * Retractions (07-04, keep-and-mark). Both sources above lock their retractable targets `for share`
+ * (07 review B-WR-01, the feed module's rule): a delete waits for the fan-out to commit, so its
+ * retraction always sees the rows the fan-out wrote.
+ *
+ * A deleted story blanks every row ABOUT it (subject), and a
  * deleted story comment blanks only the rows whose object is that comment. The definer
  * `app.notifications_retract` replaces the payload wholesale with `{"removed": true}`, so no excerpt
  * of taken-down content survives in anyone's bell.

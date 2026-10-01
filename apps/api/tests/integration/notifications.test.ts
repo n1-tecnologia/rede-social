@@ -1,5 +1,7 @@
 import type { Bootstrap } from '@rede-social/contracts';
+import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { sourcesFor } from '@rede-social/core/server/notifications/source';
 import { encodeCursor } from '@rede-social/core/server/paging';
 import {
   NOTIF_MAX_CURSOR_LENGTH,
@@ -7,6 +9,7 @@ import {
   type NotificationPage,
   type NotificationRow,
 } from '@rede-social/module-notifications/contracts';
+import { notificationsSystemCtx } from '@rede-social/module-notifications/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -852,6 +855,43 @@ describe('notifications tipos', () => {
       expect(row.facts).toEqual({});
       expect(row.preview).toBeNull();
     }
+  });
+
+  it('retraction race (07 review B-WR-01): a source holds its target FOR SHARE, so a delete waits for the fan-out to commit', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const postId = await adminPost('trava de fan-out');
+    const [source] = sourcesFor('post.published');
+    expect(source).toBeDefined();
+    let deleteError: { code?: string } | null = null;
+    await withTenantTx(notificationsSystemCtx(ids.demo), async (tx) => {
+      const intents = await source?.resolve(
+        tx,
+        {
+          tenantId: ids.demo,
+          postId,
+          authorUserId: ids.demoAdmin,
+          communityId: null,
+          hasMedia: false,
+          occurredAt: new Date().toISOString(),
+        },
+        { sinkAt: new Date().toISOString() },
+      );
+      expect(intents?.length).toBe(1);
+      // While the fan-out transaction is open, the soft delete cannot take the row.
+      try {
+        await adminSql.begin(async (sql) => {
+          await sql`set local lock_timeout = '300ms'`;
+          await sql`update public.feed_posts set deleted_at = now() where id = ${postId}::uuid`;
+        });
+      } catch (error) {
+        deleteError = error as { code?: string };
+      }
+    });
+    expect(deleteError).not.toBeNull();
+    expect((deleteError as { code?: string } | null)?.code).toBe('55P03');
+    // Positive control: once the fan-out committed, the delete goes through at once.
+    await adminSql`update public.feed_posts set deleted_at = now() where id = ${postId}::uuid`;
   });
 
   it('retraction (07 review A-WR-04): a delete while notifications is OFF still blanks the rows written while it was on', async () => {

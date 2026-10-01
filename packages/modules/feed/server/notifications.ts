@@ -85,7 +85,8 @@ async function resolvePostPublished(
      where p.tenant_id = ${payload.tenantId}::uuid
        and p.id = ${payload.postId}::uuid
        and p.deleted_at is null
-     limit 1`);
+     limit 1
+       for share of p`);
   const row = rows[0];
   if (!row) return [];
 
@@ -164,7 +165,8 @@ async function resolveCommentLiked(
      where c.tenant_id = ${payload.tenantId}::uuid
        and c.id = ${payload.commentId}::uuid
        and c.deleted_at is null
-     limit 1`);
+     limit 1
+       for share of c, p`);
   const row = rows[0];
   if (!row) return [];
   if (row.author_user_id === payload.actorUserId) return [];
@@ -242,7 +244,8 @@ async function resolveCommentCreated(
        and c.id = ${payload.commentId}::uuid
        and c.parent_id = ${payload.parentCommentId}::uuid
        and c.deleted_at is null
-     limit 1`);
+     limit 1
+       for share of c, p`);
   const row = rows[0];
   if (!row) return [];
   if (row.root_author_user_id === payload.actorUserId) return [];
@@ -296,7 +299,13 @@ export const feedNotificationSources = [
 ] as NotificationSource[];
 
 /**
- * Retractions (07-04, keep-and-mark): a deleted post blanks every row ABOUT it (subject `post`: the
+ * Retractions (07-04, keep-and-mark). **Every source above locks its retractable targets `for share`**
+ * (07 review B-WR-01): the fan-out and the retraction are separate jobs, and without the lock a delete
+ * could commit between a source's SELECT and its INSERTs, its retraction job could then run before
+ * those rows committed, and the excerpt would survive. With the lock the delete's UPDATE waits for the
+ * fan-out to commit, and the retraction, enqueued after the delete commits, always sees its rows.
+ *
+ * A deleted post blanks every row ABOUT it (subject `post`: the
  * post, like and reply kinds alike), and a deleted comment blanks only the rows whose OBJECT is that
  * comment. `app.notifications_retract` replaces the payload wholesale with `{"removed": true}`, in the
  * payload's tenant only, so no excerpt of taken-down content survives in anyone's bell.
