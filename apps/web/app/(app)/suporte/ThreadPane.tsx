@@ -9,6 +9,7 @@ import { ArrowDown, Ban, MessageCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { cursorAfterOwnSend, cursorAfterPage, isReplayedSignal } from '@/lib/chat-cursor';
 import { type ChatDayKeys, type ChatMessageView, type ChatViewer, chatRuns } from '@/lib/chat-view';
 import { type ReplyToConversationResult, sendSupportMessageAction } from './actions';
 
@@ -21,10 +22,14 @@ import { type ReplyToConversationResult, sendSupportMessageAction } from './acti
  *   it while keeping the previously first message where it was (the scroll height delta is added back
  *   before paint). Focus stays on the button; a failure shows the inline line with retry.
  * - **Live:** the pane joins `tenant:<t>:conv:<c>` once a conversation exists. A `chat.message`
- *   signal whose `seq` is above `lastSeq` runs the catch-up; so do every (re)subscribe and every
- *   `visibilitychange` to visible (D-240). The catch-up fetches `afterSeq=lastSeq` through the BFF
- *   until a short page, ONE at a time (a signal during a run schedules exactly one more), and merges by
- *   id in `seq` order, so a replayed or out-of-order signal never duplicates a bubble (T-07-64/65).
+ *   signal whose `seq` is above the catch-up cursor runs the catch-up; so do every (re)subscribe and
+ *   every `visibilitychange` to visible (D-240). The catch-up fetches `afterSeq=cursor` through the
+ *   BFF until a short page, ONE at a time (a signal during a run schedules exactly one more), and
+ *   merges by id in `seq` order, so a replayed or out-of-order signal never duplicates a bubble
+ *   (T-07-64/65). The cursor is NOT the highest seq on screen: only a catch-up page moves it freely,
+ *   and an own send moves it only when it is the very next seq; a send past a gap runs a catch-up
+ *   instead (07 review C-CR-01, `lib/chat-cursor.ts`), so the other side's reply whose signal lands
+ *   after the send's answer is never taken for a replay.
  * - **Auto-scroll** only when the viewer was within 80px of the bottom; otherwise the pill counts what
  *   arrived and scrolls to the end on tap (the messenger rule: never yank the reader away).
  * - **Read:** after mount and after each append from the other side, while visible, the highest seq is
@@ -171,8 +176,15 @@ export function ThreadPane({
   const intentRef = useRef<ScrollIntent | null>({ kind: 'bottom' });
   const conversationRef = useRef(conversationId);
   conversationRef.current = conversationId;
-  const lastSeqRef = useRef(0);
-  lastSeqRef.current = settledOf(views).reduce((max, view) => Math.max(max, view.seq), 0);
+  /** The catch-up cursor (C-CR-01): every live message up to it is held. Moved by `chat-cursor.ts` only. */
+  const cursorRef = useRef(
+    cursorAfterPage(
+      0,
+      initialViews.map((view) => view.seq),
+    ),
+  );
+  const viewsRef = useRef(views);
+  viewsRef.current = views;
   const readSeqRef = useRef(0);
   const pendingIdRef = useRef(0);
   const catchUpRef = useRef<{ running: boolean; again: boolean }>({ running: false, again: false });
@@ -200,7 +212,7 @@ export function ThreadPane({
   /** D-237: while visible, tell the API how far the viewer has read (never twice for one seq). */
   const markRead = useCallback(() => {
     const id = conversationRef.current;
-    const seq = lastSeqRef.current;
+    const seq = cursorRef.current;
     if (!id || seq <= readSeqRef.current) return;
     if (document.visibilityState !== 'visible') return;
     readSeqRef.current = seq;
@@ -235,14 +247,19 @@ export function ThreadPane({
         for (;;) {
           const id = conversationRef.current;
           if (!id) return;
-          const answer = await fetchPage(id, `afterSeq=${lastSeqRef.current}`);
+          const answer = await fetchPage(id, `afterSeq=${cursorRef.current}`);
           if (!answer) break;
           setKeys({ todayKey: answer.todayKey, yesterdayKey: answer.yesterdayKey });
-          const fresh = answer.items.filter((item) => item.seq > lastSeqRef.current);
+          cursorRef.current = cursorAfterPage(
+            cursorRef.current,
+            answer.items.map((item) => item.seq),
+          );
+          // Dedupe by id, never by a moving max: an own send may already show a later seq (C-CR-01).
+          const known = new Set(settledOf(viewsRef.current).map((view) => view.id));
+          const fresh = answer.items.filter((item) => !known.has(item.id));
           if (fresh.length > 0) {
             const stick = nearBottom();
             const fromOther = fresh.filter((item) => item.side === 'other').length;
-            lastSeqRef.current = Math.max(lastSeqRef.current, ...fresh.map((item) => item.seq));
             intentRef.current = { kind: 'keep', nearBottom: stick };
             setViews((current) => mergeViews(current, fresh));
             if (!stick && fromOther > 0) setNewCount((count) => count + fromOther);
@@ -259,8 +276,8 @@ export function ThreadPane({
   const onSignal = useCallback(
     (_event: string, payload: unknown) => {
       const seq = (payload as { seq?: unknown } | null)?.seq;
-      // Ids-only signal: a seq at or below what we hold is a replay, nothing to fetch (T-07-64).
-      if (typeof seq === 'number' && seq <= lastSeqRef.current) return;
+      // Ids-only signal: a seq at or below the cursor is a replay, nothing to fetch (T-07-64).
+      if (isReplayedSignal(cursorRef.current, seq)) return;
       void catchUp();
     },
     [catchUp],
@@ -351,9 +368,13 @@ export function ThreadPane({
       setConversationId(created);
     }
     intentRef.current = { kind: 'bottom' };
-    lastSeqRef.current = Math.max(lastSeqRef.current, view.seq);
+    // C-CR-01: the own seq moves the cursor only when nothing can be missing before it; past a gap
+    // (the other side wrote meanwhile and its signal has not landed yet) the catch-up fills it.
+    const next = cursorAfterOwnSend(cursorRef.current, view.seq);
+    cursorRef.current = next.cursor;
     setViews((current) => mergeViews(current, [view], [tempId]));
     setNewCount(0);
+    if (next.catchUp) void catchUp();
     return true;
   };
 

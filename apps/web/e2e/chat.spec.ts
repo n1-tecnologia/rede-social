@@ -227,6 +227,64 @@ test.describe('chat membro', () => {
     );
   });
 
+  test("4b. a staff reply whose signal lands after the member's own send answered is not lost (C-CR-01)", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    // Hold (never drop) every chat.message frame while `holding`, then release them in order: the
+    // staff reply's signal reaches the pane only AFTER the member's own send has answered.
+    const hold = { holding: false, held: [] as (string | Buffer)[] };
+    let toPage: ((message: string | Buffer) => void) | null = null;
+    await page.routeWebSocket(/\/realtime\/v1\/websocket/, (ws) => {
+      const server = ws.connectToServer();
+      ws.onMessage((message) => server.send(message));
+      toPage = (message) => ws.send(message);
+      server.onMessage((message) => {
+        const text = typeof message === 'string' ? message : message.toString('latin1');
+        if (hold.holding && text.includes('chat.message')) {
+          hold.held.push(message);
+          return;
+        }
+        ws.send(message);
+      });
+    });
+
+    const conversationId = await sendAsMember(MEMBER, 'Aguardando a equipe');
+    await login(page, MEMBER, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/suporte`);
+    await expect(bubbles(page)).toHaveCount(1);
+    // The pane joins its conversation topic before the hold starts.
+    await page.waitForTimeout(2_000);
+
+    hold.holding = true;
+    const reply = `Resposta atrasada ${Date.now()}`;
+    await replyAsSupport(conversationId, reply);
+    await expect.poll(() => hold.held.length, { timeout: 15_000 }).toBeGreaterThan(0);
+
+    // The member writes right after: its message is stored at the NEXT seq, past the held reply.
+    const own = `Minha mensagem ${Date.now()}`;
+    await send(page, own);
+    await expect(bubbles(page).filter({ hasText: own })).toHaveCount(1);
+    // Settled: the send answered (the optimistic bubble's `data-pending` and "Enviando…" are gone)
+    // while the reply's signal is still held.
+    await expect(thread(page).locator('[data-pending]')).toHaveCount(0);
+    await expect(bubbles(page).filter({ hasText: own })).not.toContainText(C.composer.sending);
+    expect(hold.held.length).toBeGreaterThan(0);
+
+    // Release the held signals late, as a slow Broadcast would deliver them.
+    hold.holding = false;
+    for (const message of hold.held.splice(0)) toPage?.(message);
+
+    // No refocus, no reload: the reply appears, exactly once, before the member's own message.
+    await expect(bubbles(page).filter({ hasText: reply })).toHaveCount(1, { timeout: 10_000 });
+    const texts = await bubbles(page).allTextContents();
+    expect(texts.filter((text) => text.includes(reply))).toHaveLength(1);
+    expect(texts.filter((text) => text.includes(own))).toHaveLength(1);
+    expect(texts.findIndex((text) => text.includes(reply))).toBeLessThan(
+      texts.findIndex((text) => text.includes(own)),
+    );
+  });
+
   test('5. the composer: spaces keep send disabled, the counter from 1,800, a failed send keeps the draft', async ({
     page,
   }) => {
