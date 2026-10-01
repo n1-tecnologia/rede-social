@@ -1,4 +1,3 @@
-import type { Tx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 
 /**
@@ -23,7 +22,12 @@ export const ZERO_COUNTERS: Counters = {
   conversationsBadge: 'count',
 };
 
-export type CountersResolver = (tx: Tx, ctx: RequestContext) => Promise<Counters>;
+/**
+ * Resolves the caller's counters, opening its OWN tenant-lane transaction (07 review A-WR-03): the
+ * resolver reads the module flags first, and a flags-cache miss needs a pooled connection of its own,
+ * so a caller must never hand it an already-open transaction.
+ */
+export type CountersResolver = (ctx: RequestContext) => Promise<Counters>;
 
 let resolver: CountersResolver | null = null;
 
@@ -33,10 +37,11 @@ export function setCountersResolver(fn: CountersResolver): void {
 }
 
 /**
- * The composed counters inside the caller's tenant-lane transaction, or zeros when no resolver is
+ * The caller's composed counters in their own tenant-lane transaction, or zeros when no resolver is
  * registered (a counter is a hint, never an authority: failing closed to zero is the safe default).
+ * Call it OUTSIDE any open transaction (A-WR-03).
  */
-export async function resolveCounters(tx: Tx, ctx: RequestContext): Promise<Counters> {
+export async function resolveCounters(ctx: RequestContext): Promise<Counters> {
   if (!resolver) return { ...ZERO_COUNTERS };
-  return resolver(tx, ctx);
+  return resolver(ctx);
 }

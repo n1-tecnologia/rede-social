@@ -4,11 +4,12 @@ import {
   type ModuleKey,
   type TenantRole,
 } from '@rede-social/contracts';
-import type { Tx } from '@rede-social/core/db/tenant-tx';
+import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { subscribe } from '@rede-social/core/server/events/bus';
 import { registerJobQueues } from '@rede-social/core/server/jobs/boss';
 import { registerSweepFunctions } from '@rede-social/core/server/jobs/sweep-functions';
+import { moduleLogger } from '@rede-social/core/server/logging';
 import {
   type Counters,
   setCountersResolver,
@@ -201,6 +202,8 @@ export function permissionsFor(
  */
 setPermissionResolver(permissionsFor);
 
+const countersLog = moduleLogger('counters');
+
 /**
  * D-40 / RESEARCH Pattern 13: `bootstrap.counters`, composed from every EFFECTIVE module's manifest
  * `counters` over zeros, inside the caller's tenant-lane transaction. A disabled module (or one whose
@@ -209,6 +212,11 @@ setPermissionResolver(permissionsFor);
  * 07-08 (planning decision 4): each contributor also receives the caller's composed permission set
  * (`permissionsFor`, the same value the route guards read), so the chat module picks the staff count
  * or the member dot by `chat.support` rather than by a role literal.
+ *
+ * 07 review A-WR-02: each contributor runs in its own SAVEPOINT and a failure falls back to that
+ * contributor's zeros (logged), so one module's broken count can neither abort the caller's
+ * transaction nor take the whole bootstrap (every signed-in page) down with a 500. A counter is a
+ * hint, never an authority (the kernel's `counters.ts` rule), applied per contributor.
  */
 export async function countersFor(
   tx: Tx,
@@ -219,10 +227,31 @@ export async function countersFor(
   const permissions = permissionsFor(ctx.role, flags.keys, flags.settings);
   for (const key of effectiveKeys(flags.keys)) {
     const contribute = MODULE_REGISTRY[key]?.counters;
-    if (contribute) Object.assign(counters, await contribute(tx, ctx, permissions));
+    if (!contribute) continue;
+    try {
+      Object.assign(
+        counters,
+        await tx.transaction((savepoint) => contribute(savepoint, ctx, permissions)),
+      );
+    } catch (error) {
+      countersLog.warn(
+        { event: 'counters.contributor_failed', key, tenantId: ctx.tenantId, err: String(error) },
+        'counter contributor failed; its badge reads zero',
+      );
+    }
   }
   return counters;
 }
 
-/** The kernel's counters seam (`setCountersResolver`, the permission inversion again). */
-setCountersResolver(async (tx, ctx) => countersFor(tx, ctx, await moduleFlags.flags(ctx)));
+/**
+ * The kernel's counters seam (`setCountersResolver`, the permission inversion again).
+ *
+ * 07 review A-WR-03: the flags are read BEFORE the tenant-lane transaction opens. A flags-cache miss
+ * runs its own `withTenantTx`, so reading it inside an open transaction needed a second pooled
+ * connection while holding the first; five push jobs doing that at once would hold the whole pool
+ * (`max: 5`) and wait on each other. This is the order `GET /v1/me/bootstrap` already uses.
+ */
+setCountersResolver(async (ctx) => {
+  const flags = await moduleFlags.flags(ctx);
+  return withTenantTx(ctx, (tx) => countersFor(tx, ctx, flags));
+});

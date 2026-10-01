@@ -2,10 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { bootstrapSchema, countersSchema, hostTenantSchema } from '@rede-social/contracts';
 import { db, sqlClient } from '@rede-social/core/db';
-import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { sql } from 'drizzle-orm';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MODULE_REGISTRY } from '../../src/modules/registry';
 import {
   adminSql,
   api,
@@ -343,5 +344,33 @@ describe('GET /v1/me/counters — the live refetch answers exactly the bootstrap
     expect(await badgeOf('admin@rede-demo.local')).toBe('count');
     // rede-lab has chat OFF: no chat contribution, the kernel default stands.
     expect(await badgeOf('member@rede-lab.local')).toBe('count');
+  });
+
+  it('17. 07 review A-WR-02: one failing counter contributor reads zero, the bootstrap still answers', async () => {
+    const chat = MODULE_REGISTRY.chat as { counters?: unknown } | undefined;
+    const original = chat?.counters;
+    expect(original).toBeTypeOf('function');
+    // A statement error ABORTS a Postgres transaction: without a savepoint per contributor, every
+    // later statement of the bootstrap transaction would fail too.
+    (chat as { counters: unknown }).counters = async (tx: Tx) => {
+      await tx.execute(sql`select 1 / 0`);
+      return {};
+    };
+    try {
+      const res = await bootstrap();
+      expect(res.status).toBe(200);
+      const body = bootstrapSchema.parse(await res.json());
+      expect(body.counters.unreadConversations).toBe(0);
+      expect(body.counters.conversationsBadge).toBe('count');
+      const live = await api.request('/v1/me/counters', {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(live.status).toBe(200);
+    } finally {
+      (chat as { counters: unknown }).counters = original;
+    }
+    // Positive control: restored, the chat contributor answers the member's dot again.
+    const restored = bootstrapSchema.parse(await (await bootstrap()).json());
+    expect(restored.counters.conversationsBadge).toBe('dot');
   });
 });

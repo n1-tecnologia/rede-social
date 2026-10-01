@@ -121,7 +121,8 @@ export async function runPushSend(raw: unknown): Promise<void> {
         requestId: 'job:push-badge',
         events: [],
       };
-      const counters = await withTenantTx(ctx, (tx) => resolveCounters(tx, ctx));
+      // Its own lane, flags read first: never inside an open transaction (07 review A-WR-03).
+      const counters = await resolveCounters(ctx);
       badge = counters.unreadNotifications + counters.unreadConversations;
     } catch {
       // A badge is a hint: a failed count sends 0 rather than no push.
