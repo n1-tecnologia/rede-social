@@ -625,7 +625,7 @@ Plans:
 
 **Wave 12** *(blocked on Wave 11, a T verdict in 07-13 and the developer's reset consent)*
 
-- [ ] 07-15-PLAN.md — Web typecheck ordered after web build in turbo (WINDOWS 65), then the full `pnpm verify` exit gate on a consented reset, with deferred-items, WINDOWS 59/64/65 and the STATE blocker recorded from that run
+- [x] 07-15-PLAN.md — Web typecheck ordered after web build in turbo (WINDOWS 65), then the full `pnpm verify` exit gate on a consented reset, with deferred-items, WINDOWS 59/64/65 and the STATE blocker recorded from that run
 
 **UI hint**: yes
 **Research needed**: Shape and cost of RLS policies on `realtime.messages` (membership join vs claim) and `realtime.send` vs `broadcast_changes` trigger choice; Realtime connection quota sizing on the Free plan; "new post to every member" fan-out strategy (eager rows vs hourly collapse) decided with pilot member count; iOS 16.4+ standalone push gating, Badging API support, push handlers in the Serwist service worker; per-conversation `seq` generation under concurrent inserts and catch-up cursor semantics; private-channel authorization tests for non-participants.
@@ -774,7 +774,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
-| 7. Notifications, Web Push & Chat | 14/15 | In Progress|  |
+| 7. Notifications, Web Push & Chat | 15/15 | In Progress|  |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |

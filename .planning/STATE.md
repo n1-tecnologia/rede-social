@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-14-PLAN.md
-last_updated: "2026-10-01T12:01:01.634Z"
+stopped_at: Completed 07-15-PLAN.md (gate red at e2e, 4 cases; re-verify Phase 7 next)
+last_updated: "2026-10-01T13:17:33.052Z"
 last_activity: 2026-10-01
-last_activity_desc: "07-14 complete: C-WR-03 races pinned (stale page, tapped, live-merge control), each red on 583619c^; two product gaps recorded as it.fails + WINDOWS 66/67 (mark-all busy state unreachable, no own read POST during mark-all); next: 07-15"
-state_head: 09bee274de6e883eb1881ac9f2e84e2b195441ca
+last_activity_desc: "07-15 done (halted at a red gate): web typecheck ordered after web build; the consented pnpm verify run exited 1 at e2e (651 passed, 4 failed, none a truth-15 gap item; WINDOWS 68-71); next: re-verify Phase 7"
+state_head: 4ee26f305a5e5cce6662e248d6daefd232c8fa49
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 121
-  completed_plans: 109
+  completed_plans: 110
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 14 of 15 complete (gap closure 07-12..07-15 for the pnpm verify exit gate: 07-12, 07-13 and 07-14 done; next 07-15)
-Status: Ready to execute
-Last activity: 2026-10-01 — Completed 07-14 (C-WR-03 race regressions with red evidence on 583619c^; two product gaps recorded as it.fails, WINDOWS 66/67)
+Plan: 15 of 15 complete (gap closure 07-12..07-15 done; 07-15 halted at a red exit gate: 4 e2e reds, none a truth-15 gap item)
+Status: Ready to verify (truth 15 still red; re-plan expected)
+Last activity: 2026-10-01 — Completed 07-15 (turbo typecheck after build; consented gate run red at e2e: notifications:228, phase52-smoke:294, stories:1636 mobile, phase2-smoke:378 desktop; WINDOWS 68-71)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -169,6 +169,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P12 | 5 min | 2 tasks | 4 files |
 | Phase 07 P13 | 28 min | 2 tasks | 2 files |
 | Phase 07 P14 | 5 min | 2 tasks | 1 files |
+| Phase 07 P15 | 1h 13m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -550,6 +551,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-13 Double-tap verdict T: a member's double tap within about 1 s of load unlikes a post only when it is already liked (Phase 4's one toggle); the 07-11 red was a like left behind by an earlier run on the shared member and gallery post. Every FEED-04 case now clears and confirms its own like in the database
 - [Phase 07]: 07-13: scrollFeedToBottom waits for React's hydration mark on main.app-scroll, because ScrollRoot's mount effect undoes a scroll that lands before hydration (the 05.3 page-2 race; 3/30 before, 0/30 after)
 - [Phase 07]: 07-14: C-WR-03 races pinned by NotificationsSurface.test.tsx (stale page, tapped, live-merge control), each red on 583619c^. Two product gaps recorded as it.fails cases + WINDOWS 66/67: the mark-all button is withdrawn, not aria-busy, during its POST (UI-D-252 contradicts itself); a row tapped during mark-all sends no read POST of its own — Test-only plan: product files stay byte-identical, so the gaps are recorded with unchanged assertions rather than fixed
+- [Phase 07]: 07-15: web typecheck depends on web build (apps/web/turbo.json package override); Vercel turbo build graph unchanged; root pnpm typecheck now builds the web first
+- [Phase 07]: 07-15: the consented exit gate (backup-then-reset) ran once and exited 1 at e2e (651 passed, 4 failed); WINDOWS 59/64/65, the four gap entries and the Phase 7 local gate blocker stay open because records flip only on a green run
 
 ### Pending Todos
 
@@ -568,6 +571,7 @@ None yet.
 - [Phase 05.2]: Closed partial on 2026-09-26 by user decision (same as Phases 2-4), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, iPhone Safari + Android Chrome, steps 1-6) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.2`. VERIFICATION.md is stale because quick 260926-d8f changed covered code, so re-run the verifier then instead of re-attesting. Review items still open: WR-02, WR-05, WR-06 (partly covered by 05.2-30..34), IN-01..04, `h-[68px]` in StoriesStrip.
 - [Phase 05.3]: Closed partial on 2026-09-27 by user decision (same as 05.2), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, WINDOWS #48-#51, plus WR-06 on real Mux) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.3`. VERIFICATION.md is stale because quick 260927-ebk changed covered code, so re-run the verifier then instead of re-attesting. REELS-06 stays Pending until that run. Review items still open: IN-01..07; UI-REVIEW minor: the `right-[3px]` tick offset in ReelsPager.
 - Phase 7 local gate: desktop feed.spec double tap fails in the full suite (WINDOWS 64, route to gsd-debug); the web local env file must set PLATFORM_HOST to rede-social.localhost (34 platform e2e cases fail otherwise)
+- Phase 7 local gate (07-15 run, 2026-10-01): pnpm verify exited 1 at e2e with 4 reds, none a truth-15 gap item: notifications.spec.ts:228 mobile (reload aborts the read-all POST), phase52-smoke.spec.ts:294 and stories.spec.ts:1636 mobile (highlight manage sheets), phase2-smoke.spec.ts:378 desktop (Marca Save stays disabled); WINDOWS 68-71 and deferred-items; e2e:pwa did not run
 
 ### Quick Tasks Completed
 
@@ -621,6 +625,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-01T12:00:55.332Z
-Stopped at: Completed 07-14-PLAN.md
+Last session: 2026-10-01T13:17:26.141Z
+Stopped at: Completed 07-15-PLAN.md (gate red at e2e, 4 cases; re-verify Phase 7 next)
 Resume file: None
