@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { e2eHosts } from './hosts';
 
 /** Seed password (scripts/seed.ts). Passed on the command line, never stored. */
 export const SEED_PASSWORD: string = (() => {
@@ -127,13 +128,11 @@ export const seededFeedMedia = {
     'calendario-completo-do-semestre-com-todas-as-atividades-e-os-encontros-da-nossa-comunidade.pdf',
 } as const;
 
-/** Distinct origins (D-20/D-21). Chromium resolves `*.localhost` to loopback without /etc/hosts. */
-export const hosts = {
-  demo: process.env.PLAYWRIGHT_DEMO_URL ?? 'http://rede-demo.localhost:3000',
-  lab: process.env.PLAYWRIGHT_LAB_URL ?? 'http://rede-lab.localhost:3000',
-  platform: process.env.PLAYWRIGHT_PLATFORM_URL ?? 'http://rede-social.localhost:3000',
-  generic: process.env.PLAYWRIGHT_GENERIC_URL ?? 'http://localhost:3000',
-} as const;
+/**
+ * Distinct origins (D-20/D-21). Chromium resolves `*.localhost` to loopback without /etc/hosts.
+ * One source with the Playwright config (07-12): `./hosts.ts` `e2eHosts()`, same four defaults.
+ */
+export const hosts = e2eHosts();
 
 /** Specs that need the local generic/lab/platform hosts call `test.skip(isRemote, 'local stack only')`. */
 export const isRemote = Boolean(process.env.PLAYWRIGHT_BASE_URL);

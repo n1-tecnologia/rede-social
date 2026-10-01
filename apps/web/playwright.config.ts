@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
+import { e2ePlatformHostname } from './e2e/hosts';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -12,7 +13,40 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
  * is how CI passes its own values.
  */
 const envFile = fileURLToPath(new URL('.env.local', import.meta.url));
+const exportedPlatformHost = process.env.PLATFORM_HOST;
 if (existsSync(envFile)) process.loadEnvFile(envFile);
+
+/**
+ * PLATFORM_HOST for the servers this run launches (07-12, WINDOWS 59). The harness owns it: the
+ * specs browse `e2ePlatformHostname()` (`./e2e/hosts.ts`, the one source of the e2e origins), so the
+ * API, the web, the worker `ensureWorker()` spawns and the PWA config's `next start` must all be told
+ * that same host. Playwright spawns every `webServer` with `...process.env`, and neither Node's
+ * `--env-file-if-exists` nor `next dev` lets an env file override a variable already set, so setting
+ * it here reaches all of them.
+ *
+ * - An EXPORTED value always wins and is never touched (CI passes its own; a deliberate override stays
+ *   possible).
+ * - Otherwise a value that came from `.env.local` is replaced, with one warning line that names the
+ *   harness host and never the file's value (T-07-77).
+ *
+ * Why this does not mask a shipped-configuration defect: production's PLATFORM_HOST is a Vercel and
+ * Cloud Run variable (DEPLOY.md) this harness never reads; CI writes the same value from
+ * `scripts/local-env.sh` and `.env.example` documents it; the platform-shell logic in
+ * `lib/tenant-host.ts` is still exercised end to end by every platform-host case and by its unit
+ * test. What the harness no longer catches is a stale value in a developer's own `.env.local`, which
+ * affects only a hand-run `next dev`. `bash scripts/local-env.sh --write` is NOT the remedy for that:
+ * it rewrites both env files wholesale from its template and drops hand-set values (Mux keys).
+ */
+if (exportedPlatformHost === undefined) {
+  const harnessPlatformHost = e2ePlatformHostname();
+  const fromFile = process.env.PLATFORM_HOST;
+  if (fromFile !== undefined && fromFile !== harnessPlatformHost) {
+    console.warn(
+      `[e2e] this run serves the platform shell on ${harnessPlatformHost} (the host the specs browse) instead of the PLATFORM_HOST in apps/web/.env.local; a hand-run \`next dev\` still reads that file.`,
+    );
+  }
+  process.env.PLATFORM_HOST = harnessPlatformHost;
+}
 
 /**
  * `baseURL` is the rede-demo TENANT host (D-20). Chromium resolves every `*.localhost` name to loopback
