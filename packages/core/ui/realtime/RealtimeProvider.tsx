@@ -160,6 +160,13 @@ export function RealtimeProvider({
   /** Resolves once the client holds the member's token (see `authorise`). */
   const authReady = useRef<Promise<void>>(Promise.resolve());
   const entries = useRef(new Map<string, Entry>());
+  /**
+   * A topic's channel still LEAVING (07 review A-WR-05). `removeChannel` only drops the channel from the
+   * client once the leave completes; until then `client.channel(topic)` hands back that same leaving
+   * channel, whose `subscribe()` is a silent no-op, and the topic would stay dead after the leave. So
+   * an open of the same topic waits for the removal first.
+   */
+  const removing = useRef(new Map<string, Promise<void>>());
   const suspended = useRef(false);
   const config = useRef({ supabaseUrl, publishableKey, tokenUrl, clientFactory });
   config.current = { supabaseUrl, publishableKey, tokenUrl, clientFactory };
@@ -197,7 +204,7 @@ export function RealtimeProvider({
       const generation = ++entry.generation;
       entry.opening = true;
       entry.joined = false;
-      void authReady.current.then(() => {
+      void Promise.all([authReady.current, removing.current.get(topic)]).then(() => {
         if (entry.generation !== generation || clientRef.current !== client) return;
         entry.opening = false;
         if (entry.listeners.size === 0 || suspended.current) return;
@@ -207,13 +214,21 @@ export function RealtimeProvider({
     [getClient],
   );
 
-  const close = useCallback((entry: Entry) => {
+  const close = useCallback((topic: string, entry: Entry) => {
     const channel = entry.channel;
     entry.generation++;
     entry.opening = false;
     entry.channel = null;
     entry.joined = false;
-    if (channel && clientRef.current) void clientRef.current.removeChannel(channel).catch(() => {});
+    if (!channel || !clientRef.current) return;
+    const done: Promise<void> = clientRef.current.removeChannel(channel).then(
+      () => undefined,
+      () => undefined,
+    );
+    removing.current.set(topic, done);
+    void done.then(() => {
+      if (removing.current.get(topic) === done) removing.current.delete(topic);
+    });
   }, []);
 
   const join = useCallback<RealtimeApi['join']>(
@@ -239,7 +254,7 @@ export function RealtimeProvider({
       return () => {
         current.listeners.delete(listener);
         if (current.listeners.size > 0) return;
-        close(current);
+        close(topic, current);
         if (entries.current.get(topic) === current) entries.current.delete(topic);
       };
     },
@@ -254,7 +269,7 @@ export function RealtimeProvider({
       timer = null;
       if (suspended.current) return;
       suspended.current = true;
-      for (const entry of entries.current.values()) close(entry);
+      for (const [topic, entry] of entries.current) close(topic, entry);
       void Promise.resolve(clientRef.current?.disconnect()).catch(() => {});
     };
 
@@ -287,6 +302,7 @@ export function RealtimeProvider({
         entry.channel = null;
       }
       entries.current.clear();
+      removing.current.clear();
       suspended.current = false;
       const client = clientRef.current;
       clientRef.current = null;
