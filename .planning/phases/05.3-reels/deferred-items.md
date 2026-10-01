@@ -12,7 +12,8 @@
   **Suggested next step:** run `feed.spec.ts` on a `:3100` build of `2a7cec3` to confirm it predates 05.3. Then either make the sentinel test wait for exactly one append, or check `FeedWidget`'s sentinel for a double append in production.
 
 - `feed.spec.ts:355` raced once under `next dev` in the gate run (desktop)
-  status: open
+  status: resolved
+  **07-13 resolution (2026-10-01):** reproduced 3 times in 30 mobile tap-case runs, each with no load-more request after the reload. Cause: `ScrollRoot`'s mount effect scrolls the root back to the top, so a scroll that lands before hydration is undone. `scrollFeedToBottom` now waits for React's hydration mark on `main.app-scroll` before it scrolls; afterwards 0 of 30.
   **Found during:** 05.3-09 Task 3.
   **What:** after `page.reload()` the case calls `scrollFeedToBottom` at once. The page snapshot at failure shows only page 1 (10 cards), so the scroll ran before the list could trigger the sentinel, and "Aviso 1" (page 2 since 05-03) never loaded. An isolated rerun passed on both projects.
   **Suggested fix:** in the spec, wait for the first card after the reload before scrolling.
