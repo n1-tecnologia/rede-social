@@ -560,6 +560,48 @@ export async function feedPostIdFor(caption: string, tenantSlug: string): Promis
 }
 
 /**
+ * One member's like on one post, as the database holds it (07-13, FEED-04): whether that member's
+ * `feed_likes` row exists and the post's trigger-owned `like_count`. The like cases read it after
+ * each write, so "one double tap, one row" is proven in the database and not only on screen.
+ */
+export async function feedPostLikeState(
+  postId: string,
+  email: string,
+): Promise<{ liked: boolean; likeCount: number }> {
+  const rows = await sql()<{ liked: boolean; likeCount: number }[]>`
+    select exists (
+             select 1
+               from public.feed_likes l
+               join public.users u on u.id = l.user_id
+              where l.post_id = p.id and u.email = ${email}
+           ) as liked,
+           p.like_count::int as "likeCount"
+      from public.feed_posts p
+     where p.id = ${postId}::uuid`;
+  const row = rows[0];
+  if (!row) throw new Error(`no feed post ${postId}`);
+  return { liked: row.liked, likeCount: row.likeCount };
+}
+
+/**
+ * Removes ONE member's like on ONE post and returns how many rows went (0 or 1) (07-13, FEED-04).
+ * The like cases share the seeded member and posts across both projects and every repeat, so each
+ * case clears its own like before it starts and again in a `finally`: a run that fails mid-case can
+ * no longer hand the next run a post that is already liked. The delete is scoped to the post id AND
+ * the member's e-mail, and `feed_posts.like_count` stays right because its trigger owns it.
+ */
+export async function clearFeedPostLike(postId: string, email: string): Promise<number> {
+  const deleted = await sql()`
+    delete from public.feed_likes l
+     using public.users u
+     where l.user_id = u.id
+       and u.email = ${email}
+       and l.post_id = ${postId}::uuid
+    returning l.id`;
+  return deleted.length;
+}
+
+/**
  * Sets or clears a post's soft-delete stamp (04-08, UI-D-16): the spec needs a post that EXISTS in
  * the caller's own tenant and is still unreachable, which is the third of the three branches the
  * one not-found screen has to cover.

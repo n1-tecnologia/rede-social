@@ -1,6 +1,7 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, type Request, test } from '@playwright/test';
 import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
+import { clearFeedPostLike, closeAdmin, feedPostIdFor, feedPostLikeState } from './admin';
 import {
   closeFeedAdmin,
   createEmptyFeedTenant,
@@ -120,6 +121,39 @@ function likeSegment(count: number): string {
   const template = count === 1 ? F.meta.likes.one : F.meta.likes.other;
   return template.replace('{count}', String(count));
 }
+
+/** Any like segment at all, either plural form, built from the catalog (UI-D-21: none below one). */
+function anyLikeSegment(): RegExp {
+  const forms = [F.meta.likes.one, F.meta.likes.other].map((template) =>
+    template.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace('{count}', '\\d+'),
+  );
+  return new RegExp(forms.join('|'));
+}
+
+/**
+ * A like or unlike for ONE post (07-13): every like-engine request is a server-action POST whose
+ * arguments carry the post id, and a media mint carries asset ids only (the reels.spec e6 precedent).
+ */
+function carriesPost(request: Request, postId: string): boolean {
+  return request.method() === 'POST' && (request.postData() ?? '').includes(postId);
+}
+
+/** Counts the like/unlike requests for one post from now on. */
+function countPostRequests(page: Page, postId: string): () => number {
+  let calls = 0;
+  page.on('request', (request) => {
+    if (carriesPost(request, postId)) calls += 1;
+  });
+  return () => calls;
+}
+
+/** The server's answer to the next like/unlike for one post. Arm it BEFORE the gesture. */
+function nextPostResponse(page: Page, postId: string) {
+  return page.waitForResponse((response) => carriesPost(response.request(), postId));
+}
+
+/** The member the FEED-04 cases like as: the seeded demo member, shared by both projects. */
+const LIKER = users.demoMember;
 
 /** The navigation tree visible on this project (BottomNav on the phone, the rail on desktop). */
 function visibleNav(page: Page, mobile: boolean): Locator {
@@ -284,6 +318,11 @@ test.describe('FEED-02 / D-58 — paging the feed forward and backward', () => {
 });
 
 test.describe('FEED-04 — the like, by tap and by double tap', () => {
+  // 07-13: the like cases read and restore their own like through the fixture connection.
+  test.afterAll(async () => {
+    await closeAdmin();
+  });
+
   test('a tap fills the heart and adds the count; a second tap takes both away', async ({
     page,
   }) => {
@@ -318,38 +357,96 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
     await expect(reloaded.locator('[data-post-meta]')).not.toContainText(likeSegment(1));
   });
 
-  test('a double tap on the gallery likes exactly ONCE, not twice', async ({ page }) => {
-    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+  test('a double tap on the gallery likes exactly ONCE, not twice', async ({ page }, testInfo) => {
+    // 07-13: this case and its run on the other project share ONE member and ONE post. A like left
+    // behind by a run that failed mid-case turns the next double tap into an UNLIKE (the toggle flips
+    // the current state), which is the unlike-only trace 07-11 recorded. So the case clears its own
+    // like before it starts, proves the start in the database, and clears again in `finally`.
+    const galleryId = await feedPostIdFor(seededFeedMedia.galleryCaption, 'rede-demo');
+    await clearFeedPostLike(galleryId, LIKER);
+    expect(await feedPostLikeState(galleryId, LIKER)).toEqual({ liked: false, likeCount: 0 });
 
-    const card = cardWith(page, seededFeedMedia.galleryCaption);
-    await expect(card).toBeVisible();
+    try {
+      await login(page, LIKER, SEED_PASSWORD, hosts.demo);
 
-    // The GALLERY, explicitly: the card also carries the author's avatar, and a double tap there
-    // lands outside the gesture wrapper and would make this test pass or fail for the wrong reason.
-    //
-    // SCROLLED FIRST, and that is load-bearing (05-05): `DoubleTapHeart` counts two `pointerup`s on
-    // the SAME wrapper inside 300 ms, so the element must not move between them. `dblclick` scrolls
-    // the target into view as part of the action, and with the `/inicio` column now carrying the
-    // stories strip above the feed the card starts below the fold — the scroll then lands inside
-    // the gesture window and the second tap misses. Settling the position BEFORE the gesture is the
-    // 05-03 remedy for the same class of move, one plan later.
-    const gallery = card.getByTestId('post-gallery-strip');
-    await gallery.scrollIntoViewIfNeeded();
-    await expect(gallery).toBeInViewport();
-    await gallery.dblclick();
+      const card = cardWith(page, seededFeedMedia.galleryCaption);
+      await expect(card).toBeVisible();
+      // The rendered start: not liked, and no like segment in the meta row (UI-D-21).
+      await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(card.locator('[data-post-meta]')).not.toContainText(anyLikeSegment());
 
-    await expect(card.getByRole('button', { name: F.actions.unlike })).toBeVisible();
-    await expect(card.locator('[data-post-meta]')).toContainText(likeSegment(1));
+      // The GALLERY, explicitly: the card also carries the author's avatar, and a double tap there
+      // lands outside the gesture wrapper and would make this test pass or fail for the wrong reason.
+      //
+      // SCROLLED FIRST, and that is load-bearing (05-05): `DoubleTapHeart` counts two `pointerup`s on
+      // the SAME wrapper inside 300 ms, so the element must not move between them. `dblclick` scrolls
+      // the target into view as part of the action, and with the `/inicio` column now carrying the
+      // stories strip above the feed the card starts below the fold — the scroll then lands inside
+      // the gesture window and the second tap misses. Settling the position BEFORE the gesture is the
+      // 05-03 remedy for the same class of move, one plan later.
+      const gallery = card.getByTestId('post-gallery-strip');
+      await gallery.scrollIntoViewIfNeeded();
+      await expect(gallery).toBeInViewport();
 
-    // The whole point: the toggle is idempotent at the API, so the double tap produced ONE row —
-    // a reload reads the database, not the optimistic value.
-    await page.reload();
-    const reloaded = cardWith(page, seededFeedMedia.galleryCaption);
-    await expect(reloaded.locator('[data-post-meta]')).toContainText(likeSegment(1));
-    await expect(reloaded.locator('[data-post-meta]')).not.toContainText(likeSegment(2));
+      // Every like/unlike request for THIS post, and the answer to the first one.
+      const likeRequests = countPostRequests(page, galleryId);
+      const liked = nextPostResponse(page, galleryId);
+      // 07-13 timing probe: a capture-phase listener on the strip records when each `pointerup`
+      // reached the gesture wrapper (`performance.now()`, the handler's clock) and when the browser
+      // stamped the event (`event.timeStamp`). A main-thread stall between the two taps shows up as
+      // a handler gap far larger than the event gap.
+      await gallery.evaluate((el) => {
+        const probe: { at: number; stamp: number }[] = [];
+        (window as unknown as { __doubleTapProbe: typeof probe }).__doubleTapProbe = probe;
+        el.addEventListener(
+          'pointerup',
+          (event) => {
+            probe.push({ at: performance.now(), stamp: event.timeStamp });
+          },
+          { capture: true },
+        );
+      });
+      await gallery.dblclick();
 
-    await reloaded.getByRole('button', { name: F.actions.unlike }).click();
-    await expect(reloaded.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(card.getByRole('button', { name: F.actions.unlike })).toBeVisible();
+      await expect(card.locator('[data-post-meta]')).toContainText(likeSegment(1));
+
+      // ONE request, and it was a like: the server answered and the database holds one row.
+      await liked;
+      expect(likeRequests()).toBe(1);
+      expect(await feedPostLikeState(galleryId, LIKER)).toEqual({ liked: true, likeCount: 1 });
+
+      const probe = await page.evaluate(
+        () =>
+          (window as unknown as { __doubleTapProbe?: { at: number; stamp: number }[] })
+            .__doubleTapProbe ?? [],
+      );
+      const first = probe[0];
+      const second = probe[1];
+      testInfo.annotations.push({
+        type: 'double-tap-timing',
+        description:
+          first && second
+            ? `pointerups=${probe.length} handlerGapMs=${(second.at - first.at).toFixed(1)} eventGapMs=${(second.stamp - first.stamp).toFixed(1)}`
+            : `pointerups=${probe.length}`,
+      });
+
+      // The whole point: the toggle is idempotent at the API, so the double tap produced ONE row —
+      // a reload reads the database, not the optimistic value.
+      await page.reload();
+      const reloaded = cardWith(page, seededFeedMedia.galleryCaption);
+      await expect(reloaded.locator('[data-post-meta]')).toContainText(likeSegment(1));
+      await expect(reloaded.locator('[data-post-meta]')).not.toContainText(likeSegment(2));
+
+      // Undo, confirmed by the server and the database, so it cannot be lost when the page closes.
+      const unliked = nextPostResponse(page, galleryId);
+      await reloaded.getByRole('button', { name: F.actions.unlike }).click();
+      await expect(reloaded.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await unliked;
+      expect(await feedPostLikeState(galleryId, LIKER)).toEqual({ liked: false, likeCount: 0 });
+    } finally {
+      await clearFeedPostLike(galleryId, LIKER);
+    }
   });
 
   test('a failed like reverts, toasts, and never removes the card', async ({ page }) => {
