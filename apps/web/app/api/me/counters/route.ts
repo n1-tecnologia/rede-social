@@ -1,5 +1,6 @@
 import { countersSchema } from '@rede-social/contracts';
 import { apiFetch } from '@/lib/api';
+import { sameOriginGet } from '@/lib/notifications-bff';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -8,7 +9,8 @@ import { createClient } from '@/lib/supabase/server';
  * than a server action on purpose: Next runs a page's server actions one at a time, and this refetch
  * must never queue behind another action (RESEARCH anti-pattern).
  *
- * The gates mirror `/api/realtime/token`: `Sec-Fetch-Site: same-origin` (403) and a verified session
+ * The gates mirror `/api/realtime/token`: `sameOriginGet` (403; `Sec-Fetch-Site: same-origin`, or no
+ * cross-origin `Origin` where the browser sends no fetch metadata, C-WR-02) and a verified session
  * (401), both with an empty `no-store` body and zero API calls. Then ONE forward through `apiFetch`
  * (Bearer + `x-tenant-host`); the API's answer is re-validated against the shared contract and passed
  * on with `no-store`. An API refusal keeps its 4xx; anything else is 502. Logs carry the shape only.
@@ -19,7 +21,7 @@ const empty = (status: number) =>
   new Response(null, { status, headers: { 'cache-control': 'no-store' } });
 
 export async function GET(request: Request): Promise<Response> {
-  if (request.headers.get('sec-fetch-site') !== 'same-origin') return empty(403);
+  if (!sameOriginGet(request)) return empty(403);
 
   const { data } = await (await createClient()).auth.getClaims();
   if (!data?.claims) return empty(401);

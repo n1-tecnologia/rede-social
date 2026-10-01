@@ -7,7 +7,9 @@ import { GET } from './route';
  * a raw access token to page JavaScript. The claims worth a test are its gates, each answered with an
  * empty `no-store` body and without touching the session:
  *
- *  - T1: `Sec-Fetch-Site` other than `same-origin` (absent, `cross-site`, `same-site`, `none`) is 403;
+ *  - T1: `Sec-Fetch-Site` other than `same-origin` (`cross-site`, `same-site`, `none`) is 403, and so
+ *    is NO fetch metadata with a foreign or `null` Origin; with no metadata and no Origin (Safari/iOS
+ *    before 16.4, C-WR-02) the gates go on to the session;
  *  - T2: no verified claims is 401 (and `getSession` is never read);
  *  - T3: otherwise 200 `{ accessToken, expiresAt }`, `cache-control: no-store`, and nothing logged.
  *
@@ -32,9 +34,10 @@ vi.mock('@/lib/supabase/server', () => ({
 const TOKEN = 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ1In0.sig';
 const EXPIRES_AT = 1_900_000_000;
 
-function request(site: string | null): Request {
+function request(site: string | null, origin: string | null = null): Request {
   const headers: Record<string, string> = { host: 'rede-demo.localhost:3000' };
   if (site !== null) headers['sec-fetch-site'] = site;
+  if (origin !== null) headers.origin = origin;
   return new Request('http://rede-demo.localhost:3000/api/realtime/token', { headers });
 }
 
@@ -48,7 +51,7 @@ beforeEach(() => {
 });
 
 describe('GET /api/realtime/token', () => {
-  it.each([[null], ['cross-site'], ['same-site'], ['none']])(
+  it.each([['cross-site'], ['same-site'], ['none']])(
     'T1: Sec-Fetch-Site %s is 403 with an empty no-store body and no session read',
     async (site) => {
       const res = await GET(request(site));
@@ -56,6 +59,24 @@ describe('GET /api/realtime/token', () => {
       expect(res.headers.get('cache-control')).toBe('no-store');
       expect(await res.text()).toBe('');
       expect(createClient).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([['https://evil.test'], ['null'], ['http://rede-lab.localhost:3000']])(
+    'T1 (C-WR-02): no fetch metadata with Origin %s is 403, with no session read',
+    async (origin) => {
+      const res = await GET(request(null, origin));
+      expect(res.status).toBe(403);
+      expect(createClient).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([[null], ['http://rede-demo.localhost:3000']])(
+    'T1 (C-WR-02): no fetch metadata (Safari/iOS < 16.4) with Origin %s reaches the session and answers the token',
+    async (origin) => {
+      const res = await GET(request(null, origin));
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { accessToken: string }).accessToken).toBe(TOKEN);
     },
   );
 

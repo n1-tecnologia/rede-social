@@ -43,6 +43,24 @@ export function sameOrigin(request: Request): boolean {
   return host !== null && originHost === host;
 }
 
+/**
+ * The GET gate of the BFF read routes (`/api/realtime/token`, `/api/me/counters`, `/api/chat/inbox`,
+ * the chat messages route): the request must come from this origin.
+ *
+ * - With fetch metadata (every current browser), `Sec-Fetch-Site` must be `same-origin`: the browser
+ *   sets it and page script cannot forge it.
+ * - WITHOUT it (Safari/iOS before 16.4, 07 review C-WR-02) the request is refused only on positive
+ *   evidence: an `Origin` header that is `null` or another host. A cross-origin `fetch` always sends
+ *   one; a cross-site `<script>`/`<img>` sends none but carries no `SameSite=Lax` session cookie (401
+ *   next), and cannot read a same-origin JSON body anyway. Refusing every header-less request cut
+ *   Realtime, the counters and the chat catch-up off entirely on those devices.
+ */
+export function sameOriginGet(request: Request): boolean {
+  const site = request.headers.get('sec-fetch-site');
+  if (site !== null) return site === 'same-origin';
+  return request.headers.get('origin') === null || sameOrigin(request);
+}
+
 /** A canonical uuid, or the path id is refused before any request is built. */
 export const NOTIFICATION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

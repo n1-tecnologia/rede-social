@@ -3,7 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { ApiClientError, getBootstrap } from '@/lib/bootstrap';
 import { fetchMessages, type MessageCursor } from '@/lib/chat';
 import { chatMessageView, tenantDayKeys } from '@/lib/chat-view';
-import { empty, NOTIFICATION_ID_RE } from '@/lib/notifications-bff';
+import { empty, NOTIFICATION_ID_RE, sameOriginGet } from '@/lib/notifications-bff';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -13,7 +13,7 @@ import { createClient } from '@/lib/supabase/server';
  * runs a page's server actions one at a time, and a realtime-triggered refetch must never queue behind
  * a send (RESEARCH anti-pattern; the `/api/me/counters` rule).
  *
- * Gates, each refusal costing ZERO API calls: `Sec-Fetch-Site: same-origin` (403); a verified session
+ * Gates, each refusal costing ZERO API calls: `sameOriginGet` (403; C-WR-02's fetch-metadata fallback); a verified session
  * (401); a canonical uuid path id (404: the same bare answer the API gives a foreign id, D-23); exactly
  * ONE integer cursor, `afterSeq >= 0` or `beforeSeq >= 1` (400). Then ONE forward through `apiFetch`
  * (the member's own Bearer: 07-08's policies answer another member's thread with a bare 404, T-07-62),
@@ -44,7 +44,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ conversationId: string }> },
 ): Promise<Response> {
-  if (request.headers.get('sec-fetch-site') !== 'same-origin') return empty(403);
+  if (!sameOriginGet(request)) return empty(403);
 
   const { data } = await (await createClient()).auth.getClaims();
   if (!data?.claims) return empty(401);

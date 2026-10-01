@@ -1,3 +1,4 @@
+import { sameOriginGet } from '@/lib/notifications-bff';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -10,7 +11,11 @@ import { createClient } from '@/lib/supabase/server';
  *  1. **Same origin (403).** `Sec-Fetch-Site` must be `same-origin`. A same-origin GET often carries
  *     no `Origin` header, so the Origin check of the POST routes does not transfer; the fetch metadata
  *     header is set by the browser and cannot be forged by page script, and a cross-site `<script>`,
- *     `<img>` or `fetch` reads `cross-site` / `same-site` / `none` here and is refused.
+ *     `<img>` or `fetch` reads `cross-site` / `same-site` / `none` here and is refused. A browser that
+ *     sends NO fetch metadata (Safari/iOS before 16.4, 07 review C-WR-02) is refused only when its
+ *     `Origin` is `null` or another host (`sameOriginGet`): a cross-origin `fetch` always sends one, and
+ *     a header-less `<script>`/`<img>` carries no `SameSite=Lax` session cookie (gate 2) and could not
+ *     read this JSON body anyway.
  *  2. **A verified session (401).** `getClaims()` checks the signature through JWKS and refreshes an
  *     expired access token, writing the refreshed cookies; only then is `getSession()` read.
  *  3. **The token (200)** `{ accessToken, expiresAt }` (`expiresAt` in SECONDS, the session's own
@@ -22,7 +27,7 @@ const empty = (status: number) =>
   new Response(null, { status, headers: { 'cache-control': 'no-store' } });
 
 export async function GET(request: Request): Promise<Response> {
-  if (request.headers.get('sec-fetch-site') !== 'same-origin') return empty(403);
+  if (!sameOriginGet(request)) return empty(403);
 
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();

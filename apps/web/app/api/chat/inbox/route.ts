@@ -2,7 +2,7 @@ import { getTranslations } from 'next-intl/server';
 import { ApiClientError, getBootstrap } from '@/lib/bootstrap';
 import { fetchInbox } from '@/lib/chat';
 import { inboxRowView, tenantDayKeys } from '@/lib/chat-view';
-import { empty } from '@/lib/notifications-bff';
+import { empty, sameOriginGet } from '@/lib/notifications-bff';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -12,7 +12,7 @@ import { createClient } from '@/lib/supabase/server';
  * page's server actions one at a time, and a realtime-triggered refetch must never queue behind a
  * reply (RESEARCH anti-pattern; the `/api/me/counters` rule). Load-more is the server action.
  *
- * Gates, each refusal costing ZERO API calls: `Sec-Fetch-Site: same-origin` (403) and a verified
+ * Gates, each refusal costing ZERO API calls: `sameOriginGet` (403; C-WR-02's fetch-metadata fallback) and a verified
  * session (401). Then ONE forward through `apiFetch` (the caller's own Bearer): the API re-enforces
  * `chat.support` (a member gets its 403 passed through, T-07-66) and answers only this tenant's rows.
  *
@@ -23,7 +23,7 @@ import { createClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request): Promise<Response> {
-  if (request.headers.get('sec-fetch-site') !== 'same-origin') return empty(403);
+  if (!sameOriginGet(request)) return empty(403);
 
   const { data } = await (await createClient()).auth.getClaims();
   if (!data?.claims) return empty(401);
