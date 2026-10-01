@@ -2,8 +2,10 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
+import { ForgetSignedOutDevice } from '@/components/push/ForgetSignedOutDevice';
 import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
+import { createClient } from '@/lib/supabase/server';
 import { signupPath } from '@/lib/tenant-host';
 import { hasLogo } from '../AuthBrand';
 import { AuthInput } from '../AuthInput';
@@ -86,17 +88,22 @@ export default async function EntrarPage({
 }: {
   searchParams: Promise<{ erro?: string }>;
 }) {
-  const [{ erro }, t, tc, tp, tu, shell] = await Promise.all([
+  const [{ erro }, t, tc, tp, tu, shell, claims] = await Promise.all([
     searchParams,
     getTranslations('login'),
     getTranslations('common'),
     getTranslations('platform'),
     getTranslations('unavailable'),
     resolveShell(),
+    createClient().then((supabase) => supabase.auth.getClaims()),
   ]);
+  // 07 review C-WR-06: on this device nobody is signed in, so a push subscription left by a session
+  // that ended without "Sair" is forgotten. A signed-in visit keeps its subscription.
+  const signedOut = !claims.data?.claims;
 
   return (
     <>
+      {signedOut ? <ForgetSignedOutDevice /> : null}
       {shell.tenantName ? (
         // D-22: the display-name line of the login page (also the carrier of the E06 long-name case).
         <p className="break-words text-center text-sm text-text-secondary">

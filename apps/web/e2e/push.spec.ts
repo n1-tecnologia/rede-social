@@ -279,6 +279,31 @@ test.describe('push (a browser that can subscribe)', () => {
     await expect.poll(() => subscriptionsOf(users.demoMember)).toEqual([]);
   });
 
+  test('8c. a session that ends WITHOUT Sair: /entrar forgets this device, a signed-in visit does not (C-WR-06)', async ({
+    page,
+    context,
+  }) => {
+    await installFakePush(page, { permission: 'default', answer: 'granted', pushManager: true });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/configuracoes`);
+    await pushSwitch(page).click();
+    await expect(pushRow(page)).toHaveAttribute('data-push-row', 'on');
+    const endpoint = await fakeEndpoint(page);
+    expect(endpoint).not.toBeNull();
+
+    // Signed in, /entrar keeps the subscription.
+    await page.goto(`${hosts.demo}/entrar`);
+    await page.waitForTimeout(1_000);
+    expect(await fakeEndpoint(page)).toBe(endpoint);
+    expect(await pushLog(page)).not.toContain('unsubscribe');
+
+    // The session ends without "Sair" (expired, revoked, cleared): the next /entrar forgets it.
+    await context.clearCookies();
+    await page.goto(`${hosts.demo}/entrar`);
+    await expect.poll(() => fakeEndpoint(page)).toBeNull();
+    expect(await pushLog(page)).toContain('unsubscribe');
+  });
+
   test('9. no page load ever prompts (D-233)', async ({ page }) => {
     await installFakePush(page, { permission: 'default', answer: 'granted', pushManager: true });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);

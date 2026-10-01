@@ -1,6 +1,7 @@
 import { EmptyState } from '@rede-social/ui';
 import { ShieldOff } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { ForgetSignedOutDevice } from '@/components/push/ForgetSignedOutDevice';
 import { LinkButton } from '../LinkButton';
 
 /**
@@ -27,6 +28,8 @@ export default async function AcessoSuspensoPage({
 
   return (
     <div className="w-full">
+      {/* 07 review C-WR-06: the session was cleared without "Sair"; forget this device's push. */}
+      <ForgetSignedOutDevice />
       <EmptyState
         icon={ShieldOff}
         title={t('title')}
