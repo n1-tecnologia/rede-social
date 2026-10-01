@@ -60,6 +60,19 @@ function cardWith(page: Page, caption: string): Locator {
  * spec that scrolled the WINDOW would leave the sentinel permanently out of view and time out.
  */
 async function scrollFeedToBottom(page: Page): Promise<void> {
+  // 07-13: only once React owns the scroll root. `ScrollRoot` scrolls it back to the top in its
+  // mount effect, so a scroll that lands between the load event and hydration (right after a
+  // `page.reload()`) is undone, the sentinel mounts out of view and page 2 never loads — the race
+  // 05.3 recorded and 07-13 reproduced (no load-more request after the reload). React tags the
+  // nodes it hydrated with its internal props key (the phase2-smoke / platform-branding proof).
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('main.app-scroll');
+      return el !== null && Object.keys(el).some((key) => key.startsWith('__reactProps'));
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
   await page.locator('main.app-scroll').evaluate((el) => {
     el.scrollTo(0, el.scrollHeight);
   });
@@ -326,35 +339,53 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
   test('a tap fills the heart and adds the count; a second tap takes both away', async ({
     page,
   }) => {
-    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    // 07-13: the same start restore as the double-tap case (see there): a like left by an earlier
+    // run would turn this tap into an unlike.
+    const fillerId = await feedPostIdFor(seededFeedPaging.firstFiller, 'rede-demo');
+    await clearFeedPostLike(fillerId, LIKER);
+    expect(await feedPostLikeState(fillerId, LIKER)).toEqual({ liked: false, likeCount: 0 });
 
-    // 05-03: the merged feed pushed the fillers off page 1, so the sentinel has to run once before
-    // this fixture exists in the DOM. Deliberately still the FILLER rather than a post that
-    // happens to be on page 1 today — it is the post with no likes and no media, which is what
-    // makes "a post nobody has touched shows its time alone" assertable at all.
-    await scrollFeedToBottom(page);
-    const card = cardWith(page, seededFeedPaging.firstFiller);
-    await expect(card).toBeVisible();
-    const meta = card.locator('[data-post-meta]');
-    // UI-D-21: a post nobody has touched shows its time alone — never "0 curtidas".
-    await expect(meta).not.toContainText(likeSegment(0).replace('0 ', ''));
+    try {
+      await login(page, LIKER, SEED_PASSWORD, hosts.demo);
 
-    await card.getByRole('button', { name: F.actions.like }).click();
+      // 05-03: the merged feed pushed the fillers off page 1, so the sentinel has to run once before
+      // this fixture exists in the DOM. Deliberately still the FILLER rather than a post that
+      // happens to be on page 1 today — it is the post with no likes and no media, which is what
+      // makes "a post nobody has touched shows its time alone" assertable at all.
+      await scrollFeedToBottom(page);
+      const card = cardWith(page, seededFeedPaging.firstFiller);
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
+      const meta = card.locator('[data-post-meta]');
+      // UI-D-21: a post nobody has touched shows its time alone — never "0 curtidas".
+      await expect(meta).not.toContainText(likeSegment(0).replace('0 ', ''));
 
-    // Optimistic AND reconciled: the control flips at once, and the count the server answered with
-    // is the one that stays on screen.
-    await expect(card.getByRole('button', { name: F.actions.unlike })).toBeVisible();
-    await expect(meta).toContainText(likeSegment(1));
-    await page.reload();
-    await scrollFeedToBottom(page);
-    const reloaded = cardWith(page, seededFeedPaging.firstFiller);
-    await expect(reloaded.getByRole('button', { name: F.actions.unlike })).toBeVisible();
-    await expect(reloaded.locator('[data-post-meta]')).toContainText(likeSegment(1));
+      const liked = nextPostResponse(page, fillerId);
+      await card.getByRole('button', { name: F.actions.like }).click();
 
-    // Undo, so the shared seed is exactly as it was and the file re-runs in any order.
-    await reloaded.getByRole('button', { name: F.actions.unlike }).click();
-    await expect(reloaded.getByRole('button', { name: F.actions.like })).toBeVisible();
-    await expect(reloaded.locator('[data-post-meta]')).not.toContainText(likeSegment(1));
+      // Optimistic AND reconciled: the control flips at once, and the count the server answered with
+      // is the one that stays on screen.
+      await expect(card.getByRole('button', { name: F.actions.unlike })).toBeVisible();
+      await expect(meta).toContainText(likeSegment(1));
+      await liked;
+      expect(await feedPostLikeState(fillerId, LIKER)).toEqual({ liked: true, likeCount: 1 });
+      await page.reload();
+      await scrollFeedToBottom(page);
+      const reloaded = cardWith(page, seededFeedPaging.firstFiller);
+      await expect(reloaded.getByRole('button', { name: F.actions.unlike })).toBeVisible();
+      await expect(reloaded.locator('[data-post-meta]')).toContainText(likeSegment(1));
+
+      // Undo, confirmed by the server and the database, so the shared seed is exactly as it was and
+      // the file re-runs in any order.
+      const unliked = nextPostResponse(page, fillerId);
+      await reloaded.getByRole('button', { name: F.actions.unlike }).click();
+      await expect(reloaded.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(reloaded.locator('[data-post-meta]')).not.toContainText(likeSegment(1));
+      await unliked;
+      expect(await feedPostLikeState(fillerId, LIKER)).toEqual({ liked: false, likeCount: 0 });
+    } finally {
+      await clearFeedPostLike(fillerId, LIKER);
+    }
   });
 
   test('a double tap on the gallery likes exactly ONCE, not twice', async ({ page }, testInfo) => {
@@ -450,32 +481,44 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
   });
 
   test('a failed like reverts, toasts, and never removes the card', async ({ page }) => {
-    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    // 07-13: the same start restore as the cases above.
+    const fillerId = await feedPostIdFor(seededFeedPaging.firstFiller, 'rede-demo');
+    await clearFeedPostLike(fillerId, LIKER);
+    expect(await feedPostLikeState(fillerId, LIKER)).toEqual({ liked: false, likeCount: 0 });
 
-    // 05-03: page 2, for the reason the case above states. The scroll happens BEFORE the server
-    // actions are broken, so what this test breaks is the LIKE and never the paging.
-    await scrollFeedToBottom(page);
-    const card = cardWith(page, seededFeedPaging.firstFiller);
-    await expect(card).toBeVisible();
+    try {
+      await login(page, LIKER, SEED_PASSWORD, hosts.demo);
 
-    await breakServerActions(page);
-    await card.getByRole('button', { name: F.actions.like }).click();
+      // 05-03: page 2, for the reason the case above states. The scroll happens BEFORE the server
+      // actions are broken, so what this test breaks is the LIKE and never the paging.
+      await scrollFeedToBottom(page);
+      const card = cardWith(page, seededFeedPaging.firstFiller);
+      await expect(card).toBeVisible();
+      await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
 
-    // Reverted…
-    await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
-    await expect(card.locator('[data-post-meta]')).not.toContainText(likeSegment(1));
-    // …surfaced as the GENERIC toast, with no inline message…
-    await expect(page.getByRole('status')).toContainText(F.errors.generic);
-    // …and the card is still exactly where it was (the no-optimistic-removal rule).
-    await expect(card).toBeVisible();
-    await expect(postCards(page)).toHaveCount(seededFeedPaging.pageSize * 2);
+      await breakServerActions(page);
+      await card.getByRole('button', { name: F.actions.like }).click();
 
-    await page.unrouteAll({ behavior: 'ignoreErrors' });
-    await page.reload();
-    await scrollFeedToBottom(page);
-    await expect(
-      cardWith(page, seededFeedPaging.firstFiller).getByRole('button', { name: F.actions.like }),
-    ).toBeVisible();
+      // Reverted…
+      await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(card.locator('[data-post-meta]')).not.toContainText(likeSegment(1));
+      // …surfaced as the GENERIC toast, with no inline message…
+      await expect(page.getByRole('status')).toContainText(F.errors.generic);
+      // …and the card is still exactly where it was (the no-optimistic-removal rule).
+      await expect(card).toBeVisible();
+      await expect(postCards(page)).toHaveCount(seededFeedPaging.pageSize * 2);
+      // …and the revert matches the server: no like was written.
+      expect(await feedPostLikeState(fillerId, LIKER)).toEqual({ liked: false, likeCount: 0 });
+
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      await page.reload();
+      await scrollFeedToBottom(page);
+      await expect(
+        cardWith(page, seededFeedPaging.firstFiller).getByRole('button', { name: F.actions.like }),
+      ).toBeVisible();
+    } finally {
+      await clearFeedPostLike(fillerId, LIKER);
+    }
   });
 });
 
