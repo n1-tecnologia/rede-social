@@ -226,7 +226,7 @@ None. No external service configuration is required.
 
 ## Next Phase Readiness
 
-- Gap item 2 of truth 15 (WINDOWS 64) is explained and closed in the spec. 07-14 (the turbo `.next/types` race) and 07-15 (the consented reset and the full `pnpm verify`) are next.
+- Gap item 2 of truth 15 (WINDOWS 64) is explained and closed in the spec. Next are 07-14 (the C-WR-03 regression tests for `/notificacoes`) and 07-15 (the turbo `.next/types` race, the consented reset and the full `pnpm verify`).
 - For 07-15: the two open reds above do not affect a single non-repeated gate run of `feed.spec.ts`. `feed-media.spec.ts:76` is a rare race that the gate could still hit, and its fix path is in deferred-items.
 - For the developer: decide whether the feed's double tap should stay a toggle (Phase 4) or become like-only like Reels (D-128).
 

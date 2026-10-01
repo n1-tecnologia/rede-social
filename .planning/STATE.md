@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-12-PLAN.md
-last_updated: "2026-10-01T11:22:52.528Z"
+stopped_at: Completed 07-13-PLAN.md
+last_updated: "2026-10-01T11:53:22.738Z"
 last_activity: 2026-10-01
-last_activity_desc: "07-12 complete: e2e harness tells its servers PLATFORM_HOST=rede-social.localhost (platform.spec 8/8 with the env file untouched), feed-comments failNextActions targets the action by id (2 cold starts 9/9, warm repeat 6/6); next: 07-13"
-state_head: d5c61d31b2b17a42b6373c4fd1d1db8002800f8b
+last_activity_desc: "07-13 complete: Double-tap verdict T (a leftover like turned the double tap into an unlike; clean start desktop 20/20, mobile 5/5, one request and one row each); FEED-04 cases restore and confirm their own like; scrollFeedToBottom waits for hydration; next: 07-14"
+state_head: 8b0217349d29ec91f2d60131fdcc73aa0c87fa16
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 121
-  completed_plans: 107
+  completed_plans: 108
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 12 of 15 complete (gap closure 07-12..07-15 for the pnpm verify exit gate: 07-12 done; next 07-13)
+Plan: 13 of 15 complete (gap closure 07-12..07-15 for the pnpm verify exit gate: 07-12 and 07-13 done; next 07-14)
 Status: Executing Phase 07 gap closure
-Last activity: 2026-10-01 — Completed 07-12 (harness-owned PLATFORM_HOST via e2e/hosts.ts, targeted feed-comments failNextActions)
+Last activity: 2026-10-01 — Completed 07-13 (Double-tap verdict T; self-restoring FEED-04 cases with database proof and a double-tap-timing annotation)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -167,6 +167,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P10 | 39min | 2 tasks | 27 files |
 | Phase 07 P11 | 153min | 3 tasks | 15 files |
 | Phase 07 P12 | 5 min | 2 tasks | 4 files |
+| Phase 07 P13 | 28 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -545,6 +546,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-11: pre-push check requires notifications and chat_messages empty in production (NOT NULL columns without default)
 - [Phase 07]: 07-12: the e2e harness owns PLATFORM_HOST for the servers Playwright launches (an exported value wins, else the hostname of the e2e platform URL from e2e/hosts.ts); the developer web env file is never rewritten and local-env.sh --write is not the remedy — The gate measured the developer env file instead of the product; production and CI set PLATFORM_HOST themselves, and the warning names only the harness host
 - [Phase 07]: 07-12: feed-comments forced failure targets a server action (next-action header) whose arguments carry the post id or root comment id, and each failure case asserts exactly one failed request — Ordering let a cold dev server fetchPlaybackTokenAction(assetId) consume the failure; action ids are build-generated
+- [Phase 07]: 07-13 Double-tap verdict T: a member's double tap within about 1 s of load unlikes a post only when it is already liked (Phase 4's one toggle); the 07-11 red was a like left behind by an earlier run on the shared member and gallery post. Every FEED-04 case now clears and confirms its own like in the database
+- [Phase 07]: 07-13: scrollFeedToBottom waits for React's hydration mark on main.app-scroll, because ScrollRoot's mount effect undoes a scroll that lands before hydration (the 05.3 page-2 race; 3/30 before, 0/30 after)
 
 ### Pending Todos
 
@@ -616,6 +619,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-01T11:22:39.841Z
-Stopped at: Completed 07-12-PLAN.md
+Last session: 2026-10-01T11:53:16.629Z
+Stopped at: Completed 07-13-PLAN.md
 Resume file: None
