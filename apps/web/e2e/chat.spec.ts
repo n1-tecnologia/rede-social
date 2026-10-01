@@ -233,12 +233,15 @@ test.describe('chat membro', () => {
     test.setTimeout(90_000);
     // Hold (never drop) every chat.message frame while `holding`, then release them in order: the
     // staff reply's signal reaches the pane only AFTER the member's own send has answered.
-    const hold = { holding: false, held: [] as (string | Buffer)[] };
-    let toPage: ((message: string | Buffer) => void) | null = null;
+    const hold: {
+      holding: boolean;
+      held: (string | Buffer)[];
+      toPage: ((message: string | Buffer) => void) | null;
+    } = { holding: false, held: [], toPage: null };
     await page.routeWebSocket(/\/realtime\/v1\/websocket/, (ws) => {
       const server = ws.connectToServer();
       ws.onMessage((message) => server.send(message));
-      toPage = (message) => ws.send(message);
+      hold.toPage = (message) => ws.send(message);
       server.onMessage((message) => {
         const text = typeof message === 'string' ? message : message.toString('latin1');
         if (hold.holding && text.includes('chat.message')) {
@@ -273,7 +276,7 @@ test.describe('chat membro', () => {
 
     // Release the held signals late, as a slow Broadcast would deliver them.
     hold.holding = false;
-    for (const message of hold.held.splice(0)) toPage?.(message);
+    for (const message of hold.held.splice(0)) hold.toPage?.(message);
 
     // No refocus, no reload: the reply appears, exactly once, before the member's own message.
     await expect(bubbles(page).filter({ hasText: reply })).toHaveCount(1, { timeout: 10_000 });
