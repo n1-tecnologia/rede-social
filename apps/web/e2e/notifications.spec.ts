@@ -232,10 +232,16 @@ test.describe('notifications lista', () => {
 
     const markAll = page.getByTestId('notifications-mark-all');
     await expect(markAll).toBeVisible();
+    // The reload below must not race the POST: wait for the server to answer the mark-all first.
+    const readAll = page.waitForResponse(
+      (res) =>
+        res.url().endsWith('/api/notifications/read-all') && res.request().method() === 'POST',
+    );
     await markAll.click();
     for (const excerpt of rows.unread) {
       await expect(rowFor(page, excerpt)).toHaveAttribute('data-unread', 'false');
     }
+    expect((await readAll).status()).toBe(204);
     await expect(markAll).toHaveCount(0);
 
     // Persisted: the next load has no Novas section at all.

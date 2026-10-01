@@ -252,7 +252,9 @@ describe('NotificationsSurface — C-WR-03 races', () => {
     expect(loadMore).toHaveBeenLastCalledWith('unread', 'c1-new');
   });
 
-  it('2. tapped: a failed mark-all gives the tint back only to the rows it cleared, and rows tapped before or during it stay read (D-230, UI E04 error, no second POST while it runs)', async () => {
+  it('2. tapped: a failed mark-all gives the tint back only to the rows it cleared, and rows tapped before or during it sent their own read POST and stay read (D-230, UI E04 loading, UI E04 error, no second POST while it runs)', async () => {
+    /** How many fetches went to exactly this URL. */
+    const callsTo = (url: string) => fetchMock.mock.calls.filter(([input]) => input === url).length;
     renderSurface({
       unread: [rowView('a', true), rowView('b', true), rowView('c', true)],
       unreadCursor: null,
@@ -276,20 +278,26 @@ describe('NotificationsSurface — C-WR-03 races', () => {
     fireEvent.click(markAll);
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/notifications/read-all',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ method: 'POST', keepalive: true }),
     );
 
-    // Optimistic: every tint is cleared, and no enabled mark-all control is offered while the POST
-    // runs (no second POST can start). The UI-SPEC's "aria-busy and disabled" half is the
-    // `gap E04 loading` case below: at HEAD the button is withdrawn instead, because no loaded row is
-    // unread any more.
+    // Optimistic: every tint is cleared. The control stays mounted for the whole POST, aria-busy and
+    // disabled (UI-D-252, UI E04 loading), so a click on it starts no second POST.
     for (const id of ['a', 'b', 'c']) expect(row(id).getAttribute('data-unread')).toBe('false');
-    const during = screen.queryByTestId('notifications-mark-all') as HTMLButtonElement | null;
-    expect(during === null || during.disabled).toBe(true);
+    const during = screen.getByTestId('notifications-mark-all') as HTMLButtonElement;
+    expect(during.disabled).toBe(true);
+    expect(during.getAttribute('aria-busy')).toBe('true');
+    fireEvent.click(during);
+    expect(callsTo('/api/notifications/read-all')).toBe(1);
 
-    // `b` is tapped WHILE the mark-all is in flight.
+    // `b` is tapped WHILE the mark-all is in flight: it sends its own keepalive read POST, once.
     fireEvent.click(row('b'));
     expect(row('b').getAttribute('data-unread')).toBe('false');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/notifications/b/read',
+      expect.objectContaining({ method: 'POST', keepalive: true }),
+    );
+    expect(callsTo('/api/notifications/b/read')).toBe(1);
 
     // The mark-all fails.
     await act(async () => {
@@ -302,6 +310,9 @@ describe('NotificationsSurface — C-WR-03 races', () => {
     expect(row('a').getAttribute('data-unread')).toBe('false');
     expect(row('b').getAttribute('data-unread')).toBe('false');
     expect(row('c').getAttribute('data-unread')).toBe('true');
+    // `c` was never tapped, so no read POST of its own; `a`, tapped before the mark-all, posted once.
+    expect(callsTo('/api/notifications/c/read')).toBe(0);
+    expect(callsTo('/api/notifications/a/read')).toBe(1);
 
     // One error toast, in the catalog's words.
     const toasts = screen
@@ -358,27 +369,40 @@ describe('NotificationsSurface — C-WR-03 races', () => {
 });
 
 /**
- * Two product gaps 07-14 found while pinning C-WR-03. The plan is test-only, so they are recorded
- * here as EXPECTED FAILURES, with the planned assertions unchanged (07-14-SUMMARY, phase
- * deferred-items, WINDOWS). Each `it.fails` turns red the moment the product is fixed. Then make it a
- * plain `it`.
+ * The mark-all lifecycle (UI-D-252, D-230). 07-14 found two behaviours missing while pinning C-WR-03:
+ * the control was withdrawn instead of staying busy for its POST, and a row tapped during a mark-all
+ * sent no read POST of its own. Quick 261001-ere fixed both; these cases keep them fixed.
  */
-describe('NotificationsSurface — C-WR-03 known gaps (expected failures at HEAD)', () => {
-  it.fails('gap E04 loading: the mark-all button is aria-busy and disabled while its POST runs (UI-D-252; at HEAD it is withdrawn, because the optimistic step leaves no loaded row unread)', async () => {
+describe('NotificationsSurface — mark-all lifecycle (UI-D-252, WINDOWS 66/67)', () => {
+  it('E04 loading: the mark-all button stays mounted, aria-busy and disabled while its POST runs, and leaves on success (UI-D-252)', async () => {
     renderSurface({
       unread: [rowView('a', true), rowView('b', true), rowView('c', true)],
       unreadCursor: null,
       readStarted: true,
     });
-    net.readAll = deferred<Response>().promise;
+    const readAll = deferred<Response>();
+    net.readAll = readAll.promise;
     fireEvent.click(screen.getByTestId('notifications-mark-all'));
 
     const busy = screen.getByTestId('notifications-mark-all') as HTMLButtonElement;
     expect(busy.getAttribute('aria-busy')).toBe('true');
     expect(busy.disabled).toBe(true);
+
+    await act(async () => {
+      readAll.resolve(new Response(null, { status: 204 }));
+      await readAll.promise;
+    });
+    await flush();
+
+    expect(screen.queryByTestId('notifications-mark-all')).toBeNull();
+    for (const id of ['a', 'b', 'c']) expect(row(id).getAttribute('data-unread')).toBe('false');
+    const toasts = screen
+      .queryAllByRole('status')
+      .filter((node) => node.textContent === tn('errors.markAll'));
+    expect(toasts).toHaveLength(0);
   });
 
-  it.fails('gap own read POST: a row activated while a mark-all is in flight sends its own read POST, the premise the scoped rollback keeps its tint on (at HEAD `activate` posts only while the row looks unread, and mark-all already cleared it)', async () => {
+  it('own read POST: a row tapped while a mark-all is in flight sends its own keepalive read POST (the premise of the scoped rollback)', async () => {
     renderSurface({
       unread: [rowView('a', true), rowView('b', true), rowView('c', true)],
       unreadCursor: null,
@@ -391,6 +415,9 @@ describe('NotificationsSurface — C-WR-03 known gaps (expected failures at HEAD
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/notifications/b/read',
       expect.objectContaining({ method: 'POST', keepalive: true }),
+    );
+    expect(fetchMock.mock.calls.some(([input]) => input === '/api/notifications/c/read')).toBe(
+      false,
     );
   });
 });

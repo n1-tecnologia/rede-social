@@ -77,10 +77,14 @@ export function NotificationsSkeleton({ count }: { count: number }) {
  * - **Read on tap, in place.** A row's activation fires `/api/notifications/{id}/read` with
  *   `keepalive` WITHOUT awaiting it, clears that row's tint locally and lets the anchor navigate. The
  *   row moves to Anteriores only on the next load (moving rows under the finger is what this avoids).
+ *   A row tapped while a mark-all is in flight also posts its own read when the server may still hold
+ *   it unread (cleared on screen only by that mark-all), once per mark-all.
  *   A REMOVED row (07-04 keep-and-mark) is a button: the same read, the same tint, and the info toast
  *   "Este conteúdo não está mais disponível." instead of a navigation (UI-D-254).
- * - **Mark all.** Visible while any loaded row is unread; `aria-busy` and disabled during the POST;
- *   clears every tint optimistically, restores them and fires the error toast on failure.
+ * - **Mark all.** Visible while any loaded row is unread, and for the whole of its own POST, during
+ *   which it is `aria-busy` and disabled (UI-D-252); the POST is sent with `keepalive`. Clears every
+ *   tint optimistically; on success the control leaves, on failure only the tints it alone cleared
+ *   come back and the error toast fires.
  *
  * - **Live merge (07-03, D-240).** On a `notifications.changed` signal on the member's own topic or
  *   the tenant topic, on every (re-)join and on every return to visible, page 1 of Novas is read again
@@ -199,19 +203,30 @@ export function NotificationsSurface({
     [locallyRead],
   );
 
-  /** The ids tapped while a mark-all is in flight (C-WR-03): its failure must not un-read them. */
-  const tappedDuringMarkAll = useRef<Set<string> | null>(null);
+  /**
+   * The in-flight mark-all, or null (C-WR-03). `added` holds the ids its optimistic step cleared;
+   * `tapped` the ids activated since it started, whose tint its failure must not take back.
+   */
+  const inFlightMarkAll = useRef<{ added: ReadonlySet<string>; tapped: Set<string> } | null>(null);
 
   // ── read on tap: fire and forget, tint cleared in place ────────────────────────────────────────
   const activate = useCallback(
     (view: NotificationRowView) => {
-      if (isUnread(view)) {
+      const marking = inFlightMarkAll.current;
+      // A row cleared only by the in-flight mark-all may still be unread on the server: the tap is an
+      // explicit read, so it posts its own (once per mark-all), and the scoped rollback keeps it read.
+      const clearedOnlyByMarkAll =
+        marking !== null &&
+        view.unread &&
+        marking.added.has(view.id) &&
+        !marking.tapped.has(view.id);
+      if (isUnread(view) || clearedOnlyByMarkAll) {
         void fetch(`/api/notifications/${encodeURIComponent(view.id)}/read`, {
           method: 'POST',
           keepalive: true,
         }).catch(() => {});
       }
-      tappedDuringMarkAll.current?.add(view.id);
+      marking?.tapped.add(view.id);
       setLocallyRead((previous) => new Set(previous).add(view.id));
       if (view.removed) show({ tone: 'info', message: t('fallback.removed') });
     },
@@ -219,29 +234,32 @@ export function NotificationsSurface({
   );
 
   // ── mark all: optimistic, restored on failure ─────────────────────────────────────────────────
-  // 07 review C-WR-03: a failure takes back ONLY what the optimistic step added, and never a row the
-  // member tapped meanwhile (its own keepalive POST really marked it read).
+  // 07 review C-WR-03: a failure takes back ONLY what the optimistic step cleared, and keeps any row
+  // the member tapped meanwhile, because that tap sent its own keepalive read POST (`activate` posts
+  // for a row the in-flight mark-all cleared while the server may still hold it unread).
   const markAll = useCallback(async () => {
     const before = locallyRead;
     const everything = new Set(before);
     for (const view of [...unread, ...read]) everything.add(view.id);
     const added = [...everything].filter((id) => !before.has(id));
-    tappedDuringMarkAll.current = new Set();
+    const inFlight = { added: new Set(added), tapped: new Set<string>() };
+    inFlightMarkAll.current = inFlight;
     setMarkingAll(true);
     setLocallyRead(everything);
     let ok = false;
     try {
-      const res = await fetch('/api/notifications/read-all', { method: 'POST' });
+      // keepalive: the tap already cleared every tint, so a reload or close right after it must not
+      // lose the mark (07-15 gate trace); the request has no body. Still awaited: busy + rollback.
+      const res = await fetch('/api/notifications/read-all', { method: 'POST', keepalive: true });
       ok = res.ok;
     } catch {
       ok = false;
     }
-    const tapped = tappedDuringMarkAll.current;
-    tappedDuringMarkAll.current = null;
+    inFlightMarkAll.current = null;
     if (!ok) {
       setLocallyRead((current) => {
         const next = new Set(current);
-        for (const id of added) if (!tapped?.has(id)) next.delete(id);
+        for (const id of added) if (!inFlight.tapped.has(id)) next.delete(id);
         return next;
       });
       show({ tone: 'error', message: t('errors.markAll') });
@@ -372,7 +390,7 @@ export function NotificationsSurface({
         readTitle={t('sections.read')}
         read={read.map(renderRow)}
         markAll={
-          anyUnread ? (
+          anyUnread || markingAll ? (
             <Button
               variant="ghost"
               size="sm"
