@@ -4,10 +4,10 @@ current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
 stopped_at: Completed 07-15-PLAN.md (gate red at e2e, 4 cases; re-verify Phase 7 next)
-last_updated: "2026-10-01T13:17:33.052Z"
+last_updated: "2026-10-01T14:00:16.180Z"
 last_activity: 2026-10-01
 last_activity_desc: "07-15 done (halted at a red gate): web typecheck ordered after web build; the consented pnpm verify run exited 1 at e2e (651 passed, 4 failed, none a truth-15 gap item; WINDOWS 68-71); next: re-verify Phase 7"
-state_head: 4ee26f305a5e5cce6662e248d6daefd232c8fa49
+state_head: c46b45460fc7c4926f690dac8a7ed17b96c30770
 progress:
   total_phases: 16
   completed_phases: 0
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
 Plan: 15 of 15 complete (gap closure 07-12..07-15 done; 07-15 halted at a red exit gate: 4 e2e reds, none a truth-15 gap item)
 Status: Ready to verify (truth 15 still red; re-plan expected)
-Last activity: 2026-10-01 — Completed 07-15 (turbo typecheck after build; consented gate run red at e2e: notifications:228, phase52-smoke:294, stories:1636 mobile, phase2-smoke:378 desktop; WINDOWS 68-71)
+Last activity: 2026-10-01 - Completed quick task 261001-ere: Phase 7 leftovers (mark-all busy + tapped-row read, read-all wait, UI-D-20 slug)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -593,6 +593,7 @@ None yet.
 | 260929-g0s | Invite race fix (deferred kernel.invite-send job), hook refuses tenant links on non-tenant hosts, Admins tab shows invite state | 2026-09-29 | c4e1fcb | Needs Review | [260929-g0s-fix-first-admin-invite-race-and-show-inv](./quick/260929-g0s-fix-first-admin-invite-race-and-show-inv/) |
 | 260929-ka5 | Story composer polls video readiness (new GET /v1/media/{assetId}, useAssetReadiness) so "Processando o vídeo…" clears at ready; failed video blocks Publicar; copy says you can already publish | 2026-09-29 | c1773a3 | Needs Review | [260929-ka5-story-composer-polls-video-readiness-ins](./quick/260929-ka5-story-composer-polls-video-readiness-ins/) |
 | 260929-ltf | Reconcile stale pending Mux videos on GET /v1/media/{id} and in the hourly sweeper (webhook stays primary; prod webhooks dropped after a deploy); feed composer polls the video and keeps Publicar disabled until ready | 2026-09-29 | 4701e8c | Needs Review | [260929-ltf-reconcile-pending-mux-videos-without-the](./quick/260929-ltf-reconcile-pending-mux-videos-without-the/) |
+| 261001-ere | Phase 7 leftovers: mark-all stays busy for its POST, a row tapped during mark-all posts its own read, read-all keepalive + e2e waits for it (WINDOWS 66/67/68 fixed), UI-D-20 slug unique per run | 2026-10-01 | c46b454 | — | [261001-ere-phase-7-leftovers-mark-all-busy-and-tapp](./quick/261001-ere-phase-7-leftovers-mark-all-busy-and-tapp/) |
 
 ### Roadmap Evolution
 
