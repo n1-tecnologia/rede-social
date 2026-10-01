@@ -44,3 +44,10 @@
   status: open
   **What:** in 07-13's `feed-media.spec.ts feed.spec.ts` run, line 76 failed. After `ArrowLeft` the live region already read "2 de 3", but the non-retrying `expect(await activeDot(card)).toBe(1)` read 2. In isolation it then passed 20/20 (`--repeat-each=10`, both projects), and the earlier run of the same pair passed 31/31. The file was not touched by 07-13 and involves no like.
   **Fix path:** read the active dot through a retrying assertion (for example `expect.poll(() => activeDot(card)).toBe(1)`), so the dot is not read in the same tick as the live region.
+
+- Mark-all's busy state is unreachable, and a row tapped during a mark-all sends no read POST (07-14 execution note, C-WR-03)
+  status: open
+  **What:** two product gaps found while pinning C-WR-03 in `NotificationsSurface.test.tsx`. 07-14 is test-only, so each is recorded as an `it.fails` case with the planned assertion unchanged, plus WINDOWS 66 and 67.
+  (1) **UI E04 loading (WINDOWS 66).** UI-D-252 says the button renders "only while at least one loaded row is unread" AND is "`aria-busy` and disabled while the POST runs". The optimistic step clears every loaded row, so at HEAD the button unmounts for the POST and `loading={markingAll}` never shows. A second POST still cannot start. The visible busy state is what is missing.
+  (2) **Own read POST (WINDOWS 67).** `activate` POSTs `/read` only while `isUnread(view)`. During a mark-all every row is already cleared, so a row tapped then sends no read of its own. If the mark-all then fails, the C-WR-03 rollback keeps that row read on screen, but the server still has it unread until the next load.
+  **Fix path:** (1) keep the button mounted while `markingAll` (for example `anyUnread || markingAll`), or amend UI-D-252 to "withdrawn during the POST". (2) Have `activate` POST `/read` when the row is server-unread (`view.unread`) and a mark-all is open, not only when it looks unread. Then turn each `it.fails` into a plain `it`.

@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 35
+open_count: 37
 waived_count: 0
 fixed_count: 30
-total_count: 65
-last_updated: 2026-10-01T00:21:24.073Z
+total_count: 67
+last_updated: 2026-10-01T11:59:29.990Z
 ---
 
 # Broken Windows Ledger
@@ -80,6 +80,8 @@ last_updated: 2026-10-01T00:21:24.073Z
 | 63 | 07 | stub | apps/web/app/(app)/suporte/page.tsx |  | 07-09: a holder of chat.support (staff) reaching /suporte gets the not-found screen until 07-10 swaps that branch for the staff inbox (UI-D-262/264) | fixed |  | 2026-09-30T20:21:31.933Z | 2026-09-30T21:03:55.638Z |
 | 64 | 7 | unrun-verify | apps/web/e2e/feed.spec.ts | 321 | 07-11 exit gate: desktop 'a double tap on the gallery likes exactly ONCE' fails in both full pnpm verify runs (1/3 alone); the gesture fires unlikePostAction only; see deferred-items.md | open |  | 2026-10-01T00:21:23.999Z |  |
 | 65 | 7 | unrun-verify | turbo.json |  | 07-11 exit gate: web typecheck (next typegen) races web build on apps/web/.next/types (ENOTEMPTY once); pre-existing pipeline race; see deferred-items.md | open |  | 2026-10-01T00:21:24.073Z |  |
+| 66 | 07 | unmet-truth | apps/web/app/(app)/notificacoes/NotificationsSurface.tsx | 375 | UI E04 loading unreachable: mark-all clears every loaded row, so the anyUnread-gated button unmounts during its POST and is never aria-busy/disabled (UI-D-252 contradicts itself); pinned by it.fails 'gap E04 loading' in NotificationsSurface.test.tsx (07-14) | open |  | 2026-10-01T11:59:29.919Z |  |
+| 67 | 07 | unmet-truth | apps/web/app/(app)/notificacoes/NotificationsSurface.tsx | 208 | A row tapped while mark-all is in flight sends no read POST (activate posts only while isUnread, and mark-all already cleared it), yet a failed mark-all keeps it read: UI read, server unread until next load; pinned by it.fails 'gap own read POST' (07-14) | open |  | 2026-10-01T11:59:29.990Z |  |
 
 ````json
 [
@@ -861,6 +863,30 @@ last_updated: 2026-10-01T00:21:24.073Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-01T00:21:24.073Z",
+    "resolved_at": null
+  },
+  {
+    "id": 66,
+    "kind": "unmet-truth",
+    "phase": "07",
+    "file": "apps/web/app/(app)/notificacoes/NotificationsSurface.tsx",
+    "line": 375,
+    "description": "UI E04 loading unreachable: mark-all clears every loaded row, so the anyUnread-gated button unmounts during its POST and is never aria-busy/disabled (UI-D-252 contradicts itself); pinned by it.fails 'gap E04 loading' in NotificationsSurface.test.tsx (07-14)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-01T11:59:29.919Z",
+    "resolved_at": null
+  },
+  {
+    "id": 67,
+    "kind": "unmet-truth",
+    "phase": "07",
+    "file": "apps/web/app/(app)/notificacoes/NotificationsSurface.tsx",
+    "line": 208,
+    "description": "A row tapped while mark-all is in flight sends no read POST (activate posts only while isUnread, and mark-all already cleared it), yet a failed mark-all keeps it read: UI read, server unread until next load; pinned by it.fails 'gap own read POST' (07-14)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-01T11:59:29.990Z",
     "resolved_at": null
   }
 ]
