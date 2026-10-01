@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
+import { closeAdmin, feedPostIdFor } from './admin';
 import { hosts, login, SEED_PASSWORD, seededComments, seededFeedPaging, users } from './fixtures';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -39,6 +40,11 @@ test.beforeEach(({ page: _page }, testInfo) => {
     testInfo.project.name !== 'mobile-chromium',
     'UI-02 is a phone contract (04-08 owns desktop)',
   );
+});
+
+/** `feedPostIdFor` opens the e2e fixture connection; release it so Playwright can exit. */
+test.afterAll(async () => {
+  await closeAdmin();
 });
 
 /** Every write this file makes is prefixed, so a leftover from a failed run is identifiable. */
@@ -101,18 +107,38 @@ async function deleteOwnComment(page: Page, body: string): Promise<void> {
 }
 
 /**
- * Fails the NEXT server-action POST to `/inicio` and resolves a disposer that lets traffic through
- * again.
+ * Fails the next `count` server actions aimed at `targetId` and returns `{ restore, failedCount }`.
  *
- * Every comment action is a POST to the same path, so they cannot be told apart by URL. Ordering is
- * what distinguishes them: arming this immediately before the interaction under test means the next
- * action the app fires is the one under test, and `skip` lets a known number of earlier calls
- * through when an interaction fires more than one.
+ * A request is failed only when all three hold: it is a `POST` to `/inicio`, it carries the
+ * `next-action` header (a server action, not a navigation or an RSC fetch), and its arguments
+ * (`postData()`) contain `targetId`. Every other request continues untouched.
+ *
+ * Why the id and not ordering (07-12): every comment action is a POST to the same path, and arming
+ * the helper just before the interaction was meant to make the next action the one under test. On a
+ * cold dev server it was not: the video card's `fetchPlaybackTokenAction(assetId)` fired after the
+ * helper was armed and consumed the forced failure (`media.playback_token_failed` with "forced
+ * failure" in the log, the 07-04 deferred entry), so the comment list loaded and the case went red.
+ * A comment-list action's arguments carry the post id and a replies action's carry the root comment
+ * id, while a playback mint carries only an asset id (the reels e6 precedent). Action ids are
+ * build-generated and unknown to a spec, so they are not matched.
+ *
+ * `failedCount()` lets each case prove it failed exactly the request it meant to (T-07-79): a matcher
+ * that misses, or fails something else, turns the case red.
  */
-async function failNextActions(page: Page, count = 1): Promise<() => Promise<void>> {
+async function failNextActions(
+  page: Page,
+  targetId: string,
+  count = 1,
+): Promise<{ restore: () => Promise<void>; failedCount: () => number }> {
   let failed = 0;
   const handler = async (route: import('@playwright/test').Route) => {
-    if (route.request().method() === 'POST' && failed < count) {
+    const request = route.request();
+    if (
+      failed < count &&
+      request.method() === 'POST' &&
+      request.headers()['next-action'] &&
+      (request.postData() ?? '').includes(targetId)
+    ) {
       failed += 1;
       await route.fulfill({ status: 500, contentType: 'text/plain', body: 'forced failure' });
       return;
@@ -120,7 +146,10 @@ async function failNextActions(page: Page, count = 1): Promise<() => Promise<voi
     await route.continue();
   };
   await page.route(/\/inicio/, handler);
-  return () => page.unroute(/\/inicio/, handler);
+  return {
+    restore: () => page.unroute(/\/inicio/, handler),
+    failedCount: () => failed,
+  };
 }
 
 test.describe('D-59 — the comment sheet opens over the feed', () => {
@@ -300,7 +329,9 @@ test.describe('UI-D-22 — a failed load says so; it never claims the post has n
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
-    const restore = await failNextActions(page);
+    // `loadCommentsAction(postId)` carries the post id; nothing else the feed fires here does.
+    const postId = await feedPostIdFor(seededComments.firstPost, 'rede-demo');
+    const forced = await failNextActions(page, postId);
     await cardWith(page, seededComments.firstPost)
       .getByRole('button', { name: F.actions.comment, exact: true })
       .click();
@@ -318,7 +349,10 @@ test.describe('UI-D-22 — a failed load says so; it never claims the post has n
     // …and the composer stays usable throughout (E10/partial).
     await expect(sheet(page).locator('[data-comment-input] input')).toBeVisible();
 
-    await restore();
+    // Exactly the comment-list action was failed, and nothing else (T-07-79).
+    expect(forced.failedCount()).toBe(1);
+
+    await forced.restore();
     await list.getByRole('button', { name: C.retry, exact: true }).click();
     await expect(row(page, seededComments.firstPostRootBody)).toBeVisible();
     await expect(list.locator('[data-comments-error]')).toHaveCount(0);
@@ -331,7 +365,10 @@ test.describe('UI-D-22 — a failed load says so; it never claims the post has n
     await openComments(page, seededComments.firstPost);
 
     const root = row(page, seededComments.firstPostRootBody);
-    const restore = await failNextActions(page);
+    // `loadRepliesAction(commentId)` carries the root comment id.
+    const rootId = await root.getAttribute('data-comment-id');
+    expect(rootId).not.toBeNull();
+    const forced = await failNextActions(page, rootId as string);
     await root.locator('[data-replies-toggle]').click();
 
     const failed = commentsList(page).locator('[data-replies-error]');
@@ -341,7 +378,10 @@ test.describe('UI-D-22 — a failed load says so; it never claims the post has n
     await expect(root.locator('[data-replies-toggle]')).toHaveAttribute('aria-expanded', 'true');
     await expect(commentsList(page).locator('[data-comments-empty]')).toHaveCount(0);
 
-    await restore();
+    // Exactly the replies action was failed, and nothing else (T-07-79).
+    expect(forced.failedCount()).toBe(1);
+
+    await forced.restore();
     await failed.getByRole('button', { name: C.retry, exact: true }).click();
     await expect(row(page, seededComments.firstPostReplyBody)).toBeVisible();
   });
