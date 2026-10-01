@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-13-PLAN.md
-last_updated: "2026-10-01T11:53:22.738Z"
+stopped_at: Completed 07-14-PLAN.md
+last_updated: "2026-10-01T12:01:01.634Z"
 last_activity: 2026-10-01
-last_activity_desc: "07-13 complete: Double-tap verdict T (a leftover like turned the double tap into an unlike; clean start desktop 20/20, mobile 5/5, one request and one row each); FEED-04 cases restore and confirm their own like; scrollFeedToBottom waits for hydration; next: 07-14"
-state_head: 8b0217349d29ec91f2d60131fdcc73aa0c87fa16
+last_activity_desc: "07-14 complete: C-WR-03 races pinned (stale page, tapped, live-merge control), each red on 583619c^; two product gaps recorded as it.fails + WINDOWS 66/67 (mark-all busy state unreachable, no own read POST during mark-all); next: 07-15"
+state_head: 09bee274de6e883eb1881ac9f2e84e2b195441ca
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 121
-  completed_plans: 108
+  completed_plans: 109
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 13 of 15 complete (gap closure 07-12..07-15 for the pnpm verify exit gate: 07-12 and 07-13 done; next 07-14)
-Status: Executing Phase 07 gap closure
-Last activity: 2026-10-01 — Completed 07-13 (Double-tap verdict T; self-restoring FEED-04 cases with database proof and a double-tap-timing annotation)
+Plan: 14 of 15 complete (gap closure 07-12..07-15 for the pnpm verify exit gate: 07-12, 07-13 and 07-14 done; next 07-15)
+Status: Ready to execute
+Last activity: 2026-10-01 — Completed 07-14 (C-WR-03 race regressions with red evidence on 583619c^; two product gaps recorded as it.fails, WINDOWS 66/67)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -168,6 +168,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P11 | 153min | 3 tasks | 15 files |
 | Phase 07 P12 | 5 min | 2 tasks | 4 files |
 | Phase 07 P13 | 28 min | 2 tasks | 2 files |
+| Phase 07 P14 | 5 min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -548,6 +549,7 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-12: feed-comments forced failure targets a server action (next-action header) whose arguments carry the post id or root comment id, and each failure case asserts exactly one failed request — Ordering let a cold dev server fetchPlaybackTokenAction(assetId) consume the failure; action ids are build-generated
 - [Phase 07]: 07-13 Double-tap verdict T: a member's double tap within about 1 s of load unlikes a post only when it is already liked (Phase 4's one toggle); the 07-11 red was a like left behind by an earlier run on the shared member and gallery post. Every FEED-04 case now clears and confirms its own like in the database
 - [Phase 07]: 07-13: scrollFeedToBottom waits for React's hydration mark on main.app-scroll, because ScrollRoot's mount effect undoes a scroll that lands before hydration (the 05.3 page-2 race; 3/30 before, 0/30 after)
+- [Phase 07]: 07-14: C-WR-03 races pinned by NotificationsSurface.test.tsx (stale page, tapped, live-merge control), each red on 583619c^. Two product gaps recorded as it.fails cases + WINDOWS 66/67: the mark-all button is withdrawn, not aria-busy, during its POST (UI-D-252 contradicts itself); a row tapped during mark-all sends no read POST of its own — Test-only plan: product files stay byte-identical, so the gaps are recorded with unchanged assertions rather than fixed
 
 ### Pending Todos
 
@@ -619,6 +621,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-01T11:53:16.629Z
-Stopped at: Completed 07-13-PLAN.md
+Last session: 2026-10-01T12:00:55.332Z
+Stopped at: Completed 07-14-PLAN.md
 Resume file: None

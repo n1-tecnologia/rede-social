@@ -220,3 +220,9 @@ None. No external service configuration required.
 ---
 *Phase: 07-notifications-web-push-chat*
 *Completed: 2026-10-01*
+
+## Self-Check: PASSED
+
+- Files: the test file and this SUMMARY exist.
+- Commits: ba89661, 7d492dc and 09bee27 are in the log.
+- `NotificationsSurface.tsx` is byte-identical to HEAD. The only file changed under apps/ or packages/ since 96d98df is the new test file.
