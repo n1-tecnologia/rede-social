@@ -4,6 +4,7 @@ import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { enqueueInTx } from '@rede-social/core/server/jobs/boss';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { retractionsFor } from '@rede-social/core/server/notifications/source';
 import { NOTIFICATIONS_QUEUES } from '../contracts/index';
 import { notificationsSystemCtx } from './system-context';
 
@@ -18,7 +19,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * never inside the producing request (CONTEXT, RESEARCH Pattern 6).
  *
  * - `payload.tenantId` must be a uuid; otherwise the shape is logged and nothing is enqueued.
- * - A tenant with `notifications` disabled enqueues nothing.
+ * - A tenant with `notifications` disabled enqueues nothing for a SOURCE, but still enqueues an event
+ *   that some producer RETRACTS on (07 review A-WR-04): rows written while the module was on must
+ *   lose their excerpt when their target is deleted while it is off, or they would show it again the
+ *   day the module is turned back on. The fan-out job re-reads the flag and runs only the
+ *   retractions while the module is off.
  * - The enqueue is `enqueueInTx` inside a tenant-lane transaction of the event's tenant, and
  *   `sinkAt` is stamped ONCE here, so a retried job reuses it unchanged (07-05's reactivations).
  *
@@ -43,7 +48,9 @@ export async function notificationsSink(event: DomainEventName, payload: unknown
     return;
   }
   const ctx = notificationsSystemCtx(tenantId);
-  if (!(await moduleFlags.isEnabled(ctx, 'notifications'))) return;
+  if (!(await moduleFlags.isEnabled(ctx, 'notifications')) && retractionsFor(event).length === 0) {
+    return;
+  }
 
   await withTenantTx(ctx, (tx) =>
     enqueueInTx(

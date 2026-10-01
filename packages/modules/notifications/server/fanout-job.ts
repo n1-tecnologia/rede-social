@@ -1,6 +1,7 @@
 import type { DomainEventName } from '@rede-social/contracts';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { JobDefinition } from '@rede-social/core/server/modules/manifest';
 import { retractionsFor, sourcesFor } from '@rede-social/core/server/notifications/source';
 import {
@@ -27,6 +28,10 @@ const log = moduleLogger('module-notifications');
  * failure DOES raise, so the transaction rolls back and pg-boss retries; the dedupe key makes the
  * retry insert nothing twice.
  *
+ * **Module off (07 review A-WR-04):** the sources run only while the tenant's `notifications` module
+ * is enabled, read here at run time (flags first, outside the lane). The retractions ALWAYS run: a
+ * delete while the module is off must still blank the rows written while it was on.
+ *
  * Logs carry the shape only: event, counts, kinds. Never an excerpt, a name or a fact (the ids-only
  * prohibition).
  */
@@ -41,11 +46,13 @@ export const notificationsFanoutJob: JobDefinition<NotificationsFanoutJob> = {
     const { event, tenantId, payload, sinkAt } = parsed.data;
     const name = event as DomainEventName;
 
-    const summary = await withTenantTx(notificationsSystemCtx(tenantId), async (tx) => {
+    const ctx = notificationsSystemCtx(tenantId);
+    const enabled = await moduleFlags.isEnabled(ctx, 'notifications');
+    const summary = await withTenantTx(ctx, async (tx) => {
       let intents = 0;
       let delivered = 0;
       let retracted = 0;
-      for (const source of sourcesFor(name)) {
+      for (const source of enabled ? sourcesFor(name) : []) {
         for (const intent of await source.resolve(tx, payload as never, { sinkAt })) {
           intents += 1;
           const result = await deliverIntent(tx, tenantId, intent);

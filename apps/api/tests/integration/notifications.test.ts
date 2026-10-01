@@ -813,6 +813,36 @@ describe('notifications tipos', () => {
     }
   });
 
+  it('retraction (07 review A-WR-04): a delete while notifications is OFF still blanks the rows written while it was on', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const postId = await adminPost('apagado com o módulo desligado');
+    await runNotificationJobs(ids.demo);
+    const before = await rowsAbout(postId);
+    expect(before.length).toBeGreaterThan(0);
+    expect(before.every((row) => row.payload.removed === undefined)).toBe(true);
+    try {
+      await adminSql`
+        update public.tenant_modules set enabled = false
+         where tenant_id = ${ids.demo}::uuid and module_key = 'notifications'`;
+      moduleFlags.invalidate(ids.demo);
+      const removed = await request(`/v1/feed/posts/${postId}`, tokens.demoAdmin, {
+        method: 'DELETE',
+      });
+      expect(removed.status).toBe(200);
+      // The retraction is enqueued and run although the module is off.
+      expect(await runNotificationJobs(ids.demo)).toBe(1);
+      const after = await rowsAbout(postId);
+      expect(after).toHaveLength(before.length);
+      for (const row of after) expect(row.payload).toEqual({ removed: true });
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${ids.demo}::uuid and module_key = 'notifications'`;
+      moduleFlags.invalidate(ids.demo);
+    }
+  });
+
   it('retraction: deleting a comment marks only the rows whose OBJECT is that comment', async () => {
     await clearDemo();
     await closeWaitingJobs();
