@@ -98,7 +98,9 @@ export function ChatComposer({
     }
     setPending(false);
     if (!accepted) {
-      setValue(draft);
+      // The field stays editable while the send is in flight: put the failed draft back IN FRONT of
+      // whatever was typed meanwhile, never over it (07 review B-WR-05).
+      setValue((current) => (current.trim() === '' ? draft : `${draft}\n${current}`));
       setFailed(true);
     }
     fieldRef.current?.focus();

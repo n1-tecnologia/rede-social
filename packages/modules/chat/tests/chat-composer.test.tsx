@@ -119,6 +119,28 @@ describe('ChatComposer (UI-D-260)', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('a failed send keeps what was typed while it was pending, after the restored draft (B-WR-05)', async () => {
+    let answer: (accepted: boolean) => void = () => {};
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const { field, send } = composer(onSend);
+    fireEvent.change(field, { target: { value: 'Primeira' } });
+    await act(async () => {
+      fireEvent.click(send);
+    });
+    expect(field.value).toBe('');
+    fireEvent.change(field, { target: { value: 'Segunda, digitada enquanto enviava' } });
+    await act(async () => {
+      answer(false);
+    });
+    expect(field.value).toBe('Primeira\nSegunda, digitada enquanto enviava');
+    expect(screen.getByRole('alert')).toHaveTextContent('error-sentinel');
+  });
+
   it('treats a rejected send as a failure', async () => {
     const onSend = vi.fn(async () => {
       throw new Error('network');
