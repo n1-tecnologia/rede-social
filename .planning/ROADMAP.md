@@ -619,7 +619,7 @@ Plans:
 
 **Wave 11** *(gap closure — the FAILED truth 15 of `07-VERIFICATION.md`, the local exit gate; plus the truth 14 ride-along)*
 
-- [ ] 07-12-PLAN.md — The e2e harness tells the servers it launches the platform host the specs browse (the gate no longer reads the developer's `apps/web/.env.local`, exports still win), and feed-comments' forced failure targets only the comment-list or replies action
+- [x] 07-12-PLAN.md — The e2e harness tells the servers it launches the platform host the specs browse (the gate no longer reads the developer's `apps/web/.env.local`, exports still win), and feed-comments' forced failure targets only the comment-list or replies action
 - [ ] 07-13-PLAN.md — The desktop feed double tap: the 07-11 signature reproduced, a recorded verdict (leftover like vs product bug) and every FEED-04 case restoring and proving its own like state
 - [ ] 07-14-PLAN.md — Ride-along C-WR-03: regression tests for the `/notificacoes` load-more vs pull-to-refresh generation guard and the scoped mark-all rollback, red on the pre-fix component
 
@@ -774,7 +774,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
-| 7. Notifications, Web Push & Chat | 11/11 | In Progress|  |
+| 7. Notifications, Web Push & Chat | 12/15 | In Progress|  |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |

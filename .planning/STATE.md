@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-11-PLAN.md
-last_updated: "2026-10-01T11:03:59.709Z"
-last_activity: 2026-09-30
-last_activity_desc: "07-11 complete: phase close. Isolation 'phase 7 sweep' (31/31), phase7-smoke.spec.ts 8/8, DEPLOY.md 'Phase 7 release' (10 user-run steps, Realtime quota), VAPID mounts in deploy-api.yml, apps/api/.env.example, device plan (17 rows, all blocked). pnpm verify not fully green: desktop feed double tap (WINDOWS 64) and the web PLATFORM_HOST env value; next: /gsd-verify-work 7"
-state_head: 3c72b25f1e423d7d0abe95ab71240c326824269a
+stopped_at: Completed 07-12-PLAN.md
+last_updated: "2026-10-01T11:22:52.528Z"
+last_activity: 2026-10-01
+last_activity_desc: "07-12 complete: e2e harness tells its servers PLATFORM_HOST=rede-social.localhost (platform.spec 8/8 with the env file untouched), feed-comments failNextActions targets the action by id (2 cold starts 9/9, warm repeat 6/6); next: 07-13"
+state_head: d5c61d31b2b17a42b6373c4fd1d1db8002800f8b
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 121
-  completed_plans: 106
+  completed_plans: 107
   percent: 0
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 ## Current Position
 
-Phase: 07 (Notifications, Web Push & Chat) — READY TO EXECUTE
-Plan: 11 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half, 07-08 chat server side, 07-09 member support thread, 07-10 staff inbox and thread), 07-11 phase close; next: /gsd-verify-work 7. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
-Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-11 (the phase 7 isolation sweep, the phase7-smoke witness, the DEPLOY.md Phase 7 release steps and Realtime quota, the VAPID secret mounts, the real-device test plan blocked until run; pnpm verify 654/656 e2e with the desktop feed double tap open and the web PLATFORM_HOST env value to regenerate)
+Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
+Plan: 12 of 15 complete (gap closure 07-12..07-15 for the pnpm verify exit gate: 07-12 done; next 07-13)
+Status: Executing Phase 07 gap closure
+Last activity: 2026-10-01 — Completed 07-12 (harness-owned PLATFORM_HOST via e2e/hosts.ts, targeted feed-comments failNextActions)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -166,6 +166,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P09 | 42min | 3 tasks | 53 files |
 | Phase 07 P10 | 39min | 2 tasks | 27 files |
 | Phase 07 P11 | 153min | 3 tasks | 15 files |
+| Phase 07 P12 | 5 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -542,6 +543,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-11: Phase 7 witness flips notifications/chat on a throwaway tenant, never on a seed tenant (30 s flags cache)
 - [Phase 07]: 07-11: Phase 7 release holds the web back with a staged Vercel promotion so the API (counters.conversationsBadge) ships first
 - [Phase 07]: 07-11: pre-push check requires notifications and chat_messages empty in production (NOT NULL columns without default)
+- [Phase 07]: 07-12: the e2e harness owns PLATFORM_HOST for the servers Playwright launches (an exported value wins, else the hostname of the e2e platform URL from e2e/hosts.ts); the developer web env file is never rewritten and local-env.sh --write is not the remedy — The gate measured the developer env file instead of the product; production and CI set PLATFORM_HOST themselves, and the warning names only the harness host
+- [Phase 07]: 07-12: feed-comments forced failure targets a server action (next-action header) whose arguments carry the post id or root comment id, and each failure case asserts exactly one failed request — Ordering let a cold dev server fetchPlaybackTokenAction(assetId) consume the failure; action ids are build-generated
 
 ### Pending Todos
 
@@ -613,6 +616,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-01T00:23:20.640Z
-Stopped at: Completed 07-11-PLAN.md
+Last session: 2026-10-01T11:22:39.841Z
+Stopped at: Completed 07-12-PLAN.md
 Resume file: None
