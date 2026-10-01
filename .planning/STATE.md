@@ -1,13 +1,13 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 07
-current_phase_name: Notifications, Web Push & Chat
-status: executing
-stopped_at: Completed 07-15-PLAN.md (gate red at e2e, 4 cases; re-verify Phase 7 next)
-last_updated: "2026-10-01T14:00:16.180Z"
+current_phase: 08
+current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
+status: planning
+stopped_at: Phase 07 complete, ready to plan Phase 08
+last_updated: "2026-10-01T14:34:16.322Z"
 last_activity: 2026-10-01
-last_activity_desc: "07-15 done (halted at a red gate): web typecheck ordered after web build; the consented pnpm verify run exited 1 at e2e (651 passed, 4 failed, none a truth-15 gap item; WINDOWS 68-71); next: re-verify Phase 7"
-state_head: c46b45460fc7c4926f690dac8a7ed17b96c30770
+last_activity_desc: "Phase 07 closed by developer decision (truth 15 override, real-device items deferred to Phase 8); next: plan Phase 08"
+state_head: 119154405debeb41c491575c5116a9c6e7385db6
 progress:
   total_phases: 16
   completed_phases: 0
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 07 — Notifications, Web Push & Chat
+**Current focus:** Phase 08 — Moderation, Tenant Admin Panel & Pilot Hardening
 
 ## Current Position
 
-Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 15 of 15 complete (gap closure 07-12..07-15 done; 07-15 halted at a red exit gate: 4 e2e reds, none a truth-15 gap item)
-Status: Ready to verify (truth 15 still red; re-plan expected)
-Last activity: 2026-10-01 - Completed quick task 261001-ere: Phase 7 leftovers (mark-all busy + tapped-row read, read-all wait, UI-D-20 slug)
+Phase: 08 — Moderation, Tenant Admin Panel & Pilot Hardening
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-01 — Phase 07 complete (developer closure: truth 15 override, WINDOWS 69-71 and real-device rows deferred), next Phase 08
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -38,7 +38,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 26
+- Total plans completed: 41
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -49,6 +49,7 @@ Progress: [░░░░░░░░░░] 0%
 | 01 | 9 | - | - |
 | 05 | 12 | - | - |
 | 05.1 | 5 | - | - |
+| 07 | 15 | - | - |
 
 **Recent Trend:**
 
@@ -570,8 +571,6 @@ None yet.
 - [Phase 5]: `.planning/REQUIREMENTS.md` traceability still shows 16 "Gaps Found" rows (05-SECURITY.md R-5) — documentation lag to clear.
 - [Phase 05.2]: Closed partial on 2026-09-26 by user decision (same as Phases 2-4), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, iPhone Safari + Android Chrome, steps 1-6) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.2`. VERIFICATION.md is stale because quick 260926-d8f changed covered code, so re-run the verifier then instead of re-attesting. Review items still open: WR-02, WR-05, WR-06 (partly covered by 05.2-30..34), IN-01..04, `h-[68px]` in StoriesStrip.
 - [Phase 05.3]: Closed partial on 2026-09-27 by user decision (same as 05.2), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, WINDOWS #48-#51, plus WR-06 on real Mux) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.3`. VERIFICATION.md is stale because quick 260927-ebk changed covered code, so re-run the verifier then instead of re-attesting. REELS-06 stays Pending until that run. Review items still open: IN-01..07; UI-REVIEW minor: the `right-[3px]` tick offset in ReelsPager.
-- Phase 7 local gate: desktop feed.spec double tap fails in the full suite (WINDOWS 64, route to gsd-debug); the web local env file must set PLATFORM_HOST to rede-social.localhost (34 platform e2e cases fail otherwise)
-- Phase 7 local gate (07-15 run, 2026-10-01): pnpm verify exited 1 at e2e with 4 reds, none a truth-15 gap item: notifications.spec.ts:228 mobile (reload aborts the read-all POST), phase52-smoke.spec.ts:294 and stories.spec.ts:1636 mobile (highlight manage sheets), phase2-smoke.spec.ts:378 desktop (Marca Save stays disabled); WINDOWS 68-71 and deferred-items; e2e:pwa did not run
 
 ### Quick Tasks Completed
 
@@ -627,5 +626,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-01T13:17:26.141Z
-Stopped at: Completed 07-15-PLAN.md (gate red at e2e, 4 cases; re-verify Phase 7 next)
+Stopped at: Phase 07 complete, ready to plan Phase 08
 Resume file: None

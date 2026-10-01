@@ -1,7 +1,7 @@
 ---
 phase: 07-notifications-web-push-chat
 verified: 2026-10-01T14:28:09Z
-status: human_needed
+status: passed
 score: 21/22 must-haves verified
 covered_files:
   - ".github/workflows/ci.yml"
@@ -307,7 +307,7 @@ covered_files:
   - "supabase/tests/151-notifications.sql"
   - "supabase/tests/152-chat.sql"
   - "supabase/tests/153-push-subscriptions.sql"
-covered_digest: "v1:sha256:054516bfb816686239c9c1836399b7b1fc6ef58c2875bd8223abe470e1057d00"
+covered_digest: v1:sha256:7da44485b881db9223af53e4e96ec5b3a9b48a79dc9c0f8cabed0f5b342ab747
 behavior_unverified: 0
 overrides_applied: 1
 overrides:
@@ -555,3 +555,18 @@ None of the four blocks the product goal in the local stack. Each needs the deve
 
 _Verified: 2026-10-01T14:28:09Z_
 _Verifier: Claude (gsd-verifier)_
+
+
+## Developer Closure (2026-10-01T14:33:57Z)
+
+The developer (igor.vboas) closed Phase 7 on 2026-10-01 without another full gate run. The four human-verification items above are settled in 07-UAT.md as follows:
+
+- **Accepted (pass):** the C-WR-02 fallback on the four BFF GET token routes, and the verdicts on the eleven flagged prohibitions, as described in this report.
+- **Deferred (blocked, real-device):** the real-device rows 1-17 of docs/phase-07-device-test-plan.md and the blocked-member-with-open-socket check. They run against production after the Phase 7 release steps, in the Phase 8 real-device pass (SC 4), the same way 05.2 and 05.3 were deferred.
+- **Deferred under the truth 15 override:** WINDOWS 69-71 (phase52-smoke:294, stories:1636, phase2-smoke:378). e2e:pwa was not run in the last gate run.
+
+The status moved from human_needed to passed on that decision, not on new evidence.
+
+### Re-attestation (2026-10-01)
+
+`covered_digest` was recomputed with `computeCoveredDigest` after `phase.complete 07` updated `.planning/REQUIREMENTS.md` and `.planning/ROADMAP.md` (traceability and the completion checkbox). No code or test file changed since the verifier's run.

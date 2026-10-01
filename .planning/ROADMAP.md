@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 05.2: Story Highlights (INSERTED)** - Instagram-style stories: one grouped circle of active stories on Início plus highlight circles beside it, highlights-only on communities, replacing loose community pins
 - [ ] **Phase 05.3: Reels (INSERTED)** - Full-screen vertical video pager over the feed's video posts, per the design print: a new tab that filters the feed to video, part of the MVP
 - [ ] **Phase 6: Events** - In-person / online events, upcoming + past lists, RSVP and self check-in window, admin attendance list, calendar export
-- [ ] **Phase 7: Notifications, Web Push & Chat** - Realtime infrastructure (Supabase Broadcast on private topics), event-driven notification center with live unread count, Web Push with iOS install flow, event reminders, 1:1 member <-> support chat with support inbox
+- [x] **Phase 7: Notifications, Web Push & Chat** - Realtime infrastructure (Supabase Broadcast on private topics), event-driven notification center with live unread count, Web Push with iOS install flow, event reminders, 1:1 member <-> support chat with support inbox (completed 2026-10-01)
 - [ ] **Phase 8: Moderation, Tenant Admin Panel & Pilot Hardening** - Delete any comment, block/unblock with immediate revocation, moderation log, branding editor with live preview, member/role management, rules editor, mobile admin flows, per-module READMEs, pilot go-live gate
 - [ ] **Phase 08.1: Multi-Tenant Identity (INSERTED)** - One identity, many memberships: the same e-mail joins several tenants (sign-up on a second tenant joins instead of 409), membership chosen by host, per-tenant recovery branding, shared-identity isolation tests
 - [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
@@ -774,7 +774,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
-| 7. Notifications, Web Push & Chat | 15/15 | In Progress|  |
+| 7. Notifications, Web Push & Chat | 15/15 | Complete    | 2026-10-01 |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
