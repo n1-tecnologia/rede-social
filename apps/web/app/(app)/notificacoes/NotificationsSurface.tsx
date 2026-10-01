@@ -199,6 +199,9 @@ export function NotificationsSurface({
     [locallyRead],
   );
 
+  /** The ids tapped while a mark-all is in flight (C-WR-03): its failure must not un-read them. */
+  const tappedDuringMarkAll = useRef<Set<string> | null>(null);
+
   // ── read on tap: fire and forget, tint cleared in place ────────────────────────────────────────
   const activate = useCallback(
     (view: NotificationRowView) => {
@@ -208,6 +211,7 @@ export function NotificationsSurface({
           keepalive: true,
         }).catch(() => {});
       }
+      tappedDuringMarkAll.current?.add(view.id);
       setLocallyRead((previous) => new Set(previous).add(view.id));
       if (view.removed) show({ tone: 'info', message: t('fallback.removed') });
     },
@@ -215,10 +219,14 @@ export function NotificationsSurface({
   );
 
   // ── mark all: optimistic, restored on failure ─────────────────────────────────────────────────
+  // 07 review C-WR-03: a failure takes back ONLY what the optimistic step added, and never a row the
+  // member tapped meanwhile (its own keepalive POST really marked it read).
   const markAll = useCallback(async () => {
     const before = locallyRead;
     const everything = new Set(before);
     for (const view of [...unread, ...read]) everything.add(view.id);
+    const added = [...everything].filter((id) => !before.has(id));
+    tappedDuringMarkAll.current = new Set();
     setMarkingAll(true);
     setLocallyRead(everything);
     let ok = false;
@@ -228,8 +236,14 @@ export function NotificationsSurface({
     } catch {
       ok = false;
     }
+    const tapped = tappedDuringMarkAll.current;
+    tappedDuringMarkAll.current = null;
     if (!ok) {
-      setLocallyRead(before);
+      setLocallyRead((current) => {
+        const next = new Set(current);
+        for (const id of added) if (!tapped?.has(id)) next.delete(id);
+        return next;
+      });
       show({ tone: 'error', message: t('errors.markAll') });
     }
     setMarkingAll(false);
@@ -237,28 +251,40 @@ export function NotificationsSurface({
 
   // ── paging: Novas to its end, then Anteriores ──────────────────────────────────────────────────
   const hasMore = unreadCursor !== null || !readStarted || readCursor !== null;
+  /**
+   * Bumped by every APPLIED refresh (07 review C-WR-03). A load-more captures it when it starts and
+   * drops its page when a pull-to-refresh replaced the list meanwhile: appending the page after the
+   * OLD cursor (and adopting its next cursor) would skip every row between the new page 1 and it.
+   */
+  const generation = useRef(0);
 
   const loadMore = useCallback(async () => {
+    const mine = generation.current;
+    const stale = () => generation.current !== mine;
     try {
       if (unreadCursor !== null) {
         const page = await loadMoreNotificationsAction('unread', unreadCursor);
+        if (stale()) return;
         if (!page.ok) return setPageFailed(true);
         setUnread((previous) => [...previous, ...page.items]);
         setUnreadCursor(page.nextCursor);
       } else if (!readStarted) {
         const page = await loadMoreNotificationsAction('read', null);
+        if (stale()) return;
         if (!page.ok) return setPageFailed(true);
         setRead(page.items);
         setReadCursor(page.nextCursor);
         setReadStarted(true);
       } else if (readCursor !== null) {
         const page = await loadMoreNotificationsAction('read', readCursor);
+        if (stale()) return;
         if (!page.ok) return setPageFailed(true);
         setRead((previous) => [...previous, ...page.items]);
         setReadCursor(page.nextCursor);
       }
       setPageFailed(false);
     } catch (error) {
+      if (stale()) return;
       console.error('notifications.load_more_failed', { error: String(error) });
       setPageFailed(true);
     }
@@ -271,6 +297,7 @@ export function NotificationsSurface({
         setFirstLoadFailed(unread.length === 0 && read.length === 0);
         return;
       }
+      generation.current += 1;
       setUnread(result.unread.items);
       setUnreadCursor(result.unread.nextCursor);
       setRead(result.read?.items ?? []);
