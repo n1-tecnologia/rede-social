@@ -222,10 +222,15 @@ export function ThreadPane({
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ seq }),
-    }).catch(() => {
-      // A failed mark is retried by the next append or refocus: the dot simply stays.
-      readSeqRef.current = Math.min(readSeqRef.current, seq - 1);
-    });
+    })
+      .then((res) => {
+        // A 4xx/5xx resolves the fetch: it failed all the same (07 review C-WR-04).
+        if (!res.ok) throw new Error(String(res.status));
+      })
+      .catch(() => {
+        // A failed mark is retried by the next append or refocus: the dot simply stays.
+        readSeqRef.current = Math.min(readSeqRef.current, seq - 1);
+      });
   }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount only; later reads follow appends.
