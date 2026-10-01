@@ -15,6 +15,8 @@ export type FakePushConfig = {
   answer: 'default' | 'granted' | 'denied';
   /** `false` removes `PushManager` (an unsupported browser). */
   pushManager: boolean;
+  /** `true`: `serviceWorker.ready` never settles (a worker that failed to register, C-WR-05). */
+  neverReady?: boolean;
 };
 
 /**
@@ -87,7 +89,7 @@ export async function installFakePush(page: Page, config: FakePushConfig): Promi
       },
     };
     const container = {
-      ready: Promise.resolve(registration),
+      ready: cfg.neverReady ? new Promise(() => {}) : Promise.resolve(registration),
       controller: null,
       // Serwist's registration never settles: the worker is not under test (the spec blocks it).
       register: () => new Promise(() => {}),

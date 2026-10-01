@@ -43,6 +43,9 @@ function prefersReducedMotion(): boolean {
     : false;
 }
 
+/** How long the mount-time read waits for an active service worker before reading `unsupported`. */
+const PUSH_REGISTRATION_WAIT_MS = 5_000;
+
 /** This device's push state and its service worker registration, read after mount. */
 function usePushDevice(vapidKey: string | null) {
   const [state, setState] = useState<PushState>('checking');
@@ -60,7 +63,15 @@ function usePushDevice(vapidKey: string | null) {
       setState('denied');
       return;
     }
+    // 07 review C-WR-05: `serviceWorker.ready` never resolves when the registration failed (a module
+    // worker the browser refuses, a script error, a policy, `next dev` before install), and the row
+    // would sit in `checking` forever. After PUSH_REGISTRATION_WAIT_MS it reads `unsupported`; a
+    // worker that activates later still brings the real state in.
+    const timer = setTimeout(() => {
+      if (alive) setState((current) => (current === 'checking' ? 'unsupported' : current));
+    }, PUSH_REGISTRATION_WAIT_MS);
     void pushRegistration().then(async (reg) => {
+      clearTimeout(timer);
       if (!alive) return;
       setRegistration(reg);
       const next = await readPushState(reg, { win, vapidKey });
@@ -68,6 +79,7 @@ function usePushDevice(vapidKey: string | null) {
     });
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
   }, [vapidKey]);
 

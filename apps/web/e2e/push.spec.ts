@@ -169,6 +169,23 @@ test.describe('push (a browser that can subscribe)', () => {
     await expect(pushSwitch(page)).toBeDisabled();
   });
 
+  test('4b. a worker that never activates: the row leaves checking for unsupported (C-WR-05)', async ({
+    page,
+  }) => {
+    await installFakePush(page, {
+      permission: 'default',
+      answer: 'granted',
+      pushManager: true,
+      neverReady: true,
+    });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/configuracoes`);
+    await expect(pushRow(page)).toHaveAttribute('data-push-row', 'unsupported', {
+      timeout: 10_000,
+    });
+    await expect(pushSwitch(page)).toBeDisabled();
+  });
+
   test('6. the soft-ask card: member body, X dismisses for good on this device', async ({
     page,
   }) => {
