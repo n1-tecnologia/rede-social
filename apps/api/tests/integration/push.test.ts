@@ -199,6 +199,28 @@ describe('push: NOTIF-03 end to end on the fake transport', () => {
     expect(await waitingPushJobs()).toHaveLength(0);
   });
 
+  it('1b. 07 review B-WR-02: a push queued before its post was deleted is withdrawn, and the job keeps its body 5 minutes', async () => {
+    const endpoint = `${FAKE}/sub/${randomUUID()}`;
+    expect((await subscribe(tokens.member, endpoint)).status).toBe(204);
+    const postId = await publish('1b apagado');
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    const [queued] = await waitingPushJobs();
+    expect(queued?.singleton_key).toBe(`push:feed.post:${postId}:0`);
+    const [keep] = await adminSql<{ deletion_seconds: number; retention_seconds: number }[]>`
+      select deletion_seconds,
+             extract(epoch from (keep_until - created_on))::int as retention_seconds
+        from pgboss.job_common where id = ${queued?.id ?? ''}::uuid`;
+    expect(keep?.deletion_seconds).toBe(300);
+    expect(keep?.retention_seconds).toBe(6 * 3600);
+
+    // The author deletes the post before the worker sends; the retraction runs first.
+    const removed = await request(`/v1/feed/posts/${postId}`, tokens.admin, { method: 'DELETE' });
+    expect(removed.status).toBe(200);
+    expect(await runNotificationJobs(ids.demo)).toBe(1);
+    expect(await runPushSendJobs(ids.demo)).toBe(1);
+    expect(fakePushOutbox()).toHaveLength(0);
+  });
+
   it('2. D-235: a like on the member’s comment enqueues no push, even with a device', async () => {
     const postId = await publish('2');
     await runNotificationJobs(ids.demo);

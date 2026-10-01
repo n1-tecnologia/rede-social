@@ -11,6 +11,7 @@ import {
   NOTIFICATIONS_QUEUES,
   PUSH_MAX_ATTEMPTS,
   PUSH_RETRY_DELAYS_SECONDS,
+  PUSH_SEND_JOB_KEEP,
   type PushSendJob,
   pushSendJobSchema,
 } from '../../contracts/index';
@@ -45,7 +46,11 @@ const REPORT: Record<PushOutcome, 'sent' | 'gone' | 'failed'> = {
  * `notifications.push-send` (07-06, NOTIF-03): delivers one intent's push to at most 100 users, in
  * the WORKER. Runs in three short steps, and never holds a transaction across the network:
  *
- * 1. **Read, in the tenant's system lane.** `app.push_subscriptions_delete_dead(userIds)` first (a user
+ * 1. **Read, in the tenant's system lane.** `app.notifications_withdrawn(dedupeKey, userIds)` first (07
+ *    review B-WR-02): when the target was deleted after the fan-out and its rows were retracted, the
+ *    push is withdrawn (`push.withdrawn`, nothing sent, nothing re-tried). Push-only chat kinds write no
+ *    row and are never withdrawn (chat has no delete path in V1). Then
+ *    `app.push_subscriptions_delete_dead(userIds)` (a user
  *    blocked after the fan-out loses their devices now, roadmap SC 4), then
  *    `app.push_subscriptions_for(userIds)` (live members only; narrowed to `subscriptionIds` on a
  *    re-try), and the tenant's display name and `icon-192` (`resolveBranding(branding).iconUrls?.i192`,
@@ -76,30 +81,45 @@ export async function runPushSend(raw: unknown): Promise<void> {
   const system = notificationsSystemCtx(tenantId);
 
   // 1. Read.
-  const { subscriptions, tenantName, iconUrl } = await withTenantTx(system, async (tx) => {
-    await tx.execute(
-      sql`select app.push_subscriptions_delete_dead(${pgUuidArray(userIds)}::uuid[])`,
-    );
-    const rows = await tx.execute<SubscriptionRow>(sql`
+  const { withdrawn, subscriptions, tenantName, iconUrl } = await withTenantTx(
+    system,
+    async (tx) => {
+      // 07 review B-WR-02: the body was rendered at fan-out time and may quote content deleted since
+      // (a retry waits up to 8 minutes). A retracted row under this dedupe key withdraws the push.
+      const retracted = await tx.execute<{ withdrawn: boolean }>(sql`
+      select app.notifications_withdrawn(${job.dedupeKey}, ${pgUuidArray(userIds)}::uuid[]) as withdrawn`);
+      if (retracted[0]?.withdrawn === true) {
+        return { withdrawn: true, subscriptions: [], tenantName: '', iconUrl: NEUTRAL_PUSH_ICON };
+      }
+      await tx.execute(
+        sql`select app.push_subscriptions_delete_dead(${pgUuidArray(userIds)}::uuid[])`,
+      );
+      const rows = await tx.execute<SubscriptionRow>(sql`
       select id::text as id, user_id::text as user_id, role, endpoint, p256dh, auth
         from app.push_subscriptions_for(${pgUuidArray(userIds)}::uuid[])`);
-    const tenants = await tx.execute<{ display_name: string; branding: unknown }>(sql`
+      const tenants = await tx.execute<{ display_name: string; branding: unknown }>(sql`
       select display_name, branding from public.tenants where id = ${tenantId}::uuid`);
-    const tenant = tenants[0];
-    let icon = NEUTRAL_PUSH_ICON;
-    try {
-      icon = resolveBranding(tenant?.branding ?? {}).iconUrls?.i192 ?? NEUTRAL_PUSH_ICON;
-    } catch {
-      // A malformed brand row is loud elsewhere; a push still goes out with the neutral icon.
-    }
-    const only = job.subscriptionIds ? new Set(job.subscriptionIds) : null;
-    return {
-      subscriptions: [...rows].filter((row) => only === null || only.has(row.id)),
-      tenantName: tenant?.display_name ?? '',
-      iconUrl: icon,
-    };
-  });
+      const tenant = tenants[0];
+      let icon = NEUTRAL_PUSH_ICON;
+      try {
+        icon = resolveBranding(tenant?.branding ?? {}).iconUrls?.i192 ?? NEUTRAL_PUSH_ICON;
+      } catch {
+        // A malformed brand row is loud elsewhere; a push still goes out with the neutral icon.
+      }
+      const only = job.subscriptionIds ? new Set(job.subscriptionIds) : null;
+      return {
+        withdrawn: false,
+        subscriptions: [...rows].filter((row) => only === null || only.has(row.id)),
+        tenantName: tenant?.display_name ?? '',
+        iconUrl: icon,
+      };
+    },
+  );
 
+  if (withdrawn) {
+    log.info({ event: 'push.withdrawn', kind, users: userIds.length }, 'push withdrawn');
+    return;
+  }
   if (subscriptions.length === 0 || tenantName === '') {
     log.info(
       { event: 'push.sent', kind, sent: 0, gone: 0, dropped: 0, retried: 0 },
@@ -179,6 +199,7 @@ export async function runPushSend(raw: unknown): Promise<void> {
         await enqueueInTx(tx, NOTIFICATIONS_QUEUES.pushSend, next, {
           singletonKey: `push:${job.dedupeKey}:retry:${attempt + 1}:${randomUUID()}`,
           startAfter: PUSH_RETRY_DELAYS_SECONDS[attempt] ?? PUSH_RETRY_DELAYS_SECONDS[0],
+          ...PUSH_SEND_JOB_KEEP,
         });
       }
     });

@@ -160,6 +160,14 @@ export const PUSH_MAX_ATTEMPTS = 3;
 export const PUSH_RETRY_DELAYS_SECONDS = [30, 120, 480] as const;
 
 /**
+ * 07 review B-WR-02: a `notifications.push-send` job carries the RENDERED body, so it must not linger
+ * in `pgboss.job` for the queue's 7-day default. A finished job is deleted after 5 minutes, and one
+ * still waiting after 6 hours (a long worker outage) is dropped: the bell row stays, a push that late
+ * is noise.
+ */
+export const PUSH_SEND_JOB_KEEP = { deleteAfterSeconds: 300, retentionSeconds: 6 * 3600 } as const;
+
+/**
  * The push-service hosts a subscription endpoint may point at (T-07-33, SSRF): FCM (Chrome, Edge on
  * Android), Mozilla autopush (Firefox), Apple (Safari, iOS home-screen apps) and WNS (Edge on Windows).
  * A host must END with one of these suffixes (the leading dot is load-bearing). [ASSUMED] set, confirmed

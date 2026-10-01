@@ -120,7 +120,8 @@ describe('pushChannel', () => {
         push: hint,
         attempt: 0,
       },
-      { singletonKey: 'push:feed.post:p1:0' },
+      // B-WR-02: the rendered body is deleted 5 minutes after the job finished.
+      { singletonKey: 'push:feed.post:p1:0', deleteAfterSeconds: 300, retentionSeconds: 21_600 },
     );
   });
 

@@ -32,10 +32,13 @@ begin;
 --     (2 of 3 old rows), then the rest; the 90-days-plus-1-minute row goes and the 89-days-23-hours row
 --     stays (NOTIF-02 boundary); its inner select is served by `notifications_created_idx` BY NAME on
 --     the ANALYZEd fixture of fact 8.
+-- 12. (07 review B-WR-02) `app.notifications_withdrawn` is a hardened definer; it answers true for a
+--     recipient's retracted row under the push's dedupe key, false for a recipient with no such row and
+--     for B's same-key row (adjacency), and refuses a lane without a tenant claim (42501).
 --
 -- Fixture ids use the `15100000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(47);
+select plan(53);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-nt-a', 'Notificacoes A', '15100000-0000-4000-8000-000000000001');
@@ -323,6 +326,46 @@ select throws_ok(
   '42501',
   null,
   'fact 10: an unknown p_on is refused (42501)'
+);
+reset role;
+
+-- ── 12. a queued push re-checks the retraction (07 review B-WR-02) ───────────────────────────
+select ok(
+  (select prosecdef and 'search_path=""' = any(proconfig) from pg_proc
+    where oid = 'app.notifications_withdrawn(text,uuid[])'::regprocedure),
+  'fact 12: app.notifications_withdrawn is SECURITY DEFINER with search_path pinned to ""'
+);
+select ok(
+  not has_function_privilege('anon', 'app.notifications_withdrawn(text,uuid[])', 'execute')
+  and has_function_privilege('authenticated', 'app.notifications_withdrawn(text,uuid[])', 'execute'),
+  'fact 12: anon cannot execute it; authenticated (the worker''s tenant lane) can'
+);
+select tests.as_tenant('15100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select ok(
+  app.notifications_withdrawn('feed.post:15100000-0000-4000-8000-0000000000f1',
+                              array['15100000-0000-4000-8000-0000000000a2']::uuid[]),
+  'fact 12: the retracted post''s push to m2 is withdrawn'
+);
+select ok(
+  not app.notifications_withdrawn('feed.post:15100000-0000-4000-8000-0000000000f1',
+                                  array['15100000-0000-4000-8000-0000000000a1']::uuid[]),
+  'fact 12: …but not for a recipient who holds no row of it (the author)'
+);
+reset role;
+select tests.as_tenant('15100000-0000-4000-8000-000000000011', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select ok(
+  not app.notifications_withdrawn('feed.post:15100000-0000-4000-8000-0000000000f1',
+                                  array['15100000-0000-4000-8000-0000000000b1']::uuid[]),
+  'fact 12 adjacency: B''s row under the SAME dedupe key is not retracted, so B''s push stands'
+);
+reset role;
+select tests.as_tenant_without_claims();
+select throws_ok(
+  $$ select app.notifications_withdrawn('feed.post:15100000-0000-4000-8000-0000000000f1',
+                                        array['15100000-0000-4000-8000-0000000000a2']::uuid[]) $$,
+  '42501',
+  null,
+  'fact 12: a lane without a tenant claim is refused (42501)'
 );
 reset role;
 

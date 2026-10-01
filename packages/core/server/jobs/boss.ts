@@ -154,6 +154,10 @@ async function startedBoss(): Promise<PgBoss> {
  * per-job retry options, spread into `send` like the rest; `kernel.invite-send` (quick 260929-g0s)
  * is the first user — its handler throws on purpose so a GoTrue/hook failure is retried with a
  * bounded exponential backoff instead of pg-boss's default two immediate-ish retries.
+ *
+ * `deleteAfterSeconds` / `retentionSeconds` override the queue's 7-day / 14-day retention for ONE job
+ * (pg-boss 12 per-job queue options): a job whose payload must not linger in `pgboss.job` (the
+ * rendered push body, 07 review B-WR-02) asks for a short one.
  */
 export async function enqueueInTx(
   tx: Tx,
@@ -166,6 +170,8 @@ export async function enqueueInTx(
     retryDelay?: number;
     retryBackoff?: boolean;
     retryDelayMax?: number;
+    deleteAfterSeconds?: number;
+    retentionSeconds?: number;
   } = {},
 ): Promise<string | null> {
   const boss = await startedBoss();

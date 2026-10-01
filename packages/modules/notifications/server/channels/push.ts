@@ -6,6 +6,7 @@ import {
   NOTIFICATIONS_QUEUES,
   notificationPushHintSchema,
   PUSH_SEND_CHUNK,
+  PUSH_SEND_JOB_KEEP,
   type PushSendJob,
 } from '../../contracts/index';
 import type { NotificationChannel } from './types';
@@ -40,7 +41,9 @@ function pgUuidArray(ids: readonly string[]): string {
  * enqueues no job at all (NOTIF-03 empty). The rest are chunked by `PUSH_SEND_CHUNK` users, one job per
  * chunk, each keyed `push:<dedupeKey>:<chunk>` (the `short` policy needs a key per job).
  *
- * The rendered body travels in the job (it is at most ~100 characters and never stored in a row).
+ * The rendered body travels in the job (it is at most ~100 characters and never stored in a row); the
+ * job asks pg-boss to delete it 5 minutes after it finished (`PUSH_SEND_JOB_KEEP`, 07 review B-WR-02),
+ * and the send re-checks the retraction before it goes out (`app.notifications_withdrawn`).
  * Logs carry the shape only: kind, counts.
  */
 export const pushChannel: NotificationChannel = {
@@ -93,6 +96,7 @@ export const pushChannel: NotificationChannel = {
       };
       await enqueueInTx(tx, NOTIFICATIONS_QUEUES.pushSend, job, {
         singletonKey: `push:${intent.dedupeKey}:${index}`,
+        ...PUSH_SEND_JOB_KEEP,
       });
     }
     return { delivered: targets, skipped: unique.length - targets.length };
