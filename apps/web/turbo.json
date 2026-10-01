@@ -1,4 +1,19 @@
 {
   "extends": ["//"],
-  "tags": ["app"]
+  "tags": ["app"],
+  "tasks": {
+    // 07-15 (WINDOWS 65): web `typecheck` (`next typegen && tsc --noEmit`) and web `build`
+    // (`next build`) both write `.next/types`. Run in parallel they raced, and one 07-11 gate run
+    // died with `ENOTEMPTY: directory not empty, rmdir '…/apps/web/.next/types'`. Depending on this
+    // package's own `build` orders them inside `pnpm turbo typecheck build test`, the stage that
+    // both `pnpm verify` and CI's "Typecheck, build, unit tests" step run. A package override
+    // replaces the root `dependsOn`, so `^build` is listed again.
+    //
+    // Vercel's `turbo build` is unaffected: `build` does not depend on `typecheck`, so the
+    // build-only graph is identical. Known cost: the root `pnpm typecheck` (`turbo run typecheck`)
+    // now builds the web first; `pnpm --filter @rede-social/web typecheck` runs the script directly.
+    "typecheck": {
+      "dependsOn": ["^build", "build"]
+    }
+  }
 }
