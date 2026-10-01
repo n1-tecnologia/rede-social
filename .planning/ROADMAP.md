@@ -572,7 +572,7 @@ Plans:
   3. Member can open their single support conversation and send text messages; `support_tenant` sees an inbox of member conversations ordered by last activity with unread indicators and can open and reply to any of them; new messages appear in real time on both sides in per-conversation sequence order (catch-up after reconnect loses nothing), and the member sees an unread badge on the chat entry when support replied.
   4. Realtime signals reach only their audience: a browser subscribing to another tenant's user topic, another user's conversation topic or the support inbox without the role is rejected by RLS on `realtime.messages` (covered by the isolation suite); payloads carry ids only and the client refetches through the API; blocking a member drops their Realtime access and push subscriptions.
 
-**Plans**: 11/11 plans executed
+**Plans**: 11/11 executed + 4 gap-closure plans (07-12..07-15) planned from `07-VERIFICATION.md`
 
 Plans:
 
@@ -616,6 +616,16 @@ Plans:
 **Wave 10**
 
 - [x] 07-11-PLAN.md — Phase gate: the isolation sweep, `phase7-smoke.spec.ts`, DEPLOY.md release steps (VAPID secrets, Realtime private-only, quota), the real-device test plan (blocked until run), `pnpm verify`
+
+**Wave 11** *(gap closure — the FAILED truth 15 of `07-VERIFICATION.md`, the local exit gate; plus the truth 14 ride-along)*
+
+- [ ] 07-12-PLAN.md — The e2e harness tells the servers it launches the platform host the specs browse (the gate no longer reads the developer's `apps/web/.env.local`, exports still win), and feed-comments' forced failure targets only the comment-list or replies action
+- [ ] 07-13-PLAN.md — The desktop feed double tap: the 07-11 signature reproduced, a recorded verdict (leftover like vs product bug) and every FEED-04 case restoring and proving its own like state
+- [ ] 07-14-PLAN.md — Ride-along C-WR-03: regression tests for the `/notificacoes` load-more vs pull-to-refresh generation guard and the scoped mark-all rollback, red on the pre-fix component
+
+**Wave 12** *(blocked on Wave 11, a T verdict in 07-13 and the developer's reset consent)*
+
+- [ ] 07-15-PLAN.md — Web typecheck ordered after web build in turbo (WINDOWS 65), then the full `pnpm verify` exit gate on a consented reset, with deferred-items, WINDOWS 59/64/65 and the STATE blocker recorded from that run
 
 **UI hint**: yes
 **Research needed**: Shape and cost of RLS policies on `realtime.messages` (membership join vs claim) and `realtime.send` vs `broadcast_changes` trigger choice; Realtime connection quota sizing on the Free plan; "new post to every member" fan-out strategy (eager rows vs hourly collapse) decided with pilot member count; iOS 16.4+ standalone push gating, Badging API support, push handlers in the Serwist service worker; per-conversation `seq` generation under concurrent inserts and catch-up cursor semantics; private-channel authorization tests for non-participants.
