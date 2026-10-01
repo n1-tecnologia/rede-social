@@ -821,7 +821,7 @@ select results_eq(
 );
 select results_eq(
   $$ with u as (
-       update public.chat_conversations set subject = subject
+       update public.chat_conversations set staff_last_read_seq = staff_last_read_seq
         where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
      ) select count(*)::int from u $$,
   ARRAY[0],
@@ -835,13 +835,14 @@ select results_eq(
   ARRAY[0],
   'chat_participants: USING — an update aimed at B''s rows touches nothing'
 );
-select results_eq(
-  $$ with u as (
-       update public.chat_messages set body = body
-        where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
-     ) select count(*)::int from u $$,
-  ARRAY[0],
-  'chat_messages: USING — an update aimed at B''s rows touches nothing'
+-- 07 review A-WR-01: chat is append-only for a lane, so the UPDATE is refused outright (no column
+-- of chat_messages is updatable by `authenticated`), which also leaves B's rows untouched.
+select throws_ok(
+  $$ update public.chat_messages set body = body
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  '42501',
+  null,
+  'chat_messages: a lane cannot UPDATE any message, B''s included (append-only)'
 );
 select is_empty(
   $$ select id from public.notifications

@@ -103,12 +103,25 @@ export const chatConversations = pgTable(
       sql`${t.lastMessageSide} is null or ${t.lastMessageSide} in ('member','staff')`,
     ),
     // Fact 7: staff see every SUPPORT thread of their tenant; anyone else only what they created or
-    // take part in.
-    pgPolicy('chat_conversations_access', {
-      for: 'all',
+    // take part in. Per command (07 review A-CR-01 / A-WR-01 / B-WR-04): a lane may create only its
+    // OWN conversation with untouched counters, only staff may UPDATE (and only the column the
+    // `*_chat_rls_grants.sql` grant leaves writable, `staff_last_read_seq`), and nobody DELETEs.
+    // The counters move only through the definer trigger.
+    pgPolicy('chat_conversations_select', {
+      for: 'select',
       to: authenticatedRole,
       using: sql`tenant_id = app.tenant_id() and ((kind = 'support' and ${STAFF_ROLE}) or created_by_user_id = app.user_id() or exists (select 1 from public.chat_participants p where p.conversation_id = chat_conversations.id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id()))`,
-      withCheck: sql`tenant_id = app.tenant_id() and ((kind = 'support' and ${STAFF_ROLE}) or created_by_user_id = app.user_id() or exists (select 1 from public.chat_participants p where p.conversation_id = chat_conversations.id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id()))`,
+    }),
+    pgPolicy('chat_conversations_insert', {
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`tenant_id = app.tenant_id() and created_by_user_id = app.user_id() and last_seq = 0 and last_staff_seq = 0 and staff_last_read_seq = 0 and last_message_side is null and last_message_at is null`,
+    }),
+    pgPolicy('chat_conversations_staff_update', {
+      for: 'update',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id() and kind = 'support' and ${STAFF_ROLE}`,
+      withCheck: sql`tenant_id = app.tenant_id() and kind = 'support' and ${STAFF_ROLE}`,
     }),
   ],
 ).enableRLS();
@@ -137,12 +150,27 @@ export const chatParticipants = pgTable(
     primaryKey({ columns: [t.conversationId, t.userId] }),
     index('chat_participants_tenant_user_idx').on(t.tenantId, t.userId),
     check('chat_participants_role_chk', sql`${t.role} in ('member','support','admin')`),
-    // Fact 7: your own participant rows, or any row of your tenant when you are staff.
-    pgPolicy('chat_participants_access', {
-      for: 'all',
+    // Fact 7: your own participant rows, or any row of your tenant when you are staff. A lane may
+    // enrol ONLY ITSELF and ONLY into a conversation it created (07 review A-CR-01: nothing else ties
+    // a participant row to a conversation the lane may see, and the participant row is what grants the
+    // messages and the `conv:` Realtime topic). Staff never hold participant rows (fact 2). A member
+    // updates only its own row, and only `last_read_seq`/`last_read_at` (column grant in
+    // `*_chat_rls_grants.sql`); nobody DELETEs.
+    pgPolicy('chat_participants_select', {
+      for: 'select',
       to: authenticatedRole,
       using: sql`tenant_id = app.tenant_id() and (user_id = app.user_id() or ${STAFF_ROLE})`,
-      withCheck: sql`tenant_id = app.tenant_id() and (user_id = app.user_id() or ${STAFF_ROLE})`,
+    }),
+    pgPolicy('chat_participants_insert', {
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`tenant_id = app.tenant_id() and user_id = app.user_id() and role = 'member' and exists (select 1 from public.chat_conversations c where c.id = chat_participants.conversation_id and c.tenant_id = app.tenant_id() and c.created_by_user_id = app.user_id())`,
+    }),
+    pgPolicy('chat_participants_update_own', {
+      for: 'update',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
+      withCheck: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
     }),
   ],
 ).enableRLS();
@@ -187,12 +215,18 @@ export const chatMessages = pgTable(
       sql`char_length(btrim(${t.body}, E' \\t\\n\\r')) between 1 and 2000`,
     ),
     // Fact 7: a message is visible exactly when its conversation is (the conversation policy
-    // decides), and a lane only ever writes as itself.
-    pgPolicy('chat_messages_access', {
-      for: 'all',
+    // decides). Chat is APPEND-ONLY for a lane (07 review A-WR-01 / B-WR-04): it inserts as itself,
+    // on the side its role allows (`staff` only on a support thread from a staff claim, `member` only
+    // as a participant of the thread), and there is no UPDATE or DELETE policy at all.
+    pgPolicy('chat_messages_select', {
+      for: 'select',
       to: authenticatedRole,
       using: sql`tenant_id = app.tenant_id() and exists (select 1 from public.chat_conversations c where c.id = chat_messages.conversation_id)`,
-      withCheck: sql`tenant_id = app.tenant_id() and author_user_id = app.user_id() and exists (select 1 from public.chat_conversations c where c.id = chat_messages.conversation_id)`,
+    }),
+    pgPolicy('chat_messages_insert', {
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`tenant_id = app.tenant_id() and author_user_id = app.user_id() and ((author_side = 'staff' and ${STAFF_ROLE} and exists (select 1 from public.chat_conversations c where c.id = chat_messages.conversation_id and c.kind = 'support')) or (author_side = 'member' and exists (select 1 from public.chat_participants p where p.conversation_id = chat_messages.conversation_id and p.tenant_id = app.tenant_id() and p.user_id = app.user_id())))`,
     }),
   ],
 ).enableRLS();

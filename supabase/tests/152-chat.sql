@@ -21,10 +21,15 @@ begin;
 --    payload keys exactly `conversationId`, `id`, `seq` (T-07-53: the body never travels; the `id` is
 --    the one `realtime.send` injects). Skipped with a named reason when no partition covers now().
 -- 7. `chat_conversations_inbox_idx` serves the inbox statement BY NAME on an ANALYZEd 400-row fixture.
+-- 8. The per-command policies and column grants (07 review A-CR-01, A-WR-01, B-WR-04): no lane can
+--    enrol itself (or anyone) into another member's thread, by INSERT or by moving its own participant
+--    row; no lane can post on a side its role does not own, rewrite or delete a message, rewind
+--    `last_seq`, delete a conversation or create one with pre-set counters; the member moves only its
+--    own `last_read_seq` and staff only `staff_last_read_seq` (positive controls).
 --
 -- Fixture ids use the `15200000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(52);
+select plan(72);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-chat-a', 'Chat A', '15200000-0000-4000-8000-000000000001');
@@ -429,6 +434,159 @@ select case when current_setting('tests.now_partition') <> '' then results_eq(
   ARRAY[0],
   'fact 6: the injected id is each signal''s own realtime.messages row id'
 ) else skip('no realtime.messages partition covers now() (the Realtime service creates them)') end;
+
+-- ── 8. per-command policies: a lane cannot enrol, re-side, rewrite or rewind (07 review A-CR-01,
+--       A-WR-01, B-WR-04) ─────────────────────────────────────────────────────────────────────────
+-- M2, a second member of the SAME tenant, tries every write that would let it into M1's thread.
+select tests.as_tenant('15200000-0000-4000-8000-000000000001', '15200000-0000-4000-8000-0000000000a2');
+select throws_ok(
+  $$ insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+     values ('15200000-0000-4000-8000-0000000000c1', '15200000-0000-4000-8000-000000000001',
+             '15200000-0000-4000-8000-0000000000a2', 'member') $$,
+  '42501',
+  null,
+  'fact 8 (A-CR-01): M2 cannot enrol itself as a participant of M1''s conversation'
+);
+select lives_ok(
+  $$ insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+     values ('15200000-0000-4000-8000-0000000000c2', '15200000-0000-4000-8000-000000000001',
+             '15200000-0000-4000-8000-0000000000a2', 'member') $$,
+  'fact 8 positive control: M2 enrols itself into the conversation it created'
+);
+select throws_ok(
+  $$ update public.chat_participants
+        set conversation_id = '15200000-0000-4000-8000-0000000000c1'
+      where conversation_id = '15200000-0000-4000-8000-0000000000c2'
+        and user_id = '15200000-0000-4000-8000-0000000000a2' $$,
+  '42501',
+  null,
+  'fact 8 (A-CR-01): M2 cannot move its own participant row into M1''s conversation'
+);
+select results_eq(
+  $$ select count(*)::int from public.chat_messages
+      where conversation_id = '15200000-0000-4000-8000-0000000000c1' $$,
+  ARRAY[0],
+  'fact 8 (A-CR-01): after both attempts M2 still reads 0 of M1''s messages'
+);
+select ok(
+  not app.realtime_topic_allowed(
+    'tenant:15200000-0000-4000-8000-000000000001:conv:15200000-0000-4000-8000-0000000000c1'),
+  'fact 8 (A-CR-01): …and is still refused M1''s conv: Realtime topic'
+);
+select ok(
+  app.realtime_topic_allowed(
+    'tenant:15200000-0000-4000-8000-000000000001:conv:15200000-0000-4000-8000-0000000000c2'),
+  'fact 8 positive control: M2 is allowed its own conv: topic'
+);
+select throws_ok(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+     values ('15200000-0000-4000-8000-000000000001', 'direct', '15200000-0000-4000-8000-0000000000a1') $$,
+  '42501',
+  null,
+  'fact 8: a lane cannot create a conversation in another member''s name'
+);
+select throws_ok(
+  $$ insert into public.chat_conversations (tenant_id, kind, created_by_user_id, last_seq)
+     values ('15200000-0000-4000-8000-000000000001', 'direct', '15200000-0000-4000-8000-0000000000a2', 5) $$,
+  '42501',
+  null,
+  'fact 8: a lane cannot create a conversation with pre-set counters'
+);
+reset role;
+
+-- M1, the thread's own member, tries to re-side, rewrite, delete and rewind its own thread.
+select tests.as_tenant('15200000-0000-4000-8000-000000000001', '15200000-0000-4000-8000-0000000000a1');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('15200000-0000-4000-8000-000000000001', '15200000-0000-4000-8000-0000000000c1',
+             '15200000-0000-4000-8000-0000000000a1', 'staff', 'sou da equipe') $$,
+  '42501',
+  null,
+  'fact 8 (A-WR-01): a member lane cannot insert author_side = ''staff'''
+);
+select throws_ok(
+  $$ update public.chat_messages set body = 'reescrito', author_user_id = '15200000-0000-4000-8000-0000000000a1'
+      where conversation_id = '15200000-0000-4000-8000-0000000000c1' and author_side = 'staff' $$,
+  '42501',
+  null,
+  'fact 8 (A-WR-01): a member lane cannot re-author a staff message'
+);
+select throws_ok(
+  $$ delete from public.chat_messages where conversation_id = '15200000-0000-4000-8000-0000000000c1' $$,
+  '42501',
+  null,
+  'fact 8 (A-WR-01): a member lane cannot delete messages of its own thread'
+);
+select throws_ok(
+  $$ update public.chat_conversations set last_seq = 0
+      where id = '15200000-0000-4000-8000-0000000000c1' $$,
+  '42501',
+  null,
+  'fact 8 (A-WR-01): a member lane cannot rewind last_seq'
+);
+select results_eq(
+  $$ with u as (
+       update public.chat_conversations set staff_last_read_seq = 0
+        where id = '15200000-0000-4000-8000-0000000000c1' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0],
+  'fact 8 (B-WR-04): a member lane moves no team read position, even on its own thread'
+);
+select throws_ok(
+  $$ delete from public.chat_conversations where id = '15200000-0000-4000-8000-0000000000c1' $$,
+  '42501',
+  null,
+  'fact 8 (B-WR-04): a member lane cannot delete its conversation'
+);
+select results_eq(
+  $$ with u as (
+       update public.chat_participants set last_read_seq = 1
+        where conversation_id = '15200000-0000-4000-8000-0000000000c1' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[1],
+  'fact 8 positive control: the member moves its own last_read_seq'
+);
+reset role;
+
+-- S, the support lane: replies as staff and moves the team position, nothing more.
+select tests.as_tenant('15200000-0000-4000-8000-000000000001', '15200000-0000-4000-8000-0000000000a3', 'support_tenant');
+select throws_ok(
+  $$ insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+     values ('15200000-0000-4000-8000-000000000001', '15200000-0000-4000-8000-0000000000c1',
+             '15200000-0000-4000-8000-0000000000a3', 'member', 'como se fosse o membro') $$,
+  '42501',
+  null,
+  'fact 8: a staff lane cannot write on the member side of a thread it is not part of'
+);
+select throws_ok(
+  $$ insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+     values ('15200000-0000-4000-8000-0000000000c1', '15200000-0000-4000-8000-000000000001',
+             '15200000-0000-4000-8000-0000000000a2', 'member') $$,
+  '42501',
+  null,
+  'fact 8 (A-CR-01): a staff lane cannot enrol a member into another member''s thread'
+);
+select throws_ok(
+  $$ update public.chat_conversations set last_seq = 0
+      where id = '15200000-0000-4000-8000-0000000000c1' $$,
+  '42501',
+  null,
+  'fact 8: a staff lane cannot rewind last_seq either'
+);
+select results_eq(
+  $$ with u as (
+       update public.chat_conversations set staff_last_read_seq = staff_last_read_seq
+        where id = '15200000-0000-4000-8000-0000000000c1' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[1],
+  'fact 8 positive control: the support lane moves the team read position'
+);
+reset role;
+select results_eq(
+  $$ select last_seq::int from public.chat_conversations where id = '15200000-0000-4000-8000-0000000000c1' $$,
+  ARRAY[6],
+  'fact 8: after every refused write, M1''s conversation still counts six messages'
+);
 
 -- ── 7. the inbox statement rides chat_conversations_inbox_idx, by name ─────────────────────────
 -- 400 support conversations in A (created_by null, so the one-per-member index does not bind them)

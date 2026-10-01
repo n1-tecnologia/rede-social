@@ -991,11 +991,13 @@ describe('chat suporte', () => {
       if (!match?.[1]) throw new Error(`no staff role literal in: ${text.slice(0, 200)}`);
       return [...match[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1] ?? '').sort();
     };
+    // Every per-command policy that spells the staff literal (07 review A-CR-01 split them).
     const policies = await adminSql<{ policyname: string; qual: string }[]>`
-      select policyname, qual from pg_policies
+      select policyname, coalesce(qual, with_check) as qual from pg_policies
        where schemaname = 'public'
-         and policyname in ('chat_conversations_access', 'chat_participants_access')`;
-    expect(policies).toHaveLength(2);
+         and policyname in ('chat_conversations_select', 'chat_conversations_staff_update',
+                            'chat_participants_select', 'chat_messages_insert')`;
+    expect(policies).toHaveLength(4);
     const [definer] = await adminSql<{ body: string }[]>`
       select pg_get_functiondef('app.realtime_topic_allowed(text)'::regprocedure) as body`;
     const sources = [

@@ -379,6 +379,20 @@
       "when": 1790794949172,
       "tag": "20260930190229_chat_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1790815590258,
+      "tag": "20261001004630_chat_rls_per_command",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1790815598396,
+      "tag": "20261001004638_chat_rls_grants",
+      "breakpoints": true
     }
   ]
 }
