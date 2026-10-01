@@ -30,6 +30,9 @@ const { messages } = await vi.hoisted(async () => {
 
 MotionGlobalConfig.skipAnimations = true;
 
+const { createTranslator } = await import('next-intl');
+const tn = createTranslator({ locale: 'pt-BR', messages, namespace: 'notifications' });
+
 vi.mock('next-intl', async (importOriginal) => {
   const actual = await importOriginal<typeof import('next-intl')>();
   const byNamespace = new Map<string, ReturnType<typeof actual.createTranslator>>();
@@ -171,6 +174,14 @@ function rowIds(): string[] {
     .map((item) => /row-([a-z0-9]+)\./.exec(item.textContent ?? '')?.[1] ?? '?');
 }
 
+function row(id: string): HTMLElement {
+  const found = screen
+    .getAllByTestId('notification-item')
+    .find((item) => (item.textContent ?? '').includes(`row-${id}.`));
+  if (!found) throw new Error(`row ${id} is not rendered`);
+  return found;
+}
+
 /** Lets every settled promise and the state updates it schedules land. */
 async function flush() {
   await act(async () => {
@@ -241,6 +252,69 @@ describe('NotificationsSurface — C-WR-03 races', () => {
     expect(loadMore).toHaveBeenLastCalledWith('unread', 'c1-new');
   });
 
+  it('2. tapped: a failed mark-all gives the tint back only to the rows it cleared, and rows tapped before or during it stay read (D-230, UI E04 error, no second POST while it runs)', async () => {
+    renderSurface({
+      unread: [rowView('a', true), rowView('b', true), rowView('c', true)],
+      unreadCursor: null,
+      readStarted: true,
+    });
+    expect(screen.queryByTestId('load-more')).toBeNull();
+
+    // `a` is tapped BEFORE the mark-all: its own read POST leaves, its tint clears.
+    fireEvent.click(row('a'));
+    expect(row('a').getAttribute('data-unread')).toBe('false');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/notifications/a/read',
+      expect.objectContaining({ method: 'POST', keepalive: true }),
+    );
+
+    // The mark-all POST is held open.
+    const readAll = deferred<Response>();
+    net.readAll = readAll.promise;
+    const markAll = screen.getByTestId('notifications-mark-all');
+    expect(markAll.textContent).toContain(tn('markAll'));
+    fireEvent.click(markAll);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/notifications/read-all',
+      expect.objectContaining({ method: 'POST' }),
+    );
+
+    // Optimistic: every tint is cleared, and no enabled mark-all control is offered while the POST
+    // runs (no second POST can start). The UI-SPEC's "aria-busy and disabled" half is the
+    // `gap E04 loading` case below: at HEAD the button is withdrawn instead, because no loaded row is
+    // unread any more.
+    for (const id of ['a', 'b', 'c']) expect(row(id).getAttribute('data-unread')).toBe('false');
+    const during = screen.queryByTestId('notifications-mark-all') as HTMLButtonElement | null;
+    expect(during === null || during.disabled).toBe(true);
+
+    // `b` is tapped WHILE the mark-all is in flight.
+    fireEvent.click(row('b'));
+    expect(row('b').getAttribute('data-unread')).toBe('false');
+
+    // The mark-all fails.
+    await act(async () => {
+      readAll.resolve(new Response(null, { status: 500 }));
+      await readAll.promise;
+    });
+    await flush();
+
+    // Only `c` (cleared by mark-all alone) gets its tint back; `a` and `b` stay read.
+    expect(row('a').getAttribute('data-unread')).toBe('false');
+    expect(row('b').getAttribute('data-unread')).toBe('false');
+    expect(row('c').getAttribute('data-unread')).toBe('true');
+
+    // One error toast, in the catalog's words.
+    const toasts = screen
+      .queryAllByRole('status')
+      .filter((node) => node.textContent === tn('errors.markAll'));
+    expect(toasts).toHaveLength(1);
+
+    // One row is unread again, so the button is back and idle.
+    const idle = screen.getByTestId('notifications-mark-all') as HTMLButtonElement;
+    expect(idle.getAttribute('aria-busy')).toBeNull();
+    expect(idle.disabled).toBe(false);
+  });
+
   it('3. live merge: a visibilitychange merge during a load-more only prepends, and the load-more page is still appended (the guard drops a page only after a replacing refresh)', async () => {
     expect(document.visibilityState).toBe('visible');
     renderSurface({
@@ -280,5 +354,43 @@ describe('NotificationsSurface — C-WR-03 races', () => {
 
     expect(rowIds()).toEqual(['n', 'a', 'b', 'c', 'd']);
     expect(document.querySelector('[data-notifications-page-error]')).toBeNull();
+  });
+});
+
+/**
+ * Two product gaps 07-14 found while pinning C-WR-03. The plan is test-only, so they are recorded
+ * here as EXPECTED FAILURES, with the planned assertions unchanged (07-14-SUMMARY, phase
+ * deferred-items, WINDOWS). Each `it.fails` turns red the moment the product is fixed. Then make it a
+ * plain `it`.
+ */
+describe('NotificationsSurface — C-WR-03 known gaps (expected failures at HEAD)', () => {
+  it.fails('gap E04 loading: the mark-all button is aria-busy and disabled while its POST runs (UI-D-252; at HEAD it is withdrawn, because the optimistic step leaves no loaded row unread)', async () => {
+    renderSurface({
+      unread: [rowView('a', true), rowView('b', true), rowView('c', true)],
+      unreadCursor: null,
+      readStarted: true,
+    });
+    net.readAll = deferred<Response>().promise;
+    fireEvent.click(screen.getByTestId('notifications-mark-all'));
+
+    const busy = screen.getByTestId('notifications-mark-all') as HTMLButtonElement;
+    expect(busy.getAttribute('aria-busy')).toBe('true');
+    expect(busy.disabled).toBe(true);
+  });
+
+  it.fails('gap own read POST: a row activated while a mark-all is in flight sends its own read POST, the premise the scoped rollback keeps its tint on (at HEAD `activate` posts only while the row looks unread, and mark-all already cleared it)', async () => {
+    renderSurface({
+      unread: [rowView('a', true), rowView('b', true), rowView('c', true)],
+      unreadCursor: null,
+      readStarted: true,
+    });
+    net.readAll = deferred<Response>().promise;
+    fireEvent.click(screen.getByTestId('notifications-mark-all'));
+    fireEvent.click(row('b'));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/notifications/b/read',
+      expect.objectContaining({ method: 'POST', keepalive: true }),
+    );
   });
 });
