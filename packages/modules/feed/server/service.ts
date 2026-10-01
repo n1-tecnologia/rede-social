@@ -1586,6 +1586,12 @@ export async function createComment(
  * with one more permission — the row stays, only `deleted_at` is set.
  *
  * Comments are NOT editable in V1 (D-61): there is no update-body path here and none in the routes.
+ *
+ * **Post comments only** (`post_id is not null`, 07 review B-WR-03): story comments share
+ * `feed_comments`, but they are deleted through `DELETE /v1/stories/{id}/comments/{commentId}`, which
+ * emits `story.comment_deleted` and so retracts the story author's `stories.story_commented` row. Here
+ * a story comment id is the same bare 404 as any other miss; otherwise this route would delete it and
+ * emit `comment.deleted`, whose retraction names object type `comment`, leaving the excerpt in the bell.
  */
 export async function deleteComment(ctx: RequestContext, commentId: string): Promise<void> {
   await withTenantTx(ctx, async (tx) => {
@@ -1594,6 +1600,7 @@ export async function deleteComment(ctx: RequestContext, commentId: string): Pro
          set deleted_at = now()
        where id = ${commentId}::uuid
          and author_user_id = ${ctx.userId}::uuid
+         and post_id is not null
          and deleted_at is null
       returning id`);
     if (!rows[0]) throw new ApiError(404, 'NOT_FOUND');

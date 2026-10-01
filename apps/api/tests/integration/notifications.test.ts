@@ -781,6 +781,47 @@ describe('notifications tipos', () => {
     expect(rows[0]?.payload).toMatchObject({ storyId, commentId, excerpt: 'Que lindo!' });
   });
 
+  it('retraction (07 review B-WR-03): the FEED comment route cannot delete a story comment around its retraction', async () => {
+    await clearDemo();
+    await closeWaitingJobs();
+    const storyId = await adminStory();
+    await runNotificationJobs(ids.demo);
+    const res = await request(`/v1/stories/${storyId}/comments`, tokens.demoMember, {
+      method: 'POST',
+      body: JSON.stringify({ body: 'Some pelo feed' }),
+    });
+    expect(res.status).toBe(201);
+    const { id: commentId } = (await res.json()) as { id: string };
+    await runNotificationJobs(ids.demo);
+    const commented = () =>
+      rowsAbout(storyId).then((rows) => rows.filter((r) => r.kind === 'stories.story_commented'));
+    expect((await commented())[0]?.payload).toMatchObject({ excerpt: 'Some pelo feed' });
+
+    // The feed route refuses a story comment (one bare 404), so it can never delete one without the
+    // story retraction; the excerpt stays only while the comment itself does.
+    const viaFeed = await request(`/v1/feed/comments/${commentId}`, tokens.demoMember, {
+      method: 'DELETE',
+    });
+    expect(viaFeed.status).toBe(404);
+    const [still] = await adminSql<{ deleted: boolean }[]>`
+      select deleted_at is not null as deleted from public.feed_comments where id = ${commentId}::uuid`;
+    expect(still?.deleted).toBe(false);
+
+    // Positive control: the stories route deletes it and blanks the row.
+    const removed = await request(
+      `/v1/stories/${storyId}/comments/${commentId}`,
+      tokens.demoMember,
+      {
+        method: 'DELETE',
+      },
+    );
+    expect(removed.ok).toBe(true);
+    await runNotificationJobs(ids.demo);
+    const after = await commented();
+    expect(after).toHaveLength(1);
+    expect(after[0]?.payload).toEqual({ removed: true });
+  });
+
   it('retraction: deleting the post marks its post, like and reply rows EXACTLY {removed: true}; the API answers removed with no facts', async () => {
     await clearDemo();
     await closeWaitingJobs();
