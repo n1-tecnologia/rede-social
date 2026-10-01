@@ -19,7 +19,8 @@ begin;
 -- 6. Each insert commits `realtime.messages` rows (read as the migration role): `chat.message` on the
 --    `conv:` and `support-inbox` topics, plus `chat.unread` on `user:<M1>` for a staff message, with
 --    payload keys exactly `conversationId`, `id`, `seq` (T-07-53: the body never travels; the `id` is
---    the one `realtime.send` injects). Skipped with a named reason when no partition covers now().
+--    the one `realtime.send` injects). FAILS with a named reason when no partition covers now()
+--    (07 review A-WR-06: never a vacuous skip; CI waits for Realtime's partition first).
 -- 7. `chat_conversations_inbox_idx` serves the inbox statement BY NAME on an ANALYZEd 400-row fixture.
 -- 8. The per-command policies and column grants (07 review A-CR-01, A-WR-01, B-WR-04): no lane can
 --    enrol itself (or anyone) into another member's thread, by INSERT or by moving its own participant
@@ -400,7 +401,7 @@ select case when current_setting('tests.now_partition') <> '' then results_eq(
   $$ values ('chat.message', 1), ('chat.message', 2), ('chat.message', 3), ('chat.message', 4),
             ('chat.message', 5), ('chat.message', 6) $$,
   'fact 6: one chat.message per committed insert on the conv: topic, in seq order'
-) else skip('no realtime.messages partition covers now() (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 select case when current_setting('tests.now_partition') <> '' then results_eq(
   $$ select count(*)::int
        from realtime.messages
@@ -409,7 +410,7 @@ select case when current_setting('tests.now_partition') <> '' then results_eq(
         and payload->>'conversationId' = '15200000-0000-4000-8000-0000000000c1' $$,
   ARRAY[6],
   'fact 6: …and one per insert on the support inbox (a support conversation)'
-) else skip('no realtime.messages partition covers now() (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 select case when current_setting('tests.now_partition') <> '' then results_eq(
   $$ select (payload->>'seq')::int
        from realtime.messages
@@ -418,14 +419,14 @@ select case when current_setting('tests.now_partition') <> '' then results_eq(
       order by 1 $$,
   ARRAY[2, 6],
   'fact 6: chat.unread rings the member''s own topic for the two STAFF messages only'
-) else skip('no realtime.messages partition covers now() (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 select case when current_setting('tests.now_partition') <> '' then results_eq(
   $$ select distinct array(select jsonb_object_keys(payload) order by 1)
        from realtime.messages
       where topic like 'tenant:15200000-0000-4000-8000-000000000001:%' $$,
   $$ values (array['conversationId', 'id', 'seq']) $$,
   'fact 6 (T-07-53): every chat signal carries exactly conversationId, id, seq (never the body)'
-) else skip('no realtime.messages partition covers now() (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 select case when current_setting('tests.now_partition') <> '' then results_eq(
   $$ select count(*)::int
        from realtime.messages
@@ -433,7 +434,7 @@ select case when current_setting('tests.now_partition') <> '' then results_eq(
         and payload->>'id' is distinct from id::text $$,
   ARRAY[0],
   'fact 6: the injected id is each signal''s own realtime.messages row id'
-) else skip('no realtime.messages partition covers now() (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 
 -- ── 8. per-command policies: a lane cannot enrol, re-side, rewrite or rewind (07 review A-CR-01,
 --       A-WR-01, B-WR-04) ─────────────────────────────────────────────────────────────────────────

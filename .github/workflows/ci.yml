@@ -94,6 +94,18 @@ jobs:
       - name: Give api_user a local login password
         run: bash scripts/db-local-role.sh
 
+      - name: Wait for Realtime's partition of today (pgTAP 150/152 fail without it)
+        # 07 review A-WR-06: the Realtime authorization facts need a `realtime.messages` partition that
+        # covers now(), and only the Realtime service (its owner) creates one. Wait for it instead of
+        # letting a cold stack race the suite; the facts fail, never skip, when it is missing.
+        run: |
+          for _ in $(seq 1 60); do
+            found=$(psql "postgres://postgres:postgres@127.0.0.1:54322/postgres" -Atc "select count(*) from pg_inherits i join pg_class c on c.oid = i.inhrelid where i.inhparent = 'realtime.messages'::regclass and pg_get_expr(c.relpartbound, c.oid) like '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'")
+            if [ "$found" != "0" ]; then exit 0; fi
+            sleep 2
+          done
+          echo "no realtime.messages partition covers now() after 120 s"
+          exit 1
       - name: pgTAP (RLS and tenant isolation)
         run: supabase test db
 

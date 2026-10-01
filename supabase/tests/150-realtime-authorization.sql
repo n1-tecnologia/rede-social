@@ -11,8 +11,10 @@ begin;
 -- PITFALL 3: `realtime.messages` is `PARTITION BY RANGE (inserted_at)` with daily partitions the
 -- Realtime service creates. Every probe is inserted (as the migration role) with an `inserted_at`
 -- inside an EXISTING partition, found through `pg_inherits`. On a stack with no partition the probe
--- facts are SKIPPED with a named reason, never passed; facts 10 and 11 insert at `now()` and skip
--- when no partition covers it.
+-- facts FAIL with a named reason (07 review A-WR-06: they used to skip, so a cold CI stack reported
+-- green with no Realtime authorization tested); facts 10 and 11 insert at `now()` and fail when no
+-- partition covers it. The migration role cannot create a partition of `realtime.messages` (it is
+-- `supabase_realtime_admin`'s), so CI waits for the Realtime service's partition before this suite.
 --
 -- 0. The privilege facts. Both definers are `prosecdef`, pin `search_path=""`, are NOT executable by
 --    `anon` and ARE executable by `authenticated`. `realtime.messages` carries exactly ONE policy,
@@ -182,7 +184,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000a1' $$,
   ARRAY[1],
   'fact 1: A''s member joins its OWN user topic'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 
 -- ── 2. another member's user topic ────────────────────────────────────────────────────────────
@@ -193,7 +195,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000a2' $$,
   ARRAY[0],
   'fact 2: …and never the second member''s user topic, in the SAME tenant'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 
 -- ── 3. another tenant's topics ────────────────────────────────────────────────────────────────
@@ -204,7 +206,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000011:user:15000000-0000-4000-8000-0000000000b1' $$,
   ARRAY[0],
   'fact 3: A''s member cannot join B''s member topic'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000011:all');
@@ -213,7 +215,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000011:all' $$,
   ARRAY[0],
   'fact 3: …nor B''s all topic'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000b1',
   'tenant:15000000-0000-4000-8000-000000000011:user:15000000-0000-4000-8000-0000000000b1');
@@ -222,7 +224,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000011:user:15000000-0000-4000-8000-0000000000b1' $$,
   ARRAY[1],
   'fact 3 positive control: B''s member joins its own topic'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 
 -- ── 4. the support inbox is staff-only ────────────────────────────────────────────────────────
@@ -233,7 +235,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:support-inbox' $$,
   ARRAY[0],
   'fact 4: a member cannot join support-inbox'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a4',
   'tenant:15000000-0000-4000-8000-000000000001:support-inbox');
@@ -242,7 +244,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:support-inbox' $$,
   ARRAY[1],
   'fact 4 positive control: support_tenant joins support-inbox'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a3',
   'tenant:15000000-0000-4000-8000-000000000001:support-inbox');
@@ -251,7 +253,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:support-inbox' $$,
   ARRAY[1],
   'fact 4 positive control: admin_tenant joins support-inbox'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 
 -- ── 5. a conversation topic ───────────────────────────────────────────────────────────────────
@@ -262,7 +264,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1' $$,
   ARRAY[1],
   'fact 5: the participant joins its conversation topic'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a3',
   'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1');
@@ -271,7 +273,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1' $$,
   ARRAY[1],
   'fact 5: admin_tenant joins a SUPPORT conversation it does not participate in'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a4',
   'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1');
@@ -280,7 +282,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1' $$,
   ARRAY[1],
   'fact 5: support_tenant joins it too'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a2',
   'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1');
@@ -289,7 +291,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1' $$,
   ARRAY[0],
   'fact 5: a member who is not a participant cannot'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 
 -- ── 6. a blocked member joins nothing ─────────────────────────────────────────────────────────
@@ -303,7 +305,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000a1' $$,
   ARRAY[0],
   'fact 6: blocked, the member cannot join even its own user topic'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:all');
@@ -312,7 +314,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:all' $$,
   ARRAY[0],
   'fact 6: …nor the tenant''s all topic'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1');
@@ -321,7 +323,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1' $$,
   ARRAY[0],
   'fact 6: …nor its own conversation'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a2',
   'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000a2');
@@ -330,7 +332,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000a2' $$,
   ARRAY[1],
   'fact 6 positive control: the second member, not blocked, still joins its own topic'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 update public.memberships set status = 'active', blocked_at = null
  where tenant_id = '15000000-0000-4000-8000-000000000001'
@@ -342,7 +344,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
   $$ select count(*)::int from realtime.messages where topic = 'tenant:not-a-uuid:all' $$,
   ARRAY[0],
   'fact 7: a tenant segment that is not a uuid is refused, never cast'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:all:extra');
@@ -351,7 +353,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:all:extra' $$,
   ARRAY[0],
   'fact 7: an extra segment is refused'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000A1');
@@ -360,7 +362,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000A1' $$,
   ARRAY[0],
   'fact 7: upper-case hex is refused, not normalised (it would be the member''s own topic)'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:------------------------------------:all');
@@ -369,7 +371,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:------------------------------------:all' $$,
   ARRAY[0],
   'fact 7: 36 hyphens pass the shape regex but are refused before the cast (never a raise)'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:all');
@@ -378,7 +380,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:all' $$,
   ARRAY[1],
   'fact 7 positive control: the well-formed all topic of the member''s tenant is joined'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 
 -- ── 8. the module flags gate their topics ─────────────────────────────────────────────────────
@@ -391,7 +393,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:all' $$,
   ARRAY[0],
   'fact 8: notifications disabled, the all topic is closed'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000a1');
@@ -400,7 +402,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000a1' $$,
   ARRAY[1],
   'fact 8 positive control: the member''s own user topic stays open (chat signals ride it too)'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 update public.tenant_modules set enabled = true
  where tenant_id = '15000000-0000-4000-8000-000000000001' and module_key = 'notifications';
@@ -413,7 +415,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:support-inbox' $$,
   ARRAY[0],
   'fact 8: chat disabled, support-inbox is closed even to staff'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1');
@@ -422,7 +424,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:conv:15000000-0000-4000-8000-0000000000c1' $$,
   ARRAY[0],
   'fact 8: …and so is the participant''s conversation'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 update public.tenant_modules set enabled = true
  where tenant_id = '15000000-0000-4000-8000-000000000001' and module_key = 'chat';
@@ -436,7 +438,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:user:15000000-0000-4000-8000-0000000000a1' $$,
   ARRAY[0],
   'fact 9: suspended, the member''s own user topic is closed'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:all');
@@ -445,7 +447,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:all' $$,
   ARRAY[0],
   'fact 9: …and so is all'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a4',
   'tenant:15000000-0000-4000-8000-000000000001:support-inbox');
@@ -454,7 +456,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000001:support-inbox' $$,
   ARRAY[0],
   'fact 9: …and support-inbox, for staff too'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000b1',
   'tenant:15000000-0000-4000-8000-000000000011:user:15000000-0000-4000-8000-0000000000b1');
@@ -463,7 +465,7 @@ select case when current_setting('tests.probe_at') <> '' then results_eq(
       where topic = 'tenant:15000000-0000-4000-8000-000000000011:user:15000000-0000-4000-8000-0000000000b1' $$,
   ARRAY[1],
   'fact 9 positive control: B, active, still joins'
-) else skip('no realtime.messages partition exists (the Realtime service creates them)') end;
+) else fail('no realtime.messages partition exists: start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 update public.tenants set status = 'active' where id = '15000000-0000-4000-8000-000000000001';
 
@@ -477,7 +479,7 @@ select case when current_setting('tests.now_partition') <> '' then throws_ok(
   '42501',
   null,
   'fact 10: an authenticated INSERT into realtime.messages is refused (no insert policy)'
-) else skip('no realtime.messages partition covers now()') end;
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 
 -- ── 11. app.realtime_signal publishes only inside the caller's tenant ─────────────────────────
@@ -507,7 +509,7 @@ select case when current_setting('tests.now_partition') <> '' then results_eq(
         and event = 'notifications.changed' $$,
   ARRAY[1],
   'fact 11: …exactly ONE row, on tenant:<A>:all (the tenant half is the caller''s claim)'
-) else skip('no realtime.messages partition covers now()') end;
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 select tests.as_realtime_user('15000000-0000-4000-8000-0000000000a1',
   'tenant:15000000-0000-4000-8000-000000000001:all');
 select case when current_setting('tests.now_partition') <> '' then results_eq(
@@ -516,7 +518,7 @@ select case when current_setting('tests.now_partition') <> '' then results_eq(
         and event = 'notifications.changed' $$,
   ARRAY[1],
   'fact 11: …which A''s member, joined to all, receives'
-) else skip('no realtime.messages partition covers now()') end;
+) else fail('no realtime.messages partition covers now(): start the Realtime service first (it creates them); Realtime evidence never passes vacuously') end;
 reset role;
 
 select * from finish();
