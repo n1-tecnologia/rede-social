@@ -54,9 +54,29 @@ export type EmptyFeedTenant = {
   password: string;
 };
 
-/** Per-project slug, so the two Playwright projects never provision the same host concurrently. */
-export function emptyFeedSlug(project: string): string {
-  return `feed-empty-${project.replace(/[^a-z0-9]+/gi, '').toLowerCase()}`;
+/** The project name lower-cased with every non-alphanumeric stripped (no LIKE wildcard survives). */
+function projectPart(project: string): string {
+  return project.replace(/[^a-z0-9]+/gi, '').toLowerCase();
+}
+
+/**
+ * `feed-empty-<project>-<run>-r<repeat>`: unique per project, per run and per repeat. The web proxy
+ * and the API cache a host lookup for up to 60 s, so recreating the SAME host resolves it to the
+ * deleted tenant and the member lands on "Endereço incorreto" (07-13 note). The project part also
+ * keeps the two Playwright projects from ever sharing a host. Never sliced: an 8-character base-36
+ * run token gives at most 38 characters, and `createThrowawayTenant` throws on an invalid slug.
+ */
+export function emptyFeedSlug(project: string, run: string, repeat: number): string {
+  return `feed-empty-${projectPart(project)}-${run}-r${repeat}`;
+}
+
+/** Deletes this project's legacy and per-run `feed-empty` tenants (and their users): the delete-before-create hygiene a fixed slug gave, plus runs interrupted before `afterAll`. */
+export async function deleteStaleEmptyFeedTenants(project: string): Promise<void> {
+  const legacy = `feed-empty-${projectPart(project)}`;
+  const rows = await sql()<{ slug: string }[]>`
+    select slug from public.tenants
+     where slug = ${legacy} or starts_with(slug, ${`${legacy}-`})`;
+  for (const row of rows) await deleteEmptyFeedTenant(row.slug);
 }
 
 async function addMembership(

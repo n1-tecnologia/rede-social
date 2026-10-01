@@ -6,6 +6,7 @@ import {
   closeFeedAdmin,
   createEmptyFeedTenant,
   deleteEmptyFeedTenant,
+  deleteStaleEmptyFeedTenants,
   type EmptyFeedTenant,
   emptyFeedSlug,
 } from './feed-admin';
@@ -22,6 +23,9 @@ import {
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
 const F = feedMessages.feed;
 const APP = appMessages.app;
+
+/** One token per run: the UI-D-20 empty tenant's slug and host are unique per run and repeat. */
+const RUN = Date.now().toString(36);
 
 /**
  * FEED-02 / D-55 / UI-02 (plan 04-01): the feed home slot on `/inicio`, on the phone
@@ -571,7 +575,11 @@ test.describe('UI-D-20 — a community with nothing published', () => {
   test.beforeAll(async ({ browserName }, testInfo) => {
     test.setTimeout(120_000);
     void browserName;
-    tenant = await createEmptyFeedTenant(emptyFeedSlug(testInfo.project.name), SEED_PASSWORD);
+    await deleteStaleEmptyFeedTenants(testInfo.project.name);
+    tenant = await createEmptyFeedTenant(
+      emptyFeedSlug(testInfo.project.name, RUN, testInfo.repeatEachIndex),
+      SEED_PASSWORD,
+    );
   });
 
   test.afterAll(async () => {
