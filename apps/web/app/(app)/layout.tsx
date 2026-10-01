@@ -94,6 +94,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   // 07-03 (NOTIF-02): the live layer — one Realtime client, the live counters and the stateful slot
   // labels — wraps the tenant shell only. The platform branch above stays static.
+  // 07 review C-WR-01: without the notifications module the API answers every push route with
+  // MODULE_DISABLED, so the shell gets no VAPID key and never re-saves a subscription on open.
+  const notificationsOn = bootstrap.modules.some((m) => m.key === 'notifications');
   return (
     <LiveShell
       supabaseUrl={env.NEXT_PUBLIC_SUPABASE_URL}
@@ -101,9 +104,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       tenantId={tenant.id}
       userId={bootstrap.user.id}
       initialCounters={bootstrap.counters}
-      notificationsEnabled={bootstrap.modules.some((m) => m.key === 'notifications')}
+      notificationsEnabled={notificationsOn}
       supportInbox={bootstrap.permissions.includes('chat.support')}
-      vapidPublicKey={env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null}
+      vapidPublicKey={notificationsOn ? (env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null) : null}
     >
       <AppShell
         brand={{ displayName: tenant.displayName, logoUrl: branding.logoUrl }}

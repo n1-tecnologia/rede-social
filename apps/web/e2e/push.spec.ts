@@ -308,3 +308,35 @@ test.describe('push (iPhone Safari outside the Home Screen app, D-234 / PWA-02)'
     expect(await pushLog(page)).not.toContain('subscribe');
   });
 });
+
+/**
+ * 07 review C-WR-01: rede-lab has the notifications module OFF, so the API refuses every push route.
+ * The tenant shell offers no push switch (no permission prompt spent for nothing), never re-saves a
+ * subscription on open, and `/notificacoes` is a plain miss like any module page whose module is off.
+ */
+test.describe('push com o módulo de notificações desligado', () => {
+  test.use({ userAgent: ANDROID_UA });
+
+  test('rede-lab: no push row, no subscription POST, and /notificacoes is not found', async ({
+    page,
+  }) => {
+    await installFakePush(page, { permission: 'granted', answer: 'granted', pushManager: true });
+    const posts: string[] = [];
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/api/push/subscriptions')) {
+        posts.push(req.url());
+      }
+    });
+    await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/configuracoes`);
+    // The row is server-rendered (its `checking` state) wherever it exists, so absence is decided here.
+    await expect(page.locator('main')).toBeVisible();
+    await expect(pushRow(page)).toHaveCount(0);
+
+    // The default not-found screen (the streamed shell answers 200; the reels e13 precedent).
+    await page.goto(`${hosts.lab}/notificacoes`);
+    await expect(page.getByText(/could not be found/i)).toBeVisible();
+    await expect(softAsk(page)).toHaveCount(0);
+    expect(posts).toEqual([]);
+  });
+});

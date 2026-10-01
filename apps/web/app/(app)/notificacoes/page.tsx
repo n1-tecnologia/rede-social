@@ -1,4 +1,5 @@
 import { PageHeader } from '@rede-social/ui';
+import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { SoftAsk } from '@/components/push/PushControls';
 import { requireBootstrap } from '@/lib/bootstrap';
@@ -35,6 +36,9 @@ const CHAT_SUPPORT_PERMISSION = 'chat.support';
 
 export default async function NotificationsPage() {
   const [bootstrap, t] = await Promise.all([requireBootstrap(), getTranslations('notifications')]);
+  // 07 review C-WR-01: a tenant without the module has no bell; the page is the same miss as any other
+  // module page whose module is off (`reels/page.tsx`), never an error card plus a soft-ask.
+  if (!bootstrap.modules.some((module) => module.key === 'notifications')) notFound();
 
   const unreadPage = await loadNotifications({ section: 'unread' });
   const readPage =

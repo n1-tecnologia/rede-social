@@ -100,6 +100,9 @@ export default async function SettingsPage({
   // API, so V2 handing story management to another role is a settings flip with no web change.
   // A tenant without the `stories` module carries neither the permission nor the row.
   let canManageStories = false;
+  // 07 review C-WR-01: the push row only where the notifications module is on (the API refuses the
+  // push routes otherwise, after the browser's permission prompt had already been spent).
+  let notificationsOn = false;
   let tenantName = '';
   if (platform) await requirePlatformTenants();
   else {
@@ -107,6 +110,7 @@ export default async function SettingsPage({
     role = bootstrap.membership.role;
     tenantName = bootstrap.tenant.displayName;
     canManageStories = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+    notificationsOn = bootstrap.modules.some((module) => module.key === 'notifications');
   }
 
   // E7/partial + E7/zero-one-many: the whole group — its `SectionTitle` included — is ABSENT from
@@ -150,7 +154,7 @@ export default async function SettingsPage({
           />
           {/* 07-07 (UI-D-256): this device's push switch replaces the "Em breve" pill. Its server
               render is the `checking` state; the real one is decided after mount. */}
-          {platform ? null : (
+          {platform || !notificationsOn ? null : (
             <PushSettingRow
               vapidKey={env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null}
               tenantName={tenantName}
