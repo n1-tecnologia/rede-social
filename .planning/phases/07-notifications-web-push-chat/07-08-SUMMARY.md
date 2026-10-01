@@ -331,8 +331,8 @@ See `key-decisions`. Two more:
 
 ## Issues Encountered
 
-- The full API integration suite passes 701 of 702 tests. The one failure is the known pre-existing `signup.test.ts` case 2, caused by the `tria-*` env hosts (see `deferred-items.md`). I did not work around it.
-- Seeded hosts: `db:seed` still prints `tria-*.localhost`. Every chat test reads its hosts from the env and passes.
+- The full API integration suite passes 701 of 702 tests. The one failure is the known pre-existing `signup.test.ts` case 2, caused by the `<old-brand>-*` env hosts (see `deferred-items.md`). I did not work around it.
+- Seeded hosts: `db:seed` still prints `<old-brand>-*.localhost`. Every chat test reads its hosts from the env and passes.
 
 ## Known Stubs
 

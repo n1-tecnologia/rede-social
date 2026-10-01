@@ -249,7 +249,7 @@ See `key-decisions`. Also:
 
 **1. [Rule 1 - Bug] The not-found screen named the raw hostname instead of the tenant**
 - **Found during:** Task 2 (e2e case 5)
-- **Issue:** Following the events not-found, the screen read the host shell's name. In this environment the host lookup does not resolve the tenant (the known `tria-*` env hosts, the same cause as ledger #61), so the body read "Ela não existe ou não é de rede-demo.localhost."
+- **Issue:** Following the events not-found, the screen read the host shell's name. In this environment the host lookup does not resolve the tenant (the known `<old-brand>-*` env hosts, the same cause as ledger #61), so the body read "Ela não existe ou não é de rede-demo.localhost."
 - **Fix:** `/suporte` is an authenticated route, so the screen names the caller's tenant from the bootstrap. That is the same `tenant.displayName` the shell brands itself with, and the API holds it equal to the host's tenant. It falls back to the host shell only when the bootstrap cannot be read. The five causes still render one indistinguishable screen.
 - **Files modified:** apps/web/app/(app)/suporte/[conversationId]/not-found.tsx
 - **Committed in:** 2535208
@@ -278,7 +278,7 @@ See `key-decisions`. Also:
 
 - The first plan-level e2e run had one failure: case 6, the streaming-scope issue above. After the fix, a fresh reset, seed and run of all three specs was green.
 - Every page logs `pageerror: Cannot read properties of undefined (reading 'waiting')` under Playwright, because the service worker registration is blocked. It also appears on `/inicio`, it is pre-existing, and none of this plan's pages add any console error.
-- `db:seed` still prints `tria-*.localhost` hosts from `apps/api/.env.local` (known). The e2e reads its hosts from `apps/web/.env.local` and passes.
+- `db:seed` still prints `<old-brand>-*.localhost` hosts from `apps/api/.env.local` (known). The e2e reads its hosts from `apps/web/.env.local` and passes.
 - Running `biome check` from `apps/web` over the chat module path warns about an unused suppression in `ChatComposer.tsx`. That warning is pre-existing and not from this plan. The module's own `lint` script is clean.
 
 ## Known Stubs

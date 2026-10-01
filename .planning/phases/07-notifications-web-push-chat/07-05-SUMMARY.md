@@ -272,7 +272,7 @@ See `key-decisions`. In short:
 
 ## Issues Encountered
 
-- **Env hosts, one new symptom (pre-existing, not worked around).** The plan-level `playwright test notifications.spec.ts events.spec.ts` passed 94 tests, skipped 28 by design and failed 2. Both failures are one case on both projects: `events.spec.ts` "events detalhe › … ONE not-found screen". Its body prints "…não é de rede-demo.localhost." because `getHostTenant()` cannot resolve the `rede-demo.localhost` host while the seed registered `tria-demo.localhost`. 07-05 does not touch that page. The desktop events cases skipped behind it were re-run on their own: 11 passed. Recorded in `deferred-items.md` and the WINDOWS ledger (unrun-verify, events.spec.ts:422).
+- **Env hosts, one new symptom (pre-existing, not worked around).** The plan-level `playwright test notifications.spec.ts events.spec.ts` passed 94 tests, skipped 28 by design and failed 2. Both failures are one case on both projects: `events.spec.ts` "events detalhe › … ONE not-found screen". Its body prints "…não é de rede-demo.localhost." because `getHostTenant()` cannot resolve the `rede-demo.localhost` host while the seed registered `<old-brand>-demo.localhost`. 07-05 does not touch that page. The desktop events cases skipped behind it were re-run on their own: 11 passed. Recorded in `deferred-items.md` and the WINDOWS ledger (unrun-verify, events.spec.ts:422).
 - **Full API integration suite:** 669 of 670 pass. The one failure is the known `signup.test.ts` case 2 (env hosts).
 - A first integration run failed three reminder cases because the test's own `closeWaiting()` also closed the reminder jobs. It now closes only fan-out jobs mid-test and both kinds in the sweep.
 

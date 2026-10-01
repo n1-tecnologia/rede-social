@@ -310,7 +310,7 @@ See `key-decisions`. Also:
 ## Issues Encountered
 
 - Plan-level e2e (`chat.spec.ts notifications.spec.ts feed-comments.spec.ts`, from reset and seed): 69 passed and 10 skipped by design. One failure was the known cold-run flake `feed-comments.spec.ts` "a failed comment list renders the inline error…" on mobile (deferred-items.md, 07-04). It passed on the next run in isolation. The earlier run's D-239 failure is deviation 3, fixed and re-run green.
-- `db:seed` still prints `tria-*.localhost` hosts from `apps/api/.env.local`. The e2e reads its hosts from `apps/web/.env.local` and passes. I did not work around this.
+- `db:seed` still prints `<old-brand>-*.localhost` hosts from `apps/api/.env.local`. The e2e reads its hosts from `apps/web/.env.local` and passes. I did not work around this.
 - `[WebServer] chat.messages_bff_failed { status: 404 }` appears once per chat run. A pane from the previous test is still subscribed when `beforeEach` deletes its conversation, and the BFF answers the API's bare 404 as designed.
 
 ## Known Stubs

@@ -295,7 +295,7 @@ completed: 2026-09-30
 
 - **A flaky existing e2e, outside this plan.** `feed-comments.spec.ts` "a failed comment list renders the inline error…" fails on the first cold run after `db:reset` + `db:seed`, on mobile only. Its `failNextActions` helper fails the next `POST` to `/inicio`, and the Mux playback-token action consumes that forced failure (`media.playback_token_failed` appears in the log). The test passes 3/3 in isolation and in a warm full-file run. Nothing here touches that spec, the media module or the feed card. Logged in `deferred-items.md` with a fix path. Every other test in the verify command passed on both projects (20 passed, 1 failed).
 - **Hidden route copies in e2e.** Next can keep a hidden copy of a visited post page, so two e2e locators matched twice. Both are now scoped with `filter({ visible: true })`.
-- **Env hosts.** The known env-host issue from `deferred-items.md` (tria-* hosts in `.env.local`) is unchanged. It did not affect any 07-04 test.
+- **Env hosts.** The known env-host issue from `deferred-items.md` (<old-brand>-* hosts in `.env.local`) is unchanged. It did not affect any 07-04 test.
 
 ## Verification (final run)
 

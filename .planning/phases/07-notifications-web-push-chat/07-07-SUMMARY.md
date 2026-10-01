@@ -272,7 +272,7 @@ See `key-decisions`. Two notes:
 
 ## Issues Encountered
 
-- None blocking. Both e2e runs passed on the first attempt after a `db:reset` + `db:seed` (the seed still prints the pre-rename `tria-*` hosts, a known deferred item).
+- None blocking. Both e2e runs passed on the first attempt after a `db:reset` + `db:seed` (the seed still prints the pre-rename `<old-brand>-*` hosts, a known deferred item).
 - **Copy note for UI review.** A failed turn-off (unsubscribe timing out) reuses `notifications.push.errors.failed` ("Não foi possível ativar…"), the only error string the UI-SPEC defines for the row.
 
 ## Verification (final runs)

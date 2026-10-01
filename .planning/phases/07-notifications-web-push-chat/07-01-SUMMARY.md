@@ -311,7 +311,7 @@ See `key-decisions`. Also recorded:
 ## Issues Encountered
 
 - **Docker Desktop was not running** when this continuation started, although the previous executor had left the stack up. I started it with `open -a Docker` (non-destructive), the containers came back healthy, and the precondition still printed 2.
-- **Env hosts (recorded, not acted on).** `pnpm db:seed` prints `platform=tria.localhost rede-demo=tria-demo.localhost rede-lab=tria-lab.localhost`, so the env files still carry the old host values. Every test in this plan reads hosts from the env and passes. Two pre-existing tests outside this plan hardcode `rede-*` hosts and fail only because of this:
+- **Env hosts (recorded, not acted on).** `pnpm db:seed` prints `platform=<old-brand>.localhost rede-demo=<old-brand>-demo.localhost rede-lab=<old-brand>-lab.localhost`, so the env files still carry the old host values. Every test in this plan reads hosts from the env and passes. Two pre-existing tests outside this plan hardcode `rede-*` hosts and fail only because of this:
   - `apps/web/e2e/phase2-smoke.spec.ts` case 1 fails on the platform host, so cases 2-5 (listed in this plan's Task 3 verify) did not run.
   - `apps/api/tests/integration/signup.test.ts` case 2 fails (`by-host?host=rede-demo.localhost` answers 404).
 

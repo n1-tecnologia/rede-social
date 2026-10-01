@@ -68,14 +68,14 @@ last_updated: 2026-10-01T13:55:16.627Z
 | 51 | 05.3 | unrun-verify | packages/modules/reels/ui/ReelRail.tsx |  | UI E06 populated (plan 04 lift, phone UAT, blocked until Phase 01.1): rail, caption and lane labels stay legible over a bright video frame, judged against sketch 005 | open |  | 2026-09-26T22:42:29.475Z |  |
 | 52 | 6 | stub | apps/web/lib/events-view.ts |  | Poster href /eventos/{id} resolves to not-found until 06-03 adds the detail route | fixed |  | 2026-09-27T15:36:43.923Z | 2026-09-27T16:04:42.800Z |
 | 53 | 6 | stub | apps/web/app/(app)/eventos/EventsList.tsx |  | Empty Próximos renders only the member body; manager body and Criar evento CTA arrive with 06-04 | fixed |  | 2026-09-27T15:36:43.992Z | 2026-09-27T18:46:11.297Z |
-| 54 | quick-260929-g0s | unrun-verify | apps/web/e2e/invite.spec.ts |  | e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (tria-* seed, tria_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first | open |  | 2026-09-29T15:08:34.622Z |  |
-| 55 | quick-260929-g0s | unrun-verify | apps/api/tests/integration/platform-domains.test.ts |  | platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at tria-demo; re-run after pnpm db:reset + db:seed | open |  | 2026-09-29T15:08:34.703Z |  |
+| 54 | quick-260929-g0s | unrun-verify | apps/web/e2e/invite.spec.ts |  | e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (<old-brand>-* seed, <old-brand>_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first | open |  | 2026-09-29T15:08:34.622Z |  |
+| 55 | quick-260929-g0s | unrun-verify | apps/api/tests/integration/platform-domains.test.ts |  | platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at <old-brand>-demo; re-run after pnpm db:reset + db:seed | open |  | 2026-09-29T15:08:34.703Z |  |
 | 56 | 7 | stub | apps/web/lib/notifications-view.ts | 61 | Unknown notification kinds are filtered out instead of the generic row (07-04 replaces) | fixed |  | 2026-09-30T13:22:38.605Z | 2026-09-30T22:18:19.470Z |
 | 57 | 7 | stub | apps/web/messages/pt-BR/notifications.json |  | notifications.navBadge ICU label not yet consumed by the shell bell (07-03 live counters) | fixed |  | 2026-09-30T13:22:38.678Z | 2026-09-30T14:07:37.060Z |
 | 58 | 7 | stub | packages/modules/notifications/server/channels/registry.ts |  | push channel unregistered; intents log notifications.channel_unavailable (07-06 registers it) | fixed |  | 2026-09-30T13:22:38.756Z | 2026-09-30T22:18:21.624Z |
-| 59 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 378 | 07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still tria-*), cases 2-5 did not run | open |  | 2026-09-30T13:22:38.830Z |  |
-| 60 | 7 | unrun-verify | apps/api/tests/integration/signup.test.ts | 142 | signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01) | fixed |  | 2026-09-30T13:22:38.902Z | 2026-09-30T23:28:25.028Z |
-| 61 | 7 | unrun-verify | apps/web/e2e/events.spec.ts | 422 | 07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still tria-* (pre-existing, same cause as #59/#60) | fixed |  | 2026-09-30T17:54:09.150Z | 2026-09-30T23:28:25.108Z |
+| 59 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 378 | 07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still <old-brand>-*), cases 2-5 did not run | open |  | 2026-09-30T13:22:38.830Z |  |
+| 60 | 7 | unrun-verify | apps/api/tests/integration/signup.test.ts | 142 | signup case 2 hardcodes rede-demo.localhost; 404 against the env's <old-brand>-demo host (pre-existing, recorded by 07-01) | fixed |  | 2026-09-30T13:22:38.902Z | 2026-09-30T23:28:25.028Z |
+| 61 | 7 | unrun-verify | apps/web/e2e/events.spec.ts | 422 | 07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still <old-brand>-* (pre-existing, same cause as #59/#60) | fixed |  | 2026-09-30T17:54:09.150Z | 2026-09-30T23:28:25.108Z |
 | 62 | 07 | stub | packages/modules/chat/module.ts |  | 07-08: the chat TopBar slot links to /suporte, which has no page until 07-09, and the member's unreadConversations still renders as a count badge (the dot for conversationsBadge='dot' is 07-09's UI) | fixed |  | 2026-09-30T19:34:23.332Z | 2026-09-30T20:21:31.863Z |
 | 63 | 07 | stub | apps/web/app/(app)/suporte/page.tsx |  | 07-09: a holder of chat.support (staff) reaching /suporte gets the not-found screen until 07-10 swaps that branch for the staff inbox (UI-D-262/264) | fixed |  | 2026-09-30T20:21:31.933Z | 2026-09-30T21:03:55.638Z |
 | 64 | 7 | unrun-verify | apps/web/e2e/feed.spec.ts | 321 | 07-11 exit gate: desktop 'a double tap on the gallery likes exactly ONCE' fails in both full pnpm verify runs (1/3 alone); the gesture fires unlikePostAction only; see deferred-items.md | open |  | 2026-10-01T00:21:23.999Z |  |
@@ -731,7 +731,7 @@ last_updated: 2026-10-01T13:55:16.627Z
     "phase": "quick-260929-g0s",
     "file": "apps/web/e2e/invite.spec.ts",
     "line": null,
-    "description": "e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (tria-* seed, tria_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first",
+    "description": "e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (<old-brand>-* seed, <old-brand>_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first",
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-29T15:08:34.622Z",
@@ -743,7 +743,7 @@ last_updated: 2026-10-01T13:55:16.627Z
     "phase": "quick-260929-g0s",
     "file": "apps/api/tests/integration/platform-domains.test.ts",
     "line": null,
-    "description": "platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at tria-demo; re-run after pnpm db:reset + db:seed",
+    "description": "platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at <old-brand>-demo; re-run after pnpm db:reset + db:seed",
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-29T15:08:34.703Z",
@@ -791,7 +791,7 @@ last_updated: 2026-10-01T13:55:16.627Z
     "phase": "7",
     "file": "apps/web/e2e/phase2-smoke.spec.ts",
     "line": 378,
-    "description": "07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still tria-*), cases 2-5 did not run",
+    "description": "07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still <old-brand>-*), cases 2-5 did not run",
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-30T13:22:38.830Z",
@@ -803,7 +803,7 @@ last_updated: 2026-10-01T13:55:16.627Z
     "phase": "7",
     "file": "apps/api/tests/integration/signup.test.ts",
     "line": 142,
-    "description": "signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01)",
+    "description": "signup case 2 hardcodes rede-demo.localhost; 404 against the env's <old-brand>-demo host (pre-existing, recorded by 07-01)",
     "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-30T13:22:38.902Z",
@@ -815,7 +815,7 @@ last_updated: 2026-10-01T13:55:16.627Z
     "phase": "7",
     "file": "apps/web/e2e/events.spec.ts",
     "line": 422,
-    "description": "07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still tria-* (pre-existing, same cause as #59/#60)",
+    "description": "07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still <old-brand>-* (pre-existing, same cause as #59/#60)",
     "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-30T17:54:09.150Z",

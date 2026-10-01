@@ -295,8 +295,8 @@ See `key-decisions`. The two that change behaviour relative to the plan text are
 
 ## Issues Encountered
 
-- **The full API integration suite passes 679 of 680.** The one failure is the known `signup.test.ts` case 2, caused by the env hosts (`tria-*` in `.env.local`), which is recorded in `deferred-items.md`. Not worked around.
-- Local database: reset and re-seeded three times (allowed for this phase). `pnpm db:seed` still prints `tria-*` hosts.
+- **The full API integration suite passes 679 of 680.** The one failure is the known `signup.test.ts` case 2, caused by the env hosts (`<old-brand>-*` in `.env.local`), which is recorded in `deferred-items.md`. Not worked around.
+- Local database: reset and re-seeded three times (allowed for this phase). `pnpm db:seed` still prints `<old-brand>-*` hosts.
 
 ## Verification (final runs)
 

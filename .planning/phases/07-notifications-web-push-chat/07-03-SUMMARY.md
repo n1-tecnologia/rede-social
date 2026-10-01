@@ -209,7 +209,7 @@ Other findings:
 - Task 3 unit: core **253 passed** (29 files); web `app/api/realtime` + `i18n` **460 passed**; `check-ui-literals` OK.
 - Task 3 e2e: after reset and seed, `notifications.spec.ts -g "notifications ao vivo|notifications tracer|notifications lista"`: **25 passed, 1 skipped**. The skip is 07-01's 320px phone-only case, on desktop.
 - Plan-level extras: `notifications.test.ts` **14 passed**; `shell.spec.ts` **10 passed** (its bell assertion now accepts the stateful name).
-- The two known env-host failures (`phase2-smoke` case 1, `signup` case 2) are outside every command above, and none of the commands failed. `pnpm db:seed` still prints `platform=tria.localhost rede-demo=tria-demo.localhost rede-lab=tria-lab.localhost`, so the local env hosts have **not** been regenerated yet.
+- The two known env-host failures (`phase2-smoke` case 1, `signup` case 2) are outside every command above, and none of the commands failed. `pnpm db:seed` still prints `platform=<old-brand>.localhost rede-demo=<old-brand>-demo.localhost rede-lab=<old-brand>-lab.localhost`, so the local env hosts have **not** been regenerated yet.
 - No dev servers were left running: ports 3000, 8787 and 8790 are free.
 
 ## Decisions Made
@@ -283,7 +283,7 @@ See `key-decisions` above.
 ## Issues Encountered
 
 - Browser noise already present in 07-01's cases appears in the e2e logs too: `unhandledRejection: TypeError: Cannot read properties of undefined (reading 'waiting')`, probably the service-worker registration with `serviceWorkers: 'block'`, and mux-player token errors from seeded videos. It does not affect any assertion. I did not investigate it (out of scope).
-- The env hosts are unchanged (`tria-*`), see Verification Results.
+- The env hosts are unchanged (`<old-brand>-*`), see Verification Results.
 
 ## Known Stubs
 

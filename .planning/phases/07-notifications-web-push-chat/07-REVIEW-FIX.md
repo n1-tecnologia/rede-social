@@ -226,7 +226,7 @@ New e2e on rede-lab (module off): no push row, no subscription POST, and the not
 
 ## Verification
 
-**Where the gates ran:** the main checkout (`/Users/igorvboas/Library/Developer/TRIA/rede_social`, branch `master`), against the local Supabase stack. No review-fix worktree was created.
+**Where the gates ran:** the main checkout (`<repo root>`, branch `master`), against the local Supabase stack. No review-fix worktree was created.
 - `workflow.use_worktrees` is not set in `.planning/config.json`. It defaults to true, so this departs from the agent's default flow.
 - The reason: a hand-rolled worktree has no `node_modules` and cannot share the single local Supabase stack, while every fix needed migrations applied plus vitest, pgTAP and Playwright runs in between. Project memory also records that execution here is always sequential with no isolation.
 - Files were staged by explicit path in every commit. The developer's `locais.md` and the untracked `.claude/` and `.planning/` files were not touched.
