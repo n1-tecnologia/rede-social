@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 41
+open_count: 35
 waived_count: 0
-fixed_count: 22
-total_count: 63
-last_updated: 2026-09-30T21:03:55.638Z
+fixed_count: 30
+total_count: 65
+last_updated: 2026-10-01T00:21:24.073Z
 ---
 
 # Broken Windows Ledger
@@ -16,15 +16,15 @@ last_updated: 2026-09-30T21:03:55.638Z
 | id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
 | 1 | 01 | stub | apps/api/src/routes/me.ts |  | bootstrap returns modules: [] and permissions: [] until plan 01-06 fills them from tenant_modules | fixed |  | 2026-09-12T11:47:31.307Z | 2026-09-13T14:52:43.788Z |
-| 2 | 01 | stub | apps/api/src/routes/me.ts |  | bootstrap counters are zero until Phase 7 (notifications/chat) | open |  | 2026-09-12T11:47:31.375Z |  |
+| 2 | 01 | stub | apps/api/src/routes/me.ts |  | bootstrap counters are zero until Phase 7 (notifications/chat) | fixed |  | 2026-09-12T11:47:31.375Z | 2026-09-30T22:18:12.756Z |
 | 3 | 01 | stub | apps/web/app/(auth)/entrar/page.tsx |  | Generic-host tenant hint waits for GET /v1/public/tenants/{slug} (plan 01-04); link shown, hint absent until then | fixed |  | 2026-09-12T13:28:27.502Z | 2026-09-13T14:03:19.772Z |
 | 4 | 01 | stub | apps/web/app/(app)/layout.tsx |  | Only 401 handled in the bootstrap catch; 403 codes (MEMBERSHIP_BLOCKED/NO_MEMBERSHIP/TENANT_HOST_MISMATCH) rethrow until plan 01-05 | fixed |  | 2026-09-12T13:28:27.571Z | 2026-09-13T14:24:42.696Z |
-| 5 | 01 | stub | packages/core/db/schema/chat-stubs.ts |  | Chat stub tables have no triggers, Realtime wiring or routes — intentional shape-only Foundation deliverable, resolved by Phase 7 | open |  | 2026-09-12T21:16:10.084Z |  |
-| 6 | 01 | stub | packages/core/db/schema/notification-stubs.ts |  | notifications stub has no producer or fan-out worker — resolved by Phase 7 | open |  | 2026-09-12T21:16:10.151Z |  |
+| 5 | 01 | stub | packages/core/db/schema/chat-stubs.ts |  | Chat stub tables have no triggers, Realtime wiring or routes — intentional shape-only Foundation deliverable, resolved by Phase 7 | fixed |  | 2026-09-12T21:16:10.084Z | 2026-09-30T22:18:14.376Z |
+| 6 | 01 | stub | packages/core/db/schema/notification-stubs.ts |  | notifications stub has no producer or fan-out worker — resolved by Phase 7 | fixed |  | 2026-09-12T21:16:10.151Z | 2026-09-30T22:18:15.848Z |
 | 7 | 01 | unrun-verify | .github/workflows/ci.yml |  | ci.yml runs pnpm boundaries:negative (scripts/check-boundaries.sh) and supabase test db (supabase/tests/) which do not exist yet; both are owed by sibling plans in phase 01 | fixed |  | 2026-09-12T21:34:49.618Z | 2026-09-13T16:00:54.291Z |
 | 8 | 01 | stub | apps/api/src/modules/registry.ts |  | MODULE_REGISTRY is empty until 01-07 registers @rede-social/module-example: bootstrap entries carry no nav, so /inicio lists raw module keys instead of labels | fixed |  | 2026-09-13T14:52:56.229Z | 2026-09-13T16:00:54.360Z |
 | 9 | 01 | stub | packages/modules/example/module.ts |  | throwaway reference module @rede-social/module-example (D-19) — must be deleted with its table and registry entry in Phase 4 | fixed | removed in 04-10 (6f7631c refactor + 5e74cac drop migration); to_regclass('public.example_items') is NULL and tenant_modules has 0 'example' rows | 2026-09-13T15:21:32.750Z | 2026-09-23T06:10:00.000Z |
-| 10 | 02 | stub | apps/web/app/(app)/configuracoes/page.tsx |  | Settings rows 'Editar perfil' and 'Notificações' are static placeholders with an 'Em breve' pill (D-42); Phase 3 wires profile edit, Phase 7 wires push | open |  | 2026-09-16T23:53:19.085Z |  |
+| 10 | 02 | stub | apps/web/app/(app)/configuracoes/page.tsx |  | Settings rows 'Editar perfil' and 'Notificações' are static placeholders with an 'Em breve' pill (D-42); Phase 3 wires profile edit, Phase 7 wires push | fixed |  | 2026-09-16T23:53:19.085Z | 2026-09-30T22:18:17.676Z |
 | 11 | 03 | deviation | apps/web/app/(app)/perfil/page.tsx |  | The /perfil 'Membros' row points at /membros, which 03-05 lands in the next wave — a known one-wave dead link | fixed |  | 2026-09-22T00:37:02.401Z | 2026-09-22T01:40:51.643Z |
 | 12 | 03 | unrun-verify | packages/core/server/media/video/mux.ts |  | The Mux adapter (createDirectUpload, webhooks.unwrap, signPlaybackId, assets.delete) is written and typed but has NEVER run against a real Mux account — no account exists and Phase 01.1 is deferred. Every proof in 03-06 runs against VIDEO_PROVIDER=fake. Closed by the docs/DEPLOY.md Phase 01.1 Mux runbook. | open |  | 2026-09-22T02:20:03.090Z |  |
 | 13 | 03 | stub | packages/core/server/media/video/index.ts |  | videoProvider.signPlayback and getAsset are implemented on both adapters but wired to no route yet: 03-07 adds GET /v1/media/{assetId}/playback, and getAsset waits for a future reconciliation job (declared so that job needs no adapter change). | open |  | 2026-09-22T02:20:08.948Z |  |
@@ -70,14 +70,16 @@ last_updated: 2026-09-30T21:03:55.638Z
 | 53 | 6 | stub | apps/web/app/(app)/eventos/EventsList.tsx |  | Empty Próximos renders only the member body; manager body and Criar evento CTA arrive with 06-04 | fixed |  | 2026-09-27T15:36:43.992Z | 2026-09-27T18:46:11.297Z |
 | 54 | quick-260929-g0s | unrun-verify | apps/web/e2e/invite.spec.ts |  | e2e not run (invite.spec, platform-tenants.spec, phase2-smoke, platform-domains.spec): local DB predates the 2026-09-28 rename (tria-* seed, tria_terms consent check) and no dev servers were up; needs pnpm db:reset + db:seed first | open |  | 2026-09-29T15:08:34.622Z |  |
 | 55 | quick-260929-g0s | unrun-verify | apps/api/tests/integration/platform-domains.test.ts |  | platform-domains.test.ts and send-email-hook.test.ts (as committed) fail in beforeAll on the stale local seed; proven only through uncommitted copies pointed at tria-demo; re-run after pnpm db:reset + db:seed | open |  | 2026-09-29T15:08:34.703Z |  |
-| 56 | 7 | stub | apps/web/lib/notifications-view.ts | 61 | Unknown notification kinds are filtered out instead of the generic row (07-04 replaces) | open |  | 2026-09-30T13:22:38.605Z |  |
+| 56 | 7 | stub | apps/web/lib/notifications-view.ts | 61 | Unknown notification kinds are filtered out instead of the generic row (07-04 replaces) | fixed |  | 2026-09-30T13:22:38.605Z | 2026-09-30T22:18:19.470Z |
 | 57 | 7 | stub | apps/web/messages/pt-BR/notifications.json |  | notifications.navBadge ICU label not yet consumed by the shell bell (07-03 live counters) | fixed |  | 2026-09-30T13:22:38.678Z | 2026-09-30T14:07:37.060Z |
-| 58 | 7 | stub | packages/modules/notifications/server/channels/registry.ts |  | push channel unregistered; intents log notifications.channel_unavailable (07-06 registers it) | open |  | 2026-09-30T13:22:38.756Z |  |
+| 58 | 7 | stub | packages/modules/notifications/server/channels/registry.ts |  | push channel unregistered; intents log notifications.channel_unavailable (07-06 registers it) | fixed |  | 2026-09-30T13:22:38.756Z | 2026-09-30T22:18:21.624Z |
 | 59 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 378 | 07-01 Task 3 verify: phase2-smoke case 1 fails on the platform host (env hosts still tria-*), cases 2-5 did not run | open |  | 2026-09-30T13:22:38.830Z |  |
-| 60 | 7 | unrun-verify | apps/api/tests/integration/signup.test.ts | 142 | signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01) | open |  | 2026-09-30T13:22:38.902Z |  |
-| 61 | 7 | unrun-verify | apps/web/e2e/events.spec.ts | 422 | 07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still tria-* (pre-existing, same cause as #59/#60) | open |  | 2026-09-30T17:54:09.150Z |  |
+| 60 | 7 | unrun-verify | apps/api/tests/integration/signup.test.ts | 142 | signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01) | fixed |  | 2026-09-30T13:22:38.902Z | 2026-09-30T23:28:25.028Z |
+| 61 | 7 | unrun-verify | apps/web/e2e/events.spec.ts | 422 | 07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still tria-* (pre-existing, same cause as #59/#60) | fixed |  | 2026-09-30T17:54:09.150Z | 2026-09-30T23:28:25.108Z |
 | 62 | 07 | stub | packages/modules/chat/module.ts |  | 07-08: the chat TopBar slot links to /suporte, which has no page until 07-09, and the member's unreadConversations still renders as a count badge (the dot for conversationsBadge='dot' is 07-09's UI) | fixed |  | 2026-09-30T19:34:23.332Z | 2026-09-30T20:21:31.863Z |
 | 63 | 07 | stub | apps/web/app/(app)/suporte/page.tsx |  | 07-09: a holder of chat.support (staff) reaching /suporte gets the not-found screen until 07-10 swaps that branch for the staff inbox (UI-D-262/264) | fixed |  | 2026-09-30T20:21:31.933Z | 2026-09-30T21:03:55.638Z |
+| 64 | 7 | unrun-verify | apps/web/e2e/feed.spec.ts | 321 | 07-11 exit gate: desktop 'a double tap on the gallery likes exactly ONCE' fails in both full pnpm verify runs (1/3 alone); the gesture fires unlikePostAction only; see deferred-items.md | open |  | 2026-10-01T00:21:23.999Z |  |
+| 65 | 7 | unrun-verify | turbo.json |  | 07-11 exit gate: web typecheck (next typegen) races web build on apps/web/.next/types (ENOTEMPTY once); pre-existing pipeline race; see deferred-items.md | open |  | 2026-10-01T00:21:24.073Z |  |
 
 ````json
 [
@@ -100,10 +102,10 @@ last_updated: 2026-09-30T21:03:55.638Z
     "file": "apps/api/src/routes/me.ts",
     "line": null,
     "description": "bootstrap counters are zero until Phase 7 (notifications/chat)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-12T11:47:31.375Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T22:18:12.756Z"
   },
   {
     "id": 3,
@@ -136,10 +138,10 @@ last_updated: 2026-09-30T21:03:55.638Z
     "file": "packages/core/db/schema/chat-stubs.ts",
     "line": null,
     "description": "Chat stub tables have no triggers, Realtime wiring or routes — intentional shape-only Foundation deliverable, resolved by Phase 7",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-12T21:16:10.084Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T22:18:14.376Z"
   },
   {
     "id": 6,
@@ -148,10 +150,10 @@ last_updated: 2026-09-30T21:03:55.638Z
     "file": "packages/core/db/schema/notification-stubs.ts",
     "line": null,
     "description": "notifications stub has no producer or fan-out worker — resolved by Phase 7",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-12T21:16:10.151Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T22:18:15.848Z"
   },
   {
     "id": 7,
@@ -196,10 +198,10 @@ last_updated: 2026-09-30T21:03:55.638Z
     "file": "apps/web/app/(app)/configuracoes/page.tsx",
     "line": null,
     "description": "Settings rows 'Editar perfil' and 'Notificações' are static placeholders with an 'Em breve' pill (D-42); Phase 3 wires profile edit, Phase 7 wires push",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-16T23:53:19.085Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T22:18:17.676Z"
   },
   {
     "id": 11,
@@ -748,10 +750,10 @@ last_updated: 2026-09-30T21:03:55.638Z
     "file": "apps/web/lib/notifications-view.ts",
     "line": 61,
     "description": "Unknown notification kinds are filtered out instead of the generic row (07-04 replaces)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-30T13:22:38.605Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T22:18:19.470Z"
   },
   {
     "id": 57,
@@ -772,10 +774,10 @@ last_updated: 2026-09-30T21:03:55.638Z
     "file": "packages/modules/notifications/server/channels/registry.ts",
     "line": null,
     "description": "push channel unregistered; intents log notifications.channel_unavailable (07-06 registers it)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-30T13:22:38.756Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T22:18:21.624Z"
   },
   {
     "id": 59,
@@ -796,10 +798,10 @@ last_updated: 2026-09-30T21:03:55.638Z
     "file": "apps/api/tests/integration/signup.test.ts",
     "line": 142,
     "description": "signup case 2 hardcodes rede-demo.localhost; 404 against the env's tria-demo host (pre-existing, recorded by 07-01)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-30T13:22:38.902Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T23:28:25.028Z"
   },
   {
     "id": 61,
@@ -808,10 +810,10 @@ last_updated: 2026-09-30T21:03:55.638Z
     "file": "apps/web/e2e/events.spec.ts",
     "line": 422,
     "description": "07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still tria-* (pre-existing, same cause as #59/#60)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-30T17:54:09.150Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-30T23:28:25.108Z"
   },
   {
     "id": 62,
@@ -836,6 +838,30 @@ last_updated: 2026-09-30T21:03:55.638Z
     "reason": "",
     "recorded_at": "2026-09-30T20:21:31.933Z",
     "resolved_at": "2026-09-30T21:03:55.638Z"
+  },
+  {
+    "id": 64,
+    "kind": "unrun-verify",
+    "phase": "7",
+    "file": "apps/web/e2e/feed.spec.ts",
+    "line": 321,
+    "description": "07-11 exit gate: desktop 'a double tap on the gallery likes exactly ONCE' fails in both full pnpm verify runs (1/3 alone); the gesture fires unlikePostAction only; see deferred-items.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-01T00:21:23.999Z",
+    "resolved_at": null
+  },
+  {
+    "id": 65,
+    "kind": "unrun-verify",
+    "phase": "7",
+    "file": "turbo.json",
+    "line": null,
+    "description": "07-11 exit gate: web typecheck (next typegen) races web build on apps/web/.next/types (ENOTEMPTY once); pre-existing pipeline race; see deferred-items.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-01T00:21:24.073Z",
+    "resolved_at": null
   }
 ]
 ````

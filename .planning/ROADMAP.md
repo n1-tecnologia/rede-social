@@ -572,7 +572,7 @@ Plans:
   3. Member can open their single support conversation and send text messages; `support_tenant` sees an inbox of member conversations ordered by last activity with unread indicators and can open and reply to any of them; new messages appear in real time on both sides in per-conversation sequence order (catch-up after reconnect loses nothing), and the member sees an unread badge on the chat entry when support replied.
   4. Realtime signals reach only their audience: a browser subscribing to another tenant's user topic, another user's conversation topic or the support inbox without the role is rejected by RLS on `realtime.messages` (covered by the isolation suite); payloads carry ids only and the client refetches through the API; blocking a member drops their Realtime access and push subscriptions.
 
-**Plans**: 10/11 plans executed
+**Plans**: 11/11 plans executed
 
 Plans:
 
@@ -615,7 +615,7 @@ Plans:
 
 **Wave 10**
 
-- [ ] 07-11-PLAN.md — Phase gate: the isolation sweep, `phase7-smoke.spec.ts`, DEPLOY.md release steps (VAPID secrets, Realtime private-only, quota), the real-device test plan (blocked until run), `pnpm verify`
+- [x] 07-11-PLAN.md — Phase gate: the isolation sweep, `phase7-smoke.spec.ts`, DEPLOY.md release steps (VAPID secrets, Realtime private-only, quota), the real-device test plan (blocked until run), `pnpm verify`
 
 **UI hint**: yes
 **Research needed**: Shape and cost of RLS policies on `realtime.messages` (membership join vs claim) and `realtime.send` vs `broadcast_changes` trigger choice; Realtime connection quota sizing on the Free plan; "new post to every member" fan-out strategy (eager rows vs hourly collapse) decided with pilot member count; iOS 16.4+ standalone push gating, Badging API support, push handlers in the Serwist service worker; per-conversation `seq` generation under concurrent inserts and catch-up cursor semantics; private-channel authorization tests for non-participants.
@@ -764,7 +764,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 4. Feed | 10/10 | In Progress|  |
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
-| 7. Notifications, Web Push & Chat | 10/11 | In Progress|  |
+| 7. Notifications, Web Push & Chat | 11/11 | In Progress|  |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |

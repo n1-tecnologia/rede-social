@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 07
 current_phase_name: Notifications, Web Push & Chat
 status: executing
-stopped_at: Completed 07-10-PLAN.md
-last_updated: "2026-09-30T21:06:07.881Z"
+stopped_at: Completed 07-11-PLAN.md
+last_updated: "2026-10-01T00:23:20.751Z"
 last_activity: 2026-09-30
-last_activity_desc: "07-10 complete: staff side of support (InboxRow, shared /suporte layout with SupportSplit (list persisted, one 288px|1fr card from lg), SupportInbox live page-1 refetch through GET /api/chat/inbox on support-inbox signals with keyset load-more, /suporte/[conversationId] staff thread with the profile-link ThreadHeader, staff bubbles, blocked/departed read-only notices and the 409 race, one not-found screen, chat equipe e2e; ledger 63 fixed); CHAT-03/04 stay open until 07-11; next 07-11"
-state_head: 2570b9632b0e17dd87f0ba5e0e1d2b5479c36594
+last_activity_desc: "07-11 complete: phase close. Isolation 'phase 7 sweep' (31/31), phase7-smoke.spec.ts 8/8, DEPLOY.md 'Phase 7 release' (10 user-run steps, Realtime quota), VAPID mounts in deploy-api.yml, apps/api/.env.example, device plan (17 rows, all blocked). pnpm verify not fully green: desktop feed double tap (WINDOWS 64) and the web PLATFORM_HOST env value; next: /gsd-verify-work 7"
+state_head: 140e1eefe8a650138c16fdb108c5feb558e3fb31
 progress:
   total_phases: 16
   completed_phases: 0
-  total_plans: 109
-  completed_plans: 105
+  total_plans: 117
+  completed_plans: 106
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 07 (Notifications, Web Push & Chat) — EXECUTING
-Plan: 10 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half, 07-08 chat server side, 07-09 member support thread, 07-10 staff inbox and thread); next: 07-11. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
-Status: Ready to execute
-Last activity: 2026-09-30 — Completed 07-10 (the staff inbox at /suporte with the live support-inbox refresh and keyset paging, the staff thread at /suporte/[conversationId] with the profile link, read-only notices and the block race, the lg split keeping the list in place; plan-level e2e chat + notifications + push 93 passed, 5 skipped by design)
+Plan: 11 of 11 complete (07-02 sketch 007, 07-01 tracer, 07-03 live bell, 07-04 content kinds, 07-05 event kinds and reminders, 07-06 Web Push server half, 07-07 Web Push browser half, 07-08 chat server side, 07-09 member support thread, 07-10 staff inbox and thread), 07-11 phase close; next: /gsd-verify-work 7. Sketch 007 is approved (provisional, igor.vboas, 2026-09-30), so 07-07 T2, 07-09 T2, 07-10 T1 and T2 are unblocked
+Status: Phase complete — ready for verification
+Last activity: 2026-09-30 — Completed 07-11 (the phase 7 isolation sweep, the phase7-smoke witness, the DEPLOY.md Phase 7 release steps and Realtime quota, the VAPID secret mounts, the real-device test plan blocked until run; pnpm verify 654/656 e2e with the desktop feed double tap open and the web PLATFORM_HOST env value to regenerate)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -165,6 +165,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P08 | 37 min | 3 tasks | 44 files |
 | Phase 07 P09 | 42min | 3 tasks | 53 files |
 | Phase 07 P10 | 39min | 2 tasks | 27 files |
+| Phase 07 P11 | 153min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -538,6 +539,9 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-10: module inbox rows stay plain links; SupportInbox delegates plain left clicks to router.push(href, { scroll: false }) so the list keeps its state and scroll across thread navigations
 - [Phase 07]: 07-10: the inbox refetches page 1 through GET /api/chat/inbox on chat.message/chat.read/resubscribe/refocus and merges it at the top by conversation id; load-more is loadMoreInboxAction by keyset
 - [Phase 07]: 07-10: the conversation not-found screen names the caller's tenant from the bootstrap (host shell only as fallback); a staff reply racing a block restores the draft with the notice, toasts it and router.refresh() swaps in the read-only notice
+- [Phase 07]: 07-11: Phase 7 witness flips notifications/chat on a throwaway tenant, never on a seed tenant (30 s flags cache)
+- [Phase 07]: 07-11: Phase 7 release holds the web back with a staged Vercel promotion so the API (counters.conversationsBadge) ships first
+- [Phase 07]: 07-11: pre-push check requires notifications and chat_messages empty in production (NOT NULL columns without default)
 
 ### Pending Todos
 
@@ -555,6 +559,7 @@ None yet.
 - [Phase 5]: `.planning/REQUIREMENTS.md` traceability still shows 16 "Gaps Found" rows (05-SECURITY.md R-5) — documentation lag to clear.
 - [Phase 05.2]: Closed partial on 2026-09-26 by user decision (same as Phases 2-4), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, iPhone Safari + Android Chrome, steps 1-6) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.2`. VERIFICATION.md is stale because quick 260926-d8f changed covered code, so re-run the verifier then instead of re-attesting. Review items still open: WR-02, WR-05, WR-06 (partly covered by 05.2-30..34), IN-01..04, `h-[68px]` in StoriesStrip.
 - [Phase 05.3]: Closed partial on 2026-09-27 by user decision (same as 05.2), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, WINDOWS #48-#51, plus WR-06 on real Mux) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.3`. VERIFICATION.md is stale because quick 260927-ebk changed covered code, so re-run the verifier then instead of re-attesting. REELS-06 stays Pending until that run. Review items still open: IN-01..07; UI-REVIEW minor: the `right-[3px]` tick offset in ReelsPager.
+- Phase 7 local gate: desktop feed.spec double tap fails in the full suite (WINDOWS 64, route to gsd-debug); the web local env file must set PLATFORM_HOST to rede-social.localhost (34 platform e2e cases fail otherwise)
 
 ### Quick Tasks Completed
 
@@ -608,6 +613,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-30T21:05:59.029Z
-Stopped at: Completed 07-10-PLAN.md
+Last session: 2026-10-01T00:23:20.640Z
+Stopped at: Completed 07-11-PLAN.md
 Resume file: None

@@ -103,24 +103,24 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [x] **EVENT-04**: Member can check in to an event on the day, within a time window around the event start; check-in without prior RSVP counts as a walk-in
 - [x] **EVENT-05**: `admin_tenant` can see the attendance list per event with confirmed vs checked-in status
 - [x] **EVENT-06**: Member can add an event to their calendar (.ics download and Google Calendar link)
-- [ ] **EVENT-07**: Members who confirmed receive reminder notifications before the event (24 h and 1 h) through the notification module, via a scheduled job
+- [x] **EVENT-07**: Members who confirmed receive reminder notifications before the event (24 h and 1 h) through the notification module, via a scheduled job
 
 ### Chat (member ↔ support)
 
-- [ ] **CHAT-01**: Chat is modeled as generic conversations with participants and messages (with a per-conversation sequence for ordering), so V2 member-to-member chat needs no schema change
-- [ ] **CHAT-02**: Member can open their single support conversation and send text messages; `support_tenant` users of the tenant receive and answer them
-- [ ] **CHAT-03**: `support_tenant` sees a list of member conversations ordered by last activity with unread indicators and can open and reply to any of them
-- [ ] **CHAT-04**: New messages are delivered in real time to open conversations (Supabase Realtime Broadcast on private channels; the browser only receives signals and fetches data through the API)
-- [ ] **CHAT-05**: Member sees an unread badge on the chat entry when support replied
+- [x] **CHAT-01**: Chat is modeled as generic conversations with participants and messages (with a per-conversation sequence for ordering), so V2 member-to-member chat needs no schema change
+- [x] **CHAT-02**: Member can open their single support conversation and send text messages; `support_tenant` users of the tenant receive and answer them
+- [x] **CHAT-03**: `support_tenant` sees a list of member conversations ordered by last activity with unread indicators and can open and reply to any of them
+- [x] **CHAT-04**: New messages are delivered in real time to open conversations (Supabase Realtime Broadcast on private channels; the browser only receives signals and fetches data through the API)
+- [x] **CHAT-05**: Member sees an unread badge on the chat entry when support replied
 - [ ] **CHAT-06**: With the `social` module on, a member can send direct 1:1 messages to any other member of the same tenant (no follow required) from their profile, on the same conversation schema (`kind = 'direct'`); promoted from V2-CHAT-01 on 2026-09-25
 - [ ] **CHAT-07**: With the `social` module on, a member can block and unblock another member (no messages, no follow, no message button), distinct from the admin's tenant-level block
 
 ### Notifications
 
-- [ ] **NOTIF-01**: A notification module records in-app notifications for: likes on the member's comments, comments/replies on the member's comments, new posts, new events and event reminders, support replies; all produced from domain events
+- [x] **NOTIF-01**: A notification module records in-app notifications for: likes on the member's comments, comments/replies on the member's comments, new posts, new events and event reminders, support replies; all produced from domain events
 - [x] **NOTIF-02**: Member has a notification center (bell) with unread count, list of notifications, and mark-as-read; the unread count updates in real time
-- [ ] **NOTIF-03**: Member can enable Web Push in the installed PWA; push messages carry the tenant's name and icon and open the relevant screen; expired subscriptions are cleaned up
-- [ ] **NOTIF-04**: The notification module has a channel abstraction (in-app, push) so e-mail/WhatsApp can be added later as adapters
+- [x] **NOTIF-03**: Member can enable Web Push in the installed PWA; push messages carry the tenant's name and icon and open the relevant screen; expired subscriptions are cleaned up
+- [x] **NOTIF-04**: The notification module has a channel abstraction (in-app, push) so e-mail/WhatsApp can be added later as adapters
 
 ### Moderation
 
@@ -154,7 +154,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 ### PWA & Platform
 
 - [ ] **PWA-01**: The app is mobile-first and responsive on desktop, installable as a PWA (manifest + service worker), and works in standalone mode
-- [ ] **PWA-02**: On iOS, users are shown a short "Adicionar à Tela de Início" hint before push can be enabled, since Web Push on iOS requires installation
+- [x] **PWA-02**: On iOS, users are shown a short "Adicionar à Tela de Início" hint before push can be enabled, since Web Push on iOS requires installation
 - [x] **PWA-03**: All UI text is pt-BR and centralized in a message catalog for future i18n
 - [ ] **PWA-04**: GitHub is the source of truth: pushes deploy the Next.js app to Vercel and the API/worker to Cloud Run automatically, with separate preview/staging and production environments
 
@@ -294,18 +294,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EVENT-04 | Phase 6 | Complete |
 | EVENT-05 | Phase 6 | Complete |
 | EVENT-06 | Phase 6 | Complete |
-| EVENT-07 | Phase 7 | Pending |
-| CHAT-01 | Phase 7 | Pending |
-| CHAT-02 | Phase 7 | Pending |
-| CHAT-03 | Phase 7 | Pending |
-| CHAT-04 | Phase 7 | Pending |
-| CHAT-05 | Phase 7 | Pending |
+| EVENT-07 | Phase 7 | Complete |
+| CHAT-01 | Phase 7 | Complete |
+| CHAT-02 | Phase 7 | Complete |
+| CHAT-03 | Phase 7 | Complete |
+| CHAT-04 | Phase 7 | Complete |
+| CHAT-05 | Phase 7 | Complete |
 | CHAT-06 | Phase 11 | Pending |
 | CHAT-07 | Phase 11 | Pending |
-| NOTIF-01 | Phase 7 | Pending |
+| NOTIF-01 | Phase 7 | Complete |
 | NOTIF-02 | Phase 7 | Complete |
-| NOTIF-03 | Phase 7 | Pending |
-| NOTIF-04 | Phase 7 | Pending |
+| NOTIF-03 | Phase 7 | Complete |
+| NOTIF-04 | Phase 7 | Complete |
 | MODER-01 | Phase 8 | Pending |
 | MODER-02 | Phase 8 | Pending |
 | MODER-03 | Phase 8 | Pending |
@@ -324,7 +324,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-03 | Phase 2 | Gaps Found |
 | UI-04 | Phase 2 | Gaps Found |
 | PWA-01 | Phase 2 | Gaps Found |
-| PWA-02 | Phase 7 | Pending |
+| PWA-02 | Phase 7 | Complete |
 | PWA-03 | Phase 2 | Complete |
 | PWA-04 | Phase 01.1 | Pending |
 
