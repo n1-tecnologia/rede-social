@@ -13,11 +13,16 @@ import { z } from 'zod';
  * renders the unsupported state instead of failing the build. It is the public half of the worker's
  * VAPID pair (production: the value of `vapid-public-key-prod`, DEPLOY.md); the private half never
  * reaches the web.
+ *
+ * `CSP_MODE` (08-08, D-346) picks the Content Security Policy header `proxy.ts` sends:
+ * `report-only` (the default when unset, how production ships first) or `enforce` (the e2e harness,
+ * and production after the 08-12 real-device pass). Server-only: the browser never needs it.
  */
 export const env = createEnv({
   server: {
     API_URL: z.url(),
     PLATFORM_HOST: z.string().min(1).optional(),
+    CSP_MODE: z.enum(['report-only', 'enforce']).default('report-only'),
   },
   client: {
     NEXT_PUBLIC_SUPABASE_URL: z.url(),
@@ -27,6 +32,7 @@ export const env = createEnv({
   runtimeEnv: {
     API_URL: process.env.API_URL,
     PLATFORM_HOST: process.env.PLATFORM_HOST,
+    CSP_MODE: process.env.CSP_MODE,
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     NEXT_PUBLIC_VAPID_PUBLIC_KEY: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,

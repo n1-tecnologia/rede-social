@@ -2,6 +2,7 @@ import { isRegistrableHost, normalizeHost } from '@rede-social/contracts';
 import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 import { CONTINUE_COOKIE, CONTINUE_MAX_AGE_S, isContinuablePath } from '@/lib/continue-path';
+import { CSP_REPORT_PATH, cspFor, cspHeaderName, NONCE_HEADER, newNonce } from '@/lib/csp';
 import { env } from '@/lib/env';
 import { sessionCookieOptions } from '@/lib/supabase/cookie-options';
 import {
@@ -37,9 +38,40 @@ const PUBLIC = [
   /^\/m\/[a-z0-9_-]+\/manifest\.webmanifest$/, // underscore admits the reserved neutral manifest slug (02-11)
   /^\/serwist\//,
   /^\/~offline(?:\/|$)/,
+  // 08-08: browsers POST CSP violation reports without a session too (the sign-in page has one).
+  /^\/api\/csp-report$/,
 ];
 
 const TENANT_SLUG_COOKIE = 'tenant_slug';
+
+/**
+ * The per-request Content Security Policy (D-346, `lib/csp.ts`): computed ONCE per request and then
+ * threaded through every helper that builds a request-header set or a response, so no branch of this
+ * proxy can return without it (Pitfall 10: the session-refresh rebuild, the `/cadastro` rewrite, the
+ * 307/308 redirects and the `/serwist/sw.js` response, whose policy becomes the worker's own).
+ */
+interface Csp {
+  nonce: string;
+  header: string;
+  policy: string;
+}
+
+function cspForRequest(request: NextRequest): Csp {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const https = forwardedProto ? forwardedProto === 'https' : request.nextUrl.protocol === 'https:';
+  const nonce = newNonce();
+  return {
+    nonce,
+    header: cspHeaderName(env.CSP_MODE),
+    policy: cspFor(nonce, { https, mode: env.CSP_MODE, reportUri: CSP_REPORT_PATH }),
+  };
+}
+
+/** Sets the policy on a response this proxy returns. */
+function withCsp<T extends NextResponse>(response: T, csp: Csp): T {
+  response.headers.set(csp.header, csp.policy);
+  return response;
+}
 const ONE_YEAR_S = 31536000;
 
 /**
@@ -48,8 +80,16 @@ const ONE_YEAR_S = 31536000;
  * must never be able to claim a mode). Rebuilt after cookie refreshes so the forwarded `cookie` header
  * carries the rotated session.
  */
-function buildRequestHeaders(request: NextRequest, hostTenant: HostTenant): Headers {
+function buildRequestHeaders(request: NextRequest, hostTenant: HostTenant, csp: Csp): Headers {
   const h = new Headers(request.headers);
+  // Next reads the nonce from the REQUEST's CSP header during SSR and stamps its framework scripts;
+  // `x-nonce` hands it to any server component that renders its own <script>. Both are overwritten,
+  // never trusted from the client. The client's copy of the other header name is dropped so the one
+  // Next reads is always this request's.
+  h.delete('content-security-policy');
+  h.delete('content-security-policy-report-only');
+  h.set(NONCE_HEADER, csp.nonce);
+  h.set(csp.header, csp.policy);
   h.set(TENANT_MODE_HEADER, hostTenant.mode);
   h.set(TENANT_HOST_REQUEST_HEADER, hostTenant.host);
   h.set(TENANT_SLUG_HEADER, hostTenant.mode === 'tenant' ? hostTenant.slug : '');
@@ -77,6 +117,7 @@ function primaryHostRedirect(
   request: NextRequest,
   hostTenant: HostTenant,
   browserHost: string | null | undefined,
+  csp: Csp,
 ): NextResponse | null {
   if (hostTenant.mode !== 'tenant' || hostTenant.isPrimary) return null;
   const target = normalizeHost(hostTenant.primaryHost);
@@ -95,13 +136,16 @@ function primaryHostRedirect(
     308,
   );
   response.headers.set('Cache-Control', 'no-store');
-  return response;
+  return withCsp(response, csp);
 }
 
-/** Refreshed session cookies must survive when a rewrite/redirect replaces the Supabase response. */
-function withCookies(target: NextResponse, source: NextResponse): NextResponse {
+/**
+ * Refreshed session cookies must survive when a rewrite/redirect replaces the Supabase response, and
+ * so must the policy.
+ */
+function withCookies(target: NextResponse, source: NextResponse, csp: Csp): NextResponse {
   for (const cookie of source.cookies.getAll()) target.cookies.set(cookie);
-  return target;
+  return withCsp(target, csp);
 }
 
 export async function proxy(request: NextRequest) {
@@ -119,12 +163,13 @@ export async function proxy(request: NextRequest) {
   const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
   const browserHost = forwardedHost || request.headers.get('host');
   const hostTenant = await resolveHostTenant(browserHost);
+  const csp = cspForRequest(request);
 
   // D-35: an alias host answers 308 to the tenant's primary origin (still before the Supabase client).
-  const toPrimary = primaryHostRedirect(request, hostTenant, browserHost);
+  const toPrimary = primaryHostRedirect(request, hostTenant, browserHost, csp);
   if (toPrimary) return toPrimary;
 
-  let requestHeaders = buildRequestHeaders(request, hostTenant);
+  let requestHeaders = buildRequestHeaders(request, hostTenant, csp);
 
   // Vercel Production only (01-11 sets PLATFORM_HOST there, never on Preview): the deployment alias
   // must not serve the generic shell, so it 307s to the platform host with path + query preserved.
@@ -133,14 +178,17 @@ export async function proxy(request: NextRequest) {
     hostTenant.host.endsWith('.vercel.app') &&
     env.PLATFORM_HOST
   ) {
-    return NextResponse.redirect(
-      new URL(request.nextUrl.pathname + request.nextUrl.search, `https://${env.PLATFORM_HOST}`),
-      307,
+    return withCsp(
+      NextResponse.redirect(
+        new URL(request.nextUrl.pathname + request.nextUrl.search, `https://${env.PLATFORM_HOST}`),
+        307,
+      ),
+      csp,
     );
   }
 
   // 2. Session refresh (RESEARCH §Pattern 5, official @supabase/ssr shape).
-  let response = NextResponse.next({ request: { headers: requestHeaders } });
+  let response = withCsp(NextResponse.next({ request: { headers: requestHeaders } }), csp);
   const supabase = createServerClient(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
@@ -150,8 +198,8 @@ export async function proxy(request: NextRequest) {
         getAll: () => request.cookies.getAll(),
         setAll(cookiesToSet, headers) {
           for (const { name, value } of cookiesToSet) request.cookies.set(name, value);
-          requestHeaders = buildRequestHeaders(request, hostTenant);
-          response = NextResponse.next({ request: { headers: requestHeaders } });
+          requestHeaders = buildRequestHeaders(request, hostTenant, csp);
+          response = withCsp(NextResponse.next({ request: { headers: requestHeaders } }), csp);
           for (const { name, value, options } of cookiesToSet) {
             response.cookies.set(name, value, options);
           }
@@ -176,13 +224,14 @@ export async function proxy(request: NextRequest) {
       return withCookies(
         NextResponse.rewrite(target, { request: { headers: requestHeaders } }),
         response,
+        csp,
       );
     }
     if (path.startsWith('/cadastro/')) {
       // The host decides the slug; a foreign slug in the path is ignored. 308 keeps method and body.
       const target = url.clone();
       target.pathname = '/cadastro';
-      return withCookies(NextResponse.redirect(target, 308), response);
+      return withCookies(NextResponse.redirect(target, 308), response, csp);
     }
   } else if (hostTenant.mode === 'platform') {
     if (path === '/cadastro' || path.startsWith('/cadastro/')) {
@@ -190,7 +239,7 @@ export async function proxy(request: NextRequest) {
       const target = url.clone();
       target.pathname = '/entrar';
       target.search = '';
-      return withCookies(NextResponse.redirect(target, 307), response);
+      return withCookies(NextResponse.redirect(target, 307), response, csp);
     }
   } else {
     // generic host: remember the slug for /entrar (D-06 as amended by D-22). Server-side only.
@@ -222,12 +271,17 @@ export async function proxy(request: NextRequest) {
         httpOnly: true,
       });
     }
-    return withCookies(NextResponse.redirect(target), response);
+    return withCookies(NextResponse.redirect(target), response, csp);
   }
 
+  // `response` is the initial one or the one `setAll` rebuilt; both went through `withCsp`.
   return response;
 }
 
+/**
+ * The matcher excludes only static assets by extension; `/serwist/sw.js` (a `.js` path) stays inside
+ * the proxy on purpose, so the service worker script carries the same policy (Pitfall 10).
+ */
 export const config = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',

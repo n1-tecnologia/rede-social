@@ -17,9 +17,34 @@ vi.mock('@/lib/env', () => ({
   },
 }));
 
+/**
+ * `refresh.on` (08-08) makes `getClaims()` behave like an expired access token being refreshed: it
+ * calls `setAll` (which rebuilds the request headers and the response) and reports a session.
+ */
+const refresh = vi.hoisted(() => ({ on: false }));
+
 vi.mock('@supabase/ssr', () => ({
-  createServerClient: () => ({
-    auth: { getClaims: async () => ({ data: { claims: null } }) },
+  createServerClient: (
+    _url: string,
+    _key: string,
+    options: {
+      cookies: {
+        setAll: (
+          cookies: { name: string; value: string; options: object }[],
+          headers: Record<string, string>,
+        ) => void;
+      };
+    },
+  ) => ({
+    auth: {
+      getClaims: async () => {
+        if (!refresh.on) return { data: { claims: null } };
+        options.cookies.setAll([{ name: 'sb-test-auth-token', value: 'rotated', options: {} }], {
+          'Cache-Control': 'private, no-cache, no-store, must-revalidate, max-age=0',
+        });
+        return { data: { claims: { sub: 'user-1' } } };
+      },
+    },
   }),
 }));
 
@@ -202,5 +227,120 @@ describe('proxy.ts — PWA PUBLIC entries (02-11, T-02-77)', () => {
     );
     expect(upper.status).toBe(307);
     expect(upper.headers.get('location')).toBe('http://primary.example/entrar');
+  });
+});
+
+describe('proxy.ts — the Content Security Policy rides every branch (08-08, Pitfall 10)', () => {
+  const CSP = 'content-security-policy-report-only'; // the env mock leaves CSP_MODE unset
+  const nonceOf = (policy: string | null) => policy?.match(/'nonce-([^']+)'/)?.[1];
+
+  beforeEach(() => {
+    resolve.mockReset();
+    refresh.on = false;
+  });
+
+  it('12. a served page carries the policy on the response and the same nonce on the forwarded request', async () => {
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+    const res = await proxy(request('http://primary.example/entrar', { host: 'primary.example' }));
+    const policy = res.headers.get(CSP);
+    expect(policy).toContain("frame-ancestors 'none'");
+    expect(policy).toContain('report-uri /api/csp-report');
+    expect(policy).not.toContain('upgrade-insecure-requests');
+    const nonce = nonceOf(policy);
+    expect(nonce).toBeTruthy();
+    expect(res.headers.get('x-middleware-request-x-nonce')).toBe(nonce);
+    expect(res.headers.get(`x-middleware-request-${CSP}`)).toBe(policy);
+  });
+
+  it('13. a client cannot pick the nonce: the forwarded headers are overwritten, and each request mints its own', async () => {
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+    const forged = await proxy(
+      request('http://primary.example/entrar', {
+        host: 'primary.example',
+        'x-nonce': 'forged',
+        'content-security-policy': "script-src 'nonce-forged'",
+      }),
+    );
+    expect(forged.headers.get('x-middleware-request-x-nonce')).not.toBe('forged');
+    expect(forged.headers.get('x-middleware-request-content-security-policy')).toBeNull();
+    const again = await proxy(
+      request('http://primary.example/entrar', { host: 'primary.example' }),
+    );
+    expect(nonceOf(again.headers.get(CSP))).not.toBe(nonceOf(forged.headers.get(CSP)));
+  });
+
+  it('14. the 308 alias redirect, the 307 sign-in redirect and the /cadastro rewrite and redirect carry it', async () => {
+    resolve.mockResolvedValue(tenant('alias.example', false, 'primary.example'));
+    const alias = await proxy(request('http://alias.example/entrar', { host: 'alias.example' }));
+    expect(alias.status).toBe(308);
+    expect(alias.headers.get(CSP)).toContain("frame-ancestors 'none'");
+
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+    const signIn = await proxy(
+      request('http://primary.example/inicio', { host: 'primary.example' }),
+    );
+    expect(signIn.status).toBe(307);
+    expect(signIn.headers.get(CSP)).toContain("frame-ancestors 'none'");
+
+    const rewrite = await proxy(
+      request('http://primary.example/cadastro', { host: 'primary.example' }),
+    );
+    expect(rewrite.headers.get('x-middleware-rewrite')).toContain('/cadastro/acme');
+    expect(rewrite.headers.get(CSP)).toContain("frame-ancestors 'none'");
+    expect(rewrite.headers.get('x-middleware-request-x-nonce')).toBe(
+      nonceOf(rewrite.headers.get(CSP)),
+    );
+
+    const foreign = await proxy(
+      request('http://primary.example/cadastro/other', { host: 'primary.example' }),
+    );
+    expect(foreign.status).toBe(308);
+    expect(foreign.headers.get(CSP)).toContain("frame-ancestors 'none'");
+  });
+
+  it('15. the platform host sign-up redirect and the Vercel deployment-alias 307 carry it', async () => {
+    resolve.mockResolvedValue({ mode: 'platform', host: 'rede-social.test' });
+    const platform = await proxy(
+      request('http://rede-social.test/cadastro', { host: 'rede-social.test' }),
+    );
+    expect(platform.status).toBe(307);
+    expect(platform.headers.get(CSP)).toContain("frame-ancestors 'none'");
+
+    resolve.mockResolvedValue({ mode: 'generic', host: 'x.vercel.app' });
+    const deployment = await proxy(
+      request('https://x.vercel.app/entrar', {
+        host: 'x.vercel.app',
+        'x-forwarded-proto': 'https',
+      }),
+    );
+    expect(deployment.status).toBe(307);
+    expect(deployment.headers.get(CSP)).toContain('upgrade-insecure-requests');
+  });
+
+  it('16. the session-refresh branch rebuilds the response and the forwarded headers with the policy intact', async () => {
+    refresh.on = true;
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+    const res = await proxy(request('http://primary.example/inicio', { host: 'primary.example' }));
+    expect(res.status).toBe(200);
+    expect(res.cookies.get('sb-test-auth-token')?.value).toBe('rotated');
+    const policy = res.headers.get(CSP);
+    expect(policy).toContain("frame-ancestors 'none'");
+    expect(res.headers.get('x-middleware-request-x-nonce')).toBe(nonceOf(policy));
+    expect(res.headers.get(`x-middleware-request-${CSP}`)).toBe(policy);
+  });
+
+  it('17. the service worker script and the CSP report sink pass through with the policy, no session needed', async () => {
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+    for (const [path, method] of [
+      ['/serwist/sw.js', 'GET'],
+      ['/api/csp-report', 'POST'],
+    ] as const) {
+      const res = await proxy(
+        request(`http://primary.example${path}`, { host: 'primary.example' }, method),
+      );
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get('location'), path).toBeNull();
+      expect(res.headers.get(CSP), path).toContain("worker-src 'self' blob:");
+    }
   });
 });

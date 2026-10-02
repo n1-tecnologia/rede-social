@@ -49,6 +49,15 @@ if (exportedPlatformHost === undefined) {
 }
 
 /**
+ * CSP_MODE for the web servers this run launches (08-08, D-346): every spec, in both this config and
+ * the production-build PWA config that imports it, runs under the ENFORCED Content Security Policy,
+ * so a script, frame or connection the policy would block fails the suite instead of only producing
+ * a report. Production ships `report-only` first (DEPLOY.md). An exported value still wins.
+ * `reuseExistingServer` means a web server you started yourself keeps whatever mode it was given.
+ */
+process.env.CSP_MODE ??= 'enforce';
+
+/**
  * `baseURL` is the rede-demo TENANT host (D-20). Chromium resolves every `*.localhost` name to loopback
  * (RFC 6761), so no `/etc/hosts` entry is needed and the two seed tenants plus the platform host are
  * distinct origins with separate cookies. Readiness is probed on plain `localhost` (a generic host that

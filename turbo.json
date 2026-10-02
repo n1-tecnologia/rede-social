@@ -8,7 +8,7 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
-      "env": ["NEXT_PUBLIC_*", "API_URL", "DATABASE_URL", "SUPABASE_*"]
+      "env": ["NEXT_PUBLIC_*", "API_URL", "DATABASE_URL", "SUPABASE_*", "CSP_MODE"]
     },
     "typecheck": {
       "dependsOn": ["^build"]
@@ -38,7 +38,8 @@
         "SUPABASE_*",
         "SEED_PASSWORD",
         "TENANT_*",
-        "PLATFORM_HOST"
+        "PLATFORM_HOST",
+        "CSP_MODE"
       ]
     }
   },
