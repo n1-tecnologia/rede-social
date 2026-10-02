@@ -1,5 +1,6 @@
 'use client';
 
+import type { TenantRole } from '@rede-social/contracts';
 import { type AdminMember, MODERATION_REASON_MAX } from '@rede-social/contracts/moderation';
 import { BottomSheet, Button, Textarea, useMediaQuery } from '@rede-social/ui';
 import { Ban, LockOpen } from 'lucide-react';
@@ -7,8 +8,9 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useEffect, useRef, useState, useTransition } from 'react';
 import { MemberAvatar, MemberPills, memberName } from './AdminMemberRow';
+import { RoleOptionList, type RoleRefusal } from './RoleOptionList';
 
-/** The answer of a block or unblock server action, as the sheet reads it. */
+/** The answer of a block, unblock or role-change server action, as the sheet reads it. */
 export type MemberAccessOutcome =
   | { ok: true; member: AdminMember }
   | {
@@ -19,6 +21,8 @@ export type MemberAccessOutcome =
 /** What the sheet hands back to its host once an access change is over. */
 export type MemberSheetSettled =
   | { kind: 'changed'; member: AdminMember; change: 'block' | 'unblock' }
+  /** A role change succeeded: the host updates the row and toasts, and the sheet STAYS open. */
+  | { kind: 'role'; member: AdminMember }
   | { kind: 'gone'; membershipId: string }
   | { kind: 'forbidden' };
 
@@ -32,6 +36,8 @@ export interface MemberAdminSheetProps {
   tenantName: string;
   /** `moderation.manage`: the access action. Without it the sheet shows no action (UI E04/partial). */
   canModerate: boolean;
+  /** `members.manage`: the role list (08-05). Without it, or without `onRole`, there is none. */
+  canManageMembers?: boolean;
   /** Opened from the profile page there is no "Ver perfil" (UI-D-275). */
   showViewProfile?: boolean;
   /** The server action. The sheet never decides a guard; it only explains a refusal. */
@@ -40,6 +46,8 @@ export interface MemberAdminSheetProps {
     kind: 'block' | 'unblock',
     reason: string | undefined,
   ) => Promise<MemberAccessOutcome>;
+  /** The role-change server action (08-05). The sheet never decides a guard either. */
+  onRole?: (membershipId: string, role: TenantRole) => Promise<MemberAccessOutcome>;
   /** Success, a vanished member (404) or a lost permission (403): the HOST closes, toasts, refreshes. */
   onSettled: (outcome: MemberSheetSettled) => void;
 }
@@ -71,7 +79,12 @@ function focusTitleOf(anchor: HTMLElement | null) {
  * - **Main step.** The identity block (56px avatar, e-mail, pills); for `moderation.manage` holders
  *   the access action: danger "Bloquear acesso" on an active membership, brand "Desbloquear acesso"
  *   on a blocked one; on an active membership the outline "Ver perfil" link. An INVITED membership
- *   shows the identity block and one paragraph, nothing else (A7). The role list joins in 08-05.
+ *   shows the identity block and one paragraph, nothing else (A7).
+ * - **Role list** (08-05, UI-D-273), for `members.manage` holders, above the access action: the
+ *   `RoleOptionList` with its confirm; disabled with the helper on a blocked membership. A success
+ *   goes to the host as `{ kind: 'role' }` and the sheet STAYS open on the new role and pill; a
+ *   refusal is explained inline under the list; a vanished member or a lost permission settles like
+ *   an access change.
  * - **Confirm step** (the `HighlightEditSheet` pattern: the content SWAPS, no second sheet is
  *   stacked). Title "Bloquear {name}?" / "Desbloquear {name}?", the effect body (D-330: comments stay
  *   visible), the optional INTERNAL reason (D-331: "{name} não vê o motivo"), "Voltar" and the
@@ -89,8 +102,10 @@ export function MemberAdminSheet({
   onClose,
   tenantName,
   canModerate,
+  canManageMembers = false,
   showViewProfile = true,
   onAccess,
+  onRole,
   onSettled,
 }: MemberAdminSheetProps) {
   const t = useTranslations('admin.members');
@@ -166,6 +181,24 @@ export function MemberAdminSheet({
       }
       setRefusal(outcome.code);
     });
+  };
+
+  const changeRole = async (role: TenantRole): Promise<RoleRefusal | null> => {
+    if (!onRole) return 'generic';
+    const outcome = await onRole(member.membershipId, role);
+    if (outcome.ok) {
+      onSettled({ kind: 'role', member: outcome.member });
+      return null;
+    }
+    if (outcome.code === 'gone') {
+      onSettled({ kind: 'gone', membershipId: member.membershipId });
+      return null;
+    }
+    if (outcome.code === 'forbidden') {
+      onSettled({ kind: 'forbidden' });
+      return null;
+    }
+    return outcome.code;
   };
 
   const back = () => {
@@ -265,6 +298,17 @@ export function MemberAdminSheet({
           </p>
         ) : (
           <div className="flex flex-col gap-3">
+            {canManageMembers && onRole ? (
+              <div className="mb-3">
+                <RoleOptionList
+                  value={member.role}
+                  name={name}
+                  tenantName={tenantName}
+                  disabled={member.status === 'blocked'}
+                  onChange={changeRole}
+                />
+              </div>
+            ) : null}
             {canModerate ? (
               <Button
                 data-member-sheet-action={kind}

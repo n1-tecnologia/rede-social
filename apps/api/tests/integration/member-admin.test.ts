@@ -858,3 +858,99 @@ describe('block concurrency', () => {
     }
   });
 });
+
+/* ── 08-05: the role change ──────────────────────────────────────────────────────────────────── */
+
+const setRole = (token: string, membershipId: string, body: unknown, host?: string) =>
+  request(`/v1/admin/members/${membershipId}/role`, token, { method: 'PUT', body, host });
+
+type RoleLogRow = { details: { from: string; to: string } | null; actor_membership_id: string };
+/** Every `role_changed` row aimed at one membership, oldest first, with its details. */
+async function roleRows(membershipId: string): Promise<RoleLogRow[]> {
+  return adminSql<RoleLogRow[]>`
+    select details, actor_membership_id::text
+      from public.moderation_log
+     where target_membership_id = ${membershipId}::uuid and action = 'role_changed'
+     order by created_at, id`;
+}
+
+async function roleOf(membershipId: string): Promise<string | undefined> {
+  const [row] = await adminSql<{ role: string }[]>`
+    select role from public.memberships where id = ${membershipId}::uuid`;
+  return row?.role;
+}
+
+/** Leaves the seeded demo member a plain `member` whatever a role case did. */
+async function restoreDemoMemberRole(): Promise<void> {
+  if (!people.member.membership) return;
+  await adminSql`
+    update public.memberships set role = 'member' where id = ${people.member.membership}::uuid`;
+}
+
+/**
+ * ADMIN-02 tracer (D-332): the demo admin promotes `member@rede-demo.local` to admin through
+ * `PUT /v1/admin/members/{id}/role`; ONE `role_changed` row with `{ from, to }` exists, and the
+ * member's very next bootstrap — the SAME token, no refresh — carries `moderation.manage` (membership
+ * is resolved per request). Then the admin demotes them back, which is a second row and takes the
+ * permission away on the next request too.
+ */
+describe('role tracer', () => {
+  afterAll(restoreDemoMemberRole);
+
+  it('the admin promotes the member: 200, one role_changed row, the next bootstrap carries the admin permissions', async () => {
+    const before = (await roleRows(people.member.membership)).length;
+    const pre = await request('/v1/me/bootstrap', tokens.member);
+    expect(pre.status).toBe(200);
+    expect(((await pre.json()) as { permissions: string[] }).permissions).not.toContain(
+      'moderation.manage',
+    );
+
+    const res = await setRole(tokens.admin, people.member.membership, { role: 'admin_tenant' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect((await res.json()) as AdminMember).toMatchObject({
+      membershipId: people.member.membership,
+      role: 'admin_tenant',
+      status: 'active',
+      isViewer: false,
+    });
+    expect(await roleOf(people.member.membership)).toBe('admin_tenant');
+
+    const rows = await roleRows(people.member.membership);
+    expect(rows).toHaveLength(before + 1);
+    expect(rows[rows.length - 1]).toEqual({
+      details: { from: 'member', to: 'admin_tenant' },
+      actor_membership_id: people.admin.membership,
+    });
+
+    // D-332: the member's very next request, on the token minted BEFORE the change.
+    const next = await request('/v1/me/bootstrap', tokens.member);
+    expect(next.status).toBe(200);
+    const permissions = ((await next.json()) as { permissions: string[] }).permissions;
+    expect(permissions).toEqual(expect.arrayContaining(['moderation.manage', 'members.manage']));
+    expect(permissions).toEqual(expect.arrayContaining(['tenant.manage']));
+    // …and the admin list now answers them.
+    expect((await request('/v1/admin/members', tokens.member)).status).toBe(200);
+  });
+
+  it('the admin demotes them back: a second row, and the next request has lost the permissions', async () => {
+    const before = (await roleRows(people.member.membership)).length;
+    const res = await setRole(tokens.admin, people.member.membership, { role: 'member' });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as AdminMember).role).toBe('member');
+
+    const rows = await roleRows(people.member.membership);
+    expect(rows).toHaveLength(before + 1);
+    expect(rows[rows.length - 1]?.details).toEqual({ from: 'admin_tenant', to: 'member' });
+
+    const next = await request('/v1/me/bootstrap', tokens.member);
+    expect(next.status).toBe(200);
+    const permissions = ((await next.json()) as { permissions: string[] }).permissions;
+    expect(permissions).not.toContain('moderation.manage');
+    expect(permissions).not.toContain('members.manage');
+    // T-08-29: a demoted admin's next admin call is refused.
+    const list = await request('/v1/admin/members', tokens.member);
+    expect(list.status).toBe(403);
+    expect((await envelope(list)).error.code).toBe('FORBIDDEN');
+  });
+});

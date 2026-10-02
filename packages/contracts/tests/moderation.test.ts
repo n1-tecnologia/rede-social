@@ -20,6 +20,7 @@ import {
   MODERATION_REASON_MAX,
   MODERATION_SUBJECT_TYPES,
   memberAccessBodySchema,
+  memberRoleBodySchema,
   moderationLogEntrySchema,
   moderationLogPageSchema,
   moderationLogQuerySchema,
@@ -223,6 +224,22 @@ describe('memberAccessBodySchema', () => {
 
   it('names the four D-332 refusals', () => {
     expect(MEMBER_ADMIN_REFUSALS).toEqual(['self', 'last_admin', 'not_active', 'blocked']);
+  });
+});
+
+describe('memberRoleBodySchema', () => {
+  it('accepts exactly the three tenant roles', () => {
+    for (const role of ['member', 'support_tenant', 'admin_tenant']) {
+      expect(memberRoleBodySchema.safeParse({ role }).success).toBe(true);
+    }
+  });
+
+  it('refuses any other role, a missing role and an unknown key (08-05, T-08-26)', () => {
+    for (const role of ['super_admin', 'admin', 'Member', '', null, 1]) {
+      expect(memberRoleBodySchema.safeParse({ role }).success).toBe(false);
+    }
+    expect(memberRoleBodySchema.safeParse({}).success).toBe(false);
+    expect(memberRoleBodySchema.safeParse({ role: 'member', tenantId: 'x' }).success).toBe(false);
   });
 });
 

@@ -1,5 +1,6 @@
 'use client';
 
+import type { TenantRole } from '@rede-social/contracts';
 import type { AdminMember, AdminMemberStatusFilter } from '@rede-social/contracts/moderation';
 import {
   ADMIN_MEMBER_STATUSES,
@@ -30,7 +31,13 @@ import {
 } from 'react';
 import { AdminMemberRow, AdminMemberSkeleton, memberName } from '@/components/admin/AdminMemberRow';
 import { MemberAdminSheet, type MemberSheetSettled } from '@/components/admin/MemberAdminSheet';
-import { blockMemberAction, loadMoreAdminMembersAction, unblockMemberAction } from './actions';
+import { ROLE_KEY } from '@/components/admin/RoleOptionList';
+import {
+  blockMemberAction,
+  changeMemberRoleAction,
+  loadMoreAdminMembersAction,
+  unblockMemberAction,
+} from './actions';
 
 export interface AdminMembersListProps {
   /** Page 1 for the URL's `?q=` and `?status=`, read on the server. */
@@ -46,6 +53,8 @@ export interface AdminMembersListProps {
   tenantName: string;
   /** `moderation.manage` in `bootstrap.permissions`: the sheet's access action. */
   canModerate: boolean;
+  /** `members.manage` in `bootstrap.permissions`: the sheet's role list (08-05). */
+  canManageMembers: boolean;
 }
 
 /** The canonical URL for a query — `URLSearchParams`, the `/membros` encoding; `all` is the bare route. */
@@ -72,8 +81,9 @@ function listUrl(q: string, status: AdminMemberStatusFilter): string {
  *   line plus a retry, with every loaded row kept. Empty: the search copy when `q` is set, otherwise
  *   the "Bloqueados" / "Convidados" copy (Todos and Ativos always hold the viewer's own row).
  * - **The sheet.** A successful block or unblock updates the row IN PLACE with the server's answer
- *   (no optimistic state), closes the sheet and toasts; a vanished member toasts and refreshes; a
- *   lost permission toasts and refreshes into `notFound()` (UI-D-284).
+ *   (no optimistic state), closes the sheet and toasts; a successful role change updates the row and
+ *   the open sheet in place and toasts (the sheet stays open, UI-D-273); a vanished member closes the
+ *   sheet, toasts and refreshes; a lost permission toasts and refreshes into `notFound()` (UI-D-284).
  */
 export function AdminMembersList({
   initialItems,
@@ -83,6 +93,7 @@ export function AdminMembersList({
   initialError,
   tenantName,
   canModerate,
+  canManageMembers,
 }: AdminMembersListProps) {
   const t = useTranslations('admin');
   const tm = useTranslations('moderation.member');
@@ -218,8 +229,29 @@ export function AdminMembersList({
     [],
   );
 
+  const onRole = useCallback(
+    (membershipId: string, role: TenantRole) => changeMemberRoleAction(membershipId, role),
+    [],
+  );
+
   const onSettled = useCallback(
     (outcome: MemberSheetSettled) => {
+      if (outcome.kind === 'role') {
+        // UI-D-273: the sheet stays open on the new role; the row and the pill update in place.
+        const updated = outcome.member;
+        setItems((rows) =>
+          rows.map((row) => (row.membershipId === updated.membershipId ? updated : row)),
+        );
+        setSelected(updated);
+        show({
+          tone: 'success',
+          message: t('members.toasts.roleChanged', {
+            name: memberName(updated),
+            role: t(`roles.${ROLE_KEY[updated.role]}`),
+          }),
+        });
+        return;
+      }
       setOpen(false);
       if (outcome.kind === 'changed') {
         const updated = outcome.member;
@@ -356,7 +388,9 @@ export function AdminMembersList({
         onClose={close}
         tenantName={tenantName}
         canModerate={canModerate}
+        canManageMembers={canManageMembers}
         onAccess={onAccess}
+        onRole={onRole}
         onSettled={onSettled}
       />
     </>

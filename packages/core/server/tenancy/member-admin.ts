@@ -101,6 +101,39 @@ export function decideAccessChange(
   return { outcome: 'write' };
 }
 
+/**
+ * THE role-change decision (ADMIN-02, D-332, 08-05), pure like `decideAccessChange` and pinned the
+ * same way (`tests/member-admin-guards.test.ts`). In order:
+ *
+ * 1. the actor aims at their own membership → `self` (nobody changes their own role, whatever the
+ *    display names say: the comparison is the identity, never a name);
+ * 2. the target is still `invited` → `not_active`;
+ * 3. the target is blocked (the folded state) → `blocked`: unblock first, so a blocked person's role
+ *    never changes behind their suspension;
+ * 4. the target already holds `role` → `noop` (200, no write, no log row);
+ * 5. the target is in the LOCKED active-admin set, the new role is not `admin_tenant`, and the set
+ *    holds one or fewer → `last_admin`. Promoting, or demoting one of two admins, is allowed.
+ */
+export function decideRoleChange(
+  target: LockedTarget,
+  activeAdminIds: readonly string[],
+  actorUserId: string,
+  role: TenantRole,
+): AccessDecision {
+  if (target.userId === actorUserId) return { outcome: 'refuse', refusal: 'self' };
+  if (target.invited) return { outcome: 'refuse', refusal: 'not_active' };
+  if (target.blocked) return { outcome: 'refuse', refusal: 'blocked' };
+  if (target.role === role) return { outcome: 'noop' };
+  if (
+    role !== 'admin_tenant' &&
+    activeAdminIds.includes(target.id) &&
+    activeAdminIds.length <= 1
+  ) {
+    return { outcome: 'refuse', refusal: 'last_admin' };
+  }
+  return { outcome: 'write' };
+}
+
 type LockedRow = {
   id: string;
   user_id: string;
@@ -231,4 +264,68 @@ export function unblockMembership(
   { reason }: { reason?: string },
 ): Promise<AdminMember> {
   return changeAccess(ctx, membershipId, 'unblock', reason);
+}
+
+/**
+ * `PUT /v1/admin/members/{membershipId}/role` (ADMIN-02, D-332, 08-05) — changes ONE membership's
+ * role, under the SAME row locks as a block: `lockAdminsAndTarget` locks every active admin plus the
+ * target `order by id for update`, so two admins demoting each other at once serialise, and the
+ * waiter re-reads the committed rows (READ COMMITTED re-evaluates a waiting `for update` against the
+ * new row version, so the admin the first transaction demoted has LEFT the set). With exactly two
+ * admins that ends in one 200 and one 409 `last_admin`: the tenant always keeps an active admin.
+ *
+ * The update carries `tenant_id = ${ctx.tenantId}` (admin lane, RLS off), and the `role_changed` row
+ * with `details = { from, to }` is written by `recordModerationAction(tx, …)` in the same
+ * transaction (T-08-28). A same-role call writes nothing (idempotent).
+ *
+ * TAKES EFFECT ON THE NEXT REQUEST (D-332): permissions are composed from the membership row on every
+ * request (`requireAuth` → the permission resolver), never from the JWT, so the promoted member's
+ * very next `GET /v1/me/bootstrap` carries the new permissions without a token refresh, and a demoted
+ * admin's next admin call is a 403.
+ */
+export async function setMembershipRole(
+  ctx: RequestContext,
+  membershipId: string,
+  role: TenantRole,
+): Promise<AdminMember> {
+  const result = await withAdminTx(
+    async (tx): Promise<{ member: AdminMember; changed: boolean; from: TenantRole }> => {
+      const { target, activeAdminIds } = await lockAdminsAndTarget(tx, ctx, membershipId);
+      const decision = decideRoleChange(target, activeAdminIds, ctx.userId, role);
+      if (decision.outcome === 'refuse') {
+        throw new ApiError(409, 'CONFLICT', { member: decision.refusal });
+      }
+      if (decision.outcome === 'write') {
+        await tx.execute(sql`
+          update memberships set role = ${role}
+           where id = ${target.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+        await recordModerationAction(tx, ctx, {
+          action: 'role_changed',
+          targetUserId: target.userId,
+          targetMembershipId: target.id,
+          details: { from: target.role, to: role },
+        });
+      }
+      return {
+        member: await readMemberForAdmin(tx, ctx, target.id),
+        changed: decision.outcome === 'write',
+        from: target.role,
+      };
+    },
+  );
+
+  // Ids and role names only.
+  log.info(
+    {
+      event: 'member.role_changed',
+      tenantId: ctx.tenantId,
+      requestId: ctx.requestId,
+      membershipId: result.member.membershipId,
+      from: result.from,
+      to: role,
+      changed: result.changed,
+    },
+    'membership role changed',
+  );
+  return result.member;
 }

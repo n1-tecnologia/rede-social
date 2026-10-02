@@ -6,6 +6,7 @@ import {
   adminMemberSchema,
   KERNEL_PERMISSIONS,
   memberAccessBodySchema,
+  memberRoleBodySchema,
 } from '@rede-social/contracts/moderation';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
@@ -13,12 +14,17 @@ import {
   getMemberForAdmin,
   listMembersForAdmin,
 } from '@rede-social/core/server/tenancy/admin-members';
-import { blockMembership, unblockMembership } from '@rede-social/core/server/tenancy/member-admin';
+import {
+  blockMembership,
+  setMembershipRole,
+  unblockMembership,
+} from '@rede-social/core/server/tenancy/member-admin';
 import { createOpenApiApp } from '../../http/openapi';
 
 /**
  * `/v1/admin/members/*` (ADMIN-02, MODER-02, D-330..D-333, D-340, UI-D-271..274) — the Membros
- * screen: every membership of the tenant, and block / unblock with an optional internal reason.
+ * screen: every membership of the tenant, block / unblock with an optional internal reason, and the
+ * role change (08-05).
  *
  * TENANT OF RECORD ONLY: `requireAuth` makes `ctx.tenantId` the caller's membership, and the kernel
  * services carry `tenant_id = ctx.tenantId` on every statement of their admin-lane transaction
@@ -27,11 +33,13 @@ import { createOpenApiApp } from '../../http/openapi';
  *
  * PERMISSIONS, NEVER ROLES (D-338): the list and the single read need `members.manage` OR
  * `moderation.manage` (unblocking lives here, so a moderator must be able to find a blocked member);
- * block and unblock need `moderation.manage`. Support and member get 403 `FORBIDDEN`. The rows carry
+ * block and unblock need `moderation.manage`; the role change needs `members.manage` (RESEARCH open
+ * question 3: the two are separate grants, both held by `admin_tenant` by default). Support and
+ * member get 403 `FORBIDDEN`. The rows carry
  * the e-mail, which is why nobody else may read them (ADMIN-02 privacy prohibition, T-08-23).
  *
  * The D-332 guards live in the kernel, not here: `409 CONFLICT { member: 'self' | 'last_admin' |
- * 'not_active' }`. The reason (D-331) is accepted here, written only to `moderation_log.reason`, and
+ * 'not_active' | 'blocked' }` (`blocked` only for a role change). The reason (D-331) is accepted here, written only to `moderation_log.reason`, and
  * appears in no response of this router. Logs carry ids only. Every answer is `no-store`.
  */
 const members = createOpenApiApp();
@@ -49,6 +57,7 @@ const readGuard = requirePermission(
   KERNEL_PERMISSIONS.moderationManage,
 );
 const writeGuard = requirePermission(KERNEL_PERMISSIONS.moderationManage);
+const roleGuard = requirePermission('members.manage');
 
 const listRoute = createRoute({
   method: 'get',
@@ -115,6 +124,29 @@ const accessRoute = (action: 'block' | 'unblock') =>
     },
   });
 
+const roleRoute = createRoute({
+  method: 'put',
+  path: '/{membershipId}/role',
+  middleware: [roleGuard] as const,
+  request: {
+    params: memberParams,
+    body: { content: { 'application/json': { schema: memberRoleBodySchema } } },
+  },
+  responses: {
+    200: {
+      description:
+        'The membership after the change, with its new `role`. ONE `role_changed` log row with `details: { from, to }` is written in the same transaction. Idempotent: the role the membership already holds answers its current state and writes no log row. The member’s very next request carries the new permissions (membership is resolved per request, D-332)',
+      content: { 'application/json': { schema: adminMemberSchema } },
+    },
+    400: envelope('VALIDATION_FAILED — a role outside `TENANT_ROLES` or an unknown body key'),
+    403: envelope('FORBIDDEN — the caller does not hold `members.manage`'),
+    404: envelope('NOT_FOUND — unknown, another tenant’s or removed: ONE bare body'),
+    409: envelope(
+      '`CONFLICT` with `details.member`: `self` (your own role), `last_admin` (it would leave the tenant without an active admin), `not_active` (an invite not yet accepted) or `blocked` (unblock first)',
+    ),
+  },
+});
+
 export const adminMembersRoutes = members
   .openapi(listRoute, async (c) => {
     const page = await listMembersForAdmin(c.get('ctx'), c.req.valid('query'));
@@ -140,6 +172,17 @@ export const adminMembersRoutes = members
     c.get('logger')?.info(
       { event: 'admin.members.unblock', membershipId },
       'member unblock requested',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(member, 200);
+  })
+  .openapi(roleRoute, async (c) => {
+    const { membershipId } = c.req.valid('param');
+    const { role } = c.req.valid('json');
+    const member = await setMembershipRole(c.get('ctx'), membershipId, role);
+    c.get('logger')?.info(
+      { event: 'admin.members.role', membershipId, role },
+      'member role change requested',
     );
     c.header('Cache-Control', 'no-store');
     return c.json(member, 200);

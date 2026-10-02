@@ -228,3 +228,97 @@ describe('MemberAdminSheet — the confirm step (UI-D-274)', () => {
     );
   });
 });
+
+/**
+ * 08-05 — the role list inside the sheet (UI-D-272 (2), UI-D-273, UI E04/partial): shown only for
+ * `members.manage`, above the access action; disabled on a blocked membership; absent on an invited
+ * one. A success settles as `{ kind: 'role' }` and the sheet stays open; a vanished member and a lost
+ * permission settle like an access change; a refusal stays inline under the list.
+ */
+describe('MemberAdminSheet — role list (08-05)', () => {
+  const C = (
+    messages as unknown as {
+      admin: {
+        roles: { support: string; admin: string };
+        members: { roleConfirm: { confirm: string } };
+      };
+    }
+  ).admin;
+  const CONFIRM = C.members.roleConfirm.confirm;
+  const radio = (label: string) => screen.getByRole('radio', { name: new RegExp(`^${label}`) });
+  const okRole = () =>
+    vi.fn(async () => ({
+      ok: true as const,
+      member: { ...BASE, role: 'support_tenant' as const },
+    }));
+
+  it('members.manage only: the role list without the access action', () => {
+    renderSheet({ canModerate: false, canManageMembers: true, onRole: okRole() });
+    expect(screen.getByRole('radiogroup')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: M.block })).toBeNull();
+  });
+
+  it('moderation.manage only: the access action without the role list', () => {
+    renderSheet({ canModerate: true, canManageMembers: false, onRole: okRole() });
+    expect(screen.queryByRole('radiogroup')).toBeNull();
+    expect(screen.getByRole('button', { name: M.block })).toBeTruthy();
+  });
+
+  it('both: the role list sits above the access action', () => {
+    renderSheet({ canManageMembers: true, onRole: okRole() });
+    const group = screen.getByRole('radiogroup');
+    const action = screen.getByRole('button', { name: M.block });
+    expect(group.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('blocked: the list is disabled; invited: there is no list', () => {
+    renderSheet({ canManageMembers: true, onRole: okRole() }, { status: 'blocked' });
+    expect(screen.getByRole('radiogroup').getAttribute('aria-disabled')).toBe('true');
+    cleanup();
+    renderSheet({ canManageMembers: true, onRole: okRole() }, { status: 'invited' });
+    expect(screen.queryByRole('radiogroup')).toBeNull();
+  });
+
+  it('a confirmed change settles as role and the sheet does not close itself', async () => {
+    const onRole = okRole();
+    const props = renderSheet({ canManageMembers: true, onRole });
+    fireEvent.click(radio(C.roles.support));
+    fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
+    await waitFor(() =>
+      expect(props.onSettled).toHaveBeenCalledWith({
+        kind: 'role',
+        member: { ...BASE, role: 'support_tenant' },
+      }),
+    );
+    expect(onRole).toHaveBeenCalledWith(BASE.membershipId, 'support_tenant');
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it('a vanished member or a lost permission settles like an access change; a refusal stays inline', async () => {
+    for (const code of ['gone', 'forbidden'] as const) {
+      const props = renderSheet({
+        canManageMembers: true,
+        onRole: vi.fn(async () => ({ ok: false as const, code })),
+      });
+      fireEvent.click(radio(C.roles.admin));
+      fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
+      await waitFor(() =>
+        expect(props.onSettled).toHaveBeenCalledWith(
+          code === 'gone'
+            ? { kind: 'gone', membershipId: BASE.membershipId }
+            : { kind: 'forbidden' },
+        ),
+      );
+      expect(screen.queryByRole('alert')).toBeNull();
+      cleanup();
+    }
+    const props = renderSheet({
+      canManageMembers: true,
+      onRole: vi.fn(async () => ({ ok: false as const, code: 'not_active' as const })),
+    });
+    fireEvent.click(radio(C.roles.admin));
+    fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
+    expect((await screen.findByRole('alert')).textContent).toBeTruthy();
+    expect(props.onSettled).not.toHaveBeenCalled();
+  });
+});

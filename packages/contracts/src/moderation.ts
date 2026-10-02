@@ -259,6 +259,15 @@ export const memberAccessBodySchema = z
 export type MemberAccessBody = z.infer<typeof memberAccessBodySchema>;
 
 /**
+ * Body of `PUT /v1/admin/members/{membershipId}/role` (ADMIN-02, D-332, UI-D-273). `role` is the
+ * CLOSED `TENANT_ROLES` vocabulary (`member`, `support_tenant`, `admin_tenant`); anything else, and
+ * any other key, is a 400 — the client never names a tenant, a target user or a permission. Choosing
+ * the role the membership already holds is a no-op 200 with no log row.
+ */
+export const memberRoleBodySchema = z.object({ role: z.enum(TENANT_ROLES) }).strict();
+export type MemberRoleBody = z.infer<typeof memberRoleBodySchema>;
+
+/**
  * The D-332 refusals of a member action, as `409 CONFLICT { member: <value> }`:
  *
  * - `self`: the actor aimed at their own membership (no self-block, no self-role-change);

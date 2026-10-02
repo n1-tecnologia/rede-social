@@ -1,14 +1,16 @@
 'use server';
 
+import type { TenantRole } from '@rede-social/contracts';
 import {
   type AdminMember,
   adminMemberListQuerySchema,
   memberAccessBodySchema,
+  memberRoleBodySchema,
 } from '@rede-social/contracts/moderation';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import type { MemberAccessOutcome } from '@/components/admin/MemberAdminSheet';
-import { getAdminMembers, postMemberAccess } from '@/lib/admin-members';
+import { getAdminMembers, postMemberAccess, putMemberRole } from '@/lib/admin-members';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 
 /**
@@ -20,8 +22,11 @@ import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
  *   and never reaches the API;
  * - session and membership refusals become a navigation OUTSIDE the try/catch (Next 16: `redirect()`
  *   throws) — an admin blocked in another tab lands on the shipped "Acesso suspenso" flow;
- * - 409 `details.member` maps to the refusal the sheet explains inline; 404 is `gone` and 403
- *   `FORBIDDEN` is `forbidden`, which the CALLER turns into a toast and a refresh (UI-D-284);
+ * - every member action's failure goes through ONE mapping, `handleAdminRefusal` (UI-D-284): 409
+ *   `details.member` is the refusal the sheet explains inline; 404 is `gone`; 403 `FORBIDDEN` is
+ *   `forbidden`; the CALLER turns `gone` and `forbidden` into a toast, a closed sheet and a refresh
+ *   (after which a demoted admin's screen answers `notFound()`); a 403 `MEMBERSHIP_BLOCKED` (or any
+ *   session refusal) is the shipped bootstrap navigation;
  * - logs carry the shape only: a reason or a search term never reaches a log line (D-331).
  *
  * **This module must not re-export anything** (Turbopack drops re-exports from `'use server'`).
@@ -39,6 +44,44 @@ function refusalOf(details: Record<string, unknown> | undefined): MemberAccessOu
   return { ok: false, code: 'generic' };
 }
 
+/**
+ * THE UI-D-284 mapping of a failed member action: either a navigation (a session or membership
+ * refusal, e.g. 403 `MEMBERSHIP_BLOCKED` → "Acesso suspenso") the caller performs OUTSIDE its
+ * try/catch, or the outcome the sheet and its host read. Anything unrecognised is `generic` and is
+ * logged by shape only.
+ */
+function handleAdminRefusal(
+  error: unknown,
+  label: string,
+): { navigate: string } | { outcome: MemberAccessOutcome } {
+  if (error instanceof ApiClientError) {
+    const path = bootstrapRedirectPath(error);
+    if (path) return { navigate: path };
+    if (error.status === 409) return { outcome: refusalOf(error.details) };
+    if (error.status === 404) return { outcome: { ok: false, code: 'gone' } };
+    if (error.status === 403 && error.code === 'FORBIDDEN') {
+      return { outcome: { ok: false, code: 'forbidden' } };
+    }
+  }
+  console.error(`admin.members.${label}_failed`, { error: String(error) });
+  return { outcome: { ok: false, code: 'generic' } };
+}
+
+/** Runs one member action and maps its failure; `redirect()` throws, so it sits outside the catch. */
+async function runMemberAction(
+  label: string,
+  call: () => Promise<AdminMember>,
+): Promise<MemberAccessOutcome> {
+  let mapped: { navigate: string } | { outcome: MemberAccessOutcome };
+  try {
+    mapped = { outcome: { ok: true, member: await call() } };
+  } catch (error) {
+    mapped = handleAdminRefusal(error, label);
+  }
+  if ('navigate' in mapped) redirect(mapped.navigate);
+  return mapped.outcome;
+}
+
 async function changeAccess(
   kind: 'block' | 'unblock',
   membershipId: string,
@@ -47,30 +90,7 @@ async function changeAccess(
   const id = membershipIdSchema.safeParse(membershipId);
   const body = memberAccessBodySchema.safeParse(reason === null ? {} : { reason });
   if (!id.success || !body.success) return { ok: false, code: 'generic' };
-
-  let refusal: string | null = null;
-  let result: MemberAccessOutcome = { ok: false, code: 'generic' };
-  try {
-    const member = await postMemberAccess(id.data, kind, body.data.reason);
-    result = { ok: true, member };
-  } catch (error) {
-    if (error instanceof ApiClientError) {
-      refusal = bootstrapRedirectPath(error);
-      if (!refusal) {
-        if (error.status === 409) result = refusalOf(error.details);
-        else if (error.status === 404) result = { ok: false, code: 'gone' };
-        else if (error.status === 403 && error.code === 'FORBIDDEN') {
-          result = { ok: false, code: 'forbidden' };
-        }
-      }
-    }
-    if (!refusal && result.ok === false && result.code === 'generic') {
-      console.error(`admin.members.${kind}_failed`, { error: String(error) });
-    }
-  }
-
-  if (refusal) redirect(refusal);
-  return result;
+  return runMemberAction(kind, () => postMemberAccess(id.data, kind, body.data.reason));
 }
 
 /** Blocks one membership of the caller's tenant, with the optional INTERNAL reason (D-331). */
@@ -87,6 +107,21 @@ export async function unblockMemberAction(
   reason: string | null,
 ): Promise<MemberAccessOutcome> {
   return changeAccess('unblock', membershipId, reason);
+}
+
+/**
+ * Changes one membership's role (ADMIN-02, D-332, 08-05). `role` is validated against the SAME
+ * closed enum the API uses before any request; the guards (self, last admin, invited, blocked) are
+ * the API's, and their refusals come back as the sheet's inline line.
+ */
+export async function changeMemberRoleAction(
+  membershipId: string,
+  role: TenantRole,
+): Promise<MemberAccessOutcome> {
+  const id = membershipIdSchema.safeParse(membershipId);
+  const body = memberRoleBodySchema.safeParse({ role });
+  if (!id.success || !body.success) return { ok: false, code: 'generic' };
+  return runMemberAction('role', () => putMemberRole(id.data, body.data.role));
 }
 
 export type AdminMembersPageResult =

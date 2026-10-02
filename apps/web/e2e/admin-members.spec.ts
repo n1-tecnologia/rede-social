@@ -1,4 +1,4 @@
-import { expect, type Page, test } from '@playwright/test';
+import { type Browser, expect, type Page, test } from '@playwright/test';
 import adminMessages from '../messages/pt-BR/admin.json' with { type: 'json' };
 import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
 import moderationMessages from '../messages/pt-BR/moderation.json' with { type: 'json' };
@@ -12,7 +12,7 @@ import {
   setMemberDisplayName,
   setMembershipStatus,
 } from './admin';
-import { login, SEED_PASSWORD, users } from './fixtures';
+import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 
 /** The catalog is the source of copy — never a literal in a spec. */
 const A = adminMessages.admin;
@@ -264,4 +264,117 @@ test('a long name and e-mail ellipsize at 320px with two pills', async ({ page }
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
   );
   expect(overflow).toBe(false);
+});
+
+type DeviceUse = Parameters<Browser['newContext']>[0];
+
+/** A second, independent browser context (its own cookies) signed in as `email` on the demo host. */
+async function contextAs(browser: Browser, email: string, password: string, use: DeviceUse) {
+  const context = await browser.newContext({ ...use, serviceWorkers: 'block' });
+  const page = await context.newPage();
+  await login(page, email, password, hosts.demo);
+  return { context, page };
+}
+
+/** The role-change copy with its interpolations, from the catalog. */
+const roleToast = (name: string, role: string) =>
+  A.members.toasts.roleChanged.replace('{name}', name).replace('{role}', role);
+
+/**
+ * 08-05 tracer (ADMIN-02, D-332, UI-D-273): the demo admin opens a member's sheet, picks
+ * "Administrador", reads the role-specific confirm and taps "Mudar papel". The sheet stays open on the
+ * new role and pill, the row updates in place, the toast fires, and the member — signed in BEFORE the
+ * change, in their own browser — sees the Administração rows on their very next Configurações load,
+ * with no token refresh (membership is resolved per request). Then the admin demotes them back.
+ *
+ * The subject is a THROWAWAY member for the `e2e/admin.ts` reason (the seeded users are shared by the
+ * whole suite); the API suite's `role tracer` runs the same change on `member@rede-demo.local`.
+ */
+test('role tracer', async ({
+  page,
+  browser,
+  contextOptions,
+  viewport,
+  isMobile,
+  hasTouch,
+  userAgent,
+  deviceScaleFactor,
+}, testInfo) => {
+  const { email, membershipId } = await throwawayMember(
+    `papel-${testInfo.project.name === 'mobile-chromium' ? 'm' : 'd'}`,
+  );
+  const subject = await contextAs(browser, email, PASSWORD, {
+    ...contextOptions,
+    viewport,
+    isMobile,
+    hasTouch,
+    userAgent,
+    deviceScaleFactor,
+  });
+  try {
+    // Before: a plain member has no Administração group.
+    await subject.page.goto('/configuracoes');
+    await expect(
+      subject.page.getByRole('link', { name: appMessages.app.settings.rows.members }),
+    ).toHaveCount(0);
+
+    await login(page, users.demoAdmin, SEED_PASSWORD);
+    await page.goto(`/configuracoes/membros?q=${encodeURIComponent(email)}`);
+    const row = memberRow(page, membershipId);
+    await expect(row).toBeVisible();
+    await expect(row).not.toContainText(A.roles.admin);
+    await row.click();
+
+    const sheet = page.getByRole('dialog').filter({ has: page.getByRole('radiogroup') });
+    const group = sheet.getByRole('radiogroup', { name: A.members.roleLabel });
+    await expect(group).toBeVisible();
+    const option = (label: string) => group.getByRole('radio', { name: new RegExp(`^${label}`) });
+    await expect(option(A.roles.member)).toHaveAttribute('aria-checked', 'true');
+
+    await option(A.roles.admin).click();
+    const confirm = page.getByRole('dialog', {
+      name: A.members.roleConfirm.title.replace('{name}', email),
+    });
+    await expect(confirm).toContainText(A.members.roleConfirm.toAdmin.replace('{name}', email));
+    // The confirm is rendered from inside the sheet: its scrim must still cover the whole screen,
+    // never only the sheet's panel.
+    const scrim = await confirm.locator('xpath=..').boundingBox();
+    const screenSize = page.viewportSize();
+    expect(scrim && screenSize && Math.round(scrim.width)).toBe(screenSize?.width);
+    expect(scrim && screenSize && Math.round(scrim.height)).toBe(screenSize?.height);
+    await confirm.getByRole('button', { name: A.members.roleConfirm.confirm }).click();
+
+    await expect(page.getByText(roleToast(email, A.roles.admin))).toBeVisible();
+    // UI-D-273: the sheet stays open on the new selection and pill; the row updates in place.
+    await expect(option(A.roles.admin)).toHaveAttribute('aria-checked', 'true');
+    await expect(option(A.roles.member)).toHaveAttribute('aria-checked', 'false');
+    await expect(sheet.locator('[data-member-pills]')).toContainText(A.roles.admin);
+    await expect(row).toContainText(A.roles.admin);
+    expect((await membershipForEmail(email))?.role).toBe('admin_tenant');
+
+    // D-332: the member's very next request carries the admin permissions (same session cookies).
+    await subject.page.goto('/configuracoes');
+    await expect(
+      subject.page.getByRole('link', { name: appMessages.app.settings.rows.members }),
+    ).toBeVisible();
+
+    // Demote back from the same sheet.
+    await option(A.roles.member).click();
+    const back = page.getByRole('dialog', {
+      name: A.members.roleConfirm.title.replace('{name}', email),
+    });
+    await expect(back).toContainText(A.members.roleConfirm.toMember.replace('{name}', email));
+    await back.getByRole('button', { name: A.members.roleConfirm.confirm }).click();
+    await expect(page.getByText(roleToast(email, A.roles.member))).toBeVisible();
+    await expect(option(A.roles.member)).toHaveAttribute('aria-checked', 'true');
+    await expect(row).not.toContainText(A.roles.admin);
+    expect((await membershipForEmail(email))?.role).toBe('member');
+
+    await subject.page.goto('/configuracoes');
+    await expect(
+      subject.page.getByRole('link', { name: appMessages.app.settings.rows.members }),
+    ).toHaveCount(0);
+  } finally {
+    await subject.context.close();
+  }
 });

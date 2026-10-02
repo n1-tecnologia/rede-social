@@ -88,6 +88,7 @@ export default async function AdminMembersPage({
         initialError={page === null}
         tenantName={bootstrap.tenant.displayName}
         canModerate={canModerate}
+        canManageMembers={canManageMembers}
       />
     </div>
   );

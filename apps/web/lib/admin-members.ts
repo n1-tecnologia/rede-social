@@ -1,3 +1,4 @@
+import type { TenantRole } from '@rede-social/contracts';
 import {
   ADMIN_MEMBERS_PAGE_SIZE,
   type AdminMember,
@@ -74,6 +75,21 @@ export async function postMemberAccess(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(reason === undefined ? {} : { reason }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return adminMemberSchema.parse(await res.json());
+}
+
+/**
+ * `PUT /v1/admin/members/{membershipId}/role` (08-05, D-332). Answers the membership after the
+ * change; a refusal is an `ApiClientError` whose `details` carries `{ member: 'self' | 'last_admin' |
+ * 'not_active' | 'blocked' }` on a 409.
+ */
+export async function putMemberRole(membershipId: string, role: TenantRole): Promise<AdminMember> {
+  const res = await apiFetch(`/v1/admin/members/${encodeURIComponent(membershipId)}/role`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ role }),
   });
   if (!res.ok) throw await apiError(res);
   return adminMemberSchema.parse(await res.json());
