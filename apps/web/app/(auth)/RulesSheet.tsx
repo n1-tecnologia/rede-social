@@ -2,12 +2,14 @@
 
 import { BottomSheet, Button, useMediaQuery } from '@rede-social/ui';
 import { useState } from 'react';
+import { RulesText } from '@/components/rules/RulesText';
 
 /**
  * The tenant's rules behind the "ver regras" trigger (D-03), on `@rede-social/ui` `BottomSheet`: a sheet on
  * phones, the centred `max-w-[480px]` card from `md` up (`desktopCard`). The sheet owns
  * `role="dialog"`, `aria-modal`, Escape, backdrop tap and the focus trap (02-02); the text scrolls
- * inside it (80% of `--screen-h`). Shared by `/cadastro` and `/aceitar-convite` (02-10).
+ * inside it (80% of `--screen-h`). Shared by `/cadastro` and `/aceitar-convite` (02-10). The paragraphs
+ * render through the shared `RulesText` (08-07, UI-D-281), the same renderer as the admin's preview.
  */
 export function RulesSheet({
   trigger,
@@ -22,11 +24,6 @@ export function RulesSheet({
 }) {
   const [open, setOpen] = useState(false);
   const desktop = useMediaQuery('(min-width: 768px)');
-  const paragraphs = rulesText
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter((block) => block.length > 0);
-
   return (
     <>
       <button
@@ -38,11 +35,7 @@ export function RulesSheet({
       </button>
       <BottomSheet open={open} title={title} onClose={() => setOpen(false)} desktopCard={desktop}>
         <div className="flex flex-col gap-4">
-          {paragraphs.map((block) => (
-            <p key={block.slice(0, 48)} className="text-sm leading-relaxed text-text">
-              {block}
-            </p>
-          ))}
+          <RulesText rulesText={rulesText} />
           <Button type="button" variant="secondary" fullWidth onClick={() => setOpen(false)}>
             {close}
           </Button>

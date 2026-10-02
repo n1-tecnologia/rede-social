@@ -1,10 +1,11 @@
 'use client';
 
 import { normaliseRulesText, RULES_TEXT_MAX } from '@rede-social/contracts/rules';
-import { Button, Card, cn, Textarea, useToast } from '@rede-social/ui';
+import { BottomSheet, Button, Card, cn, Textarea, useMediaQuery, useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState, useTransition } from 'react';
+import { RulesText } from '@/components/rules/RulesText';
 import type { SaveRulesResult, saveRulesAction } from './actions';
 
 const FIELD_ID = 'rulesText';
@@ -33,10 +34,16 @@ export interface RulesEditorProps {
  * shows the new number. A server refusal shows its field error; a failure toasts and KEEPS the draft;
  * a lost permission (403 `FORBIDDEN`) toasts it and refreshes into the page's `notFound()`
  * (UI-D-284). No confirm: saving loses nothing.
+ *
+ * The preview (UI-D-281, E14) opens the shipped `BottomSheet` (`desktopCard` from `md`) with the
+ * sign-up sheet's own title ("Regras da comunidade {tenant}") and its secondary "Fechar", and renders
+ * the CURRENT DRAFT through `RulesText` — the renderer `/cadastro` and `/aceitar-convite` use — so the
+ * admin sees exactly what a newcomer will read, before saving. An empty draft cannot be previewed.
  */
 export function RulesEditor({ tenantName, initialText, initialVersion, action }: RulesEditorProps) {
   const t = useTranslations('admin.rules');
   const ta = useTranslations('admin.errors');
+  const ts = useTranslations('signup');
   const toast = useToast();
   const router = useRouter();
   const [saved, setSaved] = useState(normaliseRulesText(initialText));
@@ -46,6 +53,8 @@ export function RulesEditor({ tenantName, initialText, initialVersion, action }:
   /** A paste the native `maxLength` cut short: the admin must know the end of it was dropped. */
   const [pasteCut, setPasteCut] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const desktop = useMediaQuery('(min-width: 768px)');
 
   const normalised = normaliseRulesText(draft);
   const empty = normalised.length === 0;
@@ -143,7 +152,13 @@ export function RulesEditor({ tenantName, initialText, initialVersion, action }:
         </div>
         <p className="text-xs tabular-nums text-text-tertiary">{t('version', { version })}</p>
         <div className="flex flex-col-reverse gap-3 md:flex-row md:justify-between">
-          <Button type="button" variant="ghost" size="md" disabled={empty}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="md"
+            disabled={empty}
+            onClick={() => setPreviewOpen(true)}
+          >
             {t('preview')}
           </Button>
           <Button type="submit" variant="brand" size="md" loading={pending} disabled={!canSave}>
@@ -151,6 +166,19 @@ export function RulesEditor({ tenantName, initialText, initialVersion, action }:
           </Button>
         </div>
       </form>
+      <BottomSheet
+        open={previewOpen && !empty}
+        title={ts('rulesSheetTitle', { tenant: tenantName })}
+        onClose={() => setPreviewOpen(false)}
+        desktopCard={desktop}
+      >
+        <div className="flex flex-col gap-4" data-rules-preview>
+          <RulesText rulesText={normalised} />
+          <Button type="button" variant="secondary" fullWidth onClick={() => setPreviewOpen(false)}>
+            {ts('closeRules')}
+          </Button>
+        </div>
+      </BottomSheet>
     </Card>
   );
 }
