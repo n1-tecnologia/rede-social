@@ -56,6 +56,7 @@ its own `requireAuth`, so `ctx.tenantId` is the only tenant a handler acts on):
 | `POST /v1/admin/members/{membershipId}/block`, `.../unblock` | `moderation.manage` |
 | `PUT /v1/admin/members/{membershipId}/role` | `members.manage` |
 | `/v1/admin/branding/*`, `PATCH /v1/admin/tenant` | `tenant.manage` |
+| `GET /v1/admin/rules`, `PUT /v1/admin/rules` | `tenant.manage` |
 
 **Append-only guarantees** on `public.moderation_log`: `update`, `delete` and `truncate` are
 revoked from `anon`, `authenticated`, `service_role` and `api_user`; row and statement triggers raise
