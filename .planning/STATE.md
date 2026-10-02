@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-07-PLAN.md
-last_updated: "2026-10-02T16:54:01.450Z"
+stopped_at: Completed 08-08-PLAN.md
+last_updated: "2026-10-02T18:24:55.788Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-07 (Regras da comunidade editor with the change-only rules_version bump and the shared RulesText renderer; the Administração group complete)
-state_head: 06cae492d8e9ed81cca9de5eb3bf75e5e0305318
+last_activity_desc: Completed 08-08 (nonce CSP on every proxy branch behind CSP_MODE with the /api/csp-report sink; Zod jitless in the browser; inline YouTube/Vimeo click-to-play; CORS proof; Phase 2 IN-03..IN-07 fixed, IN-01/IN-02 superseded by 08.1-06)
+state_head: d658ab4cc220e0657608ad54909fb8cc36bcfec0
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 118
+  completed_plans: 119
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 9 of 12
+Plan: 10 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-07 (GET/PUT /v1/admin/rules behind tenant.manage with the change-only rules_version bump in the admin lane, consents untouched; /configuracoes/regras editor with the preview through the shared RulesText that /cadastro and /aceitar-convite now use; the Administração group complete in the UI-D-269 order)
+Last activity: 2026-10-02 — Completed 08-08 (nonce CSP on every proxy branch behind CSP_MODE with the /api/csp-report sink; Zod jitless in the browser; inline YouTube/Vimeo click-to-play; CORS proof; Phase 2 IN-03..IN-07 fixed, IN-01/IN-02 superseded by 08.1-06)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -179,6 +179,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P06 | 27 min | 2 tasks | 21 files |
 | Phase 08 P09 | 14 min | 2 tasks | 21 files |
 | Phase 08 P07 | 16 min | 2 tasks | 23 files |
+| Phase 08 P08 | 1h 55m | 3 tasks | 38 files |
 
 ## Accumulated Context
 
@@ -584,6 +585,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-09: a Vitest config that needs its own include must not be merged with vitestBase (mergeConfig concatenates include arrays)
 - [Phase 08]: 08-07: the tenant rules contract lives in a client-safe @rede-social/contracts/rules (re-exported by legal.ts, which imports node:fs); PUT /v1/admin/rules bumps rules_version only when the normalised text changed (one admin-lane update scoped by id = ctx.tenantId with an is-distinct-from predicate) and never touches consents — D-341 made code: new sign-ups consent to the new version, recorded consents keep theirs, no re-acceptance wall; the editor compares its draft through the API's own normaliser, so the UI cannot cause an empty bump
 - [Phase 08]: 08-07: RulesText (apps/web/components/rules) is the one rules renderer for /cadastro, /aceitar-convite and the Regras preview; single line breaks are now kept (whitespace-pre-line, UI-D-281) — One renderer makes the admin's preview identical to what a newcomer reads, by construction
+- [Phase 08]: 08-08: the web sends a per-request nonce CSP from proxy.ts on every branch (refresh rebuild, rewrite, redirects, SW); CSP_MODE report-only by default, the e2e harness enforces, production flips to enforce only after the 08-12 real-device pass
+- [Phase 08]: 08-08: Zod runs jitless in the browser (apps/web/instrumentation-client.ts) because its new Function probe is a CSP eval violation on every production page; csp.spec also runs in e2e:pwa since next dev allows unsafe-eval and cannot see this class of bug
+- [Phase 08]: 08-08: inline YouTube/Vimeo play only after a tap in a sandboxed iframe (no top-level navigation) from a server-derived embedUrl; IN-01/IN-02 of 02-REVIEW are superseded by 08.1-06, IN-03..IN-07 fixed
 
 ### Pending Todos
 
@@ -657,6 +661,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T16:25:15.816Z
-Stopped at: Completed 08-07-PLAN.md
+Last session: 2026-10-02T18:24:39.327Z
+Stopped at: Completed 08-08-PLAN.md
 Resume file: None
