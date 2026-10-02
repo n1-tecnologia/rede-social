@@ -287,7 +287,7 @@ ones `deploy-hml.yml` mounts — the production list with `-prod` replaced by `-
 
 Root Directory `apps/web`; Build Command `turbo build`; Ignored Build Step
 `bash ../../scripts/vercel-ignore.sh` (committed as `apps/web/vercel.json`): on this production
-project it skips ref `homolog` and otherwise runs `npx turbo-ignore --fallback=HEAD^1` exactly as
+project it skips ref `homolog` and otherwise runs `npx turbo-ignore` (no `--fallback` since 2026-10-02) as
 before. `DEPLOY_ENV` stays unset on the production project.
 
 | Variable | Preview | Production |
@@ -335,7 +335,7 @@ committed `apps/web/vercel.json`, so the Ignored Build Step is `bash ../../scrip
 | `PLATFORM_HOST` | Production | `rede-social-hml.vercel.app` (same value as the `homolog` GitHub variable) |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Production | the PUBLIC half of the hml VAPID pair (same value as `vapid-public-key-hml`), set before the first build |
 
-`scripts/vercel-ignore.sh` (exit 0 = skip, "build check" = run `npx turbo-ignore --fallback=HEAD^1`
+`scripts/vercel-ignore.sh` (exit 0 = skip, "build check" = run `npx turbo-ignore`, which compares against the last deployment and builds when there is none
 and pass its exit code through):
 
 | `DEPLOY_ENV` | ref `homolog` | any other ref (or none) |

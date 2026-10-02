@@ -6,9 +6,11 @@
 #   - production: DEPLOY_ENV unset (or `production`), Production Branch `master`;
 #   - homolog (hml): DEPLOY_ENV=`homolog` on every environment, Production Branch `homolog`.
 # Vercel's contract: exit 0 CANCELS the build, exit 1 BUILDS. When this script decides "build
-# check", it execs `npx turbo-ignore --fallback=HEAD^1` (the command production ran before this
-# script existed) and passes its exit code through, so turbo-ignore can still skip an unaffected
-# commit.
+# check", it execs `npx turbo-ignore` and passes its exit code through, so turbo-ignore can still
+# skip an unaffected commit. No `--fallback`: turbo-ignore compares against the project's last
+# deployment (VERCEL_GIT_PREVIOUS_SHA) and, when there is none (a new project such as hml's first
+# build), it BUILDS. The old `--fallback=HEAD^1` compared against the parent commit instead, which
+# cancelled every first build and every push whose last commit did not touch apps/web.
 #
 # Decision table (DEPLOY_ENV x VERCEL_GIT_COMMIT_REF):
 #   homolog       ref homolog -> turbo-ignore;  any other ref -> skip
@@ -37,7 +39,7 @@ decide() {
 
 build() {
   decide "build check (turbo-ignore)"
-  exec npx turbo-ignore --fallback=HEAD^1
+  exec npx turbo-ignore
 }
 
 skip() {
