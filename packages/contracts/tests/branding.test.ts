@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminBrandingSchema,
   brandStyleVars,
   contrastRatio,
   contrastReport,
@@ -196,5 +197,38 @@ describe('hostTenantSchema / hostBrandingSchema — strict public contract (T-02
     expect(host).not.toHaveProperty('iconUrl');
     expect(host).not.toHaveProperty('iconVersion');
     expect(Object.keys(host).sort()).toEqual(['colors', 'faviconUrl', 'iconUrls', 'logoUrl']);
+  });
+});
+
+describe('adminBrandingSchema (08-06, ADMIN-01, D-342)', () => {
+  const report = contrastReport(deriveBrandColors({ primary: '#7c3aed', secondary: '#a78bfa' }));
+  const body = {
+    tenant: {
+      displayName: 'Rede Demo',
+      branding: { colors: { primary: '#7c3aed', secondary: '#a78bfa' }, iconVersion: 1 },
+      contrast: report,
+    },
+  };
+
+  it('accepts the three brand facts and fills the stored jsonb defaults', () => {
+    const parsed = adminBrandingSchema.parse(body);
+    expect(parsed.tenant.displayName).toBe('Rede Demo');
+    expect(parsed.tenant.branding.logoUrl).toBeNull();
+    expect(parsed.tenant.branding.iconVersion).toBe(1);
+    expect(parsed.tenant.contrast).toEqual(report);
+  });
+
+  it('refuses any platform-only fact: no id, slug, status, domains or admins on the tenant lane', () => {
+    for (const extra of [
+      { id: '6f2c5b1e-4d3a-4c2b-9e8f-1a2b3c4d5e6f' },
+      { slug: 'rede-demo' },
+      { status: 'active' },
+    ]) {
+      expect(adminBrandingSchema.safeParse({ tenant: { ...body.tenant, ...extra } }).success).toBe(
+        false,
+      );
+    }
+    expect(adminBrandingSchema.safeParse({ ...body, domains: [] }).success).toBe(false);
+    expect(adminBrandingSchema.safeParse({ ...body, admins: [] }).success).toBe(false);
   });
 });

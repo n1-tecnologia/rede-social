@@ -383,3 +383,51 @@ export function iconsUpToDate(branding: {
 }): boolean {
   return branding.iconUrls?.i512.includes(`/icons/${branding.iconVersion}/`) ?? false;
 }
+
+// ── The tenant lane (08-06, ADMIN-01, D-342) ─────────────────────────────────────────────────────
+//
+// The `admin_tenant` edits their own brand through `/v1/admin/branding/*` and `PATCH /v1/admin/tenant`
+// with the platform's editor and the platform's kernel services. No path, body or answer of that lane
+// carries a tenant id: the tenant is always the caller's membership of record (`ctx.tenantId`).
+
+/**
+ * The display-name rule, ONE value for both lanes (ADMIN-01 encoding): trimmed, 1..60 UTF-16 code
+ * units, accents and emoji kept. The platform's create and update bodies (`platform.ts`) and the
+ * tenant lane's `adminTenantBodySchema` all use this very schema, so a name the super_admin may save
+ * is exactly a name the admin may save.
+ */
+export const TENANT_DISPLAY_NAME_MAX = 60;
+export const tenantDisplayNameSchema = z.string().trim().min(1).max(TENANT_DISPLAY_NAME_MAX);
+
+/**
+ * `GET /v1/admin/branding` and the answer of every tenant-lane brand write: the three brand facts of
+ * the caller's tenant, nothing else (no id, slug, status, domains, invites or admins). Strict at both
+ * levels so the admin answer can never grow a platform-only field without the contract changing.
+ * Explicit rather than picked from `platformTenantDetailSchema`: `platform.ts` imports this file.
+ */
+export const adminBrandingSchema = z
+  .object({
+    tenant: z
+      .object({
+        displayName: z.string(),
+        branding: tenantBrandingSchema,
+        contrast: contrastReportSchema,
+      })
+      .strict(),
+  })
+  .strict();
+export type AdminBranding = z.infer<typeof adminBrandingSchema>;
+
+/**
+ * Body of `PATCH /v1/admin/tenant` (ADMIN-01, T-08-32): the display name and NOTHING else. Strict, so
+ * a body that also carries `status`, `slug`, `modules` or `domains` is a 400, never a partial write.
+ */
+export const adminTenantBodySchema = z.object({ displayName: tenantDisplayNameSchema }).strict();
+export type AdminTenantBody = z.infer<typeof adminTenantBodySchema>;
+
+/** The `details.displayName` vocabulary of a refused `PATCH /v1/admin/tenant` (400). */
+export const DISPLAY_NAME_ISSUES = ['required', 'too_long'] as const;
+export type DisplayNameIssue = (typeof DISPLAY_NAME_ISSUES)[number];
+
+/** Path params of `POST /v1/admin/branding/uploads/{uploadId}/complete` (no tenant id, by design). */
+export const adminBrandingUploadParamsSchema = z.object({ uploadId: brandingUploadIdSchema });

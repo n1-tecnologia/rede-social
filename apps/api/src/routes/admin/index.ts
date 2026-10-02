@@ -1,4 +1,5 @@
 import { createOpenApiApp } from '../../http/openapi';
+import { adminBrandingRoutes } from './branding';
 import { adminMembersRoutes } from './members';
 import { moderationLogRoutes } from './moderation';
 
@@ -12,9 +13,10 @@ import { moderationLogRoutes } from './moderation';
  * `tenant.manage`, D-338), never by a role comparison.
  *
  * Sub-routers are chained with `.route()` so `AppType` carries every admin route for `hc<AppType>()`.
- * 08-01 mounts the moderation log; 08-04 chains the Membros routes (`/members`); later plans chain
- * branding, tenant and rules here.
+ * 08-01 mounts the moderation log; 08-04 chains the Membros routes (`/members`); 08-06 chains the
+ * brand (`/branding`) and the display name (`/tenant`); later plans chain the rules here.
  */
 export const adminRoutes = createOpenApiApp()
   .route('/moderation-log', moderationLogRoutes)
-  .route('/members', adminMembersRoutes);
+  .route('/members', adminMembersRoutes)
+  .route('/branding', adminBrandingRoutes);

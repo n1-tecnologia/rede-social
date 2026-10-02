@@ -88,9 +88,10 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ erro?: string }>;
 }) {
-  const [hostTenant, t, cookieStore, params] = await Promise.all([
+  const [hostTenant, t, ta, cookieStore, params] = await Promise.all([
     getHostTenant(),
     getTranslations('app'),
+    getTranslations('admin'),
     cookies(),
     searchParams,
   ]);
@@ -107,6 +108,9 @@ export default async function SettingsPage({
   // 08-04 (D-339, D-340, UI-D-269): the Membros row needs `members.manage` OR `moderation.manage` —
   // unblocking lives there, so a moderator must be able to reach it.
   let canSeeMembers = false;
+  // 08-06 (D-339, D-342, UI-D-269): the Marca row, gated on `tenant.manage` — the value the API's
+  // `/v1/admin/branding` guard reads — and absent from the DOM without it.
+  let canManageBrand = false;
   // 07 review C-WR-01: the push row only where the notifications module is on (the API refuses the
   // push routes otherwise, after the browser's permission prompt had already been spent).
   let notificationsOn = false;
@@ -119,11 +123,12 @@ export default async function SettingsPage({
     canManageStories = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
     canModerate = bootstrap.permissions.includes(KERNEL_PERMISSIONS.moderationManage);
     canSeeMembers = canModerate || bootstrap.permissions.includes(KERNEL_PERMISSIONS.membersManage);
+    canManageBrand = bootstrap.permissions.includes(KERNEL_PERMISSIONS.tenantManage);
     notificationsOn = bootstrap.modules.some((module) => module.key === 'notifications');
   }
 
   // E7/partial + E7/zero-one-many: the whole group — its `SectionTitle` included — is ABSENT from
-  // the DOM unless one of its rows renders (Membros, Moderação, Mídia, Seus stories), never rendered-and-disabled. A member must not learn
+  // the DOM unless one of its rows renders (Marca, Membros, Moderação, Mídia, Seus stories), never rendered-and-disabled. A member must not learn
   // that an admin media screen exists, which is also why `/configuracoes/midia` itself answers
   // `notFound()` rather than a 403 screen.
   const isTenantAdmin = role === 'admin_tenant';
@@ -136,6 +141,9 @@ export default async function SettingsPage({
   return (
     <div className="flex flex-col gap-4">
       {params.erro === 'sair' ? <ActionToast message={t('settings.logoutFailed')} /> : null}
+      {/* UI-D-284: an admin action refused with 403 FORBIDDEN (the permission was lost in another
+          tab) lands here — the Marca page itself would now answer notFound(). */}
+      {params.erro === 'sem-permissao' ? <ActionToast message={ta('errors.forbidden')} /> : null}
       <PageHeader
         title={t('settings.title')}
         backHref="/inicio"
@@ -170,10 +178,18 @@ export default async function SettingsPage({
             />
           )}
         </Group>
-        {isTenantAdmin || canManageStories || canModerate || canSeeMembers ? (
+        {isTenantAdmin || canManageStories || canModerate || canSeeMembers || canManageBrand ? (
           <Group title={t('settings.groups.admin')}>
             {/* UI-D-269 order: Marca, Membros, Regras da comunidade, Moderação, then the shipped
                 Mídia and Seus stories rows. */}
+            {canManageBrand ? (
+              <Row
+                icon="palette"
+                label={t('settings.rows.brand')}
+                href="/configuracoes/marca"
+                trailing={null}
+              />
+            ) : null}
             {canSeeMembers ? (
               <Row
                 icon="users"

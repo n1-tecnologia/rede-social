@@ -17,6 +17,10 @@
         "admin": "Publica, modera, edita a marca e as regras e gerencia membros."
       }
     },
+    "brand": {
+      "title": "Marca",
+      "freshness": "As mudanças aparecem no app na hora. Na tela de entrada podem levar até 1 minuto, e o ícone já instalado no aparelho pode demorar mais."
+    },
     "members": {
       "title": "Membros",
       "search": {

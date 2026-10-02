@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { slugSchema } from './auth';
-import { contrastReportSchema, hexColorSchema, tenantBrandingSchema } from './branding';
+import {
+  contrastReportSchema,
+  hexColorSchema,
+  tenantBrandingSchema,
+  tenantDisplayNameSchema,
+} from './branding';
 import { tenantDomainSchema } from './domains';
 import { tenantInviteSchema } from './invites';
 import { REAL_TENANT_DEFAULT_MODULES, TOGGLEABLE_MODULES } from './modules';
@@ -57,7 +62,7 @@ const brandSourceColorsSchema = z.object({
  *   different casing can never create a second invite (edge ROLE-03/encoding).
  */
 export const createTenantBodySchema = z.object({
-  displayName: z.string().trim().min(1).max(60),
+  displayName: tenantDisplayNameSchema,
   slug: slugSchema,
   colors: brandSourceColorsSchema,
   modules: z.array(realModuleKeySchema).default([...REAL_TENANT_DEFAULT_MODULES]),
@@ -65,10 +70,14 @@ export const createTenantBodySchema = z.object({
 });
 export type CreateTenantBody = z.infer<typeof createTenantBodySchema>;
 
-/** Body of `PATCH /v1/platform/tenants/{id}`: at least one of the editable fields (slug is immutable). */
+/**
+ * Body of `PATCH /v1/platform/tenants/{id}`: at least one of the editable fields (slug is immutable).
+ * `displayName` is THE shared rule (`tenantDisplayNameSchema`), the same the tenant lane's
+ * `PATCH /v1/admin/tenant` validates with (08-06, ADMIN-01 encoding).
+ */
 export const updateTenantBodySchema = z
   .object({
-    displayName: z.string().trim().min(1).max(60).optional(),
+    displayName: tenantDisplayNameSchema.optional(),
     colors: brandSourceColorsSchema.optional(),
   })
   .refine((b) => b.displayName !== undefined || b.colors !== undefined, {
