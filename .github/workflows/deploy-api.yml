@@ -1,7 +1,8 @@
 # API + worker to Cloud Run (D-11, D-12, D-15). One image, two Cloud Run services (D-18).
 #
-# Production only: there is no staging project and no staging services (docs/DEPLOY.md
-# "Decisions (2026-09-28)"). Pull requests run ci.yml only; the web Preview comes from Vercel's
+# This workflow is production. Homolog (hml) is a separate, isolated environment (its own GCP,
+# Supabase and Vercel projects) deployed by deploy-hml.yml from the `homolog` branch (docs/DEPLOY.md
+# "Decisions (2026-10-02)"). Pull requests run ci.yml only; the web Preview comes from Vercel's
 # Git integration.
 #
 #   push to master -> `checks` (the reusable ci.yml for THIS sha) + build, then

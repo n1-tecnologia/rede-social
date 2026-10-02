@@ -1,0 +1,281 @@
+# Homolog (hml): API + worker to Cloud Run in the isolated hml GCP project (quick 261002-f4y).
+#
+# Homolog is fully isolated from production: its own GCP project (`rede-social-hml`), its own
+# Supabase project and its own Vercel project (`rede-social-hml`). See docs/DEPLOY.md
+# "Decisions (2026-10-02)".
+#
+#   push to homolog -> `build` (preflight + image) -> `migrate-and-deploy-hml`
+#                      (migrations -> API -> worker), automatically, with NO reviewer.
+#
+# ci.yml runs on the same push but does NOT gate this deploy: its e2e has never finished in time to
+# be worth waiting for here. Production keeps its gate (`checks` + the `production` reviewer) in
+# deploy-api.yml, which this file never touches.
+#
+# Isolation guards, outermost last:
+#   1. Both jobs declare `environment: homolog`; its variables and secrets override the
+#      repository-level (production) values of the same names.
+#   2. The preflight (first step of `build`, before any credential is used) refuses an empty value,
+#      any value that resolves to production, and a supabase/config.toml without a
+#      `[remotes.homolog]` table bound to the hml Supabase ref.
+#   3. The WIF provider attribute conditions: the hml provider accepts only `refs/heads/homolog`
+#      and the production provider only `refs/heads/master` (docs/DEPLOY.md "Workload Identity
+#      branch restriction (isolation guard)").
+#
+# No seed step: production's never-seed rule does not apply to hml, but a demo seed there is run by
+# hand only, never from a workflow (docs/DEPLOY.md "hml provisioning runbook").
+name: Deploy homolog (hml)
+
+on:
+  push:
+    branches: [homolog]
+    paths:
+      - apps/api/**
+      - packages/**
+      - supabase/**
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-hml.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+# Never cancel: a cancelled run could abort a migration halfway. Two pushes to homolog queue instead.
+concurrency:
+  group: deploy-hml
+  cancel-in-progress: false
+
+env:
+  GCP_REGION: southamerica-east1
+  AR_REPO: rede-social
+
+jobs:
+  build:
+    name: Build and push the image (hml)
+    # A workflow_dispatch from any other branch is skipped here instead of failing at WIF.
+    if: github.ref == 'refs/heads/homolog'
+    runs-on: ubuntu-latest
+    environment: homolog
+    outputs:
+      image: ${{ steps.image.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Values arrive only through env (no expression inside `run`). Never prints the Supabase ref.
+      # Read-only: it never edits supabase/config.toml.
+      - name: Preflight — refuse production values and a missing hml remote
+        env:
+          WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+          DEPLOY_SA: ${{ vars.DEPLOY_SA }}
+          RUNTIME_SA: ${{ vars.RUNTIME_SA }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          PLATFORM_HOST: ${{ vars.PLATFORM_HOST }}
+          WEB_URL: ${{ vars.WEB_URL }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+
+          # (a) Every homolog value is present.
+          for name in WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL SUPABASE_PROJECT_ID; do
+            if [ -z "${!name:-}" ]; then
+              fail "$name is empty: define it on the GitHub environment 'homolog' (docs/DEPLOY.md)."
+            fi
+          done
+
+          # (b) GCP identifiers are not production's (a missing environment value falls back to the
+          # repository-level production variable).
+          if [ "$GCP_PROJECT_ID" = "api-dere-social" ]; then
+            fail "GCP_PROJECT_ID is the production project; set the hml project on environment 'homolog'."
+          fi
+          case "$WIF_PROVIDER" in
+            projects/253040968821/*) fail "WIF_PROVIDER is the production provider; set the hml provider on environment 'homolog'." ;;
+          esac
+          for name in DEPLOY_SA RUNTIME_SA; do
+            case "${!name}" in
+              *@api-dere-social.iam.gserviceaccount.com) fail "$name is a production service account; set the hml one on environment 'homolog'." ;;
+            esac
+          done
+
+          # (c) The Supabase ref is not production's.
+          if [ "$SUPABASE_PROJECT_ID" = "qjjhtduxquvlfppybpqq" ]; then
+            fail "SUPABASE_PROJECT_ID is the production Supabase project; set the hml ref on environment 'homolog'."
+          fi
+
+          # (d) The web host is not production's.
+          if [ "$PLATFORM_HOST" = "rede-social-woad.vercel.app" ]; then
+            fail "PLATFORM_HOST is the production host; set the hml host on environment 'homolog'."
+          fi
+          case "$WEB_URL" in
+            *rede-social-woad.vercel.app*) fail "WEB_URL points at the production host; set the hml URL on environment 'homolog'." ;;
+          esac
+
+          # (e) supabase/config.toml has a [remotes.homolog] table bound to the hml ref. Without it,
+          # `supabase config push` would push the LOCAL [auth] values to the hml project.
+          missing_remote="supabase/config.toml has no [remotes.homolog] table whose project_id equals SUPABASE_PROJECT_ID. Add the [remotes.homolog] override (project_id, site_url, the explicit /auth/confirm** redirect entry, the send_email hook uri on the hml api) before the first hml deploy: without it, supabase config push would push the local [auth] values to the hml project."
+          if [ ! -f supabase/config.toml ] || ! grep -Eq '^\[remotes\.homolog\][[:space:]]*$' supabase/config.toml; then
+            fail "$missing_remote"
+          fi
+          remote_ref="$(awk '
+            /^\[remotes\.homolog\][ \t]*$/ { inside = 1; next }
+            inside && /^\[/ { exit }
+            inside && /^[ \t]*project_id[ \t]*=/ {
+              if (match($0, /"[^"]*"/)) print substr($0, RSTART + 1, RLENGTH - 2)
+              exit
+            }
+          ' supabase/config.toml)"
+          if [ -z "$remote_ref" ] || [ "$remote_ref" != "$SUPABASE_PROJECT_ID" ]; then
+            fail "$missing_remote"
+          fi
+
+          echo "Preflight passed: homolog values present, none resolves to production, [remotes.homolog] matches."
+
+      - uses: google-github-actions/auth@v3
+        id: auth
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GCP_REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Compute the image reference
+        id: image
+        run: echo "ref=${GCP_REGION}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${AR_REPO}/api:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.image.outputs.ref }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  migrate-and-deploy-hml:
+    name: Homolog (migrations -> API -> worker)
+    if: github.ref == 'refs/heads/homolog'
+    # Only the image build: ci.yml does not gate homolog (docs/DEPLOY.md "Decisions (2026-10-02)").
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: homolog
+      url: ${{ vars.WEB_URL }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.117.0
+
+      # Every Supabase CLI command validates config.toml's `[auth.hook.send_email]` block, so each
+      # step that runs the CLI needs SEND_EMAIL_HOOK_SECRETS (same value as Secret Manager).
+      - name: Migrations (roles included)
+        env:
+          SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_ID"
+          supabase db push --include-roles
+
+      - name: Set the api_user password
+        env:
+          PGPASSWORD_URL: ${{ secrets.SUPABASE_SESSION_POOLER_URL }}
+          API_DB_PASSWORD: ${{ secrets.API_DB_PASSWORD }}
+        # psql substitutes :'pw' only in stdin/-f input, never in -c.
+        run: echo "alter role api_user with login password :'pw';" | psql "$PGPASSWORD_URL" -v ON_ERROR_STOP=1 -v pw="$API_DB_PASSWORD"
+
+      - name: Push auth configuration (Send Email Hook -> API)
+        env:
+          SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: supabase config push --project-ref "$SUPABASE_PROJECT_ID" --yes
+
+      # No seeding here. A demo seed on hml is allowed, but it is run by hand (docs/DEPLOY.md
+      # "hml provisioning runbook"), never from a workflow. Production's never-seed rule is unchanged.
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      # Web Push (07-06, 07-11): both services run the `webpush` transport with the three VAPID
+      # secrets (the hml pair, never production's). The worker sends; the API only enqueues, but it
+      # validates subscription endpoints and boots the same assertProductionEnv. Every `-hml` secret
+      # must exist in `rede-social-hml` BEFORE the first run: a missing one fails the deploy
+      # (docs/DEPLOY.md "GCP Secret Manager secrets — `homolog`").
+      - uses: google-github-actions/deploy-cloudrun@v3
+        id: api
+        with:
+          service: api
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build.outputs.image }}
+          env_vars: |-
+            ROLE=api
+            LOG_LEVEL=info
+            PLATFORM_HOST=${{ vars.PLATFORM_HOST }}
+            VIDEO_PROVIDER=mux
+            MAIL_TRANSPORT=resend
+            MAIL_DOMAIN=n1marketingdigital.com.br
+            PUSH_TRANSPORT=webpush
+          secrets: |-
+            DATABASE_URL=api-database-url-hml:latest
+            SUPABASE_SERVICE_KEY=supabase-service-key-hml:latest
+            SUPABASE_URL=supabase-url-hml:latest
+            MUX_TOKEN_ID=mux-token-id-hml:latest
+            MUX_TOKEN_SECRET=mux-token-secret-hml:latest
+            MUX_SIGNING_KEY_ID=mux-signing-key-id-hml:latest
+            MUX_SIGNING_KEY_PRIVATE=mux-signing-key-private-hml:latest
+            MUX_WEBHOOK_SECRET=mux-webhook-secret-hml:latest
+            VAPID_PUBLIC_KEY=vapid-public-key-hml:latest
+            VAPID_PRIVATE_KEY=vapid-private-key-hml:latest
+            VAPID_SUBJECT=vapid-subject-hml:latest
+            RESEND_API_KEY=resend-api-key-hml:latest
+            SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-hml:latest
+          # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
+          # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
+          # --min-instances=0: hml tolerates a cold start; the deep health check below retries.
+          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=0 --no-invoker-iam-check --port=8080
+
+      - uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          service: worker
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build.outputs.image }}
+          env_vars: |-
+            ROLE=worker
+            LOG_LEVEL=info
+            PLATFORM_HOST=${{ vars.PLATFORM_HOST }}
+            VIDEO_PROVIDER=mux
+            MAIL_TRANSPORT=resend
+            MAIL_DOMAIN=n1marketingdigital.com.br
+            PUSH_TRANSPORT=webpush
+          secrets: |-
+            DATABASE_URL=api-database-url-hml:latest
+            BOSS_DATABASE_URL=worker-database-url-hml:latest
+            SUPABASE_SERVICE_KEY=supabase-service-key-hml:latest
+            SUPABASE_URL=supabase-url-hml:latest
+            MUX_TOKEN_ID=mux-token-id-hml:latest
+            MUX_TOKEN_SECRET=mux-token-secret-hml:latest
+            MUX_SIGNING_KEY_ID=mux-signing-key-id-hml:latest
+            MUX_SIGNING_KEY_PRIVATE=mux-signing-key-private-hml:latest
+            MUX_WEBHOOK_SECRET=mux-webhook-secret-hml:latest
+            VAPID_PUBLIC_KEY=vapid-public-key-hml:latest
+            VAPID_PRIVATE_KEY=vapid-private-key-hml:latest
+            VAPID_SUBJECT=vapid-subject-hml:latest
+            RESEND_API_KEY=resend-api-key-hml:latest
+            SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-hml:latest
+          # pg-boss needs a warm worker: min 1 and CPU always allocated, as in production.
+          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --no-cpu-throttling --no-allow-unauthenticated
+
+      # The api scales to zero on hml, so the first request may hit a cold start: retry.
+      - name: Deep health check
+        env:
+          API_URL: ${{ steps.api.outputs.url }}
+        run: curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$API_URL/v1/health?deep=1"
