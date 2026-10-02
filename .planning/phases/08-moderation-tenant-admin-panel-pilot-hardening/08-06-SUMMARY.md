@@ -320,9 +320,9 @@ See `key-decisions` in the frontmatter.
   - `pnpm boundaries`: no issues.
 - **Not run:** `scripts/check-static-routes.sh` needs a production `next build`. The new `REQUIRED_KEYS` entry is checked at the 08-12 gate's `pnpm verify`.
 - **Acceptance greps:**
-  - `ctx.tenantId` in `branding.ts`: 7;
+  - `ctx.tenantId` in `branding.ts`: 13;
   - `{id}` / `:id` paths: 0;
-  - `BrandingForm` in the Marca page: 4;
+  - `BrandingForm` in the Marca page: 5;
   - `BrandingForm.tsx` diff since the task base: none;
   - `platformRedirectPath` in the Marca actions: 0;
   - `adminTenantBodySchema` in `tenant.ts`: 3, and the contract defines it with `.strict()`;

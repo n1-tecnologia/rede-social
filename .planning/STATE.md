@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-05-PLAN.md
-last_updated: "2026-10-02T15:17:03.105Z"
+stopped_at: Completed 08-06-PLAN.md
+last_updated: "2026-10-02T15:48:23.009Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-05 (role changes under the D-332 guards, profile admin entry, lost-permission handling)
-state_head: b5bc9c2ebc3d107c2a025926673485e4614442ab
+last_activity_desc: Completed 08-06 (tenant-lane Marca editor with the platform BrandingForm reused unchanged, display name card, last write wins)
+state_head: 94a2a0f7b9467e3f4dcd16cc46b4498ae63d3b78
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 115
+  completed_plans: 116
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 6 of 12
+Plan: 7 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-05 (PUT /v1/admin/members/{id}/role with self/not_active/blocked/last_admin guards under row locks and a role_changed log row, the RoleOptionList in the member sheet, the profile header admin entry, UI-D-284 forbidden/gone handling)
+Last activity: 2026-10-02 — Completed 08-06 (/v1/admin/branding/* and PATCH /v1/admin/tenant on ctx.tenantId behind tenant.manage, /configuracoes/marca with the unchanged BrandingForm and the DisplayNameCard, the Marca settings row, last write wins between the platform and tenant lanes)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -176,6 +176,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P03 | 28 min | 3 tasks | 33 files |
 | Phase 08 P04 | 35 min | 3 tasks | 33 files |
 | Phase 08 P05 | 31 min | 2 tasks | 18 files |
+| Phase 08 P06 | 27 min | 2 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -572,6 +573,10 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-04: member block/unblock runs in the admin lane under one order-by-id row lock on the active admins plus the target; status folding (status blocked OR blocked_at) everywhere; refusals are 409 CONFLICT { member }
 - [Phase 08]: 08-04: the Membros admin list reads e-mail in the admin lane with m.tenant_id = ctx.tenantId on every statement; three-key keyset inside the shared cursor envelope
 - [Phase 08]: 08-04: membership.blocked (after commit) drives the eager push cleanup and a notifications.changed nudge; the counters BFF forwards 403 MEMBERSHIP_BLOCKED with the /auth/blocked path and LiveShell lands there
+- [Phase 08]: 08-06: the tenant lane reuses the platform brand editor unchanged — /v1/admin/branding/* and PATCH /v1/admin/tenant carry no tenant id and pass ctx.tenantId to the platform kernel services; the actions keep the BrandingActions signatures and ignore the tenantId argument
+- [Phase 08]: 08-06: the display-name rule is one schema (tenantDisplayNameSchema in contracts/branding) used by both lanes; Zod 4 counts code points (an emoji is one character)
+- [Phase 08]: 08-06: the tenant-lane Marca form is keyed on the tenant only (not the display name), since BrandingForm adopts a refreshed view in place (08-02)
+- [Phase 08]: 08-06: a 403 FORBIDDEN from a BrandingForm action redirects to /configuracoes?erro=sem-permissao (forbidden toast) after revalidating the layout; the unchanged form has no forbidden outcome
 
 ### Pending Todos
 
@@ -644,6 +649,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T15:17:02.980Z
-Stopped at: Completed 08-05-PLAN.md
+Last session: 2026-10-02T15:48:09.300Z
+Stopped at: Completed 08-06-PLAN.md
 Resume file: None
