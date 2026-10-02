@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-04-PLAN.md
-last_updated: "2026-10-02T14:41:47.480Z"
+stopped_at: Completed 08-05-PLAN.md
+last_updated: "2026-10-02T15:17:03.105Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-03 (story-comment moderation, full Moderação screen, removal finish)
-state_head: e18adc2cd8f9910a92b6774b7f86b9154cca5c74
+last_activity_desc: Completed 08-05 (role changes under the D-332 guards, profile admin entry, lost-permission handling)
+state_head: b5bc9c2ebc3d107c2a025926673485e4614442ab
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 114
+  completed_plans: 115
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 5 of 12
+Plan: 6 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-03 (stories admin delete with story_comment log rows, Moderação chips + keyset paging + every state, removal finish on feed/community/reel/story)
+Last activity: 2026-10-02 — Completed 08-05 (PUT /v1/admin/members/{id}/role with self/not_active/blocked/last_admin guards under row locks and a role_changed log row, the RoleOptionList in the member sheet, the profile header admin entry, UI-D-284 forbidden/gone handling)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -175,6 +175,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P02 | 45 min | 3 tasks | 12 files |
 | Phase 08 P03 | 28 min | 3 tasks | 33 files |
 | Phase 08 P04 | 35 min | 3 tasks | 33 files |
+| Phase 08 P05 | 31 min | 2 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -643,6 +644,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T14:41:47.353Z
-Stopped at: Completed 08-04-PLAN.md
+Last session: 2026-10-02T15:17:02.980Z
+Stopped at: Completed 08-05-PLAN.md
 Resume file: None
