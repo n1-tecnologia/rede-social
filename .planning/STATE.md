@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-06-PLAN.md
-last_updated: "2026-10-02T15:48:23.009Z"
+stopped_at: Completed 08-09-PLAN.md
+last_updated: "2026-10-02T16:05:37.387Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-06 (tenant-lane Marca editor with the platform BrandingForm reused unchanged, display name card, last write wins)
-state_head: 94a2a0f7b9467e3f4dcd16cc46b4498ae63d3b78
+last_activity_desc: Completed 08-09 (MOD-05 reuse fixture mounting the events module on the kernel contracts alone, eight READMEs and the README drift test)
+state_head: 4ec2998043624e3872884822d30b5bded20e4f11
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 116
+  completed_plans: 117
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 7 of 12
+Plan: 8 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-06 (/v1/admin/branding/* and PATCH /v1/admin/tenant on ctx.tenantId behind tenant.manage, /configuracoes/marca with the unchanged BrandingForm and the DisplayNameCard, the Marca settings row, last write wins between the platform and tenant lanes)
+Last activity: 2026-10-02 — Completed 08-09 (packages/reuse-fixture mounts the events module on the kernel contracts alone: route set, 401 without a DB, seeded rede-demo member 200, dependency set asserted; root test:integration chains it; seven module READMEs plus the kernel moderation README kept true by module-readmes.test.ts)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -177,6 +177,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P04 | 35 min | 3 tasks | 33 files |
 | Phase 08 P05 | 31 min | 2 tasks | 18 files |
 | Phase 08 P06 | 27 min | 2 tasks | 21 files |
+| Phase 08 P09 | 14 min | 2 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -577,6 +578,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-06: the display-name rule is one schema (tenantDisplayNameSchema in contracts/branding) used by both lanes; Zod 4 counts code points (an emoji is one character)
 - [Phase 08]: 08-06: the tenant-lane Marca form is keyed on the tenant only (not the display name), since BrandingForm adopts a refreshed view in place (08-02)
 - [Phase 08]: 08-06: a 403 FORBIDDEN from a BrandingForm action redirects to /configuracoes?erro=sem-permissao (forbidden toast) after revalidating the layout; the unchanged form has no forbidden outcome
+- [Phase 08]: 08-09: MOD-05 is proven by packages/reuse-fixture (tag app), which mounts the events module on the kernel contracts alone; its dependency set is asserted by its own unit test and turbo boundaries, and its seeded-stack case runs from the root test:integration after the API suite
+- [Phase 08]: 08-09: module READMEs (fixed headings Contracts, Events emitted, Events consumed, Flag key, Kernel dependencies, Navigation, Jobs, Reuse) are kept true by apps/api/tests/unit/module-readmes.test.ts; the check reads ternary emits and fails both ways, and every packages/modules/* package must be in MODULE_REGISTRY
+- [Phase 08]: 08-09: a Vitest config that needs its own include must not be merged with vitestBase (mergeConfig concatenates include arrays)
 
 ### Pending Todos
 
@@ -649,6 +653,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T15:48:09.300Z
-Stopped at: Completed 08-06-PLAN.md
+Last session: 2026-10-02T16:05:12.554Z
+Stopped at: Completed 08-09-PLAN.md
 Resume file: None

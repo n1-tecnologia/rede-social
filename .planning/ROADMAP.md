@@ -644,7 +644,7 @@ Plans:
   3. Every admin creation flow - post, story, community, event - plus branding, member management and moderation is usable end-to-end from a phone inside the same app (verified on a real device).
   4. Each module package ships a README documenting its public interface (contracts, emitted/consumed events, flag key, kernel dependencies) and one module can be copied into a fresh app that provides only the kernel contracts; the pilot go-live gate passes: full two-tenant isolation suite across every endpoint, storage URL and Realtime topic, pt-BR catalog audit with zero UI literals, and PWA install + push smoke tests on a real iPhone and Android. Per D-344 the full gate runs here, and 08.1's exit gate re-runs the isolation suite with its shared-identity fixture plus a short real-device smoke; the MVP is declared closed there.
 
-**Plans:** 6/12 plans executed (planned 2026-10-02)
+**Plans:** 7/12 plans executed (planned 2026-10-02)
 
 Plans:
 
@@ -668,7 +668,7 @@ Plans:
 **Wave 5**
 
 - [x] 08-06-PLAN.md — Tenant-lane branding with the platform editor reused unchanged, display name, last write wins
-- [ ] 08-09-PLAN.md — MOD-05: `packages/reuse-fixture` mounting the events module on the kernel contracts alone, eight READMEs and the README drift test
+- [x] 08-09-PLAN.md — MOD-05: `packages/reuse-fixture` mounting the events module on the kernel contracts alone, eight READMEs and the README drift test
 
 **Wave 6**
 
@@ -818,7 +818,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 15/15 | Complete    | 2026-10-01 |
-| 8. Moderation, Tenant Admin Panel & Pilot Hardening | 6/12 | In Progress|  |
+| 8. Moderation, Tenant Admin Panel & Pilot Hardening | 7/12 | In Progress|  |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
