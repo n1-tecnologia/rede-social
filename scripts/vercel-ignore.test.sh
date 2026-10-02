@@ -4,12 +4,12 @@
 # (DEPLOY_ENV unset or `production`, Production Branch `master`) and homolog (DEPLOY_ENV=`homolog`,
 # Production Branch `homolog`). This test proves that the COMMITTED ignoreCommand builds `homolog`
 # only on the hml project, never on production, and otherwise delegates to
-# `npx turbo-ignore --fallback=HEAD^1` exactly as before.
+# `npx turbo-ignore` (no --fallback: no previous deployment means build).
 #
 # How: the ignoreCommand string is read from apps/web/vercel.json (never a copy) and run with
 # `bash -c` from apps/web — the Root Directory Vercel runs it in — under a clean environment and a
 # stub `npx` first on PATH. The stub records its cwd and argv and exits with STUB_EXIT (default 1).
-# "delegated" means the stub ran exactly once, from apps/web, with `turbo-ignore --fallback=HEAD^1`.
+# "delegated" means the stub ran exactly once, from apps/web, with `turbo-ignore` and no arguments.
 #
 # Output: TAP (`1..15`, then `ok N` / `not ok N`). Exits 1 when any case fails.
 set -euo pipefail
@@ -28,7 +28,7 @@ exit "${STUB_EXIT:-1}"
 STUB
 chmod +x "$TMP/bin/npx"
 
-WANT_LOG="$WEB|turbo-ignore --fallback=HEAD^1"
+WANT_LOG="$WEB|turbo-ignore"
 FAILED=0
 N=0
 
