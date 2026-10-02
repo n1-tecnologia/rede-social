@@ -1,6 +1,8 @@
-import { expect, type Page, test } from '@playwright/test';
-import { closeBrandingAdmin, getTenantBranding } from './branding-admin';
-import { isRemote, login, SEED_PASSWORD } from './fixtures';
+import { fileURLToPath } from 'node:url';
+import { type Browser, expect, type Page, test } from '@playwright/test';
+import { closeAdmin, setMembershipRole } from './admin';
+import { closeBrandingAdmin, getTenantBranding, getTenantDisplayName } from './branding-admin';
+import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import {
   closeMembersAdmin,
   createMembersTenant,
@@ -10,6 +12,7 @@ import {
   sweepMembersTenants,
 } from './members-admin';
 import { closeTenantFixtures } from './tenant-fixtures';
+import { ensureWorker } from './worker';
 
 /**
  * 08-06 — the tenant lane's Marca screen (ADMIN-01, D-339, D-342, UI-D-279): the admin edits their
@@ -20,14 +23,21 @@ import { closeTenantFixtures } from './tenant-fixtures';
  * would leak into every spec that runs after this one (`tenant-fixtures.ts`). The API integration
  * suite proves the same flow on `admin@rede-demo.local` itself and restores the seed afterwards.
  * Each project gets its own tenant and host, unique per run (the host-cache rule of
- * `membersTenantSlug`).
+ * `membersTenantSlug`). The spec brings its own `ROLE=worker` (`ensureWorker`): icon derivation runs
+ * off the request path and the Playwright config starts the API and the web app only.
  */
 
-test.describe.configure({ mode: 'serial', timeout: 120_000 });
+test.describe.configure({ mode: 'serial', timeout: 180_000 });
 test.skip(isRemote, 'local stack only');
 
 const PREFIX = 'brnd';
 let tenant: MembersTenant;
+let stopWorker: () => Promise<void> = async () => {};
+
+const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/rede-lab.svg', import.meta.url));
+const SQUARE_SVG = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#dc2626"/></svg>',
+);
 
 /**
  * After a full navigation the inputs exist before React hydrated them; a fill dispatched in that
@@ -62,8 +72,31 @@ function shellPrimary(page: Page): Promise<string> {
 
 async function openMarca(page: Page): Promise<void> {
   await page.goto(`${tenant.origin}/configuracoes/marca`);
-  await expect(page.getByRole('heading', { name: 'Marca' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Marca', exact: true })).toBeVisible();
   await waitForHydration(page, '#primary');
+}
+
+/** Whether the first server HTML declares `--brand-primary` = `hex` (the phase2-smoke probe). */
+function declaresPrimary(html: string, hex: string): boolean {
+  return new RegExp(`--brand-primary:\\s*${hex}`).test(html);
+}
+
+/** The tenant's `/entrar` first HTML in a signed-out context (the login screen, no session). */
+async function loginScreenHtml(browser: Browser): Promise<string> {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    const res = await page.goto(`${tenant.origin}/entrar`);
+    if (!res) throw new Error('no /entrar response');
+    return await res.text();
+  } finally {
+    await context.close();
+  }
+}
+
+/** The toast line (the form and the card both speak through the shell's toast). */
+function toast(page: Page, text: string) {
+  return page.getByText(text, { exact: true }).first();
 }
 
 test.beforeAll(async ({ browserName: _browserName }, testInfo) => {
@@ -75,10 +108,13 @@ test.beforeAll(async ({ browserName: _browserName }, testInfo) => {
     SEED_PASSWORD,
     0,
   );
+  stopWorker = await ensureWorker();
 });
 
 test.afterAll(async () => {
+  await stopWorker();
   if (tenant) await deleteMembersTenant(tenant.slug);
+  await closeAdmin();
   await closeMembersAdmin();
   await closeTenantFixtures();
   await closeBrandingAdmin();
@@ -92,7 +128,7 @@ test.describe('08-06 — Marca on the tenant lane', () => {
 
     // D-339: "Marca" is the first row of the Administração group.
     await page.goto(`${tenant.origin}/configuracoes`);
-    const row = page.getByRole('link', { name: 'Marca' });
+    const row = page.getByRole('link', { name: 'Marca', exact: true });
     await expect(row).toBeVisible();
     await row.click();
     await expect(page).toHaveURL(`${tenant.origin}/configuracoes/marca`);
@@ -124,4 +160,189 @@ test.describe('08-06 — Marca on the tenant lane', () => {
     await expect(page.locator('#primary')).toHaveValue('#1d4ed8');
     await expect(page.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled();
   });
+  test('the name card: disabled, errors, the 60-character cap, save, toast and the preview (E11)', async ({
+    page,
+  }) => {
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await openMarca(page);
+    await waitForHydration(page, '#displayName');
+    const name = page.locator('#displayName');
+    const save = page.getByRole('button', { name: 'Salvar nome' });
+    await expect(page.getByText('Nome da comunidade', { exact: true })).toBeVisible();
+    await expect(name).toHaveValue(`Comunidade ${tenant.slug}`);
+    await expect(save).toBeDisabled();
+
+    // E11/empty: empty and spaces-only never save.
+    for (const value of ['', '    ']) {
+      await name.fill(value);
+      await expect(page.getByText('Informe o nome da comunidade.')).toBeVisible();
+      await expect(save).toBeDisabled();
+    }
+
+    // E11/long-text: typing stops at 60 characters.
+    await name.fill('');
+    await name.pressSequentially('n'.repeat(64));
+    await expect(name).toHaveValue('n'.repeat(60));
+    await expect(save).toBeEnabled();
+
+    // E11/populated: a new name with accents and an emoji saves; the preview follows it.
+    const next = `Marca Ação 🎉 ${tenant.slug.slice(-6)}`;
+    await name.fill(`  ${next}  `);
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(toast(page, 'Nome salvo.')).toBeVisible();
+    await expect(save).toBeDisabled();
+    await expect(name).toHaveValue(next);
+    await expect(page.locator('[data-brand-scope][data-theme="light"]')).toContainText(next);
+    await expect.poll(async () => (await getTenantDisplayName(tenant.slug)) ?? '').toBe(next);
+  });
+
+  test('a logo upload derives the icons; a colour typed while the icon poll runs survives its refresh (E12)', async ({
+    page,
+  }) => {
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await openMarca(page);
+    // E12/empty: the shipped no-logo state, no app-icons card yet.
+    await expect(
+      page.getByText('Nenhum logo enviado — o nome da comunidade aparece no lugar.'),
+    ).toBeVisible();
+    await expect(page.locator('[data-icons-status]')).toHaveCount(0);
+    await waitForHydration(page, '[data-upload-zone="logo"] input[type="file"]');
+
+    // The poll's `router.refresh()` once the icons are ready: an RSC GET of this very route.
+    const refreshed = page.waitForResponse(
+      (res) =>
+        res.request().method() === 'GET' &&
+        res.request().headers().rsc === '1' &&
+        !res.request().headers()['next-router-prefetch'] &&
+        new URL(res.url()).pathname === '/configuracoes/marca',
+      { timeout: 120_000 },
+    );
+
+    await page.locator('[data-upload-zone="logo"] input[type="file"]').setInputFiles(SEED_LOGO);
+    await expect(toast(page, 'Alterações salvas.')).toBeVisible({ timeout: 30_000 });
+    const logo = await getTenantBranding(tenant.slug);
+    expect(logo.logoUrl).toContain(
+      `/storage/v1/object/public/branding/${tenant.tenantId}/branding/`,
+    );
+
+    // E12/loading backstop (RESEARCH Pitfall 7, WINDOWS #71): type while the poll runs.
+    await page.locator('#primary').fill('#0e7490');
+    await page.locator('#secondary').fill('#22d3ee');
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+    await refreshed;
+    const save = page.getByRole('button', { name: 'Salvar alterações' });
+    await expect(page.locator('#primary')).toHaveValue('#0e7490');
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(toast(page, 'Alterações salvas.')).toBeVisible();
+    await expect
+      .poll(async () => (await getTenantBranding(tenant.slug)).colors.primary)
+      .toBe('#0e7490');
+
+    // The derived set belongs to the current version; the preview carries the uploaded logo.
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+    const derived = await getTenantBranding(tenant.slug);
+    expect(derived.iconUrls?.i512).toContain(`/${tenant.tenantId}/branding/icons/`);
+    await expect(page.locator('[data-icon-thumb]')).toHaveCount(4);
+    await expect(
+      page.locator(`[data-brand-scope][data-theme="light"] img[src="${derived.logoUrl}"]`).first(),
+    ).toBeAttached();
+  });
+
+  test('the square icon override uploads and is removed on the tenant lane', async ({ page }) => {
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await openMarca(page);
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+    await waitForHydration(page, '[data-upload-zone="icon"] input[type="file"]');
+    await page
+      .locator('[data-upload-zone="icon"] input[type="file"]')
+      .setInputFiles({ name: 'quadrado.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
+    await expect
+      .poll(async () => (await getTenantBranding(tenant.slug)).iconUrl, {
+        timeout: 30_000,
+      })
+      .not.toBeNull();
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+
+    // Remove on a settled form (a fresh navigation: icons ready, no poll, no refresh).
+    await openMarca(page);
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible();
+    await page.getByRole('button', { name: 'Remover' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Remover ícone quadrado?')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Remover' }).click();
+    await expect
+      .poll(async () => (await getTenantBranding(tenant.slug)).iconUrl, {
+        timeout: 30_000,
+      })
+      .toBeNull();
+  });
+
+  test("after a save, the tenant's login screen shows the new colour within 70 s (E12 partial backstop)", async ({
+    page,
+    browser,
+  }) => {
+    // Warm the login screen's host cache first, so the poll below measures the cache (an entry made
+    // before the save expires at most 60 s after it) instead of a cold miss.
+    await loginScreenHtml(browser);
+
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await openMarca(page);
+    await page.locator('#primary').fill('#be123c');
+    await page.locator('#secondary').fill('#fb7185');
+    await page.getByRole('button', { name: 'Salvar alterações' }).click();
+    await expect(toast(page, 'Alterações salvas.')).toBeVisible();
+    const savedAt = Date.now();
+
+    // The shell: the very next navigation.
+    await page.goto(`${tenant.origin}/inicio`);
+    await expect.poll(() => shellPrimary(page)).toBe('#be123c');
+
+    // The login screen: through the host caches (60 s web TTL), polled by reloading.
+    await expect
+      .poll(async () => declaresPrimary(await loginScreenHtml(browser), '#be123c'), {
+        timeout: 70_000,
+        intervals: [2_000, 5_000],
+      })
+      .toBe(true);
+    expect(Date.now() - savedAt).toBeLessThan(70_000);
+  });
+
+  test('a lost permission: the save lands on Configurações with the forbidden toast (UI-D-284)', async ({
+    page,
+  }) => {
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await openMarca(page);
+    await page.locator('#primary').fill('#15803d');
+    await page.locator('#secondary').fill('#4ade80');
+
+    await setMembershipRole(tenant.admin.email, tenant.slug, 'member');
+    try {
+      await page.getByRole('button', { name: 'Salvar alterações' }).click();
+      await expect(page).toHaveURL(
+        new RegExp(`${tenant.origin}/configuracoes\\?erro=sem-permissao$`),
+      );
+      await expect(toast(page, 'Você não tem mais permissão para esta ação.')).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Marca', exact: true })).toHaveCount(0);
+      expect((await getTenantBranding(tenant.slug)).colors.primary).not.toBe('#15803d');
+      await page.goto(`${tenant.origin}/configuracoes/marca`);
+      await expect(page.getByRole('heading', { name: 'Marca', exact: true })).toHaveCount(0);
+    } finally {
+      await setMembershipRole(tenant.admin.email, tenant.slug, 'admin_tenant');
+    }
+  });
+});
+
+/** D-339 / UI-D-270: a member never meets Marca — no row, and the URL is the not-found answer. */
+test('a member sees no Marca row and /configuracoes/marca does not exist for them', async ({
+  page,
+}) => {
+  await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+  await page.goto(`${hosts.demo}/configuracoes`);
+  await expect(page.getByRole('heading', { name: 'Configurações' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Marca', exact: true })).toHaveCount(0);
+  await page.goto(`${hosts.demo}/configuracoes/marca`);
+  await expect(page.getByRole('heading', { name: 'Marca', exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-brand-scope]')).toHaveCount(0);
 });

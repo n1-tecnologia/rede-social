@@ -2,6 +2,7 @@ import { createOpenApiApp } from '../../http/openapi';
 import { adminBrandingRoutes } from './branding';
 import { adminMembersRoutes } from './members';
 import { moderationLogRoutes } from './moderation';
+import { adminTenantRoutes } from './tenant';
 
 /**
  * `/v1/admin/*` — the tenant admin panel's API (Phase 8, D-339): the `admin_tenant` running their own
@@ -19,4 +20,5 @@ import { moderationLogRoutes } from './moderation';
 export const adminRoutes = createOpenApiApp()
   .route('/moderation-log', moderationLogRoutes)
   .route('/members', adminMembersRoutes)
-  .route('/branding', adminBrandingRoutes);
+  .route('/branding', adminBrandingRoutes)
+  .route('/tenant', adminTenantRoutes);

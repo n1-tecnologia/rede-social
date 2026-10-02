@@ -391,8 +391,9 @@ export function iconsUpToDate(branding: {
 // carries a tenant id: the tenant is always the caller's membership of record (`ctx.tenantId`).
 
 /**
- * The display-name rule, ONE value for both lanes (ADMIN-01 encoding): trimmed, 1..60 UTF-16 code
- * units, accents and emoji kept. The platform's create and update bodies (`platform.ts`) and the
+ * The display-name rule, ONE value for both lanes (ADMIN-01 encoding): trimmed, 1..60 characters as
+ * Zod 4 counts them (Unicode code points: an emoji is one, a combining accent is one more), accents
+ * and emoji kept. The platform's create and update bodies (`platform.ts`) and the
  * tenant lane's `adminTenantBodySchema` all use this very schema, so a name the super_admin may save
  * is exactly a name the admin may save.
  */

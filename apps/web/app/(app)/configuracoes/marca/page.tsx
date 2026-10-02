@@ -3,12 +3,20 @@ import { KERNEL_PERMISSIONS } from '@rede-social/contracts/moderation';
 import { PageHeader } from '@rede-social/ui';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { DisplayNameCard } from '@/components/admin/DisplayNameCard';
 import { BrandingForm } from '@/components/platform/BrandingForm';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath, requireBootstrap } from '@/lib/bootstrap';
 import { toBrandingView } from '@/lib/branding-view';
 import { getHostTenant } from '@/lib/tenant-host';
-import { getBrandingStatusAction, saveBrandColorsAction } from './actions';
+import {
+  completeBrandingUploadAction,
+  getBrandingStatusAction,
+  removeIconOverrideAction,
+  saveBrandColorsAction,
+  saveDisplayNameAction,
+  startBrandingUploadAction,
+} from './actions';
 
 /**
  * `GET /v1/admin/branding`, mapped like every admin loader (UI-D-284): session and membership
@@ -60,9 +68,11 @@ function formKey(tenantId: string): string {
 
 /**
  * `/configuracoes/marca` (ADMIN-01, D-339, D-342, UI-D-270, UI-D-279) — the admin edits their own
- * community's brand with the super_admin's editor, unchanged: the same `BrandingForm` (assets,
- * colours with the live light/dark `BrandPreview` and `ContrastFeedback`, the derived icons), fed by
- * tenant-lane actions that never send a tenant id.
+ * community's brand with the super_admin's editor, unchanged. Top to bottom: the freshness note (the
+ * shell shows a change on the next request; the login screen and the installed manifest go through
+ * the 60 s host cache), the name card (`DisplayNameCard`, `BrandingForm` has no name field), then the
+ * same `BrandingForm` (assets, colours with the live light/dark `BrandPreview` and `ContrastFeedback`,
+ * the derived icons) with all five tenant-lane actions, none of which sends a tenant id.
  *
  * **`notFound()`, never a 403 screen** (UI-D-270): without `tenant.manage` in `bootstrap.permissions`
  * — the SAME composed value the API's `requirePermission` reads — and on the platform host. No cache
@@ -93,6 +103,7 @@ export default async function AdminBrandPage() {
         className="md:static md:px-0"
       />
       <p className="px-4 text-xs text-text-tertiary md:px-0">{t('brand.freshness')}</p>
+      <DisplayNameCard initialName={view.displayName} action={saveDisplayNameAction} />
       <BrandingForm
         key={formKey(tenantId)}
         tenantId={tenantId}
@@ -107,6 +118,9 @@ export default async function AdminBrandPage() {
         actions={{
           saveColors: saveBrandColorsAction,
           status: getBrandingStatusAction,
+          start: startBrandingUploadAction,
+          complete: completeBrandingUploadAction,
+          removeIcon: removeIconOverrideAction,
         }}
       />
     </div>

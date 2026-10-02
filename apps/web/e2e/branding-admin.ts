@@ -60,3 +60,10 @@ export async function getTenantBranding(slug: string): Promise<TenantBrandingRow
     colors: { primary: colors.primary ?? '', secondary: colors.secondary ?? '' },
   };
 }
+
+/** The stored `tenants.display_name` of a slug (08-06: the tenant lane's name card). */
+export async function getTenantDisplayName(slug: string): Promise<string | null> {
+  const rows = await sql()<{ display_name: string }[]>`
+    select display_name from public.tenants where slug = ${slug}`;
+  return rows[0]?.display_name ?? null;
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   adminBrandingSchema,
+  adminTenantBodySchema,
   brandStyleVars,
   contrastRatio,
   contrastReport,
@@ -13,6 +14,7 @@ import {
   toHostBranding,
 } from '../src/branding';
 import { hostTenantSchema } from '../src/hosts';
+import { updateTenantBodySchema } from '../src/platform';
 
 /**
  * TENANT-02 / D-25 / D-41: the derivation and contrast maths every brand consumer shares (API save
@@ -230,5 +232,44 @@ describe('adminBrandingSchema (08-06, ADMIN-01, D-342)', () => {
     }
     expect(adminBrandingSchema.safeParse({ ...body, domains: [] }).success).toBe(false);
     expect(adminBrandingSchema.safeParse({ ...body, admins: [] }).success).toBe(false);
+  });
+});
+
+describe('display name parity: platform update vs tenant lane (08-06, ADMIN-01 encoding)', () => {
+  const samples: [label: string, value: string, accepted: boolean][] = [
+    ['empty', '', false],
+    ['spaces only', '   ', false],
+    ['60 characters', 'a'.repeat(60), true],
+    ['61 characters', 'a'.repeat(61), false],
+    ['60 after trimming', `  ${'b'.repeat(60)}  `, true],
+    ['emoji', 'Comunidade 🎉', true],
+    // Zod 4 measures code points: an emoji is ONE character, a combining accent is its own.
+    ['59 characters + an emoji = 60', `${'c'.repeat(59)}🎉`, true],
+    ['60 characters + an emoji = 61', `${'c'.repeat(60)}🎉`, false],
+    ['60 characters + a combining accent = 61', `${'d'.repeat(60)}\u0301`, false],
+    ['combining accent', 'Associac\u0327a\u0303o Sa\u0303o Jose\u0301', true],
+    ['precomposed accents', 'Associação São José', true],
+  ];
+
+  for (const [label, value, accepted] of samples) {
+    it(`${label}: both lanes ${accepted ? 'accept' : 'refuse'} it, with the same stored value`, () => {
+      const platform = updateTenantBodySchema.safeParse({ displayName: value });
+      const admin = adminTenantBodySchema.safeParse({ displayName: value });
+      expect(platform.success).toBe(accepted);
+      expect(admin.success).toBe(accepted);
+      if (platform.success && admin.success) {
+        expect(admin.data.displayName).toBe(platform.data.displayName);
+        expect(admin.data.displayName).toBe(value.trim());
+      }
+    });
+  }
+
+  it('the tenant lane takes the name and nothing else (strict)', () => {
+    for (const extra of [{ status: 'suspended' }, { slug: 'x' }, { modules: [] }, { colors: {} }]) {
+      expect(adminTenantBodySchema.safeParse({ displayName: 'Rede', ...extra }).success).toBe(
+        false,
+      );
+    }
+    expect(adminTenantBodySchema.safeParse({}).success).toBe(false);
   });
 });

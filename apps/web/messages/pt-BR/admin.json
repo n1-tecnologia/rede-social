@@ -19,7 +19,20 @@
     },
     "brand": {
       "title": "Marca",
-      "freshness": "As mudanças aparecem no app na hora. Na tela de entrada podem levar até 1 minuto, e o ícone já instalado no aparelho pode demorar mais."
+      "freshness": "As mudanças aparecem no app na hora. Na tela de entrada podem levar até 1 minuto, e o ícone já instalado no aparelho pode demorar mais.",
+      "name": {
+        "title": "Nome da comunidade",
+        "label": "Nome de exibição",
+        "helper": "Aparece no topo do app, na tela de entrada, nos e-mails e no app instalado.",
+        "save": "Salvar nome",
+        "saving": "Salvando…",
+        "saved": "Nome salvo.",
+        "errors": {
+          "required": "Informe o nome da comunidade.",
+          "tooLong": "Use até 60 caracteres.",
+          "failed": "Não foi possível salvar o nome. Tente novamente."
+        }
+      }
     },
     "members": {
       "title": "Membros",
