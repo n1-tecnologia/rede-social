@@ -35,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   catalog,
   feedCatalog,
+  modCatalog,
   toast,
   like,
   unlike,
@@ -51,6 +52,7 @@ const {
   return {
     catalog: read('stories').stories as Record<string, unknown>,
     feedCatalog: read('feed').feed as Record<string, unknown>,
+    modCatalog: read('moderation').moderation as Record<string, unknown>,
     toast: { show: vi.fn(), dismiss: vi.fn() },
     like: vi.fn(),
     unlike: vi.fn(),
@@ -734,6 +736,80 @@ describe('StoryViewerHost — the comment sheet (D-82, STORY-05)', () => {
   it('12. with NO binding the affordance stays inert rather than doing nothing on tap', () => {
     host();
     expect(screen.getByRole('button', { name: 'Comentar' }).hasAttribute('disabled')).toBe(true);
+  });
+});
+
+/**
+ * 08-03 (D-336, UI-D-276): story comments are moderated through the SAME shared list the feed uses.
+ * The control's meaning comes from the row's server-derived `removal`; the host only supplies the
+ * `moderation` copy (registry `storyCommentsProps(…, tm)`). The catalog is the REAL `moderation.json`.
+ */
+describe('StoryViewerHost — moderating a story comment (08-03, D-336)', () => {
+  const moderation = (key: string) =>
+    String(
+      key
+        .split('.')
+        .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], modCatalog) ??
+        key,
+    );
+
+  function moderatedBinding(removal: 'own' | 'moderation' | null) {
+    const binding = commentsBinding();
+    loadComments.mockResolvedValue({
+      ok: true,
+      items: [{ ...SEEDED_COMMENT, replyCount: 0, canDelete: removal !== null, removal }],
+      nextCursor: null,
+    });
+    return {
+      ...binding,
+      labels: {
+        ...binding.labels,
+        moderation: {
+          title: moderation('comment.title'),
+          body: moderation('comment.body'),
+          bodyWithReplies: moderation('comment.bodyWithReplies'),
+          confirm: moderation('comment.confirm'),
+          cancel: moderation('comment.cancel'),
+          removedToast: moderation('comment.toasts.removed'),
+        },
+        item: { ...binding.labels.item, remove: moderation('comment.label') },
+      },
+    };
+  }
+
+  const openSheet = async () => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Comentar' }));
+    });
+  };
+
+  it("27. 'moderation' draws the trash control named for the author, and opens the moderation dialog", async () => {
+    host({ comments: moderatedBinding('moderation') });
+    await openSheet();
+
+    const control = screen.getByRole('button', { name: 'Remover comentário de Bruno' });
+    await act(async () => {
+      fireEvent.click(control);
+    });
+    expect(screen.getByRole('dialog', { name: 'Remover comentário?' })).toBeTruthy();
+    expect(
+      screen.getByText(
+        'O comentário de Bruno sai da conversa para todos os membros. Bruno não é avisado, e a remoção fica no histórico de moderação.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("28. 'own' keeps the shipped own label; null draws no control at all", async () => {
+    host({ comments: moderatedBinding('own') });
+    await openSheet();
+    expect(screen.getByRole('button', { name: feed('comments.delete.label') })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Remover comentário de/ })).toBeNull();
+    cleanup();
+
+    const { container } = host({ comments: moderatedBinding(null) });
+    await openSheet();
+    expect(screen.getByText('Que story bonito.')).toBeTruthy();
+    expect(container.ownerDocument.querySelectorAll('[data-comment-removal]')).toHaveLength(0);
   });
 });
 

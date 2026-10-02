@@ -2,11 +2,15 @@ import { expect, type Page, test } from '@playwright/test';
 import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import moderationMessages from '../messages/pt-BR/moderation.json' with { type: 'json' };
+import storiesMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
   closeAdmin,
   createFeedCommentAs,
   createFeedPostAs,
+  createStoryCommentAs,
+  createStoryLike,
   deleteFeedPostsLike,
+  deleteStoriesByCaptionPrefix,
   memberProfileForEmail,
 } from './admin';
 import { login, SEED_PASSWORD, users } from './fixtures';
@@ -14,6 +18,7 @@ import { login, SEED_PASSWORD, users } from './fixtures';
 /** The catalog is the source of copy — never a literal in a spec. */
 const M = moderationMessages.moderation;
 const F = feedMessages.feed;
+const S = storiesMessages.stories;
 
 /**
  * 08-01 — the Phase 8 tracer in a real browser (MODER-01 into MODER-03, UI-D-276/277/278).
@@ -34,6 +39,7 @@ const REPLIER = 'ana.carolina.vasconcellos@rede-demo.local';
 
 test.afterAll(async () => {
   await deleteFeedPostsLike(CAPTION_PREFIX);
+  await deleteStoriesByCaptionPrefix(CAPTION_PREFIX);
   await closeAdmin();
 });
 
@@ -98,5 +104,57 @@ test('moderation tracer', async ({ page }, testInfo) => {
   await expect(first).toContainText(M.log.context.post);
   await expect(first.locator('[data-moderation-log-excerpt]')).toHaveText(
     M.log.excerpt.replace('{excerpt}', rootBody),
+  );
+});
+
+/**
+ * 08-03 (D-336): the story half of the tracer. The demo admin opens a story's deep link, opens the
+ * SHIPPED comment sheet, taps the same trash control on the member's flat comment (named for a
+ * moderator), confirms the moderation dialog, and finds the row in Moderação with the story context.
+ */
+test('story removal', async ({ page }, testInfo) => {
+  const run = `${testInfo.project.name}-${Date.now()}`;
+  const storyId = await createStoryLike('rede-demo', `${CAPTION_PREFIX} story ${run}`);
+  const body = `Comentario de story a remover ${run}`;
+  const commentId = await createStoryCommentAs(users.demoMember, storyId, body);
+  const member = await memberProfileForEmail(users.demoMember);
+  if (!member) throw new Error('the seeded demo member has no profile');
+
+  await login(page, users.demoAdmin, SEED_PASSWORD);
+  await page.goto(`/stories/${storyId}`);
+  const viewer = page.getByRole('dialog', { name: S.viewer.dialog });
+  await expect(viewer).toBeVisible();
+  // Dispatched AT the element: the stories spec's dev-overlay rule.
+  await viewer.getByRole('button', { name: S.viewer.comment }).dispatchEvent('click');
+
+  const sheet = page.getByRole('dialog', { name: F.comments.title });
+  await expect(sheet).toBeVisible();
+  const row = commentRow(page, commentId);
+  await expect(row).toBeVisible();
+
+  const control = row.locator('[data-comment-delete]');
+  await expect(control).toHaveAttribute('data-comment-removal', 'moderation');
+  await expect(control).toHaveAccessibleName(
+    M.comment.label.replace('{author}', member.displayName),
+  );
+  await control.dispatchEvent('click');
+
+  const dialog = page
+    .getByRole('alertdialog')
+    .or(page.getByRole('dialog', { name: M.comment.title }));
+  await expect(dialog.getByText(M.comment.title, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: M.comment.confirm, exact: true }).dispatchEvent('click');
+
+  await expect(commentRow(page, commentId)).toHaveCount(0);
+  await expect(page.getByText(M.comment.toasts.removed, { exact: true })).toBeVisible();
+
+  await page.goto('/configuracoes/moderacao');
+  const first = page.getByRole('list', { name: M.log.label }).getByRole('listitem').first();
+  await expect(first).toContainText(
+    M.log.rows.commentRemoved.replace('{actor}', M.log.you).replace('{target}', member.displayName),
+  );
+  await expect(first).toContainText(M.log.context.story);
+  await expect(first.locator('[data-moderation-log-excerpt]')).toHaveText(
+    M.log.excerpt.replace('{excerpt}', body),
   );
 });

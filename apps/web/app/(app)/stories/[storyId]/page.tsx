@@ -87,7 +87,13 @@ export default async function StoryPage({ params }: { params: Promise<{ storyId:
       // The deep link is a single-story sequence, and it gets the SAME comment surface the strip's
       // viewer does: a shared link to a story must be a place a member can join the conversation,
       // not a read-only version of it.
-      comments={storyCommentsProps(locale, tfeed, tf, bootstrap)}
+      comments={storyCommentsProps(
+        locale,
+        tfeed,
+        tf,
+        bootstrap,
+        await getTranslations('moderation'),
+      )}
       // UI-D-66: a curator can put ANY story into a highlight, the deep link's included. A
       // permission, never a role; the API's own `requirePermission` is the boundary.
       canCurate={bootstrap.permissions.includes(STORY_PERMISSIONS.manage)}

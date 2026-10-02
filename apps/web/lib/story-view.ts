@@ -175,6 +175,9 @@ export function storyCommentView(
     replyCount: 0,
     isReply: false,
     canDelete: comment.canDelete,
+    // 08-03 (D-336, UI-D-276): server-derived; an API that predates it leaves the field absent,
+    // which reads as the shipped rule (`canDelete ? 'own' : null`).
+    removal: comment.removal ?? (comment.canDelete ? 'own' : null),
   };
 }
 

@@ -576,6 +576,16 @@ const createCommentRoute = createRoute({
   },
 });
 
+/**
+ * 08-03 (D-336, D-338, T-08-14): whether this caller may remove OTHER people's story comments — the
+ * kernel `moderation.manage`, read through the composed permission set BEFORE the service opens its
+ * transaction (on a flags-cache miss `permissionsForRequest` opens its own tenant transaction, and
+ * holding two of the pool's five connections per request is the starvation `readPlaceGate` avoids).
+ * The list uses it too, so each row's `removal` (UI-D-276) and the delete agree.
+ */
+const canModerateComments = async (ctx: AppEnv['Variables']['ctx']) =>
+  (await permissionsForRequest(ctx)).includes('moderation.manage');
+
 const deleteCommentRoute = createRoute({
   method: 'delete',
   path: '/{storyId}/comments/{commentId}',
@@ -583,11 +593,11 @@ const deleteCommentRoute = createRoute({
   responses: {
     204: {
       description:
-        "The comment is SOFT-deleted: the row stays for Phase 8 moderation and the story's count moves exactly once, on the `deleted_at` transition.",
+        "The comment is SOFT-deleted (`deleted_at`, `deleted_by_user_id`) and the story's count moves exactly once, on the `deleted_at` transition. A caller holding `moderation.manage` may remove anyone's comment; when it is not their own, one `moderation_log` row (`subject_type = 'story_comment'`) commits in the same transaction. The response is identical either way and the author is not notified (D-335).",
     },
     404: {
       description:
-        'Not this member’s comment, not on this story, unknown, or already removed — ONE branch, so a member cannot probe whether a comment exists (T-04-16).',
+        'Unknown, not on this story, already removed, or someone else’s comment for a caller without `moderation.manage` — ONE branch, so a member cannot probe whether a comment exists (T-04-16, T-08-14).',
     },
   },
 });
@@ -698,16 +708,21 @@ export const storiesRoutes = stories
     return c.json(await unlikeStory(c.get('ctx'), storyId), 200);
   })
   .openapi(listCommentsRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { storyId } = c.req.valid('param');
-    return c.json(await listStoryComments(c.get('ctx'), storyId, c.req.valid('query')), 200);
+    const opts = { canModerate: await canModerateComments(ctx) };
+    return c.json(await listStoryComments(ctx, storyId, c.req.valid('query'), opts), 200);
   })
   .openapi(createCommentRoute, async (c) => {
     const { storyId } = c.req.valid('param');
     return c.json(await createStoryComment(c.get('ctx'), storyId, c.req.valid('json')), 201);
   })
   .openapi(deleteCommentRoute, async (c) => {
+    const ctx = c.get('ctx');
     const { storyId, commentId } = c.req.valid('param');
-    await deleteStoryComment(c.get('ctx'), storyId, commentId);
+    await deleteStoryComment(ctx, storyId, commentId, {
+      canModerate: await canModerateComments(ctx),
+    });
     return c.body(null, 204);
   })
   .openapi(storyHighlightIdsRoute, async (c) => {

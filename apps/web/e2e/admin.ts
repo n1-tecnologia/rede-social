@@ -885,6 +885,51 @@ export async function deleteStoryCommentsByBodyPrefix(prefix: string): Promise<v
 }
 
 /**
+ * 08-03 (D-336): ONE live story for `tenantSlug`, cloned from an existing ready IMAGE story of the
+ * tenant (the `cloneActiveStories` posture: a story references an asset, so no upload is needed),
+ * published by the tenant's admin with `caption`. Remove it with `deleteStoriesByCaptionPrefix`.
+ */
+export async function createStoryLike(tenantSlug: string, caption: string): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.stories
+      (tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+    select s.tenant_id, s.author_user_id, s.media_asset_id, s.media_kind, ${caption},
+           now(), now() + interval '24 hours'
+      from public.stories s
+      join public.media_assets a on a.id = s.media_asset_id
+      join public.tenants t on t.id = s.tenant_id
+     where t.slug = ${tenantSlug}
+       and s.deleted_at is null
+       and a.status = 'ready'
+       and s.media_kind = 'image'
+     limit 1
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no ready image story to clone in ${tenantSlug}`);
+  return id;
+}
+
+/**
+ * 08-03 (D-336): a flat STORY comment by `email`, written directly (the `createFeedCommentAs`
+ * posture). The comment-count trigger moves the story's counter.
+ */
+export async function createStoryCommentAs(
+  email: string,
+  storyId: string,
+  body: string,
+): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.feed_comments (tenant_id, story_id, author_user_id, body, depth)
+    select s.tenant_id, s.id, u.id, ${body}, 0
+      from public.stories s, public.users u
+     where s.id = ${storyId}::uuid and u.email = ${email}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not comment on story ${storyId} as ${email}`);
+  return id;
+}
+
+/**
  * 05.2-09 (UI-D-80): writes ONE highlight straight into the table, for the place a spec cannot reach
  * through the product — an ARCHIVED community, whose create the API refuses with `archived` by
  * design. Appended after the place's current rows. Returns the new id.

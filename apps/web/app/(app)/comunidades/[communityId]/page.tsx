@@ -233,7 +233,13 @@ export default async function CommunityPage({
                 labels: storyViewerLabels(ts),
                 onLike: likeStoryAction,
                 onUnlike: unlikeStoryAction,
-                comments: storyCommentsProps(locale, tf, ts, bootstrap),
+                comments: storyCommentsProps(
+                  locale,
+                  tf,
+                  ts,
+                  bootstrap,
+                  await getTranslations('moderation'),
+                ),
                 // UI-D-66: "Destacar" for a curator on any story, a permission never a role.
                 canCurate: bootstrap.permissions.includes(STORY_PERMISSIONS.manage),
                 // The empty highlight sheet's "Criar destaque" opens THIS community's manage screen.

@@ -302,7 +302,10 @@ export async function createStoryComment(
   return storyCommentSchema.parse(await res.json());
 }
 
-/** `DELETE /v1/stories/{storyId}/comments/{commentId}` — a member removes their OWN comment. */
+/**
+ * `DELETE /v1/stories/{storyId}/comments/{commentId}` — the author removes their own comment, or a
+ * holder of `moderation.manage` removes anyone's (08-03, D-336). 204 either way.
+ */
 export async function deleteStoryComment(storyId: string, commentId: string): Promise<void> {
   const res = await apiFetch(
     `/v1/stories/${encodeURIComponent(storyId)}/comments/${encodeURIComponent(commentId)}`,

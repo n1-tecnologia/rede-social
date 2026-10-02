@@ -5,6 +5,7 @@ import type { ModerationLogPage } from '@rede-social/contracts/moderation';
 import { sqlClient } from '@rede-social/core/db';
 import { subscribe } from '@rede-social/core/server/events/bus';
 import type { CommentDeleted, FeedComment, FeedPost } from '@rede-social/module-feed/contracts';
+import type { StoryComment } from '@rede-social/module-stories/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, runNotificationJobs, SEED_PASSWORD, signInAs } from './setup';
 
@@ -461,6 +462,231 @@ describe('moderation tracer', () => {
     const [{ n: afterReads } = { n: 0 }] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.moderation_log where tenant_id = ${ids.tenant}::uuid`;
     expect(afterReads).toBe(before);
+  });
+});
+
+/**
+ * 08-03 (D-336, MODER-01, T-08-14, T-08-17) — the stories module's own admin-delete path, through
+ * `DELETE /v1/stories/{storyId}/comments/{commentId}`. Story comments are FLAT (nothing cascades),
+ * and the response stays the shipped 204 whoever removed the row.
+ */
+describe('story', () => {
+  const storyDeletedEvents: { commentId: string; storyId: string }[] = [];
+
+  beforeAll(() => {
+    unsubscribers.push(
+      subscribe('story.comment_deleted', async (payload) => {
+        storyDeletedEvents.push({ commentId: payload.commentId, storyId: payload.storyId });
+      }),
+    );
+  });
+
+  async function seedStory(): Promise<string> {
+    const assetId = randomUUID();
+    createdAssets.push(assetId);
+    await adminSql`
+      insert into public.media_assets
+        (id, tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths)
+      values (${assetId}::uuid, ${ids.tenant}::uuid, ${ids.admin}::uuid, 'image', 'story', 'ready',
+              'supabase', 'image/webp', 1024, '{640,1080}'::int[])`;
+    const published = await request('/v1/stories', tokens.admin, {
+      method: 'POST',
+      body: JSON.stringify({ mediaAssetId: assetId, mediaKind: 'image', caption: '' }),
+    });
+    expect(published.status).toBe(201);
+    const { id } = (await published.json()) as { id: string };
+    createdStories.push(id);
+    return id;
+  }
+
+  async function storyComment(token: string, storyId: string, body: string): Promise<StoryComment> {
+    const res = await request(`/v1/stories/${storyId}/comments`, token, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    });
+    expect(res.status, `POST story comment ${body}`).toBe(201);
+    return (await res.json()) as StoryComment;
+  }
+
+  const removeStoryComment = (token: string, storyId: string, commentId: string) =>
+    request(`/v1/stories/${storyId}/comments/${commentId}`, token, { method: 'DELETE' });
+
+  async function storyCount(storyId: string): Promise<number> {
+    const [row] = await adminSql<{ n: number }[]>`
+      select comment_count::int as n from public.stories where id = ${storyId}::uuid`;
+    return row?.n ?? -1;
+  }
+
+  async function listAs(token: string, storyId: string): Promise<StoryComment[]> {
+    const res = await request(`/v1/stories/${storyId}/comments`, token);
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { items: StoryComment[] }).items;
+  }
+
+  it('the admin removes a member’s story comment: 204, stamped, count −1, one story_comment row, retraction, silence', async () => {
+    const storyId = await seedStory();
+    const body = `${BODY_PREFIX} no story\ncom duas linhas`;
+    const theirs = await storyComment(tokens.member, storyId, body);
+    // The story author (the admin) holds a "comentou no seu story" row for this comment.
+    await runNotificationJobs(ids.tenant);
+    const authorRows = await adminSql<{ id: string }[]>`
+      select id::text from public.notifications
+       where user_id = ${ids.admin}::uuid and object_id = ${theirs.id}::uuid`;
+    expect(authorRows).toHaveLength(1);
+    const memberRowsBefore = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications where user_id = ${ids.member}::uuid`;
+
+    // The read derives `removal` per viewer, server-side.
+    expect((await listAs(tokens.admin, storyId)).find((c) => c.id === theirs.id)).toMatchObject({
+      removal: 'moderation',
+      canDelete: true,
+    });
+    expect((await listAs(tokens.member, storyId)).find((c) => c.id === theirs.id)?.removal).toBe(
+      'own',
+    );
+    expect((await listAs(tokens.other, storyId)).find((c) => c.id === theirs.id)).toMatchObject({
+      removal: null,
+      canDelete: false,
+    });
+
+    expect(await storyCount(storyId)).toBe(1);
+    const eventsBefore = storyDeletedEvents.length;
+
+    const res = await removeStoryComment(tokens.admin, storyId, theirs.id);
+    expect(res.status).toBe(204);
+
+    const [state] = await commentState([theirs.id]);
+    expect(state?.deleted_at).not.toBeNull();
+    expect(state?.deleted_by_user_id).toBe(ids.admin);
+    expect(await storyCount(storyId)).toBe(0);
+    expect(storyDeletedEvents.slice(eventsBefore)).toEqual([{ commentId: theirs.id, storyId }]);
+
+    const rows = await logRowsFor(theirs.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      tenant_id: ids.tenant,
+      action: 'comment_removed',
+      actor_user_id: ids.admin,
+      actor_membership_id: memberships.admin,
+      target_user_id: ids.member,
+      target_membership_id: memberships.member,
+      subject_type: 'story_comment',
+      subject_id: theirs.id,
+      excerpt: body,
+      reason: null,
+    });
+
+    // The story author's row is retracted (keep-and-mark), and the comment's author gets nothing.
+    await runNotificationJobs(ids.tenant);
+    const retracted = await adminSql<{ payload: Record<string, unknown> }[]>`
+      select payload from public.notifications
+       where user_id = ${ids.admin}::uuid and object_id = ${theirs.id}::uuid`;
+    expect(retracted).toHaveLength(1);
+    expect(retracted[0]?.payload).toEqual({ removed: true });
+    const memberRowsAfter = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications where user_id = ${ids.member}::uuid`;
+    expect(memberRowsAfter[0]?.n).toBe(memberRowsBefore[0]?.n);
+
+    // Moderação lists it, with the story subject type.
+    const log = (await (await getLog(tokens.admin)).json()) as ModerationLogPage;
+    expect(log.items.find((item) => item.id === rows[0]?.id)).toMatchObject({
+      action: 'comment_removed',
+      subjectType: 'story_comment',
+      excerpt: body,
+      actor: { isViewer: true },
+    });
+    expect(await listAs(tokens.member, storyId)).toHaveLength(0);
+  });
+
+  it('an admin removing their OWN story comment is an author delete: 204, no log row', async () => {
+    const storyId = await seedStory();
+    const mine = await storyComment(tokens.admin, storyId, `${BODY_PREFIX} story do admin`);
+    expect(mine.removal).toBe('own');
+    const res = await removeStoryComment(tokens.admin, storyId, mine.id);
+    expect(res.status).toBe(204);
+    const [state] = await commentState([mine.id]);
+    expect(state?.deleted_by_user_id).toBe(ids.admin);
+    expect(await logRowsFor(mine.id)).toHaveLength(0);
+  });
+
+  it('member and support on another member’s story comment get the ONE bare 404; the row is untouched', async () => {
+    const storyId = await seedStory();
+    const theirs = await storyComment(
+      tokens.other,
+      storyId,
+      `${BODY_PREFIX} story de outra pessoa`,
+    );
+    for (const token of [tokens.member, tokens.support]) {
+      const res = await removeStoryComment(token, storyId, theirs.id);
+      expect(res.status).toBe(404);
+      const envelope = (await res.json()) as Envelope;
+      expect(envelope.error.code).toBe('NOT_FOUND');
+      expect(envelope.error.details).toBeUndefined();
+    }
+    const [state] = await commentState([theirs.id]);
+    expect(state?.deleted_at).toBeNull();
+    expect(await logRowsFor(theirs.id)).toHaveLength(0);
+    expect(await storyCount(storyId)).toBe(1);
+  });
+
+  it('a POST comment id on the story route is the bare 404 and is untouched', async () => {
+    const storyId = await seedStory();
+    const postId = await seedPost('story route');
+    const postComment = await comment(tokens.member, postId, `${BODY_PREFIX} no post`);
+    const res = await removeStoryComment(tokens.admin, storyId, postComment.id);
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as Envelope).error.details).toBeUndefined();
+    const [state] = await commentState([postComment.id]);
+    expect(state?.deleted_at).toBeNull();
+    expect(await logRowsFor(postComment.id)).toHaveLength(0);
+  });
+
+  it('a story comment id under ANOTHER story is the bare 404', async () => {
+    const storyA = await seedStory();
+    const storyB = await seedStory();
+    const theirs = await storyComment(tokens.member, storyA, `${BODY_PREFIX} story A`);
+    const res = await removeStoryComment(tokens.admin, storyB, theirs.id);
+    expect(res.status).toBe(404);
+    const [state] = await commentState([theirs.id]);
+    expect(state?.deleted_at).toBeNull();
+  });
+
+  it('a second removal is the bare 404, with no second row, no event and no count change', async () => {
+    const storyId = await seedStory();
+    const theirs = await storyComment(tokens.member, storyId, `${BODY_PREFIX} story duas vezes`);
+    expect((await removeStoryComment(tokens.admin, storyId, theirs.id)).status).toBe(204);
+    const eventsAfterFirst = storyDeletedEvents.length;
+    const again = await removeStoryComment(tokens.admin2, storyId, theirs.id);
+    expect(again.status).toBe(404);
+    expect(((await again.json()) as Envelope).error.details).toBeUndefined();
+    expect(await logRowsFor(theirs.id)).toHaveLength(1);
+    expect(storyDeletedEvents.length).toBe(eventsAfterFirst);
+    expect(await storyCount(storyId)).toBe(0);
+  });
+
+  it('atomicity: a failing log insert leaves the story comment live and the count unchanged', async () => {
+    const storyId = await seedStory();
+    const theirs = await storyComment(tokens.member, storyId, `${BODY_PREFIX} story atomico`);
+    const eventsBefore = storyDeletedEvents.length;
+    await adminSql.unsafe(`
+      create or replace function public.test_moderation_log_fail() returns trigger
+        language plpgsql as $$ begin raise exception 'forced log failure'; end $$;
+      create trigger test_moderation_log_fail before insert on public.moderation_log
+        for each row execute function public.test_moderation_log_fail();`);
+    try {
+      const res = await removeStoryComment(tokens.admin, storyId, theirs.id);
+      expect(res.status).toBe(500);
+    } finally {
+      await adminSql.unsafe(`
+        drop trigger if exists test_moderation_log_fail on public.moderation_log;
+        drop function if exists public.test_moderation_log_fail();`);
+    }
+    const [state] = await commentState([theirs.id]);
+    expect(state?.deleted_at).toBeNull();
+    expect(state?.deleted_by_user_id).toBeNull();
+    expect(storyDeletedEvents.length).toBe(eventsBefore);
+    expect(await storyCount(storyId)).toBe(1);
+    expect(await logRowsFor(theirs.id)).toHaveLength(0);
   });
 });
 

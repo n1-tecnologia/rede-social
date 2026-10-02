@@ -1,4 +1,5 @@
 import { MEDIA_STATUSES } from '@rede-social/contracts/media';
+import { commentRemovalSchema } from '@rede-social/contracts/moderation';
 import { z } from 'zod';
 
 /**
@@ -405,7 +406,15 @@ export const storyCommentSchema = z
     author: storyCommentAuthorSchema,
     /** UI-D-24 — true exactly when `author.displayName` is null. */
     authorRemoved: z.boolean(),
+    /** `removal !== null`, kept for the clients that predate `removal` (T-04-44: server-derived). */
     canDelete: z.boolean(),
+    /**
+     * 08-03 (D-336, UI-D-276): what the removal control means for THIS viewer — `'own'` (they wrote
+     * it), `'moderation'` (someone else's, and the viewer holds `moderation.manage`) or `null`.
+     * OPTIONAL for release-order compatibility (the 08-01 rule): a client reading a response without
+     * it falls back to `canDelete ? 'own' : null`. The delete re-decides it under a row lock.
+     */
+    removal: commentRemovalSchema.optional(),
   })
   .strict();
 export type StoryComment = z.infer<typeof storyCommentSchema>;

@@ -3,6 +3,7 @@ import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { recordModerationAction } from '@rede-social/core/server/moderation/log';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { decodeCursor, encodeCursor, keysetComparison } from '@rede-social/core/server/paging';
 import { type SQL, sql } from 'drizzle-orm';
@@ -766,8 +767,26 @@ function storyCommentProjection() {
       left join member_profiles mp on mp.membership_id = ms.id`;
 }
 
+/**
+ * What one viewer may do with the removal control (08-03, D-336, UI-D-276, T-04-44) — derived HERE,
+ * on the server, so the web never compares ids. The author's own row is `'own'`; someone else's row
+ * is `'moderation'` exactly when the caller holds `moderation.manage` (read by the ROUTE before the
+ * service opens its transaction); anything else is `null`. `deleteStoryComment` re-decides the same
+ * question under a row lock, so this value is a convenience, never the authority.
+ */
+const storyRemovalFor = (
+  row: StoryCommentRow,
+  viewerUserId: string,
+  canModerate: boolean,
+): 'own' | 'moderation' | null =>
+  row.author_user_id === viewerUserId ? 'own' : canModerate ? 'moderation' : null;
+
 /** Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`. */
-const toStoryComment = (row: StoryCommentRow, viewerUserId: string): StoryComment => ({
+const toStoryComment = (
+  row: StoryCommentRow,
+  viewerUserId: string,
+  canModerate: boolean,
+): StoryComment => ({
   id: row.id,
   createdAt: row.created_at,
   body: row.body,
@@ -780,7 +799,8 @@ const toStoryComment = (row: StoryCommentRow, viewerUserId: string): StoryCommen
     displayName: row.display_name,
     avatarAssetId: row.avatar_asset_id,
   },
-  canDelete: row.author_user_id === viewerUserId,
+  canDelete: storyRemovalFor(row, viewerUserId, canModerate) !== null,
+  removal: storyRemovalFor(row, viewerUserId, canModerate),
 });
 
 /**
@@ -861,6 +881,7 @@ export async function listStoryComments(
   ctx: RequestContext,
   storyId: string,
   query: StoryCommentsQuery,
+  opts: { canModerate: boolean },
 ): Promise<StoryCommentPage> {
   const limit = query.limit;
   const after = decodeCursor(query.cursor);
@@ -908,7 +929,10 @@ export async function listStoryComments(
     'story comments listed',
   );
 
-  return { items: page.map((row) => toStoryComment(row, ctx.userId)), nextCursor };
+  return {
+    items: page.map((row) => toStoryComment(row, ctx.userId, opts.canModerate)),
+    nextCursor,
+  };
 }
 
 /**
@@ -1002,41 +1026,75 @@ export async function createStoryComment(
     'story comment created',
   );
 
-  return toStoryComment(created, ctx.userId);
+  // The caller wrote this row, so its removal is `'own'` whatever they hold: no permission read here.
+  return toStoryComment(created, ctx.userId, false);
 }
 
 /**
- * `DELETE /v1/stories/{storyId}/comments/{commentId}` (D-61's rule, restated for stories) — a
- * member removes their OWN comment.
+ * `DELETE /v1/stories/{storyId}/comments/{commentId}` (D-61's rule, restated for stories) — the
+ * author removes their OWN comment, and since 08-03 (D-336, MODER-01) a caller holding
+ * `moderation.manage` removes ANYONE's.
  *
- * The authority is IN THE PREDICATE (`author_user_id = ctx.userId`), so someone else's comment, an
- * unknown id and an already-deleted one are ONE branch answering a bare 404: a member cannot even
- * probe whether a comment exists (T-04-16, T-04-21). The row STAYS — only `deleted_at` is set — so
- * Phase 8's MODER-01 widens this exact route with one more permission and reads the same row.
+ * In ONE `withTenantTx`, mirroring 08-01's feed `deleteComment`:
+ *  1. The live row is LOCKED (`for update`) with `tenant_id` and `story_id` in the predicate, so a
+ *     comment id of another story, of a POST, or of another tenant answers like an unknown one, and
+ *     two concurrent removals serialise on the lock (the second sees `deleted_at` set and misses).
+ *  2. Missing, or neither the author nor `canModerate`, is the ONE bare 404 — a member or support
+ *     user cannot even probe whether someone else's comment exists (T-04-16, T-08-14).
+ *  3. The soft delete sets `deleted_at` and `deleted_by_user_id`. Story comments are FLAT
+ *     (`feed_comments_parent_fk` makes a reply unrepresentable), so nothing cascades.
+ *  4. When the actor is NOT the author, the kernel `recordModerationAction`, given THIS `tx`,
+ *     appends the `subject_type = 'story_comment'` log row in the same transaction — a removal
+ *     without its log row is impossible, and a failed log insert rolls the removal back (T-08-17).
+ *     A moderator removing their OWN comment writes no row (R-Pitfall 2).
  *
- * `story_id` is in the predicate as well as the path, so a comment id belonging to another story
- * (or to a POST) answers the same 404 rather than being removed from a conversation the caller was
- * not looking at.
+ * `canModerate` is read by the ROUTE through `permissionsForRequest(ctx)` BEFORE this function opens
+ * its transaction (the pool is `max: 5`; see `readPlaceGate`).
  *
  * The count moves EXACTLY ONCE, and not from here: `app.feed_comment_count()` fires on the
- * `deleted_at` TRANSITION, so a second delete matches nothing, adjusts nothing and emits nothing.
+ * `deleted_at` TRANSITION. `story.comment_deleted` is emitted once, after commit, whoever removed
+ * the row — so the story author's `stories.story_commented` row is retracted the same way, and the
+ * comment's author is told nothing (D-335).
  */
 export async function deleteStoryComment(
   ctx: RequestContext,
   storyId: string,
   commentId: string,
+  opts: { canModerate: boolean },
 ): Promise<void> {
-  await withTenantTx(ctx, async (tx) => {
-    const rows = await tx.execute<{ id: string }>(sql`
-      update feed_comments
-         set deleted_at = now()
+  const moderated = await withTenantTx(ctx, async (tx) => {
+    const locked = await tx.execute<{ id: string; author_user_id: string; body: string }>(sql`
+      select id, author_user_id, body
+        from feed_comments
        where id = ${commentId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid
          and story_id = ${storyId}::uuid
-         and author_user_id = ${ctx.userId}::uuid
+         and deleted_at is null
+       for update`);
+    const target = locked[0];
+    const isAuthor = target?.author_user_id === ctx.userId;
+    if (!target || (!isAuthor && !opts.canModerate)) throw new ApiError(404, 'NOT_FOUND');
+
+    const removed = await tx.execute<{ id: string }>(sql`
+      update feed_comments
+         set deleted_at = now(),
+             deleted_by_user_id = ${ctx.userId}::uuid
+       where id = ${commentId}::uuid
          and deleted_at is null
       returning id`);
-    if (!rows[0]) throw new ApiError(404, 'NOT_FOUND');
+    if (!removed[0]) throw new ApiError(404, 'NOT_FOUND');
+
+    if (!isAuthor) {
+      await recordModerationAction(tx, ctx, {
+        action: 'comment_removed',
+        targetUserId: target.author_user_id,
+        subjectType: 'story_comment',
+        subjectId: commentId,
+        excerptSource: target.body,
+        reason: null,
+      });
+    }
+    return !isAuthor;
   });
 
   emit(ctx, 'story.comment_deleted', {
@@ -1046,6 +1104,7 @@ export async function deleteStoryComment(
     actorUserId: ctx.userId,
   });
 
+  // Ids only — never the body (T-05-43, the MODER-03 privacy prohibition).
   log.info(
     {
       event: 'stories.comment.deleted',
@@ -1054,6 +1113,7 @@ export async function deleteStoryComment(
       requestId: ctx.requestId,
       storyId,
       commentId,
+      moderated,
     },
     'story comment soft-deleted',
   );

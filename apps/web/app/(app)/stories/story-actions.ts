@@ -248,10 +248,12 @@ export async function createStoryCommentAction(
 }
 
 /**
- * Soft-delete the member's OWN story comment (D-61's rule, restated for stories).
+ * Soft-delete a story comment: the member's OWN (D-61's rule, restated for stories) or, since 08-03
+ * (D-336), anyone's for a holder of `moderation.manage` — the API decides, under a row lock.
  *
- * Someone else's comment, an unknown id and an already-removed one are ONE branch at the API — a
- * bare 404 — so this action cannot be used to probe whether a comment exists (T-04-16).
+ * Someone else's comment without the permission, an unknown id and an already-removed one are ONE
+ * branch at the API — a bare 404 — so this action cannot be used to probe whether a comment exists
+ * (T-04-16).
  */
 export async function deleteStoryCommentAction(
   storyId: string,

@@ -242,9 +242,9 @@ export function feedCommentsProps(
   bootstrap: Bootstrap,
   /**
    * 08-01 (UI-D-276): the `moderation` namespace, for the moderator's control name, dialog and
-   * toast. Every FEED surface passes it (home, post page, community page, reels). The story host
-   * does not yet: story-comment moderation is 08-03, and without it the list keeps the own dialog.
-   * Which dialog a row opens is still decided by the row's SERVER-derived `removal`, never here.
+   * toast. Every comment surface passes it: home, post page, community page, reels and, since 08-03
+   * (D-336), the story comment sheet through `storyCommentsProps`. Without it the list keeps the own
+   * dialog. Which dialog a row opens is decided by the row's SERVER-derived `removal`, never here.
    */
   tm?: Translator,
 ) {
@@ -348,8 +348,10 @@ export function storyCommentsProps(
   tf: Translator,
   ts: Translator,
   bootstrap: Bootstrap,
+  /** 08-03 (D-336, UI-D-276): the `moderation` namespace — see `feedCommentsProps`. */
+  tm?: Translator,
 ) {
-  const feed = feedCommentsProps(locale, tf, bootstrap);
+  const feed = feedCommentsProps(locale, tf, bootstrap, tm);
   return {
     ...feed,
     title: tf('comments.title'),
@@ -474,7 +476,13 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
               labels: storyViewerLabels(tf),
               onLike: likeStoryAction,
               onUnlike: unlikeStoryAction,
-              comments: storyCommentsProps(locale, tfeed, tf, bootstrap),
+              comments: storyCommentsProps(
+                locale,
+                tfeed,
+                tf,
+                bootstrap,
+                await getTranslations('moderation'),
+              ),
               // UI-D-66 / D-110 route 1: the viewer's "Destacar" pill, on every Início group —
               // gated on the composed PERMISSION, never a role (the API re-checks it on every read
               // and write the sheet makes, T-05.2-26).
