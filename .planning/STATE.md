@@ -4,10 +4,10 @@ current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
 stopped_at: Completed 08-07-PLAN.md
-last_updated: "2026-10-02T16:25:21.965Z"
+last_updated: "2026-10-02T16:54:01.450Z"
 last_activity: 2026-10-02
 last_activity_desc: Completed 08-07 (Regras da comunidade editor with the change-only rules_version bump and the shared RulesText renderer; the Administração group complete)
-state_head: 26b7e51758924e039c88d5597f851664f6d4d8d5
+state_head: 06cae492d8e9ed81cca9de5eb3bf75e5e0305318
 progress:
   total_phases: 16
   completed_phases: 0
@@ -624,6 +624,7 @@ None yet.
 | 260929-ltf | Reconcile stale pending Mux videos on GET /v1/media/{id} and in the hourly sweeper (webhook stays primary; prod webhooks dropped after a deploy); feed composer polls the video and keeps Publicar disabled until ready | 2026-09-29 | 4701e8c | Needs Review | [260929-ltf-reconcile-pending-mux-videos-without-the](./quick/260929-ltf-reconcile-pending-mux-videos-without-the/) |
 | 261001-ere | Phase 7 leftovers: mark-all stays busy for its POST, a row tapped during mark-all posts its own read, read-all keepalive + e2e waits for it (WINDOWS 66/67/68 fixed), UI-D-20 slug unique per run | 2026-10-01 | c46b454 | — | [261001-ere-phase-7-leftovers-mark-all-busy-and-tapp](./quick/261001-ere-phase-7-leftovers-mark-all-busy-and-tapp/) |
 | 261002-f4y | Isolated hml environment: deploy-hml.yml (homolog branch), Vercel ignore routing, DEPLOY.md runbook | 2026-10-02 | f627129 | — | [261002-f4y-ambiente-de-homologacao-isolado-hml](./quick/261002-f4y-ambiente-de-homologacao-isolado-hml/) |
+| 19 | fast: turbo-ignore without --fallback (first/docs-only Vercel builds no longer cancelled) | 2026-10-02 | 06cae49 | — | — |
 
 ### Roadmap Evolution
 
