@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-11-PLAN.md
-last_updated: "2026-10-02T19:11:42.940Z"
+stopped_at: "08-12 Tasks 1-2 committed (3f36953, eb0bcb5, 0afec36); paused at Task 3 checkpoint (developer-run go-live). Local pnpm verify RED: media-video.spec.ts:461 (WINDOWS #72), e2e:pwa not run"
+last_updated: "2026-10-02T20:41:28.045Z"
 last_activity: 2026-10-02
-last_activity_desc: "Completed 08-11 (pt-BR literal audit gate: Biome noJsxLiterals at error with a glyph-only allow-list and a canary, attribute-literal rule (d), every catalog message compiled, dated 08-I18N-AUDIT.md)"
-state_head: c9fbde1a9abe973c555943b0db1572ad4fa8f48d
+last_activity_desc: "08-12 Tasks 1-2 done; paused at Task 3 (developer-run go-live); pnpm verify red at media-video.spec.ts:461"
+state_head: 0afec360144e132c78adcc326685e87396b80a0a
 progress:
   total_phases: 16
   completed_phases: 0
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
 Plan: 12 of 12
-Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-11 (pt-BR literal audit gate: Biome noJsxLiterals at error with a glyph-only allow-list and a canary, attribute-literal rule (d), every catalog message compiled, dated 08-I18N-AUDIT.md)
+Status: In progress — 08-12 paused at the Task 3 checkpoint (developer-run go-live); local pnpm verify RED (WINDOWS #72)
+Last activity: 2026-10-02 — 08-12 Tasks 1-2: phase8-smoke.spec.ts green, device checklist + DEPLOY.md Phase 8 release + 08-GATE.md written; pnpm verify red at media-video.spec.ts:461
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -613,6 +613,7 @@ None yet.
 - [Phase 5]: `.planning/REQUIREMENTS.md` traceability still shows 16 "Gaps Found" rows (05-SECURITY.md R-5) — documentation lag to clear.
 - [Phase 05.2]: Closed partial on 2026-09-26 by user decision (same as Phases 2-4), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, iPhone Safari + Android Chrome, steps 1-6) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.2`. VERIFICATION.md is stale because quick 260926-d8f changed covered code, so re-run the verifier then instead of re-attesting. Review items still open: WR-02, WR-05, WR-06 (partly covered by 05.2-30..34), IN-01..04, `h-[68px]` in StoriesStrip.
 - [Phase 05.3]: Closed partial on 2026-09-27 by user decision (same as 05.2), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, WINDOWS #48-#51, plus WR-06 on real Mux) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.3`. VERIFICATION.md is stale because quick 260927-ebk changed covered code, so re-run the verifier then instead of re-attesting. REELS-06 stays Pending until that run. Review items still open: IN-01..07; UI-REVIEW minor: the `right-[3px]` tick offset in ReelsPager.
+- 08-12 gate: pnpm verify red at e2e (media-video.spec.ts:461 both projects, order-dependent in its own file, green alone; e2e:pwa not run) - WINDOWS #72; needs a debug/quick fix and one more full run, or a recorded decision
 
 ### Quick Tasks Completed
 
@@ -669,6 +670,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T19:11:42.793Z
-Stopped at: Completed 08-11-PLAN.md
-Resume file: None
+Last session: 2026-10-02T20:41:27.337Z
+Stopped at: 08-12 Tasks 1-2 committed (3f36953, eb0bcb5, 0afec36); paused at Task 3 checkpoint (developer-run go-live). Local pnpm verify RED: media-video.spec.ts:461 (WINDOWS #72), e2e:pwa not run
+Resume file: .planning/phases/08-moderation-tenant-admin-panel-pilot-hardening/08-12-PLAN.md
