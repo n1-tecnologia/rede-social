@@ -630,10 +630,13 @@ export async function createFeedPostAs(
   email: string,
   tenantSlug: string,
   caption: string,
+  /** 08-03: a COMMUNITY post (the moderation spec removes a comment on one). */
+  options: { communityId?: string } = {},
 ): Promise<string> {
+  const communityId = options.communityId ?? null;
   const rows = await sql()<{ id: string }[]>`
-    insert into public.feed_posts (tenant_id, author_user_id, caption)
-    select t.id, u.id, ${caption}
+    insert into public.feed_posts (tenant_id, author_user_id, caption, community_id)
+    select t.id, u.id, ${caption}, ${communityId}::uuid
       from public.tenants t, public.users u
      where t.slug = ${tenantSlug} and u.email = ${email}
     returning id`;
@@ -882,6 +885,49 @@ export async function deleteStoryCommentsByBodyPrefix(prefix: string): Promise<v
   await sql()`
     delete from public.feed_comments
      where story_id is not null and body like ${`${prefix}%`}`;
+}
+
+/**
+ * 08-03 (UI E10/long-text backstop): ONE moderation log row written straight into the append-only
+ * table (INSERT is the one write the owner lane keeps), with the demo admin as the actor and `target`
+ * as the target. It can never be removed — the log is append-only by design — so the spec scopes its
+ * assertions to the row id this returns.
+ */
+export async function insertModerationLogRow(
+  tenantSlug: string,
+  actorEmail: string,
+  targetEmail: string,
+  row:
+    | { action: 'comment_removed'; excerpt: string }
+    | { action: 'member_blocked'; reason: string },
+): Promise<string> {
+  const excerpt = row.action === 'comment_removed' ? row.excerpt : null;
+  const reason = row.action === 'member_blocked' ? row.reason : null;
+  const subjectType = row.action === 'comment_removed' ? 'post_comment' : null;
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.moderation_log
+      (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+       subject_type, subject_id, excerpt, reason)
+    select t.id, ${row.action}, au.id, am.id, tu.id, tm.id, ${subjectType},
+           case when ${subjectType}::text is null then null else gen_random_uuid() end,
+           ${excerpt}, ${reason}
+      from public.tenants t
+      join public.users au on au.email = ${actorEmail}
+      join public.memberships am on am.user_id = au.id and am.tenant_id = t.id
+      join public.users tu on tu.email = ${targetEmail}
+      join public.memberships tm on tm.user_id = tu.id and tm.tenant_id = t.id
+     where t.slug = ${tenantSlug}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not write a moderation log row in ${tenantSlug}`);
+  return id;
+}
+
+/** 08-03: soft-deletes one comment out of band — the "someone removed it first" race. */
+export async function softDeleteCommentOutOfBand(commentId: string): Promise<void> {
+  await sql()`
+    update public.feed_comments set deleted_at = now()
+     where id = ${commentId}::uuid and deleted_at is null`;
 }
 
 /**

@@ -295,6 +295,8 @@ export function feedCommentsProps(
       nowLabel: tf('comments.now'),
       deleteTitle: tf('comments.delete.title'),
       deleteBody: tf('comments.delete.body'),
+      // 08-03 (D-334): the author's dialog for a root with replies — they leave with it.
+      deleteBodyWithReplies: tf('comments.delete.bodyWithReplies'),
       deleteConfirm: tf('comments.delete.confirm'),
       deleteCancel: tf('comments.delete.cancel'),
       // `raw`: `{author}` is filled by the list with the name of the row being confirmed.
@@ -307,6 +309,9 @@ export function feedCommentsProps(
               confirm: tm('comment.confirm'),
               cancel: tm('comment.cancel'),
               removedToast: tm('comment.toasts.removed'),
+              // 08-03 (UI-D-276): a refusal keeps the row; a 404 race removes it.
+              failedToast: tm('comment.errors.failed'),
+              goneToast: tm('comment.errors.gone'),
             },
           }
         : {}),

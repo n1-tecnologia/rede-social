@@ -76,6 +76,13 @@ export type CommentCreateOutcome =
   | { ok: true; comment: CommentView }
   | { ok: false; code?: 'generic' | 'reply_depth_exceeded' | 'story_comment_no_reply' };
 
+/**
+ * What a delete action answers (08-03, UI-D-276). `gone` is the API's bare 404: the comment was
+ * already removed (by its author, a moderator, or a cascade), so the row leaves the list anyway and
+ * the race toast explains why. Any other refusal is `generic` (or no code): the row STAYS.
+ */
+export type CommentDeleteOutcome = { ok: boolean; code?: 'gone' | 'generic' };
+
 /** What a comment like/unlike answers — the authoritative pair, read back in the writing txn. */
 export type CommentLikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false };
 
@@ -122,6 +129,12 @@ export type CommentsListLabels = {
   /** The confirmation the own-comment delete opens (D-61). */
   deleteTitle: string;
   deleteBody: string;
+  /**
+   * 08-03 (D-334, UI-D-276): the own dialog's body for a ROOT with live replies — "Ele e as respostas
+   * saem da conversa…" (`feed.comments.delete.bodyWithReplies`). The cascade applies to authors too.
+   * Absent means the host predates it, and `deleteBody` is used.
+   */
+  deleteBodyWithReplies?: string;
   deleteConfirm: string;
   deleteCancel: string;
   /**
@@ -144,6 +157,13 @@ export type CommentModerationLabels = {
   cancel: string;
   /** The success toast after a moderator's removal. */
   removedToast: string;
+  /**
+   * 08-03 (UI-D-276): the two failure toasts of ANY removal, own or moderation — a refusal keeps the
+   * row ("Não foi possível remover…"), a 404 race removes it ("Este comentário já tinha sido
+   * removido."). Absent means the host predates them, and a failure stays silent (the row stays).
+   */
+  failedToast?: string;
+  goneToast?: string;
 };
 
 export type CommentsListProps = {
@@ -173,7 +193,7 @@ export type CommentsListProps = {
     body: string,
     parentId?: string,
   ) => Promise<CommentCreateOutcome>;
-  onDeleteComment: (commentId: string) => Promise<{ ok: boolean }>;
+  onDeleteComment: (commentId: string) => Promise<CommentDeleteOutcome>;
   onLikeComment: (commentId: string) => Promise<CommentLikeOutcome>;
   onUnlikeComment: (commentId: string) => Promise<CommentLikeOutcome>;
   /** `+1` / `-1` as the post's comment count moves, so the card's meta row follows the sheet. */
@@ -229,17 +249,21 @@ function CommentRowSkeleton({ indented = false }: { indented?: boolean }) {
 }
 
 /**
- * 08-01 (UI-D-276): the moderation success toast, as a component that owns `useToast` ONLY while it
- * is mounted — the `PostMedia` rule: the hook throws outside a `ToastProvider`, and a list that never
- * removed anything for a moderator must not need one. Keyed by the host, so each removal shows once.
+ * 08-01 (UI-D-276): a removal toast, as a component that owns `useToast` ONLY while it is mounted —
+ * the `PostMedia` rule: the hook throws outside a `ToastProvider`, and a list that never removed
+ * anything must not need one. Keyed by the list, so each outcome shows once. The shipped toast is
+ * `role="status"` (UI-D-288).
  */
-function RemovedToast({ message }: { message: string }) {
+function ListToast({ message, tone }: { message: string; tone: 'success' | 'error' | 'info' }) {
   const toast = useToast();
   useEffect(() => {
-    toast.show({ tone: 'success', message });
-  }, [toast, message]);
+    toast.show({ tone, message });
+  }, [toast, message, tone]);
   return null;
 }
+
+/** Where focus goes after a removal (UI-D-288): a row id, or the composer. */
+type FocusTarget = { kind: 'row'; id: string } | { kind: 'input' };
 
 /**
  * Three rows, exported so both containers' loading boundaries have the SAME geometry as the list
@@ -320,8 +344,18 @@ export function CommentsList({
     'generic' | 'reply_depth_exceeded' | 'story_comment_no_reply' | null
   >(null);
   const [confirming, setConfirming] = useState<CommentView | null>(null);
-  // Bumped on each confirmed MODERATION removal: the key that mounts one `RemovedToast`.
-  const [removedToastKey, setRemovedToastKey] = useState(0);
+  // One removal outcome toast at a time; `key` mounts a fresh `ListToast` for each outcome.
+  const [removalToast, setRemovalToast] = useState<{
+    key: number;
+    message: string;
+    tone: 'success' | 'error' | 'info';
+  } | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<FocusTarget | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  const raiseToast = useCallback((message: string, tone: 'success' | 'error' | 'info') => {
+    setRemovalToast((previous) => ({ key: (previous?.key ?? 0) + 1, message, tone }));
+  }, []);
 
   const patchThread = useCallback((rootId: string, patch: Partial<ReplyThread>) => {
     setThreads((previous) => ({
@@ -617,29 +651,52 @@ export function CommentsList({
   );
 
   /**
-   * D-61, widened by 08-01 (D-334). The row leaves the list only once the SERVER has confirmed it —
-   * never optimistically. A ROOT leaves together with its loaded replies (the server soft-deleted
-   * them in the same statement), and the post's visible count drops by 1 + its live reply count —
-   * the number the server's trigger just subtracted. This holds for an author's own root too: the
-   * cascade is the same on both paths. A moderator's removal also raises "Comentário removido.".
+   * D-61, widened by 08-01 (D-334) and finished by 08-03 (UI-D-276, UI-D-288). The row leaves the
+   * list only once the SERVER has answered — never optimistically:
+   *
+   * - **Confirmed:** a ROOT leaves together with its loaded replies (the server soft-deleted them in
+   *   the same statement), and the visible count drops by 1 + its SERVER reply count — the number
+   *   the trigger just subtracted, not the replies that happen to be loaded. A moderator's removal
+   *   raises "Comentário removido."; an author's own keeps its shipped silence.
+   * - **404 race (`gone`):** someone removed it first. The row leaves exactly as above and the race
+   *   toast says so, rather than leaving a ghost the member would tap again.
+   * - **Any other failure:** the row STAYS where it is and the failure toast fires.
+   *
+   * Focus then moves to the next comment row (the previous one when it was the last), or to the
+   * composer when none is left (UI-D-288), so a keyboard moderator never lands on `<body>`.
    */
   const confirmDelete = useCallback(async () => {
     const target = confirming;
     if (!target) return;
-    let deleted = false;
+    let outcome: CommentDeleteOutcome = { ok: false };
     try {
-      deleted = (await onDeleteComment(target.id)).ok;
+      outcome = await onDeleteComment(target.id);
     } catch (error) {
       console.error('feed.comment.delete_failed', { error: String(error) });
     }
-    // The row leaves only on a CONFIRMED delete: a refusal keeps the comment exactly where it is
-    // rather than removing it from the member's view while it still exists for everyone else.
-    if (!deleted) return;
+    const gone = !outcome.ok && outcome.code === 'gone';
+    // A refusal keeps the comment exactly where it is rather than removing it from the member's
+    // view while it still exists for everyone else.
+    if (!outcome.ok && !gone) {
+      if (labels.moderation?.failedToast) raiseToast(labels.moderation.failedToast, 'error');
+      return;
+    }
 
+    // UI-D-288: decide where focus goes BEFORE the rows move.
+    let focusTarget: FocusTarget = { kind: 'input' };
     if (target.isReply) {
       const parentId = Object.entries(threads).find(([, thread]) =>
         thread.items.some((row) => row.id === target.id),
       )?.[0];
+      const siblings = parentId ? (threads[parentId]?.items ?? []) : [];
+      const at = siblings.findIndex((row) => row.id === target.id);
+      const neighbour = siblings[at + 1] ?? siblings[at - 1];
+      focusTarget = neighbour
+        ? { kind: 'row', id: neighbour.id }
+        : parentId
+          ? { kind: 'row', id: parentId }
+          : { kind: 'input' };
+
       setThreads((previous) => {
         const next: Record<string, ReplyThread> = {};
         for (const [rootId, thread] of Object.entries(previous)) {
@@ -656,6 +713,10 @@ export function CommentsList({
       }
       onCountChange?.(-1);
     } else {
+      const at = items.findIndex((row) => row.id === target.id);
+      const neighbour = items[at + 1] ?? items[at - 1];
+      if (neighbour) focusTarget = { kind: 'row', id: neighbour.id };
+
       setItems((previous) => previous.filter((row) => row.id !== target.id));
       setThreads((previous) => {
         if (!(target.id in previous)) return previous;
@@ -664,14 +725,40 @@ export function CommentsList({
       });
       onCountChange?.(-(1 + Math.max(0, target.replyCount)));
     }
-    if (removalOf(target) === 'moderation' && labels.moderation) {
-      setRemovedToastKey((key) => key + 1);
+    setPendingFocus(focusTarget);
+
+    if (gone) {
+      if (labels.moderation?.goneToast) raiseToast(labels.moderation.goneToast, 'info');
+    } else if (removalOf(target) === 'moderation' && labels.moderation) {
+      raiseToast(labels.moderation.removedToast, 'success');
     }
-  }, [confirming, labels.moderation, onCountChange, onDeleteComment, threads]);
+  }, [confirming, items, labels.moderation, onCountChange, onDeleteComment, raiseToast, threads]);
+
+  // UI-D-288: move focus once the removal has rendered AND the dialog has let go of it (its focus
+  // trap restores focus to the now-detached trash control, which is a no-op, on the same commit).
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const frame = requestAnimationFrame(() => {
+      if (pendingFocus.kind === 'input') {
+        setFocusKey((key) => key + 1);
+      } else {
+        const row = sectionRef.current?.querySelector<HTMLElement>(
+          `[data-comment-id="${CSS.escape(pendingFocus.id)}"]`,
+        );
+        if (row) row.focus({ preventScroll: false });
+        else setFocusKey((key) => key + 1);
+      }
+      setPendingFocus(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingFocus]);
 
   /** The dialog's copy for the row being confirmed: the moderator's, or the author's own. */
   const moderationDialog =
     confirming !== null && removalOf(confirming) === 'moderation' ? labels.moderation : undefined;
+  // D-334: the with-replies wording only for a ROOT that has live replies — a reply never has any.
+  const withReplies =
+    confirming !== null && !confirming.isReply && Math.max(0, confirming.replyCount) > 0;
   const confirmingAuthor =
     confirming === null
       ? ''
@@ -856,6 +943,7 @@ export function CommentsList({
 
   return (
     <section
+      ref={sectionRef}
       aria-label={labels.region}
       data-comments-list
       // The sheet's own scroll container already pads by 16; the list draws its own gutters, so it
@@ -893,11 +981,13 @@ export function CommentsList({
         title={moderationDialog ? moderationDialog.title : labels.deleteTitle}
         body={
           moderationDialog
-            ? ((confirming?.replyCount ?? 0) > 0
-                ? moderationDialog.bodyWithReplies
-                : moderationDialog.body
-              ).replaceAll('{author}', confirmingAuthor)
-            : labels.deleteBody
+            ? (withReplies ? moderationDialog.bodyWithReplies : moderationDialog.body).replaceAll(
+                '{author}',
+                confirmingAuthor,
+              )
+            : withReplies && labels.deleteBodyWithReplies
+              ? labels.deleteBodyWithReplies
+              : labels.deleteBody
         }
         icon={Trash2}
         tone="danger"
@@ -907,8 +997,8 @@ export function CommentsList({
         onClose={() => setConfirming(null)}
         onError={(error) => console.error('feed.comment.delete_failed', { error: String(error) })}
       />
-      {removedToastKey > 0 && labels.moderation ? (
-        <RemovedToast key={removedToastKey} message={labels.moderation.removedToast} />
+      {removalToast ? (
+        <ListToast key={removalToast.key} message={removalToast.message} tone={removalToast.tone} />
       ) : null}
     </section>
   );

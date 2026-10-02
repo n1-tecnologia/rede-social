@@ -247,7 +247,11 @@ export type CommentCreateResult =
   /** `reply_depth_exceeded` is the API's translation of the database's one-level refusal (D-60). */
   | { ok: false; code: 'generic' | 'reply_depth_exceeded' };
 
-export type CommentDeleteResult = { ok: true } | { ok: false; code: 'generic' };
+/**
+ * 08-03 (UI-D-276): `gone` is the API's bare 404 — the comment was already removed — so the list
+ * drops the row and shows the race toast; `generic` keeps the row and shows the failure toast.
+ */
+export type CommentDeleteResult = { ok: true } | { ok: false; code: 'generic' | 'gone' };
 
 /** A comment id: a uuid or nothing. The API answers a bare 404 for every miss (T-04-21). */
 const commentIdSchema = z.uuid();
@@ -390,8 +394,13 @@ export async function deleteCommentAction(commentId: string): Promise<CommentDel
     await deleteComment(id.data);
     result = { ok: true };
   } catch (error) {
-    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
-    if (!refusal) console.error('feed.comment.delete_failed', { error: String(error) });
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      if (!refusal && error.status === 404) result = { ok: false, code: 'gone' };
+    }
+    if (!refusal && result.ok === false && result.code === 'generic') {
+      console.error('feed.comment.delete_failed', { error: String(error) });
+    }
   }
 
   if (refusal) redirect(refusal);

@@ -87,6 +87,7 @@ const LABELS: CommentsListLabels = {
   nowLabel: 'now-label',
   deleteTitle: 'delete-title',
   deleteBody: 'delete-body',
+  deleteBodyWithReplies: 'delete-body-with-replies',
   deleteConfirm: 'delete-confirm',
   deleteCancel: 'delete-cancel',
   moderation: {
@@ -96,6 +97,8 @@ const LABELS: CommentsListLabels = {
     confirm: 'moderation-confirm',
     cancel: 'moderation-cancel',
     removedToast: 'moderation-removed-toast',
+    failedToast: 'moderation-failed-toast',
+    goneToast: 'moderation-gone-toast',
   },
   item: ITEM_LABELS,
 };
@@ -220,7 +223,7 @@ describe('CommentsList — a moderator removes a root with its replies (D-334)',
     expect(screen.getByText('moderation-removed-toast')).toBeTruthy();
   });
 
-  it('6. a refused removal leaves the row where it is and raises no toast', async () => {
+  it('6. a refused removal leaves the row where it is and raises the FAILURE toast only', async () => {
     const root = comment({ id: 'root', removal: 'moderation' });
     const { container } = list({
       initialItems: [root],
@@ -235,6 +238,7 @@ describe('CommentsList — a moderator removes a root with its replies (D-334)',
     });
     expect(container.querySelector('[data-comment-id="root"]')).not.toBeNull();
     expect(screen.queryByText('moderation-removed-toast')).toBeNull();
+    expect(screen.getByText('moderation-failed-toast')).toBeTruthy();
   });
 
   it('7. the viewer’s own comment keeps the own dialog and no moderation toast', async () => {
@@ -248,6 +252,158 @@ describe('CommentsList — a moderator removes a root with its replies (D-334)',
     });
     expect(container.querySelector('[data-comment-id="mine"]')).toBeNull();
     expect(screen.queryByText('moderation-removed-toast')).toBeNull();
+  });
+});
+
+/** Opens the dialog on the row `id` (its OWN control, never a reply's) and returns the list. */
+async function openDialogOn(container: HTMLElement, id: string) {
+  const control = container.querySelector<HTMLButtonElement>(
+    `[data-comment-id="${id}"] > div > div [data-comment-delete]`,
+  );
+  if (!control) throw new Error(`no control on ${id}`);
+  await act(async () => {
+    fireEvent.click(control);
+  });
+}
+
+describe('08-03 — the four dialog copies (D-334, UI-D-276)', () => {
+  it.each([
+    ['own, no replies', { removal: 'own' as const, replyCount: 0 }, 'delete-title', 'delete-body'],
+    [
+      'own, with replies',
+      { removal: 'own' as const, replyCount: 3 },
+      'delete-title',
+      'delete-body-with-replies',
+    ],
+    [
+      'moderation, no replies',
+      { removal: 'moderation' as const, replyCount: 0 },
+      'moderation-title',
+      'moderation-body-author-name',
+    ],
+    [
+      'moderation, with replies',
+      { removal: 'moderation' as const, replyCount: 1 },
+      'moderation-title',
+      'moderation-body-with-replies-author-name',
+    ],
+  ])('%s', async (_name, overrides, title, body) => {
+    const { container } = list({ initialItems: [comment({ id: 'c1', ...overrides })] });
+    await openDialogOn(container, 'c1');
+    expect(screen.getByText(title)).toBeTruthy();
+    expect(screen.getByText(body)).toBeTruthy();
+  });
+
+  it('a REPLY never shows the with-replies wording, own or moderation', async () => {
+    const root = comment({ id: 'root', removal: null, canDelete: false, replyCount: 2 });
+    const replies = [
+      // A defensive replyCount on a reply: the wording must still be the without-replies one.
+      comment({ id: 'r1', isReply: true, removal: 'moderation', replyCount: 4 }),
+      comment({ id: 'r2', isReply: true, removal: 'own', replyCount: 4 }),
+    ];
+    const { container } = list({
+      initialItems: [root],
+      onLoadReplies: vi.fn().mockResolvedValue({ ok: true, items: replies, nextCursor: null }),
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('show-2-replies'));
+    });
+    await openDialogOn(container, 'r1');
+    expect(screen.getByText('moderation-body-author-name')).toBeTruthy();
+    expect(screen.queryByText(/with-replies/)).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'moderation-cancel' }));
+    });
+    await openDialogOn(container, 'r2');
+    expect(screen.getByText('delete-body')).toBeTruthy();
+    expect(screen.queryByText(/with-replies/)).toBeNull();
+  });
+});
+
+describe('08-03 — outcomes: count arithmetic, the 404 race, the failure, focus', () => {
+  it('the count drops by 1 + the SERVER reply count, not just the replies that are loaded', async () => {
+    const onCountChange = vi.fn();
+    const root = comment({ id: 'root', removal: 'moderation', replyCount: 30 });
+    const { container } = list({
+      initialItems: [root],
+      // Only the first page of the thread is loaded on screen.
+      onLoadReplies: vi.fn().mockResolvedValue({
+        ok: true,
+        items: [comment({ id: 'r1', isReply: true, removal: 'moderation', body: 'reply-one' })],
+        nextCursor: 'more',
+      }),
+      onCountChange,
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('show-30-replies'));
+    });
+    await openDialogOn(container, 'root');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'moderation-confirm' }));
+    });
+    expect(onCountChange).toHaveBeenCalledWith(-31);
+    expect(container.querySelector('[data-comment-id="r1"]')).toBeNull();
+    expect(container.querySelector('[data-replies-of="root"]')).toBeNull();
+  });
+
+  it('a 404 race REMOVES the row, toasts "gone" and moves the count; no success toast', async () => {
+    const onCountChange = vi.fn();
+    const { container } = list({
+      initialItems: [comment({ id: 'root', removal: 'moderation', replyCount: 2 })],
+      onDeleteComment: vi.fn().mockResolvedValue({ ok: false, code: 'gone' }),
+      onCountChange,
+    });
+    await openDialogOn(container, 'root');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'moderation-confirm' }));
+    });
+    expect(container.querySelector('[data-comment-id="root"]')).toBeNull();
+    expect(screen.getByText('moderation-gone-toast')).toBeTruthy();
+    expect(screen.queryByText('moderation-removed-toast')).toBeNull();
+    expect(onCountChange).toHaveBeenCalledWith(-3);
+  });
+
+  it('a rejected action is a failure: the row stays, the count does not move, the failure toast fires', async () => {
+    const onCountChange = vi.fn();
+    const { container } = list({
+      initialItems: [comment({ id: 'mine', removal: 'own' })],
+      onDeleteComment: vi.fn().mockRejectedValue(new Error('network')),
+      onCountChange,
+    });
+    await openDialogOn(container, 'mine');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'delete-confirm' }));
+    });
+    expect(container.querySelector('[data-comment-id="mine"]')).not.toBeNull();
+    expect(onCountChange).not.toHaveBeenCalled();
+    expect(screen.getByText('moderation-failed-toast')).toBeTruthy();
+  });
+
+  it('focus moves to the NEXT row, and to the composer once none is left; the empty copy shows', async () => {
+    const { container } = list({
+      initialItems: [
+        comment({ id: 'a', removal: 'moderation', body: 'body-a' }),
+        comment({ id: 'b', removal: 'moderation', body: 'body-b' }),
+      ],
+    });
+    await openDialogOn(container, 'a');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'moderation-confirm' }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+    expect(document.activeElement).toBe(container.querySelector('[data-comment-id="b"]'));
+
+    await openDialogOn(container, 'b');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'moderation-confirm' }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+    expect(screen.getByText('empty-label')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByPlaceholderText('placeholder-label'));
   });
 });
 

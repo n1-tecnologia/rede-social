@@ -2,6 +2,7 @@
 
 import { MediaImage } from '@rede-social/core/ui';
 import {
+  type CommentDeleteOutcome,
   CommentSheet,
   type CommentSheetProps,
   LikeButton,
@@ -98,7 +99,7 @@ export type StoryCommentsBinding = Omit<
    * being removed from a conversation nobody was looking at. This component binds the story it has
    * open, so the LIST still sees the `(commentId) => …` shape it expects and needs no branch.
    */
-  onDeleteComment: (storyId: string, commentId: string) => Promise<{ ok: boolean }>;
+  onDeleteComment: (storyId: string, commentId: string) => Promise<CommentDeleteOutcome>;
 };
 
 /** A group as the host receives it: the server's view plus the client's own "the read failed". */

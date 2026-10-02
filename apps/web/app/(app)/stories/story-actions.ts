@@ -162,7 +162,8 @@ export type StoryCommentCreateResult =
    */
   | { ok: false; code: 'generic' | 'story_comment_no_reply' };
 
-export type StoryCommentDeleteResult = { ok: true } | { ok: false; code: 'generic' };
+/** 08-03 (UI-D-276): `gone` is the bare 404 (already removed) — see `CommentDeleteResult`. */
+export type StoryCommentDeleteResult = { ok: true } | { ok: false; code: 'generic' | 'gone' };
 
 /**
  * One page of a story's comments, OLDEST first (D-83).
@@ -269,8 +270,13 @@ export async function deleteStoryCommentAction(
     await deleteStoryComment(id.data, comment.data);
     result = { ok: true };
   } catch (error) {
-    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
-    if (!refusal) console.error('stories.comment.delete_failed', { error: String(error) });
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      if (!refusal && error.status === 404) result = { ok: false, code: 'gone' };
+    }
+    if (!refusal && result.ok === false && result.code === 'generic') {
+      console.error('stories.comment.delete_failed', { error: String(error) });
+    }
   }
 
   if (refusal) redirect(refusal);

@@ -1781,6 +1781,14 @@ describe('08-03 — moderation log and comment removal strings and placeholders'
     ['moderation.comment.toasts.removed', 'Comentário removido.'],
     ['moderation.comment.errors.failed', 'Não foi possível remover o comentário. Tente novamente.'],
     ['moderation.comment.errors.gone', 'Este comentário já tinha sido removido.'],
+    // D-334 parity for authors: the shipped own copy is NOT reworded; the sibling key is new.
+    ['feed.comments.delete.title', 'Excluir comentário?'],
+    ['feed.comments.delete.body', 'Ele sai da conversa para todos os membros.'],
+    [
+      'feed.comments.delete.bodyWithReplies',
+      'Ele e as respostas saem da conversa para todos os membros.',
+    ],
+    ['feed.comments.delete.confirm', 'Excluir'],
   ])('%s is the UI-SPEC string', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });

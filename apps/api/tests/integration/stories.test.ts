@@ -61,7 +61,7 @@ type Envelope = {
   error: { code: string; message?: string; details?: Record<string, unknown>; requestId?: string };
 };
 
-const tokens = { demoAdmin: '', demoMember: '', labAdmin: '' };
+const tokens = { demoAdmin: '', demoMember: '', demoSupport: '', labAdmin: '' };
 const tenantIds = { demo: '', lab: '' };
 
 /** Every story and asset THIS FILE created; swept by caption prefix as well, in case of a crash. */
@@ -204,6 +204,7 @@ beforeAll(async () => {
 
   tokens.demoAdmin = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
   tokens.demoMember = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+  tokens.demoSupport = await signInAs('support@rede-demo.local', SEED_PASSWORD);
   tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
 
   const rows = await adminSql<{ id: string; slug: string }[]>`
@@ -1108,10 +1109,11 @@ describe('STORY-05 (second half) — the comment surface, and the two refusals t
     ).json()) as StoryCommentPage;
     const someoneElses = page.items[0]?.id ?? '';
 
-    // The admin wrote nothing here, so this comment is not theirs to remove.
+    // Support wrote nothing here and holds no `moderation.manage`, so this comment is not theirs to
+    // remove. (Since 08-03, D-336, an ADMIN may remove it — `moderation-comments.test.ts` 'story'.)
     const notMine = await request(
       `/v1/stories/${storyId}/comments/${someoneElses}`,
-      tokens.demoAdmin,
+      tokens.demoSupport,
       { method: 'DELETE', headers: { 'x-tenant-host': HOSTS.demo } },
     );
     expect(notMine.status).toBe(404);

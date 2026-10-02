@@ -466,6 +466,61 @@ describe('moderation tracer', () => {
 });
 
 /**
+ * 08-03 (UI E08/long-text backstop, the database half): a root with THIRTY replies — far more than
+ * one replies page — leaves with every reply in one statement, the post's trigger-maintained count
+ * ends equal to the live rows, and one `comment.deleted` per removed id is delivered.
+ */
+describe('cascade at scale', () => {
+  it('a moderator removes a root with 30 replies: 31 rows, 31 deliveries, count equals live rows', async () => {
+    const postId = await seedPost('thirty replies');
+    const root = await comment(tokens.member, postId, `${BODY_PREFIX} raiz com trinta`);
+    const replies = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments
+        (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+      select ${ids.tenant}::uuid, ${postId}::uuid, ${ids.other}::uuid,
+             ${`${BODY_PREFIX} resposta `} || g, 1, ${root.id}::uuid, 0, 'post'
+        from generate_series(1, 30) g
+      returning id::text`;
+    expect(replies).toHaveLength(30);
+    // A live comment elsewhere on the post must survive (the count is not simply zeroed).
+    const bystander = await comment(tokens.other, postId, `${BODY_PREFIX} outra raiz`);
+    expect(await commentCount(postId)).toBe(32);
+
+    const eventsBefore = deletedEvents.length;
+    const res = await remove(tokens.admin, root.id);
+    expect(res.status).toBe(200);
+
+    const removed = [root.id, ...replies.map((row) => row.id)];
+    const state = await commentState(removed);
+    expect(state).toHaveLength(31);
+    for (const row of state) {
+      expect(row.deleted_at).not.toBeNull();
+      expect(row.deleted_by_user_id).toBe(ids.admin);
+    }
+    const [live] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_comments
+       where post_id = ${postId}::uuid and deleted_at is null`;
+    expect(live?.n).toBe(1);
+    expect(await commentCount(postId)).toBe(live?.n);
+
+    const emitted = deletedEvents.slice(eventsBefore).map((event) => event.commentId);
+    expect(emitted).toHaveLength(31);
+    expect([...emitted].sort()).toEqual([...removed].sort());
+    expect(await logRowsFor(root.id)).toHaveLength(1);
+
+    // A fresh load shows only the bystander, and the root's replies page is empty.
+    const page = (await (
+      await request(`/v1/feed/posts/${postId}/comments`, tokens.member)
+    ).json()) as { items: FeedComment[] };
+    expect(page.items.map((item) => item.id)).toEqual([bystander.id]);
+    const thread = (await (
+      await request(`/v1/feed/comments/${root.id}/replies`, tokens.member)
+    ).json()) as { items: FeedComment[] };
+    expect(thread.items).toHaveLength(0);
+  });
+});
+
+/**
  * 08-03 (D-336, MODER-01, T-08-14, T-08-17) — the stories module's own admin-delete path, through
  * `DELETE /v1/stories/{storyId}/comments/{commentId}`. Story comments are FLAT (nothing cascades),
  * and the response stays the shipped 204 whoever removed the row.

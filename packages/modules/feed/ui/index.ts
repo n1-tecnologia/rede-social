@@ -20,6 +20,7 @@ export {
 export { CommentSheet, type CommentSheetProps } from './CommentSheet';
 export {
   type CommentCreateOutcome,
+  type CommentDeleteOutcome,
   type CommentLikeOutcome,
   type CommentModerationLabels,
   type CommentPageOutcome,

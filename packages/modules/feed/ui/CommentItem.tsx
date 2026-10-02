@@ -186,12 +186,15 @@ export function CommentItem({
       data-comment-author-removed={authorRemoved ? 'true' : undefined}
       data-comment-highlighted={highlighted && tinted ? 'true' : undefined}
       aria-busy={pending || undefined}
+      // UI-D-288: programmatically focusable (never in the tab order), so a removal can hand focus
+      // to the next row instead of dropping it on `<body>`.
+      tabIndex={-1}
       // `pl-14` overrides the row's own left gutter for the reply indent **[proto]**; the avatar is
       // `shrink-0`, so at 320px the indent is preserved by pushing the BODY in, never by clipping.
       // A highlighted row trades 8px of gutter for 8px of margin on each side so its `rounded-xl`
       // tint reads as a shape, with the content exactly where it was (UI-D-254, sketch 007 item 8).
       className={cn(
-        'flex gap-3 px-4 py-3',
+        'flex gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand',
         isReply && 'pl-14',
         highlighted &&
           'mx-2 rounded-xl px-2 transition-colors duration-[600ms] motion-reduce:transition-none',
