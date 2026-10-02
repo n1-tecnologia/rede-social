@@ -352,9 +352,8 @@ and set it with
 
 Recorded 2026-10-02: the production provider was created (2026-09-28) with only
 `assertion.repository=='n1-tecnologia/rede-social'` — no branch restriction. The hml provider was
-created with the `refs/heads/homolog` condition on 2026-10-02. Tightening production to
-`refs/heads/master` is applied by hand (auto mode refuses production IaC changes); until it is, the
-`homolog` environment's branch policy and the preflight are the guards.
+created with the `refs/heads/homolog` condition on 2026-10-02, and production was tightened to
+`refs/heads/master` the same day (applied by hand; auto mode refuses production IaC changes).
 
 ## hml provisioning runbook
 
@@ -397,7 +396,7 @@ Run in order; every `<hml-...>` value is unknown until its step. No step here is
 - [ ] **Resend.** Create an hml API key on the verified domain `n1marketingdigital.com.br`.
 - [x] **Secret Manager.** (created empty 2026-10-02; values still to add) Create the 14 secrets of "GCP Secret Manager secrets — `homolog`" in
   `rede-social-hml`.
-- [ ] **GitHub environment `homolog`.** Its variables and secrets (the two `homolog` sections above),
+- [x] **GitHub environment `homolog`.** (2026-10-02: variables + branch policy; secrets pending) Its variables and secrets (the two `homolog` sections above),
   Deployment branches limited to `homolog`, no required reviewer.
 - [ ] **Branch.** Create `homolog` from `master` and push it.
 - [ ] **Vercel project.** Create `rede-social-hml` with the settings and variables of
