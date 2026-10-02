@@ -24,6 +24,9 @@
     },
     "linkPreview": {
       "label": "Abrir link externo: {title}",
+      "play": "Assistir {title} aqui",
+      "playUntitled": "Assistir vídeo aqui",
+      "frameTitle": "{provider}: {title}",
       "provider": {
         "youtube": "YouTube",
         "vimeo": "Vimeo"

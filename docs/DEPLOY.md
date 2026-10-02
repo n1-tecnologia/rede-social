@@ -297,6 +297,7 @@ before. `DEPLOY_ENV` stays unset on the production project.
 | `API_URL` | not provisioned (no staging project) | `api` Cloud Run URL |
 | `PLATFORM_HOST` | *(unset — every Preview host is a generic host, D-21)* | `rede-social-woad.vercel.app` |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | *(unset — every push surface reads "unsupported")* | the PUBLIC half of the production VAPID pair, the same value as `vapid-public-key-prod` (Phase 7 release, step 3). Inlined at build time, so set it BEFORE the push that ships Phase 7 |
+| `CSP_MODE` | *(unset — the default `report-only`)* | `report-only` when Phase 8 ships; `enforce` only after the 08-12 real-device pass shows zero violations (see the CSP section below). Server-only and read per request, so a change needs a redeploy but no rebuild of anything else |
 
 No `SITE_URL` anywhere: every absolute URL, including the password-recovery `redirect_to`, is derived
 from the request origin (D-22). Only publishable keys ever reach Vercel — the service key lives in
@@ -810,6 +811,61 @@ a wrong number.
 **Upgrade trigger:** more than about **150 simultaneous foreground windows**, or any observed
 `too_many_connections` / `tenant_events` error in the Realtime logs (Dashboard → Logs → Realtime),
 means moving the project to **Pro** (V2-PLAT-06: 500 connections, 500 messages/s).
+
+## Content Security Policy (Phase 8)
+
+**What it is (08-08, D-346).** Every response the web app returns carries a per-request nonce
+Content Security Policy. `apps/web/lib/csp.ts` builds it (`cspFor`) and `apps/web/proxy.ts` sets it,
+with the nonce in `x-nonce`, on the forwarded request headers (Next reads the nonce there and stamps
+it on its own scripts) and on EVERY response the proxy returns: the session-refresh rebuild, the
+`/cadastro` rewrite, the 307/308 redirects and the service worker script (whose policy becomes the
+worker's own). The policy:
+
+| Directive | Value |
+|---|---|
+| `script-src` | `'self' 'nonce-…' 'strict-dynamic'` (`'unsafe-eval'` only under `next dev`) |
+| `style-src` | `'self' 'unsafe-inline'`, deliberately with NO nonce (a nonce would disable every SSR `style=` attribute) |
+| `img-src` / `media-src` | `'self' data:`/`blob:`, the Supabase origin, `https://*.mux.com` (+ `https://*.litix.io` for images) |
+| `connect-src` | `'self'`, the Supabase origin and its `wss:` twin (Realtime), `https://*.mux.com`, `https://*.litix.io`, `https://storage.googleapis.com` (Mux direct upload) |
+| `frame-src` | `https://www.youtube-nocookie.com https://player.vimeo.com` (the click-to-play players) |
+| others | `default-src 'self'`, `worker-src 'self' blob:`, `font-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`, `report-uri /api/csp-report`, and `upgrade-insecure-requests` only on https requests |
+
+The Supabase origins come from `NEXT_PUBLIC_SUPABASE_URL`, so production and hml need no extra
+list. Adding a third-party host anywhere in the app means adding it in `cspFor` too, or it is
+blocked once the policy enforces.
+
+**The switch.** `CSP_MODE` (Vercel, server-only): `report-only` (the default when unset) sends
+`Content-Security-Policy-Report-Only`, which blocks nothing and only reports; `enforce` sends
+`Content-Security-Policy`. Every local and CI e2e run enforces (`apps/web/playwright.config.ts`),
+and `apps/web/e2e/csp.spec.ts` walks every surface with a violation collector, so the policy is
+proven before production ever enforces it.
+
+**Rollout, run by the developer by hand:**
+
+1. With the Phase 8 web deploy, set `CSP_MODE=report-only` on the production Vercel project
+   (`vercel env add CSP_MODE production`, value `report-only`; leaving it unset is the same) and
+   redeploy. Nothing can break: report-only blocks nothing.
+2. Use the app on real devices (the 08-12 real-device pass: iPhone and Android, member and admin,
+   the inline YouTube and Vimeo players, a video, an upload, chat, push) and read the violations.
+   Every report becomes one `csp.violation` line in the Vercel function logs with only the
+   effective directive, the blocked HOST (or `inline`/`eval`) and the document path:
+   `vercel logs --project prj_oPNJ2NKXw4j2RkAN4gtC8vbmqyZa --environment production --no-branch --json --no-follow`
+   and filter the output for `csp.violation`. Browser extensions also report (their own hosts or
+   `chrome-extension`); those are noise, not app defects.
+3. Only when the real-device pass shows **zero** app violations, set `CSP_MODE=enforce` on
+   production and redeploy. Repeat the smallest smoke (sign in, feed, a video, tap an inline player,
+   open Suporte) on one phone after the flip.
+4. **Rollback:** set `CSP_MODE=report-only` and redeploy. No code change, no migration, nothing to
+   undo in the database.
+
+The hml project follows the same steps with its own `CSP_MODE` (unset there means report-only).
+
+**CORS: the API answers no browser.** `API_URL` is server-only and the web app is a BFF: the
+browser never calls Cloud Run, so the API mounts no CORS middleware at all, and
+`apps/api/tests/unit/cors.test.ts` fails the moment any `Access-Control-Allow-*` header appears on a
+preflight or a simple request. The rule for any FUTURE browser-facing API route: allow only the
+production origins (the platform host and the verified tenant domains), never `*`, never a
+reflected `Origin`, and never with credentials for an origin outside that list.
 
 ## Production gate (D-12)
 

@@ -1,6 +1,8 @@
+'use client';
+
 import { MediaImage } from '@rede-social/core/ui';
 import { Play } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 /**
  * The link preview card (MEDIA-04, UI-SPEC E06 / UI-D-11 / UI-D-12 / UI-D-13).
@@ -13,10 +15,15 @@ import type { ReactNode } from 'react';
  *    that may never resolve is indistinguishable from a broken one (UI-D-11). A refused URL takes
  *    the same path, which is what makes UI-D-13's silence structural rather than a message we
  *    remembered not to write.
- * 2. **No frame element, ever.** YouTube and Vimeo render as the SAME card with the provider
- *    thumbnail and a play badge, opening externally (UI-D-12). `apps/web` has no
- *    Content-Security-Policy today, so an embedded third-party frame could navigate the top frame
- *    and set cookies inside the tenant's origin. Inline playback is a Phase 8 item behind a real CSP.
+ * 2. **No frame until the member taps play, and only the server's frame** (08-08, UI-D-282,
+ *    superseding Phase 4's "no frame element, ever"). Without `embedUrl` the card is the shipped
+ *    external card, byte for byte. With it (a resolved YouTube/Vimeo preview whose URL yielded a
+ *    strict id, `server/embed-url.ts`), a flat black 16:9 stage with the play disc sits above the
+ *    text block; nothing third-party loads until the tap, which swaps in a sandboxed iframe
+ *    (scripts, same-origin, presentation and popups only: the frame can never navigate the
+ *    tenant's top-level page, T-08-42) on one of the two hosts the enforced Content Security
+ *    Policy's `frame-src` names. The text block stays the external link in both variants, so "open
+ *    on YouTube" still works where the inline player fails.
  * 3. **Never an HTML-injection sink** (T-04-32, the `PostCaption` rule restated). Title, description,
  *    site name and hostname are UNTRUSTED REMOTE METADATA rendered as plain text through React's
  *    default escaping. No raw-HTML escape hatch appears here or anywhere under
@@ -41,6 +48,8 @@ export type LinkPreviewView = {
   imageAssetId: string | null;
   /** The variant ladder for `imageAssetId`; empty when there is no image. */
   imageVariantWidths: readonly number[];
+  /** 08-08: the server-computed inline player URL (UI-D-282); absent → the shipped external card. */
+  embedUrl?: string;
 };
 
 export type LinkPreviewCardProps = {
@@ -49,6 +58,12 @@ export type LinkPreviewCardProps = {
   ariaLabel: string;
   /** "YouTube" / "Vimeo" — what the meta slot reads when `provider` is set. */
   providerLabel?: string;
+  /** 08-08: the play button's name when the preview has a title ("Assistir {title} aqui"). */
+  playLabel?: string;
+  /** 08-08: the play button's name when it has none ("Assistir vídeo aqui"). */
+  playUntitledLabel?: string;
+  /** 08-08: the iframe's accessible title ("{provider}: {title}"). */
+  frameTitle?: string;
 };
 
 /** The card's column is 680px on desktop (D-39) and the viewport width on a phone. */
@@ -58,6 +73,9 @@ export function LinkPreviewCard({
   preview,
   ariaLabel,
   providerLabel,
+  playLabel,
+  playUntitledLabel,
+  frameTitle,
 }: LinkPreviewCardProps): ReactNode {
   // UI-D-11 / UI-D-13: pending, failed and refused are ONE rendering — nothing at all.
   if (preview.status !== 'resolved') return null;
@@ -67,6 +85,22 @@ export function LinkPreviewCard({
 
   // The meta slot: the provider name when this came through oEmbed, else the hostname (UI-D-12).
   const meta = preview.provider !== null ? (providerLabel ?? preview.hostname) : preview.hostname;
+
+  // UI-D-282: the click-to-play variant needs the frame URL AND its labels; an unlabelled control is
+  // worse than the external card, so a host that passes no labels keeps the shipped card.
+  const playName = preview.title !== null ? playLabel : playUntitledLabel;
+  if (preview.embedUrl && playName && frameTitle) {
+    return (
+      <InlinePlayerCard
+        preview={preview}
+        embedUrl={preview.embedUrl}
+        meta={meta}
+        ariaLabel={ariaLabel}
+        playName={playName}
+        frameTitle={frameTitle}
+      />
+    );
+  }
 
   return (
     <a
@@ -119,5 +153,101 @@ export function LinkPreviewCard({
         ) : null}
       </span>
     </a>
+  );
+}
+
+/** The text block both variants share: meta, title, description (plain text, React-escaped). */
+function PreviewText({ preview, meta }: { preview: LinkPreviewView; meta: string }): ReactNode {
+  return (
+    <span className="flex flex-col gap-1 px-4 py-3">
+      <span className="truncate text-xs font-normal text-text-tertiary">{meta}</span>
+      {preview.title !== null ? (
+        <span className="line-clamp-2 text-sm font-bold text-text">{preview.title}</span>
+      ) : null}
+      {preview.description !== null ? (
+        <span className="line-clamp-2 text-sm font-normal text-text-secondary">
+          {preview.description}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * UI-D-282 (E15): the stage is static until the tap (no skeleton, no remote thumbnail: a flat
+ * `bg-black` ground), and `w-full aspect-video` inside the card so it never outgrows it at any
+ * viewport. The tap is the user gesture, so the provider's `autoplay=1` starts playback, and the
+ * provider's own player shows its loading state inside the frame. Focus moves to the frame so a
+ * keyboard user lands on the player they asked for.
+ */
+function InlinePlayerCard({
+  preview,
+  embedUrl,
+  meta,
+  ariaLabel,
+  playName,
+  frameTitle,
+}: {
+  preview: LinkPreviewView;
+  embedUrl: string;
+  meta: string;
+  ariaLabel: string;
+  playName: string;
+  frameTitle: string;
+}): ReactNode {
+  const [playing, setPlaying] = useState(false);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    if (playing) frameRef.current?.focus();
+  }, [playing]);
+
+  return (
+    <div
+      data-testid="post-link-preview"
+      data-provider={preview.provider ?? undefined}
+      className="mx-4 mt-3 block overflow-hidden rounded-xl border border-border bg-bg-secondary"
+    >
+      {playing ? (
+        <iframe
+          ref={frameRef}
+          src={embedUrl}
+          title={frameTitle}
+          data-testid="post-link-preview-frame"
+          sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+          allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+          referrerPolicy="strict-origin-when-cross-origin"
+          loading="lazy"
+          className="block aspect-video w-full border-0"
+        />
+      ) : (
+        <span
+          data-testid="post-link-preview-stage"
+          className="relative block aspect-video w-full bg-black"
+        >
+          <button
+            type="button"
+            aria-label={playName}
+            data-testid="post-link-preview-play"
+            onClick={() => setPlaying(true)}
+            className="absolute inset-0 grid place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+          >
+            <span className="grid h-14 w-14 place-items-center rounded-full bg-black/60 text-white">
+              <Play size={24} fill="currentColor" aria-hidden />
+            </span>
+          </button>
+        </span>
+      )}
+      <a
+        href={preview.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={ariaLabel}
+        data-testid="post-link-preview-link"
+        className="block hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+      >
+        <PreviewText preview={preview} meta={meta} />
+      </a>
+    </div>
   );
 }

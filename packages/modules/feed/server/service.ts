@@ -37,6 +37,7 @@ import {
   firstUrlIn,
 } from '../contracts/index';
 import { feedPosts } from '../db/schema';
+import { embedUrlFor } from './embed-url';
 import { assertAllowedUrl, normaliseUrl, urlHash } from './unfurl/guard';
 
 const log = moduleLogger('module-feed');
@@ -219,6 +220,8 @@ function toLinkPreview(row: FeedRow): LinkPreview | null {
   } catch {
     return null;
   }
+  // 08-08: the inline player (UI-D-282) only for a provider preview whose URL yields a strict id.
+  const embedUrl = embedUrlFor(row.link_preview_provider, row.link_preview_url);
   return {
     status: 'resolved',
     url: row.link_preview_url,
@@ -228,6 +231,7 @@ function toLinkPreview(row: FeedRow): LinkPreview | null {
     hostname,
     provider: row.link_preview_provider,
     imageAssetId: row.link_preview_image_asset_id,
+    ...(embedUrl !== null ? { embedUrl } : {}),
   };
 }
 

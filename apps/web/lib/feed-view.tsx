@@ -156,6 +156,8 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
               provider: post.linkPreview.provider,
               imageAssetId: post.linkPreview.imageAssetId,
               imageVariantWidths: [],
+              // 08-08 (UI-D-282): the server-computed inline player URL, YouTube/Vimeo only.
+              ...(post.linkPreview.embedUrl ? { embedUrl: post.linkPreview.embedUrl } : {}),
             },
             ariaLabel: tf('linkPreview.label', {
               title: post.linkPreview.title ?? post.linkPreview.hostname,
@@ -164,6 +166,16 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
               post.linkPreview.provider === null
                 ? undefined
                 : tf(`linkPreview.provider.${post.linkPreview.provider}`),
+            ...(post.linkPreview.embedUrl && post.linkPreview.provider !== null
+              ? {
+                  playLabel: tf('linkPreview.play', { title: post.linkPreview.title ?? '' }),
+                  playUntitledLabel: tf('linkPreview.playUntitled'),
+                  frameTitle: tf('linkPreview.frameTitle', {
+                    provider: tf(`linkPreview.provider.${post.linkPreview.provider}`),
+                    title: post.linkPreview.title ?? post.linkPreview.hostname,
+                  }),
+                }
+              : {}),
           },
   };
 }

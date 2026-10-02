@@ -341,6 +341,14 @@ export const linkPreviewSchema = z
     hostname: z.string(),
     provider: z.enum(LINK_PREVIEW_PROVIDERS).nullable(),
     imageAssetId: z.uuid().nullable(),
+    /**
+     * 08-08 (D-346, UI-D-282): the inline player's frame source, present only on a resolved YouTube
+     * or Vimeo preview whose URL yields a strict id (`server/embed-url.ts`). Only ever
+     * `https://www.youtube-nocookie.com/embed/{id}?...` or `https://player.vimeo.com/video/{id}?...`.
+     * `.optional()` so a web build that predates it still parses an API that sends it, and the
+     * reverse (the 08-01 web-first release rule for additive fields on a strict schema).
+     */
+    embedUrl: z.url().optional(),
   })
   .strict();
 export type LinkPreview = z.infer<typeof linkPreviewSchema>;

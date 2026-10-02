@@ -122,3 +122,38 @@ describe('absoluteTimeFormatter — one formatter per zone', () => {
     expect(absoluteTimeFormatter(MANAUS).resolvedOptions().timeZone).toBe(MANAUS);
   });
 });
+
+describe('postCardBase — the inline player labels (08-08, UI-D-282)', () => {
+  const EMBED = 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0';
+  const withPreview = (embedUrl?: string, title: string | null = 'Encontro') =>
+    ({
+      ...post(),
+      linkPreview: {
+        status: 'resolved',
+        url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        title,
+        description: null,
+        siteName: null,
+        hostname: 'youtube.com',
+        provider: 'youtube',
+        imageAssetId: null,
+        ...(embedUrl ? { embedUrl } : {}),
+      },
+    }) satisfies FeedPost;
+
+  it('passes embedUrl and the pt-BR play, untitled and frame labels', () => {
+    const card = postCardBase(withPreview(EMBED), NOW, tf, null);
+    const link = card.media.linkPreview;
+    expect(link?.preview.embedUrl).toBe(EMBED);
+    expect(link?.playLabel).toBe('Assistir Encontro aqui');
+    expect(link?.playUntitledLabel).toBe('Assistir vídeo aqui');
+    expect(link?.frameTitle).toBe('YouTube: Encontro');
+  });
+
+  it('without embedUrl the card gets no player labels (the shipped external card)', () => {
+    const link = postCardBase(withPreview(), NOW, tf, null).media.linkPreview;
+    expect(link?.preview.embedUrl).toBeUndefined();
+    expect(link?.playLabel).toBeUndefined();
+    expect(link?.frameTitle).toBeUndefined();
+  });
+});

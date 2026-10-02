@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
@@ -1154,4 +1155,79 @@ export async function setMembershipRole(
      where u.id = m.user_id and t.id = m.tenant_id and u.email = ${email} and t.slug = ${tenantSlug}
     returning m.id`;
   if (updated.length === 0) throw new Error(`no membership for ${email} in ${tenantSlug}`);
+}
+
+/**
+ * 08-08 (D-346): a post whose link preview is a RESOLVED YouTube or Vimeo oEmbed card, written in
+ * its terminal state (the seed's rule: an e2e never performs a real unfurl). The API projects
+ * `embedUrl` from the stored provider and URL, so this is the fixture the enforced-CSP walk taps
+ * play on. `url` should carry a per-run query parameter: `(tenant_id, url_hash)` is unique.
+ * Nothing is added to `scripts/seed.ts` (its pinned feed counts must not move); remove it with
+ * `deleteLinkPreviewPosts`.
+ */
+export async function createLinkPreviewPostAs(
+  email: string,
+  tenantSlug: string,
+  caption: string,
+  preview: { url: string; provider: 'youtube' | 'vimeo'; title: string },
+): Promise<string> {
+  const urlHash = createHash('sha256').update(new URL(preview.url).toString()).digest('hex');
+  const rows = await sql()<{ id: string }[]>`
+    with t as (select id from public.tenants where slug = ${tenantSlug}),
+    lp as (
+      insert into public.feed_link_previews
+        (tenant_id, url_hash, url, status, title, site_name, provider, fetched_at)
+      select t.id, ${urlHash}, ${preview.url}, 'resolved', ${preview.title},
+             ${preview.provider === 'youtube' ? 'YouTube' : 'Vimeo'}, ${preview.provider}, now()
+        from t
+      returning id, tenant_id
+    )
+    insert into public.feed_posts (tenant_id, author_user_id, caption, link_preview_id)
+    select lp.tenant_id, u.id, ${caption}, lp.id
+      from lp, public.users u
+     where u.email = ${email}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not create a link-preview post for ${email} in ${tenantSlug}`);
+  return id;
+}
+
+/** Removes every post whose caption starts with `prefix` AND the link previews they carried. */
+export async function deleteLinkPreviewPosts(prefix: string): Promise<void> {
+  const removed = await sql()<{ link_preview_id: string | null }[]>`
+    delete from public.feed_posts where caption like ${`${prefix}%`} returning link_preview_id`;
+  const previewIds = removed.map((row) => row.link_preview_id).filter((id) => id !== null);
+  if (previewIds.length > 0) {
+    await sql()`delete from public.feed_link_previews where id = any(${previewIds}::uuid[])`;
+  }
+}
+
+/**
+ * 08-08: one id of each surface the enforced-CSP walk visits in a tenant: a community, the soonest
+ * live event, and a member-visible story (not removed, unexpired, asset ready; null when another
+ * spec removed them all, see `activeReadyStoryCount`).
+ */
+export async function cspWalkFixtureIds(
+  tenantSlug: string,
+): Promise<{ communityId: string; eventId: string; storyId: string | null }> {
+  const rows = await sql()<{ community_id: string; event_id: string; story_id: string | null }[]>`
+    select
+      (select c.id from public.communities c
+        where c.tenant_id = t.id and c.deleted_at is null
+        order by c.created_at limit 1) as community_id,
+      (select e.id from public.events e
+        where e.tenant_id = t.id and e.deleted_at is null
+        order by e.starts_at limit 1) as event_id,
+      (select s.id from public.stories s
+         join public.media_assets a on a.id = s.media_asset_id
+        where s.tenant_id = t.id and s.deleted_at is null and s.expires_at > now()
+          and a.status = 'ready'
+        order by s.published_at desc limit 1) as story_id
+      from public.tenants t
+     where t.slug = ${tenantSlug}`;
+  const row = rows[0];
+  if (!row?.community_id || !row.event_id) {
+    throw new Error(`csp walk fixtures missing in ${tenantSlug}`);
+  }
+  return { communityId: row.community_id, eventId: row.event_id, storyId: row.story_id };
 }
