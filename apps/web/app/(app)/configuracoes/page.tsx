@@ -109,7 +109,8 @@ export default async function SettingsPage({
   // unblocking lives there, so a moderator must be able to reach it.
   let canSeeMembers = false;
   // 08-06 (D-339, D-342, UI-D-269): the Marca row, gated on `tenant.manage` — the value the API's
-  // `/v1/admin/branding` guard reads — and absent from the DOM without it.
+  // `/v1/admin/branding` guard reads — and absent from the DOM without it. 08-07: the Regras row
+  // shares the same gate (`/v1/admin/rules`).
   let canManageBrand = false;
   // 07 review C-WR-01: the push row only where the notifications module is on (the API refuses the
   // push routes otherwise, after the browser's permission prompt had already been spent).
@@ -128,7 +129,7 @@ export default async function SettingsPage({
   }
 
   // E7/partial + E7/zero-one-many: the whole group — its `SectionTitle` included — is ABSENT from
-  // the DOM unless one of its rows renders (Marca, Membros, Moderação, Mídia, Seus stories), never rendered-and-disabled. A member must not learn
+  // the DOM unless one of its rows renders (Marca, Membros, Regras da comunidade, Moderação, Mídia, Seus stories), never rendered-and-disabled. A member must not learn
   // that an admin media screen exists, which is also why `/configuracoes/midia` itself answers
   // `notFound()` rather than a 403 screen.
   const isTenantAdmin = role === 'admin_tenant';
@@ -195,6 +196,15 @@ export default async function SettingsPage({
                 icon="users"
                 label={t('settings.rows.members')}
                 href="/configuracoes/membros"
+                trailing={null}
+              />
+            ) : null}
+            {/* 08-07 (ADMIN-03, UI-D-280): the rules editor shares Marca's gate, `tenant.manage`. */}
+            {canManageBrand ? (
+              <Row
+                icon="scroll-text"
+                label={t('settings.rows.rules')}
+                href="/configuracoes/regras"
                 trailing={null}
               />
             ) : null}

@@ -15,6 +15,7 @@
     "./moderation": "./src/moderation.ts",
     "./profiles": "./src/profiles.ts",
     "./realtime": "./src/realtime.ts",
+    "./rules": "./src/rules.ts",
     "./text": "./src/text.ts"
   },
   "scripts": {

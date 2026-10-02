@@ -3,6 +3,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
+ * The tenant rules contract (ADMIN-03) lives in the client-safe `./rules` — the editor imports it in
+ * the browser, where this file's `node:fs` cannot go — and is re-exported here with the rest of the
+ * consent texts.
+ */
+export * from './rules';
+
+/**
  * the platform's legal texts and their versions (D-03, AUTH-04).
  *
  * SERVER-ONLY: `readLegalDoc` touches `node:fs`. Never import this module from a client component

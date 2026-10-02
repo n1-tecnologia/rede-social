@@ -34,6 +34,23 @@
         }
       }
     },
+    "rules": {
+      "title": "Regras da comunidade",
+      "intro": "Quem entrar em {tenant} lê e aceita estas regras no cadastro.",
+      "label": "Regras",
+      "placeholder": "Ex.: Trate todos com respeito. Não publique propaganda sem autorização.",
+      "helper": "Deixe uma linha em branco entre os parágrafos.",
+      "counter": "{count}/10.000",
+      "version": "Versão {version} em vigor",
+      "preview": "Ver como os novos membros veem",
+      "save": "Salvar regras",
+      "saving": "Salvando…",
+      "saved": "Regras salvas. Valem para quem entrar a partir de agora.",
+      "errors": {
+        "tooLong": "Use até 10.000 caracteres.",
+        "failed": "Não foi possível salvar as regras. Tente novamente."
+      }
+    },
     "members": {
       "title": "Membros",
       "search": {

@@ -13,6 +13,7 @@ import {
   MessageCircle,
   Moon,
   Palette,
+  ScrollText,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -167,6 +168,8 @@ const ICONS: Record<string, LucideIcon> = {
   'shield-check': ShieldCheck,
   // 08-06 (UI-D-269): the Configurações "Marca" row.
   palette: Palette,
+  // 08-07 (UI-D-269): the Configurações "Regras da comunidade" row.
+  'scroll-text': ScrollText,
 };
 
 export function iconFor(name: string): LucideIcon {

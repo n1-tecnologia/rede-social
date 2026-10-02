@@ -95,6 +95,8 @@ const REQUIRED_KEYS = [
   '/(app)/configuracoes/membros/page',
   // 08-06: the tenant lane's Marca screen reads the session, `tenant.manage` and the brand per request.
   '/(app)/configuracoes/marca/page',
+  // 08-07: the Regras editor reads the session, `tenant.manage` and the tenant's rules per request.
+  '/(app)/configuracoes/regras/page',
   // 07-09: the member's support thread (CHAT-02). It reads the session, the member's own
   // conversation and the request instant (day labels such as "Hoje"), so it may never be prerendered.
   '/(app)/suporte/page',
