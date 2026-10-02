@@ -764,18 +764,30 @@ export async function createCommunityAs(
  * 05.3-09: a ROOT comment on a post, written directly (the Reels comment case needs a thread whose
  * reply affordance it can see). The comment-count trigger moves the post's counter; the row goes
  * with its post, since `feed_comments.post_id` cascades.
+ *
+ * 08-01: with `parentId`, a REPLY under that root instead — the moderation spec needs another
+ * member's root with replies, without driving three member sessions through the composer.
  */
 export async function createFeedCommentAs(
   email: string,
   postId: string,
   body: string,
+  parentId?: string,
 ): Promise<string> {
-  const rows = await sql()<{ id: string }[]>`
-    insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth)
-    select p.tenant_id, p.id, u.id, ${body}, 0
-      from public.feed_posts p, public.users u
-     where p.id = ${postId}::uuid and u.email = ${email}
-    returning id`;
+  const rows = parentId
+    ? await sql()<{ id: string }[]>`
+        insert into public.feed_comments
+          (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+        select p.tenant_id, p.id, u.id, ${body}, 1, ${parentId}::uuid, 0, 'post'
+          from public.feed_posts p, public.users u
+         where p.id = ${postId}::uuid and u.email = ${email}
+        returning id`
+    : await sql()<{ id: string }[]>`
+        insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth)
+        select p.tenant_id, p.id, u.id, ${body}, 0
+          from public.feed_posts p, public.users u
+         where p.id = ${postId}::uuid and u.email = ${email}
+        returning id`;
   const id = rows[0]?.id;
   if (!id) throw new Error(`could not comment on ${postId} as ${email}`);
   return id;

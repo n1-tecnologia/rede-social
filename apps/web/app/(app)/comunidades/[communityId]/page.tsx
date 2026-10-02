@@ -320,7 +320,10 @@ export default async function CommunityPage({
           onRefresh={refreshCommunityPostsAction.bind(null, community.id)}
           onLike={likePostAction}
           onUnlike={unlikePostAction}
-          comments={{ title: tf('comments.title'), ...feedCommentsProps(locale, tf, bootstrap) }}
+          comments={{
+            title: tf('comments.title'),
+            ...feedCommentsProps(locale, tf, bootstrap, await getTranslations('moderation')),
+          }}
           share={{
             title: bootstrap.tenant.displayName,
             copied: tf('share.copied'),

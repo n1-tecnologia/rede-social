@@ -1,10 +1,10 @@
 'use client';
 
-import { Button, ConfirmDialog, cn, Skeleton } from '@rede-social/ui';
+import { Button, ConfirmDialog, cn, Skeleton, useToast } from '@rede-social/ui';
 import { Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { CommentInput, type ReplyTarget } from './CommentInput';
-import { CommentItem, type CommentItemLabels, type CommentView } from './CommentItem';
+import { CommentItem, type CommentItemLabels, type CommentView, removalOf } from './CommentItem';
 import { type CountTemplates, formatCountLabel } from './meta';
 
 /**
@@ -124,7 +124,26 @@ export type CommentsListLabels = {
   deleteBody: string;
   deleteConfirm: string;
   deleteCancel: string;
+  /**
+   * 08-01 (UI-D-276): the MODERATION dialog a holder of `moderation.manage` sees on someone else's
+   * comment — "Remover comentário?", a body naming the author (`{author}` still in it; the list
+   * fills it in) with and without replies, "Remover" / "Cancelar" — and the "Comentário removido."
+   * toast. Absent means the host predates moderation, and the own dialog is used.
+   */
+  moderation?: CommentModerationLabels;
   item: CommentItemLabels;
+};
+
+export type CommentModerationLabels = {
+  title: string;
+  /** "O comentário de {author} sai da conversa…" — `{author}` filled by the list. */
+  body: string;
+  /** The same sentence for a root with live replies (D-334: they leave with it). */
+  bodyWithReplies: string;
+  confirm: string;
+  cancel: string;
+  /** The success toast after a moderator's removal. */
+  removedToast: string;
 };
 
 export type CommentsListProps = {
@@ -210,6 +229,19 @@ function CommentRowSkeleton({ indented = false }: { indented?: boolean }) {
 }
 
 /**
+ * 08-01 (UI-D-276): the moderation success toast, as a component that owns `useToast` ONLY while it
+ * is mounted — the `PostMedia` rule: the hook throws outside a `ToastProvider`, and a list that never
+ * removed anything for a moderator must not need one. Keyed by the host, so each removal shows once.
+ */
+function RemovedToast({ message }: { message: string }) {
+  const toast = useToast();
+  useEffect(() => {
+    toast.show({ tone: 'success', message });
+  }, [toast, message]);
+  return null;
+}
+
+/**
  * Three rows, exported so both containers' loading boundaries have the SAME geometry as the list
  * they stand in for and the swap to content does not shift the sheet.
  */
@@ -288,6 +320,8 @@ export function CommentsList({
     'generic' | 'reply_depth_exceeded' | 'story_comment_no_reply' | null
   >(null);
   const [confirming, setConfirming] = useState<CommentView | null>(null);
+  // Bumped on each confirmed MODERATION removal: the key that mounts one `RemovedToast`.
+  const [removedToastKey, setRemovedToastKey] = useState(0);
 
   const patchThread = useCallback((rootId: string, patch: Partial<ReplyThread>) => {
     setThreads((previous) => ({
@@ -582,7 +616,13 @@ export function CommentsList({
     [onLikeComment, onUnlikeComment],
   );
 
-  /** D-61. The row leaves the list only once the SERVER has confirmed it — never optimistically. */
+  /**
+   * D-61, widened by 08-01 (D-334). The row leaves the list only once the SERVER has confirmed it —
+   * never optimistically. A ROOT leaves together with its loaded replies (the server soft-deleted
+   * them in the same statement), and the post's visible count drops by 1 + its live reply count —
+   * the number the server's trigger just subtracted. This holds for an author's own root too: the
+   * cascade is the same on both paths. A moderator's removal also raises "Comentário removido.".
+   */
   const confirmDelete = useCallback(async () => {
     const target = confirming;
     if (!target) return;
@@ -614,11 +654,30 @@ export function CommentsList({
           ),
         );
       }
+      onCountChange?.(-1);
     } else {
       setItems((previous) => previous.filter((row) => row.id !== target.id));
+      setThreads((previous) => {
+        if (!(target.id in previous)) return previous;
+        const { [target.id]: _removed, ...rest } = previous;
+        return rest;
+      });
+      onCountChange?.(-(1 + Math.max(0, target.replyCount)));
     }
-    onCountChange?.(-1);
-  }, [confirming, onCountChange, onDeleteComment, threads]);
+    if (removalOf(target) === 'moderation' && labels.moderation) {
+      setRemovedToastKey((key) => key + 1);
+    }
+  }, [confirming, labels.moderation, onCountChange, onDeleteComment, threads]);
+
+  /** The dialog's copy for the row being confirmed: the moderator's, or the author's own. */
+  const moderationDialog =
+    confirming !== null && removalOf(confirming) === 'moderation' ? labels.moderation : undefined;
+  const confirmingAuthor =
+    confirming === null
+      ? ''
+      : confirming.authorRemoved
+        ? labels.item.removedAuthor
+        : (confirming.author.displayName ?? labels.item.removedAuthor);
 
   const startReply = useCallback((comment: CommentView) => {
     setReplyTarget({ commentId: comment.id, name: comment.author.displayName ?? '' });
@@ -686,7 +745,7 @@ export function CommentsList({
             labels={labels.item}
             // NO `onReply` — a reply has no reply affordance and no toggle of its own (D-60). The
             // one-level cap is visible here, not merely refused by the database.
-            onDelete={reply.canDelete ? setConfirming : undefined}
+            onDelete={removalOf(reply) !== null ? setConfirming : undefined}
             onToggleLike={(row) => void toggleLike(row)}
             highlighted={reply.id === highlightCommentId}
           />
@@ -768,7 +827,7 @@ export function CommentsList({
               // removes the controls — `CommentItem` chooses its shell from the handlers it was
               // given, so there is no second branch anywhere about what a comment looks like.
               onReply={flat ? undefined : startReply}
-              onDelete={comment.canDelete ? setConfirming : undefined}
+              onDelete={removalOf(comment) !== null ? setConfirming : undefined}
               onToggleLike={flat ? undefined : (row) => void toggleLike(row)}
               highlighted={!flat && comment.id === highlightCommentId}
             >
@@ -831,16 +890,26 @@ export function CommentsList({
 
       <ConfirmDialog
         open={confirming !== null}
-        title={labels.deleteTitle}
-        body={labels.deleteBody}
+        title={moderationDialog ? moderationDialog.title : labels.deleteTitle}
+        body={
+          moderationDialog
+            ? ((confirming?.replyCount ?? 0) > 0
+                ? moderationDialog.bodyWithReplies
+                : moderationDialog.body
+              ).replaceAll('{author}', confirmingAuthor)
+            : labels.deleteBody
+        }
         icon={Trash2}
         tone="danger"
-        confirmLabel={labels.deleteConfirm}
-        cancelLabel={labels.deleteCancel}
+        confirmLabel={moderationDialog ? moderationDialog.confirm : labels.deleteConfirm}
+        cancelLabel={moderationDialog ? moderationDialog.cancel : labels.deleteCancel}
         onConfirm={confirmDelete}
         onClose={() => setConfirming(null)}
         onError={(error) => console.error('feed.comment.delete_failed', { error: String(error) })}
       />
+      {removedToastKey > 0 && labels.moderation ? (
+        <RemovedToast key={removedToastKey} message={labels.moderation.removedToast} />
+      ) : null}
     </section>
   );
 }

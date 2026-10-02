@@ -88,6 +88,9 @@ const REQUIRED_KEYS = [
   // 07-01: the bell's destination. It reads the session and the request instant (relative times)
   // per request, and its server render must never be a cached copy of another member's rows.
   '/(app)/notificacoes/page',
+  // Phase 8 (08-01): the tenant admin panel's Moderação screen. It reads the session and the
+  // permission per request, so it may never be prerendered.
+  '/(app)/configuracoes/moderacao/page',
   // 07-09: the member's support thread (CHAT-02). It reads the session, the member's own
   // conversation and the request instant (day labels such as "Hoje"), so it may never be prerendered.
   '/(app)/suporte/page',

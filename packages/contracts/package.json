@@ -12,6 +12,7 @@
     ".": "./src/index.ts",
     "./branding": "./src/branding.ts",
     "./media": "./src/media.ts",
+    "./moderation": "./src/moderation.ts",
     "./profiles": "./src/profiles.ts",
     "./realtime": "./src/realtime.ts",
     "./text": "./src/text.ts"

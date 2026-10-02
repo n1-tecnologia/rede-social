@@ -361,5 +361,8 @@ export function commentView(
     replyCount: comment.replyCount,
     isReply: comment.isReply,
     canDelete: comment.canDelete,
+    // 08-01 (UI-D-276): copied THROUGH, like `canDelete`. An API that predates it sends nothing, and
+    // the row then reads `canDelete ? 'own' : null` — the shipped behaviour (release-order rule).
+    removal: comment.removal ?? (comment.canDelete ? 'own' : null),
   };
 }

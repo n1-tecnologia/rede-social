@@ -159,7 +159,7 @@ export default async function PostPage({
           onDelete: deletePostAction,
         }}
         comments={{
-          ...feedCommentsProps(locale, tf, bootstrap),
+          ...feedCommentsProps(locale, tf, bootstrap, await getTranslations('moderation')),
           initialItems: commentPage === null ? undefined : commentPage.items.map(toView),
           initialCursor: commentPage?.nextCursor ?? null,
           initialError: commentPage === null,

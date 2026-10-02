@@ -180,7 +180,10 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
       onRefresh={refreshFeedAction}
       onLike={likePostAction}
       onUnlike={unlikePostAction}
-      comments={{ title: tf('comments.title'), ...feedCommentsProps(locale, tf, bootstrap) }}
+      comments={{
+        title: tf('comments.title'),
+        ...feedCommentsProps(locale, tf, bootstrap, await getTranslations('moderation')),
+      }}
       share={{
         title: bootstrap.tenant.displayName,
         copied: tf('share.copied'),
@@ -233,7 +236,18 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
  * their membership id — and for the ~200 ms a pending row lives, a name without a link is the
  * honest rendering rather than a guessed route.
  */
-export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Bootstrap) {
+export function feedCommentsProps(
+  locale: string,
+  tf: Translator,
+  bootstrap: Bootstrap,
+  /**
+   * 08-01 (UI-D-276): the `moderation` namespace, for the moderator's control name, dialog and
+   * toast. Every FEED surface passes it (home, post page, community page, reels). The story host
+   * does not yet: story-comment moderation is 08-03, and without it the list keeps the own dialog.
+   * Which dialog a row opens is still decided by the row's SERVER-derived `removal`, never here.
+   */
+  tm?: Translator,
+) {
   return {
     locale,
     viewer: {
@@ -283,6 +297,19 @@ export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Boo
       deleteBody: tf('comments.delete.body'),
       deleteConfirm: tf('comments.delete.confirm'),
       deleteCancel: tf('comments.delete.cancel'),
+      // `raw`: `{author}` is filled by the list with the name of the row being confirmed.
+      ...(tm
+        ? {
+            moderation: {
+              title: tm('comment.title'),
+              body: tm.raw('comment.body') as string,
+              bodyWithReplies: tm.raw('comment.bodyWithReplies') as string,
+              confirm: tm('comment.confirm'),
+              cancel: tm('comment.cancel'),
+              removedToast: tm('comment.toasts.removed'),
+            },
+          }
+        : {}),
       item: {
         removedAuthor: tf('comments.removedAuthor'),
         like: tf('comments.like'),
@@ -290,6 +317,8 @@ export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Boo
         likes: { one: tf.raw('comments.likes.one'), other: tf.raw('comments.likes.other') },
         reply: tf('comments.reply'),
         delete: tf('comments.delete.label'),
+        // `raw`: "Remover comentário de {author}" — each row fills in the name it shows.
+        ...(tm ? { remove: tm.raw('comment.label') as string } : {}),
       },
     },
   };

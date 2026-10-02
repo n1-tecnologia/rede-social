@@ -358,6 +358,14 @@ export const feedComments = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /** D-61: a member soft-deletes their OWN comment. The row stays for Phase 8 moderation. */
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    /**
+     * Who soft-deleted the row (08-01, D-334, SCHEMA-CONVENTIONS §(d).2): the author, or the
+     * moderator who removed it — and, on a root's cascade, the same actor on every reply it took
+     * down. Null for legacy rows and for the replies the 08-01 orphan repair soft-deleted, which is
+     * what keeps those repaired rows identifiable. NO foreign key, for the `moderation_log` reason: a
+     * deleted account must never be blocked by, or cascade into, the evidence of a removal.
+     */
+    deletedByUserId: uuid('deleted_by_user_id'),
   },
   (t) => [
     // The targets of the two composite foreign keys below. `id` is already the primary key, so

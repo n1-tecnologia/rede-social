@@ -1,0 +1,66 @@
+{
+  "moderation": {
+    "comment": {
+      "label": "Remover comentário de {author}",
+      "title": "Remover comentário?",
+      "body": "O comentário de {author} sai da conversa para todos os membros. {author} não é avisado, e a remoção fica no histórico de moderação.",
+      "bodyWithReplies": "O comentário de {author} e as respostas saem da conversa para todos os membros. {author} não é avisado, e a remoção fica no histórico de moderação.",
+      "confirm": "Remover",
+      "cancel": "Cancelar",
+      "toasts": {
+        "removed": "Comentário removido."
+      },
+      "errors": {
+        "failed": "Não foi possível remover o comentário. Tente novamente.",
+        "gone": "Este comentário já tinha sido removido."
+      }
+    },
+    "log": {
+      "title": "Moderação",
+      "back": "Voltar para Configurações",
+      "permanent": "Este histórico não pode ser editado nem apagado.",
+      "label": "Histórico de moderação",
+      "filters": {
+        "all": "Tudo",
+        "comments": "Comentários",
+        "blocks": "Bloqueios",
+        "unblocks": "Desbloqueios",
+        "roles": "Papéis"
+      },
+      "rows": {
+        "commentRemoved": "{actor} removeu um comentário de {target}",
+        "blocked": "{actor} bloqueou o acesso de {target}",
+        "unblocked": "{actor} desbloqueou o acesso de {target}",
+        "roleChanged": "{actor} mudou o papel de {target} de {from} para {to}"
+      },
+      "roles": {
+        "admin_tenant": "Administrador",
+        "support_tenant": "Suporte",
+        "member": "Membro"
+      },
+      "you": "Você",
+      "removedMember": "Membro removido",
+      "context": {
+        "post": "Comentário em um post",
+        "story": "Comentário em um story"
+      },
+      "excerpt": "“{excerpt}”",
+      "reason": "Motivo: {reason}",
+      "time": "{date} às {time}",
+      "empty": {
+        "title": "Nenhuma ação de moderação ainda",
+        "body": "Quando você remover um comentário ou bloquear o acesso de alguém, o registro aparece aqui."
+      },
+      "filteredEmpty": {
+        "title": "Nada com este filtro",
+        "body": "Escolha outro filtro para ver mais registros."
+      },
+      "errors": {
+        "title": "Algo deu errado",
+        "generic": "Algo deu errado. Tente novamente.",
+        "retry": "Tentar novamente",
+        "loadMore": "Não foi possível carregar mais registros."
+      }
+    }
+  }
+}

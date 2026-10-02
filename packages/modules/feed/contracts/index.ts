@@ -1,4 +1,5 @@
 import { MEDIA_STATUSES } from '@rede-social/contracts/media';
+import { commentRemovalSchema } from '@rede-social/contracts/moderation';
 import {
   LINK_URL_PATTERN,
   LINK_URL_TRAILING_PUNCTUATION,
@@ -660,7 +661,15 @@ export const commentSchema = z
      */
     replyCount: z.number().int().min(0),
     isReply: z.boolean(),
+    /** `removal !== null`, kept for the clients that predate `removal` (T-04-44: server-derived). */
     canDelete: z.boolean(),
+    /**
+     * 08-01 (UI-D-276, D-338): what the removal control means for THIS viewer — `'own'` (they wrote
+     * it), `'moderation'` (someone else did and they hold `moderation.manage`) or `null`. SERVER-
+     * DERIVED; the web never compares ids. OPTIONAL on purpose (production is live): a web that
+     * ships before this API reads an absent value as `canDelete ? 'own' : null`.
+     */
+    removal: commentRemovalSchema.optional(),
   })
   .strict();
 export type FeedComment = z.infer<typeof commentSchema>;

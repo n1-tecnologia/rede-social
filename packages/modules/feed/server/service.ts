@@ -4,6 +4,7 @@ import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { enqueueInTx } from '@rede-social/core/server/jobs/boss';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { recordModerationAction } from '@rede-social/core/server/moderation/log';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { sql } from 'drizzle-orm';
@@ -1226,11 +1227,25 @@ const commentProjection = (viewerUserId: string) => sql`
       left join feed_likes cl on cl.comment_id = c.id and cl.user_id = ${viewerUserId}::uuid`;
 
 /**
+ * What one viewer may do with the removal control (08-01, UI-D-276, T-04-44) — derived HERE, on the
+ * server, so the web never compares ids: the author's own row is `'own'`; someone else's row is
+ * `'moderation'` exactly when the caller holds `moderation.manage` (read by the ROUTE before the
+ * service opens its transaction); anything else is `null`. The delete itself re-decides the same
+ * question under a row lock, so this value is a convenience, never the authority.
+ */
+const removalFor = (
+  row: CommentRow,
+  viewerUserId: string,
+  canModerate: boolean,
+): 'own' | 'moderation' | null =>
+  row.author_user_id === viewerUserId ? 'own' : canModerate ? 'moderation' : null;
+
+/**
  * Row → published contract. `isReply` is `depth = 1` — the RENDERED half of the one-level cap
  * (D-60: a reply shows no "Responder" and no replies toggle), read from the same column the
  * database enforces the cap with, so the UI and the constraint can never disagree.
  */
-const toComment = (row: CommentRow, viewerUserId: string): FeedComment => ({
+const toComment = (row: CommentRow, viewerUserId: string, canModerate: boolean): FeedComment => ({
   id: row.id,
   createdAt: row.created_at,
   body: row.body,
@@ -1247,7 +1262,8 @@ const toComment = (row: CommentRow, viewerUserId: string): FeedComment => ({
   viewerLiked: row.viewer_liked,
   replyCount: row.reply_count,
   isReply: row.depth === 1,
-  canDelete: row.author_user_id === viewerUserId,
+  canDelete: removalFor(row, viewerUserId, canModerate) !== null,
+  removal: removalFor(row, viewerUserId, canModerate),
 });
 
 /**
@@ -1574,44 +1590,92 @@ export async function createComment(
     'comment created',
   );
 
-  return toComment(created, ctx.userId);
+  // The caller wrote this row, so its removal is `'own'` whatever they hold: no permission read here.
+  return toComment(created, ctx.userId, false);
 }
 
 /**
- * `DELETE /v1/feed/comments/{commentId}` (D-61) — a member removes their OWN comment or reply.
+ * `DELETE /v1/feed/comments/{commentId}` (D-61, widened by 08-01 for MODER-01) — the author removes
+ * their OWN comment or reply, or a holder of `moderation.manage` removes ANYONE's.
  *
- * The authority is IN THE PREDICATE (`author_user_id = ctx.userId`), so someone else's comment, an
- * unknown id and an already-deleted one are ONE branch answering a bare 404: a member cannot even
- * probe whether a comment exists (T-04-16, T-04-21). Phase 8's MODER-01 widens this exact route
- * with one more permission — the row stays, only `deleted_at` is set.
+ * ONE transaction (RESEARCH Pattern 1, T-08-05):
+ *  1. `select … for update` locks the live POST comment. Two moderators removing the same comment
+ *     at once are serialised here: the second re-reads the row as deleted and takes the 404.
+ *  2. Missing, or neither the author nor `canModerate`, is the ONE bare 404 shared with unknown,
+ *     another tenant's and already-removed ids (T-04-16, T-04-21): nobody can probe existence.
+ *  3. ONE statement soft-deletes the comment AND, for a root, its live replies (D-334, Pitfall 1),
+ *     stamping `deleted_by_user_id` with the actor. `app.feed_comment_count()` drops the post's count
+ *     by 1 + N on the `deleted_at` transition. An author deleting their own root cascades identically.
+ *  4. When the actor is NOT the author it is a moderation action: the kernel writes the log row in
+ *     THIS transaction (`recordModerationAction(tx, …)`), with the excerpt cut from the body read
+ *     under the lock. A failed log insert rolls the removal back. A moderator removing their OWN
+ *     comment is an author delete and writes no log row (Pitfall 2, MODER-03 adjacency).
  *
- * Comments are NOT editable in V1 (D-61): there is no update-body path here and none in the routes.
+ * After the transaction resolves, ONE `comment.deleted` per removed id, so the existing retraction
+ * takes down the "X respondeu" rows of the cascaded replies too. D-335: nothing else is sent — no
+ * notification of any kind to the author, and the response does not name who removed it.
+ *
+ * `canModerate` is read by the ROUTE through `permissionsForRequest(ctx)` BEFORE this function opens
+ * its transaction (T-08-08: on a flags-cache miss that read opens its own, and the pool is max 5).
  *
  * **Post comments only** (`post_id is not null`, 07 review B-WR-03): story comments share
  * `feed_comments`, but they are deleted through `DELETE /v1/stories/{id}/comments/{commentId}`, which
  * emits `story.comment_deleted` and so retracts the story author's `stories.story_commented` row. Here
  * a story comment id is the same bare 404 as any other miss; otherwise this route would delete it and
  * emit `comment.deleted`, whose retraction names object type `comment`, leaving the excerpt in the bell.
+ *
+ * Comments are NOT editable in V1 (D-61): there is no update-body path here and none in the routes.
  */
-export async function deleteComment(ctx: RequestContext, commentId: string): Promise<void> {
-  await withTenantTx(ctx, async (tx) => {
-    const rows = await tx.execute<{ id: string }>(sql`
-      update feed_comments
-         set deleted_at = now()
+export async function deleteComment(
+  ctx: RequestContext,
+  commentId: string,
+  opts: { canModerate: boolean },
+): Promise<void> {
+  const { removedIds, moderated } = await withTenantTx(ctx, async (tx) => {
+    const locked = await tx.execute<{ id: string; author_user_id: string; body: string }>(sql`
+      select id, author_user_id, body
+        from feed_comments
        where id = ${commentId}::uuid
-         and author_user_id = ${ctx.userId}::uuid
+         and post_id is not null
+         and deleted_at is null
+       for update`);
+    const target = locked[0];
+    const isAuthor = target?.author_user_id === ctx.userId;
+    if (!target || (!isAuthor && !opts.canModerate)) throw new ApiError(404, 'NOT_FOUND');
+
+    // D-334: the root and its live replies in ONE statement (a reply has none, so this is a no-op
+    // widening for it). `deleted_by_user_id` names the actor on every row it took down.
+    const removed = await tx.execute<{ id: string }>(sql`
+      update feed_comments
+         set deleted_at = now(),
+             deleted_by_user_id = ${ctx.userId}::uuid
+       where (id = ${commentId}::uuid or parent_id = ${commentId}::uuid)
          and post_id is not null
          and deleted_at is null
       returning id`);
-    if (!rows[0]) throw new ApiError(404, 'NOT_FOUND');
+
+    if (!isAuthor) {
+      await recordModerationAction(tx, ctx, {
+        action: 'comment_removed',
+        targetUserId: target.author_user_id,
+        subjectType: 'post_comment',
+        subjectId: commentId,
+        excerptSource: target.body,
+        reason: null,
+      });
+    }
+    return { removedIds: removed.map((row) => row.id), moderated: !isAuthor };
   });
 
-  emit(ctx, 'comment.deleted', {
-    tenantId: ctx.tenantId,
-    commentId,
-    actorUserId: ctx.userId,
-  });
+  for (const id of removedIds) {
+    emit(ctx, 'comment.deleted', {
+      tenantId: ctx.tenantId,
+      commentId: id,
+      actorUserId: ctx.userId,
+    });
+  }
 
+  // Ids and counts only — never the body (T-04-19, the MODER-03 privacy prohibition).
   log.info(
     {
       event: 'feed.comment.deleted',
@@ -1619,6 +1683,8 @@ export async function deleteComment(ctx: RequestContext, commentId: string): Pro
       userId: ctx.userId,
       requestId: ctx.requestId,
       commentId,
+      removed: removedIds.length,
+      moderated,
     },
     'comment soft-deleted',
   );
@@ -1644,6 +1710,7 @@ export async function listComments(
   ctx: RequestContext,
   postId: string,
   query: CommentsQuery,
+  opts: { canModerate: boolean },
 ): Promise<FeedCommentPage> {
   const limit = query.limit;
   const after = decodeCursor(query.cursor);
@@ -1690,7 +1757,7 @@ export async function listComments(
     'comments listed',
   );
 
-  return { items: page.map((row) => toComment(row, ctx.userId)), nextCursor };
+  return { items: page.map((row) => toComment(row, ctx.userId, opts.canModerate)), nextCursor };
 }
 
 /**
@@ -1711,6 +1778,7 @@ export async function listReplies(
   ctx: RequestContext,
   commentId: string,
   query: RepliesQuery,
+  opts: { canModerate: boolean },
 ): Promise<FeedCommentPage> {
   const limit = query.limit;
   const after = decodeCursor(query.cursor);
@@ -1752,7 +1820,7 @@ export async function listReplies(
     'replies listed',
   );
 
-  return { items: page.map((row) => toComment(row, ctx.userId)), nextCursor };
+  return { items: page.map((row) => toComment(row, ctx.userId, opts.canModerate)), nextCursor };
 }
 
 /**
@@ -1775,6 +1843,7 @@ export async function listReplies(
 export async function getCommentThread(
   ctx: RequestContext,
   commentId: string,
+  opts: { canModerate: boolean },
 ): Promise<FeedCommentThread> {
   const cap = COMMENT_THREAD_REPLIES_CAP;
   const { postId, root, replies, extra } = await withTenantTx(ctx, async (tx) => {
@@ -1843,8 +1912,10 @@ export async function getCommentThread(
 
   return {
     postId,
-    root: toComment(root, ctx.userId),
-    replies: [...replies.rows, ...(extra ? [extra] : [])].map((row) => toComment(row, ctx.userId)),
+    root: toComment(root, ctx.userId, opts.canModerate),
+    replies: [...replies.rows, ...(extra ? [extra] : [])].map((row) =>
+      toComment(row, ctx.userId, opts.canModerate),
+    ),
     repliesCursor,
     targetId: commentId,
   };

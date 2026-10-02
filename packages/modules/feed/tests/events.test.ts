@@ -311,13 +311,45 @@ describe('the interaction events — after commit, once, and never on a refusal'
       seen.push(payload);
     });
     try {
-      executeQueue = [[{ id: COMMENT_ID }]];
-      await deleteComment(ctx, COMMENT_ID);
+      // 08-01: the locked row (the caller is its author), then the soft-deleted ids.
+      executeQueue = [
+        [{ id: COMMENT_ID, author_user_id: USER_ID, body: 'olá' }],
+        [{ id: COMMENT_ID }],
+      ];
+      await deleteComment(ctx, COMMENT_ID, { canModerate: false });
       await flush(ctx);
       expect(seen).toHaveLength(1);
       expect(seen[0]).toMatchObject({ commentId: COMMENT_ID, actorUserId: USER_ID });
     } finally {
       off();
     }
+  });
+
+  it('9b. a root delete emits comment.deleted once PER removed id (D-334 cascade)', async () => {
+    const ctx = context();
+    const seen: { commentId: string }[] = [];
+    const off = subscribe('comment.deleted', async (payload) => {
+      seen.push(payload);
+    });
+    try {
+      executeQueue = [
+        [{ id: COMMENT_ID, author_user_id: USER_ID, body: 'olá' }],
+        [{ id: COMMENT_ID }, { id: PARENT_ID }],
+      ];
+      await deleteComment(ctx, COMMENT_ID, { canModerate: false });
+      await flush(ctx);
+      expect(seen.map((payload) => payload.commentId)).toEqual([COMMENT_ID, PARENT_ID]);
+    } finally {
+      off();
+    }
+  });
+
+  it('9c. someone else’s comment without moderation.manage is the bare 404 and emits nothing', async () => {
+    const ctx = context();
+    executeQueue = [[{ id: COMMENT_ID, author_user_id: POST_AUTHOR_ID, body: 'olá' }]];
+    await expect(deleteComment(ctx, COMMENT_ID, { canModerate: false })).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(ctx.events).toHaveLength(0);
   });
 });

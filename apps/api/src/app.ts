@@ -10,6 +10,7 @@ import { notificationsRoutes } from '@rede-social/module-notifications/server';
 import { storiesRoutes } from '@rede-social/module-stories/server';
 import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
+import { adminRoutes } from './routes/admin';
 import { healthRoutes } from './routes/health';
 import { hookRoutes } from './routes/hooks';
 import { meRoutes } from './routes/me';
@@ -65,6 +66,12 @@ const routes = app
   // the community whose members are listed is always the membership of record, never a path or query
   // value, and the RLS select policy makes another community's rows invisible rather than refused.
   .route('/v1/members', membersRoutes)
+  // `/v1/admin` is the tenant admin panel (Phase 8, D-338/D-339): tenant lane only — every sub-router
+  // carries its own `requireAuth`, so `ctx.tenantId` is the only tenant a handler can act on — and
+  // every route is guarded by a PERMISSION (`moderation.manage`, …), never a role. 08-01 mounts the
+  // read-only moderation log; the log itself is written only inside each moderator action's own
+  // transaction (`recordModerationAction`), never through a route.
+  .route('/v1/admin', adminRoutes)
   .route('/v1/platform', platformRoutes)
   // The module carries its own `requireAuth` + `requireModule('feed')` chain plus a per-route
   // `requirePermission('feed.post.create')` on the write (packages/modules/feed/server/routes.ts),

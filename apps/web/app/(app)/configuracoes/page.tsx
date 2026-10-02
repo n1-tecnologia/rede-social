@@ -1,4 +1,5 @@
 import { THEME_COOKIE } from '@rede-social/contracts/branding';
+import { KERNEL_PERMISSIONS } from '@rede-social/contracts/moderation';
 import { iconFor, ThemeToggle } from '@rede-social/core/ui';
 import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { Button, Card, PageHeader, SectionTitle } from '@rede-social/ui';
@@ -100,6 +101,9 @@ export default async function SettingsPage({
   // API, so V2 handing story management to another role is a settings flip with no web change.
   // A tenant without the `stories` module carries neither the permission nor the row.
   let canManageStories = false;
+  // 08-01 (D-339, UI-D-269): the Moderação row, gated on the composed PERMISSION — the value the
+  // API's `requirePermission('moderation.manage')` reads — never on the role (D-338).
+  let canModerate = false;
   // 07 review C-WR-01: the push row only where the notifications module is on (the API refuses the
   // push routes otherwise, after the browser's permission prompt had already been spent).
   let notificationsOn = false;
@@ -110,11 +114,12 @@ export default async function SettingsPage({
     role = bootstrap.membership.role;
     tenantName = bootstrap.tenant.displayName;
     canManageStories = bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
+    canModerate = bootstrap.permissions.includes(KERNEL_PERMISSIONS.moderationManage);
     notificationsOn = bootstrap.modules.some((module) => module.key === 'notifications');
   }
 
   // E7/partial + E7/zero-one-many: the whole group — its `SectionTitle` included — is ABSENT from
-  // the DOM for every role but `admin_tenant`, never rendered-and-disabled. A member must not learn
+  // the DOM unless one of its rows renders (Mídia, Seus stories, Moderação), never rendered-and-disabled. A member must not learn
   // that an admin media screen exists, which is also why `/configuracoes/midia` itself answers
   // `notFound()` rather than a 403 screen.
   const isTenantAdmin = role === 'admin_tenant';
@@ -161,8 +166,17 @@ export default async function SettingsPage({
             />
           )}
         </Group>
-        {isTenantAdmin || canManageStories ? (
+        {isTenantAdmin || canManageStories || canModerate ? (
           <Group title={t('settings.groups.admin')}>
+            {/* UI-D-269: Moderação sits before the shipped Mídia and Seus stories rows. */}
+            {canModerate ? (
+              <Row
+                icon="shield-check"
+                label={t('settings.rows.moderation')}
+                href="/configuracoes/moderacao"
+                trailing={null}
+              />
+            ) : null}
             {isTenantAdmin ? (
               <Row
                 icon="film"

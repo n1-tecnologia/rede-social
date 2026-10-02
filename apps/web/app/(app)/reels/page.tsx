@@ -55,7 +55,10 @@ export default async function ReelsPage() {
       tenantName={tenantName}
       onLike={likePostAction}
       onUnlike={unlikePostAction}
-      comments={{ title: tf('comments.title'), ...feedCommentsProps(locale, tf, bootstrap) }}
+      comments={{
+        title: tf('comments.title'),
+        ...feedCommentsProps(locale, tf, bootstrap, await getTranslations('moderation')),
+      }}
       labels={{
         region: t('region'),
         lanesLabel: t('lanes.label'),

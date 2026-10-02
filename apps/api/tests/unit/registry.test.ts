@@ -221,6 +221,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     expect(permissionsFor('admin_tenant')).toEqual([
       'content.publish',
       'members.manage',
+      'moderation.manage',
       'tenant.manage',
     ]);
 

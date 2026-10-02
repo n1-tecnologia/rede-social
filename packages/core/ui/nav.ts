@@ -13,6 +13,7 @@ import {
   MessageCircle,
   Moon,
   Settings,
+  ShieldCheck,
   Sparkles,
   Sun,
   User,
@@ -161,6 +162,8 @@ const ICONS: Record<string, LucideIcon> = {
   'user-circle': UserCircle,
   info: Info,
   'layout-grid': LayoutGrid,
+  // 08-01 (UI-D-269): the Configurações "Moderação" row.
+  'shield-check': ShieldCheck,
 };
 
 export function iconFor(name: string): LucideIcon {

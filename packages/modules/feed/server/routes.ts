@@ -3,7 +3,10 @@ import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { requireModule } from '@rede-social/core/server/modules/require-module';
-import { requirePermission } from '@rede-social/core/server/rbac/permissions';
+import {
+  permissionsForRequest,
+  requirePermission,
+} from '@rede-social/core/server/rbac/permissions';
 import {
   commentPageSchema,
   commentSchema,
@@ -323,15 +326,26 @@ const deleteCommentRoute = createRoute({
   request: { params: commentIdParam },
   responses: {
     200: {
-      description: 'The comment was soft-deleted (D-61). The row stays for Phase 8 moderation.',
+      description:
+        "The comment was soft-deleted (D-61) — by its author, or by a holder of `moderation.manage` (08-01, MODER-01), who may remove ANY comment or reply on a feed post, community post or reel. A root takes its live replies with it (D-334). A moderator's removal of someone else's comment is written to the moderation log in the same transaction; the author is not told (D-335). The response is identical in every case and never names who removed it.",
       content: { 'application/json': { schema: z.object({ deleted: z.literal(true) }).strict() } },
     },
     404: {
       description:
-        "Not this member's comment, unknown, or already removed — one bare code for all three.",
+        "One bare code for every miss: unknown, another tenant's, already removed, a story comment, or someone else's comment for a caller without `moderation.manage`.",
     },
   },
 });
+
+/**
+ * 08-01 (D-338, T-08-08): whether this caller may remove OTHER people's comments. Read through the
+ * composed permission set BEFORE the service opens its transaction — on a flags-cache miss
+ * `permissionsForRequest` opens its own tenant transaction, and holding two of the pool's five
+ * connections per request is the starvation the stories `readPlaceGate` rule exists to avoid. Every
+ * comment READ uses it too, so `removal` on each row (UI-D-276) and the delete agree.
+ */
+const canModerate = async (ctx: AppEnv['Variables']['ctx']) =>
+  (await permissionsForRequest(ctx)).includes('moderation.manage');
 
 const listRepliesRoute = createRoute({
   method: 'get',
@@ -403,7 +417,9 @@ export const feedRoutes = feed
   })
   .openapi(listCommentsRoute, async (c) => {
     const { postId } = c.req.valid('param');
-    return c.json(await listComments(c.get('ctx'), postId, c.req.valid('query')), 200);
+    const ctx = c.get('ctx');
+    const opts = { canModerate: await canModerate(ctx) };
+    return c.json(await listComments(ctx, postId, c.req.valid('query'), opts), 200);
   })
   .openapi(createCommentRoute, async (c) => {
     const { postId } = c.req.valid('param');
@@ -411,7 +427,8 @@ export const feedRoutes = feed
   })
   .openapi(deleteCommentRoute, async (c) => {
     const { commentId } = c.req.valid('param');
-    await deleteComment(c.get('ctx'), commentId);
+    const ctx = c.get('ctx');
+    await deleteComment(ctx, commentId, { canModerate: await canModerate(ctx) });
     return c.json({ deleted: true } as const, 200);
   })
   .openapi(likeCommentRoute, async (c) => {
@@ -424,9 +441,15 @@ export const feedRoutes = feed
   })
   .openapi(listRepliesRoute, async (c) => {
     const { commentId } = c.req.valid('param');
-    return c.json(await listReplies(c.get('ctx'), commentId, c.req.valid('query')), 200);
+    const ctx = c.get('ctx');
+    const opts = { canModerate: await canModerate(ctx) };
+    return c.json(await listReplies(ctx, commentId, c.req.valid('query'), opts), 200);
   })
   .openapi(commentThreadRoute, async (c) => {
     const { commentId } = c.req.valid('param');
-    return c.json(await getCommentThread(c.get('ctx'), commentId), 200);
+    const ctx = c.get('ctx');
+    return c.json(
+      await getCommentThread(ctx, commentId, { canModerate: await canModerate(ctx) }),
+      200,
+    );
   });

@@ -41,7 +41,8 @@
         "notifications": "Notificações",
         "version": "Versão {version}",
         "media": "Mídia",
-        "stories": "Seus stories"
+        "stories": "Seus stories",
+        "moderation": "Moderação"
       },
       "soon": "Em breve",
       "logoutFailed": "Algo deu errado. Tente novamente."

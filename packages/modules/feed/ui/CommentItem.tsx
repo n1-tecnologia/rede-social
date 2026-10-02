@@ -58,6 +58,13 @@ export type CommentView = {
   /** Server-derived (T-04-44): the client never compares ids to decide who may delete. */
   canDelete: boolean;
   /**
+   * 08-01 (UI-D-276): what the removal control MEANS for this viewer, copied through from the server
+   * — `'own'` (their comment: "Excluir"), `'moderation'` (someone else's, the viewer moderates:
+   * "Remover", logged) or `null` (no control). Absent on a row from an API that predates it; the
+   * host maps that to `canDelete ? 'own' : null`, and `removalOf` below does the same.
+   */
+  removal?: 'own' | 'moderation' | null;
+  /**
    * An optimistic row the server has not confirmed yet. It renders identically except that its
    * controls are inert — a like or a delete addressed to an id the server has never seen would be
    * a guaranteed 404, and offering it would be a lie about what the row currently is.
@@ -76,7 +83,19 @@ export type CommentItemLabels = {
   reply: string;
   /** The own-comment control's accessible name; it opens the confirmation directly (see below). */
   delete: string;
+  /**
+   * 08-01 (UI-D-276): the MODERATION control's accessible name, "Remover comentário de {author}",
+   * with `{author}` still in it — the row fills in the name it is showing. Absent means the host
+   * predates moderation, and the own label is used.
+   */
+  remove?: string;
 };
+
+/** The row's removal meaning, with an absent server value read as the pre-08-01 `canDelete` rule. */
+export function removalOf(comment: CommentView): 'own' | 'moderation' | null {
+  if (comment.removal !== undefined) return comment.removal;
+  return comment.canDelete ? 'own' : null;
+}
 
 export type CommentItemProps = {
   comment: CommentView;
@@ -129,6 +148,12 @@ export function CommentItem({
   const { author, authorRemoved, isReply, pending } = comment;
   const name = authorRemoved ? labels.removedAuthor : (author.displayName ?? labels.removedAuthor);
   const likeLabel = formatCountLabel(comment.likeCount, labels.likes, locale);
+  const removal = removalOf(comment);
+  // UI-D-276: the SAME control on more rows; only its name says whether this is a moderator's act.
+  const removeLabel =
+    removal === 'moderation' && labels.remove
+      ? labels.remove.replace('{author}', name)
+      : labels.delete;
 
   const rowRef = useRef<HTMLElement>(null);
   const [tinted, setTinted] = useState(highlighted);
@@ -210,16 +235,18 @@ export function CommentItem({
               {labels.reply}
             </button>
           ) : null}
-          {comment.canDelete && onDelete && !pending ? (
+          {removal !== null && onDelete && !pending ? (
             // ONE control, one destination. D-61 is "the row's own overflow control, behind a
             // confirmation dialog", and with exactly one action in V1 an intermediate menu would
             // add a second layer over the comment sheet for nothing — and would leave the control
-            // named "Mais opções" when it does precisely one thing. Phase 8's MODER-01 adds
-            // "Denunciar" beside it, and THAT is when it becomes a menu.
+            // named "Mais opções" when it does precisely one thing. 08-01 (UI-D-276) reuses this
+            // exact control for a moderator on everyone's rows, named for what it does; Phase 11's
+            // "Denunciar" is when it becomes a menu.
             <button
               type="button"
               data-comment-delete
-              aria-label={labels.delete}
+              data-comment-removal={removal}
+              aria-label={removeLabel}
               onClick={() => onDelete(comment)}
               className="inline-flex items-center gap-1 font-bold text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >

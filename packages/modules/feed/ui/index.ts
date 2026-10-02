@@ -15,11 +15,13 @@ export {
   type CommentItemLabels,
   type CommentItemProps,
   type CommentView,
+  removalOf,
 } from './CommentItem';
 export { CommentSheet, type CommentSheetProps } from './CommentSheet';
 export {
   type CommentCreateOutcome,
   type CommentLikeOutcome,
+  type CommentModerationLabels,
   type CommentPageOutcome,
   CommentsList,
   type CommentsListLabels,

@@ -247,6 +247,8 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     const admin = (await (await bootstrap(tokens.demoAdmin)).json()) as BootstrapBody;
     expect(admin.permissions).toContain('tenant.manage');
     expect(admin.permissions).toContain('content.publish');
+    // 08-01 (D-338): the kernel grants moderation to the admin only; the member list below stays exact.
+    expect(admin.permissions).toContain('moderation.manage');
 
     // 06-01: `events` grants the manage and attendance-read permissions to the admin only.
     expect(admin.permissions).toContain('events.event.manage');
