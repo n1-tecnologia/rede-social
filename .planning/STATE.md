@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-10-PLAN.md
-last_updated: "2026-10-02T19:01:27.015Z"
+stopped_at: Completed 08-11-PLAN.md
+last_updated: "2026-10-02T19:11:42.940Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-10 (isolation inventory gate: every API route, Realtime topic kind, Storage bucket and web route handler classified and checked; phase 8, inventory and storage sweeps; cross-tenant Realtime joins)
-state_head: f0ada8b85d3d9940d5dc99757e6a8502e7c59132
+last_activity_desc: "Completed 08-11 (pt-BR literal audit gate: Biome noJsxLiterals at error with a glyph-only allow-list and a canary, attribute-literal rule (d), every catalog message compiled, dated 08-I18N-AUDIT.md)"
+state_head: c9fbde1a9abe973c555943b0db1572ad4fa8f48d
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 120
+  completed_plans: 121
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 11 of 12
+Plan: 12 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-10 (isolation inventory gate: every API route, Realtime topic kind, Storage bucket and web route handler classified and checked; phase 8, inventory and storage sweeps; cross-tenant Realtime joins)
+Last activity: 2026-10-02 — Completed 08-11 (pt-BR literal audit gate: Biome noJsxLiterals at error with a glyph-only allow-list and a canary, attribute-literal rule (d), every catalog message compiled, dated 08-I18N-AUDIT.md)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -181,6 +181,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P07 | 16 min | 2 tasks | 23 files |
 | Phase 08 P08 | 1h 55m | 3 tasks | 38 files |
 | Phase 08 P10 | 26 min | 2 tasks | 7 files |
+| Phase 08 P11 | 8 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -592,6 +593,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-10: the isolation gate is a machine check: tests/isolation-inventory.ts classifies every app.routes entry (98 cases, 22 exemptions in six families), plus Realtime topic kinds parsed from REALTIME_TOPIC_PATTERN and Storage buckets parsed from the migrations; a new route without a case fails pnpm turbo test
 - [Phase 08]: 08-10: the web route-handler inventory reads the API map as text (turbo boundaries refuses the cross-package import); the API unit test pins the parse and apps/web/turbo.json lists the file as a web test input
 - [Phase 08]: 08-10: cross-tenant crossings are compared byte for byte (requestId stripped) with the same call on an unknown id; the replies route is 200-only by contract, so its proof is the identical empty page while a live lab reply exists
+- [Phase 08]: 08-11: Biome noJsxLiterals at error on apps/web, packages/ui and packages/**/ui .tsx with a glyph-only allowedStrings list; a canary in check-ui-literals.sh copies the real biome.json into a temp tree to prove a word still fails (biome lint --stdin-file-path reports nothing in 2.5.13)
+- [Phase 08]: 08-11: biome.json stays comment-free — Biome 2.5.13 silently ignored files.includes when it carried // comments; allow-list justification lives in check-ui-literals.sh
+- [Phase 08]: 08-11: next-intl AppConfig.Messages key typing deferred (29 runtime-merged files, dynamic keys)
 
 ### Pending Todos
 
@@ -665,6 +669,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T19:01:20.803Z
-Stopped at: Completed 08-10-PLAN.md
+Last session: 2026-10-02T19:11:42.793Z
+Stopped at: Completed 08-11-PLAN.md
 Resume file: None
