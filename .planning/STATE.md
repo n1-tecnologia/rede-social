@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-10-02T14:17:11.657Z"
+stopped_at: Completed 08-04-PLAN.md
+last_updated: "2026-10-02T14:41:47.480Z"
 last_activity: 2026-10-02
 last_activity_desc: Completed 08-03 (story-comment moderation, full Moderação screen, removal finish)
-state_head: f627129de415f6b896c51d24fbf7d6f16553899a
+state_head: e18adc2cd8f9910a92b6774b7f86b9154cca5c74
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 113
+  completed_plans: 114
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 4 of 12
+Plan: 5 of 12
 Status: Ready to execute
 Last activity: 2026-10-02 — Completed 08-03 (stories admin delete with story_comment log rows, Moderação chips + keyset paging + every state, removal finish on feed/community/reel/story)
 
@@ -174,6 +174,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P01 | 26 min | 2 tasks | 51 files |
 | Phase 08 P02 | 45 min | 3 tasks | 12 files |
 | Phase 08 P03 | 28 min | 3 tasks | 33 files |
+| Phase 08 P04 | 35 min | 3 tasks | 33 files |
 
 ## Accumulated Context
 
@@ -567,6 +568,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-03: story comments are moderated by the stories module's own locked delete (author-or-moderation.manage, one bare 404, story_comment log row in the same transaction); the story DELETE keeps its 204
 - [Phase 08]: 08-03: Moderação rows are formatted on the server for every page (page.tsx and loadMoreModerationLogAction share moderationLogLabels); ?acao= carries the API action values and an unknown value reads as Tudo
 - [Phase 08]: 08-03: a comment delete answering the bare 404 maps to code gone (row leaves with the race toast); any other failure keeps the row; focus moves to the next row or the composer
+- [Phase 08]: 08-04: member block/unblock runs in the admin lane under one order-by-id row lock on the active admins plus the target; status folding (status blocked OR blocked_at) everywhere; refusals are 409 CONFLICT { member }
+- [Phase 08]: 08-04: the Membros admin list reads e-mail in the admin lane with m.tenant_id = ctx.tenantId on every statement; three-key keyset inside the shared cursor envelope
+- [Phase 08]: 08-04: membership.blocked (after commit) drives the eager push cleanup and a notifications.changed nudge; the counters BFF forwards 403 MEMBERSHIP_BLOCKED with the /auth/blocked path and LiveShell lands there
 
 ### Pending Todos
 
@@ -639,6 +643,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T14:02:41.938Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-10-02T14:41:47.353Z
+Stopped at: Completed 08-04-PLAN.md
 Resume file: None
