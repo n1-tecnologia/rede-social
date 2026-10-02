@@ -32,6 +32,14 @@ import { MoreHorizontal } from 'lucide-react';
  *    node — which is UI-D-21's meta-row rule restated, and `suppressCommunity` does the same on the
  *    community's own page, where the segment would only restate the page the reader is standing on.
  */
+/**
+ * The meta-row separator glyph. A constant rather than JSX text because the formatter puts this
+ * span's child on its own line, and Biome's `noJsxLiterals` (08-11) compares the raw text, so the
+ * allow-listed "·" would arrive wrapped in whitespace and fail. Typography, not language: it is the
+ * same in every locale, which is why it does not live in the catalog.
+ */
+const MIDDOT = '·';
+
 export type PostHeaderProps = {
   displayName: string;
   /** `/membros/{membershipId}` — built by the host, never assembled inside the module. */
@@ -104,7 +112,7 @@ export function PostHeader({
                   data-post-community-sep
                   className="shrink-0 text-xs font-normal text-text-tertiary"
                 >
-                  ·
+                  {MIDDOT}
                 </span>
                 <a
                   href={segment.href}

@@ -60,8 +60,11 @@ export default async function InicioPage({
           <ul className="flex flex-col gap-1 text-sm text-text">
             {platform.tenants.map((tenant) => (
               <li key={tenant.id}>
-                {tenant.slug} — {tenant.displayName} (
-                {tp('modulesCount', { count: tenant.enabledModules.length })})
+                {tp('tenantRow', {
+                  slug: tenant.slug,
+                  name: tenant.displayName,
+                  modules: tp('modulesCount', { count: tenant.enabledModules.length }),
+                })}
               </li>
             ))}
           </ul>

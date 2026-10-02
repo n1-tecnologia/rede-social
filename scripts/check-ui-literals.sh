@@ -123,8 +123,97 @@ process.exit(bad === 0 ? 0 : 1);
   fi
 fi
 
+# ---- Biome `style/noJsxLiterals` canary (08-11, PWA-03) ---------------------------------------------
+# The AST-level half of the literal audit is Biome's `noJsxLiterals`, set to `error` by the biome.json
+# override for `apps/web/**/*.tsx`, `packages/ui/**/*.tsx` and `packages/**/ui/**/*.tsx` (tests, e2e
+# and fixtures excluded) and run by `turbo run lint` (`biome check .` in every package). Two things
+# could silently switch it off, so this canary proves it still bites on every full run:
+#
+#   1. its `allowedStrings` must hold PURE GLYPHS ONLY. The list is the typographic separators the UI
+#      renders between translated values — "/" (a `{length}/{max}` counter), "·" (a meta-row middot),
+#      "—" (an em-dash between two values), "(" and ")" (around an interpolated count) and "…" — which
+#      read the same in every locale. Any entry carrying a letter would let a word through, so one
+#      fails here (T-08-55). The list cannot be commented inside biome.json: Biome 2.5.13 reads
+#      biome.json as strict JSON, and a `//` comment there made it silently stop honouring
+#      `files.includes` (it linted .next/ and dist/) — so the justification lives here instead;
+#   2. the rule must still reject a word. The real biome.json and its base are copied, byte for byte,
+#      into a throwaway directory beside a probe tree (`biome lint --stdin-file-path` reports nothing
+#      in 2.5.13, and no probe file may land in the repo), then linted with the repo's own Biome:
+#      a one-line word ("Salvar agora", no diacritics, which rule (c) above cannot see) and multi-line
+#      JSX text must fail; a bare allow-listed glyph and a word under `tests/` must pass.
+#
+# Only on a full run (no directory argument): the script's own unit tests pass fixture directories.
+if [ "$#" -eq 0 ]; then
+  if ! node -e '
+const fs = require("node:fs");
+const config = JSON.parse(fs.readFileSync("biome.json", "utf8"));
+const lists = [];
+for (const override of config.overrides ?? []) {
+  const rule = override.linter?.rules?.style?.noJsxLiterals;
+  if (rule) lists.push({ level: rule.level, allowed: rule.options?.allowedStrings ?? [] });
+}
+if (lists.length === 0) {
+  console.error("biome.json: no override enables style/noJsxLiterals");
+  process.exit(1);
+}
+let bad = 0;
+for (const { level, allowed } of lists) {
+  if (level !== "error") {
+    console.error(`biome.json: style/noJsxLiterals must be at "error" (found ${JSON.stringify(level)})`);
+    bad += 1;
+  }
+  for (const glyph of allowed) {
+    if (/\p{L}|\p{N}/u.test(glyph) || glyph.trim() === "") {
+      console.error(`biome.json: noJsxLiterals allowedStrings entry ${JSON.stringify(glyph)} is not a pure glyph`);
+      bad += 1;
+    }
+  }
+}
+process.exit(bad === 0 ? 0 : 1);
+'; then
+    echo "check-ui-literals: FAILED — the biome.json noJsxLiterals override is missing, not at error, or allow-lists a non-glyph" >&2
+    STATUS=1
+  fi
+
+  CANARY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rede-social-jsx-literals-XXXXXX")"
+  trap 'rm -rf "$CANARY_DIR"' EXIT
+  mkdir -p "$CANARY_DIR/packages/config" "$CANARY_DIR/apps/web/components" \
+    "$CANARY_DIR/packages/modules/canary/ui" "$CANARY_DIR/apps/web/tests"
+  cp biome.json .gitignore "$CANARY_DIR/"
+  cp packages/config/biome.base.json "$CANARY_DIR/packages/config/"
+  printf 'export const Word = () => <p>Salvar agora</p>;\n' >"$CANARY_DIR/apps/web/components/word.tsx"
+  printf 'export const Split = () => (\n  <p>\n    Salvar\n    agora\n  </p>\n);\n' \
+    >"$CANARY_DIR/packages/modules/canary/ui/split.tsx"
+  printf 'export const Glyph = () => <span>·</span>;\n' >"$CANARY_DIR/apps/web/components/glyph.tsx"
+  printf 'export const Fixture = () => <p>Salvar</p>;\n' >"$CANARY_DIR/apps/web/tests/fixture.tsx"
+  BIOME_BIN="$PWD/node_modules/.bin/biome"
+  CANARY_OUT="$(cd "$CANARY_DIR" && "$BIOME_BIN" lint --only=style/noJsxLiterals \
+    --diagnostic-level=error --max-diagnostics=50 apps packages 2>&1 || true)"
+  CANARY_OK=1
+  for expected in "apps/web/components/word.tsx" "packages/modules/canary/ui/split.tsx"; do
+    if ! grep -q "${expected}:[0-9]*:[0-9]* lint/style/noJsxLiterals" <<<"$CANARY_OUT"; then
+      echo "noJsxLiterals canary: ${expected} was NOT reported — the rule no longer bites" >&2
+      CANARY_OK=0
+    fi
+  done
+  for unexpected in "apps/web/components/glyph.tsx" "apps/web/tests/fixture.tsx"; do
+    if grep -q "$unexpected" <<<"$CANARY_OUT"; then
+      echo "noJsxLiterals canary: ${unexpected} was reported — the glyph allow-list or the test exclusion is broken" >&2
+      CANARY_OK=0
+    fi
+  done
+  if [ "$CANARY_OK" -ne 1 ]; then
+    echo "$CANARY_OUT" >&2
+    echo "check-ui-literals: FAILED — Biome noJsxLiterals canary (08-11)" >&2
+    STATUS=1
+  fi
+fi
+
 if [ "$STATUS" -ne 0 ]; then
   exit 1
 fi
 echo "check-ui-literals: OK — no hex/legacy-class/pt-BR literals in .tsx under ${DIRS[*]}; catalog files valid"
+if [ "$#" -eq 0 ]; then
+  echo "check-ui-literals: OK — Biome noJsxLiterals is at error, glyph-only allow-list, and the canary still fails a word"
+fi
 exit 0

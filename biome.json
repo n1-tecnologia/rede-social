@@ -135,6 +135,28 @@
       }
     },
     {
+      "includes": [
+        "apps/web/**/*.tsx",
+        "packages/ui/**/*.tsx",
+        "packages/**/ui/**/*.tsx",
+        "!**/*.test.tsx",
+        "!**/tests/**",
+        "!**/e2e/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noJsxLiterals": {
+              "level": "error",
+              "options": {
+                "allowedStrings": ["/", "·", "—", "(", ")", "…"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/ui/src/styles/tokens.css"],
       "formatter": {
         "enabled": false
