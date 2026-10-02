@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 33
+open_count: 34
 waived_count: 0
 fixed_count: 38
-total_count: 71
-last_updated: 2026-10-02T13:25:40.932Z
+total_count: 72
+last_updated: 2026-10-02T20:40:39.988Z
 ---
 
 # Broken Windows Ledger
@@ -86,6 +86,7 @@ last_updated: 2026-10-02T13:25:40.932Z
 | 69 | 7 | unrun-verify | apps/web/e2e/phase52-smoke.spec.ts | 294 | 07-15 exit gate: mobile case 1 failed at line 255, the Novo destaque create sheet never opened after the click; cases 2-6 did not run; passed on desktop in the same run; see deferred-items.md | fixed |  | 2026-10-01T13:15:19.871Z | 2026-10-02T13:23:31.763Z |
 | 70 | 7 | unrun-verify | apps/web/e2e/stories.spec.ts | 1636 | 07-15 exit gate: mobile Inicio manage case failed at line 1707, Escape did not close the Editar destaque sheet; see deferred-items.md | fixed |  | 2026-10-01T13:15:19.946Z | 2026-10-02T13:23:31.837Z |
 | 71 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 532 | 07-15 exit gate: desktop case 1 timed out (300 s), Salvar alteracoes re-rendered disabled after #primary was filled (Marca rebrand); platform-host steps passed; desktop cases 2-5 did not run; see deferred-items.md | fixed |  | 2026-10-01T13:15:20.020Z | 2026-10-02T13:07:44.600Z |
+| 72 | 8 | unrun-verify | apps/web/e2e/media-video.spec.ts | 461 | 08-12 exit gate: pnpm verify red at e2e: 'the list polls while a row is processing and, after five minutes, stops and offers Atualizar' failed on mobile and desktop (Atualizar never visible); reproduces with the whole file (2/2), green alone (2/2); e2e:pwa did not run; see 08 deferred-items.md | open |  | 2026-10-02T20:40:39.988Z |  |
 
 ````json
 [
@@ -940,6 +941,18 @@ last_updated: 2026-10-02T13:25:40.932Z
     "reason": "",
     "recorded_at": "2026-10-01T13:15:20.020Z",
     "resolved_at": "2026-10-02T13:07:44.600Z"
+  },
+  {
+    "id": 72,
+    "kind": "unrun-verify",
+    "phase": "8",
+    "file": "apps/web/e2e/media-video.spec.ts",
+    "line": 461,
+    "description": "08-12 exit gate: pnpm verify red at e2e: 'the list polls while a row is processing and, after five minutes, stops and offers Atualizar' failed on mobile and desktop (Atualizar never visible); reproduces with the whole file (2/2), green alone (2/2); e2e:pwa did not run; see 08 deferred-items.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-02T20:40:39.988Z",
+    "resolved_at": null
   }
 ]
 ````

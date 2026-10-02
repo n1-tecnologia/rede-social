@@ -812,6 +812,119 @@ a wrong number.
 `too_many_connections` / `tenant_events` error in the Realtime logs (Dashboard → Logs → Realtime),
 means moving the project to **Pro** (V2-PLAT-06: 500 connections, 500 messages/s).
 
+## Phase 8 release (moderation, tenant admin panel, CSP)
+
+**Every step below is run by the developer, in this order, by hand** (plan 08-12, D-345). No plan
+has run any of them: production is live, auto mode blocks Claude from applying production
+migrations, and the devices and accounts are the developer's. No command here prints a secret; do
+not paste a key or token into a terminal that records history, a chat or an issue.
+
+What ships:
+- 3 migrations: `20261002121805_moderation_log.sql` (the `moderation_log` table, its two policies,
+  and the nullable `feed_comments.deleted_by_user_id`), `20261002123245_moderation_log_immutable.sql`
+  (revokes update, delete and truncate; the immutability triggers) and
+  `20261002123247_feed_comments_orphan_replies.sql` (a one-off, idempotent soft delete of the
+  replies left under roots that were deleted the pre-Phase-8 way). Any earlier migration production
+  has not applied yet goes with them; step 1 lists them.
+- The `/v1/admin` routes (Moderação, Membros, Marca, Regras), the moderator removal on feed and story
+  comments, the block that reaches an open app, the click-to-play YouTube and Vimeo players, and the
+  nonce CSP with its `CSP_MODE` switch.
+- No new API or worker environment variable or secret. The web gains `CSP_MODE` (server-only).
+
+**Why this order inverts Phase 7's API-first rule.** The web parses every API answer with STRICT
+response schemas, which refuse unknown keys. The Phase 8 API adds `removal` to every comment and
+`embedUrl` to link previews. An OLD web would therefore refuse a NEW API's comment and feed answers.
+The NEW web declares both fields `.optional()`, so it reads the OLD API's answers unchanged. The new
+admin rows also hide without the new permissions, which only the new API grants. Phase 7 was the
+opposite case (an added bootstrap field the old web lacked). So, for Phase 8: migrations first, then
+the web, then the API and worker. Every migration is expand-only, so the running API ignores them.
+
+**hml shares this database** ("Temporary: hml shares production's Supabase, Mux and Resend"). Phase 8
+must not reach the `homolog` branch before step 1 has run, and pushing it there at all is the
+developer's call.
+
+1. **Push `master`, then apply the migrations with the brew Supabase CLI.**
+   - Before pushing, confirm no commit carries a Claude trailer:
+     `git log origin/master..HEAD --format=%B | grep -i anthropic` must print nothing.
+   - Push `master`. This starts three things at once:
+     - the Vercel production build of the web (step 2: set `CSP_MODE` BEFORE this push);
+     - the `CI` workflow (step 7);
+     - `Deploy API`. Let its `build` job finish, because it pushes
+       `southamerica-east1-docker.pkg.dev/api-dere-social/rede-social/api:<sha>` for step 3. Do not
+       approve the `production` environment while its `checks` job has not finished green; cancel
+       the run once the image exists if you deploy by hand (step 3).
+   - Pre-push check that the pending migrations are expand-only. With the global (brew) CLI linked
+     to `qjjhtduxquvlfppybpqq`, `supabase migration list --linked` lists the migrations production
+     lacks. Each pending file must hold no `drop table`, `drop column`, `rename`, `set not null` or
+     column type change:
+     `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/<pending>.sql`
+     must print nothing for each pending file. The three Phase 8 files pass this check.
+   - Apply them as in Phase 7, with the brew CLI (the repo-pinned binary hangs on the macOS keychain
+     prompt). Export `SUPABASE_ACCESS_TOKEN` (from `supabase-pat-prod`) and a `SEND_EMAIL_HOOK_SECRETS`
+     value (the CLI validates the hook block on every command) in the shell only, then run
+     `supabase db push --linked --include-roles`. This is the same exception to "Migrations never
+     run from a developer machine" that Phase 7 used, because `deploy-api.yml`'s `checks` have never
+     finished inside their limit. If a `Deploy API` run ever passes `checks`, its production job does
+     the same push instead.
+   - Afterwards, `supabase migration list --linked` shows the three Phase 8 migrations applied.
+2. **The web on Vercel, FIRST, with `CSP_MODE=report-only`.** Before the push in step 1, run
+   `vercel env add CSP_MODE production` with the value `report-only` (unset means the same). The
+   push then builds and serves the new web. If the Ignored Build Step cancels the build, force it
+   from a scratch directory linked to the project after `vercel switch n1-tecnologia`:
+   `vercel api -X POST /v13/deployments --input <json with gitSource ref master>` (the Phase 7
+   path). Check `https://rede-social-woad.vercel.app/entrar`: the response carries
+   `Content-Security-Policy-Report-Only`, and an existing tenant's feed and comments still render
+   against the OLD API.
+3. **The API and the worker on Cloud Run**, with the image from step 1's `build` job:
+   ```bash
+   export CLOUDSDK_ACTIVE_CONFIG_NAME=rede-social
+   IMAGE=southamerica-east1-docker.pkg.dev/api-dere-social/rede-social/api:<sha>
+   gcloud run deploy api    --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social
+   gcloud run deploy worker --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social
+   curl -fsS https://api-253040968821.southamerica-east1.run.app/v1/health?deep=1
+   ```
+   `gcloud run deploy` with only `--image` keeps each service's current env vars, secrets and flags.
+   Phase 8 adds none, so these match `deploy-api.yml`'s production job. A deploy closes Mux's
+   pooled webhook connections, and Mux retries 10-15 min later (Phase 7 note). Then, on an existing
+   tenant, an admin's Configurações shows the Administração group with Marca, Membros, Regras da
+   comunidade and Moderação.
+4. **The `qa` tenant** (D-345), from the platform panel as the super_admin:
+   - `/plataforma/novo`: slug `qa`, a display name such as "QA Rede Social", the brand colours and a
+     logo. Modules on: `feed`, `communities`, `stories`, `events`, `notifications`, `chat` (and
+     `reels` for the Reels rows). It is a tenant of its own, separate from socializando,
+     igor-alves-teste and reine, and never holds real members' data.
+   - Accounts: the first admin through the panel's invite (a mailbox you control). Then a member
+     (sign up on the qa host, or invite). Then a second member promoted to "Suporte" from Membros
+     (checklist row A9).
+   - Domain: a verified custom domain needs a DNS name from you (RESEARCH A8). Attach it from
+     Domínios as in "Attach a real customer domain end-to-end" under Runbook. Without one, the
+     checklist marks the host-dependent rows blocked with that reason.
+   - Lifecycle: it stays active until the 08.1 exit gate's real-device smoke closes the MVP. Then
+     suspend it with the platform panel's status toggle (reversible). Never hard-delete it.
+   - **Post-release smoke on qa** (minutes, before the full checklist): as the qa admin, remove one
+     member comment (it appears in Moderação) and block then unblock the second member (the member's
+     open app lands on "Acesso suspenso").
+5. **Run [`docs/phase-08-device-checklist.md`](phase-08-device-checklist.md)** on a real iPhone and
+   a real Android phone against production on the `qa` tenant. Record every row you run in that file
+   and in the Phase 8 UAT (`/gsd-verify-work 8`). A row you did not run on a real device stays
+   `blocked — not run`.
+6. **The flip to `CSP_MODE=enforce`**, only when the checklist's section D read shows **zero**
+   `csp.violation` lines from the app in the Vercel logs (filter below in "Content Security Policy
+   (Phase 8)", step 2). Then set it (`vercel env rm CSP_MODE production`, then
+   `vercel env add CSP_MODE production` with value `enforce`) and redeploy the web. Repeat the
+   smallest smoke on one phone (checklist D3). **Rollback:** set `CSP_MODE=report-only` again and
+   redeploy. No code, no migration.
+7. **One CI run that finishes.** The `CI` workflow that the step 1 push started on `master` (jobs
+   `static`, `db`, `e2e` in 4 shards, `e2e-pwa`; 08-02's split) must reach a conclusion inside its
+   limits. Record its URL, its conclusion and each job's duration in `08-GATE.md`. If it does not
+   finish, the gate row stays open with what timed out (D-348).
+
+**Rollback.** The API first, then the web, because an old web cannot read the new API (see above):
+`gcloud run services update-traffic api --to-revisions=<previous>=100 --region=southamerica-east1`
+(and the same for `worker`), then Vercel → Instant Rollback to the previous production deployment.
+The migrations stay: they are expand-only, and the old code ignores the new table and column. The
+orphan-reply repair is a one-way soft delete by design; the rows stay in the table.
+
 ## Content Security Policy (Phase 8)
 
 **What it is (08-08, D-346).** Every response the web app returns carries a per-request nonce

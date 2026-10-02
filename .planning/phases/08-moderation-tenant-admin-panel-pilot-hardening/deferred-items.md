@@ -62,3 +62,33 @@ The inherited reds from the Phase 7 exit gate (07-15, 07-11) and the never-run `
   status: open
   **Run:** after a reset and seed, `VIDEO_PROVIDER=fake pnpm --filter @rede-social/web e2e` (every spec enforced since 08-08) gave 735 passed, 125 skipped, 8 failed, all on `desktop-chromium`: platform-tenants 1 (status dialog not opened), push 1-2 (login never left `/entrar`), reels e6/e7 (30 s timeouts), stories 507/1332/1387/1440 (timeouts and a missing toast). The same cases passed on `mobile-chromium` in that run, and a CSP effect would fail on both projects alike.
   **Rerun:** after a fresh reset and seed, those four files on desktop gave 55 passed, 21 skipped, 1 failed: `stories.spec.ts:1440` ("Story publicado." toast not seen; the publish itself succeeded and landed on `/inicio`). Run alone it passes 3/3 under `enforce` and 3/3 under `report-only`. Verdict: dev-server load and order flakes, not a policy regression. Recorded for the 08-12 gate run.
+
+### 08-12 exit gate (`pnpm verify`)
+
+- 08-12 run 1 — `guard:lanes` red on the Phase 8 role updates
+  status: resolved
+  **Run:** 2026-10-02, HEAD `3f36953`, `pnpm db:reset && pnpm db:seed && TURBO_CACHE=local:r VIDEO_PROVIDER=fake pnpm verify`: exit 1 at `pnpm guard:lanes` (lint, typecheck, build, unit tests, static routes and both boundary checks had passed). `scripts/guard-local-settings.sh` read `update memberships set role = ${role}` (08-05's `setMembershipRole` service, the e2e fixture `setMembershipRole` and five integration fixtures in `member-admin.test.ts`) as a non-LOCAL `SET role` switch.
+  **Verdict:** a guard false positive the 08-05 code tripped; a real defect of the gate run, not of the SQL. Postgres also accepts `SET role = …` as a session role switch, so the guard cannot tell them apart by the `=`.
+  **Fix:** `eb0bcb5` writes the column quoted (`set "role" = …`), identical SQL; the guard header records the convention. `bash scripts/guard-local-settings.sh` OK.
+
+- 08-12 run 2 — e2e red: `media-video.spec.ts:461` on both projects; `e2e:pwa` did not run (WINDOWS #72)
+  status: open
+  **Run:** 2026-10-02 19:27:27Z → 20:28:51Z, HEAD `eb0bcb5` (the only other change in the tree was `docs/DEPLOY.md`), same command: **exit 1**. Stages, in order:
+  - `pnpm lint` (14 packages, `check-ui-literals` with the noJsxLiterals canary): pass;
+  - `pnpm turbo typecheck build test` (29 tasks, every package's unit tests, including the isolation inventory, the README drift test and the reuse fixture's no-DB cases): pass;
+  - `check:static-routes` (58 guarded routes, 0 offenders), `boundaries`, `boundaries:negative`, `guard:lanes`: pass;
+  - `supabase test db`: `Files=22, Tests=764, Result: PASS`;
+  - `test:integration`: API 47 files / 820 tests passed, then the reuse fixture 1/1;
+  - `spike:supavisor`: 3/3;
+  - `db:reset && db:seed`: pass;
+  - `pnpm e2e` (`CSP_MODE=enforce`, 57.3 min): **748 passed, 126 skipped, 2 failed** — `media-video.spec.ts:461` "the list polls while a row is processing and, after five minutes, stops and offers 'Atualizar'" on `mobile-chromium` and `desktop-chromium` (`getByRole('button', { name: 'Atualizar' })` never visible within 10 s after `page.clock.fastForward('06:00')`). `phase8-smoke.spec.ts` passed 4/4 on mobile in this run. The 08-08 late-run flake `stories.spec.ts:1440` passed;
+  - `e2e:pwa`: **not run** (the chain stops at the first failure).
+  **Classification (the rerun rule):**
+  - the case ALONE, after a fresh reset and seed: 2 passed (mobile + desktop), exit 0;
+  - the WHOLE `media-video.spec.ts` file alone, after a fresh reset and seed: 32 passed, 2 failed — the same case on both projects. So it is not machine load (load average 5-7 throughout) and not cross-file drift: it is order-dependent inside its own file, reproducible.
+  **What the two probes showed (both reverted, nothing committed):**
+  1. Waiting for the poll's first re-fetch request before the fast-forward (the `data-polling` attribute the case asserts is in the SERVER HTML, so it does not prove the poll's effect has armed its `startedAt`): "Atualizar" then appeared, desktop passed, but on mobile the click found the button "not stable", then "detached from the DOM".
+  2. The same, plus a `dispatchEvent('click')`: both projects then timed out waiting for "Atualizar", which appears and is removed again before the click.
+  Reading: two effects at once — a fast-forward that can land before the poll is armed, and something that re-renders or re-fetches the list after the ceiling (another row from an earlier case in the file still processing and flipping, or a refresh), so the `pollExhausted && pending` button flaps. Not settled within this plan's fix budget (3 attempts per task).
+  **Not caused by Phase 8 code as far as the evidence shows:** 08-12 touched neither the media screen nor its spec; 08-08's full enforced e2e run (735 passed, 8 desktop-only late-run failures) did not list this case. No bisect was run.
+  **Gate consequence:** D-348's "one green `pnpm verify`" is NOT met. No WINDOWS row was flipped by this run. Next step (developer's choice): a `/gsd-debug` or `/gsd-quick` on `media-video.spec.ts:461` and `MediaLibrary.tsx`'s poll, then one more full `pnpm verify`; or an explicit decision recorded in `08-GATE.md`.
