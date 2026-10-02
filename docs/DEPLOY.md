@@ -122,7 +122,7 @@ itself is not edited here.
 | | Local | Homolog | Production |
 |---|---|---|---|
 | Trigger | `supabase start` + `pnpm dev` | push to `homolog`, automatic, no reviewer (`deploy-hml.yml`) | push to `master` (after the `production` approval) |
-| Web | `localhost:3000` | Vercel `rede-social-hml` **Production** (`<hml-web-domain>`) | Vercel **Production** (`rede-social-woad.vercel.app`) |
+| Web | `localhost:3000` | Vercel `rede-social-hml` **Production** (`rede-social-hml.vercel.app`) | Vercel **Production** (`rede-social-woad.vercel.app`) |
 | API | `localhost:8787` | Cloud Run `api` in `rede-social-hml` (`https://api-221367067304.southamerica-east1.run.app`) | Cloud Run `api` |
 | Worker | same process (`ROLE=worker`) | Cloud Run `worker` in `rede-social-hml` | Cloud Run `worker` |
 | Database | Supabase CLI stack | Supabase `<hml-supabase-ref>` | Supabase `rede-social` (`qjjhtduxquvlfppybpqq`) |
@@ -195,8 +195,8 @@ any value that resolves to production.
 | `DEPLOY_SA` | `rede-social-deploy@rede-social-hml.iam.gserviceaccount.com` | `deploy-hml.yml` (the identity Actions impersonates) |
 | `RUNTIME_SA` | `rede-social-runtime@rede-social-hml.iam.gserviceaccount.com` | `deploy-hml.yml` — `--service-account=` on both `deploy-cloudrun@v3` steps (reads the `-hml` Secret Manager secrets) |
 | `GCP_PROJECT_ID` | `rede-social-hml` | `deploy-hml.yml` (image reference) |
-| `PLATFORM_HOST` | `<hml-web-domain>` — the same value as the hml Vercel `PLATFORM_HOST` | `deploy-hml.yml` — `env_vars` on `api` and `worker`, so a tenant attach of the platform host is refused (D-34) |
-| `WEB_URL` | `https://<hml-web-domain>` | `deploy-hml.yml` — the `homolog` environment URL, and a preflight check |
+| `PLATFORM_HOST` | `rede-social-hml.vercel.app` — the same value as the hml Vercel `PLATFORM_HOST` | `deploy-hml.yml` — `env_vars` on `api` and `worker`, so a tenant attach of the platform host is refused (D-34) |
+| `WEB_URL` | `https://rede-social-hml.vercel.app` | `deploy-hml.yml` — the `homolog` environment URL, and a preflight check |
 
 Environment settings: **no required reviewer** (Decisions 2026-10-02), and **Deployment branches and
 tags** limited to the `homolog` branch — a third guard, so no other ref can run a job on this
@@ -314,7 +314,7 @@ committed `apps/web/vercel.json`, so the Ignored Build Step is `bash ../../scrip
 | `NEXT_PUBLIC_SUPABASE_URL` | Production | the hml Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Production | the hml project's publishable key |
 | `API_URL` | Production | `https://api-221367067304.southamerica-east1.run.app` (the hml `api` Cloud Run URL) |
-| `PLATFORM_HOST` | Production | `<hml-web-domain>` (same value as the `homolog` GitHub variable) |
+| `PLATFORM_HOST` | Production | `rede-social-hml.vercel.app` (same value as the `homolog` GitHub variable) |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Production | the PUBLIC half of the hml VAPID pair (same value as `vapid-public-key-hml`), set before the first build |
 
 `scripts/vercel-ignore.sh` (exit 0 = skip, "build check" = run `npx turbo-ignore --fallback=HEAD^1`
@@ -379,8 +379,8 @@ Run in order; every `<hml-...>` value is unknown until its step. No step here is
   "Phase 7 release", step 4.
 - [ ] **`[remotes.homolog]` in `supabase/config.toml`**, in its own commit once the ref is known:
   `project_id = "<hml-supabase-ref>"`; `[remotes.homolog.auth]` with
-  `site_url = "https://<hml-web-domain>"` and one explicit
-  `additional_redirect_urls = ["https://<hml-web-domain>/auth/confirm**"]` entry;
+  `site_url = "https://rede-social-hml.vercel.app"` and one explicit
+  `additional_redirect_urls = ["https://rede-social-hml.vercel.app/auth/confirm**"]` entry;
   `[remotes.homolog.auth.email]` `otp_expiry = 86400`; `[remotes.homolog.auth.hook.send_email]`
   `enabled = true`,
   `uri = "https://api-221367067304.southamerica-east1.run.app/v1/hooks/auth/send-email"`
@@ -407,7 +407,7 @@ Run in order; every `<hml-...>` value is unknown until its step. No step here is
   builds `homolog`, but fix the variable's environments.
 - [ ] **Optional demo seed / super_admin (by hand).** From a clean checkout, export only hml values:
   `DATABASE_URL` (the `api-database-url-hml` value), `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
-  `SEED_PASSWORD`, `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD`, `PLATFORM_HOST=<hml-web-domain>`,
+  `SEED_PASSWORD`, `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD`, `PLATFORM_HOST=rede-social-hml.vercel.app`,
   `TENANT_DEMO_HOST` / `TENANT_LAB_HOST` (distinct from `PLATFORM_HOST`); then run `pnpm db:seed`.
   Variables in the environment win over `apps/api/.env.local`. Check the target ref first, and
   never run it with a production value.
