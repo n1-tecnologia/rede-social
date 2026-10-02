@@ -61,6 +61,10 @@ export function useSignedUpload({
 
   const onFile = async (file: File) => {
     if (busy.current) return;
+    // The recorded upload, captured INSIDE the try; the parent's callback and the success toast run
+    // AFTER it (02-REVIEW IN-06, 08-08), so a throwing `onCompleted` (a parent bug) is never
+    // reported as a failed upload of an object the API has already recorded.
+    let done: BrandingView | null = null;
     try {
       setError(null);
       const rejected = classifyFile(file);
@@ -107,13 +111,15 @@ export function useSignedUpload({
       busy.current = false;
       setState('idle');
       setProgress(0);
-      onCompleted(completed.view);
-      toast.show({ tone: 'success', message: t('toasts.saved') });
+      done = completed.view;
     } catch (error) {
-      // A rejected action / thrown transfer (WR-07): `fail` resets busy, state and progress. Kept as
-      // try + catch only — the success path above must not re-run `fail` after `onCompleted`.
+      // A rejected action / thrown transfer (WR-07): `fail` resets busy, state and progress.
       console.error('platform.branding.upload_failed', { kind, error: String(error) });
       fail(t('errors.generic'));
+    }
+    if (done) {
+      onCompleted(done);
+      toast.show({ tone: 'success', message: t('toasts.saved') });
     }
   };
 

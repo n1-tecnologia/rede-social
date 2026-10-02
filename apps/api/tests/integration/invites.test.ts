@@ -659,6 +659,50 @@ describe('resend lifecycle — list, resend, supersession, 409/404/403 (D-30)', 
     expect(mails).toHaveLength(1);
     expect(mails[0]?.HTML).toContain('type=invite');
   });
+
+  it('14. IN-04 (08-08): a SENT invite whose tenant lost its verified primary -> 409 { reason: "no_verified_primary" }, the reason the button now maps to the helper copy', async () => {
+    const lostSlug = `inv-lost-${RUN}`.slice(0, 40);
+    const lostHost = `${lostSlug}.localhost`;
+    const lostEmail = `admin+lost-${RUN}@invite.test`;
+    const created = await createTenantViaApi(lostSlug, lostEmail);
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at, verification_status)
+      values (${created.id}::uuid, ${lostHost}, true, now(), 'verified')`;
+    const first = await platform(`/tenants/${created.id}/invites/${created.inviteId}/resend`, {
+      method: 'POST',
+    });
+    expect(first.status).toBe(200);
+    expect(tenantInviteSchema.parse(await first.json()).status).toBe('sent');
+    await waitForMailCount(lostEmail, 1);
+
+    // The primary host lapses (removed or expired): no link can be minted for this tenant anymore.
+    await adminSql`delete from public.tenant_domains where tenant_id = ${created.id}::uuid`;
+    const res = await platform(`/tenants/${created.id}/invites/${created.inviteId}/resend`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(409);
+    const err = await envelope(res);
+    expect(err.code).toBe('INVITE_STATE_INVALID');
+    expect(err.details).toEqual({ reason: 'no_verified_primary' });
+    expect((await tenantDetail(created.id)).invites.at(-1)?.status).toBe('sent');
+    expect(await mailpitMessages(lostEmail)).toHaveLength(1);
+  });
+
+  it('15. IN-05 (08-08): the detail lists invites OLDEST first, so the newest invite is the LAST element (what the Admins tab reads)', async () => {
+    const orderSlug = `inv-order-${RUN}`.slice(0, 40);
+    const firstEmail = `admin+order1-${RUN}@invite.test`;
+    const secondEmail = `admin+order2-${RUN}@invite.test`;
+    const created = await createTenantViaApi(orderSlug, firstEmail);
+    // A later invite for the same tenant (V2's re-invite shape), written directly.
+    await adminSql`
+      insert into public.tenant_invites (tenant_id, email, role, status, created_by, created_at)
+      select tenant_id, ${secondEmail}, 'admin_tenant', 'pending', created_by, created_at + interval '1 minute'
+        from public.tenant_invites where id = ${created.inviteId}::uuid`;
+    const { invites } = await tenantDetail(created.id);
+    expect(invites).toHaveLength(2);
+    expect(invites[0]?.email).toBe(firstEmail);
+    expect(invites.at(-1)?.email).toBe(secondEmail);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------

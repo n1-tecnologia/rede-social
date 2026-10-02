@@ -83,9 +83,19 @@ describe('resolveHostTenant — bounded by-host lookup (WR-06)', () => {
   }, 10_000);
 
   it('2. the generic answer is served from the error TTL — no second fetch for the same host', async () => {
+    // Self-contained (02-REVIEW IN-07, 08-08): this case populates its OWN cache entry with an
+    // immediate failure on its own host, so it passes alone (`-t`), shuffled, and without case 1's
+    // 2 s timeout. (Case 1 has to spend that real 2 s: `AbortSignal.timeout` is not driven by fake
+    // timers.)
+    const failedHost = `failed-${Date.now()}.example`;
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+    expect(await resolveHostTenant(failedHost)).toEqual({ mode: 'generic', host: failedHost });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockReset();
     fetchMock.mockImplementation(hangingFetch);
-    const result = await resolveHostTenant(slowHost);
-    expect(result).toEqual({ mode: 'generic', host: slowHost });
+    const result = await resolveHostTenant(failedHost);
+    expect(result).toEqual({ mode: 'generic', host: failedHost });
     expect(fetchMock).toHaveBeenCalledTimes(0);
   });
 

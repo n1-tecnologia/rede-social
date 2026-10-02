@@ -148,4 +148,36 @@ describe('useSignedUpload — a rejected step returns the zone to idle (WR-07)',
       expect.objectContaining({ error: expect.stringContaining('xhr-boom') }),
     );
   });
+
+  it('4. IN-06 (08-08): a throwing onCompleted is NOT reported as a failed upload', async () => {
+    actions.start.mockResolvedValue(startOk);
+    put.mockResolvedValue({ ok: true });
+    actions.complete.mockResolvedValue({ ok: true, view });
+    onCompleted.mockImplementation(() => {
+      throw new Error('parent-bug');
+    });
+    const { result } = mount();
+
+    // The parent's bug surfaces as itself, out of onFile...
+    await expect(
+      act(async () => {
+        await result.current.onFile(file());
+      }),
+    ).rejects.toThrow('parent-bug');
+
+    // ...while the zone reports the upload the API recorded as done, not failed.
+    expect(onCompleted).toHaveBeenCalledWith(view);
+    expect(result.current.state).toBe('idle');
+    expect(result.current.progress).toBe(0);
+    expect(result.current.error).toBeNull();
+    expect(errorSpy).not.toHaveBeenCalledWith('platform.branding.upload_failed', expect.anything());
+
+    // And the zone is free for the next drop.
+    onCompleted.mockReset();
+    await act(async () => {
+      await result.current.onFile(file());
+    });
+    expect(onCompleted).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+  });
 });

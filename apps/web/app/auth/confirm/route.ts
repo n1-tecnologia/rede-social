@@ -26,6 +26,13 @@ function sameOriginPath(next: string, origin: string): string {
   }
 }
 
+/** The invite's landing path; a failed link aimed there is an invite, whatever its `type`. */
+const ACCEPT_INVITE_PATH = '/aceitar-convite';
+
+function isAcceptInvitePath(safeNext: string): boolean {
+  return safeNext.split('?')[0] === ACCEPT_INVITE_PATH;
+}
+
 /** The OTP types this route accepts; anything else is treated as an invalid link. */
 const OTP_TYPES: readonly EmailOtpType[] = ['recovery', 'email', 'signup', 'invite', 'magiclink'];
 
@@ -42,8 +49,9 @@ function isOtpType(value: string | null): value is EmailOtpType {
  * branded invite mail links to `{tenant origin}/auth/confirm?next=/aceitar-convite&token_hash=…&type=invite`.
  * A failed invite exchange (missing, expired, already-consumed or superseded-by-a-resend token) lands
  * on `/convite-expirado`, never on the recovery form: the invited admin has no password to recover
- * yet. The redirect carries no query string — that screen names no tenant. Every other type keeps
- * the Phase 1 fallback.
+ * yet. A link counts as an invite when its `type` is `invite` OR its `next` is `/aceitar-convite`
+ * (the WR-04 resend fallback mails a `type=recovery` link to the same landing). The redirect carries
+ * no query string — that screen names no tenant. Every other link keeps the Phase 1 fallback.
  *
  * `verifyOtp` exchanges the one-time hash for a session; because this is a Route Handler, the
  * `@supabase/ssr` client may write the HttpOnly session cookies here (a Server Component may not).
@@ -61,8 +69,10 @@ export async function GET(request: NextRequest): Promise<never> {
     if (!error) redirect(safeNext);
   }
 
-  // An invite link that no longer exchanges: the dedicated expired screen (D-29).
-  if (type === 'invite') redirect('/convite-expirado');
+  // An invite link that no longer exchanges: the dedicated expired screen (D-29). That includes the
+  // invite mail's recovery-type fallback (02-REVIEW IN-03, fixed in 08-08): its `next` is
+  // `/aceitar-convite`, and an invited admin must never land on the password-recovery form.
+  if (type === 'invite' || isAcceptInvitePath(safeNext)) redirect('/convite-expirado');
 
   // Missing params, unknown type, expired or already-used token: ask for a fresh link.
   redirect('/esqueci-senha?erro=link-invalido');

@@ -254,6 +254,8 @@ const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() 
  * ROLE-05: everything the panel's tenant page shows — and the ONLY platform answer that carries a
  * tenant's domains, invites and admins (T-02-19 / T-06-07: no members, no content). `modules` is the
  * six real keys in their canonical order (a missing row reads as disabled; `example` never appears).
+ * `invites` are ordered OLDEST first (`asc(createdAt)`), so the newest invite is the LAST element;
+ * the Admins tab reads `invites.at(-1)` (02-REVIEW IN-05, fixed in 08-08).
  * `null` for an unknown id; the route turns that into 404.
  */
 export async function getTenantDetail(id: string): Promise<PlatformTenantDetail | null> {

@@ -4,6 +4,27 @@ import { Button, useToast } from '@rede-social/ui';
 import { useTransition } from 'react';
 import type { ResendInviteResult } from '@/app/(platform)/plataforma/tenants/[id]/admins/actions';
 
+/**
+ * The refusal reasons the resend route documents (WR-02/WR-03), plus `no_verified_primary`
+ * (02-REVIEW IN-04, 08-08): the tenant has no verified primary host, so no link can be minted.
+ */
+export const RESEND_REFUSAL_REASONS = [
+  'email_in_use',
+  'user_in_other_tenant',
+  'no_verified_primary',
+] as const;
+export type ResendRefusalReason = (typeof RESEND_REFUSAL_REASONS)[number];
+
+/** The reason-specific copy for an API refusal, or undefined (the caller falls back to generic). */
+export function resendReasonCopy(
+  reason: string | undefined,
+  reasons: Partial<Record<ResendRefusalReason, string>> | undefined,
+): string | undefined {
+  return (RESEND_REFUSAL_REASONS as readonly (string | undefined)[]).includes(reason)
+    ? reasons?.[reason as ResendRefusalReason]
+    : undefined;
+}
+
 export interface ResendInviteButtonProps {
   tenantId: string;
   inviteId: string;
@@ -16,10 +37,10 @@ export interface ResendInviteButtonProps {
     resent: string;
     resendFailed: string;
     /**
-     * Reason-specific failure copy keyed by the API's `details.reason` (WR-02/WR-03). Only the two
-     * documented refusals are known; any other reason falls back to `resendFailed`.
+     * Reason-specific failure copy keyed by the API's `details.reason` (WR-02/WR-03, IN-04). Only
+     * the documented refusals are known; any other reason falls back to `resendFailed`.
      */
-    reasons?: Partial<Record<'email_in_use' | 'user_in_other_tenant', string>>;
+    reasons?: Partial<Record<ResendRefusalReason, string>>;
   };
   /** `resendInviteAction` — the API call + layout revalidation live in the server action. */
   action: (tenantId: string, inviteId: string) => Promise<ResendInviteResult>;
@@ -44,18 +65,16 @@ export function ResendInviteButton({
   const toast = useToast();
   const [pending, startTransition] = useTransition();
 
-  const reasonCopy = (reason: string | undefined): string | undefined =>
-    reason === 'email_in_use' || reason === 'user_in_other_tenant'
-      ? labels.reasons?.[reason]
-      : undefined;
-
   const resend = () => {
     startTransition(async () => {
       const result = await action(tenantId, inviteId);
       toast.show(
         result.ok
           ? { tone: 'success', message: labels.resent }
-          : { tone: 'error', message: reasonCopy(result.reason) ?? labels.resendFailed },
+          : {
+              tone: 'error',
+              message: resendReasonCopy(result.reason, labels.reasons) ?? labels.resendFailed,
+            },
       );
     });
   };

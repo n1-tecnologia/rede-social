@@ -5,7 +5,8 @@ import { formatPanelDate, primaryVerifiedHost, requirePlatformTenantDetail } fro
 import { resendInviteAction } from './actions';
 
 /**
- * Admins tab (D-29/D-30): the first-admin invite (the newest `tenant_invites` row) and the
+ * Admins tab (D-29/D-30): the first-admin invite (the newest `tenant_invites` row: the detail service
+ * orders them oldest first, so it is the LAST element of the list; 02-REVIEW IN-05) and the
  * `admin_tenant` memberships. Dates are formatted here, on the server.
  *
  * Where the invite stands comes from `deriveInviteState` (quick 260929-g0s) — the API already
@@ -28,7 +29,7 @@ export default async function TenantAdminsPage({ params }: { params: Promise<{ i
     getTranslations('platform'),
     requirePlatformTenantDetail(id),
   ]);
-  const raw = detail.invites[0] ?? null;
+  const raw = detail.invites.at(-1) ?? null;
   const state = raw ? deriveInviteState(raw, primaryVerifiedHost(detail) !== null) : null;
   const invite =
     raw && state
@@ -40,9 +41,12 @@ export default async function TenantAdminsPage({ params }: { params: Promise<{ i
         }
       : null;
 
+  // 02-REVIEW IN-04 (08-08): a non-pending resend on a tenant that lost its verified primary host
+  // answers `no_verified_primary`; the helper line says exactly what to do, the generic retry would not.
   const reasons = {
     email_in_use: t('admins.resendEmailInUse'),
     user_in_other_tenant: t('admins.resendUserInOtherTenant'),
+    no_verified_primary: t('admins.resendHelper'),
   };
   const buttonLabels =
     state?.action === 'send'
