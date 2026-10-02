@@ -100,7 +100,9 @@ export async function listModerationLog(
              case when tm.id is null then null else tp.display_name end as target_display_name,
              l.subject_type,
              l.excerpt,
-             l.reason,
+             -- MODER-03 empty: a reason that is blank or only whitespace is NO reason. The writer
+             -- already stores null for one; this keeps a hand-written or legacy row honest too.
+             case when l.reason ~ '^[[:space:]]*$' then null else l.reason end as reason,
              l.details
         from moderation_log l
         left join memberships am on am.id = l.actor_membership_id and am.deleted_at is null

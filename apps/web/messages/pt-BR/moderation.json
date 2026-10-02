@@ -59,7 +59,8 @@
         "title": "Algo deu errado",
         "generic": "Algo deu errado. Tente novamente.",
         "retry": "Tentar novamente",
-        "loadMore": "Não foi possível carregar mais registros."
+        "loadMore": "Não foi possível carregar mais registros.",
+        "forbidden": "Você não tem mais permissão para esta ação."
       }
     }
   }

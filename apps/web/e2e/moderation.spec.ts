@@ -158,3 +158,48 @@ test('story removal', async ({ page }, testInfo) => {
     M.log.excerpt.replace('{excerpt}', body),
   );
 });
+
+/**
+ * 08-03 (D-337, UI-D-277, UI E09): the chip row is bound to `?acao=`, an unknown value reads as
+ * "Tudo", the filtered list holds only that action, and the five chips scroll sideways at 320px
+ * instead of wrapping. The log always holds at least the removals the cases above just wrote.
+ */
+test('log filters', async ({ page }) => {
+  await login(page, users.demoAdmin, SEED_PASSWORD);
+  await page.setViewportSize({ width: 320, height: 640 });
+
+  await page.goto('/configuracoes/moderacao?acao=nao-existe');
+  const filters = page.locator('[data-moderation-log-filters]');
+  const all = filters.getByRole('button', { name: M.log.filters.all, exact: true });
+  await expect(all).toHaveAttribute('aria-pressed', 'true');
+  for (const key of ['comments', 'blocks', 'unblocks', 'roles'] as const) {
+    await expect(
+      filters.getByRole('button', { name: M.log.filters[key], exact: true }),
+    ).toHaveAttribute('aria-pressed', 'false');
+  }
+  // UI E09/overflow: one line that scrolls, never a wrap.
+  const box = await filters.evaluate((node) => ({
+    scroll: node.scrollWidth,
+    client: node.clientHeight,
+    overflowX: getComputedStyle(node).overflowX,
+    chipTops: [...node.children].map((child) => (child as HTMLElement).offsetTop),
+  }));
+  expect(box.overflowX).toBe('auto');
+  expect(new Set(box.chipTops).size).toBe(1);
+
+  // "Comentários": the URL carries the API value and every row is a comment removal.
+  await filters.getByRole('button', { name: M.log.filters.comments, exact: true }).click();
+  await expect(page).toHaveURL(/\?acao=comment_removed$/);
+  const list = page.getByRole('list', { name: M.log.label });
+  await expect(list.getByRole('listitem').first()).toBeVisible();
+  const kinds = await list
+    .locator('[data-moderation-log-row]')
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-moderation-log-row')));
+  expect(kinds.length).toBeGreaterThan(0);
+  expect(new Set(kinds)).toEqual(new Set(['comment_removed']));
+
+  // Back to "Tudo": the bare route.
+  await filters.getByRole('button', { name: M.log.filters.all, exact: true }).click();
+  await expect(page).toHaveURL(/\/configuracoes\/moderacao$/);
+  await expect(list.getByRole('listitem').first()).toBeVisible();
+});

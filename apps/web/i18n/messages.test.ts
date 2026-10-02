@@ -1736,3 +1736,101 @@ describe('07-10 — chat staff thread strings and placeholders', () => {
     );
   });
 });
+
+/**
+ * 08-03 — the `moderation` catalog (UI-SPEC "Moderation log" and "Comment removal (in context)"
+ * tables, plus the Core contract's empty, error and confirmation rows), verbatim, with every ICU
+ * interpolation PINNED and FORMATTED: a reworded template or a dropped `{author}` fails here.
+ */
+describe('08-03 — moderation log and comment removal strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['moderation.log.permanent', 'Este histórico não pode ser editado nem apagado.'],
+    ['moderation.log.label', 'Histórico de moderação'],
+    ['moderation.log.filters.all', 'Tudo'],
+    ['moderation.log.filters.comments', 'Comentários'],
+    ['moderation.log.filters.blocks', 'Bloqueios'],
+    ['moderation.log.filters.unblocks', 'Desbloqueios'],
+    ['moderation.log.filters.roles', 'Papéis'],
+    ['moderation.log.you', 'Você'],
+    ['moderation.log.removedMember', 'Membro removido'],
+    ['moderation.log.context.post', 'Comentário em um post'],
+    ['moderation.log.context.story', 'Comentário em um story'],
+    ['moderation.log.empty.title', 'Nenhuma ação de moderação ainda'],
+    [
+      'moderation.log.empty.body',
+      'Quando você remover um comentário ou bloquear o acesso de alguém, o registro aparece aqui.',
+    ],
+    ['moderation.log.filteredEmpty.title', 'Nada com este filtro'],
+    ['moderation.log.filteredEmpty.body', 'Escolha outro filtro para ver mais registros.'],
+    ['moderation.log.errors.title', 'Algo deu errado'],
+    ['moderation.log.errors.generic', 'Algo deu errado. Tente novamente.'],
+    ['moderation.log.errors.retry', 'Tentar novamente'],
+    ['moderation.log.errors.loadMore', 'Não foi possível carregar mais registros.'],
+    ['moderation.log.errors.forbidden', 'Você não tem mais permissão para esta ação.'],
+    ['moderation.comment.title', 'Remover comentário?'],
+    ['moderation.comment.confirm', 'Remover'],
+    ['moderation.comment.cancel', 'Cancelar'],
+    ['moderation.comment.toasts.removed', 'Comentário removido.'],
+    ['moderation.comment.errors.failed', 'Não foi possível remover o comentário. Tente novamente.'],
+    ['moderation.comment.errors.gone', 'Este comentário já tinha sido removido.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['moderation.log.rows.commentRemoved', ['{actor}', '{target}']],
+    ['moderation.log.rows.blocked', ['{actor}', '{target}']],
+    ['moderation.log.rows.unblocked', ['{actor}', '{target}']],
+    ['moderation.log.rows.roleChanged', ['{actor}', '{target}', '{from}', '{to}']],
+    ['moderation.log.excerpt', ['{excerpt}']],
+    ['moderation.log.reason', ['{reason}']],
+    ['moderation.log.time', ['{date}', '{time}']],
+    ['moderation.comment.label', ['{author}']],
+    ['moderation.comment.body', ['{author}']],
+    ['moderation.comment.bodyWithReplies', ['{author}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('formats the row sentences, the excerpt, the reason, the time and the removal copy', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'moderation',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    expect(t('log.rows.commentRemoved', { actor: 'Você', target: 'Bruno Lima' })).toBe(
+      'Você removeu um comentário de Bruno Lima',
+    );
+    expect(t('log.rows.blocked', { actor: 'Ana Souza', target: 'Bruno Lima' })).toBe(
+      'Ana Souza bloqueou o acesso de Bruno Lima',
+    );
+    expect(t('log.rows.unblocked', { actor: 'Ana Souza', target: 'Bruno Lima' })).toBe(
+      'Ana Souza desbloqueou o acesso de Bruno Lima',
+    );
+    expect(
+      t('log.rows.roleChanged', {
+        actor: 'Você',
+        target: 'Bruno Lima',
+        from: 'Membro',
+        to: 'Suporte',
+      }),
+    ).toBe('Você mudou o papel de Bruno Lima de Membro para Suporte');
+    expect(t('log.excerpt', { excerpt: 'Texto' })).toBe('“Texto”');
+    expect(t('log.reason', { reason: 'spam' })).toBe('Motivo: spam');
+    expect(t('log.time', { date: '12/10/2026', time: '14:05' })).toBe('12/10/2026 às 14:05');
+    expect(t('comment.label', { author: 'Bruno' })).toBe('Remover comentário de Bruno');
+    expect(t('comment.bodyWithReplies', { author: 'Bruno' })).toBe(
+      'O comentário de Bruno e as respostas saem da conversa para todos os membros. Bruno não é avisado, e a remoção fica no histórico de moderação.',
+    );
+  });
+});

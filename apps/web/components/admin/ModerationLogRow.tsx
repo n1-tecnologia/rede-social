@@ -1,4 +1,5 @@
 import type { ModerationAction } from '@rede-social/contracts/moderation';
+import { Skeleton } from '@rede-social/ui';
 import { Ban, LockOpen, type LucideIcon, Trash2, UserCog } from 'lucide-react';
 import type { ModerationLogRowView } from '@/lib/moderation-view';
 
@@ -70,5 +71,32 @@ export function ModerationLogRow({ view }: { view: ModerationLogRowView }) {
         </p>
       </div>
     </li>
+  );
+}
+
+/**
+ * `count` row skeletons in the row's own geometry (UI-D-283): the 40px circle, two text bars, and a
+ * 48px `rounded-xl` block standing in for the excerpt on ALTERNATE rows, so the list does not jump
+ * when real rows (some with an excerpt, some without) replace them. `loading.tsx` and a chip change
+ * show 6; a load-more shows 3 at the sentinel.
+ */
+export function ModerationLogSkeleton({ count }: { count: number }) {
+  return (
+    <div aria-busy data-testid="moderation-log-skeleton" className="flex flex-col">
+      {Array.from({ length: count }, (_, index) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: identical placeholders, never reordered
+          key={index}
+          className="flex min-h-16 items-start gap-3 border-b border-divider px-4 py-3 last:border-0"
+        >
+          <Skeleton variant="circle" className="h-10 w-10" />
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <Skeleton variant="text" width="80%" className="h-3.5" />
+            {index % 2 === 0 ? <Skeleton variant="rect" className="h-12 rounded-xl" /> : null}
+            <Skeleton variant="text" width="35%" className="h-3" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

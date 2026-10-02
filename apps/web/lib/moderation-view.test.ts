@@ -1,7 +1,15 @@
 import type { ModerationLogEntry } from '@rede-social/contracts/moderation';
 import { describe, expect, it } from 'vitest';
 import catalog from '../messages/pt-BR/moderation.json';
-import { formatLogTime, type ModerationLogLabels, toModerationLogView } from './moderation-view';
+import {
+  formatLogTime,
+  MODERATION_LOG_FILTERS,
+  type ModerationLogLabels,
+  type ModerationLogTranslator,
+  moderationLogLabels,
+  parseModerationAction,
+  toModerationLogView,
+} from './moderation-view';
 
 /**
  * 08-01 (UI-D-278): the log row's sentence, context, excerpt and absolute time, from the REAL pt-BR
@@ -132,5 +140,106 @@ describe('formatLogTime (tenant time zone, h23, explicit 2-digit fields)', () =>
     expect(formatLogTime('2026-01-05T10:07:00.000000Z', TZ, LABELS.time)).toBe(
       '05/01/2026 às 07:07',
     );
+  });
+});
+
+/** 08-03 (D-337, UI-D-277/278): every action, the defensive blanks, the filter and the label builder. */
+describe('08-03 — every row variant and the filter', () => {
+  it('an unblock reads "desbloqueou o acesso", with its reason and no context or excerpt', () => {
+    const view = toModerationLogView(
+      entry({
+        action: 'member_unblocked',
+        subjectType: null,
+        excerpt: null,
+        reason: 'conversamos e está tudo certo',
+      }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(view)).toBe('**Você** desbloqueou o acesso de **Bruno Lima**');
+    expect(view.context).toBeNull();
+    expect(view.excerpt).toBeNull();
+    expect(view.reason).toBe('Motivo: conversamos e está tudo certo');
+  });
+
+  it('a block with NO reason has no "Motivo" line; a blank or whitespace reason is no reason', () => {
+    for (const reason of [null, '', '   ', '\n\t ']) {
+      const view = toModerationLogView(
+        entry({ action: 'member_blocked', subjectType: null, excerpt: null, reason }),
+        { timezone: TZ, labels: LABELS },
+      );
+      expect(view.reason).toBeNull();
+      expect(view.context).toBeNull();
+    }
+  });
+
+  it('E10/empty: an empty stored excerpt omits the block, and the context line still renders', () => {
+    for (const excerpt of ['', '   ', null]) {
+      const view = toModerationLogView(entry({ excerpt }), { timezone: TZ, labels: LABELS });
+      expect(view.excerpt).toBeNull();
+      expect(view.context).toBe('Comentário em um post');
+    }
+  });
+
+  it('a 280-character excerpt with line breaks and a 500-character reason come through whole', () => {
+    const excerpt = `${'a'.repeat(139)}\n${'b'.repeat(140)}`;
+    const reason = 'r'.repeat(500);
+    const view = toModerationLogView(entry({ excerpt }), { timezone: TZ, labels: LABELS });
+    expect(view.excerpt).toBe(`“${excerpt}”`);
+    const blocked = toModerationLogView(
+      entry({ action: 'member_blocked', subjectType: null, excerpt: null, reason }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(blocked.reason).toBe(`Motivo: ${reason}`);
+  });
+
+  it('a role change from Administrador to Suporte by someone else', () => {
+    const view = toModerationLogView(
+      entry({
+        action: 'role_changed',
+        subjectType: null,
+        excerpt: null,
+        actor: { ...entry().actor, isViewer: false },
+        details: { from: 'admin_tenant', to: 'support_tenant' },
+      }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(view)).toBe(
+      '**Ana Souza** mudou o papel de **Bruno Lima** de Administrador para Suporte',
+    );
+  });
+
+  it('parseModerationAction: the four API values pass; anything else reads as "Tudo"', () => {
+    for (const action of ['comment_removed', 'member_blocked', 'member_unblocked', 'role_changed'])
+      expect(parseModerationAction(action)).toBe(action);
+    for (const raw of [undefined, '', 'tudo', 'COMMENT_REMOVED', 'comentarios', ['member_blocked']])
+      expect(parseModerationAction(raw)).toBeNull();
+  });
+
+  it('the chip row is "Tudo · Comentários · Bloqueios · Desbloqueios · Papéis", in that order', () => {
+    expect(MODERATION_LOG_FILTERS.map((filter) => log.filters[filter.key])).toEqual([
+      'Tudo',
+      'Comentários',
+      'Bloqueios',
+      'Desbloqueios',
+      'Papéis',
+    ]);
+    expect(MODERATION_LOG_FILTERS.map((filter) => filter.action)).toEqual([
+      null,
+      'comment_removed',
+      'member_blocked',
+      'member_unblocked',
+      'role_changed',
+    ]);
+  });
+
+  it('moderationLogLabels reads raw templates, so the slots survive for the view', () => {
+    const lookup = (key: string) =>
+      key
+        .split('.')
+        .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], log);
+    const t = Object.assign((key: string) => String(lookup(key)), {
+      raw: (key: string) => lookup(key),
+    }) as ModerationLogTranslator;
+    expect(moderationLogLabels(t)).toEqual(LABELS);
   });
 });
