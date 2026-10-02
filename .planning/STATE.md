@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-10-02T13:30:18.026Z"
+stopped_at: Completed 08-03-PLAN.md
+last_updated: "2026-10-02T14:02:58.899Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-02 (inherited test debt and CI split)
-state_head: 8afceb5ab19900ef86684f6e4131f216c0642b6b
+last_activity_desc: Completed 08-03 (story-comment moderation, full Moderação screen, removal finish)
+state_head: 037a74a1dcb10107fd6be22d2341a2afdd70aac7
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 112
+  completed_plans: 113
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-02 (WINDOWS 64/65/69/70/71 fixed on green runs, first e2e:pwa green, CI split into four jobs)
+Last activity: 2026-10-02 — Completed 08-03 (stories admin delete with story_comment log rows, Moderação chips + keyset paging + every state, removal finish on feed/community/reel/story)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -173,6 +173,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P15 | 1h 13m | 3 tasks | 3 files |
 | Phase 08 P01 | 26 min | 2 tasks | 51 files |
 | Phase 08 P02 | 45 min | 3 tasks | 12 files |
+| Phase 08 P03 | 28 min | 3 tasks | 33 files |
 
 ## Accumulated Context
 
@@ -563,6 +564,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-02: the Marca form is keyed on the tenant id only and BrandingForm adopts a refreshed server view in place (WINDOWS 71); keying on persisted colours would remount again one save later
 - [Phase 08]: 08-02: HighlightEditSheet keeps focus inside the sheet after an optimistic remove so Escape still closes it (WINDOWS 70 product bug); WINDOWS 69 was a pre-hydration tap, fixed in the specs with React's hydration mark
 - [Phase 08]: 08-02: CI is split into static, db, e2e (4 shards) and e2e-pwa jobs; job-level concurrency groups name the job id literally because github.job is empty outside steps
+- [Phase 08]: 08-03: story comments are moderated by the stories module's own locked delete (author-or-moderation.manage, one bare 404, story_comment log row in the same transaction); the story DELETE keeps its 204
+- [Phase 08]: 08-03: Moderação rows are formatted on the server for every page (page.tsx and loadMoreModerationLogAction share moderationLogLabels); ?acao= carries the API action values and an unknown value reads as Tudo
+- [Phase 08]: 08-03: a comment delete answering the bare 404 maps to code gone (row leaves with the race toast); any other failure keeps the row; focus moves to the next row or the composer
 
 ### Pending Todos
 
@@ -634,6 +638,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T13:30:03.621Z
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-10-02T14:02:41.938Z
+Stopped at: Completed 08-03-PLAN.md
 Resume file: None
