@@ -124,11 +124,7 @@ export function decideRoleChange(
   if (target.invited) return { outcome: 'refuse', refusal: 'not_active' };
   if (target.blocked) return { outcome: 'refuse', refusal: 'blocked' };
   if (target.role === role) return { outcome: 'noop' };
-  if (
-    role !== 'admin_tenant' &&
-    activeAdminIds.includes(target.id) &&
-    activeAdminIds.length <= 1
-  ) {
+  if (role !== 'admin_tenant' && activeAdminIds.includes(target.id) && activeAdminIds.length <= 1) {
     return { outcome: 'refuse', refusal: 'last_admin' };
   }
   return { outcome: 'write' };
