@@ -1068,3 +1068,35 @@ export async function hasStoryView(email: string, storyId: string): Promise<bool
     ) as seen`;
   return rows[0]?.seen === true;
 }
+
+/**
+ * 08-04: sets the PROFILE display name of an e-mail's membership in a tenant (the name the Membros
+ * list and the directory show). `createMember` creates identities without a name, so a spec that needs
+ * a long or specific name sets it here. Never used on seeded users.
+ */
+export async function setMemberDisplayName(
+  email: string,
+  tenantSlug: string,
+  displayName: string,
+): Promise<void> {
+  const updated = await sql()`
+    update public.member_profiles mp
+       set display_name = ${displayName}
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+      join public.tenants t on t.id = m.tenant_id
+     where mp.membership_id = m.id and u.email = ${email} and t.slug = ${tenantSlug}
+    returning mp.id`;
+  if (updated.length === 0) throw new Error(`no profile for ${email} in ${tenantSlug}`);
+}
+
+/** 08-04: how many memberships of a tenant read as blocked (`status` or the legacy `blocked_at`). */
+export async function blockedMembershipCount(tenantSlug: string): Promise<number> {
+  const rows = await sql()<{ count: number }[]>`
+    select count(*)::int as count
+      from public.memberships m
+      join public.tenants t on t.id = m.tenant_id
+     where t.slug = ${tenantSlug} and m.deleted_at is null
+       and (m.status = 'blocked' or m.blocked_at is not null)`;
+  return rows[0]?.count ?? 0;
+}

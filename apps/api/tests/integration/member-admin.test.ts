@@ -339,3 +339,237 @@ describe('block tracer', () => {
     expect((await membershipRow(people.member.membership))?.status).toBe('active');
   });
 });
+
+/** Walks every page of the list at `limit`, guarding against a runaway loop. */
+async function walk(
+  token: string,
+  limit: number,
+  query: Record<string, string> = {},
+  host?: string,
+): Promise<AdminMember[]> {
+  const seen: AdminMember[] = [];
+  let cursor: string | null = null;
+  for (let hops = 0; hops < 500; hops += 1) {
+    const search = new URLSearchParams({ ...query, limit: String(limit) });
+    if (cursor) search.set('cursor', cursor);
+    const next = await list(token, `?${search.toString()}`, host);
+    expect(next.items.length).toBeLessThanOrEqual(limit);
+    seen.push(...next.items);
+    cursor = next.nextCursor;
+    if (cursor === null) return seen;
+  }
+  throw new Error('the walk did not terminate');
+}
+
+/** The table's own order for one tenant: the ground truth a walk must reproduce (ADMIN-02 ordering). */
+async function listSnapshot(tenantId: string): Promise<string[]> {
+  const rows = await adminSql<{ id: string }[]>`
+    select m.id::text
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+      left join public.member_profiles mp on mp.membership_id = m.id
+     where m.tenant_id = ${tenantId}::uuid and m.deleted_at is null
+     order by app.imm_unaccent(lower(coalesce(nullif(mp.display_name, ''), u.email))),
+              lower(u.email), m.id`;
+  return rows.map((row) => row.id);
+}
+
+describe('admin list', () => {
+  const fixtures = {
+    twinA: { user: '', membership: '' },
+    twinB: { user: '', membership: '' },
+    accented: { user: '', membership: '' },
+    percent: { user: '', membership: '' },
+    nameless: { user: '', membership: '' },
+    blocked: { user: '', membership: '' },
+    legacy: { user: '', membership: '' },
+    invited: { user: '', membership: '' },
+  };
+
+  beforeAll(async () => {
+    const twin = `Ana Souza ${RUN}`;
+    fixtures.twinA = await throwaway(
+      ids.demo,
+      `twin-a-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      twin,
+    );
+    fixtures.twinB = await throwaway(
+      ids.demo,
+      `twin-b-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      twin,
+    );
+    fixtures.accented = await throwaway(
+      ids.demo,
+      `acento-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      `Árvore Conceição ${RUN}`,
+    );
+    fixtures.percent = await throwaway(
+      ids.demo,
+      `percent-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      `Cem 100% Real ${RUN}`,
+    );
+    fixtures.nameless = await throwaway(
+      ids.demo,
+      `mmm-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      '',
+    );
+    fixtures.blocked = await throwaway(
+      ids.demo,
+      `bloqueado-${RUN}@rede-demo.local`,
+      'member',
+      'blocked',
+      `Bloqueado ${RUN}`,
+    );
+    fixtures.legacy = await throwaway(
+      ids.demo,
+      `legado-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      `Legado ${RUN}`,
+    );
+    // A legacy row: `status` still active, only `blocked_at` set. Every reader must call it blocked.
+    await adminSql`
+      update public.memberships set blocked_at = now() where id = ${fixtures.legacy.membership}::uuid`;
+    fixtures.invited = await throwaway(
+      ids.demo,
+      `convite-${RUN}@rede-demo.local`,
+      'admin_tenant',
+      'invited',
+      '',
+    );
+  });
+
+  it('lists every membership — active, staff, blocked (incl. blocked_at-only) and invited — with its folded status', async () => {
+    const all = await walk(tokens.admin, 50);
+    const byId = new Map(all.map((member) => [member.membershipId, member]));
+    expect(byId.get(people.admin.membership)).toMatchObject({
+      role: 'admin_tenant',
+      isViewer: true,
+    });
+    expect(byId.get(people.support.membership)?.role).toBe('support_tenant');
+    expect(byId.get(fixtures.blocked.membership)?.status).toBe('blocked');
+    expect(byId.get(fixtures.legacy.membership)?.status).toBe('blocked');
+    expect(byId.get(fixtures.invited.membership)).toMatchObject({
+      status: 'invited',
+      displayName: null,
+    });
+    expect(byId.get(fixtures.nameless.membership)?.displayName).toBeNull();
+    expect(all.filter((member) => member.isViewer)).toHaveLength(1);
+    expect(all.map((member) => member.membershipId)).toEqual(await listSnapshot(ids.demo));
+  });
+
+  it('status filters are disjoint and the legacy blocked_at row is blocked, never active', async () => {
+    const active = (await walk(tokens.admin, 50, { status: 'active' })).map((m) => m.membershipId);
+    const blocked = (await walk(tokens.admin, 50, { status: 'blocked' })).map(
+      (m) => m.membershipId,
+    );
+    const invited = (await walk(tokens.admin, 50, { status: 'invited' })).map(
+      (m) => m.membershipId,
+    );
+    expect(blocked).toEqual(
+      expect.arrayContaining([fixtures.blocked.membership, fixtures.legacy.membership]),
+    );
+    expect(active).not.toContain(fixtures.legacy.membership);
+    expect(active).toContain(people.admin.membership);
+    expect(invited).toEqual(expect.arrayContaining([fixtures.invited.membership]));
+    const all = await walk(tokens.admin, 50);
+    expect(active.length + blocked.length + invited.length).toBe(all.length);
+    expect(new Set([...active, ...blocked, ...invited]).size).toBe(all.length);
+  });
+
+  it('q matches the name accent- and case-insensitively, or the e-mail', async () => {
+    const byName = await list(tokens.admin, `?q=${encodeURIComponent(`arvore CONCEICAO ${RUN}`)}`);
+    expect(byName.items.map((m) => m.membershipId)).toEqual([fixtures.accented.membership]);
+    const byEmail = await list(tokens.admin, `?q=${encodeURIComponent(`ACENTO-${RUN}@`)}`);
+    expect(byEmail.items.map((m) => m.membershipId)).toEqual([fixtures.accented.membership]);
+    // The nameless membership is found by its e-mail (an invited admin's only identifier).
+    const nameless = await list(tokens.admin, `?q=${encodeURIComponent(`convite-${RUN}`)}`);
+    expect(nameless.items.map((m) => m.membershipId)).toEqual([fixtures.invited.membership]);
+  });
+
+  it('a % in q is a literal percent sign, not a wildcard', async () => {
+    const page = await list(tokens.admin, `?q=${encodeURIComponent('%')}&limit=50`);
+    expect(page.items.map((m) => m.membershipId)).toContain(fixtures.percent.membership);
+    for (const member of page.items) {
+      expect(`${member.displayName ?? ''} ${member.email}`).toContain('%');
+    }
+    const underscore = await list(tokens.admin, `?q=${encodeURIComponent(`_${RUN}`)}&limit=50`);
+    for (const member of underscore.items) {
+      expect(`${member.displayName ?? ''} ${member.email}`).toContain(`_${RUN}`);
+    }
+  });
+
+  it('an empty or spaces-only q is no filter', async () => {
+    const plain = await list(tokens.admin, '?limit=50');
+    const spaces = await list(tokens.admin, `?q=${encodeURIComponent('    ')}&limit=50`);
+    const empty = await list(tokens.admin, '?q=&limit=50');
+    expect(spaces.items.map((m) => m.membershipId)).toEqual(plain.items.map((m) => m.membershipId));
+    expect(empty.items.map((m) => m.membershipId)).toEqual(plain.items.map((m) => m.membershipId));
+  });
+
+  it('a q with no match is { items: [], nextCursor: null }', async () => {
+    expect(await list(tokens.admin, `?q=${encodeURIComponent(`ninguem-${RUN}-zzz`)}`)).toEqual({
+      items: [],
+      nextCursor: null,
+    });
+  });
+
+  it('ordering: two identical names in a stable order; a limit=1 walk visits each membership exactly once', async () => {
+    const walked = (await walk(tokens.admin, 1)).map((member) => member.membershipId);
+    expect(new Set(walked).size).toBe(walked.length);
+    expect(walked).toEqual(await listSnapshot(ids.demo));
+
+    const twins = [fixtures.twinA.membership, fixtures.twinB.membership];
+    const positions = twins.map((id) => walked.indexOf(id));
+    // Adjacent, and ordered by the e-mail tiebreaker (twin-a before twin-b).
+    expect(positions[1]).toBe((positions[0] ?? -2) + 1);
+    // A second walk at a different page size gives the very same order.
+    expect((await walk(tokens.admin, 3)).map((m) => m.membershipId)).toEqual(walked);
+  });
+
+  it('a membership without a profile name sorts by its e-mail', async () => {
+    const walked = (await walk(tokens.admin, 50)).map((member) => member.membershipId);
+    // "mmm-<run>@…" sorts after the seeded "Membro Rede Demo" ("membro …" < "mmm-…").
+    expect(walked.indexOf(fixtures.nameless.membership)).toBeGreaterThan(
+      walked.indexOf(people.member.membership),
+    );
+  });
+
+  it('a tampered cursor answers page 1', async () => {
+    const first = await list(tokens.admin, '?limit=2');
+    const tampered = await list(tokens.admin, '?limit=2&cursor=bm90LWEtY3Vyc29y');
+    expect(tampered.items.map((m) => m.membershipId)).toEqual(
+      first.items.map((m) => m.membershipId),
+    );
+  });
+
+  it('support and member get 403 on the list with any query', async () => {
+    for (const token of [tokens.support, tokens.member]) {
+      const res = await request('/v1/admin/members?status=blocked&q=a', token);
+      expect(res.status).toBe(403);
+      expect((await envelope(res)).error.code).toBe('FORBIDDEN');
+    }
+  });
+
+  it('a rede-lab admin never sees a rede-demo row; a rede-demo session on the lab host is 403 TENANT_HOST_MISMATCH', async () => {
+    const lab = await walk(tokens.labAdmin, 50, {}, HOSTS.lab);
+    const demoIds = new Set(await listSnapshot(ids.demo));
+    expect(lab.length).toBeGreaterThan(0);
+    expect(lab.some((member) => demoIds.has(member.membershipId))).toBe(false);
+    expect(lab.map((member) => member.membershipId)).toEqual(await listSnapshot(ids.lab));
+
+    const res = await request('/v1/admin/members', tokens.admin, { host: HOSTS.lab });
+    expect(res.status).toBe(403);
+    expect((await envelope(res)).error.code).toBe('TENANT_HOST_MISMATCH');
+  });
+});

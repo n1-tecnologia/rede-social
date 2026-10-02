@@ -1842,3 +1842,119 @@ describe('08-03 — moderation log and comment removal strings and placeholders'
     );
   });
 });
+
+/**
+ * 08-04 — the `admin` catalog (UI-SPEC "Membros and the member sheet", the Core contract's empty and
+ * error rows) and the `moderation.member` block/unblock strings, verbatim, with every ICU
+ * interpolation PINNED and FORMATTED.
+ */
+describe('08-04 — Membros, the member sheet and block/unblock strings and placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['app.settings.rows.members', 'Membros'],
+    ['admin.back', 'Voltar para Configurações'],
+    ['admin.errors.title', 'Algo deu errado'],
+    ['admin.errors.generic', 'Algo deu errado. Tente novamente.'],
+    ['admin.errors.retry', 'Tentar novamente'],
+    ['admin.errors.forbidden', 'Você não tem mais permissão para esta ação.'],
+    ['admin.roles.member', 'Membro'],
+    ['admin.roles.support', 'Suporte'],
+    ['admin.roles.admin', 'Administrador'],
+    ['admin.members.title', 'Membros'],
+    ['admin.members.search.label', 'Buscar por nome ou e-mail'],
+    ['admin.members.search.clear', 'Limpar busca'],
+    ['admin.members.filters.all', 'Todos'],
+    ['admin.members.filters.active', 'Ativos'],
+    ['admin.members.filters.blocked', 'Bloqueados'],
+    ['admin.members.filters.invited', 'Convidados'],
+    ['admin.members.pills.blocked', 'Bloqueado'],
+    ['admin.members.pills.invited', 'Convite pendente'],
+    ['admin.members.pills.you', 'Você'],
+    ['admin.members.viewProfile', 'Ver perfil'],
+    ['admin.members.searchEmpty.title', 'Nenhum membro encontrado'],
+    ['admin.members.searchEmpty.body', 'Tente outro nome ou e-mail.'],
+    ['admin.members.blockedEmpty.title', 'Nenhum acesso bloqueado'],
+    [
+      'admin.members.blockedEmpty.body',
+      'Quem tiver o acesso bloqueado aparece aqui, e você pode desbloquear quando quiser.',
+    ],
+    ['admin.members.invitedEmpty.title', 'Nenhum convite pendente'],
+    ['admin.members.invitedEmpty.body', 'Convites aparecem aqui até serem aceitos.'],
+    ['admin.members.errors.loadMore', 'Não foi possível carregar mais membros.'],
+    ['moderation.member.block', 'Bloquear acesso'],
+    ['moderation.member.unblock', 'Desbloquear acesso'],
+    ['moderation.member.confirmBlock', 'Bloquear'],
+    ['moderation.member.blocking', 'Bloqueando…'],
+    ['moderation.member.confirmUnblock', 'Desbloquear'],
+    ['moderation.member.unblocking', 'Desbloqueando…'],
+    ['moderation.member.back', 'Voltar'],
+    ['moderation.member.reason.label', 'Motivo (opcional)'],
+    ['moderation.member.reason.placeholder', 'Ex.: mensagens ofensivas repetidas'],
+    [
+      'moderation.member.errors.self',
+      'Você não pode bloquear o próprio acesso nem mudar o próprio papel.',
+    ],
+    ['moderation.member.errors.notActive', 'Disponível depois que o convite for aceito.'],
+    ['moderation.member.errors.generic', 'Não foi possível concluir. Tente novamente.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['admin.members.invitedBody', ['{email}']],
+    ['admin.members.errors.gone', ['{tenant}']],
+    ['moderation.member.blockStep.title', ['{name}']],
+    ['moderation.member.blockStep.body', ['{name}', '{tenant}']],
+    ['moderation.member.unblockStep.title', ['{name}']],
+    ['moderation.member.unblockStep.body', ['{name}', '{tenant}']],
+    ['moderation.member.reason.helper', ['{name}']],
+    ['moderation.member.toasts.blocked', ['{name}']],
+    ['moderation.member.toasts.unblocked', ['{name}']],
+    ['moderation.member.errors.lastAdmin', ['{tenant}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('formats the confirm steps, the helper, the toasts and the refusals', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'moderation.member',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    const ta = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'admin.members',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    expect(t('blockStep.title', { name: 'Bruno Lima' })).toBe('Bloquear Bruno Lima?');
+    expect(t('blockStep.body', { name: 'Bruno Lima', tenant: 'Rede Demo' })).toBe(
+      'Bruno Lima perde o acesso a Rede Demo na próxima ação no app e não consegue entrar de novo nem criar outra conta com o mesmo e-mail. Os comentários já publicados continuam visíveis.',
+    );
+    expect(t('unblockStep.body', { name: 'Bruno Lima', tenant: 'Rede Demo' })).toBe(
+      'Bruno Lima volta a ter acesso a Rede Demo como antes do bloqueio.',
+    );
+    expect(t('reason.helper', { name: 'Bruno Lima' })).toBe(
+      'Fica só no histórico de moderação. Bruno Lima não vê o motivo.',
+    );
+    expect(t('toasts.blocked', { name: 'Bruno Lima' })).toBe('Acesso de Bruno Lima bloqueado.');
+    expect(t('toasts.unblocked', { name: 'Bruno Lima' })).toBe('Acesso de Bruno Lima liberado.');
+    expect(t('errors.lastAdmin', { tenant: 'Rede Demo' })).toBe(
+      'Rede Demo precisa de pelo menos um administrador ativo. Torne outra pessoa administrador antes.',
+    );
+    expect(ta('invitedBody', { email: 'eu@exemplo.com' })).toBe(
+      'Convite enviado para eu@exemplo.com. As ações ficam disponíveis depois que o convite for aceito.',
+    );
+    expect(ta('errors.gone', { tenant: 'Rede Demo' })).toBe(
+      'Este membro não faz mais parte de Rede Demo.',
+    );
+  });
+});
