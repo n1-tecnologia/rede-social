@@ -123,7 +123,7 @@ itself is not edited here.
 |---|---|---|---|
 | Trigger | `supabase start` + `pnpm dev` | push to `homolog`, automatic, no reviewer (`deploy-hml.yml`) | push to `master` (after the `production` approval) |
 | Web | `localhost:3000` | Vercel `rede-social-hml` **Production** (`<hml-web-domain>`) | Vercel **Production** (`rede-social-woad.vercel.app`) |
-| API | `localhost:8787` | Cloud Run `api` in `rede-social-hml` (`<hml-api-url>`) | Cloud Run `api` |
+| API | `localhost:8787` | Cloud Run `api` in `rede-social-hml` (`https://api-221367067304.southamerica-east1.run.app`) | Cloud Run `api` |
 | Worker | same process (`ROLE=worker`) | Cloud Run `worker` in `rede-social-hml` | Cloud Run `worker` |
 | Database | Supabase CLI stack | Supabase `<hml-supabase-ref>` | Supabase `rede-social` (`qjjhtduxquvlfppybpqq`) |
 | Seed | `pnpm db:seed` | demo seed allowed, by hand only ("hml provisioning runbook"), never in a workflow | none: super_admin only, created once by hand (Decisions 2026-09-28), never `pnpm db:seed` |
@@ -191,7 +191,7 @@ any value that resolves to production.
 
 | Name | Value | Read by |
 |---|---|---|
-| `WIF_PROVIDER` | `projects/<hml-gcp-project-number>/locations/global/workloadIdentityPools/github/providers/repo` | `deploy-hml.yml` (`google-github-actions/auth@v3`, both jobs) |
+| `WIF_PROVIDER` | `projects/221367067304/locations/global/workloadIdentityPools/github/providers/repo` | `deploy-hml.yml` (`google-github-actions/auth@v3`, both jobs) |
 | `DEPLOY_SA` | `rede-social-deploy@rede-social-hml.iam.gserviceaccount.com` | `deploy-hml.yml` (the identity Actions impersonates) |
 | `RUNTIME_SA` | `rede-social-runtime@rede-social-hml.iam.gserviceaccount.com` | `deploy-hml.yml` — `--service-account=` on both `deploy-cloudrun@v3` steps (reads the `-hml` Secret Manager secrets) |
 | `GCP_PROJECT_ID` | `rede-social-hml` | `deploy-hml.yml` (image reference) |
@@ -313,7 +313,7 @@ committed `apps/web/vercel.json`, so the Ignored Build Step is `bash ../../scrip
 | `DEPLOY_ENV` | Production **and** Preview **and** Development | `homolog`. Preview matters: every other branch arrives on this project as a Preview, and this is how the script skips it |
 | `NEXT_PUBLIC_SUPABASE_URL` | Production | the hml Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Production | the hml project's publishable key |
-| `API_URL` | Production | `<hml-api-url>` (the hml `api` Cloud Run URL) |
+| `API_URL` | Production | `https://api-221367067304.southamerica-east1.run.app` (the hml `api` Cloud Run URL) |
 | `PLATFORM_HOST` | Production | `<hml-web-domain>` (same value as the `homolog` GitHub variable) |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Production | the PUBLIC half of the hml VAPID pair (same value as `vapid-public-key-hml`), set before the first build |
 
@@ -350,22 +350,25 @@ Read a condition with
 and set it with
 `gcloud iam workload-identity-pools providers update-oidc repo --workload-identity-pool=github --location=global --project=<project> --attribute-condition="<condition>"`.
 
-The production provider's current condition was **not recorded** when it was created (2026-09-28).
-Read it and record it here before changing it.
+Recorded 2026-10-02: the production provider was created (2026-09-28) with only
+`assertion.repository=='n1-tecnologia/rede-social'` — no branch restriction. The hml provider was
+created with the `refs/heads/homolog` condition on 2026-10-02. Tightening production to
+`refs/heads/master` is applied by hand (auto mode refuses production IaC changes); until it is, the
+`homolog` environment's branch policy and the preflight are the guards.
 
 ## hml provisioning runbook
 
 Run in order; every `<hml-...>` value is unknown until its step. No step here is automated.
 
-- [ ] **GCP project.** Create `rede-social-hml` (tentative id), link the billing account
-  `cobrancas-tech`, and record its project number as `<hml-gcp-project-number>`.
-- [ ] **APIs.** Enable Cloud Run, Artifact Registry, Secret Manager, IAM Service Account Credentials
+- [x] **GCP project.** Create `rede-social-hml` (done 2026-10-02, number `221367067304`), link the billing account
+  `cobrancas-tech`, and record its project number as `221367067304`.
+- [x] **APIs.** Enable Cloud Run, Artifact Registry, Secret Manager, IAM Service Account Credentials
   and Security Token Service (STS) on `rede-social-hml`.
-- [ ] **Artifact Registry.** Create the Docker repository `rede-social` in `southamerica-east1`.
-- [ ] **Service accounts.** `rede-social-deploy` with `roles/run.admin`,
+- [x] **Artifact Registry.** Create the Docker repository `rede-social` in `southamerica-east1`.
+- [x] **Service accounts.** `rede-social-deploy` with `roles/run.admin`,
   `roles/artifactregistry.writer`, and `roles/iam.serviceAccountUser` on the runtime SA;
   `rede-social-runtime` with `roles/secretmanager.secretAccessor`.
-- [ ] **Workload Identity.** Pool `github`, OIDC provider `repo` (issuer
+- [x] **Workload Identity.** Pool `github`, OIDC provider `repo` (issuer
   `https://token.actions.githubusercontent.com`) with the `refs/heads/homolog` condition from
   "Workload Identity branch restriction (isolation guard)", and a `roles/iam.workloadIdentityUser`
   binding for the repository principal on `rede-social-deploy`. Then read the production provider's
@@ -381,18 +384,18 @@ Run in order; every `<hml-...>` value is unknown until its step. No step here is
   `additional_redirect_urls = ["https://<hml-web-domain>/auth/confirm**"]` entry;
   `[remotes.homolog.auth.email]` `otp_expiry = 86400`; `[remotes.homolog.auth.hook.send_email]`
   `enabled = true`,
-  `uri = "https://api-<hml-gcp-project-number>.southamerica-east1.run.app/v1/hooks/auth/send-email"`
+  `uri = "https://api-221367067304.southamerica-east1.run.app/v1/hooks/auth/send-email"`
   (the Cloud Run URL is derivable from the project number) and
   `secrets = "env(SEND_EMAIL_HOOK_SECRETS)"`; and, if hml stays on the Free plan, the same
   `[remotes.homolog.auth.email.template.recovery]` pin production uses. The `deploy-hml.yml` preflight
   blocks every deploy until this block exists with the hml ref.
 - [ ] **Mux.** Environment "HML": an access token pair, a signing key (store the private key
-  base64-encoded), a webhook to `<hml-api-url>/v1/webhooks/mux` subscribed to `video.asset.ready`,
+  base64-encoded), a webhook to `https://api-221367067304.southamerica-east1.run.app/v1/webhooks/mux` subscribed to `video.asset.ready`,
   `video.asset.errored` and `video.upload.errored`, and the default playback policy `signed`.
 - [ ] **VAPID.** Generate a new pair with `npx web-push generate-vapid-keys`; never reuse
   production's.
 - [ ] **Resend.** Create an hml API key on the verified domain `n1marketingdigital.com.br`.
-- [ ] **Secret Manager.** Create the 14 secrets of "GCP Secret Manager secrets — `homolog`" in
+- [x] **Secret Manager.** (created empty 2026-10-02; values still to add) Create the 14 secrets of "GCP Secret Manager secrets — `homolog`" in
   `rede-social-hml`.
 - [ ] **GitHub environment `homolog`.** Its variables and secrets (the two `homolog` sections above),
   Deployment branches limited to `homolog`, no required reviewer.
