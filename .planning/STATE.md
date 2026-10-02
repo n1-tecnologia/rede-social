@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Phase 8 UI-SPEC approved
-last_updated: "2026-10-02T09:41:19.771Z"
-last_activity: 2026-10-01
-last_activity_desc: "Phase 07 closed by developer decision (truth 15 override, real-device items deferred to Phase 8); next: plan Phase 08"
-state_head: 4a312fc0eb1773dc0e15f0e4d6084d21b3d8d1b2
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-10-02T12:41:50.819Z"
+last_activity: 2026-10-02
+last_activity_desc: Completed 08-01 (moderation tracer)
+state_head: "0ba5ef394084e4d49a20f462cd198b397b1cf5b9"
 progress:
   total_phases: 16
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 133
-  completed_plans: 110
-  percent: 6
+  completed_plans: 111
+  percent: 0
 ---
 
 # Project State
@@ -27,12 +27,12 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 ## Current Position
 
-Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — READY TO EXECUTE
-Plan: Not started
+Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
-Last activity: 2026-10-01 — Phase 07 complete (developer closure: truth 15 override, WINDOWS 69-71 and real-device rows deferred), next Phase 08
+Last activity: 2026-10-02 — Completed 08-01 (moderation tracer: kernel moderation_log, moderator comment removal, Moderação screen)
 
-Progress: [█░░░░░░░░░] 6%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -171,6 +171,7 @@ Progress: [█░░░░░░░░░] 6%
 | Phase 07 P13 | 28 min | 2 tasks | 2 files |
 | Phase 07 P14 | 5 min | 2 tasks | 1 files |
 | Phase 07 P15 | 1h 13m | 3 tasks | 3 files |
+| Phase 08 P01 | 26 min | 2 tasks | 51 files |
 
 ## Accumulated Context
 
@@ -554,6 +555,10 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-14: C-WR-03 races pinned by NotificationsSurface.test.tsx (stale page, tapped, live-merge control), each red on 583619c^. Two product gaps recorded as it.fails cases + WINDOWS 66/67: the mark-all button is withdrawn, not aria-busy, during its POST (UI-D-252 contradicts itself); a row tapped during mark-all sends no read POST of its own — Test-only plan: product files stay byte-identical, so the gaps are recorded with unchanged assertions rather than fixed
 - [Phase 07]: 07-15: web typecheck depends on web build (apps/web/turbo.json package override); Vercel turbo build graph unchanged; root pnpm typecheck now builds the web first
 - [Phase 07]: 07-15: the consented exit gate (backup-then-reset) ran once and exited 1 at e2e (651 passed, 4 failed); WINDOWS 59/64/65, the four gap entries and the Phase 7 local gate blocker stay open because records flip only on a green run
+- [Phase 08]: 08-01: moderation is a KERNEL capability — owning modules call recordModerationAction(tx, ...) inside their own transaction; never a bus subscriber
+- [Phase 08]: 08-01: feed comment DELETE keeps its shipped 200 { deleted: true } (plan said 204); identical response for own and moderation removals
+- [Phase 08]: 08-01: removal ('own'|'moderation'|null) is optional on commentSchema; web reads absent as canDelete ? 'own' : null (release order free)
+- [Phase 08]: 08-01: moderation_log actor/target are NOT NULL membership ids with no user/membership FKs; append-only via policies + revoke + row/statement triggers
 
 ### Pending Todos
 
@@ -625,6 +630,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T08:43:21.984Z
-Stopped at: Phase 8 UI-SPEC approved
-Resume file: .planning/phases/08-moderation-tenant-admin-panel-pilot-hardening/08-UI-SPEC.md
+Last session: 2026-10-02T12:41:50.695Z
+Stopped at: Completed 08-01-PLAN.md
+Resume file: None

@@ -644,13 +644,13 @@ Plans:
   3. Every admin creation flow - post, story, community, event - plus branding, member management and moderation is usable end-to-end from a phone inside the same app (verified on a real device).
   4. Each module package ships a README documenting its public interface (contracts, emitted/consumed events, flag key, kernel dependencies) and one module can be copied into a fresh app that provides only the kernel contracts; the pilot go-live gate passes: full two-tenant isolation suite across every endpoint, storage URL and Realtime topic, pt-BR catalog audit with zero UI literals, and PWA install + push smoke tests on a real iPhone and Android. Per D-344 the full gate runs here, and 08.1's exit gate re-runs the isolation suite with its shared-identity fixture plus a short real-device smoke; the MVP is declared closed there.
 
-**Plans:** 12 plans (planned 2026-10-02)
+**Plans:** 1/12 plans executed (planned 2026-10-02)
 
 Plans:
 
 **Wave 1**
 
-- [ ] 08-01-PLAN.md — Tracer: kernel append-only `moderation_log` (insert-only policy, revoked grants, immutability trigger, pgTAP 154), `moderation.manage`, `recordModerationAction` in the caller's transaction, the feed comment delete widened with the reply cascade and `deleted_by_user_id`, `GET /v1/admin/moderation-log`, the moderator control and the Moderação screen
+- [x] 08-01-PLAN.md — Tracer: kernel append-only `moderation_log` (insert-only policy, revoked grants, immutability trigger, pgTAP 154), `moderation.manage`, `recordModerationAction` in the caller's transaction, the feed comment delete widened with the reply cascade and `deleted_by_user_id`, `GET /v1/admin/moderation-log`, the moderator control and the Moderação screen
 - [ ] 08-02-PLAN.md — Inherited test debt (D-348): WINDOWS #71 Marca remount first, then #64, #65, #69, #70 and the never-run `e2e:pwa` triaged, fixed or quarantined with a reason; CI split into static, db, 4-shard e2e and e2e-pwa jobs under 60 minutes
 
 **Wave 2**
@@ -686,6 +686,7 @@ Plans:
 **Wave 9** *(blocked on Waves 1-8; Task 3 is the developer-run go-live)*
 
 - [ ] 08-12-PLAN.md — Phase witness `phase8-smoke.spec.ts`, the consolidated real-device checklist (D-345), the Phase 8 release in DEPLOY.md, the gate report with the LGPD row (D-349), a green `pnpm verify`, then the production release, qa tenant, device pass, CSP flip and CI run
+
 **UI hint**: yes
 **Research needed**: None (thin screens over columns that exist since Foundation/Feed; hardening is checklist-driven). Flag LGPD legal review to the user before go-live (research covered mechanics only).
 **Notes**: Hardening items without a requirement of their own but expected here: `EXPLAIN` checks on feed/notification/chat queries with a 10k-row seed, Sentry + structured logging with `tenant_id`/`request_id`, Cloud Run config in git (`min-instances=1`, cpu-boost, timeouts), backups/rollback rehearsal, CORS locked to the single origin in production, a11y pass, build-output check for static routes under `(app)`. Moderation of member content (MODER-04) and the reports queue (MODER-05) moved to Phase 11 (post-MVP) on 2026-09-25. Of the hardening items above, only the CORS lock and a real CSP are in scope (D-346); the rest are post-pilot backlog. This phase runs the go-live gate in full; the MVP is declared closed at 08.1's exit gate (D-344).
@@ -817,7 +818,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 15/15 | Complete    | 2026-10-01 |
-| 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/12 | Planned | - |
+| 8. Moderation, Tenant Admin Panel & Pilot Hardening | 1/12 | In Progress|  |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
