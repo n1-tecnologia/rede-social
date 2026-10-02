@@ -954,3 +954,247 @@ describe('role tracer', () => {
     expect((await envelope(list)).error.code).toBe('FORBIDDEN');
   });
 });
+
+/**
+ * 08-05 D-332 guards on a role change (T-08-26, T-08-27, T-08-28), under the 08-04 row locks. The
+ * seeded member is promoted to admin through the admin SQL lane, so the demo tenant has exactly TWO
+ * active admins; every case leaves it that way, and `afterAll` restores the seed (admin stays
+ * `admin_tenant`, member back to `member`).
+ */
+describe('role guards', () => {
+  const activeAdmins = async (): Promise<number> => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.memberships
+       where tenant_id = ${ids.demo}::uuid and role = 'admin_tenant' and status = 'active'
+         and blocked_at is null and deleted_at is null`;
+    return row?.n ?? 0;
+  };
+  const restoreTwoAdmins = async () => {
+    await adminSql`
+      update public.memberships set role = 'admin_tenant', status = 'active', blocked_at = null
+       where id in (${people.admin.membership}::uuid, ${people.member.membership}::uuid)`;
+  };
+
+  beforeAll(async () => {
+    // Earlier describes leave THROWAWAY admins of this run active (`block concurrency`'s second
+    // admin): demote them, so the seeded admin and the promoted member are the only two.
+    if (throwawayUsers.length > 0) {
+      await adminSql`
+        update public.memberships set role = 'member'
+         where tenant_id = ${ids.demo}::uuid and role = 'admin_tenant'
+           and user_id = any(${throwawayUsers}::uuid[])`;
+    }
+    await restoreTwoAdmins();
+    expect(await activeAdmins()).toBe(2);
+  });
+
+  afterAll(async () => {
+    await restoreDemoAdmin();
+    await adminSql`
+      update public.memberships set role = 'admin_tenant' where id = ${people.admin.membership}::uuid`;
+    await restoreDemoMember();
+    await restoreDemoMemberRole();
+  });
+
+  it('each admin changing their own role answers 409 self and writes nothing', async () => {
+    for (const [token, membership] of [
+      [tokens.admin, people.admin.membership],
+      [tokens.member, people.member.membership],
+    ] as const) {
+      const before = (await roleRows(membership)).length;
+      for (const role of ['member', 'support_tenant', 'admin_tenant']) {
+        const res = await setRole(token, membership, { role });
+        expect(res.status).toBe(409);
+        expect((await envelope(res)).error.details).toEqual({ member: 'self' });
+      }
+      expect(await roleOf(membership)).toBe('admin_tenant');
+      expect(await roleRows(membership)).toHaveLength(before);
+    }
+  });
+
+  it('two admins demoting each other at once: one 200, one 409 last_admin, one active admin remains', async () => {
+    expect(await activeAdmins()).toBe(2);
+    const before =
+      (await roleRows(people.admin.membership)).length +
+      (await roleRows(people.member.membership)).length;
+    try {
+      const [a, b] = await Promise.all([
+        setRole(tokens.admin, people.member.membership, { role: 'member' }),
+        setRole(tokens.member, people.admin.membership, { role: 'member' }),
+      ]);
+      expect([a.status, b.status].sort()).toEqual([200, 409]);
+      const refused = a.status === 409 ? a : b;
+      expect((await envelope(refused)).error.details).toEqual({ member: 'last_admin' });
+      expect(await activeAdmins()).toBe(1);
+      const written =
+        (await roleRows(people.admin.membership)).length +
+        (await roleRows(people.member.membership)).length;
+      expect(written).toBe(before + 1);
+    } finally {
+      await restoreTwoAdmins();
+    }
+  });
+
+  it('demoting the only active admin is refused even to support (sequential last_admin)', async () => {
+    // A promoted-then-demoted second admin leaves one: the remaining admin cannot be demoted by a
+    // members.manage holder who is not an admin (D-338's future grant, simulated as in 08-04).
+    await adminSql`
+      update public.memberships set role = 'support_tenant' where id = ${people.member.membership}::uuid`;
+    setPermissionResolver((role, enabled, settings) => {
+      const granted = permissionsFor(role, enabled, settings);
+      return role === 'support_tenant' ? [...granted, 'members.manage'] : granted;
+    });
+    try {
+      for (const role of ['member', 'support_tenant']) {
+        const res = await setRole(tokens.member, people.admin.membership, { role });
+        expect(res.status).toBe(409);
+        expect((await envelope(res)).error.details).toEqual({ member: 'last_admin' });
+      }
+      expect(await activeAdmins()).toBe(1);
+      // Promoting someone is always allowed, and promoting back restores two admins.
+      const promote = await setRole(tokens.admin, people.member.membership, {
+        role: 'admin_tenant',
+      });
+      expect(promote.status).toBe(200);
+      expect(await activeAdmins()).toBe(2);
+    } finally {
+      setPermissionResolver(permissionsFor);
+      await restoreTwoAdmins();
+    }
+  });
+
+  it('promoting or demoting ANOTHER admin is allowed while two remain', async () => {
+    const demote = await setRole(tokens.admin, people.member.membership, {
+      role: 'support_tenant',
+    });
+    expect(demote.status).toBe(200);
+    expect(((await demote.json()) as AdminMember).role).toBe('support_tenant');
+    const rows = await roleRows(people.member.membership);
+    expect(rows[rows.length - 1]?.details).toEqual({ from: 'admin_tenant', to: 'support_tenant' });
+    const promote = await setRole(tokens.admin, people.member.membership, {
+      role: 'admin_tenant',
+    });
+    expect(promote.status).toBe(200);
+    expect(await activeAdmins()).toBe(2);
+  });
+
+  it('an invited membership answers 409 not_active', async () => {
+    const invited = await throwaway(
+      ids.demo,
+      `convite-papel-${RUN}@rede-demo.local`,
+      'member',
+      'invited',
+      '',
+    );
+    const res = await setRole(tokens.admin, invited.membership, { role: 'support_tenant' });
+    expect(res.status).toBe(409);
+    expect((await envelope(res)).error.details).toEqual({ member: 'not_active' });
+    expect(await roleOf(invited.membership)).toBe('member');
+    expect(await roleRows(invited.membership)).toHaveLength(0);
+  });
+
+  it('a blocked membership answers 409 blocked (unblock first), for any role', async () => {
+    const blocked = await throwaway(
+      ids.demo,
+      `bloqueado-papel-${RUN}@rede-demo.local`,
+      'support_tenant',
+      'blocked',
+    );
+    for (const role of ['admin_tenant', 'member', 'support_tenant']) {
+      const res = await setRole(tokens.admin, blocked.membership, { role });
+      expect(res.status).toBe(409);
+      expect((await envelope(res)).error.details).toEqual({ member: 'blocked' });
+    }
+    // The legacy blocked_at-only row is blocked too (the app.membership_for_user folding).
+    await adminSql`
+      update public.memberships set status = 'active' where id = ${blocked.membership}::uuid`;
+    const legacy = await setRole(tokens.admin, blocked.membership, { role: 'member' });
+    expect(legacy.status).toBe(409);
+    expect((await envelope(legacy)).error.details).toEqual({ member: 'blocked' });
+    expect(await roleOf(blocked.membership)).toBe('support_tenant');
+    expect(await roleRows(blocked.membership)).toHaveLength(0);
+  });
+
+  it('the same role is 200 with the current state and no new log row', async () => {
+    const before = (await roleRows(people.member.membership)).length;
+    const res = await setRole(tokens.admin, people.member.membership, { role: 'admin_tenant' });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as AdminMember).role).toBe('admin_tenant');
+    expect(await roleRows(people.member.membership)).toHaveLength(before);
+  });
+
+  it('a role outside TENANT_ROLES, a missing role or an unknown key is 400', async () => {
+    for (const body of [
+      { role: 'super_admin' },
+      { role: 'admin' },
+      {},
+      { role: 'member', tenantId: ids.lab },
+    ]) {
+      const res = await setRole(tokens.admin, people.support.membership, body);
+      expect(res.status).toBe(400);
+    }
+    expect(await roleOf(people.support.membership)).toBe('support_tenant');
+  });
+
+  it('a rede-lab membership id (or an unknown one) is the bare 404', async () => {
+    for (const id of [people.labMember.membership, randomUUID()]) {
+      const res = await setRole(tokens.admin, id, { role: 'admin_tenant' });
+      expect(res.status).toBe(404);
+      const body = await envelope(res);
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.details).toBeUndefined();
+    }
+    expect(await roleOf(people.labMember.membership)).toBe('member');
+  });
+
+  it('support and a plain member get 403 FORBIDDEN', async () => {
+    const plain = await throwawaySession('papel-membro');
+    for (const token of [tokens.support, plain.token]) {
+      const res = await setRole(token, people.support.membership, { role: 'admin_tenant' });
+      expect(res.status).toBe(403);
+      expect((await envelope(res)).error.code).toBe('FORBIDDEN');
+    }
+    expect(await roleOf(people.support.membership)).toBe('support_tenant');
+  });
+
+  it('a rede-demo session on the lab host is 403 TENANT_HOST_MISMATCH', async () => {
+    const res = await setRole(
+      tokens.admin,
+      people.labMember.membership,
+      { role: 'admin_tenant' },
+      HOSTS.lab,
+    );
+    expect(res.status).toBe(403);
+    expect((await envelope(res)).error.code).toBe('TENANT_HOST_MISMATCH');
+    expect(await roleOf(people.labMember.membership)).toBe('member');
+  });
+
+  it('ADMIN-02 adjacency: a same-named other member is acted on; the actor’s own membership is always self', async () => {
+    const [own] = await adminSql<{ name: string | null }[]>`
+      select display_name as name from public.member_profiles
+       where membership_id = ${people.admin.membership}::uuid`;
+    const adminName = own?.name ?? '';
+    expect(adminName).not.toBe('');
+    const twin = await throwaway(
+      ids.demo,
+      `gemeo-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      adminName,
+    );
+    const page = await list(tokens.admin, `?q=${encodeURIComponent(adminName)}&limit=50`);
+    const named = page.items.filter((m) => m.displayName === adminName);
+    expect(named.map((m) => m.membershipId).sort()).toEqual(
+      [people.admin.membership, twin.membership].sort(),
+    );
+
+    const self = await setRole(tokens.admin, people.admin.membership, { role: 'support_tenant' });
+    expect(self.status).toBe(409);
+    expect((await envelope(self)).error.details).toEqual({ member: 'self' });
+
+    const other = await setRole(tokens.admin, twin.membership, { role: 'support_tenant' });
+    expect(other.status).toBe(200);
+    expect(await roleOf(twin.membership)).toBe('support_tenant');
+    expect(await roleOf(people.admin.membership)).toBe('admin_tenant');
+  });
+});

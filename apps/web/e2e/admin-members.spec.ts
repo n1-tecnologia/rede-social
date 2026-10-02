@@ -1,6 +1,7 @@
 import { type Browser, expect, type Page, test } from '@playwright/test';
 import adminMessages from '../messages/pt-BR/admin.json' with { type: 'json' };
 import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
+import membersMessages from '../messages/pt-BR/members.json' with { type: 'json' };
 import moderationMessages from '../messages/pt-BR/moderation.json' with { type: 'json' };
 import {
   blockedMembershipCount,
@@ -9,7 +10,9 @@ import {
   deleteUserByEmail,
   membershipForEmail,
   membershipIdFor,
+  removeMembership,
   setMemberDisplayName,
+  setMembershipRole,
   setMembershipStatus,
 } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
@@ -250,11 +253,13 @@ test('a long name and e-mail ellipsize at 320px with two pills', async ({ page }
   await expect(row).toContainText(A.roles.admin);
   await expect(row).toContainText(A.members.pills.blocked);
 
+  // Polled, not read once: in a full run the first read can land before the row's final layout.
   for (const selector of ['[data-member-name]', '[data-member-email]']) {
-    const truncated = await row
-      .locator(selector)
-      .evaluate((node) => node.scrollWidth > node.clientWidth);
-    expect(truncated, `${selector} ellipsizes`).toBe(true);
+    await expect
+      .poll(() => row.locator(selector).evaluate((node) => node.scrollWidth > node.clientWidth), {
+        message: `${selector} ellipsizes`,
+      })
+      .toBe(true);
   }
   const rowBox = await row.boundingBox();
   const chevron = await row.locator('svg').last().boundingBox();
@@ -377,4 +382,184 @@ test('role tracer', async ({
   } finally {
     await subject.context.close();
   }
+});
+
+/** The demo tenant's display name, as the seed writes it (the `chat.spec.ts` constant). */
+const TENANT = 'Rede Demo';
+
+const projectTag = (name: string) => (name === 'mobile-chromium' ? 'm' : 'd');
+
+/** The profile header's admin trigger (UI-D-275), by its accessible name. */
+const profileTrigger = (page: Page) => page.getByRole('button', { name: A.members.actions });
+
+/**
+ * UI E07/populated + empty (D-340, UI-D-275, T-08-30): the profile header carries the 44px "⋯" for a
+ * permission holder and NOTHING for a member — not hidden, absent from the DOM. The sheet it opens is
+ * the member sheet without "Ver perfil".
+ */
+test('the profile admin trigger: present for the admin, absent from the DOM for a member', async ({
+  page,
+}, testInfo) => {
+  const { email, membershipId } = await throwawayMember(
+    `perfil-${projectTag(testInfo.project.name)}`,
+  );
+  const name = `Perfil Admin ${Date.now()}`;
+  await setMemberDisplayName(email, 'rede-demo', name);
+
+  await login(page, users.demoMember, SEED_PASSWORD);
+  await page.goto(`/membros/${membershipId}`);
+  await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+  await expect(profileTrigger(page)).toHaveCount(0);
+  await expect(page.locator('[data-profile-admin-trigger]')).toHaveCount(0);
+
+  await page.context().clearCookies();
+  await login(page, users.demoAdmin, SEED_PASSWORD);
+  await page.goto(`/membros/${membershipId}`);
+  const trigger = profileTrigger(page);
+  await expect(trigger).toBeVisible();
+  const box = await trigger.boundingBox();
+  expect(box && box.width >= 44 && box.height >= 44).toBe(true);
+  await trigger.click();
+
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByRole('heading', { name })).toBeVisible();
+  await expect(sheet.getByRole('radiogroup', { name: A.members.roleLabel })).toBeVisible();
+  await expect(sheet.getByRole('button', { name: M.block, exact: true })).toBeVisible();
+  await expect(sheet.getByRole('link', { name: A.members.viewProfile })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+/**
+ * UI-D-275 / UI E06/partial: a block from the profile lands on the Membros list filtered to
+ * "Bloqueados", with the toast, because the profile no longer exists for that person.
+ */
+test('a block from the profile lands on Bloqueados with the toast', async ({ page }, testInfo) => {
+  const { email, membershipId } = await throwawayMember(
+    `perfil-bloq-${projectTag(testInfo.project.name)}`,
+  );
+  await login(page, users.demoAdmin, SEED_PASSWORD);
+  await page.goto(`/membros/${membershipId}`);
+  await profileTrigger(page).click();
+
+  const sheet = page.getByRole('dialog');
+  await sheet.getByRole('button', { name: M.block, exact: true }).click();
+  await sheet.getByRole('button', { name: M.confirmBlock, exact: true }).click();
+
+  await expect(page).toHaveURL(/\/configuracoes\/membros\?status=blocked$/);
+  await expect(page.getByText(M.toasts.blocked.replace('{name}', email))).toBeVisible();
+  await expect(page.getByRole('button', { name: A.members.filters.blocked })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(memberRow(page, membershipId)).toContainText(A.members.pills.blocked);
+  expect((await membershipForEmail(email))?.status).toBe('blocked');
+
+  // The profile is gone for a blocked member (D-23): the one not-found answer.
+  await page.goto(`/membros/${membershipId}`);
+  await expect(page.getByText(membersMessages.members.notFound.title)).toBeVisible();
+  await expect(profileTrigger(page)).toHaveCount(0);
+});
+
+/** UI E05/partial: a blocked membership's role list is disabled, with the helper, and does nothing. */
+test('the role list is disabled for a blocked member, with the helper', async ({
+  page,
+}, testInfo) => {
+  const blocked = await throwawayMember(
+    `papel-bloq-${projectTag(testInfo.project.name)}`,
+    'support_tenant',
+  );
+  await setMembershipStatus(blocked.email, 'blocked');
+
+  await login(page, users.demoAdmin, SEED_PASSWORD);
+  await page.goto(`/configuracoes/membros?status=blocked&q=${encodeURIComponent(blocked.email)}`);
+  await memberRow(page, blocked.membershipId).click();
+
+  const sheet = page.getByRole('dialog');
+  const group = sheet.getByRole('radiogroup', { name: A.members.roleLabel });
+  await expect(group).toHaveAttribute('aria-disabled', 'true');
+  await expect(sheet.getByText(A.members.roleBlockedHelper)).toBeVisible();
+  const support = group.getByRole('radio', { name: new RegExp(`^${A.roles.support}`) });
+  await expect(support).toHaveAttribute('aria-checked', 'true');
+  // `dispatchEvent`: a real tap on an `aria-disabled` option, without Playwright's actionability wait.
+  await group.getByRole('radio', { name: new RegExp(`^${A.roles.admin}`) }).dispatchEvent('click');
+  await expect(
+    page.getByRole('dialog', {
+      name: A.members.roleConfirm.title.replace('{name}', blocked.email),
+    }),
+  ).toHaveCount(0);
+  await expect(sheet.getByRole('button', { name: M.unblock, exact: true })).toBeVisible();
+  expect((await membershipForEmail(blocked.email))?.role).toBe('support_tenant');
+});
+
+/**
+ * UI-D-284 (T-08-29): an admin demoted in the background (here: through SQL) who then taps an action
+ * is told — the forbidden toast — and the refreshed screen answers `notFound()`. The actor is a
+ * THROWAWAY admin, never the seeded one.
+ */
+test('a demoted admin taps an action: the forbidden toast, then the screen is gone', async ({
+  page,
+}, testInfo) => {
+  const tag = projectTag(testInfo.project.name);
+  const actor = await throwawayMember(`ex-admin-${tag}`, 'admin_tenant');
+  const target = await throwawayMember(`alvo-ex-admin-${tag}`);
+
+  await login(page, actor.email, PASSWORD);
+  await page.goto(`/configuracoes/membros?q=${encodeURIComponent(target.email)}`);
+  await memberRow(page, target.membershipId).click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByRole('radiogroup', { name: A.members.roleLabel })).toBeVisible();
+
+  // Another admin demotes the actor while the sheet is open.
+  await setMembershipRole(actor.email, 'rede-demo', 'member');
+
+  await sheet
+    .getByRole('radiogroup', { name: A.members.roleLabel })
+    .getByRole('radio', { name: new RegExp(`^${A.roles.support}`) })
+    .click();
+  await page
+    .getByRole('dialog', { name: A.members.roleConfirm.title.replace('{name}', target.email) })
+    .getByRole('button', { name: A.members.roleConfirm.confirm })
+    .click();
+
+  await expect(page.getByText(A.errors.forbidden)).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: A.members.title })).toHaveCount(0);
+  await expect(page.locator('[data-admin-members]')).toHaveCount(0);
+  expect((await membershipForEmail(target.email))?.role).toBe('member');
+  // A reload is the same notFound(): the screen does not exist for a member.
+  await page.reload();
+  await expect(page.getByRole('searchbox', { name: A.members.search.label })).toHaveCount(0);
+  await expect(page.locator('[data-admin-members]')).toHaveCount(0);
+});
+
+/**
+ * UI E04/error (UI-D-284): the membership vanished while its sheet was open — the gone toast, the
+ * sheet closes and the list no longer shows the row.
+ */
+test('a vanished member: the gone toast, the sheet closes, the row leaves', async ({
+  page,
+}, testInfo) => {
+  const target = await throwawayMember(`some-${projectTag(testInfo.project.name)}`);
+  await login(page, users.demoAdmin, SEED_PASSWORD);
+  await page.goto(`/configuracoes/membros?q=${encodeURIComponent(target.email)}`);
+  const row = memberRow(page, target.membershipId);
+  await row.click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByRole('heading', { name: target.email })).toBeVisible();
+
+  await removeMembership(target.email);
+
+  await sheet
+    .getByRole('radiogroup', { name: A.members.roleLabel })
+    .getByRole('radio', { name: new RegExp(`^${A.roles.admin}`) })
+    .click();
+  await page
+    .getByRole('dialog', { name: A.members.roleConfirm.title.replace('{name}', target.email) })
+    .getByRole('button', { name: A.members.roleConfirm.confirm })
+    .click();
+
+  await expect(page.getByText(A.members.errors.gone.replace('{tenant}', TENANT))).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(row).toHaveCount(0);
 });

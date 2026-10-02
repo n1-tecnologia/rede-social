@@ -1137,3 +1137,21 @@ export async function memberAccessAs(
   if (res.status !== 200)
     throw new Error(`${kind} ${membershipId}: ${res.status} ${await res.text()}`);
 }
+
+/**
+ * 08-05: sets the ROLE of an e-mail's membership in a tenant directly in the database — "an admin
+ * demoted in another tab" without going through the API. Never used on seeded users.
+ */
+export async function setMembershipRole(
+  email: string,
+  tenantSlug: string,
+  role: 'member' | 'admin_tenant' | 'support_tenant',
+): Promise<void> {
+  const updated = await sql()`
+    update public.memberships m
+       set role = ${role}
+      from public.users u, public.tenants t
+     where u.id = m.user_id and t.id = m.tenant_id and u.email = ${email} and t.slug = ${tenantSlug}
+    returning m.id`;
+  if (updated.length === 0) throw new Error(`no membership for ${email} in ${tenantSlug}`);
+}

@@ -1,8 +1,12 @@
+import { KERNEL_PERMISSIONS } from '@rede-social/contracts/moderation';
 import { EmptyState, PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { ProfileAdminTrigger } from '@/components/admin/ProfileAdminTrigger';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
+import { loadAdminMemberForProfile } from '@/lib/admin-members';
+import { requireBootstrap } from '@/lib/bootstrap';
 import { loadMemberProfile, loadOwnProfile } from '@/lib/profile';
 import { getHostTenant } from '@/lib/tenant-host';
 
@@ -23,6 +27,13 @@ import { getHostTenant } from '@/lib/tenant-host';
  * API answers ONE indistinguishable bare 404 (D-23/TENANT-04) and this route turns all of them into
  * the same `notFound()`. A transport or 5xx failure is a DIFFERENT screen ("Algo deu errado"), so
  * "we could not reach the server" is never dressed up as "this person is not in your community".
+ *
+ * **The admin entry (D-340, UI-D-275, 08-05).** For holders of `members.manage` or
+ * `moderation.manage` in `bootstrap.permissions` — the same composed values the API guards with — the
+ * `PageHeader` carries a trailing `ProfileAdminTrigger` that opens THE member admin sheet for this
+ * membership. For anyone else nothing renders: the trigger is absent from the DOM and no admin read
+ * is made (T-08-30). It renders only AFTER the own-profile redirect, so it can never target the
+ * viewer. The profile itself (photo, name, bio) is unchanged.
  *
  * `redirect()` and `notFound()` both throw (Next 16), so both sit OUTSIDE any try/catch.
  */
@@ -71,6 +82,13 @@ export default async function MemberProfilePage({
     );
   }
 
+  // The admin trigger: permission holders only, and only after the own-profile redirect above.
+  const bootstrap = await requireBootstrap();
+  const canManageMembers = bootstrap.permissions.includes(KERNEL_PERMISSIONS.membersManage);
+  const canModerate = bootstrap.permissions.includes(KERNEL_PERMISSIONS.moderationManage);
+  const adminMember =
+    canManageMembers || canModerate ? await loadAdminMemberForProfile(membershipId) : null;
+
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
       <PageHeader
@@ -78,6 +96,16 @@ export default async function MemberProfilePage({
         backLabel={t('back')}
         stickyTop="0px"
         className="md:static md:px-0"
+        trailing={
+          adminMember ? (
+            <ProfileAdminTrigger
+              member={adminMember}
+              tenantName={bootstrap.tenant.displayName}
+              canModerate={canModerate}
+              canManageMembers={canManageMembers}
+            />
+          ) : undefined
+        }
       />
       <ProfileHeader
         headingLevel={1}

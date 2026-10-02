@@ -123,3 +123,21 @@ export async function loadAdminMembers(
   if (forbidden) notFound();
   return page;
 }
+
+/**
+ * The profile page's admin read (D-340, UI-D-275): the membership in the admin row shape, for the
+ * header trigger's sheet. The page calls it ONLY for holders of `members.manage` or
+ * `moderation.manage`. Any failure — a permission lost since the bootstrap (403), a membership gone
+ * (404), a transport error — answers `null` and the page simply renders no trigger: the profile itself
+ * is unaffected, and an admin action's own refusal handling covers the rest (UI-D-284).
+ */
+export async function loadAdminMemberForProfile(membershipId: string): Promise<AdminMember | null> {
+  try {
+    return await getAdminMember(membershipId);
+  } catch (error) {
+    const expected =
+      error instanceof ApiClientError && (error.status === 403 || error.status === 404);
+    if (!expected) console.error('admin.members.profile_read_failed', { error: String(error) });
+    return null;
+  }
+}

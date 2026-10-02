@@ -4,7 +4,8 @@ import type { TenantRole } from '@rede-social/contracts';
 import { ConfirmDialog } from '@rede-social/ui';
 import { Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { type KeyboardEvent, useId, useRef, useState, useTransition } from 'react';
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 /** The display order of UI-D-273: Membro, Suporte, Administrador. */
 export const ROLE_OPTIONS = [
@@ -64,9 +65,11 @@ export interface RoleOptionListProps {
  *   move focus between the three options. Moving focus never changes a role: choosing one (click,
  *   Space or Enter) opens the confirm, because every role change is confirmed (UI-D-273).
  * - **Confirm.** Choosing a different role opens `ConfirmDialog tone="brand"` with the role-specific
- *   body; choosing the current role does nothing. Cancelling leaves the selection unchanged.
+ *   body; choosing the current role does nothing. Cancelling leaves the selection unchanged. The
+ *   dialog is portalled to `<body>`, so it covers the screen and its exit never depends on the sheet's.
  * - **No optimistic selection.** `aria-checked` always reflects `value`, the server's answer. After
- *   the confirm the group is `aria-busy` and `inert` until the server answers; success arrives as a
+ *   the confirm the dialog stays in its pending state (spinner, both buttons disabled) and the group
+ *   is `aria-busy` and `inert` until the server answers; then the dialog closes. Success arrives as a
  *   new `value` from the host, and a refusal leaves `value` where it was (the selection "reverts")
  *   and renders the inline `role="alert"` line under the list.
  * - **Disabled** (a blocked membership): `aria-disabled` on the group and every option, opacity 50,
@@ -88,8 +91,16 @@ export function RoleOptionList({
   const [candidate, setCandidate] = useState<TenantRole | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [refusal, setRefusal] = useState<RoleRefusal | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // The confirm is portalled to <body>: rendered inside the sheet's animated panel, a sheet that
+  // closes while the confirm is still leaving (a vanished member, a lost permission) never finished
+  // either exit. Client-only, so the server render has no portal target to need.
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setPortalTarget(document.body);
+  }, []);
 
   // A new server value (success, or a different membership) clears a stale refusal.
   const [shownValue, setShownValue] = useState(value);
@@ -105,19 +116,23 @@ export function RoleOptionList({
     setConfirming(true);
   };
 
-  const confirm = () => {
+  /**
+   * The confirmed request. `ConfirmDialog` awaits it, so the dialog shows its own pending state and
+   * closes once the server has answered; meanwhile the group behind it is `aria-busy` and `inert`.
+   */
+  const confirm = async () => {
     const role = candidate;
     if (role === null) return;
-    startTransition(async () => {
-      let outcome: RoleRefusal | null;
-      try {
-        outcome = await onChange(role);
-      } catch (error) {
-        console.error('admin.members.role_failed', { error: String(error) });
-        outcome = 'generic';
-      }
-      setRefusal(outcome);
-    });
+    setPending(true);
+    let outcome: RoleRefusal | null;
+    try {
+      outcome = await onChange(role);
+    } catch (error) {
+      console.error('admin.members.role_failed', { error: String(error) });
+      outcome = 'generic';
+    }
+    setPending(false);
+    setRefusal(outcome);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -194,20 +209,25 @@ export function RoleOptionList({
           {tm(`errors.${REFUSAL_KEY[refusal]}`, { tenant: tenantName })}
         </p>
       ) : null}
-      <ConfirmDialog
-        open={confirming && candidate !== null}
-        tone="brand"
-        title={t('members.roleConfirm.title', { name })}
-        body={
-          candidate === null
-            ? undefined
-            : t(`members.roleConfirm.${CONFIRM_KEY[candidate]}`, { name })
-        }
-        confirmLabel={t('members.roleConfirm.confirm')}
-        cancelLabel={t('members.roleConfirm.cancel')}
-        onConfirm={confirm}
-        onClose={() => setConfirming(false)}
-      />
+      {portalTarget
+        ? createPortal(
+            <ConfirmDialog
+              open={confirming && candidate !== null}
+              tone="brand"
+              title={t('members.roleConfirm.title', { name })}
+              body={
+                candidate === null
+                  ? undefined
+                  : t(`members.roleConfirm.${CONFIRM_KEY[candidate]}`, { name })
+              }
+              confirmLabel={t('members.roleConfirm.confirm')}
+              cancelLabel={t('members.roleConfirm.cancel')}
+              onConfirm={confirm}
+              onClose={() => setConfirming(false)}
+            />,
+            portalTarget,
+          )
+        : null}
     </div>
   );
 }
