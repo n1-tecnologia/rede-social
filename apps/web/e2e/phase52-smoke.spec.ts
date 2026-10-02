@@ -248,9 +248,27 @@ async function rowNames(page: Page): Promise<string[]> {
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') ?? ''));
 }
 
+/**
+ * Waits until React has hydrated `target` (it carries React's internal props key), the 02-14
+ * `waitForHydration` signal. 08-02 (WINDOWS #69): the manage screen arrives by a full document load,
+ * and a tap on the server-rendered "Novo destaque" before hydration is lost — the sheet never opens
+ * (proved by holding the JS chunks: the tap landed unhydrated and no dialog opened after hydration).
+ * 30 s is the 02-14 helper's bound for a cold dev compile; it waits for a signal, never a sleep.
+ */
+async function waitForHydrated(target: Locator): Promise<void> {
+  await expect
+    .poll(
+      () => target.evaluate((el) => Object.keys(el).some((key) => key.startsWith('__reactProps'))),
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+}
+
 /** Creates a highlight on a manage screen already open, and closes the edit sheet it opens. */
 async function createOnManageScreen(page: Page, title: string, place: string): Promise<void> {
-  await page.getByRole('button', { name: H.manage.create }).click();
+  const create = page.getByRole('button', { name: H.manage.create });
+  await waitForHydrated(create);
+  await create.click();
   const createSheet = page.getByRole('dialog', { name: H.create.title });
   await expect(createSheet.getByText(H.create.place.replace('{place}', place))).toBeVisible();
   await createSheet.getByLabel(H.create.label).fill(title);

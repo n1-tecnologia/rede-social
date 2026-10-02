@@ -28,7 +28,8 @@
   **Next step:** a `/gsd-debug` session on the desktop double tap. Log the like state and the actions the gallery's `DoubleTapHeart` fires, compare with the commit before 07-01, and decide whether a member's double tap within about 1 s of load can unlike a post (a product bug) or the test needs to settle the page first (the 05-05 remedy).
 
 - `pnpm turbo typecheck build test` can race on `apps/web/.next/types` (07-11 exit gate)
-  status: open
+  status: resolved
+  **08-02 resolution (2026-10-02):** see `.planning/phases/08-moderation-tenant-admin-panel-pilot-hardening/deferred-items.md`, D-348 verdicts, WINDOWS #65.
   **What:** the web package's `typecheck` is `next typegen && tsc --noEmit`, and turbo runs it in parallel with the web `build` (`next build`). Both write `.next/types`. One 07-11 run failed `next build` with `ENOTEMPTY: directory not empty, rmdir '…/apps/web/.next/types'`; the identical code passed the stage in the runs before and after. This is a pre-existing pipeline race, not a code failure.
   **Fix path:** make `@rede-social/web#typecheck` depend on `@rede-social/web#build` in `turbo.json`, or point `next typegen` at a separate dist dir.
 
@@ -66,13 +67,16 @@
   **Fix path (needs a decision):** test side, wait for the `read-all` response before the reload. Product side, decide whether a reload right after "Marcar todas como lidas" may lose it; if not, send it with `keepalive: true` like the row reads.
 
 - `phase52-smoke.spec.ts:294` mobile "1. an admin creates an Início highlight and a community highlight from their manage screens" failed in the 07-15 gate (05.2 spec)
-  status: open
+  status: resolved
+  **08-02 resolution (2026-10-02):** see `.planning/phases/08-moderation-tenant-admin-panel-pilot-hardening/deferred-items.md`, D-348 verdicts, WINDOWS #69.
   **What:** in `createOnManageScreen` (line 255) the click on "Novo destaque" did not open the create sheet: `getByRole('dialog', { name: 'Novo destaque' }).getByText('Em Início')` was not found for 10 s, and the failure snapshot shows the manage screen with no dialog. Cases 2-6 of the serial describe did not run on mobile. The same case passed on desktop in this run. Cause not established; the run's only page errors are the Serwist `register` TypeError every page logs under Playwright's blocked service worker.
 
 - `stories.spec.ts:1636` mobile "create, rename, add the EXPIRED story, pick it as cover, remove it, move up by keyboard, delete" failed in the 07-15 gate (05.2 spec)
-  status: open
+  status: resolved
+  **08-02 resolution (2026-10-02):** see `.planning/phases/08-moderation-tenant-admin-panel-pilot-hardening/deferred-items.md`, D-348 verdicts, WINDOWS #70.
   **What:** at line 1707, after the remove step, `page.keyboard.press('Escape')` did not close the "Editar destaque" sheet (`toHaveCount(0)` received 1 for 10 s). The case is mobile-only (desktop skips it by design). Like the phase52 red above, it is a sheet interaction on a highlight manage screen; whether they share a cause is not established.
 
 - `phase2-smoke.spec.ts:378` desktop "1. @tracer panel: create → verified host → invite mail → branded login… Marca rebrand" failed in the 07-15 gate (Phase 2 spec)
-  status: open
+  status: resolved
+  **08-02 resolution (2026-10-02):** see `.planning/phases/08-moderation-tenant-admin-panel-pilot-hardening/deferred-items.md`, D-348 verdicts, WINDOWS #71.
   **What:** the platform-host part of the case passed (panel create, verified host, invite mail, branded login, logo upload, "Alterações salvas.", icons ready). At line 532, after `#primary` was filled, "Salvar alterações" was detached and re-rendered disabled, and stayed disabled until the 300 s test timeout (438 retries). The form appears to have re-rendered from server state after the filled value. Cases 2-5 on desktop did not run. The same case passed on mobile and pixel in this run. This is not the PLATFORM_HOST cause of WINDOWS 59, but phase2-smoke case 1 is still not green on every project, so WINDOWS 59 stays open.

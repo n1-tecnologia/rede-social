@@ -1651,7 +1651,17 @@ test.describe('the Início manage screen (D-109, UI-D-72..76)', () => {
     ]);
 
     // ── Create: appended at the END, the toast, and its edit sheet opens (UI-D-72).
-    await page.getByRole('button', { name: H.manage.create }).click();
+    // 08-02 (WINDOWS #69/#70): `page.goto` is a full document load; a tap before React hydrated the
+    // button is lost, so wait for React's internal props key on it first (the 02-14 signal).
+    const create = page.getByRole('button', { name: H.manage.create });
+    await expect
+      .poll(
+        () =>
+          create.evaluate((el) => Object.keys(el).some((key) => key.startsWith('__reactProps'))),
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    await create.click();
     const createSheet = page.getByRole('dialog', { name: H.create.title });
     await expect(
       createSheet.getByText(H.create.place.replace('{place}', H.place.home)),

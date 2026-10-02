@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 37
+open_count: 33
 waived_count: 0
-fixed_count: 34
+fixed_count: 38
 total_count: 71
-last_updated: 2026-10-02T13:07:44.600Z
+last_updated: 2026-10-02T13:25:40.932Z
 ---
 
 # Broken Windows Ledger
@@ -78,13 +78,13 @@ last_updated: 2026-10-02T13:07:44.600Z
 | 61 | 7 | unrun-verify | apps/web/e2e/events.spec.ts | 422 | 07-05 plan verification: events.spec 'events detalhe > ONE not-found screen' fails on both projects; the body names rede-demo.localhost instead of Rede Demo because env hosts are still <old-brand>-* (pre-existing, same cause as #59/#60) | fixed |  | 2026-09-30T17:54:09.150Z | 2026-09-30T23:28:25.108Z |
 | 62 | 07 | stub | packages/modules/chat/module.ts |  | 07-08: the chat TopBar slot links to /suporte, which has no page until 07-09, and the member's unreadConversations still renders as a count badge (the dot for conversationsBadge='dot' is 07-09's UI) | fixed |  | 2026-09-30T19:34:23.332Z | 2026-09-30T20:21:31.863Z |
 | 63 | 07 | stub | apps/web/app/(app)/suporte/page.tsx |  | 07-09: a holder of chat.support (staff) reaching /suporte gets the not-found screen until 07-10 swaps that branch for the staff inbox (UI-D-262/264) | fixed |  | 2026-09-30T20:21:31.933Z | 2026-09-30T21:03:55.638Z |
-| 64 | 7 | unrun-verify | apps/web/e2e/feed.spec.ts | 321 | 07-11 exit gate: desktop 'a double tap on the gallery likes exactly ONCE' fails in both full pnpm verify runs (1/3 alone); the gesture fires unlikePostAction only; see deferred-items.md | open |  | 2026-10-01T00:21:23.999Z |  |
-| 65 | 7 | unrun-verify | turbo.json |  | 07-11 exit gate: web typecheck (next typegen) races web build on apps/web/.next/types (ENOTEMPTY once); pre-existing pipeline race; see deferred-items.md | open |  | 2026-10-01T00:21:24.073Z |  |
+| 64 | 7 | unrun-verify | apps/web/e2e/feed.spec.ts | 321 | 07-11 exit gate: desktop 'a double tap on the gallery likes exactly ONCE' fails in both full pnpm verify runs (1/3 alone); the gesture fires unlikePostAction only; see deferred-items.md | fixed |  | 2026-10-01T00:21:23.999Z | 2026-10-02T13:24:54.833Z |
+| 65 | 7 | unrun-verify | turbo.json |  | 07-11 exit gate: web typecheck (next typegen) races web build on apps/web/.next/types (ENOTEMPTY once); pre-existing pipeline race; see deferred-items.md | fixed |  | 2026-10-01T00:21:24.073Z | 2026-10-02T13:25:40.932Z |
 | 66 | 07 | unmet-truth | apps/web/app/(app)/notificacoes/NotificationsSurface.tsx | 375 | UI E04 loading unreachable: mark-all clears every loaded row, so the anyUnread-gated button unmounts during its POST and is never aria-busy/disabled (UI-D-252 contradicts itself); pinned by it.fails 'gap E04 loading' in NotificationsSurface.test.tsx (07-14) | fixed |  | 2026-10-01T11:59:29.919Z | 2026-10-01T13:55:16.472Z |
 | 67 | 07 | unmet-truth | apps/web/app/(app)/notificacoes/NotificationsSurface.tsx | 208 | A row tapped while mark-all is in flight sends no read POST (activate posts only while isUnread, and mark-all already cleared it), yet a failed mark-all keeps it read: UI read, server unread until next load; pinned by it.fails 'gap own read POST' (07-14) | fixed |  | 2026-10-01T11:59:29.990Z | 2026-10-01T13:55:16.546Z |
 | 68 | 7 | unrun-verify | apps/web/e2e/notifications.spec.ts | 228 | 07-15 exit gate: mobile 'mark-all clears every tint' failed; reload 44 ms after the click aborted POST /api/notifications/read-all (no keepalive), Novas still shown; see deferred-items.md | fixed |  | 2026-10-01T13:15:19.797Z | 2026-10-01T13:55:16.627Z |
-| 69 | 7 | unrun-verify | apps/web/e2e/phase52-smoke.spec.ts | 294 | 07-15 exit gate: mobile case 1 failed at line 255, the Novo destaque create sheet never opened after the click; cases 2-6 did not run; passed on desktop in the same run; see deferred-items.md | open |  | 2026-10-01T13:15:19.871Z |  |
-| 70 | 7 | unrun-verify | apps/web/e2e/stories.spec.ts | 1636 | 07-15 exit gate: mobile Inicio manage case failed at line 1707, Escape did not close the Editar destaque sheet; see deferred-items.md | open |  | 2026-10-01T13:15:19.946Z |  |
+| 69 | 7 | unrun-verify | apps/web/e2e/phase52-smoke.spec.ts | 294 | 07-15 exit gate: mobile case 1 failed at line 255, the Novo destaque create sheet never opened after the click; cases 2-6 did not run; passed on desktop in the same run; see deferred-items.md | fixed |  | 2026-10-01T13:15:19.871Z | 2026-10-02T13:23:31.763Z |
+| 70 | 7 | unrun-verify | apps/web/e2e/stories.spec.ts | 1636 | 07-15 exit gate: mobile Inicio manage case failed at line 1707, Escape did not close the Editar destaque sheet; see deferred-items.md | fixed |  | 2026-10-01T13:15:19.946Z | 2026-10-02T13:23:31.837Z |
 | 71 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 532 | 07-15 exit gate: desktop case 1 timed out (300 s), Salvar alteracoes re-rendered disabled after #primary was filled (Marca rebrand); platform-host steps passed; desktop cases 2-5 did not run; see deferred-items.md | fixed |  | 2026-10-01T13:15:20.020Z | 2026-10-02T13:07:44.600Z |
 
 ````json
@@ -852,10 +852,10 @@ last_updated: 2026-10-02T13:07:44.600Z
     "file": "apps/web/e2e/feed.spec.ts",
     "line": 321,
     "description": "07-11 exit gate: desktop 'a double tap on the gallery likes exactly ONCE' fails in both full pnpm verify runs (1/3 alone); the gesture fires unlikePostAction only; see deferred-items.md",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-01T00:21:23.999Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-02T13:24:54.833Z"
   },
   {
     "id": 65,
@@ -864,10 +864,10 @@ last_updated: 2026-10-02T13:07:44.600Z
     "file": "turbo.json",
     "line": null,
     "description": "07-11 exit gate: web typecheck (next typegen) races web build on apps/web/.next/types (ENOTEMPTY once); pre-existing pipeline race; see deferred-items.md",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-01T00:21:24.073Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-02T13:25:40.932Z"
   },
   {
     "id": 66,
@@ -912,10 +912,10 @@ last_updated: 2026-10-02T13:07:44.600Z
     "file": "apps/web/e2e/phase52-smoke.spec.ts",
     "line": 294,
     "description": "07-15 exit gate: mobile case 1 failed at line 255, the Novo destaque create sheet never opened after the click; cases 2-6 did not run; passed on desktop in the same run; see deferred-items.md",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-01T13:15:19.871Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-02T13:23:31.763Z"
   },
   {
     "id": 70,
@@ -924,10 +924,10 @@ last_updated: 2026-10-02T13:07:44.600Z
     "file": "apps/web/e2e/stories.spec.ts",
     "line": 1636,
     "description": "07-15 exit gate: mobile Inicio manage case failed at line 1707, Escape did not close the Editar destaque sheet; see deferred-items.md",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-01T13:15:19.946Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-02T13:23:31.837Z"
   },
   {
     "id": 71,

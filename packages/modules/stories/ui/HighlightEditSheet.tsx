@@ -21,7 +21,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { HighlightMembershipList, type HighlightMembershipRow } from './HighlightSheet';
 import { StoryMonogram } from './StoryCircle';
 
@@ -341,7 +341,30 @@ export function HighlightEditSheet({
     }
   }
 
+  /**
+   * 08-02 (WINDOWS #70): the removal is optimistic, so the tapped "Remover" control unmounts in the
+   * same render and the browser drops focus to `<body>`. The sheet's focus trap listens for Escape on
+   * its panel only, so until the host's follow-up re-read happened to re-arm the trap (one server
+   * round trip later) Escape did nothing. Focus stays inside the sheet instead: on "Adicionar
+   * stories", or the panel itself when that control is absent. A layout effect, so it lands before
+   * the next paint and before any key can reach `<body>`.
+   */
+  const keepFocusInSheet = useRef(false);
+  /** The main step's root — its dialog ancestor is the fallback focus target. */
+  const mainRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!keepFocusInSheet.current || removed.size === 0) return;
+    keepFocusInSheet.current = false;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const target =
+      addStoriesRef.current?.querySelector('button') ??
+      mainRef.current?.closest<HTMLElement>('[role="dialog"]');
+    target?.focus({ preventScroll: true });
+  }, [removed]);
+
   const remove = (storyId: string) => {
+    keepFocusInSheet.current = true;
     setRemoved((current) => new Set(current).add(storyId));
     const restore = () =>
       setRemoved((current) => {
@@ -369,7 +392,7 @@ export function HighlightEditSheet({
   const { archived } = highlight;
 
   const main = (
-    <div className="flex flex-col gap-6">
+    <div ref={mainRef} className="flex flex-col gap-6">
       {archived ? (
         <p className="text-sm font-normal text-text-secondary">{labels.archivedNote}</p>
       ) : (

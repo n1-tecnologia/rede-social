@@ -28,6 +28,9 @@ import {
  *  - **E6** "Excluir destaque" asks first (the one irreversible act) and cancel closes the question.
  *  - **E7** an archived place keeps only the take-downs (UI-D-80), and an empty highlight shows the
  *    plain empty state with "Adicionar stories".
+ *  - **E8** (08-02, WINDOWS #70) the optimistic remove unmounts the focused control; focus stays in
+ *    the sheet ("Adicionar stories", or the panel when archived), so Escape still closes it before
+ *    the host's follow-up read lands.
  *
  * Every string is a fixture word: the module ships none (PWA-03).
  */
@@ -305,5 +308,32 @@ describe('HighlightEditSheet — the edit sheet (UI-D-74)', () => {
     expect(screen.getByText('edit-empty-body')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'edit-add-stories' })).toHaveLength(1);
     expect(screen.queryByText('edit-archived-note')).toBeNull();
+  });
+
+  it('E8. after a remove, focus stays in the sheet and Escape closes it before the host re-reads', () => {
+    const pending = () => new Promise<boolean>(() => {}); // the follow-up read never lands here
+    for (const archived of [false, true]) {
+      const onClose = vi.fn();
+      const base = props().highlight;
+      render(
+        <HighlightEditSheet
+          {...props({ onClose, onRemove: pending, highlight: { ...base, archived } })}
+        />,
+      );
+      const remove = screen.getByRole('button', { name: 'remove:date-old' });
+      remove.focus();
+      fireEvent.click(remove);
+
+      expect(screen.queryByRole('button', { name: 'remove:date-old' })).toBeNull();
+      const active = document.activeElement as HTMLElement;
+      expect(active).not.toBe(document.body);
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.contains(active)).toBe(true);
+      if (!archived) expect(active).toHaveTextContent('edit-add-stories');
+
+      fireEvent.keyDown(active, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+      cleanup();
+    }
   });
 });
