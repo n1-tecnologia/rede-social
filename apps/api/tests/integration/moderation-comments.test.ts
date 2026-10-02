@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { ModerationLogPage } from '@rede-social/contracts/moderation';
 import { sqlClient } from '@rede-social/core/db';
 import { subscribe } from '@rede-social/core/server/events/bus';
@@ -459,5 +461,64 @@ describe('moderation tracer', () => {
     const [{ n: afterReads } = { n: 0 }] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.moderation_log where tenant_id = ${ids.tenant}::uuid`;
     expect(afterReads).toBe(before);
+  });
+});
+
+/**
+ * 08-01 Task 2: the one-off DATA repair of replies orphaned under a root deleted the pre-Phase-8 way.
+ * The statement is read from the migration file itself, so this case runs exactly what production
+ * runs — twice, to prove it idempotent.
+ */
+describe('orphan repair', () => {
+  const migrationsDir = fileURLToPath(new URL('../../../../supabase/migrations/', import.meta.url));
+  const repairFile = readdirSync(migrationsDir).find((file) =>
+    file.endsWith('_feed_comments_orphan_replies.sql'),
+  );
+
+  it('soft-deletes a live reply of an already-deleted root once, keeps it identifiable, and the count follows', async () => {
+    expect(repairFile, 'the orphan-repair migration exists').toBeDefined();
+    const repair = readFileSync(`${migrationsDir}${repairFile}`, 'utf8');
+
+    const postId = await seedPost('orphan repair');
+    const [root] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body)
+      values (${ids.tenant}::uuid, ${postId}::uuid, ${ids.member}::uuid, ${`${BODY_PREFIX} raiz legada`})
+      returning id::text`;
+    const [reply] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments
+        (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+      values (${ids.tenant}::uuid, ${postId}::uuid, ${ids.other}::uuid,
+              ${`${BODY_PREFIX} resposta legada`}, 1, ${root?.id ?? ''}::uuid, 0, 'post')
+      returning id::text`;
+    expect(await commentCount(postId)).toBe(2);
+
+    // The LEGACY delete: the root alone, `deleted_at` only (what `deleteComment` did before 08-01).
+    await adminSql`
+      update public.feed_comments set deleted_at = now() where id = ${root?.id ?? ''}::uuid`;
+    expect(await commentCount(postId)).toBe(1);
+
+    await adminSql.unsafe(repair);
+    const once = await adminSql<
+      { id: string; deleted_at: Date | null; deleted_by_user_id: string | null }[]
+    >`
+      select r.id::text, r.deleted_at, r.deleted_by_user_id::text
+        from public.feed_comments r where r.id = ${reply?.id ?? ''}::uuid`;
+    const [rootAfter] = await adminSql<{ deleted_at: Date }[]>`
+      select deleted_at from public.feed_comments where id = ${root?.id ?? ''}::uuid`;
+    expect(once[0]?.deleted_at?.getTime()).toBe(rootAfter?.deleted_at.getTime());
+    // Identifiable: the repair never names an actor.
+    expect(once[0]?.deleted_by_user_id).toBeNull();
+    expect(await commentCount(postId)).toBe(0);
+
+    // Idempotent: a second run changes nothing, and the count still equals the live rows.
+    await adminSql.unsafe(repair);
+    const twice = await adminSql<{ deleted_at: Date | null }[]>`
+      select deleted_at from public.feed_comments where id = ${reply?.id ?? ''}::uuid`;
+    expect(twice[0]?.deleted_at?.getTime()).toBe(once[0]?.deleted_at?.getTime());
+    const [live] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_comments
+       where post_id = ${postId}::uuid and deleted_at is null`;
+    expect(await commentCount(postId)).toBe(live?.n);
+    expect(live?.n).toBe(0);
   });
 });

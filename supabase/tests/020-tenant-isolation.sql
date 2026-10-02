@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(157);
+select plan(160);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -266,6 +266,14 @@ insert into public.platform_admins (user_id) values ('0a000000-0000-4000-8000-00
 insert into public.tenant_invites (tenant_id, email, created_by) values
   ('0a000000-0000-4000-8000-000000000001', 'convidado@a.local', '0a000000-0000-4000-8000-000000000002'),
   ('0b000000-0000-4000-8000-000000000001', 'convidado@b.local', '0b000000-0000-4000-8000-000000000002');
+
+-- 08-01: one moderation-log row per tenant, written as the migration role (the admin-lane writer's
+-- shape). The reasons are IDENTICAL on both sides (adjacency); both parties are the tenant's member.
+insert into public.moderation_log
+  (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id, reason)
+select m.tenant_id, 'member_blocked', m.user_id, m.id, m.user_id, m.id, 'motivo-pgtap'
+  from public.memberships m
+ where m.user_id in ('0a000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-000000000002');
 
 -- ── tenant A's lane ─────────────────────────────────────────────────────────────────────────────
 select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
@@ -882,6 +890,26 @@ select results_eq(
      ) select count(*)::int from d $$,
   ARRAY[0],
   'push_subscriptions: USING — a delete aimed at B''s rows touches nothing'
+);
+-- 08-01: moderation_log, tenant-wide select (the permission is the API's) and an append-only table.
+select is_empty(
+  $$ select id from public.moderation_log
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'moderation_log: B''s rows are invisible'
+);
+select results_eq(
+  $$ select tenant_id::text from public.moderation_log where reason = 'motivo-pgtap' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'],
+  'moderation_log: adjacency — identical reasons on both sides, the lane returns only A''s own row'
+);
+-- The USING case on an append-only table: there is no update path to aim at B at all — the lane holds
+-- no UPDATE privilege on the log, so the statement is refused before any row is considered.
+select throws_ok(
+  $$ update public.moderation_log set reason = reason
+      where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  '42501',
+  null,
+  'moderation_log: an update aimed at B''s rows is refused outright (append-only, touches nothing)'
 );
 
 -- 03-01 (MEDIA-01/TENANT-04): the asset ROW is tenant-scoped like every other row. The OBJECT is

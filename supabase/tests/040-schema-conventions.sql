@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(38);
+select plan(40);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -101,6 +101,20 @@ select results_eq(
       where polrelid = 'public.consent_records'::regclass and polcmd in ('w', 'd', '*') $$,
   ARRAY[0],
   'consent_records has no update/delete policy: a consent record cannot be altered from a tenant lane'
+);
+
+-- ── 08-01: moderation_log is the append-only audit record (D-337): read and append, never rewrite ─
+select results_eq(
+  $$ select count(*)::int from pg_policy
+      where polrelid = 'public.moderation_log'::regclass and polcmd in ('w', 'd', '*') $$,
+  ARRAY[0],
+  'moderation_log has no update/delete policy: a log row cannot be altered from a tenant lane'
+);
+select is(
+  (select string_agg(tgname::text, ',' order by tgname::text) from pg_trigger
+    where tgrelid = 'public.moderation_log'::regclass and not tgisinternal),
+  'moderation_log_no_truncate,moderation_log_no_update_delete',
+  'moderation_log carries its two immutability triggers (row: update/delete, statement: truncate)'
 );
 
 -- ── memberships is the authorization source of truth: the lane may read, never write ───────────
