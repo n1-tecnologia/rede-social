@@ -1,0 +1,30 @@
+{
+  "name": "@rede-social/reuse-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MOD-05 reuse proof (D-347): a fresh app that mounts ONE module (events) on a minimal Hono app providing only the kernel contracts. Its dependency set is asserted by its own unit test; `turbo boundaries` validates its `app` tag.",
+  "exports": {
+    "./app": "./src/app.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
+    "@rede-social/contracts": "workspace:*",
+    "@rede-social/core": "workspace:*",
+    "@rede-social/module-events": "workspace:*",
+    "hono": "4.13.7",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@rede-social/config": "workspace:*",
+    "@types/node": "24.13.4",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
+  }
+}

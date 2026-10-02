@@ -18,7 +18,7 @@
     "db:reset": "bash scripts/supabase.sh db reset && bash scripts/db-local-role.sh",
     "db:seed": "tsx scripts/seed.ts",
     "spike:supavisor": "vitest run --config scripts/vitest.config.ts",
-    "test:integration": "pnpm --filter @rede-social/api test:integration",
+    "test:integration": "pnpm --filter @rede-social/api test:integration && pnpm --filter @rede-social/reuse-fixture test:integration",
     "e2e": "pnpm --filter @rede-social/web e2e",
     "check:static-routes": "bash scripts/check-static-routes.sh",
     "verify": "pnpm lint && pnpm turbo typecheck build test && pnpm check:static-routes && pnpm boundaries && pnpm boundaries:negative && pnpm guard:lanes && pnpm supabase test db && pnpm test:integration && pnpm spike:supavisor && pnpm db:reset && pnpm db:seed && pnpm e2e && pnpm --filter @rede-social/web e2e:pwa",
