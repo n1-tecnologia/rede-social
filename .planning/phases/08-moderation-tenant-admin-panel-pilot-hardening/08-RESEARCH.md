@@ -688,18 +688,26 @@ returning rules_version;
 | A7 | Refusing block/role on `invited` memberships is acceptable under D-332 ("any membership") | Pattern 4 | If the user wants invites blockable, unblock must restore `invited`, not `active`. |
 | A8 | The `qa` tenant can get a verified custom domain on production (the platform host is `rede-social-woad.vercel.app`; no wildcard subdomain exists) | Environment | The real-device pass cannot run on a tenant host. Needs a DNS name from the developer. |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All six were resolved during planning (2026-10-02). Each RESOLVED line records what the plans adopted and the plan/task that implements it.
 
 1. **Does the inline YouTube/Vimeo player ship in Phase 8, or only the CSP that permits it?**
    - What we know: D-346 says the CSP "unblocks" inline embeds. The `LinkPreviewCard` docblock calls inline playback "a Phase 8 item behind a real CSP".
    - Recommendation: ship the click-to-play iframe in the CSP plan (small, additive `embedUrl`). Planner confirms.
+   - RESOLVED: the player ships in Phase 8. 08-08 Task 1 puts the two-host `frame-src` (`www.youtube-nocookie.com`, `player.vimeo.com`) in the policy builder. 08-08 Task 2 adds `embedUrlFor(provider, url)` (`packages/modules/feed/server/embed-url.ts`, strict id patterns), the optional `embedUrl` on `linkPreviewSchema`, and the click-to-play sandboxed iframe in `LinkPreviewCard` (no `allow-top-navigation`, T-08-42).
 2. **Repair already-orphaned replies in production?**
    - Recommendation: yes. One guarded DML migration (`update feed_comments r set deleted_at = p.deleted_at … from feed_comments p where r.parent_id = p.id and p.deleted_at is not null and r.deleted_at is null`). It is expand-safe and the counts self-correct. The planner records it.
+   - RESOLVED: yes. 08-01 Task 2 creates the custom DML migration `*_feed_comments_orphan_replies.sql` with exactly that guarded statement. `deleted_by_user_id` stays null on the repaired rows so they remain identifiable (reversibility rated costly). An integration case `orphan repair` runs it twice to prove idempotence. 08-12 Task 2 lists it in the expand-only `supabase db push` step of the Phase 8 release.
 3. **Block/unblock permission:** `moderation.manage` (recommended, D-338 lists block as moderation) or `members.manage`?
    - Recommendation: `moderation.manage` for block/unblock/log/removal, and `members.manage` for role change and the list.
+   - RESOLVED: `moderation.manage` gates comment removal and `GET /v1/admin/moderation-log` (08-01 Task 1) and `POST /v1/admin/members/{id}/block|unblock` (08-04 Task 1). `members.manage` gates `PUT /v1/admin/members/{id}/role` (08-05 Task 1). One change from the recommendation: the Membros list and detail (`GET /v1/admin/members`, `GET /{membershipId}`) accept EITHER permission (08-04 Task 1). D-340 makes that list the only place to find and unblock a blocked member, so a holder of `moderation.manage` alone must be able to reach it. With default grants both permissions belong to `admin_tenant` (D-338).
 4. **Membros list and invites:** show `invited` rows read-only (no resend/cancel here). 08.1-06 rewrites the invite path, and moving the controls now would collide with it.
+   - RESOLVED: adopted as recommended. 08-04 lists invited rows with a status pill and an invited-only sheet with no actions (Task 2). Its block and unblock guards answer 409 `{ member: 'not_active' }` for an invited membership (Task 1). 08-05 Task 1 gives the role change the same 409 refusal. Resend and cancel stay in the platform panel and 08.1-06.
 5. **qa tenant lifecycle:** keep it active until 08.1's real-device smoke closes the MVP (D-344), then suspend it through the platform status toggle (reversible). Never hard-delete it.
+   - RESOLVED: adopted as recommended. It is recorded in 08-12's D-345 qa-tenant truth. 08-12 Task 2 writes the lifecycle into the DEPLOY.md "Phase 8 release" section. In 08-12 Task 3 the developer creates the tenant through `/plataforma/novo`. T-08-58 records the suspension after 08.1's smoke.
 6. **CSP violation reporting:** Report-Only needs a sink to be useful in production. A tiny `/api/csp-report` route handler that `console.error`s into Vercel logs is enough. Is it in scope? Recommendation: yes, inside the CSP plan.
+   - RESOLVED: in scope. 08-08 Task 1 adds `apps/web/app/api/csp-report/route.ts`, a POST-only, 16 KB-capped handler. It logs one bounded `csp.violation` line to the Vercel logs and answers 204 (T-08-43). The same task wires `report-uri` into `cspFor`. 08-10 maps the handler in the web route-handler inventory. 08-12's Section D checklist reads those log lines before the `CSP_MODE=enforce` flip.
 
 ## Environment Availability
 
