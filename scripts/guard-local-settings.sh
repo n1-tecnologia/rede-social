@@ -8,6 +8,11 @@
 #   (a) set_config('request.jwt.claims', ..., false)   — session-scoped claims
 #   (b) a `set role` / `SET ROLE` statement without the LOCAL keyword on the same line
 #
+# An UPDATE of the `memberships.role` COLUMN reads the same as (b) to a line grep, and Postgres also
+# accepts `SET role = …` as a session-scoped role switch, so the guard cannot tell them apart by the
+# `=`. Write the column quoted, `update … set "role" = …` (08-12): the quoted identifier is plainly a
+# column and the guard stays strict for every real role switch.
+#
 # Usage: bash scripts/guard-local-settings.sh [dir ...]   (default: packages apps scripts)
 # Exit 0 when clean, 1 when any offending line is found (lines are printed).
 set -euo pipefail

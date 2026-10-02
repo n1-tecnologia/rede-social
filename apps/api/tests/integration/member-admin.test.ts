@@ -884,7 +884,7 @@ async function roleOf(membershipId: string): Promise<string | undefined> {
 async function restoreDemoMemberRole(): Promise<void> {
   if (!people.member.membership) return;
   await adminSql`
-    update public.memberships set role = 'member' where id = ${people.member.membership}::uuid`;
+    update public.memberships set "role" = 'member' where id = ${people.member.membership}::uuid`;
 }
 
 /**
@@ -971,7 +971,7 @@ describe('role guards', () => {
   };
   const restoreTwoAdmins = async () => {
     await adminSql`
-      update public.memberships set role = 'admin_tenant', status = 'active', blocked_at = null
+      update public.memberships set "role" = 'admin_tenant', status = 'active', blocked_at = null
        where id in (${people.admin.membership}::uuid, ${people.member.membership}::uuid)`;
   };
 
@@ -980,7 +980,7 @@ describe('role guards', () => {
     // admin): demote them, so the seeded admin and the promoted member are the only two.
     if (throwawayUsers.length > 0) {
       await adminSql`
-        update public.memberships set role = 'member'
+        update public.memberships set "role" = 'member'
          where tenant_id = ${ids.demo}::uuid and role = 'admin_tenant'
            and user_id = any(${throwawayUsers}::uuid[])`;
     }
@@ -991,7 +991,7 @@ describe('role guards', () => {
   afterAll(async () => {
     await restoreDemoAdmin();
     await adminSql`
-      update public.memberships set role = 'admin_tenant' where id = ${people.admin.membership}::uuid`;
+      update public.memberships set "role" = 'admin_tenant' where id = ${people.admin.membership}::uuid`;
     await restoreDemoMember();
     await restoreDemoMemberRole();
   });
@@ -1039,7 +1039,7 @@ describe('role guards', () => {
     // A promoted-then-demoted second admin leaves one: the remaining admin cannot be demoted by a
     // members.manage holder who is not an admin (D-338's future grant, simulated as in 08-04).
     await adminSql`
-      update public.memberships set role = 'support_tenant' where id = ${people.member.membership}::uuid`;
+      update public.memberships set "role" = 'support_tenant' where id = ${people.member.membership}::uuid`;
     setPermissionResolver((role, enabled, settings) => {
       const granted = permissionsFor(role, enabled, settings);
       return role === 'support_tenant' ? [...granted, 'members.manage'] : granted;

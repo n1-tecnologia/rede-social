@@ -293,7 +293,7 @@ export async function setMembershipRole(
       }
       if (decision.outcome === 'write') {
         await tx.execute(sql`
-          update memberships set role = ${role}
+          update memberships set "role" = ${role}
            where id = ${target.id}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
         await recordModerationAction(tx, ctx, {
           action: 'role_changed',

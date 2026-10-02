@@ -1150,7 +1150,7 @@ export async function setMembershipRole(
 ): Promise<void> {
   const updated = await sql()`
     update public.memberships m
-       set role = ${role}
+       set "role" = ${role}
       from public.users u, public.tenants t
      where u.id = m.user_id and t.id = m.tenant_id and u.email = ${email} and t.slug = ${tenantSlug}
     returning m.id`;
