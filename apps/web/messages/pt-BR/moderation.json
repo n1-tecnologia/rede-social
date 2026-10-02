@@ -62,6 +62,39 @@
         "loadMore": "Não foi possível carregar mais registros.",
         "forbidden": "Você não tem mais permissão para esta ação."
       }
+    },
+    "member": {
+      "block": "Bloquear acesso",
+      "unblock": "Desbloquear acesso",
+      "confirmBlock": "Bloquear",
+      "blocking": "Bloqueando…",
+      "confirmUnblock": "Desbloquear",
+      "unblocking": "Desbloqueando…",
+      "back": "Voltar",
+      "blockStep": {
+        "title": "Bloquear {name}?",
+        "body": "{name} perde o acesso a {tenant} na próxima ação no app e não consegue entrar de novo nem criar outra conta com o mesmo e-mail. Os comentários já publicados continuam visíveis."
+      },
+      "unblockStep": {
+        "title": "Desbloquear {name}?",
+        "body": "{name} volta a ter acesso a {tenant} como antes do bloqueio."
+      },
+      "reason": {
+        "label": "Motivo (opcional)",
+        "placeholder": "Ex.: mensagens ofensivas repetidas",
+        "helper": "Fica só no histórico de moderação. {name} não vê o motivo.",
+        "counter": "{count}/500"
+      },
+      "toasts": {
+        "blocked": "Acesso de {name} bloqueado.",
+        "unblocked": "Acesso de {name} liberado."
+      },
+      "errors": {
+        "self": "Você não pode bloquear o próprio acesso nem mudar o próprio papel.",
+        "lastAdmin": "{tenant} precisa de pelo menos um administrador ativo. Torne outra pessoa administrador antes.",
+        "notActive": "Disponível depois que o convite for aceito.",
+        "generic": "Não foi possível concluir. Tente novamente."
+      }
     }
   }
 }

@@ -144,3 +144,145 @@ export const moderationLogPageSchema = z
   })
   .strict();
 export type ModerationLogPage = z.infer<typeof moderationLogPageSchema>;
+
+/* ── Member admin: the Membros list and block / unblock (08-04, MODER-02, ADMIN-02, D-330..D-333, D-340) ── */
+
+/**
+ * The Membros filter (UI-D-271, D-340). `all` is the default and lists EVERY membership of the tenant
+ * — members, staff, blocked and invited — because Membros is the only screen where a blocked member
+ * can be found and unblocked. The web maps an unknown `?status=` to `all` before it asks.
+ */
+export const ADMIN_MEMBER_STATUSES = ['all', 'active', 'blocked', 'invited'] as const;
+export type AdminMemberStatusFilter = (typeof ADMIN_MEMBER_STATUSES)[number];
+
+/** The three states a listed membership can be in (the `memberships_status_chk` list). */
+export const ADMIN_MEMBERSHIP_STATES = ['active', 'blocked', 'invited'] as const;
+export type AdminMembershipState = (typeof ADMIN_MEMBERSHIP_STATES)[number];
+
+/** One screen of rows on a phone, and the ceiling a crafted `limit` cannot exceed. */
+export const ADMIN_MEMBERS_PAGE_SIZE = 20;
+export const ADMIN_MEMBERS_MAX_PAGE_SIZE = 50;
+
+/**
+ * The search term's cap: the member directory's own `MEMBERS_MAX_QUERY_LENGTH` (80), restated as a
+ * value so this module does not pull the profiles contract into every moderation import. The two
+ * are pinned equal by `tests/moderation.test.ts`.
+ */
+export const ADMIN_MEMBERS_MAX_QUERY_LENGTH = 80;
+
+/** The longest cursor the list will look at; the envelope carries two folded strings and a uuid. */
+export const ADMIN_MEMBERS_MAX_CURSOR_LENGTH = 1024;
+
+/**
+ * `GET /v1/admin/members?q=&status=&cursor=&limit=`. `.strict()`: an unknown key fails loudly.
+ *
+ * - `q` is trimmed and capped at `ADMIN_MEMBERS_MAX_QUERY_LENGTH` (a longer one is a 400; the page
+ *   trims before it asks). An empty or spaces-only `q` means no filter (the kernel's
+ *   `normaliseQuery`). It matches the display name OR the e-mail, accent- and case-insensitively, and
+ *   `%`, `_` and `\` are literal.
+ * - `status` is a CLOSED enum defaulting to `all`; an unknown value is a 400, never a widened read.
+ * - `limit` CLAMPS to `1..ADMIN_MEMBERS_MAX_PAGE_SIZE` (garbage reads as the default).
+ * - `cursor` is OPAQUE; one over the transport bound degrades to page 1, like a tampered one.
+ */
+export const adminMemberListQuerySchema = z
+  .object({
+    q: z.string().trim().max(ADMIN_MEMBERS_MAX_QUERY_LENGTH).optional(),
+    status: z.enum(ADMIN_MEMBER_STATUSES).default('all'),
+    cursor: z
+      .string()
+      .optional()
+      .transform((value) =>
+        value !== undefined && value.length > ADMIN_MEMBERS_MAX_CURSOR_LENGTH ? undefined : value,
+      ),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(ADMIN_MEMBERS_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), ADMIN_MEMBERS_MAX_PAGE_SIZE))
+      .default(ADMIN_MEMBERS_PAGE_SIZE),
+  })
+  .strict();
+export type AdminMemberListQuery = z.infer<typeof adminMemberListQuerySchema>;
+
+/**
+ * One membership as the admin sees it (UI-D-272). ADMIN ONLY: it carries the e-mail, so it is served
+ * exclusively behind `members.manage` or `moderation.manage` — the public directory and profile stay
+ * name-only (ADMIN-02 privacy prohibition, T-08-23).
+ *
+ * - `displayName` is null when the membership has no profile name yet (an invited admin): the web
+ *   shows the e-mail as the name line.
+ * - `status` folds the legacy `blocked_at`-only row into `blocked`, so every reader agrees.
+ * - `isViewer` is computed in SQL, so the web never compares ids to draw the static "Você" row.
+ */
+export const adminMemberSchema = z
+  .object({
+    membershipId: z.uuid(),
+    displayName: z.string().nullable(),
+    email: z.string(),
+    avatarAssetId: z.uuid().nullable(),
+    role: z.enum(TENANT_ROLES),
+    status: z.enum(ADMIN_MEMBERSHIP_STATES),
+    isViewer: z.boolean(),
+  })
+  .strict();
+export type AdminMember = z.infer<typeof adminMemberSchema>;
+
+/** One keyset page of the Membros list. `nextCursor` is non-null EXACTLY when another row exists. */
+export const adminMemberPageSchema = z
+  .object({
+    items: z.array(adminMemberSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type AdminMemberPage = z.infer<typeof adminMemberPageSchema>;
+
+/** The `withinCodeUnits` rule of the profiles contract: `.length` counts UTF-16 code units. */
+const withinCodeUnits = (max: number) => (value: string) => value.length <= max;
+
+/**
+ * Body of `POST /v1/admin/members/{membershipId}/block` and `…/unblock` (D-331, UI-D-274).
+ *
+ * `reason` is OPTIONAL and INTERNAL: trimmed, at most `MODERATION_REASON_MAX` UTF-16 code units, and
+ * an empty or whitespace-only value is normalised to `undefined` (stored as null). It is written ONLY
+ * to `moderation_log.reason`; no member-facing response, screen, e-mail or push ever carries it.
+ */
+export const memberAccessBodySchema = z
+  .object({
+    reason: z
+      .string()
+      .trim()
+      .refine(withinCodeUnits(MODERATION_REASON_MAX), 'too_long')
+      .optional()
+      .transform((value) => (value === undefined || value === '' ? undefined : value)),
+  })
+  .strict();
+export type MemberAccessBody = z.infer<typeof memberAccessBodySchema>;
+
+/**
+ * The D-332 refusals of a member action, as `409 CONFLICT { member: <value> }`:
+ *
+ * - `self`: the actor aimed at their own membership (no self-block, no self-role-change);
+ * - `last_admin`: the action would leave the tenant without an active `admin_tenant`;
+ * - `not_active`: the membership is still `invited` (A7: actions wait for the accept);
+ * - `blocked`: a role change aimed at a blocked membership (08-05).
+ */
+export const MEMBER_ADMIN_REFUSALS = ['self', 'last_admin', 'not_active', 'blocked'] as const;
+export type MemberAdminRefusal = (typeof MEMBER_ADMIN_REFUSALS)[number];
+
+/**
+ * `membership.blocked` — emitted by the kernel AFTER the block commits (MODER-02 "revoked
+ * immediately"). Ids only: the reason never rides an event. The notifications module subscribes to
+ * clean the member's push devices eagerly and to nudge their open app (`membership-blocked.ts`).
+ *
+ * Declared against `@rede-social/contracts` by name — the same merge every module contract writes. A
+ * relative `declare module './events'` type-checks inside this package but, seen from the API,
+ * did not merge with the module contracts' entries (every module's `emit` stopped type-checking), so
+ * the package name is the spelling that works across the workspace.
+ */
+export type MembershipBlocked = { tenantId: string; userId: string; membershipId: string };
+
+declare module '@rede-social/contracts' {
+  interface EventMap {
+    'membership.blocked': MembershipBlocked;
+  }
+}

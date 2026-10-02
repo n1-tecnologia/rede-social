@@ -1,0 +1,71 @@
+{
+  "admin": {
+    "back": "Voltar para Configurações",
+    "errors": {
+      "title": "Algo deu errado",
+      "generic": "Algo deu errado. Tente novamente.",
+      "retry": "Tentar novamente",
+      "forbidden": "Você não tem mais permissão para esta ação."
+    },
+    "roles": {
+      "member": "Membro",
+      "support": "Suporte",
+      "admin": "Administrador",
+      "descriptions": {
+        "member": "Vê e participa da comunidade.",
+        "support": "Responde às conversas de suporte.",
+        "admin": "Publica, modera, edita a marca e as regras e gerencia membros."
+      }
+    },
+    "members": {
+      "title": "Membros",
+      "search": {
+        "label": "Buscar por nome ou e-mail",
+        "clear": "Limpar busca"
+      },
+      "filters": {
+        "all": "Todos",
+        "active": "Ativos",
+        "blocked": "Bloqueados",
+        "invited": "Convidados"
+      },
+      "pills": {
+        "blocked": "Bloqueado",
+        "invited": "Convite pendente",
+        "you": "Você"
+      },
+      "roleLabel": "Papel",
+      "roleBlockedHelper": "Desbloqueie o acesso para mudar o papel.",
+      "invitedBody": "Convite enviado para {email}. As ações ficam disponíveis depois que o convite for aceito.",
+      "viewProfile": "Ver perfil",
+      "actions": "Ações de administração",
+      "searchEmpty": {
+        "title": "Nenhum membro encontrado",
+        "body": "Tente outro nome ou e-mail."
+      },
+      "blockedEmpty": {
+        "title": "Nenhum acesso bloqueado",
+        "body": "Quem tiver o acesso bloqueado aparece aqui, e você pode desbloquear quando quiser."
+      },
+      "invitedEmpty": {
+        "title": "Nenhum convite pendente",
+        "body": "Convites aparecem aqui até serem aceitos."
+      },
+      "errors": {
+        "loadMore": "Não foi possível carregar mais membros.",
+        "gone": "Este membro não faz mais parte de {tenant}."
+      },
+      "roleConfirm": {
+        "title": "Mudar o papel de {name}?",
+        "toAdmin": "Como Administrador, {name} poderá publicar, moderar comentários, editar a marca e as regras e gerenciar membros.",
+        "toSupport": "Como Suporte, {name} poderá responder às conversas de suporte, sem publicar nem moderar.",
+        "toMember": "Como Membro, {name} deixa de ter acesso às ferramentas da equipe.",
+        "confirm": "Mudar papel",
+        "cancel": "Cancelar"
+      },
+      "toasts": {
+        "roleChanged": "Papel de {name} alterado para {role}."
+      }
+    }
+  }
+}

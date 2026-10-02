@@ -91,6 +91,8 @@ const REQUIRED_KEYS = [
   // Phase 8 (08-01): the tenant admin panel's Moderação screen. It reads the session and the
   // permission per request, so it may never be prerendered.
   '/(app)/configuracoes/moderacao/page',
+  // 08-04: the Membros admin list reads the session and the permissions per request.
+  '/(app)/configuracoes/membros/page',
   // 07-09: the member's support thread (CHAT-02). It reads the session, the member's own
   // conversation and the request instant (day labels such as "Hoje"), so it may never be prerendered.
   '/(app)/suporte/page',
