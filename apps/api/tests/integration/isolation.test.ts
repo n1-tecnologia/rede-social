@@ -1,4 +1,4 @@
-import { TENANT_HOST_HEADER } from '@rede-social/contracts';
+import { PLATFORM_TERMS_VERSION, TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
@@ -245,6 +245,119 @@ async function membershipIdOf(tenantId: string, email: string): Promise<string> 
       join public.users u on u.id = m.user_id
      where m.tenant_id = ${tenantId}::uuid and u.email = ${email}`;
   if (!row) throw new Error(`${email} is not a member of ${tenantId}`);
+  return row.id;
+}
+
+/* ── 08-10: the sweeps' shared shapes ───────────────────────────────────────────────────────── */
+
+/** Any method, any host, an optional JSON body: the one request shape every 08-10 sweep uses. */
+const send = (method: string, path: string, token: string, host: string, body?: unknown) =>
+  api.request(path, {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      [TENANT_HOST_HEADER]: host,
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+/** `requestId` identifies the CALL, not the row — stripping it makes two refusals comparable (case q). */
+function sansRequestId(raw: string): string {
+  const { requestId: _requestId, ...error } = (JSON.parse(raw) as Envelope)
+    .error as Envelope['error'] & { requestId?: string };
+  return JSON.stringify({ error });
+}
+
+/** One bare NOT_FOUND (D-23): no `details` key at all. Returns the raw body for further needles. */
+async function expectBareNotFound(res: Response, label: string): Promise<string> {
+  const text = await res.text();
+  expect(res.status, `${label}: ${text}`).toBe(404);
+  const body = JSON.parse(text) as Envelope;
+  expect(body.error.code, label).toBe('NOT_FOUND');
+  expect(Object.hasOwn(body.error, 'details'), label).toBe(false);
+  return text;
+}
+
+/** A session presented on another tenant's registered host is refused before any read (D-23). */
+async function expectHostRefused(res: Response, label: string): Promise<void> {
+  expect(res.status, label).toBe(403);
+  expect(await code(res), label).toBe('TENANT_HOST_MISMATCH');
+}
+
+/** The database clock: every "since" below compares against `created_on`/`created_at` it wrote. */
+async function dbNow(): Promise<Date> {
+  const [row] = await adminSql<{ now: Date }[]>`select now() as now`;
+  return row?.now ?? new Date();
+}
+
+/**
+ * The jobs a sweep's writes queued for these tenants are CLOSED, not run (the admin-branding
+ * precedent): a later suite that plays the worker for rede-demo must not inherit a fan-out about a
+ * post, story or event this file already deleted. Matched by `tenantId` in the payload or by the
+ * singleton key (the icon derivation keys on the tenant id).
+ */
+async function closeJobsSince(since: Date, tenants: string[]): Promise<void> {
+  await adminSql`
+    update pgboss.job set state = 'completed', completed_on = now()
+     where state = 'created' and created_on >= ${since}
+       and (data->>'tenantId' = any(${tenants}::text[]) or singleton_key = any(${tenants}::text[]))`;
+}
+
+/** A READY image of `purpose`, written directly (the `seedCover` shape, any purpose). */
+async function seedReadyImage(
+  tenantId: string,
+  email: string,
+  purpose: 'post' | 'cover',
+): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+       variant_widths, filename, ready_at)
+    select ${tenantId}::uuid, u.id, 'image', ${purpose}, 'ready', 'supabase',
+           'image/webp', 262144, 1600, 900, '{320,640,960,1280}'::int[], 'varredura.webp', now()
+      from public.users u where u.email = ${email}
+    returning id`;
+  if (!row) throw new Error(`could not seed a ${purpose} image for ${email}`);
+  mediaAssetIds.push(row.id);
+  return row.id;
+}
+
+/** A live STORY of 24 h, written directly (the `stories.test.ts` fixture), image from `seedStoryImage`. */
+async function seedLiveStory(tenantId: string, email: string): Promise<string> {
+  const assetId = await seedStoryImage(tenantId, email);
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.stories
+      (tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+    select ${tenantId}::uuid, u.id, ${assetId}::uuid, 'image', ${`Varredura 08-10 ${RUN}`},
+           now(), now() + interval '24 hours'
+      from public.users u where u.email = ${email}
+    returning id::text as id`;
+  if (!row) throw new Error(`could not seed a story for ${email}`);
+  return row.id;
+}
+
+async function userIdOf(email: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    select id::text as id from public.users where email = ${email}`;
+  if (!row) throw new Error(`${email} is not seeded`);
+  return row.id;
+}
+
+/** A ROOT comment written directly, on a post or on a story (exactly one target). */
+async function seedComment(
+  tenantId: string,
+  target: { postId: string } | { storyId: string },
+  authorUserId: string,
+): Promise<string> {
+  const postId = 'postId' in target ? target.postId : null;
+  const storyId = 'storyId' in target ? target.storyId : null;
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.feed_comments (tenant_id, post_id, story_id, author_user_id, body)
+    values (${tenantId}::uuid, ${postId}::uuid, ${storyId}::uuid, ${authorUserId}::uuid,
+            'Comentário de varredura.')
+    returning id::text as id`;
+  if (!row) throw new Error(`could not seed a comment in ${tenantId}`);
   return row.id;
 }
 
@@ -1834,6 +1947,1264 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         }
       }
       moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
+  it('phase 8 sweep: every Phase 8 route answers a demo admin about its own tenant only, each block beside its positive control (08-10, TENANT-05)', async () => {
+    // The Phase 8 route inventory (08-10, `tests/isolation-inventory.ts`). Every row is asserted
+    // below: the rede-lab id (or the rede-lab row) through the demo admin's lane, beside the demo
+    // positive control in the same test, and every route again on the lab's registered host
+    // (403 TENANT_HOST_MISMATCH, the "hosts" block).
+    //
+    // | Route                                                | Negative asserted here                                   |
+    // |------------------------------------------------------|----------------------------------------------------------|
+    // | GET    /v1/admin/moderation-log                      | a full walk never lists a lab row; the sweep's rows do    |
+    // | GET    /v1/admin/members                             | a full walk never lists a lab membership                  |
+    // | GET    /v1/admin/members/{id}                        | a lab membership id is the bare 404 (= unknown id)        |
+    // | POST   /v1/admin/members/{id}/block                  | bare 404, the lab row byte-identical                      |
+    // | POST   /v1/admin/members/{id}/unblock                | bare 404, the lab row byte-identical                      |
+    // | PUT    /v1/admin/members/{id}/role                   | bare 404, the lab row byte-identical                      |
+    // | DELETE /v1/feed/comments/{id}                        | a lab comment is the bare 404 and stays live              |
+    // | DELETE /v1/stories/{id}/comments/{id}                | a lab story comment is the bare 404 and stays live        |
+    // | GET    /v1/admin/branding                            | names the demo brand only                                 |
+    // | PUT    /v1/admin/branding/colors                     | rede-lab's tenant row unchanged (snapshot)                |
+    // | POST   /v1/admin/branding/uploads                    | minted under the demo prefix; lab row unchanged           |
+    // | POST   /v1/admin/branding/uploads/{uploadId}/complete| a lab uploadId is the same 404 an unknown one gets        |
+    // | DELETE /v1/admin/branding/icon                       | rede-lab's tenant row unchanged (snapshot)                |
+    // | PATCH  /v1/admin/tenant                              | rede-lab's display name unchanged (snapshot)              |
+    // | GET    /v1/admin/rules                               | answers the demo text and version only                    |
+    // | PUT    /v1/admin/rules                               | rede-lab's rules text and version unchanged (snapshot)    |
+    //
+    // Then the 08-01 assumption-delta invariant: no `moderation_log` row anywhere names an actor or a
+    // target membership of ANOTHER tenant, and every row this sweep wrote is anchored in its own.
+    //
+    // A THROWAWAY demo member is the subject of every demo-side write (block, unblock, role, the
+    // removed comments), so the seeded rows later files count are never touched. rede-demo's tenant
+    // row (brand, name, rules) is snapshotted and written back in `finally`, its added Storage
+    // objects removed and the icon derivations it queued closed.
+    const sweepStart = await dbNow();
+    const asDemoAdmin = (method: string, path: string, body?: unknown) =>
+      send(method, path, tokens.demoAdmin, HOSTS.demo, body);
+
+    const subjectEmail = `varredura8-${RUN}@rede-demo.local`;
+    await throwawayMember(tenantIds.demo, subjectEmail);
+    const subjectUser = throwawayUsers[throwawayUsers.length - 1] ?? '';
+    const demoSubject = await membershipIdOf(tenantIds.demo, subjectEmail);
+    const labAdminMembership = await membershipIdOf(tenantIds.lab, 'admin@rede-lab.local');
+    const labMemberMembership = membershipIds.lab;
+    const labAdminUser = await userIdOf('admin@rede-lab.local');
+    const labMemberUser = await userIdOf('member@rede-lab.local');
+
+    type Settings = {
+      display_name: string;
+      branding: Record<string, unknown>;
+      rules_text: string;
+      rules_version: number;
+    };
+    const settingsOf = async (tenantId: string): Promise<Settings> => {
+      const [row] = await adminSql<Settings[]>`
+        select display_name, branding, rules_text, rules_version
+          from public.tenants where id = ${tenantId}::uuid`;
+      if (!row) throw new Error(`tenant ${tenantId} not found`);
+      return row;
+    };
+    const membershipRow = async (id: string) => {
+      const [row] = await adminSql<{ row: unknown }[]>`
+        select to_jsonb(m) as row from public.memberships m where m.id = ${id}::uuid`;
+      return row?.row;
+    };
+    const commentRow = async (id: string) => {
+      const [row] = await adminSql<{ deleted_at: string | null; tenant_id: string }[]>`
+        select deleted_at::text, tenant_id::text from public.feed_comments where id = ${id}::uuid`;
+      return row;
+    };
+    const brandingObjects = async (tenantId: string) =>
+      (
+        await adminSql<{ name: string }[]>`
+          select name from storage.objects
+           where bucket_id = 'branding' and name like ${`${tenantId}/%`}`
+      ).map((row) => row.name);
+
+    const labSettingsBefore = await settingsOf(tenantIds.lab);
+    const demoSettingsBefore = await settingsOf(tenantIds.demo);
+    const labMembershipBefore = await membershipRow(labMemberMembership);
+    const objectsBefore = {
+      demo: new Set(await brandingObjects(tenantIds.demo)),
+      lab: new Set(await brandingObjects(tenantIds.lab)),
+    };
+
+    // ONE rede-lab log row, through the admin SQL lane (the log is append-only for every lane, but
+    // INSERT is not refused to the owner) — the row the demo admin must never be shown.
+    const [labLog] = await adminSql<{ id: string }[]>`
+      insert into public.moderation_log
+        (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+         reason)
+      values (${tenantIds.lab}::uuid, 'member_blocked', ${labAdminUser}::uuid,
+              ${labAdminMembership}::uuid, ${labMemberUser}::uuid, ${labMemberMembership}::uuid,
+              ${`Varredura 08-10 ${RUN}`})
+      returning id::text as id`;
+    const labLogId = labLog?.id ?? '';
+    expect(labLogId).not.toBe('');
+
+    const commentIds: string[] = [];
+    const storyIds: string[] = [];
+    try {
+      // ── /v1/admin/members/{id} (read, block, unblock, role): lab id = unknown id, bare 404 ──────
+      const memberCalls = (id: string) =>
+        [
+          ['read', 'GET', `/v1/admin/members/${id}`, undefined],
+          ['block', 'POST', `/v1/admin/members/${id}/block`, { reason: 'Isolamento 08-10' }],
+          ['unblock', 'POST', `/v1/admin/members/${id}/unblock`, {}],
+          ['role', 'PUT', `/v1/admin/members/${id}/role`, { role: 'support_tenant' }],
+        ] as const;
+      const unknownMembership = crypto.randomUUID();
+      const foreignCalls = memberCalls(labMemberMembership);
+      for (const [index, [label, method, path, body]] of memberCalls(unknownMembership).entries()) {
+        const unknownText = await expectBareNotFound(
+          await asDemoAdmin(method, path, body),
+          `members ${label} (unknown id)`,
+        );
+        const foreign = foreignCalls[index];
+        if (!foreign) throw new Error('member call table out of step');
+        const foreignText = await expectBareNotFound(
+          await asDemoAdmin(foreign[1], foreign[2], foreign[3]),
+          `members ${label} (lab id)`,
+        );
+        expect(sansRequestId(foreignText), label).toEqual(sansRequestId(unknownText));
+        for (const needle of [tenantIds.lab, 'rede-lab', 'member@rede-lab.local']) {
+          expect(foreignText, label).not.toContain(needle);
+        }
+      }
+      expect(await membershipRow(labMemberMembership)).toEqual(labMembershipBefore);
+
+      // Positive control: the same four calls on the demo subject succeed.
+      const ownRead = await asDemoAdmin('GET', `/v1/admin/members/${demoSubject}`);
+      expect(ownRead.status).toBe(200);
+      expect(((await ownRead.json()) as { membershipId: string }).membershipId).toBe(demoSubject);
+      const blocked = await asDemoAdmin('POST', `/v1/admin/members/${demoSubject}/block`, {
+        reason: 'Isolamento 08-10',
+      });
+      expect(blocked.status).toBe(200);
+      expect(((await blocked.json()) as { status: string }).status).toBe('blocked');
+      const unblocked = await asDemoAdmin('POST', `/v1/admin/members/${demoSubject}/unblock`, {});
+      expect(unblocked.status).toBe(200);
+      expect(((await unblocked.json()) as { status: string }).status).toBe('active');
+      for (const role of ['support_tenant', 'member'] as const) {
+        const changed = await asDemoAdmin('PUT', `/v1/admin/members/${demoSubject}/role`, { role });
+        expect(changed.status, role).toBe(200);
+        expect(((await changed.json()) as { role: string }).role).toBe(role);
+      }
+      expect(await membershipRow(labMemberMembership)).toEqual(labMembershipBefore);
+
+      // ── GET /v1/admin/members: a full walk lists the demo subject and never a lab membership ───
+      const listedMembers: string[] = [];
+      let memberCursor: string | null = null;
+      for (let guard = 0; guard < 100; guard++) {
+        const query: string = memberCursor
+          ? `?limit=50&cursor=${encodeURIComponent(memberCursor)}`
+          : '?limit=50';
+        const res = await asDemoAdmin('GET', `/v1/admin/members${query}`);
+        expect(res.status).toBe(200);
+        const page = (await res.json()) as {
+          items: { membershipId: string }[];
+          nextCursor: string | null;
+        };
+        listedMembers.push(...page.items.map((item) => item.membershipId));
+        memberCursor = page.nextCursor;
+        if (memberCursor === null) break;
+      }
+      expect(listedMembers).toContain(demoSubject);
+      expect(listedMembers).toContain(membershipIds.demo);
+      const labMemberships = await adminSql<{ id: string }[]>`
+        select id::text as id from public.memberships where tenant_id = ${tenantIds.lab}::uuid`;
+      expect(labMemberships.length).toBeGreaterThan(0);
+      for (const row of labMemberships) expect(listedMembers).not.toContain(row.id);
+
+      // ── DELETE /v1/feed/comments/{id}: the lab comment is the bare 404 and stays live ──────────
+      const labFeedComment = await seedComment(
+        tenantIds.lab,
+        { postId: postIds.lab },
+        labMemberUser,
+      );
+      const demoFeedComment = await seedComment(
+        tenantIds.demo,
+        { postId: postIds.demo },
+        subjectUser,
+      );
+      commentIds.push(labFeedComment, demoFeedComment);
+      const unknownFeed = await expectBareNotFound(
+        await asDemoAdmin('DELETE', `/v1/feed/comments/${crypto.randomUUID()}`),
+        'feed comment (unknown id)',
+      );
+      const foreignFeed = await expectBareNotFound(
+        await asDemoAdmin('DELETE', `/v1/feed/comments/${labFeedComment}`),
+        'feed comment (lab id)',
+      );
+      expect(sansRequestId(foreignFeed)).toEqual(sansRequestId(unknownFeed));
+      expect((await commentRow(labFeedComment))?.deleted_at).toBeNull();
+      // Positive control: the demo admin removes the demo subject's comment.
+      const ownFeed = await asDemoAdmin('DELETE', `/v1/feed/comments/${demoFeedComment}`);
+      expect(ownFeed.status).toBe(200);
+      expect((await commentRow(demoFeedComment))?.deleted_at).not.toBeNull();
+
+      // ── DELETE /v1/stories/{id}/comments/{id}: same, on two fresh live stories ────────────────
+      const demoStory = await seedLiveStory(tenantIds.demo, 'admin@rede-demo.local');
+      const labStory = await seedLiveStory(tenantIds.lab, 'admin@rede-lab.local');
+      storyIds.push(demoStory, labStory);
+      const labStoryComment = await seedComment(
+        tenantIds.lab,
+        { storyId: labStory },
+        labMemberUser,
+      );
+      const demoStoryComment = await seedComment(
+        tenantIds.demo,
+        { storyId: demoStory },
+        subjectUser,
+      );
+      commentIds.push(labStoryComment, demoStoryComment);
+      const unknownStoryComment = await expectBareNotFound(
+        await asDemoAdmin('DELETE', `/v1/stories/${demoStory}/comments/${crypto.randomUUID()}`),
+        'story comment (unknown id)',
+      );
+      for (const [label, path] of [
+        ['lab story, lab comment', `/v1/stories/${labStory}/comments/${labStoryComment}`],
+        ['demo story, lab comment', `/v1/stories/${demoStory}/comments/${labStoryComment}`],
+      ] as const) {
+        const text = await expectBareNotFound(await asDemoAdmin('DELETE', path), label);
+        expect(sansRequestId(text), label).toEqual(sansRequestId(unknownStoryComment));
+      }
+      expect((await commentRow(labStoryComment))?.deleted_at).toBeNull();
+      const ownStoryComment = await asDemoAdmin(
+        'DELETE',
+        `/v1/stories/${demoStory}/comments/${demoStoryComment}`,
+      );
+      expect(ownStoryComment.status).toBe(204);
+      expect((await commentRow(demoStoryComment))?.deleted_at).not.toBeNull();
+
+      // ── GET /v1/admin/moderation-log: the sweep's demo rows appear, a lab row never does ───────
+      const loggedIds: string[] = [];
+      let logCursor: string | null = null;
+      for (let guard = 0; guard < 200; guard++) {
+        const query: string = logCursor
+          ? `?limit=50&cursor=${encodeURIComponent(logCursor)}`
+          : '?limit=50';
+        const res = await asDemoAdmin('GET', `/v1/admin/moderation-log${query}`);
+        expect(res.status).toBe(200);
+        const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+        loggedIds.push(...page.items.map((item) => item.id));
+        logCursor = page.nextCursor;
+        if (logCursor === null) break;
+      }
+      // Positive control: block, unblock, two role changes and two comment removals — six rows.
+      const sweepRows = await adminSql<{ id: string }[]>`
+        select id::text as id from public.moderation_log
+         where tenant_id = ${tenantIds.demo}::uuid and created_at >= ${sweepStart}`;
+      expect(sweepRows).toHaveLength(6);
+      for (const row of sweepRows) expect(loggedIds).toContain(row.id);
+      const labLogRows = await adminSql<{ id: string }[]>`
+        select id::text as id from public.moderation_log where tenant_id = ${tenantIds.lab}::uuid`;
+      expect(labLogRows.map((row) => row.id)).toContain(labLogId);
+      for (const row of labLogRows) expect(loggedIds).not.toContain(row.id);
+
+      // ── Tenant settings: brand, name and rules move rede-demo only ─────────────────────────────
+      const brand = await asDemoAdmin('GET', '/v1/admin/branding');
+      expect(brand.status).toBe(200);
+      const brandText = await brand.text();
+      expect(
+        (JSON.parse(brandText) as { tenant: { displayName: string } }).tenant.displayName,
+      ).toBe(demoSettingsBefore.display_name);
+      for (const needle of [tenantIds.lab, labSettingsBefore.display_name]) {
+        expect(brandText).not.toContain(needle);
+      }
+
+      const colours = await asDemoAdmin('PUT', '/v1/admin/branding/colors', {
+        primary: '#9d174d',
+        secondary: '#f9a8d4',
+        confirmLowContrast: true,
+      });
+      expect(colours.status).toBe(200);
+      expect(
+        ((await settingsOf(tenantIds.demo)).branding.colors as { primary?: string }).primary,
+      ).toBe('#9d174d');
+
+      // A real PNG, rendered through the kernel (the api package has no `sharp` of its own).
+      const { deriveIconSet } = await import('@rede-social/core/server/branding/icons');
+      const png = (
+        await deriveIconSet(
+          Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="120" viewBox="0 0 300 120"><rect width="300" height="120" rx="12" fill="#9d174d"/></svg>',
+          ),
+          { primaryHex: '#9d174d', mime: 'image/svg+xml' },
+        )
+      ).i512;
+      const putBytes = async (signedUrl: string) => {
+        const put = await fetch(signedUrl, {
+          method: 'PUT',
+          body: new Uint8Array(png),
+          headers: { 'content-type': 'image/png', 'x-upsert': 'false' },
+        });
+        expect(put.ok).toBe(true);
+      };
+      const uploadBody = { kind: 'logo', mime: 'image/png', size: png.length };
+
+      // The LAB upload is started through the PLATFORM route as the super admin, and its bytes
+      // really land under rede-lab's prefix: the strongest negative the complete route can face.
+      const labStart = await api.request(`/v1/platform/tenants/${tenantIds.lab}/branding/uploads`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.superAdmin}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(uploadBody),
+      });
+      expect(labStart.status).toBe(201);
+      const labUpload = (await labStart.json()) as {
+        uploadId: string;
+        signedUrl: string;
+        path: string;
+      };
+      expect(labUpload.path.startsWith(`${tenantIds.lab}/`)).toBe(true);
+      await putBytes(labUpload.signedUrl);
+
+      const demoStart = await asDemoAdmin('POST', '/v1/admin/branding/uploads', uploadBody);
+      expect(demoStart.status).toBe(201);
+      const demoUpload = (await demoStart.json()) as {
+        uploadId: string;
+        signedUrl: string;
+        path: string;
+      };
+      expect(demoUpload.path.startsWith(`${tenantIds.demo}/`)).toBe(true);
+      await putBytes(demoUpload.signedUrl);
+
+      const foreignComplete = await asDemoAdmin(
+        'POST',
+        `/v1/admin/branding/uploads/${labUpload.uploadId}/complete`,
+      );
+      const unknownComplete = await asDemoAdmin(
+        'POST',
+        `/v1/admin/branding/uploads/logo-${crypto.randomUUID()}.png/complete`,
+      );
+      expect(foreignComplete.status).toBe(404);
+      expect(unknownComplete.status).toBe(404);
+      const foreignCompleteText = await foreignComplete.text();
+      expect(sansRequestId(foreignCompleteText)).toEqual(
+        sansRequestId(await unknownComplete.text()),
+      );
+      expect(foreignCompleteText).not.toContain(tenantIds.lab);
+      // The lab object is untouched: never recorded on either side, never removed.
+      expect(await brandingObjects(tenantIds.lab)).toContain(labUpload.path);
+      // Positive control: the demo's own upload completes and becomes the demo logo.
+      const ownComplete = await asDemoAdmin(
+        'POST',
+        `/v1/admin/branding/uploads/${demoUpload.uploadId}/complete`,
+      );
+      expect(ownComplete.status).toBe(200);
+      const completed = (await ownComplete.json()) as {
+        tenant: { branding: { logoUrl: string | null } };
+      };
+      expect(completed.tenant.branding.logoUrl?.endsWith(demoUpload.path)).toBe(true);
+
+      expect((await asDemoAdmin('DELETE', '/v1/admin/branding/icon')).status).toBe(200);
+
+      const renamed = await asDemoAdmin('PATCH', '/v1/admin/tenant', {
+        displayName: 'Rede Demo Varredura',
+      });
+      expect(renamed.status).toBe(200);
+      expect((await settingsOf(tenantIds.demo)).display_name).toBe('Rede Demo Varredura');
+
+      const rules = await asDemoAdmin('GET', '/v1/admin/rules');
+      expect(rules.status).toBe(200);
+      expect(await rules.json()).toEqual({
+        rulesText: demoSettingsBefore.rules_text,
+        rulesVersion: demoSettingsBefore.rules_version,
+      });
+      const saved = await asDemoAdmin('PUT', '/v1/admin/rules', {
+        rulesText: `${demoSettingsBefore.rules_text}\n\nVarredura 08-10.`,
+      });
+      expect(saved.status).toBe(200);
+      expect(((await saved.json()) as { rulesVersion: number }).rulesVersion).toBe(
+        demoSettingsBefore.rules_version + 1,
+      );
+
+      // Every write above moved rede-demo, and rede-lab's tenant row is exactly as it was.
+      expect(await settingsOf(tenantIds.lab)).toEqual(labSettingsBefore);
+
+      // ── Hosts: every Phase 8 route, demo admin on the lab's registered host ────────────────────
+      for (const [method, path, body] of [
+        ['GET', '/v1/admin/moderation-log', undefined],
+        ['GET', '/v1/admin/members', undefined],
+        ['GET', `/v1/admin/members/${demoSubject}`, undefined],
+        ['POST', `/v1/admin/members/${labMemberMembership}/block`, {}],
+        ['POST', `/v1/admin/members/${labMemberMembership}/unblock`, {}],
+        ['PUT', `/v1/admin/members/${labMemberMembership}/role`, { role: 'support_tenant' }],
+        ['GET', '/v1/admin/branding', undefined],
+        ['PUT', '/v1/admin/branding/colors', { primary: '#b91c1c', secondary: '#fca5a5' }],
+        ['POST', '/v1/admin/branding/uploads', uploadBody],
+        ['POST', `/v1/admin/branding/uploads/${labUpload.uploadId}/complete`, undefined],
+        ['DELETE', '/v1/admin/branding/icon', undefined],
+        ['PATCH', '/v1/admin/tenant', { displayName: 'Invadido' }],
+        ['GET', '/v1/admin/rules', undefined],
+        ['PUT', '/v1/admin/rules', { rulesText: 'Invadido.' }],
+        ['DELETE', `/v1/feed/comments/${labFeedComment}`, undefined],
+        ['DELETE', `/v1/stories/${labStory}/comments/${labStoryComment}`, undefined],
+      ] as const) {
+        await expectHostRefused(
+          await send(method, path, tokens.demoAdmin, HOSTS.lab, body),
+          `${method} ${path}`,
+        );
+      }
+      expect(await settingsOf(tenantIds.lab)).toEqual(labSettingsBefore);
+      expect(await membershipRow(labMemberMembership)).toEqual(labMembershipBefore);
+      expect((await commentRow(labFeedComment))?.deleted_at).toBeNull();
+      expect((await commentRow(labStoryComment))?.deleted_at).toBeNull();
+
+      // ── The 08-01 assumption-delta invariant, over the WHOLE table ────────────────────────────
+      // No row anywhere names an actor or a target membership that belongs to ANOTHER tenant. A
+      // membership that no longer exists (an auth user deleted by a fixture's cleanup, which
+      // cascades) cannot belong to another tenant either, so it does not count against the row.
+      const crossed = await adminSql<{ id: string }[]>`
+        select l.id::text as id from public.moderation_log l
+         where exists (select 1 from public.memberships m
+                        where m.id = l.actor_membership_id and m.tenant_id <> l.tenant_id)
+            or exists (select 1 from public.memberships m
+                        where m.id = l.target_membership_id and m.tenant_id <> l.tenant_id)`;
+      expect(crossed).toEqual([]);
+      // …and every row this sweep wrote (both tenants) is anchored in memberships of its own tenant.
+      const unanchored = await adminSql<{ id: string }[]>`
+        select l.id::text as id from public.moderation_log l
+         where (l.created_at >= ${sweepStart} or l.id = ${labLogId}::uuid)
+           and not (exists (select 1 from public.memberships m
+                             where m.id = l.actor_membership_id and m.tenant_id = l.tenant_id)
+                and exists (select 1 from public.memberships m
+                             where m.id = l.target_membership_id and m.tenant_id = l.tenant_id))`;
+      expect(unanchored).toEqual([]);
+    } finally {
+      if (commentIds.length > 0) {
+        await adminSql`delete from public.feed_comments where id = any(${commentIds}::uuid[])`;
+      }
+      if (storyIds.length > 0) {
+        await adminSql`delete from public.stories where id = any(${storyIds}::uuid[])`;
+      }
+      // rede-demo's tenant row goes back exactly as found (brand, name, rules and version).
+      await adminSql`
+        update public.tenants
+           set display_name = ${demoSettingsBefore.display_name},
+               branding = ${adminSql.json(demoSettingsBefore.branding as never)},
+               rules_text = ${demoSettingsBefore.rules_text},
+               rules_version = ${demoSettingsBefore.rules_version}
+         where id = ${tenantIds.demo}::uuid`;
+      for (const key of ['demo', 'lab'] as const) {
+        const added = (await brandingObjects(tenantIds[key])).filter(
+          (name) => !objectsBefore[key].has(name),
+        );
+        if (added.length > 0) await storageAdmin().from('branding').remove(added);
+      }
+      await closeJobsSince(sweepStart, [tenantIds.demo, tenantIds.lab]);
+    }
+  });
+
+  /*
+   * 08-10 — the INVENTORY SWEEPS. Building `tests/isolation-inventory.ts` from `app.routes` found
+   * pre-Phase-8 routes whose cross-tenant proof lived only in their own feature suite (or nowhere):
+   * mostly the writes and the manage-only reads that f2's GET-only loop never reached. Each sweep
+   * below closes one family, in the same shape as the phase sweeps: the rede-lab id through the demo
+   * lane is the bare 404 an unknown id gets, the lab's rows are byte-identical afterwards, the demo
+   * positive control succeeds IN THE SAME TEST, and every route is refused on the lab's host.
+   */
+
+  it("inventory sweep: me and media — the caller's own profile, nudge, invite answer and asset reads, never another tenant's (08-10)", async () => {
+    // | Route                               | Negative asserted here                                     |
+    // |-------------------------------------|------------------------------------------------------------|
+    // | GET  /v1/me/profile                 | each member reads its OWN membership's profile; lab host 403 |
+    // | POST /v1/me/profile/dismiss-nudge   | the lab member's profile row is byte-identical; lab host 403 |
+    // | POST /v1/me/accept-invite           | answers rede-demo only (already_active); lab host 403       |
+    // | GET  /v1/media                      | a full admin walk never lists a lab asset; lab host 403     |
+    // | GET  /v1/media/{assetId}            | a lab asset id is the bare 404 (= unknown id); lab host 403 |
+    for (const [token, host, membershipId] of [
+      [tokens.demoMember, HOSTS.demo, membershipIds.demo],
+      [tokens.labMember, HOSTS.lab, membershipIds.lab],
+    ] as const) {
+      const res = await send('GET', '/v1/me/profile', token, host);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { membershipId: string }).membershipId).toBe(membershipId);
+    }
+    await expectHostRefused(
+      await send('GET', '/v1/me/profile', tokens.demoMember, HOSTS.lab),
+      'GET /v1/me/profile',
+    );
+
+    // The nudge: a throwaway demo member dismisses its own; the lab member's row never moves.
+    const labProfile = async () => {
+      const [row] = await adminSql<{ row: unknown }[]>`
+        select to_jsonb(p) as row from public.member_profiles p
+         where p.membership_id = ${membershipIds.lab}::uuid`;
+      return row?.row;
+    };
+    const labProfileBefore = await labProfile();
+    expect(labProfileBefore).toBeTruthy();
+    const nudgeEmail = `nudge-${RUN}@rede-demo.local`;
+    const nudgeToken = await throwawayMember(tenantIds.demo, nudgeEmail);
+    const nudgeMembership = await membershipIdOf(tenantIds.demo, nudgeEmail);
+    await expectHostRefused(
+      await send('POST', '/v1/me/profile/dismiss-nudge', nudgeToken, HOSTS.lab),
+      'POST /v1/me/profile/dismiss-nudge',
+    );
+    const dismissed = await send('POST', '/v1/me/profile/dismiss-nudge', nudgeToken, HOSTS.demo);
+    expect(dismissed.status).toBe(200);
+    const nudged = (await dismissed.json()) as { membershipId: string; needsNudge: boolean };
+    expect(nudged.membershipId).toBe(nudgeMembership);
+    expect(nudged.needsNudge).toBe(false);
+    expect(await labProfile()).toEqual(labProfileBefore);
+
+    // The invite answer: the tenant is the membership's, never the request's. An already-active
+    // demo member replaying it learns about rede-demo only and writes nothing.
+    const [demoRules] = await adminSql<{ rules_version: number }[]>`
+      select rules_version from public.tenants where id = ${tenantIds.demo}::uuid`;
+    const consents = {
+      rulesVersion: demoRules?.rules_version ?? 1,
+      termsVersion: PLATFORM_TERMS_VERSION,
+    };
+    const consentRows = async () => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.consent_records
+         where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+      return row?.n ?? 0;
+    };
+    const consentsBefore = await consentRows();
+    await expectHostRefused(
+      await send('POST', '/v1/me/accept-invite', tokens.demoMember, HOSTS.lab, consents),
+      'POST /v1/me/accept-invite',
+    );
+    const replay = await send(
+      'POST',
+      '/v1/me/accept-invite',
+      tokens.demoMember,
+      HOSTS.demo,
+      consents,
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual({ tenantSlug: 'rede-demo', landing: '/inicio' });
+    expect(await consentRows()).toBe(consentsBefore);
+
+    // The asset list: a full walk by the demo admin lists the demo's assets and none of the lab's.
+    const listedAssets: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 200; guard++) {
+      const query: string = cursor ? `?limit=50&cursor=${encodeURIComponent(cursor)}` : '?limit=50';
+      const res = await send('GET', `/v1/media${query}`, tokens.demoAdmin, HOSTS.demo);
+      expect(res.status).toBe(200);
+      const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+      listedAssets.push(...page.items.map((item) => item.id));
+      cursor = page.nextCursor;
+      if (cursor === null) break;
+    }
+    for (const id of [assets.demoVideo, assets.demoCover]) expect(listedAssets).toContain(id);
+    const labAssets = await adminSql<{ id: string }[]>`
+      select id::text as id from public.media_assets where tenant_id = ${tenantIds.lab}::uuid`;
+    expect(labAssets.length).toBeGreaterThan(0);
+    for (const row of labAssets) expect(listedAssets).not.toContain(row.id);
+    await expectHostRefused(
+      await send('GET', '/v1/media', tokens.demoAdmin, HOSTS.lab),
+      'GET /v1/media',
+    );
+
+    // One asset: the lab's cover is the same bare 404 an unknown id gets; the demo's is 200.
+    const unknownAsset = await expectBareNotFound(
+      await send('GET', `/v1/media/${crypto.randomUUID()}`, tokens.demoAdmin, HOSTS.demo),
+      'asset (unknown id)',
+    );
+    const foreignAsset = await expectBareNotFound(
+      await send('GET', `/v1/media/${assets.labCover}`, tokens.demoAdmin, HOSTS.demo),
+      'asset (lab id)',
+    );
+    expect(sansRequestId(foreignAsset)).toEqual(sansRequestId(unknownAsset));
+    expect(foreignAsset).not.toContain(tenantIds.lab);
+    const ownAsset = await send(
+      'GET',
+      `/v1/media/${assets.demoCover}`,
+      tokens.demoAdmin,
+      HOSTS.demo,
+    );
+    expect(ownAsset.status).toBe(200);
+    expect(((await ownAsset.json()) as { id: string }).id).toBe(assets.demoCover);
+    await expectHostRefused(
+      await send('GET', `/v1/media/${assets.demoCover}`, tokens.demoAdmin, HOSTS.lab),
+      'GET /v1/media/{assetId}',
+    );
+  });
+
+  it('inventory sweep: feed — every post, like and comment route refuses the lab ids as the bare 404 beside its demo positive control (08-10)', async () => {
+    // | Route                                      | Negative asserted here                               |
+    // |--------------------------------------------|------------------------------------------------------|
+    // | POST   /v1/feed/posts                      | a lab community is the bare 404, a lab image is the  |
+    // |                                            | one `asset_not_usable` code with no id echoed back   |
+    // | PATCH  /v1/feed/posts/{id}                 | lab post: bare 404, the lab row byte-identical       |
+    // | DELETE /v1/feed/posts/{id}                 | lab post: bare 404, still live                       |
+    // | POST   /v1/feed/posts/{id}/like            | lab post: bare 404, no like written                  |
+    // | DELETE /v1/feed/posts/{id}/like            | lab post: bare 404                                   |
+    // | GET    /v1/feed/posts/{id}/comments        | lab post: bare 404                                   |
+    // | POST   /v1/feed/posts/{id}/comments        | lab post, or a lab parentId on a demo post: bare 404 |
+    // | POST   /v1/feed/comments/{id}/like         | lab comment: bare 404                                |
+    // | DELETE /v1/feed/comments/{id}/like         | lab comment: bare 404                                |
+    // | GET    /v1/feed/comments/{id}/replies      | 200-only by contract: a lab comment WITH a live lab  |
+    // |                                            | reply answers the byte-identical empty page an       |
+    // |                                            | unknown id gets; the demo's own reply is listed      |
+    // Every one of them is also refused on the lab's registered host.
+    const since = await dbNow();
+    const labMemberUser = await userIdOf('member@rede-lab.local');
+    const [labCommunityRow] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.communities
+       where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null limit 1`;
+    const labCommunity = labCommunityRow?.id ?? '';
+    expect(labCommunity).not.toBe('');
+    const labImage = await seedReadyImage(tenantIds.lab, 'admin@rede-lab.local', 'post');
+    const demoImage = await seedReadyImage(tenantIds.demo, 'admin@rede-demo.local', 'post');
+    const labComment = await seedComment(tenantIds.lab, { postId: postIds.lab }, labMemberUser);
+    // A live REPLY under the lab comment, so the replies read has a real lab row to (not) return.
+    const [labReplyRow] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments
+        (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+      values (${tenantIds.lab}::uuid, ${postIds.lab}::uuid, ${labMemberUser}::uuid,
+              'Resposta de varredura.', 1, ${labComment}::uuid, 0, 'post')
+      returning id::text as id`;
+    const labReply = labReplyRow?.id ?? '';
+    expect(labReply).not.toBe('');
+    const createdPosts: string[] = [];
+    const caption = `Varredura do feed ${RUN}`;
+
+    const labTrace = async () => {
+      const [row] = await adminSql<
+        { post: unknown; comment: unknown; likes: number; comments: number }[]
+      >`
+        select (select to_jsonb(p) from public.feed_posts p where p.id = ${postIds.lab}::uuid) as post,
+               (select to_jsonb(c) from public.feed_comments c where c.id = ${labComment}::uuid) as comment,
+               (select count(*)::int from public.feed_likes l
+                 where l.post_id = ${postIds.lab}::uuid or l.comment_id = ${labComment}::uuid) as likes,
+               (select count(*)::int from public.feed_comments c
+                 where c.post_id = ${postIds.lab}::uuid) as comments`;
+      return row;
+    };
+    const asAdmin = (method: string, path: string, body?: unknown) =>
+      send(method, path, tokens.demoAdmin, HOSTS.demo, body);
+    const asMember = (method: string, path: string, body?: unknown) =>
+      send(method, path, tokens.demoMember, HOSTS.demo, body);
+
+    try {
+      const before = await labTrace();
+
+      // ── POST /v1/feed/posts ──────────────────────────────────────────────────────────────────
+      const unknownCommunity = await expectBareNotFound(
+        await asAdmin('POST', '/v1/feed/posts', { caption, communityId: crypto.randomUUID() }),
+        'create into an unknown community',
+      );
+      const foreignCommunity = await expectBareNotFound(
+        await asAdmin('POST', '/v1/feed/posts', { caption, communityId: labCommunity }),
+        'create into the lab community',
+      );
+      expect(sansRequestId(foreignCommunity)).toEqual(sansRequestId(unknownCommunity));
+      const foreignImage = await asAdmin('POST', '/v1/feed/posts', {
+        caption,
+        imageAssetIds: [labImage],
+      });
+      expect(foreignImage.status).toBe(400);
+      const foreignImageText = await foreignImage.text();
+      expect((JSON.parse(foreignImageText) as Envelope).error.details).toEqual({
+        media: 'asset_not_usable',
+      });
+      expect(foreignImageText).not.toContain(labImage);
+      const [refused] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.feed_posts where caption = ${caption}`;
+      expect(refused?.n).toBe(0);
+      // Positive control: the demo's own image publishes, in the demo tenant.
+      const created = await asAdmin('POST', '/v1/feed/posts', {
+        caption,
+        imageAssetIds: [demoImage],
+      });
+      expect(created.status).toBe(201);
+      const ownPost = ((await created.json()) as { id: string }).id;
+      createdPosts.push(ownPost);
+      const [ownRow] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text from public.feed_posts where id = ${ownPost}::uuid`;
+      expect(ownRow?.tenant_id).toBe(tenantIds.demo);
+
+      // ── The lab ids through every other feed route: one bare 404 each ────────────────────────
+      const unknownPost = crypto.randomUUID();
+      const unknownComment = crypto.randomUUID();
+      const crossings = (post: string, comment: string) =>
+        [
+          ['edit post', 'admin', 'PATCH', `/v1/feed/posts/${post}`, { caption: 'Invadido.' }],
+          ['delete post', 'admin', 'DELETE', `/v1/feed/posts/${post}`, undefined],
+          ['like post', 'member', 'POST', `/v1/feed/posts/${post}/like`, undefined],
+          ['unlike post', 'member', 'DELETE', `/v1/feed/posts/${post}/like`, undefined],
+          ['list comments', 'member', 'GET', `/v1/feed/posts/${post}/comments`, undefined],
+          ['comment', 'member', 'POST', `/v1/feed/posts/${post}/comments`, { body: 'Oi.' }],
+          ['like comment', 'member', 'POST', `/v1/feed/comments/${comment}/like`, undefined],
+          ['unlike comment', 'member', 'DELETE', `/v1/feed/comments/${comment}/like`, undefined],
+          [
+            'reply to a lab comment',
+            'member',
+            'POST',
+            `/v1/feed/posts/${ownPost}/comments`,
+            { body: 'Oi.', parentId: comment },
+          ],
+        ] as const;
+      const unknownCalls = crossings(unknownPost, unknownComment);
+      for (const [index, [label, who, method, path, body]] of crossings(
+        postIds.lab,
+        labComment,
+      ).entries()) {
+        const as = who === 'admin' ? asAdmin : asMember;
+        const text = await expectBareNotFound(await as(method, path, body), label);
+        const unknown = unknownCalls[index];
+        if (!unknown) throw new Error('crossing table out of step');
+        const unknownText = await expectBareNotFound(
+          await as(unknown[2], unknown[3], unknown[4]),
+          `${label} (unknown)`,
+        );
+        expect(sansRequestId(text), label).toEqual(sansRequestId(unknownText));
+        for (const needle of [tenantIds.lab, postIds.lab, labComment]) {
+          expect(text, label).not.toContain(needle);
+        }
+      }
+
+      // ── Positive controls: the same routes on the demo's own post and comment ────────────────
+      const edited = await asAdmin('PATCH', `/v1/feed/posts/${ownPost}`, {
+        caption: `${caption} (editado)`,
+      });
+      expect(edited.status).toBe(200);
+      const liked = await asMember('POST', `/v1/feed/posts/${ownPost}/like`);
+      expect(liked.status).toBe(200);
+      expect(((await liked.json()) as { liked: boolean }).liked).toBe(true);
+      const unliked = await asMember('DELETE', `/v1/feed/posts/${ownPost}/like`);
+      expect(((await unliked.json()) as { liked: boolean }).liked).toBe(false);
+      const commented = await asMember('POST', `/v1/feed/posts/${ownPost}/comments`, {
+        body: 'Comentário de controle.',
+      });
+      expect(commented.status).toBe(201);
+      const ownComment = ((await commented.json()) as { id: string }).id;
+      const listed = await asMember('GET', `/v1/feed/posts/${ownPost}/comments`);
+      expect(listed.status).toBe(200);
+      const listedIds = ((await listed.json()) as { items: { id: string }[] }).items.map(
+        (item) => item.id,
+      );
+      expect(listedIds).toContain(ownComment);
+      expect(listedIds).not.toContain(labComment);
+      const commentLike = await asMember('POST', `/v1/feed/comments/${ownComment}/like`);
+      expect(((await commentLike.json()) as { liked: boolean }).liked).toBe(true);
+      const commentUnlike = await asMember('DELETE', `/v1/feed/comments/${ownComment}/like`);
+      expect(((await commentUnlike.json()) as { liked: boolean }).liked).toBe(false);
+
+      // ── Replies: 200-only by contract (no 404 branch), so the proof is the oracle-free page ──
+      // The lab comment HAS a live reply, yet the demo lane gets the byte-identical empty page an
+      // unknown id gets; the demo's own reply is listed under its own comment.
+      const repliesOf = async (id: string) => {
+        const res = await asMember('GET', `/v1/feed/comments/${id}/replies`);
+        expect(res.status).toBe(200);
+        return res.text();
+      };
+      const foreignReplies = await repliesOf(labComment);
+      expect(foreignReplies).toBe(await repliesOf(crypto.randomUUID()));
+      expect(JSON.parse(foreignReplies)).toEqual({ items: [], nextCursor: null });
+      expect(foreignReplies).not.toContain(labReply);
+      const replied = await asMember('POST', `/v1/feed/posts/${ownPost}/comments`, {
+        body: 'Resposta de controle.',
+        parentId: ownComment,
+      });
+      expect(replied.status).toBe(201);
+      const ownReply = ((await replied.json()) as { id: string }).id;
+      expect(
+        (JSON.parse(await repliesOf(ownComment)) as { items: { id: string }[] }).items.map(
+          (item) => item.id,
+        ),
+      ).toEqual([ownReply]);
+
+      // ── Hosts: every route of the family on the lab's registered host ────────────────────────
+      for (const [method, path, body] of [
+        ['POST', '/v1/feed/posts', { caption }],
+        ['PATCH', `/v1/feed/posts/${ownPost}`, { caption: 'Invadido.' }],
+        ['DELETE', `/v1/feed/posts/${ownPost}`, undefined],
+        ['POST', `/v1/feed/posts/${ownPost}/like`, undefined],
+        ['DELETE', `/v1/feed/posts/${ownPost}/like`, undefined],
+        ['GET', `/v1/feed/posts/${ownPost}/comments`, undefined],
+        ['POST', `/v1/feed/posts/${ownPost}/comments`, { body: 'Oi.' }],
+        ['POST', `/v1/feed/comments/${ownComment}/like`, undefined],
+        ['DELETE', `/v1/feed/comments/${ownComment}/like`, undefined],
+        ['GET', `/v1/feed/comments/${ownComment}/replies`, undefined],
+      ] as const) {
+        await expectHostRefused(
+          await send(method, path, tokens.demoAdmin, HOSTS.lab, body),
+          `${method} ${path}`,
+        );
+      }
+
+      // The delete last: the demo's own post goes, the lab's never moved.
+      expect((await asAdmin('DELETE', `/v1/feed/posts/${ownPost}`)).status).toBe(200);
+      expect(await labTrace()).toEqual(before);
+    } finally {
+      if (createdPosts.length > 0) {
+        await adminSql`
+          delete from public.notifications where subject_id = any(${createdPosts}::uuid[])`;
+        await adminSql`delete from public.feed_posts where id = any(${createdPosts}::uuid[])`;
+      }
+      // The reply goes with its root (composite parent key, on delete cascade).
+      await adminSql`delete from public.feed_comments where id = ${labComment}::uuid`;
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+    }
+  });
+
+  it('inventory sweep: stories and communities — every curation, story and community write refuses the lab ids beside its demo positive control (08-10)', async () => {
+    // | Route                                                   | Negative asserted here                    |
+    // |---------------------------------------------------------|-------------------------------------------|
+    // | GET    /v1/stories/mine                                 | a full walk never lists a lab story       |
+    // | GET    /v1/stories/highlights/catalog                   | never lists a lab highlight               |
+    // | PUT    /v1/stories/highlights/order                     | a lab community is the bare 404; a lab id |
+    // |                                                         | in the set is `order_stale`, nothing moves|
+    // | PATCH  /v1/stories/highlights/{id}                      | lab highlight: bare 404, title unchanged  |
+    // | DELETE /v1/stories/highlights/{id}                      | lab highlight: bare 404, still there      |
+    // | DELETE /v1/stories/highlights/{id}/stories/{storyId}    | a lab highlight or a lab story: bare 404  |
+    // | DELETE /v1/stories/{id}                                 | lab story: bare 404, still live           |
+    // | POST   /v1/stories/{id}/likes, DELETE …/likes           | lab story: bare 404, no like written      |
+    // | GET    /v1/stories/{id}/comments, POST …/comments       | lab story: bare 404, nothing written      |
+    // | GET    /v1/stories/{id}/highlights                      | lab story: bare 404                       |
+    // | PATCH  /v1/communities/{id}                             | lab community: bare 404, row unchanged    |
+    // Every one of them is also refused on the lab's registered host.
+    const since = await dbNow();
+    const labMemberUser = await userIdOf('member@rede-lab.local');
+    const [labHighlightRow] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.story_highlights
+       where tenant_id = ${tenantIds.lab}::uuid and community_id is null and title = 'Bastidores'`;
+    const [demoHighlightRow] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.story_highlights
+       where tenant_id = ${tenantIds.demo}::uuid and community_id is null and title = 'Bastidores'`;
+    const [labCommunityRow] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.communities
+       where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null limit 1`;
+    const labHighlight = labHighlightRow?.id ?? '';
+    const demoHighlight = demoHighlightRow?.id ?? '';
+    const labCommunity = labCommunityRow?.id ?? '';
+    for (const [name, id] of Object.entries({ labHighlight, demoHighlight, labCommunity })) {
+      expect(id, `seeded ${name}`).not.toBe('');
+    }
+    const storyIds: string[] = [];
+    const communityIds: string[] = [];
+    let ownHighlight = '';
+
+    const asAdmin = (method: string, path: string, body?: unknown) =>
+      send(method, path, tokens.demoAdmin, HOSTS.demo, body);
+    const asMember = (method: string, path: string, body?: unknown) =>
+      send(method, path, tokens.demoMember, HOSTS.demo, body);
+
+    try {
+      const demoStory = await seedLiveStory(tenantIds.demo, 'admin@rede-demo.local');
+      const labStory = await seedLiveStory(tenantIds.lab, 'admin@rede-lab.local');
+      storyIds.push(demoStory, labStory);
+      const labStoryComment = await seedComment(
+        tenantIds.lab,
+        { storyId: labStory },
+        labMemberUser,
+      );
+      const [demoAdminUser] = await adminSql<{ id: string }[]>`
+        select m.user_id::text as id from public.memberships m
+         where m.tenant_id = ${tenantIds.demo}::uuid and m.role = 'admin_tenant' limit 1`;
+      const [ownCommunityRow] = await adminSql<{ id: string }[]>`
+        insert into public.communities (tenant_id, created_by_user_id, name, slug)
+        values (${tenantIds.demo}::uuid, ${demoAdminUser?.id ?? ''}::uuid,
+                ${`Varredura ${String(RUN).slice(-4)}`},
+                ${`varredura-${crypto.randomUUID().slice(0, 8)}`})
+        returning id::text as id`;
+      const ownCommunity = ownCommunityRow?.id ?? '';
+      communityIds.push(ownCommunity);
+
+      const labTrace = async () => {
+        const [row] = await adminSql<
+          {
+            story: unknown;
+            highlights: unknown;
+            items: number;
+            social: number;
+            community: unknown;
+          }[]
+        >`
+          select (select to_jsonb(s) from public.stories s where s.id = ${labStory}::uuid) as story,
+                 (select jsonb_agg(jsonb_build_object('id', h.id, 'title', h.title, 'position', h.position)
+                                   order by h.id)
+                    from public.story_highlights h where h.tenant_id = ${tenantIds.lab}::uuid) as highlights,
+                 (select count(*)::int from public.story_highlight_items i
+                   where i.tenant_id = ${tenantIds.lab}::uuid) as items,
+                 (select count(*)::int from public.feed_comments c where c.story_id = ${labStory}::uuid)
+                 + (select count(*)::int from public.feed_likes l where l.story_id = ${labStory}::uuid)
+                   as social,
+                 (select to_jsonb(c) from public.communities c where c.id = ${labCommunity}::uuid) as community`;
+        return row;
+      };
+      const before = await labTrace();
+
+      // ── GET /v1/stories/mine: a full walk lists the demo story and no lab story ───────────────
+      const mine: string[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 100; guard++) {
+        const query: string = cursor
+          ? `?limit=50&cursor=${encodeURIComponent(cursor)}`
+          : '?limit=50';
+        const res = await asAdmin('GET', `/v1/stories/mine${query}`);
+        expect(res.status).toBe(200);
+        const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+        mine.push(...page.items.map((item) => item.id));
+        cursor = page.nextCursor;
+        if (cursor === null) break;
+      }
+      expect(mine).toContain(demoStory);
+      const labStoryIds = await adminSql<{ id: string }[]>`
+        select id::text as id from public.stories where tenant_id = ${tenantIds.lab}::uuid`;
+      for (const row of labStoryIds) expect(mine).not.toContain(row.id);
+
+      // ── Highlights: catalog, a throwaway demo highlight, the order ────────────────────────────
+      const catalog = async () => {
+        const res = await asAdmin('GET', '/v1/stories/highlights/catalog');
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { items: { id: string; communityId: string | null }[] })
+          .items;
+      };
+      const labHighlightIds = (
+        await adminSql<{ id: string }[]>`
+          select id::text as id from public.story_highlights where tenant_id = ${tenantIds.lab}::uuid`
+      ).map((row) => row.id);
+      const firstCatalog = await catalog();
+      expect(firstCatalog.map((item) => item.id)).toContain(demoHighlight);
+      for (const id of labHighlightIds)
+        expect(firstCatalog.map((item) => item.id)).not.toContain(id);
+
+      const createdHighlight = await asAdmin('POST', '/v1/stories/highlights', {
+        title: `Varredura ${String(RUN).slice(-4)}`,
+      });
+      expect(createdHighlight.status).toBe(201);
+      ownHighlight = ((await createdHighlight.json()) as { id: string }).id;
+
+      const inicio = (await catalog())
+        .filter((item) => item.communityId === null)
+        .map((item) => item.id);
+      expect(inicio).toContain(ownHighlight);
+      const unknownPlace = await expectBareNotFound(
+        await asAdmin('PUT', '/v1/stories/highlights/order', {
+          communityId: crypto.randomUUID(),
+          highlightIds: inicio,
+        }),
+        'order (unknown community)',
+      );
+      const foreignPlace = await expectBareNotFound(
+        await asAdmin('PUT', '/v1/stories/highlights/order', {
+          communityId: labCommunity,
+          highlightIds: inicio,
+        }),
+        'order (lab community)',
+      );
+      expect(sansRequestId(foreignPlace)).toEqual(sansRequestId(unknownPlace));
+      const staleSet = await asAdmin('PUT', '/v1/stories/highlights/order', {
+        highlightIds: [...inicio.slice(0, -1), labHighlight],
+      });
+      expect(staleSet.status).toBe(400);
+      const staleText = await staleSet.text();
+      expect((JSON.parse(staleText) as Envelope).error.details).toEqual({
+        highlight: 'order_stale',
+      });
+      expect(staleText).not.toContain(labHighlight);
+      // Positive control: the demo's own full set, in its current order, is accepted.
+      expect(
+        (await asAdmin('PUT', '/v1/stories/highlights/order', { highlightIds: inicio })).status,
+      ).toBe(200);
+
+      // ── The lab ids through every other story / community route: one bare 404 each ───────────
+      const unknownId = crypto.randomUUID();
+      const crossings = (highlight: string, story: string, community: string) =>
+        [
+          [
+            'rename highlight',
+            'admin',
+            'PATCH',
+            `/v1/stories/highlights/${highlight}`,
+            { title: 'Invadido' },
+          ],
+          ['remove highlight', 'admin', 'DELETE', `/v1/stories/highlights/${highlight}`, undefined],
+          [
+            'remove a story from a highlight',
+            'admin',
+            'DELETE',
+            `/v1/stories/highlights/${highlight}/stories/${story}`,
+            undefined,
+          ],
+          [
+            'remove a lab story from the demo highlight',
+            'admin',
+            'DELETE',
+            `/v1/stories/highlights/${ownHighlight}/stories/${story}`,
+            undefined,
+          ],
+          ['delete story', 'admin', 'DELETE', `/v1/stories/${story}`, undefined],
+          ['like story', 'member', 'POST', `/v1/stories/${story}/likes`, undefined],
+          ['unlike story', 'member', 'DELETE', `/v1/stories/${story}/likes`, undefined],
+          ['list story comments', 'member', 'GET', `/v1/stories/${story}/comments`, undefined],
+          ['comment on story', 'member', 'POST', `/v1/stories/${story}/comments`, { body: 'Oi.' }],
+          ['story highlights', 'admin', 'GET', `/v1/stories/${story}/highlights`, undefined],
+          [
+            'edit community',
+            'admin',
+            'PATCH',
+            `/v1/communities/${community}`,
+            { description: 'Invadida.' },
+          ],
+        ] as const;
+      const unknownCalls = crossings(unknownId, unknownId, unknownId);
+      for (const [index, [label, who, method, path, body]] of crossings(
+        labHighlight,
+        labStory,
+        labCommunity,
+      ).entries()) {
+        const as = who === 'admin' ? asAdmin : asMember;
+        const text = await expectBareNotFound(await as(method, path, body), label);
+        const unknown = unknownCalls[index];
+        if (!unknown) throw new Error('crossing table out of step');
+        const unknownText = await expectBareNotFound(
+          await as(unknown[2], unknown[3], unknown[4]),
+          `${label} (unknown)`,
+        );
+        expect(sansRequestId(text), label).toEqual(sansRequestId(unknownText));
+        for (const needle of [tenantIds.lab, labHighlight, labStory, labCommunity]) {
+          expect(text, label).not.toContain(needle);
+        }
+      }
+
+      // ── Positive controls: the same routes on the demo's own rows ────────────────────────────
+      expect(
+        (await asAdmin('PATCH', `/v1/stories/highlights/${ownHighlight}`, { title: 'Varrido' }))
+          .status,
+      ).toBe(200);
+      expect(
+        (await asAdmin('PUT', `/v1/stories/highlights/${ownHighlight}/stories/${demoStory}`))
+          .status,
+      ).toBe(200);
+      const storyHighlights = await asAdmin('GET', `/v1/stories/${demoStory}/highlights`);
+      expect(storyHighlights.status).toBe(200);
+      expect(((await storyHighlights.json()) as { highlightIds: string[] }).highlightIds).toContain(
+        ownHighlight,
+      );
+      expect(
+        (await asAdmin('DELETE', `/v1/stories/highlights/${ownHighlight}/stories/${demoStory}`))
+          .status,
+      ).toBe(200);
+      const storyLike = await asMember('POST', `/v1/stories/${demoStory}/likes`);
+      expect(((await storyLike.json()) as { liked: boolean }).liked).toBe(true);
+      const storyUnlike = await asMember('DELETE', `/v1/stories/${demoStory}/likes`);
+      expect(((await storyUnlike.json()) as { liked: boolean }).liked).toBe(false);
+      const storyCommented = await asMember('POST', `/v1/stories/${demoStory}/comments`, {
+        body: 'Comentário de controle.',
+      });
+      expect(storyCommented.status).toBe(201);
+      const ownStoryComment = ((await storyCommented.json()) as { id: string }).id;
+      const storyComments = await asMember('GET', `/v1/stories/${demoStory}/comments`);
+      expect(storyComments.status).toBe(200);
+      const storyCommentIds = (
+        (await storyComments.json()) as { items: { id: string }[] }
+      ).items.map((item) => item.id);
+      expect(storyCommentIds).toContain(ownStoryComment);
+      expect(storyCommentIds).not.toContain(labStoryComment);
+      expect(
+        (await asAdmin('PATCH', `/v1/communities/${ownCommunity}`, { description: 'Varrida.' }))
+          .status,
+      ).toBe(200);
+
+      // ── Hosts: every route of the family on the lab's registered host ────────────────────────
+      for (const [method, path, body] of [
+        ['GET', '/v1/stories/mine', undefined],
+        ['GET', '/v1/stories/highlights/catalog', undefined],
+        ['PUT', '/v1/stories/highlights/order', { highlightIds: inicio }],
+        ['PATCH', `/v1/stories/highlights/${ownHighlight}`, { title: 'Invadido' }],
+        ['DELETE', `/v1/stories/highlights/${ownHighlight}`, undefined],
+        ['DELETE', `/v1/stories/highlights/${ownHighlight}/stories/${demoStory}`, undefined],
+        ['DELETE', `/v1/stories/${demoStory}`, undefined],
+        ['POST', `/v1/stories/${demoStory}/likes`, undefined],
+        ['DELETE', `/v1/stories/${demoStory}/likes`, undefined],
+        ['GET', `/v1/stories/${demoStory}/comments`, undefined],
+        ['POST', `/v1/stories/${demoStory}/comments`, { body: 'Oi.' }],
+        ['GET', `/v1/stories/${demoStory}/highlights`, undefined],
+        ['PATCH', `/v1/communities/${ownCommunity}`, { description: 'Invadida.' }],
+      ] as const) {
+        await expectHostRefused(
+          await send(method, path, tokens.demoAdmin, HOSTS.lab, body),
+          `${method} ${path}`,
+        );
+      }
+
+      // The two deletes last: the demo's own highlight and story go, the lab's never moved.
+      expect((await asAdmin('DELETE', `/v1/stories/highlights/${ownHighlight}`)).status).toBe(204);
+      ownHighlight = '';
+      expect((await asAdmin('DELETE', `/v1/stories/${demoStory}`)).status).toBe(204);
+      expect(await labTrace()).toEqual(before);
+    } finally {
+      if (ownHighlight) {
+        await adminSql`delete from public.story_highlights where id = ${ownHighlight}::uuid`;
+      }
+      if (storyIds.length > 0) {
+        await adminSql`
+          delete from public.notifications where subject_id = any(${storyIds}::uuid[])`;
+        await adminSql`delete from public.feed_comments where story_id = any(${storyIds}::uuid[])`;
+        await adminSql`delete from public.stories where id = any(${storyIds}::uuid[])`;
+      }
+      if (communityIds.length > 0) {
+        await adminSql`delete from public.communities where id = any(${communityIds}::uuid[])`;
+      }
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+    }
+  });
+
+  it('inventory sweep: events — create, edit, status, attendance and the door code refuse the lab event beside the demo positive control (08-10)', async () => {
+    // | Route                                        | Negative asserted here                              |
+    // |----------------------------------------------|-----------------------------------------------------|
+    // | GET   /v1/events/next                        | names a demo event, never a lab one                 |
+    // | POST  /v1/events                             | a lab cover is the bare 404 (= unknown id), nothing |
+    // |                                              | written                                             |
+    // | GET   /v1/events/{id}/edit                   | lab event: bare 404, no URL or code in the body     |
+    // | PUT   /v1/events/{id}                        | lab event: bare 404, the lab row byte-identical     |
+    // | PATCH /v1/events/{id}                        | lab event: bare 404, still active                   |
+    // | GET   /v1/events/{id}/attendance             | lab event: bare 404                                 |
+    // | GET   /v1/events/{id}/attendance/summary     | lab event: bare 404, the lab code never printed     |
+    // | POST  /v1/events/{id}/checkin-code           | lab event: bare 404, the lab code unchanged         |
+    // Every one of them is also refused on the lab's registered host.
+    const since = await dbNow();
+    const labEvent = '0e000000-0000-4000-8000-000000000e01';
+    const title = `Varredura de eventos ${RUN}`;
+    const tenantDate = (offsetDays: number) =>
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(Date.now() + offsetDays * 86_400_000));
+    const date = tenantDate(5);
+    const body = {
+      title,
+      description: 'Encontro de varredura.',
+      format: 'in_person',
+      venueName: 'Auditório da sede',
+      address: 'Rua das Flores, 100',
+      start: { date, time: '19:00' },
+      end: { date, time: '21:00' },
+    };
+    const asAdmin = (method: string, path: string, payload?: unknown) =>
+      send(method, path, tokens.demoAdmin, HOSTS.demo, payload);
+    const labTrace = async () => {
+      const [row] = await adminSql<{ event: unknown; secret: unknown; answers: number }[]>`
+        select (select to_jsonb(e) from public.events e where e.id = ${labEvent}::uuid) as event,
+               (select to_jsonb(s) from public.event_secrets s where s.event_id = ${labEvent}::uuid) as secret,
+               (select count(*)::int from public.event_attendances a
+                 where a.event_id = ${labEvent}::uuid) as answers`;
+      return row;
+    };
+    const created: string[] = [];
+
+    try {
+      const before = await labTrace();
+      expect(before?.event).toBeTruthy();
+      const labCode = (before?.secret as { checkin_code?: string } | null)?.checkin_code ?? '';
+      expect(labCode).not.toBe('');
+
+      // ── GET /v1/events/next names a demo event ───────────────────────────────────────────────
+      const next = await send('GET', '/v1/events/next', tokens.demoMember, HOSTS.demo);
+      expect(next.status).toBe(200);
+      const nextId = ((await next.json()) as { event: { id: string } | null }).event?.id ?? '';
+      const [nextRow] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text from public.events where id = ${nextId}::uuid`;
+      expect(nextRow?.tenant_id).toBe(tenantIds.demo);
+
+      // ── POST /v1/events: a lab cover is the bare 404 an unknown one gets, nothing written ─────
+      const unknownCover = await expectBareNotFound(
+        await asAdmin('POST', '/v1/events', { ...body, coverAssetId: crypto.randomUUID() }),
+        'create with an unknown cover',
+      );
+      const foreignCover = await expectBareNotFound(
+        await asAdmin('POST', '/v1/events', { ...body, coverAssetId: assets.labCover }),
+        'create with the lab cover',
+      );
+      expect(sansRequestId(foreignCover)).toEqual(sansRequestId(unknownCover));
+      expect(foreignCover).not.toContain(assets.labCover);
+      const [refused] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.events where title = ${title}`;
+      expect(refused?.n).toBe(0);
+      // Positive control: the same body with no cover publishes, in the demo tenant.
+      const published = await asAdmin('POST', '/v1/events', body);
+      expect(published.status).toBe(201);
+      const ownEvent = ((await published.json()) as { id: string }).id;
+      created.push(ownEvent);
+      const [ownRow] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text from public.events where id = ${ownEvent}::uuid`;
+      expect(ownRow?.tenant_id).toBe(tenantIds.demo);
+
+      // ── The lab event through every manage route: one bare 404 each ───────────────────────────
+      const unknownEvent = crypto.randomUUID();
+      const crossings = (id: string) =>
+        [
+          ['edit read', 'GET', `/v1/events/${id}/edit`, undefined],
+          ['edit', 'PUT', `/v1/events/${id}`, body],
+          ['cancel', 'PATCH', `/v1/events/${id}`, { status: 'cancelled' }],
+          ['attendance', 'GET', `/v1/events/${id}/attendance`, undefined],
+          ['summary', 'GET', `/v1/events/${id}/attendance/summary`, undefined],
+          ['new door code', 'POST', `/v1/events/${id}/checkin-code`, undefined],
+        ] as const;
+      const unknownCalls = crossings(unknownEvent);
+      for (const [index, [label, method, path, payload]] of crossings(labEvent).entries()) {
+        const text = await expectBareNotFound(await asAdmin(method, path, payload), label);
+        const unknown = unknownCalls[index];
+        if (!unknown) throw new Error('crossing table out of step');
+        const unknownText = await expectBareNotFound(
+          await asAdmin(unknown[1], unknown[2], unknown[3]),
+          `${label} (unknown)`,
+        );
+        expect(sansRequestId(text), label).toEqual(sansRequestId(unknownText));
+        for (const needle of [tenantIds.lab, labEvent, labCode]) {
+          expect(text, label).not.toContain(needle);
+        }
+      }
+
+      // ── Positive controls: the same routes on the demo's own event ───────────────────────────
+      expect((await asAdmin('GET', `/v1/events/${ownEvent}/edit`)).status).toBe(200);
+      expect(
+        (await asAdmin('PUT', `/v1/events/${ownEvent}`, { ...body, title: `${title} (editado)` }))
+          .status,
+      ).toBe(200);
+      expect((await asAdmin('GET', `/v1/events/${ownEvent}/attendance`)).status).toBe(200);
+      const summary = await asAdmin('GET', `/v1/events/${ownEvent}/attendance/summary`);
+      expect(summary.status).toBe(200);
+      const ownCode = ((await summary.json()) as { checkinCode: string | null }).checkinCode;
+      expect(ownCode).toBeTruthy();
+      const regenerated = await asAdmin('POST', `/v1/events/${ownEvent}/checkin-code`);
+      expect(regenerated.status).toBe(200);
+      expect(((await regenerated.json()) as { checkinCode: string }).checkinCode).not.toBe(ownCode);
+      expect(
+        (await asAdmin('PATCH', `/v1/events/${ownEvent}`, { status: 'cancelled' })).status,
+      ).toBe(200);
+
+      // ── Hosts: every route of the family on the lab's registered host ────────────────────────
+      for (const [method, path, payload] of [
+        ['GET', '/v1/events/next', undefined],
+        ['POST', '/v1/events', body],
+        ['GET', `/v1/events/${ownEvent}/edit`, undefined],
+        ['PUT', `/v1/events/${ownEvent}`, body],
+        ['PATCH', `/v1/events/${ownEvent}`, { status: 'active' }],
+        ['GET', `/v1/events/${ownEvent}/attendance`, undefined],
+        ['GET', `/v1/events/${ownEvent}/attendance/summary`, undefined],
+        ['POST', `/v1/events/${ownEvent}/checkin-code`, undefined],
+      ] as const) {
+        await expectHostRefused(
+          await send(method, path, tokens.demoAdmin, HOSTS.lab, payload),
+          `${method} ${path}`,
+        );
+      }
+      expect(await labTrace()).toEqual(before);
+    } finally {
+      if (created.length > 0) {
+        await adminSql`delete from public.notifications where subject_id = any(${created}::uuid[])`;
+        await adminSql`delete from public.events where id = any(${created}::uuid[])`;
+      }
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
     }
   });
 
