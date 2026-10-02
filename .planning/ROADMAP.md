@@ -41,7 +41,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 
-**MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the Phase 8 go-live gate. It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
+**MVP scope** (user decision 2026-09-25): the MVP is the pilot going live, closed by the go-live gate (D-344, 2026-10-01: Phase 8 runs the full gate, and the MVP is declared closed at 08.1's exit gate). It covers Phases 1-8 and their decimal insertions (01.1, 05.1, 05.2, 05.3). The "Rede social" module (Phases 9-11) is V2 scope promoted into this milestone; it is post-MVP, runs after Phase 8, and no MVP phase may depend on it.
 
 ## Phase Details
 
@@ -642,12 +642,53 @@ Plans:
   1. `admin_tenant` can delete any comment or reply in their tenant (soft-delete with `deleted_by`, replies and related notifications cascade), block a member (their session is revoked immediately, they cannot log in to the tenant, and cannot re-register with the same e-mail through the sign-up link) and unblock them; every delete/block/unblock appears in an append-only moderation log with actor, target, timestamp and optional reason that the admin can view.
   2. `admin_tenant` can edit the tenant's branding (logo, colors, favicon, display name) with a live preview of the app shell and contrast validation, list and search members, change a member's role (member / support_tenant / admin_tenant), and edit the community rules text shown at sign-up.
   3. Every admin creation flow - post, story, community, event - plus branding, member management and moderation is usable end-to-end from a phone inside the same app (verified on a real device).
-  4. Each module package ships a README documenting its public interface (contracts, emitted/consumed events, flag key, kernel dependencies) and one module can be copied into a fresh app that provides only the kernel contracts; the pilot go-live gate passes: full two-tenant isolation suite across every endpoint, storage URL and Realtime topic, pt-BR catalog audit with zero UI literals, and PWA install + push smoke tests on a real iPhone and Android.
+  4. Each module package ships a README documenting its public interface (contracts, emitted/consumed events, flag key, kernel dependencies) and one module can be copied into a fresh app that provides only the kernel contracts; the pilot go-live gate passes: full two-tenant isolation suite across every endpoint, storage URL and Realtime topic, pt-BR catalog audit with zero UI literals, and PWA install + push smoke tests on a real iPhone and Android. Per D-344 the full gate runs here, and 08.1's exit gate re-runs the isolation suite with its shared-identity fixture plus a short real-device smoke; the MVP is declared closed there.
 
-**Plans**: TBD
+**Plans:** 12 plans (planned 2026-10-02)
+
+Plans:
+
+**Wave 1**
+
+- [ ] 08-01-PLAN.md — Tracer: kernel append-only `moderation_log` (insert-only policy, revoked grants, immutability trigger, pgTAP 154), `moderation.manage`, `recordModerationAction` in the caller's transaction, the feed comment delete widened with the reply cascade and `deleted_by_user_id`, `GET /v1/admin/moderation-log`, the moderator control and the Moderação screen
+- [ ] 08-02-PLAN.md — Inherited test debt (D-348): WINDOWS #71 Marca remount first, then #64, #65, #69, #70 and the never-run `e2e:pwa` triaged, fixed or quarantined with a reason; CI split into static, db, 4-shard e2e and e2e-pwa jobs under 60 minutes
+
+**Wave 2**
+
+- [ ] 08-03-PLAN.md — Story comment removal (stories module's own admin path), the full Moderação screen (chips, keyset infinite scroll, states) and removal polish on feed, community post, reel and story
+
+**Wave 3**
+
+- [ ] 08-04-PLAN.md — Block and unblock from the Membros admin list (all statuses, search by name or e-mail), D-332 guards under row locks, `membership.blocked` push cleanup and Realtime nudge, D-330/D-331/D-333 proofs
+
+**Wave 4**
+
+- [ ] 08-05-PLAN.md — Role changes with the self and last-admin guards (concurrency-proven), the profile admin entry, lost-permission handling
+
+**Wave 5**
+
+- [ ] 08-06-PLAN.md — Tenant-lane branding with the platform editor reused unchanged, display name, last write wins
+- [ ] 08-09-PLAN.md — MOD-05: `packages/reuse-fixture` mounting the events module on the kernel contracts alone, eight READMEs and the README drift test
+
+**Wave 6**
+
+- [ ] 08-07-PLAN.md — Rules editor with the change-only version bump and the shared `RulesText` renderer; the Configurações admin group complete
+
+**Wave 7**
+
+- [ ] 08-08-PLAN.md — Security hardening (D-346): nonce CSP in `proxy.ts` behind `CSP_MODE`, the report sink, inline YouTube/Vimeo click-to-play, the CORS proof, Phase 2 IN-01..IN-07
+
+**Wave 8**
+
+- [ ] 08-10-PLAN.md — Isolation inventory: every API route, storage-minting route, Realtime topic kind and web route handler classified and covered, the phase 8 sweep
+- [ ] 08-11-PLAN.md — pt-BR audit: Biome `noJsxLiterals`, the attribute-literal rule, every catalog message compiled, the dated audit record
+
+**Wave 9** *(blocked on Waves 1-8; Task 3 is the developer-run go-live)*
+
+- [ ] 08-12-PLAN.md — Phase witness `phase8-smoke.spec.ts`, the consolidated real-device checklist (D-345), the Phase 8 release in DEPLOY.md, the gate report with the LGPD row (D-349), a green `pnpm verify`, then the production release, qa tenant, device pass, CSP flip and CI run
 **UI hint**: yes
 **Research needed**: None (thin screens over columns that exist since Foundation/Feed; hardening is checklist-driven). Flag LGPD legal review to the user before go-live (research covered mechanics only).
-**Notes**: Hardening items without a requirement of their own but expected here: `EXPLAIN` checks on feed/notification/chat queries with a 10k-row seed, Sentry + structured logging with `tenant_id`/`request_id`, Cloud Run config in git (`min-instances=1`, cpu-boost, timeouts), backups/rollback rehearsal, CORS locked to the single origin in production, a11y pass, build-output check for static routes under `(app)`. Moderation of member content (MODER-04) and the reports queue (MODER-05) moved to Phase 11 (post-MVP) on 2026-09-25; this phase's go-live gate closes the MVP.
+**Notes**: Hardening items without a requirement of their own but expected here: `EXPLAIN` checks on feed/notification/chat queries with a 10k-row seed, Sentry + structured logging with `tenant_id`/`request_id`, Cloud Run config in git (`min-instances=1`, cpu-boost, timeouts), backups/rollback rehearsal, CORS locked to the single origin in production, a11y pass, build-output check for static routes under `(app)`. Moderation of member content (MODER-04) and the reports queue (MODER-05) moved to Phase 11 (post-MVP) on 2026-09-25. Of the hardening items above, only the CORS lock and a real CSP are in scope (D-346); the rest are post-pilot backlog. This phase runs the go-live gate in full; the MVP is declared closed at 08.1's exit gate (D-344).
 
 ### Phase 08.1: Multi-Tenant Identity (INSERTED)
 
@@ -662,6 +703,7 @@ Plans:
   3. The auth middleware resolves the tenant of record from the membership that matches the request host. The host still only picks among the user's own memberships: a session with no membership on that host gets `403 TENANT_HOST_MISMATCH`. Bootstrap, the Realtime topic authorization and push subscriptions are all scoped to that membership.
   4. Password recovery and auth e-mails started on tenant B's host carry B's branding and links. The `super_admin` invite flow (02-19 refusal `user_in_other_tenant`) is revisited so it adds a membership instead of refusing.
   5. The two-tenant isolation suite grows a shared-identity fixture. pgTAP and API negative tests prove that a user with memberships in A and B, acting on A's host, can never read or write B's rows, storage objects, Realtime topics or notifications, and the reverse.
+  6. 08.1's exit gate re-runs the full two-tenant isolation suite from Phase 8 (route inventory included) with the shared-identity fixture, plus a short real-device smoke on production. This is where the MVP is declared closed (D-344).
 
 **Plans:** 8 plans (planned 2026-09-30, ahead of Phases 7 and 8; plan 01 opens with a reconcile check against their code)
 
@@ -775,7 +817,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 5. Communities & Stories | 12/12 | Complete    | 2026-09-25 |
 | 6. Events | 9/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 15/15 | Complete    | 2026-10-01 |
-| 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/TBD | Not started | - |
+| 8. Moderation, Tenant Admin Panel & Pilot Hardening | 0/12 | Planned | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
