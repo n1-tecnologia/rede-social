@@ -1,5 +1,7 @@
+import type { MembershipBlocked } from '@rede-social/contracts/moderation';
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { notificationsFanoutJob } from './server/fanout-job';
+import { onMembershipBlocked } from './server/membership-blocked';
 import { pushSendJob } from './server/push/send-job';
 import { countUnseen } from './server/service';
 
@@ -22,6 +24,8 @@ import { countUnseen } from './server/service';
  * No `defaultRolePermissions`: every member reads and marks only their own rows, and the database's
  * owner-only policies are what enforce it.
  *
+ * `events`: `membership.blocked` (08-04) — the eager push cleanup and the open-app nudge.
+ *
  * No producer is named here (MOD-02): producers declare `notificationSources` in THEIR manifests and
  * the app registry wires both halves through the kernel seam.
  */
@@ -41,4 +45,15 @@ export const notificationsModule = defineModule({
   // D-231 (07-04): rows older than 90 days are deleted by the kernel's EXISTING hourly sweeper, which
   // runs `app.notifications_prune(batch)` through the admin lane. The kernel never names this table.
   sweepFunctions: ['notifications_prune'],
+  // 08-04 (MODER-02, T-08-24): the kernel's `membership.blocked` (after commit) cleans the blocked
+  // member's push devices eagerly and nudges their open app to refetch, which lands on the blocked
+  // flow. Best-effort: a failure is logged and never undoes the block.
+  events: [
+    {
+      event: 'membership.blocked',
+      // The bus hands this subscription `membership.blocked` payloads only; the manifest's slot is typed
+      // over the whole EventMap, so the payload is narrowed back to its own event here.
+      handler: (payload) => onMembershipBlocked(payload as MembershipBlocked),
+    },
+  ],
 });

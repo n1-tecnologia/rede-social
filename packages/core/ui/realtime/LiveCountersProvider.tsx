@@ -73,6 +73,13 @@ export interface LiveCountersProviderProps {
    * `chat.read` on the support inbox for staff (the awaiting count).
    */
   events?: ReadonlyArray<string>;
+  /**
+   * 08-04 (MODER-02, T-08-24): called with the refused response when a refetch answers a non-2xx. The
+   * counters still keep their last value (UI-D-265); the HOST decides what a refusal means — the web
+   * shell reads a 403 `MEMBERSHIP_BLOCKED` and lands on the blocked flow. The kernel never interprets
+   * the body. A throwing callback is contained.
+   */
+  onRefused?: (response: Response) => void | Promise<void>;
   children: ReactNode;
 }
 
@@ -87,7 +94,8 @@ const DEFAULT_EVENTS: ReadonlyArray<string> = [REALTIME_EVENTS.notificationsChan
  * - on every `SUBSCRIBED`, first join and re-join alike, and on every `visibilitychange` to visible:
  *   a signal missed while the window was away or the socket was down never matters (D-240);
  * - a failed refetch keeps the last value: with Realtime or the route down, the bell still shows the
- *   server's count and nothing else changes (UI-D-265: no "Conectando…" indicator, no toast).
+ *   server's count and nothing else changes (UI-D-265: no "Conectando…" indicator, no toast); a
+ *   REFUSED one (non-2xx) is also handed to the host's `onRefused` (08-04: the blocked flow).
  *
  * After every change the installed app's icon badge follows (`applyAppBadge`, D-239).
  */
@@ -96,6 +104,7 @@ export function LiveCountersProvider({
   countersUrl,
   topics,
   events = DEFAULT_EVENTS,
+  onRefused,
   children,
 }: LiveCountersProviderProps) {
   const [counters, setCounters] = useState<LiveCounters>(initial);
@@ -121,6 +130,8 @@ export function LiveCountersProvider({
   // Out-of-order answers: only an answer newer than the last one applied may land.
   const issued = useRef(0);
   const applied = useRef(0);
+  const onRefusedRef = useRef(onRefused);
+  onRefusedRef.current = onRefused;
   const refetch = useCallback(async () => {
     const seq = ++issued.current;
     try {
@@ -129,7 +140,14 @@ export function LiveCountersProvider({
         credentials: 'same-origin',
         redirect: 'manual',
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        try {
+          await onRefusedRef.current?.(res);
+        } catch {
+          // A host callback never breaks the live layer.
+        }
+        return;
+      }
       const body: unknown = await res.json();
       if (!isCounters(body) || seq < applied.current) return;
       applied.current = seq;

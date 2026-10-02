@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createECDH, randomBytes, randomUUID } from 'node:crypto';
+import { PLATFORM_TERMS_VERSION } from '@rede-social/contracts';
 import type { AdminMember, AdminMemberPage } from '@rede-social/contracts/moderation';
 import { sqlClient } from '@rede-social/core/db';
 import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions';
@@ -156,9 +157,34 @@ beforeAll(async () => {
   tokens.labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
 });
 
+/** Leaves the seeded demo admin ACTIVE whatever a concurrency case did. */
+async function restoreDemoAdmin(): Promise<void> {
+  if (!people.admin.membership) return;
+  await adminSql`
+    update public.memberships set status = 'active', blocked_at = null
+     where id = ${people.admin.membership}::uuid`;
+}
+
+/** Rows a throwaway left behind that would keep `deleteUser` from cascading cleanly. */
+async function removeThrowawayRows(userId: string): Promise<void> {
+  await adminSql`delete from public.chat_messages where author_user_id = ${userId}::uuid`;
+  await adminSql`delete from public.chat_conversations where created_by_user_id = ${userId}::uuid`;
+  await adminSql`delete from public.push_subscriptions where user_id = ${userId}::uuid`;
+  await adminSql`delete from public.notifications where user_id = ${userId}::uuid`;
+}
+
 afterAll(async () => {
   await restoreDemoMember();
-  for (const userId of throwawayUsers) await authAdmin().deleteUser(userId);
+  await restoreDemoAdmin();
+  await adminSql`delete from public.feed_posts where caption like ${`Membros 08-04 ${RUN}%`}`;
+  // Fan-out jobs the comment and the support message queued are closed, not run (the chat precedent).
+  await adminSql`
+    update pgboss.job_common set state = 'completed', completed_on = now()
+     where name in ('notifications.fanout', 'notifications.push-send') and state = 'created'`;
+  for (const userId of throwawayUsers) {
+    await removeThrowawayRows(userId);
+    await authAdmin().deleteUser(userId);
+  }
   await adminSql.end();
   await sqlClient.end();
 });
@@ -571,5 +597,264 @@ describe('admin list', () => {
     const res = await request('/v1/admin/members', tokens.admin, { host: HOSTS.lab });
     expect(res.status).toBe(403);
     expect((await envelope(res)).error.code).toBe('TENANT_HOST_MISMATCH');
+  });
+});
+
+/* ── Task 3: what a block DOES (and does not do), and what concurrent admins get ───────────────── */
+
+/** A throwaway identity with a session (its own token) — `throwaway` plus a GoTrue sign-in. */
+async function throwawaySession(
+  label: string,
+  role: 'member' | 'admin_tenant' = 'member',
+  name = `Pessoa ${label} ${RUN}`,
+): Promise<Person & { email: string; token: string }> {
+  const email = `${label}-${RUN}@rede-demo.local`;
+  const created = await throwaway(ids.demo, email, role, 'active', name);
+  return { ...created, email, token: await signInAs(email, THROWAWAY_PASSWORD) };
+}
+
+function deviceKeys(): { p256dh: string; auth: string } {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return {
+    p256dh: ecdh.getPublicKey().toString('base64url'),
+    auth: randomBytes(16).toString('base64url'),
+  };
+}
+
+async function pushDevicesOf(userId: string): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.push_subscriptions
+     where tenant_id = ${ids.demo}::uuid and user_id = ${userId}::uuid`;
+  return row?.n ?? 0;
+}
+
+async function dbNow(): Promise<string> {
+  const [row] = await adminSql<{ now: string }[]>`select now()::text as now`;
+  return row?.now ?? '';
+}
+
+describe('block effects', () => {
+  const REASON = `Motivo-unico-${RUN}-nunca-visivel`;
+  let subject: Person & { email: string; token: string };
+  let postId = '';
+  let commentId = '';
+  let conversationId = '';
+
+  beforeAll(async () => {
+    subject = await throwawaySession('efeitos');
+
+    // Two push devices (the 07-06 registration route, as the browser would).
+    for (const n of [1, 2]) {
+      const res = await request('/v1/notifications/push-subscriptions', subject.token, {
+        method: 'POST',
+        body: {
+          endpoint: `https://push.fake.test/08-04/${RUN}/${n}`,
+          keys: deviceKeys(),
+          userAgent: 'vitest',
+        },
+      });
+      expect(res.status, 'push device registered').toBeLessThan(300);
+    }
+    expect(await pushDevicesOf(subject.user)).toBe(2);
+
+    // A post by the admin, a comment by the subject (D-330 evidence).
+    const post = await request('/v1/feed/posts', tokens.admin, {
+      method: 'POST',
+      body: { caption: `Membros 08-04 ${RUN} post` },
+    });
+    expect(post.status).toBe(201);
+    postId = ((await post.json()) as { id: string }).id;
+    const comment = await request(`/v1/feed/posts/${postId}/comments`, subject.token, {
+      method: 'POST',
+      body: { body: `Comentario do bloqueado ${RUN}` },
+    });
+    expect(comment.status).toBe(201);
+    commentId = ((await comment.json()) as { id: string }).id;
+
+    // The subject's support thread (D-333 evidence).
+    const support = await request('/v1/chat/support/messages', subject.token, {
+      method: 'POST',
+      body: { body: `Oi, sou o bloqueado ${RUN}.` },
+    });
+    expect(support.status).toBe(201);
+    conversationId = ((await support.json()) as { conversationId: string }).conversationId;
+  });
+
+  it('a block deletes the member’s push devices and nudges their user topic, ids only', async () => {
+    const since = await dbNow();
+    const res = await block(tokens.admin, subject.membership, { reason: REASON });
+    expect(res.status).toBe(200);
+
+    expect(await pushDevicesOf(subject.user)).toBe(0);
+    const signals = await adminSql<{ event: string; payload: Record<string, unknown> }[]>`
+      select event, payload from realtime.messages
+       where topic = ${`tenant:${ids.demo}:user:${subject.user}`}
+         and inserted_at >= ${since}::timestamptz`;
+    expect(signals.map((signal) => signal.event)).toContain('notifications.changed');
+    for (const signal of signals) expect(JSON.stringify(signal.payload)).not.toContain(REASON);
+  });
+
+  it('D-330: the blocked member’s comment is still listed on its post, for everyone', async () => {
+    for (const token of [tokens.admin, tokens.member]) {
+      const res = await request(`/v1/feed/posts/${postId}/comments`, token);
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).toContain(commentId);
+      expect(text).toContain(`Comentario do bloqueado ${RUN}`);
+    }
+    const [row] = await adminSql<{ deleted_at: Date | null }[]>`
+      select deleted_at from public.feed_comments where id = ${commentId}::uuid`;
+    expect(row?.deleted_at).toBeNull();
+  });
+
+  it('D-331: no member-facing response carries the reason', async () => {
+    const bodies: string[] = [];
+    // The blocked member's own refusal.
+    const bootstrap = await request('/v1/me/bootstrap', subject.token);
+    expect(bootstrap.status).toBe(403);
+    bodies.push(await bootstrap.text());
+    // Another member's reads: the post's comments, the directory, the profile route.
+    for (const path of [
+      `/v1/feed/posts/${postId}/comments`,
+      '/v1/members?limit=50',
+      `/v1/members/${subject.membership}`,
+      '/v1/me/bootstrap',
+    ]) {
+      bodies.push(await (await request(path, tokens.member)).text());
+    }
+    // The admin's own member read (sheet) does not carry it either: it lives only in the log.
+    bodies.push(
+      await (await request(`/v1/admin/members/${subject.membership}`, tokens.admin)).text(),
+    );
+    for (const body of bodies) expect(body).not.toContain(REASON);
+
+    const [logged] = await adminSql<{ reason: string | null }[]>`
+      select reason from public.moderation_log
+       where target_membership_id = ${subject.membership}::uuid and action = 'member_blocked'`;
+    expect(logged?.reason).toBe(REASON);
+  });
+
+  it('MODER-02: the blocked member cannot re-register with the same e-mail', async () => {
+    const [tenant] = await adminSql<{ rules_version: number }[]>`
+      select rules_version from public.tenants where id = ${ids.demo}::uuid`;
+    const res = await api.request('/v1/public/signup/rede-demo', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': 'vitest' },
+      body: JSON.stringify({
+        name: 'Outra Conta',
+        email: subject.email,
+        password: 'Segredo123',
+        consents: {
+          tenantRulesVersion: tenant?.rules_version ?? 1,
+          platformTermsVersion: PLATFORM_TERMS_VERSION,
+        },
+      }),
+    });
+    expect(res.status).toBe(409);
+    expect((await envelope(res)).error.code).toBe('EMAIL_ALREADY_REGISTERED');
+  });
+
+  it('D-333: staff still read the thread; a reply is 409 member_blocked while blocked, 201 after unblock', async () => {
+    const read = await request(`/v1/chat/conversations/${conversationId}/messages`, tokens.support);
+    expect(read.status).toBe(200);
+    const blocked = await request(
+      `/v1/chat/conversations/${conversationId}/messages`,
+      tokens.support,
+      {
+        method: 'POST',
+        body: { body: 'Oi?' },
+      },
+    );
+    expect(blocked.status).toBe(409);
+    expect((await envelope(blocked)).error.details).toEqual({ chat: 'member_blocked' });
+
+    expect((await unblock(tokens.admin, subject.membership)).status).toBe(200);
+    const reply = await request(
+      `/v1/chat/conversations/${conversationId}/messages`,
+      tokens.support,
+      {
+        method: 'POST',
+        body: { body: 'Estamos de volta.' },
+      },
+    );
+    expect(reply.status).toBe(201);
+    // Unblocking restores access exactly as it was (and adds no devices back).
+    expect((await request('/v1/me/bootstrap', subject.token)).status).toBe(200);
+  });
+});
+
+describe('block concurrency', () => {
+  let secondAdmin: Person & { email: string; token: string };
+
+  beforeAll(async () => {
+    // A second ACTIVE admin, promoted through the admin SQL lane: the demo tenant now has exactly two.
+    secondAdmin = await throwawaySession('admin2', 'admin_tenant');
+  });
+
+  it('two concurrent blocks of one member: both 200, exactly one member_blocked row', async () => {
+    const target = await throwawaySession('alvo-duplo');
+    const [a, b] = await Promise.all([
+      block(tokens.admin, target.membership),
+      block(secondAdmin.token, target.membership),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(((await a.json()) as AdminMember).status).toBe('blocked');
+    expect(((await b.json()) as AdminMember).status).toBe('blocked');
+    expect(await logRows(target.membership, 'member_blocked')).toHaveLength(1);
+  });
+
+  it('a concurrent block and unblock end consistent, with one row per real transition', async () => {
+    const target = await throwawaySession('alvo-misto');
+    const [a, b] = await Promise.all([
+      block(tokens.admin, target.membership),
+      unblock(secondAdmin.token, target.membership),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const final = await membershipRow(target.membership);
+    const blockedRows = await logRows(target.membership, 'member_blocked');
+    const unblockedRows = await logRows(target.membership, 'member_unblocked');
+    // The block is always a real transition (the target starts active); the unblock is one only
+    // when it ran AFTER the block.
+    expect(blockedRows).toHaveLength(1);
+    if (final?.status === 'blocked') {
+      expect(final.blocked_at).not.toBeNull();
+      expect(unblockedRows).toHaveLength(0);
+    } else {
+      expect(final).toMatchObject({ status: 'active', blocked_at: null });
+      expect(unblockedRows).toHaveLength(1);
+    }
+  });
+
+  it('mutual blocks of the only two admins: one 200, one 409 last_admin, one active admin remains', async () => {
+    const before =
+      (await logRows(secondAdmin.membership, 'member_blocked')).length +
+      (await logRows(people.admin.membership, 'member_blocked')).length;
+    try {
+      const [a, b] = await Promise.all([
+        block(tokens.admin, secondAdmin.membership),
+        block(secondAdmin.token, people.admin.membership),
+      ]);
+      const statuses = [a.status, b.status].sort();
+      expect(statuses).toEqual([200, 409]);
+      const refused = a.status === 409 ? a : b;
+      expect((await envelope(refused)).error.details).toEqual({ member: 'last_admin' });
+
+      const [active] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.memberships
+         where tenant_id = ${ids.demo}::uuid and role = 'admin_tenant' and status = 'active'
+           and blocked_at is null and deleted_at is null`;
+      expect(active?.n).toBe(1);
+      const written = [
+        ...(await logRows(secondAdmin.membership, 'member_blocked')),
+        ...(await logRows(people.admin.membership, 'member_blocked')),
+      ];
+      expect(written).toHaveLength(before + 1);
+    } finally {
+      await restoreDemoAdmin();
+      await adminSql`
+        update public.memberships set status = 'active', blocked_at = null
+         where id = ${secondAdmin.membership}::uuid`;
+    }
   });
 });

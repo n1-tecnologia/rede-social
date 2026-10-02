@@ -1100,3 +1100,40 @@ export async function blockedMembershipCount(tenantSlug: string): Promise<number
        and (m.status = 'blocked' or m.blocked_at is not null)`;
   return rows[0]?.count ?? 0;
 }
+
+/**
+ * 08-04: blocks or unblocks a membership THROUGH THE REAL API as `adminEmail` (the admin action the
+ * Membros sheet calls), so the kernel's `membership.blocked` crosses the bus and the notifications
+ * subscriber nudges the member's open app. `host` is the tenant host the API compares the membership
+ * with. Throws on anything but 200.
+ */
+export async function memberAccessAs(
+  adminEmail: string,
+  password: string,
+  membershipId: string,
+  kind: 'block' | 'unblock',
+  host = 'rede-demo.localhost',
+): Promise<void> {
+  const session = await fetch(`${required('SUPABASE_URL')}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: {
+      apikey: required('SUPABASE_PUBLISHABLE_KEY'),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ email: adminEmail, password }),
+  });
+  if (!session.ok) throw new Error(`${adminEmail} sign-in failed: ${session.status}`);
+  const token = ((await session.json()) as { access_token: string }).access_token;
+  const apiUrl = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
+  const res = await fetch(`${apiUrl}/v1/admin/members/${membershipId}/${kind}`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-tenant-host': host,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+  if (res.status !== 200)
+    throw new Error(`${kind} ${membershipId}: ${res.status} ${await res.text()}`);
+}

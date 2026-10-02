@@ -66,9 +66,14 @@ function fakeRealtime() {
   };
 }
 
-let answers: Array<{ unreadNotifications: number; unreadConversations: number } | 'fail'> = [];
+let answers: Array<
+  { unreadNotifications: number; unreadConversations: number } | 'fail' | 'blocked'
+> = [];
 const fetchMock = vi.fn(async (_url: string) => {
   const next = answers.shift();
+  if (next === 'blocked') {
+    return new Response(JSON.stringify({ error: { code: 'MEMBERSHIP_BLOCKED' } }), { status: 403 });
+  }
   if (!next || next === 'fail') return new Response(null, { status: 502 });
   return new Response(JSON.stringify(next), { status: 200 });
 });
@@ -97,7 +102,11 @@ function Count() {
   return <span data-testid="count">{counters ? counters.unreadNotifications : 'none'}</span>;
 }
 
-function tree(fake: ReturnType<typeof fakeRealtime>, initial = 0) {
+function tree(
+  fake: ReturnType<typeof fakeRealtime>,
+  initial = 0,
+  onRefused?: (response: Response) => void | Promise<void>,
+) {
   return (
     <RealtimeProvider
       supabaseUrl="http://supabase.test"
@@ -109,6 +118,7 @@ function tree(fake: ReturnType<typeof fakeRealtime>, initial = 0) {
         initial={{ unreadNotifications: initial, unreadConversations: 0 }}
         countersUrl="/api/me/counters"
         topics={TOPICS}
+        onRefused={onRefused}
       >
         <Count />
       </LiveCountersProvider>
@@ -244,6 +254,32 @@ describe('RealtimeProvider + LiveCountersProvider (07-03)', () => {
     await waitFor(() => expect(counterFetches()).toBe(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.getByTestId('count')).toHaveTextContent('4');
+  });
+
+  it('08-04: a refused refetch keeps the value and hands the response to onRefused', async () => {
+    const fake = fakeRealtime();
+    const seen: Array<{ status: number; code: unknown }> = [];
+    const onRefused = vi.fn(async (response: Response) => {
+      const body = (await response.json()) as { error?: { code?: string } };
+      seen.push({ status: response.status, code: body.error?.code });
+    });
+    render(tree(fake, 2, onRefused));
+    await waitFor(() => expect(fake.client.channel).toHaveBeenCalledTimes(2));
+    answers.push('blocked');
+    fake.emit(TOPICS[0] as string, 'notifications.changed');
+    await waitFor(() => expect(onRefused).toHaveBeenCalledTimes(1));
+    expect(seen).toEqual([{ status: 403, code: 'MEMBERSHIP_BLOCKED' }]);
+    expect(screen.getByTestId('count')).toHaveTextContent('2');
+
+    // A throwing host callback is contained: the next good answer still lands.
+    onRefused.mockImplementationOnce(async () => {
+      throw new Error('host failed');
+    });
+    answers.push('fail', { unreadNotifications: 5, unreadConversations: 0 });
+    fake.emit(TOPICS[0] as string, 'notifications.changed');
+    await waitFor(() => expect(onRefused).toHaveBeenCalledTimes(2));
+    fake.emit(TOPICS[0] as string, 'notifications.changed');
+    await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('5'));
   });
 
   it('D-239: every counters change sets the app badge (clear at zero)', async () => {

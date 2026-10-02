@@ -3,9 +3,12 @@ import {
   closeAdmin,
   createMember,
   deleteUserByEmail,
+  memberAccessAs,
+  membershipIdFor,
   removeMembership,
   setMembershipStatus,
 } from './admin';
+import { SEED_PASSWORD, users } from './fixtures';
 
 /**
  * AUTH-06 / D-09 on a phone viewport (`mobile-chromium`): blocking a membership cuts the member off on
@@ -99,4 +102,44 @@ test('orphan identity — a session with no membership lands on /sem-comunidade'
   );
 
   await deleteUserByEmail(orphan);
+});
+
+/**
+ * 08-04 (MODER-02 "revoked immediately", T-08-24): the member has `/inicio` OPEN when the admin blocks
+ * them through the real API. The kernel emits `membership.blocked`, the notifications subscriber
+ * publishes `notifications.changed` on the member's user topic, the open shell refetches its
+ * counters, the BFF answers 403 `MEMBERSHIP_BLOCKED` with the blocked flow's path, and the page lands
+ * on "Acesso suspenso" within 15 s — with no manual reload. Unblocking and signing in again restores.
+ */
+test('blocked by an admin with the app open', async ({ page }) => {
+  const live = `e2e-blocked-live-${Date.now()}@rede-demo.local`;
+  await createMember(live, PASSWORD, 'rede-demo');
+  const membershipId = await membershipIdFor(live, 'rede-demo');
+  try {
+    await page.goto('/entrar');
+    await page.locator('#email').fill(live);
+    await page.locator('#password').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
+    // Let the shell's Realtime join settle (its first SUBSCRIBED refetches the counters).
+    await page.waitForLoadState('networkidle');
+
+    await memberAccessAs(users.demoAdmin, SEED_PASSWORD, membershipId, 'block');
+
+    // No reload, no navigation by the test: the open app gets there on its own.
+    await expect(page).toHaveURL(/\/acesso-suspenso\?t=Rede%20Demo$/, { timeout: 15_000 });
+    await expect(page.getByText(SUSPENDED)).toBeVisible();
+    expect(await page.locator('body').innerText()).not.toMatch(/motivo/i);
+
+    await memberAccessAs(users.demoAdmin, SEED_PASSWORD, membershipId, 'unblock');
+    await page.goto('/entrar');
+    await page.locator('#email').fill(live);
+    await page.locator('#password').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
+    await page.reload();
+    await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
+  } finally {
+    await deleteUserByEmail(live);
+  }
 });

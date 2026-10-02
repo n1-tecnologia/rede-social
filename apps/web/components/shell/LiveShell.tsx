@@ -47,6 +47,36 @@ export interface LiveShellProps {
   children: ReactNode;
 }
 
+/**
+ * 08-04 (MODER-02, T-08-24): a counters refetch REFUSED with 403 `MEMBERSHIP_BLOCKED` (the BFF adds the
+ * shipped flow's path) takes the open app to the blocked flow — the same `/auth/blocked` destination
+ * `requireBootstrap` maps the code to, which signs this device out and shows "Acesso suspenso". A full
+ * navigation, because the route handler clears the session cookies. Only that one code, and only a
+ * same-origin `/auth/blocked` path, ever navigates; every other refusal keeps the last counters.
+ */
+export async function landOnBlockedFlow(
+  response: Response,
+  navigate: (path: string) => void,
+): Promise<boolean> {
+  if (response.status !== 403) return false;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return false;
+  }
+  const refusal = body as { error?: { code?: unknown }; location?: unknown };
+  if (refusal?.error?.code !== 'MEMBERSHIP_BLOCKED') return false;
+  const location = refusal.location;
+  if (typeof location !== 'string' || !location.startsWith('/auth/blocked')) return false;
+  navigate(location);
+  return true;
+}
+
+const assignLocation = (path: string) => window.location.assign(path);
+const onCountersRefused = (response: Response) =>
+  landOnBlockedFlow(response, assignLocation).then(() => undefined);
+
 /** Every signal that can move a badge: the bell, the member's dot and the staff count. */
 const COUNTER_EVENTS = [
   REALTIME_EVENTS.notificationsChanged,
@@ -73,6 +103,10 @@ const COUNTER_EVENTS = [
  * subscription is re-saved or re-made under a rotated key (`syncPushOnOpen`, never a prompt). The shell
  * also provides the kernel's `BeforeLogoutProvider` with "forget this device's push", which the
  * desktop rail's "Sair" awaits (bounded to 2 s) before signing out.
+ *
+ * Blocked with the app open (08-04): an admin's block nudges `notifications.changed` on the member's
+ * user topic; the refetch answers 403 `MEMBERSHIP_BLOCKED` and `landOnBlockedFlow` navigates to the
+ * shipped blocked flow, with no manual reload.
  *
  * Mounted by `app/(app)/layout.tsx` on the tenant branch only. Leaving the `(app)` segment (logout,
  * the blocked flow's `/acesso-suspenso`) unmounts it, and the provider disconnects on unmount.
@@ -138,6 +172,7 @@ export function LiveShell({
         countersUrl="/api/me/counters"
         topics={topics}
         events={COUNTER_EVENTS}
+        onRefused={onCountersRefused}
       >
         <SlotBadgeLabelsProvider value={labelFor}>
           <BeforeLogoutProvider value={forgetDevice}>{children}</BeforeLogoutProvider>
