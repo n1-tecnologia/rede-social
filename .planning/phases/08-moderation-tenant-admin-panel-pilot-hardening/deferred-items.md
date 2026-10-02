@@ -45,3 +45,20 @@ The inherited reds from the Phase 7 exit gate (07-15, 07-11) and the never-run `
   status: resolved
   **Verdict:** green on its first run; nothing to triage.
   **Run (08-02, for the 08-12 gate report):** after a reset and seed, with no dev server running, `VIDEO_PROVIDER=fake pnpm --filter @rede-social/web e2e:pwa` (`next build && next start -p 3100`, iPhone 14, Pixel 7 and desktop projects) gave exit 0: 46 passed, 5 skipped, 0 failed, 0 flaky. The five skips are by design: `pwa.spec.ts:104` "data-display-mode follows display-mode: standalone" on all three projects (desktop by project; on the two phones it skips at runtime with an annotation because Chromium ignores `display-mode` in `Emulation.setEmulatedMedia`, and real-device install stays the manual proof) and `events-prefetch.spec.ts:65` on pixel and desktop (it runs on one phone project only).
+
+- 08-08 — browser `unhandledRejection: TypeError: Cannot read properties of undefined (reading 'waiting')` in the dev-server log
+  status: open
+  **What:** forwarded by `next dev` from the browser on feed pages during the e2e. It is not a CSP effect: the same feed case prints it once under `CSP_MODE=report-only` and once under `enforce`. No app source reads `.waiting`, so it comes from a dependency (the service-worker registration path is the likely reader). No test fails on it. Out of 08-08's scope; recorded only.
+
+- 08-08 — `/_global-error` is the one prerendered HTML page, so its scripts carry no nonce
+  status: open
+  **What:** Next prerenders `/_global-error` (the root-layout crash page) at build time, so its framework scripts cannot carry the per-request nonce. Under `CSP_MODE=enforce` that page still renders its static HTML, but its scripts are blocked and report as violations. It is served only when the root layout itself throws. Revisit if Next lets this page render dynamically, or if a real-device report shows it.
+
+- 08-08 — a `page.goto` issued right after `/plataforma/tenants/{id}` loads is aborted (`net::ERR_ABORTED`)
+  status: open
+  **What:** seen while writing the CSP walk; identical under `report-only`, so not a policy effect. The walk visits the tenant detail page last. Not investigated further (test-ordering only, no user-visible symptom known).
+
+- 08-08 — full dev e2e under `CSP_MODE=enforce`: 8 desktop-only failures late in a 1.1 h run, 7 green on a fresh rerun, 1 order-dependent
+  status: open
+  **Run:** after a reset and seed, `VIDEO_PROVIDER=fake pnpm --filter @rede-social/web e2e` (every spec enforced since 08-08) gave 735 passed, 125 skipped, 8 failed, all on `desktop-chromium`: platform-tenants 1 (status dialog not opened), push 1-2 (login never left `/entrar`), reels e6/e7 (30 s timeouts), stories 507/1332/1387/1440 (timeouts and a missing toast). The same cases passed on `mobile-chromium` in that run, and a CSP effect would fail on both projects alike.
+  **Rerun:** after a fresh reset and seed, those four files on desktop gave 55 passed, 21 skipped, 1 failed: `stories.spec.ts:1440` ("Story publicado." toast not seen; the publish itself succeeded and landed on `/inicio`). Run alone it passes 3/3 under `enforce` and 3/3 under `report-only`. Verdict: dev-server load and order flakes, not a policy regression. Recorded for the 08-12 gate run.
