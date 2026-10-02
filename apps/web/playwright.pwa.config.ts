@@ -15,6 +15,10 @@ import base from './playwright.config';
  * 06-06: the events prefetch spec runs here too (D-218, Pitfall 6): Next prefetches only in
  * production, so "rendering the detail of an in-window online event records nothing" can only be
  * proved on this build. It self-skips the same way.
+ * 08-08: `csp.spec.ts` runs here too. `next dev` needs `'unsafe-eval'`, so only a production build
+ * serves the production policy; the dev run cannot see a library that asks for eval in the browser
+ * (Zod 4's JIT probe was one, fixed in `instrumentation-client.ts`). The base config makes both runs
+ * `CSP_MODE=enforce`.
  * Importing the base config loads `.env.local` first (SEED_PASSWORD for the login cases).
  */
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -32,7 +36,7 @@ const apiServer = (Array.isArray(base.webServer) ? base.webServer : [base.webSer
 
 export default defineConfig({
   ...base,
-  testMatch: /(pwa|events-prefetch)\.spec\.ts$/,
+  testMatch: /(pwa|events-prefetch|csp)\.spec\.ts$/,
   use: { ...base.use, baseURL: process.env.PLAYWRIGHT_DEMO_URL },
   projects: [
     { name: 'iphone-chromium', use: { ...devices['iPhone 14'], browserName: 'chromium' } },
