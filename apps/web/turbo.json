@@ -14,6 +14,12 @@
     // now builds the web first; `pnpm --filter @rede-social/web typecheck` runs the script directly.
     "typecheck": {
       "dependsOn": ["^build", "build"]
+    },
+    // 08-10: `lib/route-handlers.inventory.test.ts` reads the API's isolation inventory as text (a
+    // cross-package import would fail `turbo boundaries`). Listing that file as an input keeps the
+    // web `test` cache honest: an API inventory change re-runs the web check instead of replaying it.
+    "test": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/apps/api/tests/isolation-inventory.ts"]
     }
   }
 }

@@ -1,8 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { REALTIME_TOPIC_PATTERN } from '@rede-social/contracts/realtime';
 import { describe, expect, it } from 'vitest';
 import { app } from '../../src/app';
-import { ISOLATION_INVENTORY } from '../isolation-inventory';
+import {
+  ISOLATION_INVENTORY,
+  REALTIME_TOPIC_INVENTORY,
+  STORAGE_BUCKET_INVENTORY,
+} from '../isolation-inventory';
 
 /**
  * The isolation gate's machine check (08-10, TENANT-05, D-344): the route table IS the inventory.
@@ -13,6 +18,10 @@ import { ISOLATION_INVENTORY } from '../isolation-inventory';
  * id it names must be the prefix of a real `it(` title in the two isolation suites. So a route added
  * without its cross-tenant case turns `pnpm turbo test` red, and so does a case renamed or deleted
  * under an entry that still points at it.
+ *
+ * The same rule covers the two non-route surfaces: every Realtime topic KIND of the contract's
+ * pattern, and every Storage bucket a migration creates, must name a case too (plus the pgTAP file
+ * that pins the bucket's policies).
  */
 
 const live = new Set(
@@ -98,5 +107,51 @@ describe('isolation inventory (TENANT-05 gate)', () => {
       .filter(([key, entry]) => 'exempt' in entry && !allowed.some((re) => re.test(key)))
       .map(([key]) => key);
     expect(outside, 'a tenant-lane route may not be exempted').toEqual([]);
+  });
+
+  it("the web gate's text parse of this map yields exactly its keys", () => {
+    // `apps/web/lib/route-handlers.inventory.test.ts` cannot IMPORT this map (`turbo boundaries`
+    // refuses an import that leaves the web package), so it reads the file as text with this SAME
+    // regex. Pinning the parse here means a key written in a shape the regex misses fails this suite.
+    const API_INVENTORY_KEY_RE = /^\s*'((?:GET|POST|PUT|PATCH|DELETE) \/[^']*)':/gm;
+    const source = readFileSync(
+      fileURLToPath(new URL('../isolation-inventory.ts', import.meta.url)),
+      'utf8',
+    );
+    const parsed = [...source.matchAll(API_INVENTORY_KEY_RE)].map((match) => match[1] ?? '');
+    expect(parsed.sort()).toEqual(Object.keys(ISOLATION_INVENTORY).sort());
+  });
+
+  it('every Realtime topic kind of REALTIME_TOPIC_PATTERN names a cross-tenant case', () => {
+    // The alternation after `tenant:<uuid>:`, each branch reduced to its kind (`user:<uuid>` -> `user`).
+    const group = /:\((.+)\)\$$/.exec(REALTIME_TOPIC_PATTERN)?.[1] ?? '';
+    const kinds = group.split('|').map((branch) => branch.split(':')[0] ?? '');
+    expect(kinds.sort()).toEqual(['all', 'conv', 'support-inbox', 'user']);
+    expect(Object.keys(REALTIME_TOPIC_INVENTORY).sort()).toEqual(kinds);
+    const titles = itTitles();
+    for (const [kind, entry] of Object.entries(REALTIME_TOPIC_INVENTORY)) {
+      expect(namesATitle(entry.case, titles), `topic kind ${kind}`).toBe(true);
+    }
+  });
+
+  it('every Storage bucket a migration creates names a case and an existing pgTAP file', () => {
+    const migrations = fileURLToPath(new URL('../../../../supabase/migrations/', import.meta.url));
+    const buckets = new Set<string>();
+    for (const file of readdirSync(migrations).filter((name) => name.endsWith('.sql'))) {
+      const sql = readFileSync(`${migrations}${file}`, 'utf8');
+      for (const match of sql.matchAll(
+        /insert into storage\.buckets[^;]*?values\s*\(\s*'([^']+)'/gi,
+      )) {
+        buckets.add(match[1] ?? '');
+      }
+    }
+    expect([...buckets].sort()).toEqual(['branding', 'media']);
+    expect(Object.keys(STORAGE_BUCKET_INVENTORY).sort()).toEqual([...buckets].sort());
+    const titles = itTitles();
+    const pgtap = fileURLToPath(new URL('../../../../supabase/tests/', import.meta.url));
+    for (const [bucket, entry] of Object.entries(STORAGE_BUCKET_INVENTORY)) {
+      expect(namesATitle(entry.case, titles), `bucket ${bucket}`).toBe(true);
+      expect(existsSync(`${pgtap}${entry.pgtap}`), `pgTAP ${entry.pgtap}`).toBe(true);
+    }
   });
 });

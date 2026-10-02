@@ -3604,4 +3604,352 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
       expect(await code(res), path).toBe('NO_MEMBERSHIP');
     }
   });
+
+  it("storage sweep: every route that mints or serves a Storage URL refuses the other tenant's object, beside the owner's own positive control (08-10, T-03-56)", async () => {
+    // The storage half of the 08-10 inventory. Two buckets (pgTAP 060 `branding`, 070 `media` pin
+    // their policies inside Postgres); these are the API routes that MINT or SERVE a URL into them.
+    // Each negative is the other tenant's id from a rede-demo session, answered exactly like an id
+    // that names nothing; each positive control is the OWNER's same call, in the same test.
+    //
+    // | Route                                                        | Negative asserted here                         |
+    // |--------------------------------------------------------------|------------------------------------------------|
+    // | POST   /v1/media/uploads                                     | minted under the CALLER's prefix only; lab host 403 |
+    // | POST   /v1/media/uploads/{assetId}/complete                  | lab upload: the unknown-id 404, lab row pending |
+    // | GET    /v1/media/{assetId}/{variant}                         | lab image: the unknown-id 404, no Location      |
+    // | GET    /v1/media/{assetId}/playback                          | lab video: bare 404, no token, no playback id   |
+    // | DELETE /v1/media/{assetId}                                   | lab asset: bare 404, still live                 |
+    // | POST   /v1/admin/branding/uploads                            | minted under the session tenant's prefix only   |
+    // | POST   /v1/admin/branding/uploads/{uploadId}/complete        | lab upload: the unknown-id 404, nothing changes |
+    // | POST   /v1/platform/tenants/{id}/branding/uploads            | minted under the PATH tenant's prefix only      |
+    // | POST   /v1/platform/tenants/{id}/branding/uploads/{u}/complete | a lab upload under the demo id: unknown-id 404 |
+    //
+    // rede-lab's tenant row is the subject of two owner-side completes (its own logo), so it is
+    // snapshotted and written back in `finally`, with every Storage object and job this case added.
+    const since = await dbNow();
+    type BrandRow = { display_name: string; branding: Record<string, unknown> };
+    const brandRow = async (tenantId: string): Promise<BrandRow> => {
+      const [row] = await adminSql<BrandRow[]>`
+        select display_name, branding from public.tenants where id = ${tenantId}::uuid`;
+      if (!row) throw new Error(`tenant ${tenantId} not found`);
+      return row;
+    };
+    const objectsOf = async (bucket: string, tenantId: string) =>
+      (
+        await adminSql<{ name: string }[]>`
+          select name from storage.objects
+           where bucket_id = ${bucket} and name like ${`${tenantId}/%`}`
+      ).map((row) => row.name);
+    const brandBefore = {
+      demo: await brandRow(tenantIds.demo),
+      lab: await brandRow(tenantIds.lab),
+    };
+    const objectsBefore = {
+      branding: {
+        demo: new Set(await objectsOf('branding', tenantIds.demo)),
+        lab: new Set(await objectsOf('branding', tenantIds.lab)),
+      },
+      media: {
+        demo: new Set(await objectsOf('media', tenantIds.demo)),
+        lab: new Set(await objectsOf('media', tenantIds.lab)),
+      },
+    };
+    const startedAssets: string[] = [];
+
+    const { encodeJpeg } = await import('@rede-social/core/server/media/variants');
+    const { deriveIconSet } = await import('@rede-social/core/server/branding/icons');
+    const jpeg = await encodeJpeg(
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320"><rect width="320" height="320" fill="#1d4ed8"/></svg>',
+      ),
+    );
+    const png = (
+      await deriveIconSet(
+        Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="120" viewBox="0 0 300 120"><rect width="300" height="120" rx="12" fill="#1d4ed8"/></svg>',
+        ),
+        { primaryHex: '#1d4ed8', mime: 'image/svg+xml' },
+      )
+    ).i512;
+    const putTo = async (signedUrl: string, bytes: Buffer, mime: string) => {
+      const put = await fetch(signedUrl, {
+        method: 'PUT',
+        body: new Uint8Array(bytes),
+        headers: { 'content-type': mime, 'x-upsert': 'false' },
+      });
+      expect(put.ok).toBe(true);
+    };
+    const superAdmin = (method: string, path: string, body?: unknown) =>
+      api.request(path, {
+        method,
+        headers: {
+          authorization: `Bearer ${tokens.superAdmin}`,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+
+    try {
+      // ── POST /v1/media/uploads: the key is the CALLER's prefix, whoever asks ──────────────────
+      const mediaStart = {
+        kind: 'image',
+        purpose: 'avatar',
+        mime: 'image/jpeg',
+        size: jpeg.length,
+      };
+      const starts = {} as Record<
+        'demo' | 'lab',
+        { assetId: string; signedUrl: string; path: string }
+      >;
+      for (const [key, token, host] of [
+        ['demo', tokens.demoMember, HOSTS.demo],
+        ['lab', tokens.labMember, HOSTS.lab],
+      ] as const) {
+        const res = await send('POST', '/v1/media/uploads', token, host, mediaStart);
+        expect(res.status, key).toBe(201);
+        const started = (await res.json()) as { assetId: string; signedUrl: string; path: string };
+        startedAssets.push(started.assetId);
+        expect(started.path).toBe(`${tenantIds[key]}/media/${started.assetId}/original`);
+        starts[key] = started;
+      }
+      await expectHostRefused(
+        await send('POST', '/v1/media/uploads', tokens.demoMember, HOSTS.lab, mediaStart),
+        'POST /v1/media/uploads',
+      );
+
+      // ── POST /v1/media/uploads/{assetId}/complete: the lab's REAL upload from demo ─────────────
+      await putTo(starts.lab.signedUrl, jpeg, 'image/jpeg');
+      const foreignComplete = await send(
+        'POST',
+        `/v1/media/uploads/${starts.lab.assetId}/complete`,
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      const unknownComplete = await send(
+        'POST',
+        `/v1/media/uploads/${crypto.randomUUID()}/complete`,
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(foreignComplete.status).toBe(404);
+      expect(unknownComplete.status).toBe(404);
+      const foreignCompleteText = await foreignComplete.text();
+      expect(sansRequestId(foreignCompleteText)).toEqual(
+        sansRequestId(await unknownComplete.text()),
+      );
+      expect(foreignCompleteText).not.toContain(tenantIds.lab);
+      const [labPending] = await adminSql<{ status: string; tenant_id: string }[]>`
+        select status, tenant_id::text from public.media_assets
+         where id = ${starts.lab.assetId}::uuid`;
+      expect(labPending).toEqual({ status: 'pending', tenant_id: tenantIds.lab });
+      // Positive control: the OWNER completes the very same upload.
+      const ownComplete = await send(
+        'POST',
+        `/v1/media/uploads/${starts.lab.assetId}/complete`,
+        tokens.labMember,
+        HOSTS.lab,
+      );
+      expect(ownComplete.status).toBe(200);
+      await expectHostRefused(
+        await send(
+          'POST',
+          `/v1/media/uploads/${starts.demo.assetId}/complete`,
+          tokens.demoMember,
+          HOSTS.lab,
+        ),
+        'POST /v1/media/uploads/{assetId}/complete',
+      );
+
+      // ── GET /v1/media/{assetId}/{variant}: the lab's ready image from demo ────────────────────
+      const variant = (assetId: string, token: string, host: string) =>
+        api.request(`/v1/media/${assetId}/w320`, {
+          headers: { authorization: `Bearer ${token}`, [TENANT_HOST_HEADER]: host },
+          redirect: 'manual',
+        });
+      const foreignVariant = await variant(assets.labImage, tokens.demoMember, HOSTS.demo);
+      const unknownVariant = await variant(crypto.randomUUID(), tokens.demoMember, HOSTS.demo);
+      expect(foreignVariant.status).toBe(404);
+      expect(foreignVariant.headers.get('location')).toBeNull();
+      expect(unknownVariant.status).toBe(404);
+      expect(sansRequestId(await foreignVariant.text())).toEqual(
+        sansRequestId(await unknownVariant.text()),
+      );
+      const ownVariant = await variant(assets.labImage, tokens.labMember, HOSTS.lab);
+      expect(ownVariant.status).toBe(302);
+      expect(ownVariant.headers.get('location')).toContain(
+        `${tenantIds.lab}/media/${assets.labImage}/w320.webp`,
+      );
+      await expectHostRefused(
+        await variant(assets.demoImage, tokens.demoMember, HOSTS.lab),
+        'GET /v1/media/{assetId}/{variant}',
+      );
+
+      // ── GET /v1/media/{assetId}/playback: the lab's ready video from the demo admin ───────────
+      const unknownPlayback = await expectBareNotFound(
+        await send(
+          'GET',
+          `/v1/media/${crypto.randomUUID()}/playback`,
+          tokens.demoAdmin,
+          HOSTS.demo,
+        ),
+        'playback (unknown id)',
+      );
+      const foreignPlayback = await expectBareNotFound(
+        await send('GET', `/v1/media/${assets.labVideo}/playback`, tokens.demoAdmin, HOSTS.demo),
+        'playback (lab id)',
+      );
+      expect(sansRequestId(foreignPlayback)).toEqual(sansRequestId(unknownPlayback));
+      for (const needle of ['tokens', 'playbackId', 'privado-do-lab']) {
+        expect(foreignPlayback).not.toContain(needle);
+      }
+      const ownPlayback = await send(
+        'GET',
+        `/v1/media/${assets.labVideo}/playback`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(ownPlayback.status).toBe(200);
+      await expectHostRefused(
+        await send('GET', `/v1/media/${assets.demoVideo}/playback`, tokens.demoAdmin, HOSTS.lab),
+        'GET /v1/media/{assetId}/playback',
+      );
+
+      // ── DELETE /v1/media/{assetId}: a fresh lab asset from demo, then the owner's delete ──────
+      const labDoomed = await seedReadyImage(tenantIds.lab, 'admin@rede-lab.local', 'post');
+      const unknownDelete = await expectBareNotFound(
+        await send('DELETE', `/v1/media/${crypto.randomUUID()}`, tokens.demoAdmin, HOSTS.demo),
+        'delete (unknown id)',
+      );
+      const foreignDelete = await expectBareNotFound(
+        await send('DELETE', `/v1/media/${labDoomed}`, tokens.demoAdmin, HOSTS.demo),
+        'delete (lab id)',
+      );
+      expect(sansRequestId(foreignDelete)).toEqual(sansRequestId(unknownDelete));
+      const deletedAt = async () => {
+        const [row] = await adminSql<{ deleted_at: string | null }[]>`
+          select deleted_at::text from public.media_assets where id = ${labDoomed}::uuid`;
+        return row?.deleted_at;
+      };
+      expect(await deletedAt()).toBeNull();
+      await expectHostRefused(
+        await send('DELETE', `/v1/media/${labDoomed}`, tokens.demoAdmin, HOSTS.lab),
+        'DELETE /v1/media/{assetId}',
+      );
+      expect(
+        (await send('DELETE', `/v1/media/${labDoomed}`, tokens.labAdmin, HOSTS.lab)).status,
+      ).toBe(200);
+      expect(await deletedAt()).not.toBeNull();
+
+      // ── /v1/admin/branding/uploads: the lab ADMIN's upload, completed from demo ───────────────
+      const brandUpload = { kind: 'logo', mime: 'image/png', size: png.length };
+      const adminStart = async (token: string, host: string, tenantId: string) => {
+        const res = await send('POST', '/v1/admin/branding/uploads', token, host, brandUpload);
+        expect(res.status).toBe(201);
+        const started = (await res.json()) as { uploadId: string; signedUrl: string; path: string };
+        expect(started.path.startsWith(`${tenantId}/`)).toBe(true);
+        return started;
+      };
+      const labAdminUpload = await adminStart(tokens.labAdmin, HOSTS.lab, tenantIds.lab);
+      await adminStart(tokens.demoAdmin, HOSTS.demo, tenantIds.demo);
+      await putTo(labAdminUpload.signedUrl, png, 'image/png');
+      const foreignBrand = await send(
+        'POST',
+        `/v1/admin/branding/uploads/${labAdminUpload.uploadId}/complete`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+      );
+      const unknownBrand = await send(
+        'POST',
+        `/v1/admin/branding/uploads/logo-${crypto.randomUUID()}.png/complete`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+      );
+      expect(foreignBrand.status).toBe(404);
+      expect(unknownBrand.status).toBe(404);
+      const foreignBrandText = await foreignBrand.text();
+      expect(sansRequestId(foreignBrandText)).toEqual(sansRequestId(await unknownBrand.text()));
+      expect(foreignBrandText).not.toContain(tenantIds.lab);
+      expect(await brandRow(tenantIds.demo)).toEqual(brandBefore.demo);
+      expect(await brandRow(tenantIds.lab)).toEqual(brandBefore.lab);
+      // Positive control: the lab admin completes its own upload on its own lane.
+      const ownBrand = await send(
+        'POST',
+        `/v1/admin/branding/uploads/${labAdminUpload.uploadId}/complete`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(ownBrand.status).toBe(200);
+      expect(
+        (
+          (await ownBrand.json()) as { tenant: { branding: { logoUrl: string | null } } }
+        ).tenant.branding.logoUrl?.endsWith(labAdminUpload.path),
+      ).toBe(true);
+      expect(await brandRow(tenantIds.demo)).toEqual(brandBefore.demo);
+      for (const [method, path, body] of [
+        ['POST', '/v1/admin/branding/uploads', brandUpload],
+        ['POST', `/v1/admin/branding/uploads/${labAdminUpload.uploadId}/complete`, undefined],
+      ] as const) {
+        await expectHostRefused(
+          await send(method, path, tokens.demoAdmin, HOSTS.lab, body),
+          `${method} ${path}`,
+        );
+      }
+
+      // ── /v1/platform/tenants/{id}/branding/uploads: the PATH tenant is the prefix ─────────────
+      const platformStart = async (tenantId: string) => {
+        const res = await superAdmin(
+          'POST',
+          `/v1/platform/tenants/${tenantId}/branding/uploads`,
+          brandUpload,
+        );
+        expect(res.status).toBe(201);
+        const started = (await res.json()) as { uploadId: string; signedUrl: string; path: string };
+        expect(started.path.startsWith(`${tenantId}/`)).toBe(true);
+        return started;
+      };
+      const labPlatformUpload = await platformStart(tenantIds.lab);
+      await platformStart(tenantIds.demo);
+      await putTo(labPlatformUpload.signedUrl, png, 'image/png');
+      const demoBrandMid = await brandRow(tenantIds.demo);
+      const crossPath = await superAdmin(
+        'POST',
+        `/v1/platform/tenants/${tenantIds.demo}/branding/uploads/${labPlatformUpload.uploadId}/complete`,
+      );
+      const unknownPath = await superAdmin(
+        'POST',
+        `/v1/platform/tenants/${tenantIds.demo}/branding/uploads/logo-${crypto.randomUUID()}.png/complete`,
+      );
+      expect(crossPath.status).toBe(404);
+      expect(unknownPath.status).toBe(404);
+      expect(sansRequestId(await crossPath.text())).toEqual(
+        sansRequestId(await unknownPath.text()),
+      );
+      expect(await brandRow(tenantIds.demo)).toEqual(demoBrandMid);
+      // Positive control: the same upload completed under ITS OWN tenant id.
+      const samePath = await superAdmin(
+        'POST',
+        `/v1/platform/tenants/${tenantIds.lab}/branding/uploads/${labPlatformUpload.uploadId}/complete`,
+      );
+      expect(samePath.status).toBe(200);
+      expect(await brandRow(tenantIds.demo)).toEqual(brandBefore.demo);
+    } finally {
+      // rede-lab's brand goes back exactly as found; every object and job this case added goes.
+      await adminSql`
+        update public.tenants
+           set display_name = ${brandBefore.lab.display_name},
+               branding = ${adminSql.json(brandBefore.lab.branding as never)}
+         where id = ${tenantIds.lab}::uuid`;
+      for (const bucket of ['branding', 'media'] as const) {
+        for (const key of ['demo', 'lab'] as const) {
+          const added = (await objectsOf(bucket, tenantIds[key])).filter(
+            (name) => !objectsBefore[bucket][key].has(name),
+          );
+          if (added.length > 0) await storageAdmin().from(bucket).remove(added);
+        }
+      }
+      if (startedAssets.length > 0) {
+        await adminSql`delete from public.media_assets where id = any(${startedAssets}::uuid[])`;
+      }
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+    }
+  });
 });

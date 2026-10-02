@@ -453,3 +453,131 @@ describe('realtime chat (live)', () => {
     expect(got?.payload).toMatchObject({ conversationId: chat.conversationId, seq: 5 });
   });
 });
+
+/* ── 08-10: the cross-tenant joins, every topic kind ─────────────────────────────────────────── */
+
+const LAB_SUPPORT = 'support@rede-lab.local';
+/** A rede-lab support thread written for this case only (removed in `finally`). */
+const LAB_CONVERSATION = '0b100000-0000-4000-8000-0000000008a0';
+
+describe('cross-tenant (live)', () => {
+  it("cross-tenant: a rede-demo session is refused on every one of rede-lab's four topic kinds (all, user:, support-inbox, conv:), beside its own topic and the lab's own joins (08-10, RESEARCH Pattern 6)", async () => {
+    // pgTAP 150 proves `app.realtime_topic_allowed` row by row and cases 2 / chat 3 above prove the
+    // in-tenant negatives; this is the CROSS-tenant half of the go-live gate (ROADMAP SC 4, D-344),
+    // one live join per topic kind of `REALTIME_TOPIC_PATTERN`, with the demo's own topic as the
+    // positive control in the same test.
+    //
+    // rede-lab has `notifications` and `chat` OFF in the seed. Both are turned ON here, and the lab's
+    // own member and support user are shown to JOIN their own topics, so every demo refusal below
+    // comes from the TENANT check, never from a module being off. Restored in `finally`.
+    const labSupportId = await idOf(LAB_SUPPORT);
+    const flagsBefore = await adminSql<{ module_key: string; enabled: boolean }[]>`
+      select module_key, enabled from public.tenant_modules
+       where tenant_id = ${ids.lab}::uuid and module_key in ('notifications', 'chat')`;
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${ids.lab}::uuid, 'notifications', true), (${ids.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(ids.lab);
+      await adminSql`
+        insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+        values (${LAB_CONVERSATION}::uuid, ${ids.lab}::uuid, 'support', ${ids.labMember}::uuid)`;
+      await adminSql`
+        insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+        values (${LAB_CONVERSATION}::uuid, ${ids.lab}::uuid, ${ids.labMember}::uuid, 'member')`;
+
+      // The four lab topics, each kind once. `support-inbox` is attempted by demo STAFF (the only
+      // role that joins its own tenant's inbox), the other three by a demo member.
+      const crossings = [
+        ['all', MEMBER, tenantTopic(ids.lab)],
+        ['user', MEMBER, userTopic(ids.lab, ids.labMember)],
+        ['support-inbox', SUPPORT, inboxTopic(ids.lab)],
+        ['conv', MEMBER, convTopic(ids.lab, LAB_CONVERSATION)],
+      ] as const;
+      // The lab's OWN joins of the same four topics: the proof the topics are live for their owners.
+      const owners = [
+        ['all', LAB_MEMBER, tenantTopic(ids.lab)],
+        ['user', LAB_MEMBER, userTopic(ids.lab, ids.labMember)],
+        ['support-inbox', LAB_SUPPORT, inboxTopic(ids.lab)],
+        ['conv', LAB_MEMBER, convTopic(ids.lab, LAB_CONVERSATION)],
+      ] as const;
+
+      // One socket per join, in parallel (case 2's reason: refusals sharing a socket queue up).
+      const [refused, admitted, own] = await Promise.all([
+        Promise.all(
+          crossings.map(async ([, email, topic]) =>
+            joinTopic((await connectAs(email)).client, topic),
+          ),
+        ),
+        Promise.all(
+          owners.map(async ([, email, topic]) => joinTopic((await connectAs(email)).client, topic)),
+        ),
+        (async () =>
+          joinTopic((await connectAs(MEMBER)).client, userTopic(ids.demo, ids.member)))(),
+      ]);
+
+      // Positive control: the demo member's own topic joins in the same test.
+      observed['cross-tenant own demo user'] = own.status;
+      expect(own.status).toBe('SUBSCRIBED');
+      for (const [index, [kind]] of owners.entries()) {
+        const joined = admitted[index];
+        observed[`cross-tenant lab ${kind} (owner)`] = joined?.status ?? 'missing';
+        expect(joined?.status, `the lab's own ${kind} join`).toBe('SUBSCRIBED');
+      }
+      for (const [index, [kind]] of crossings.entries()) {
+        const joined = refused[index];
+        if (!joined) throw new Error(`no join for ${kind}`);
+        observed[`cross-tenant demo -> lab ${kind}`] = joined.status;
+        expectNotSubscribed(joined);
+      }
+
+      // A signal on every lab topic, then the demo member's own: the owners hear theirs, the own
+      // topic hears its own, and the four refused channels hear nothing at all.
+      await signal(ids.lab, 'all', REALTIME_EVENTS.notificationsChanged, { kind: 'probe' });
+      await signal(ids.lab, `user:${ids.labMember}`, REALTIME_EVENTS.notificationsChanged, {
+        kind: 'probe',
+      });
+      await signal(ids.lab, 'support-inbox', REALTIME_EVENTS.chatMessage, { kind: 'probe' });
+      await signal(ids.lab, `conv:${LAB_CONVERSATION}`, REALTIME_EVENTS.chatMessage, {
+        kind: 'probe',
+      });
+      await signal(ids.demo, `user:${ids.member}`, REALTIME_EVENTS.notificationsChanged, {
+        kind: 'probe',
+      });
+      expect(
+        await waitForBroadcast(own, REALTIME_EVENTS.notificationsChanged, 10_000),
+      ).not.toBeNull();
+      for (const [index, [kind]] of owners.entries()) {
+        const joined = admitted[index];
+        if (!joined) throw new Error(`no owner join for ${kind}`);
+        const event =
+          kind === 'all' || kind === 'user'
+            ? REALTIME_EVENTS.notificationsChanged
+            : REALTIME_EVENTS.chatMessage;
+        expect(await waitForBroadcast(joined, event, 10_000), `the lab's ${kind}`).not.toBeNull();
+      }
+      await sleep(1_500);
+      for (const [index, [kind]] of crossings.entries()) {
+        expect(refused[index]?.received, `demo -> lab ${kind} received`).toEqual([]);
+      }
+      expect(labSupportId).not.toBe('');
+    } finally {
+      await adminSql`delete from public.chat_conversations where id = ${LAB_CONVERSATION}::uuid`;
+      // The lab's rows go back EXACTLY as found (the seed keeps both modules off for rede-lab).
+      for (const key of ['notifications', 'chat'] as const) {
+        const found = flagsBefore.find((row) => row.module_key === key);
+        if (found) {
+          await adminSql`
+            update public.tenant_modules set enabled = ${found.enabled}
+             where tenant_id = ${ids.lab}::uuid and module_key = ${key}`;
+        } else {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${ids.lab}::uuid and module_key = ${key}`;
+        }
+      }
+      moduleFlags.invalidate(ids.lab);
+    }
+  }, 90_000);
+});

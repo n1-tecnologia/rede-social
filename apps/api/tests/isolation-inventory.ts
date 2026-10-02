@@ -70,11 +70,13 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // ── /v1/media (the private bucket's broker) ─────────────────────────────────────────────────
   'GET /v1/media': { case: 'inventory sweep: me and media' },
   'GET /v1/media/:assetId': { case: 'inventory sweep: me and media' },
-  'GET /v1/media/:assetId/playback': { case: 'k' },
-  'POST /v1/media/uploads': { case: 'p' },
-  'POST /v1/media/uploads/:assetId/complete': { case: 'l' },
-  'GET /v1/media/:assetId/:variant': { case: 'j' },
-  'DELETE /v1/media/:assetId': { case: 'm' },
+  // The storage-minting routes: each has a cross-tenant 404 beside the OWNER's positive control in
+  // `storage sweep` (T-03-56); the older single-direction cases j, k, l, m and p still run too.
+  'GET /v1/media/:assetId/playback': { case: 'storage sweep' },
+  'POST /v1/media/uploads': { case: 'storage sweep' },
+  'POST /v1/media/uploads/:assetId/complete': { case: 'storage sweep' },
+  'GET /v1/media/:assetId/:variant': { case: 'storage sweep' },
+  'DELETE /v1/media/:assetId': { case: 'storage sweep' },
 
   // ── /v1/members (the member directory) ──────────────────────────────────────────────────────
   'GET /v1/members': { case: 'n' },
@@ -89,8 +91,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PUT /v1/admin/members/:membershipId/role': { case: 'phase 8 sweep' },
   'GET /v1/admin/branding': { case: 'phase 8 sweep' },
   'PUT /v1/admin/branding/colors': { case: 'phase 8 sweep' },
-  'POST /v1/admin/branding/uploads': { case: 'phase 8 sweep' },
-  'POST /v1/admin/branding/uploads/:uploadId/complete': { case: 'phase 8 sweep' },
+  // Storage-minting: `storage sweep` holds the lab admin's own complete as the positive control;
+  // the phase 8 sweep also refuses the super-admin-started lab upload.
+  'POST /v1/admin/branding/uploads': { case: 'storage sweep' },
+  'POST /v1/admin/branding/uploads/:uploadId/complete': { case: 'storage sweep' },
   'DELETE /v1/admin/branding/icon': { case: 'phase 8 sweep' },
   'PATCH /v1/admin/tenant': { case: 'phase 8 sweep' },
   'GET /v1/admin/rules': { case: 'phase 8 sweep' },
@@ -111,8 +115,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/platform/tenants/:id/domains/:domainId/restart': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/domains/:domainId/primary': { exempt: PLATFORM_LANE },
   'DELETE /v1/platform/tenants/:id/domains/:domainId': { exempt: PLATFORM_LANE },
-  'POST /v1/platform/tenants/:id/branding/uploads': { exempt: PLATFORM_LANE },
-  'POST /v1/platform/tenants/:id/branding/uploads/:uploadId/complete': { exempt: PLATFORM_LANE },
+  // The two platform routes that MINT a Storage URL are not exempted: the path tenant is the
+  // prefix, and a lab upload completed under the demo id is the unknown-id 404 (`storage sweep`).
+  'POST /v1/platform/tenants/:id/branding/uploads': { case: 'storage sweep' },
+  'POST /v1/platform/tenants/:id/branding/uploads/:uploadId/complete': { case: 'storage sweep' },
   'PUT /v1/platform/tenants/:id/branding/colors': { exempt: PLATFORM_LANE },
   'DELETE /v1/platform/tenants/:id/branding/icon': { exempt: PLATFORM_LANE },
 
@@ -197,4 +203,27 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/chat/conversations/:conversationId': { case: 'phase 7 sweep' },
   'POST /v1/chat/conversations/:conversationId/read': { case: 'phase 7 sweep' },
   'GET /v1/chat/inbox': { case: 'phase 7 sweep' },
+};
+
+/**
+ * Every Realtime topic KIND of `REALTIME_TOPIC_PATTERN` (`@rede-social/contracts/realtime`), mapped to
+ * the live cross-tenant case that joins tenant B's topic of that kind with a tenant-A session. The
+ * unit check parses the kinds out of the pattern itself, so a fifth kind added to the contract fails
+ * until it has an entry here (and a join in that case).
+ */
+export const REALTIME_TOPIC_INVENTORY: Record<string, { case: string }> = {
+  all: { case: 'cross-tenant' },
+  user: { case: 'cross-tenant' },
+  'support-inbox': { case: 'cross-tenant' },
+  conv: { case: 'cross-tenant' },
+};
+
+/**
+ * Every Storage bucket a migration creates, mapped to the API case that proves its minting routes
+ * across tenants and to the pgTAP file that pins its `storage.objects` policies inside Postgres. The
+ * unit check reads the bucket ids from `supabase/migrations`, so a new bucket fails until it is here.
+ */
+export const STORAGE_BUCKET_INVENTORY: Record<string, { case: string; pgtap: string }> = {
+  branding: { case: 'storage sweep', pgtap: '060-branding-bucket.sql' },
+  media: { case: 'storage sweep', pgtap: '070-media-bucket.sql' },
 };
