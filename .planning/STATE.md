@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-10-02T12:41:50.819Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-10-02T13:30:18.026Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-01 (moderation tracer)
-state_head: "0ba5ef394084e4d49a20f462cd198b397b1cf5b9"
+last_activity_desc: Completed 08-02 (inherited test debt and CI split)
+state_head: 8afceb5ab19900ef86684f6e4131f216c0642b6b
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 111
+  completed_plans: 112
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 2 of 12
+Plan: 3 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-01 (moderation tracer: kernel moderation_log, moderator comment removal, Moderação screen)
+Last activity: 2026-10-02 — Completed 08-02 (WINDOWS 64/65/69/70/71 fixed on green runs, first e2e:pwa green, CI split into four jobs)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -172,6 +172,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 07 P14 | 5 min | 2 tasks | 1 files |
 | Phase 07 P15 | 1h 13m | 3 tasks | 3 files |
 | Phase 08 P01 | 26 min | 2 tasks | 51 files |
+| Phase 08 P02 | 45 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -559,6 +560,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-01: feed comment DELETE keeps its shipped 200 { deleted: true } (plan said 204); identical response for own and moderation removals
 - [Phase 08]: 08-01: removal ('own'|'moderation'|null) is optional on commentSchema; web reads absent as canDelete ? 'own' : null (release order free)
 - [Phase 08]: 08-01: moderation_log actor/target are NOT NULL membership ids with no user/membership FKs; append-only via policies + revoke + row/statement triggers
+- [Phase 08]: 08-02: the Marca form is keyed on the tenant id only and BrandingForm adopts a refreshed server view in place (WINDOWS 71); keying on persisted colours would remount again one save later
+- [Phase 08]: 08-02: HighlightEditSheet keeps focus inside the sheet after an optimistic remove so Escape still closes it (WINDOWS 70 product bug); WINDOWS 69 was a pre-hydration tap, fixed in the specs with React's hydration mark
+- [Phase 08]: 08-02: CI is split into static, db, e2e (4 shards) and e2e-pwa jobs; job-level concurrency groups name the job id literally because github.job is empty outside steps
 
 ### Pending Todos
 
@@ -630,6 +634,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T12:41:50.695Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-10-02T13:30:03.621Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
