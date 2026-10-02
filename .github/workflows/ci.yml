@@ -5,6 +5,18 @@
 # so the production gate runs the identical checks for the exact `master` SHA it is about to deploy —
 # there is never a second, drifting copy of these steps (D-12). Add a step here only when the
 # `verify` script gains one, in the same position.
+#
+# 08-02 (D-348): the steps are split into four jobs, so each one fits a 60-minute limit. The single
+# `checks` job could not: its e2e stage alone took 49.8 minutes single-worker in 07-15 (788 tests).
+# - `static`: lint, typecheck/build/unit, the build-output gate, boundaries and the lane guard.
+# - `db`: its own local stack, pgTAP, the seed, the API integration suite and the pooler spike.
+# - `e2e`: four shards (`--shard=N/4`), each with its own local stack, reset, role, env and seed.
+#   Shard N runs about a quarter of the suite (about 13 minutes) plus the stack start.
+# - `e2e-pwa`: its own local stack and seed, then the production-build PWA run.
+# The `verify` order is kept inside each job. A caller of this workflow (deploy-api.yml `checks`)
+# succeeds only when every job here succeeds, so the production gate still waits on all of them.
+# The local-stack bring-up is repeated verbatim per job: GitHub Actions has no way to splice a list
+# of steps into another job without a composite action, and none is added (08-02).
 name: CI
 
 on:
@@ -16,30 +28,34 @@ on:
 permissions:
   contents: read
 
+env:
+  # Local-stack-only credentials: the Supabase instance lives and dies inside each runner.
+  # Real environments get these from GitHub environment secrets (see docs/DEPLOY.md).
+  # The runner never reaches a real provider: scripts/local-env.sh writes MAIL_TRANSPORT=local,
+  # DOMAIN_PROVIDER=fake and AUTH_ALLOW_LIST=local, and no hosted secret is declared here
+  # (fork pull requests receive none either — plain `pull_request`, never `pull_request_target`).
+  SEED_PASSWORD: ci-only-Segredo123
+  SUPER_ADMIN_PASSWORD: ci-only-SuperSegredo123
+  SUPER_ADMIN_EMAIL: superadmin@rede-social.test
+  # Send Email Hook secret, ci-only: the stack start, `db reset` and `test db` below run the
+  # setup-cli binary directly (scripts/supabase.sh does not apply), every CLI command validates the
+  # `[auth.hook.send_email]` block, and scripts/local-env.sh writes this exported value into
+  # .env.local so GoTrue and the API share it. Real environments: docs/deploy/auth-mail.md.
+  SEND_EMAIL_HOOK_SECRETS: v1,whsec_Y2ktb25seS1zZW5kLWVtYWlsLWhvb2stc2VjcmV0LTAwMDE=
+
+# Concurrency is job-level, one group per job (and per shard), so jobs of ONE run never cancel one
+# another, while a newer run of the same ref cancels the older run's matching job. The group names
+# the job id literally: `github.job` is set by the runner for steps only and is empty when a
+# job-level `concurrency` is evaluated, so a group built on it would be the same for every job.
+# `github.workflow` keeps a direct run apart from the deploy-api.yml call.
 jobs:
-  checks:
-    name: lint, typecheck, build gate, tests, pgTAP, integration, e2e, PWA e2e
+  static:
+    name: lint, typecheck, build gate, unit tests, boundaries, lane guard
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    # Job-level so the group is the same whether this file runs directly or is called by
-    # deploy-api.yml; `github.workflow` keeps the two groups apart.
+    timeout-minutes: 30
     concurrency:
-      group: ci-${{ github.workflow }}-${{ github.ref }}
+      group: ci-${{ github.workflow }}-${{ github.ref }}-static
       cancel-in-progress: true
-    env:
-      # Local-stack-only credentials: the Supabase instance lives and dies inside this runner.
-      # Real environments get these from GitHub environment secrets (see docs/DEPLOY.md).
-      # The runner never reaches a real provider: scripts/local-env.sh writes MAIL_TRANSPORT=local,
-      # DOMAIN_PROVIDER=fake and AUTH_ALLOW_LIST=local, and no hosted secret is declared here
-      # (fork pull requests receive none either — plain `pull_request`, never `pull_request_target`).
-      SEED_PASSWORD: ci-only-Segredo123
-      SUPER_ADMIN_PASSWORD: ci-only-SuperSegredo123
-      SUPER_ADMIN_EMAIL: superadmin@rede-social.test
-      # Send Email Hook secret, ci-only: `supabase start`/`db reset`/`test db` below run the setup-cli
-      # binary directly (scripts/supabase.sh does not apply), every CLI command validates the
-      # `[auth.hook.send_email]` block, and scripts/local-env.sh writes this exported value into
-      # .env.local so GoTrue and the API share it. Real environments: docs/deploy/auth-mail.md.
-      SEND_EMAIL_HOOK_SECRETS: v1,whsec_Y2ktb25seS1zZW5kLWVtYWlsLWhvb2stc2VjcmV0LTAwMDE=
     steps:
       - uses: actions/checkout@v7
 
@@ -56,9 +72,9 @@ jobs:
       # (UI-03 / PWA-03) run in CI.
       - name: Lint (Biome + UI literal guard)
         run: pnpm lint
-      # apps/web/lib/env.ts validates at `next build` time, and this step runs before the local stack
-      # exists (apps/web/.env.local is written further down). These are the local-stack defaults —
-      # public values that only satisfy validation; nothing is reached during the build.
+      # apps/web/lib/env.ts validates at `next build` time, and this job has no local stack (no
+      # apps/web/.env.local). These are the local-stack defaults — public values that only satisfy
+      # validation; nothing is reached during the build.
       - name: Typecheck, build, unit tests
         run: pnpm turbo typecheck build test
         env:
@@ -77,6 +93,25 @@ jobs:
         run: pnpm boundaries:negative
       - name: Lane guard (no non-LOCAL role switch or session-scoped claims)
         run: pnpm guard:lanes
+
+  db:
+    name: pgTAP, seed, API integration, pooler spike
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-db
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
 
       - uses: supabase/setup-cli@v3
         with:
@@ -119,13 +154,134 @@ jobs:
       - name: Pooler lane spike (local contingency port; staging proof is plan 01-12)
         run: pnpm spike:supavisor
 
+  e2e:
+    name: e2e shard ${{ matrix.shard }}/4 (iPhone 14, Pixel 7, desktop — dev servers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      # One red shard must not cancel the others: the run reports every shard's failures.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-e2e-${{ matrix.shard }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.117.0
+
+      - name: Generate ES256 signing keys for the local stack
+        # Same as the db job: seed an empty set, the CLI appends the key itself.
+        run: echo '[]' > supabase/signing_keys.json && supabase gen signing-key --algorithm ES256 --yes
+      - name: Start the local Supabase stack
+        run: supabase start
+      - name: Apply migrations
+        run: supabase db reset
+      - name: Give api_user a local login password
+        run: bash scripts/db-local-role.sh
+
+      - name: Wait for Realtime's partition of today (the notification and chat specs need it)
+        # Same wait as the db job (07 review A-WR-06): a cold stack has no `realtime.messages`
+        # partition for now() until the Realtime service creates one.
+        run: |
+          for _ in $(seq 1 60); do
+            found=$(psql "postgres://postgres:postgres@127.0.0.1:54322/postgres" -Atc "select count(*) from pg_inherits i join pg_class c on c.oid = i.inhrelid where i.inhparent = 'realtime.messages'::regclass and pg_get_expr(c.relpartbound, c.oid) like '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'")
+            if [ "$found" != "0" ]; then exit 0; fi
+            sleep 2
+          done
+          echo "no realtime.messages partition covers now() after 120 s"
+          exit 1
+
+      - name: Write .env.local for the API and the web app
+        run: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
+      - name: Seed the two tenants
+        run: pnpm db:seed
+
       - name: Install Chromium for Playwright
         run: pnpm --filter @rede-social/web exec playwright install --with-deps chromium
-      - name: End-to-end (iPhone 14, Pixel 7, desktop — dev servers)
-        run: pnpm e2e
+      # `pnpm e2e` is `playwright test` in apps/web; the shard flag splits the spec files four ways.
+      - name: End-to-end shard ${{ matrix.shard }}/4 (iPhone 14, Pixel 7, desktop — dev servers)
+        run: pnpm --filter @rede-social/web exec playwright test --shard=${{ matrix.shard }}/4
+        env:
+          PLAYWRIGHT_REPORT_DIR: playwright-report-shard-${{ matrix.shard }}
+          PLAYWRIGHT_OUTPUT_DIR: test-results-shard-${{ matrix.shard }}
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-artifacts-shard-${{ matrix.shard }}
+          path: |
+            apps/web/playwright-report-shard-${{ matrix.shard }}
+            apps/web/test-results-shard-${{ matrix.shard }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-pwa:
+    name: e2e PWA (production build — iPhone 14, Pixel 7, desktop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-e2e-pwa
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.117.0
+
+      - name: Generate ES256 signing keys for the local stack
+        # Same as the db job: seed an empty set, the CLI appends the key itself.
+        run: echo '[]' > supabase/signing_keys.json && supabase gen signing-key --algorithm ES256 --yes
+      - name: Start the local Supabase stack
+        run: supabase start
+      - name: Apply migrations
+        run: supabase db reset
+      - name: Give api_user a local login password
+        run: bash scripts/db-local-role.sh
+
+      - name: Wait for Realtime's partition of today (the signed-in shell subscribes)
+        # Same wait as the db job (07 review A-WR-06).
+        run: |
+          for _ in $(seq 1 60); do
+            found=$(psql "postgres://postgres:postgres@127.0.0.1:54322/postgres" -Atc "select count(*) from pg_inherits i join pg_class c on c.oid = i.inhrelid where i.inhparent = 'realtime.messages'::regclass and pg_get_expr(c.relpartbound, c.oid) like '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'")
+            if [ "$found" != "0" ]; then exit 0; fi
+            sleep 2
+          done
+          echo "no realtime.messages partition covers now() after 120 s"
+          exit 1
+
+      - name: Write .env.local for the API and the web app
+        run: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
+      - name: Seed the two tenants
+        run: pnpm db:seed
+
+      - name: Install Chromium for Playwright
+        run: pnpm --filter @rede-social/web exec playwright install --with-deps chromium
       # Production build required: `@serwist/turbopack` empties the precache in `next dev` (02-11).
       # playwright.pwa.config.ts builds and starts the app on port 3100 and inherits the base
-      # config's report knobs, so the two Playwright runs keep separate report/trace folders.
+      # config's report knobs, so this run keeps its own report/trace folders.
       - name: End-to-end PWA (production build — iPhone 14, Pixel 7, desktop)
         run: pnpm --filter @rede-social/web e2e:pwa
         env:
@@ -135,11 +291,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-pwa
           path: |
-            apps/web/playwright-report
             apps/web/playwright-report-pwa
-            apps/web/test-results
             apps/web/test-results-pwa
           if-no-files-found: ignore
           retention-days: 7
