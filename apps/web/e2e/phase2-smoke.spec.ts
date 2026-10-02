@@ -340,7 +340,11 @@ function iconVersionOf(b: HostBranding): number {
 // ---------------------------------------------------------------------------------------------
 
 test.beforeAll(async ({ browser: _browser }, testInfo) => {
-  const sfx = `${rand}${testInfo.project.name.charAt(0)}`;
+  // 08-02: each `--repeat-each` iteration gets its own tenant, host and mailboxes. With one slug for
+  // every repeat, repeat 2 met the previous repeat's deleted host still answered by the API's host
+  // lookup (by-host 200 where (c) asserts the pre-verification 404) — the quick 261001-ere lesson.
+  const repeat = testInfo.repeatEachIndex > 0 ? `r${testInfo.repeatEachIndex}` : '';
+  const sfx = `${rand}${testInfo.project.name.charAt(0)}${repeat}`;
   slug = `e2e-smoke-${sfx}`;
   displayName = `Smoke ${sfx}`;
   host = `${slug}.localhost`;

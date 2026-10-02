@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 38
+open_count: 37
 waived_count: 0
-fixed_count: 33
+fixed_count: 34
 total_count: 71
-last_updated: 2026-10-01T13:55:16.627Z
+last_updated: 2026-10-02T13:07:44.600Z
 ---
 
 # Broken Windows Ledger
@@ -85,7 +85,7 @@ last_updated: 2026-10-01T13:55:16.627Z
 | 68 | 7 | unrun-verify | apps/web/e2e/notifications.spec.ts | 228 | 07-15 exit gate: mobile 'mark-all clears every tint' failed; reload 44 ms after the click aborted POST /api/notifications/read-all (no keepalive), Novas still shown; see deferred-items.md | fixed |  | 2026-10-01T13:15:19.797Z | 2026-10-01T13:55:16.627Z |
 | 69 | 7 | unrun-verify | apps/web/e2e/phase52-smoke.spec.ts | 294 | 07-15 exit gate: mobile case 1 failed at line 255, the Novo destaque create sheet never opened after the click; cases 2-6 did not run; passed on desktop in the same run; see deferred-items.md | open |  | 2026-10-01T13:15:19.871Z |  |
 | 70 | 7 | unrun-verify | apps/web/e2e/stories.spec.ts | 1636 | 07-15 exit gate: mobile Inicio manage case failed at line 1707, Escape did not close the Editar destaque sheet; see deferred-items.md | open |  | 2026-10-01T13:15:19.946Z |  |
-| 71 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 532 | 07-15 exit gate: desktop case 1 timed out (300 s), Salvar alteracoes re-rendered disabled after #primary was filled (Marca rebrand); platform-host steps passed; desktop cases 2-5 did not run; see deferred-items.md | open |  | 2026-10-01T13:15:20.020Z |  |
+| 71 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 532 | 07-15 exit gate: desktop case 1 timed out (300 s), Salvar alteracoes re-rendered disabled after #primary was filled (Marca rebrand); platform-host steps passed; desktop cases 2-5 did not run; see deferred-items.md | fixed |  | 2026-10-01T13:15:20.020Z | 2026-10-02T13:07:44.600Z |
 
 ````json
 [
@@ -936,10 +936,10 @@ last_updated: 2026-10-01T13:55:16.627Z
     "file": "apps/web/e2e/phase2-smoke.spec.ts",
     "line": 532,
     "description": "07-15 exit gate: desktop case 1 timed out (300 s), Salvar alteracoes re-rendered disabled after #primary was filled (Marca rebrand); platform-host steps passed; desktop cases 2-5 did not run; see deferred-items.md",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-01T13:15:20.020Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-02T13:07:44.600Z"
   }
 ]
 ````

@@ -44,7 +44,10 @@ const pollExhausted = (attempts: number) => attempts >= 20;
 
 export interface BrandingFormProps {
   tenantId: string;
-  /** The server-rendered view; the page remounts the form (`key`) whenever it changes. */
+  /**
+   * The server-rendered view. The page keys the form on the tenant only; a new view (a refresh) is
+   * adopted in place, so typed colours survive it.
+   */
   view: BrandingView;
   /** Strings of the kernel `BrandPreview` (props, never a hook — Phase 8 reuses it as-is). */
   previewLabels: BrandPreviewLabels;
@@ -78,6 +81,8 @@ export function BrandingForm({
   const toast = useToast();
   const router = useRouter();
   const [view, setView] = useState(initialView);
+  /** The last `view` prop seen — a new one is a server refresh to adopt (below `applyView`). */
+  const [seed, setSeed] = useState(initialView);
   const [attempts, setAttempts] = useState(0);
   const [primary, setPrimary] = useState(view.colors.primary);
   const [secondary, setSecondary] = useState(view.colors.secondary);
@@ -108,10 +113,17 @@ export function BrandingForm({
     if (check.success) setLastValid((prev) => ({ ...prev, [which]: check.data }));
   };
 
-  /** A fresh view from an upload/removal: adopt it and, when the colours were not being edited, follow it. */
+  /**
+   * A fresh view from an upload/removal or a server refresh: adopt it and, when the colours were not
+   * being edited, follow it. "Not edited" covers the raw fields too, so a half-typed (still invalid)
+   * hex is never overwritten.
+   */
   const applyView = (next: BrandingView) => {
     const untouched =
-      lastValid.primary === view.colors.primary && lastValid.secondary === view.colors.secondary;
+      lastValid.primary === view.colors.primary &&
+      lastValid.secondary === view.colors.secondary &&
+      primary === view.colors.primary &&
+      secondary === view.colors.secondary;
     if (untouched) {
       setPrimary(next.colors.primary);
       setSecondary(next.colors.secondary);
@@ -120,6 +132,16 @@ export function BrandingForm({
     setView(next);
     setAttempts(0);
   };
+
+  // A refreshed server view (the poll's `router.refresh()` once the icons are ready, an action's
+  // `revalidatePath`) arrives as a new `view` prop. The page no longer remounts the form for it
+  // (08-02, WINDOWS #71: the remount dropped a colour typed while the refresh was in flight), so it
+  // is adopted here, during render, with the same rule as an upload. A view older than the one on
+  // screen (a lower `iconVersion`) is dropped, like a stale poll answer (T-02-117).
+  if (seed !== initialView) {
+    setSeed(initialView);
+    if (initialView.iconVersion >= view.iconVersion) applyView(initialView);
+  }
 
   const iconStatus: IconsStatus = view.iconsReady
     ? 'ready'

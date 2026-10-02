@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { BrandingForm } from '@/components/platform/BrandingForm';
-import { type BrandingView, toBrandingView } from '@/lib/branding-view';
+import { toBrandingView } from '@/lib/branding-view';
 import { requirePlatformTenantDetail } from '@/lib/platform';
 import {
   completeBrandingUploadAction,
@@ -18,16 +18,18 @@ import {
  * `BrandingView` and mounts the client form. No cache directive: every read is per request.
  */
 
-/** A refreshed server view remounts the form with fresh state — no effect-driven state sync. */
-function formKey(view: BrandingView): string {
-  return [
-    view.iconVersion,
-    view.iconsReady,
-    view.logoUrl,
-    view.iconUrl,
-    view.colors.primary,
-    view.colors.secondary,
-  ].join('|');
+/**
+ * The form is keyed on the tenant alone (08-02, WINDOWS #71). It used to be keyed on the whole view
+ * (icon version, icons ready, logo/icon URLs, colours), so the poll's `router.refresh()` once the
+ * icons were ready, and every action's `revalidatePath`, remounted it: a colour typed while the
+ * refresh was in flight was dropped and "Salvar alterações" came back disabled (07-15 desktop red).
+ * Keying on the persisted colours too would bring the same remount back one save later, because the
+ * refresh after a colour save carries the new colours. A refreshed view is adopted by the form in
+ * place instead (`BrandingForm`, the `applyView` rule: follow the server colours only when the user
+ * has not touched them).
+ */
+function formKey(tenantId: string): string {
+  return tenantId;
 }
 
 export default async function TenantBrandingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -38,7 +40,7 @@ export default async function TenantBrandingPage({ params }: { params: Promise<{
 
   return (
     <BrandingForm
-      key={formKey(view)}
+      key={formKey(id)}
       tenantId={id}
       view={view}
       previewLabels={{
