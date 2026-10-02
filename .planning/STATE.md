@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-08-PLAN.md
-last_updated: "2026-10-02T18:24:55.788Z"
+stopped_at: Completed 08-10-PLAN.md
+last_updated: "2026-10-02T19:01:27.015Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-08 (nonce CSP on every proxy branch behind CSP_MODE with the /api/csp-report sink; Zod jitless in the browser; inline YouTube/Vimeo click-to-play; CORS proof; Phase 2 IN-03..IN-07 fixed, IN-01/IN-02 superseded by 08.1-06)
-state_head: d658ab4cc220e0657608ad54909fb8cc36bcfec0
+last_activity_desc: Completed 08-10 (isolation inventory gate: every API route, Realtime topic kind, Storage bucket and web route handler classified and checked; phase 8, inventory and storage sweeps; cross-tenant Realtime joins)
+state_head: f0ada8b85d3d9940d5dc99757e6a8502e7c59132
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 119
+  completed_plans: 120
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 10 of 12
+Plan: 11 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-08 (nonce CSP on every proxy branch behind CSP_MODE with the /api/csp-report sink; Zod jitless in the browser; inline YouTube/Vimeo click-to-play; CORS proof; Phase 2 IN-03..IN-07 fixed, IN-01/IN-02 superseded by 08.1-06)
+Last activity: 2026-10-02 — Completed 08-10 (isolation inventory gate: every API route, Realtime topic kind, Storage bucket and web route handler classified and checked; phase 8, inventory and storage sweeps; cross-tenant Realtime joins)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -180,6 +180,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P09 | 14 min | 2 tasks | 21 files |
 | Phase 08 P07 | 16 min | 2 tasks | 23 files |
 | Phase 08 P08 | 1h 55m | 3 tasks | 38 files |
+| Phase 08 P10 | 26 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -588,6 +589,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-08: the web sends a per-request nonce CSP from proxy.ts on every branch (refresh rebuild, rewrite, redirects, SW); CSP_MODE report-only by default, the e2e harness enforces, production flips to enforce only after the 08-12 real-device pass
 - [Phase 08]: 08-08: Zod runs jitless in the browser (apps/web/instrumentation-client.ts) because its new Function probe is a CSP eval violation on every production page; csp.spec also runs in e2e:pwa since next dev allows unsafe-eval and cannot see this class of bug
 - [Phase 08]: 08-08: inline YouTube/Vimeo play only after a tap in a sandboxed iframe (no top-level navigation) from a server-derived embedUrl; IN-01/IN-02 of 02-REVIEW are superseded by 08.1-06, IN-03..IN-07 fixed
+- [Phase 08]: 08-10: the isolation gate is a machine check: tests/isolation-inventory.ts classifies every app.routes entry (98 cases, 22 exemptions in six families), plus Realtime topic kinds parsed from REALTIME_TOPIC_PATTERN and Storage buckets parsed from the migrations; a new route without a case fails pnpm turbo test
+- [Phase 08]: 08-10: the web route-handler inventory reads the API map as text (turbo boundaries refuses the cross-package import); the API unit test pins the parse and apps/web/turbo.json lists the file as a web test input
+- [Phase 08]: 08-10: cross-tenant crossings are compared byte for byte (requestId stripped) with the same call on an unknown id; the replies route is 200-only by contract, so its proof is the identical empty page while a live lab reply exists
 
 ### Pending Todos
 
@@ -661,6 +665,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T18:24:39.327Z
-Stopped at: Completed 08-08-PLAN.md
+Last session: 2026-10-02T19:01:20.803Z
+Stopped at: Completed 08-10-PLAN.md
 Resume file: None
