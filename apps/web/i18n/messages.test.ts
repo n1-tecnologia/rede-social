@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { assembleMessages, loadMessages } from './messages';
+import { assembleMessages, loadMessages, type MessageTree } from './messages';
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const catalogDir = fileURLToPath(new URL('../messages/pt-BR/', import.meta.url));
@@ -105,6 +105,153 @@ describe('loadMessages (PWA-03: one pt-BR catalog assembled from per-namespace f
     for (const ns of ['common', 'login', 'signup', 'forgot', 'reset', 'platform', 'app', 'legal']) {
       expect(messages, ns).toHaveProperty(ns);
     }
+  });
+});
+
+type Leaf = { key: string; message: string };
+
+function leaves(tree: MessageTree, prefix = ''): Leaf[] {
+  return Object.entries(tree).flatMap(([name, value]) => {
+    const key = prefix ? `${prefix}.${name}` : name;
+    return typeof value === 'string' ? [{ key, message: value }] : leaves(value, key);
+  });
+}
+
+type SampleValue = string | number | Date | ((chunks: string) => string);
+
+/**
+ * A sample value for every argument a message names, from a small ICU brace parser: a number for a
+ * `plural`/`selectordinal`/`select`/`number` argument, a Date for `date`/`time`, a string otherwise,
+ * and a pass-through function for every `<tag>` (rich text). Arguments nested inside plural branches
+ * are collected too. The parser only has to FIND the names — a malformed message is reported by
+ * next-intl itself through `onError`, which is what the test asserts on.
+ */
+function sampleValues(message: string): Record<string, SampleValue> {
+  const values: Record<string, SampleValue> = {};
+  for (const [, tag] of message.matchAll(/<([A-Za-z][\w-]*)>/g)) {
+    values[tag as string] = (chunks: string) => chunks;
+  }
+  let i = 0;
+  const readUntil = (stops: string): string => {
+    const start = i;
+    while (i < message.length && !stops.includes(message.charAt(i))) i += 1;
+    return message.slice(start, i).trim();
+  };
+  const skipBalanced = (): void => {
+    let depth = 0;
+    for (; i < message.length; i += 1) {
+      const c = message.charAt(i);
+      if (c === '{') depth += 1;
+      else if (c === '}') {
+        if (depth === 0) return;
+        depth -= 1;
+      }
+    }
+  };
+  const parseText = (): void => {
+    while (i < message.length && message.charAt(i) !== '}') {
+      if (message.charAt(i) === '{') {
+        i += 1;
+        parseArgument();
+      } else {
+        i += 1;
+      }
+    }
+  };
+  function parseArgument(): void {
+    const name = readUntil(',}');
+    if (message.charAt(i) === '}') {
+      i += 1;
+      if (name && !(name in values)) values[name] = 'Exemplo';
+      return;
+    }
+    i += 1; // the comma
+    const type = readUntil(',}');
+    if (type === 'plural' || type === 'selectordinal' || type === 'select' || type === 'number') {
+      values[name] = 2;
+    } else if (type === 'date' || type === 'time') {
+      values[name] = new Date('2026-10-02T12:00:00Z');
+    } else if (name && !(name in values)) {
+      values[name] = 'Exemplo';
+    }
+    if (message.charAt(i) === '}') {
+      i += 1;
+      return;
+    }
+    i += 1; // the comma before the style or the branches
+    if (type !== 'plural' && type !== 'selectordinal' && type !== 'select') {
+      skipBalanced();
+      i += 1;
+      return;
+    }
+    // branches: `selector {text}` pairs (and an optional `offset:n`) until the closing brace
+    while (i < message.length && message.charAt(i) !== '}') {
+      readUntil('{}');
+      if (message.charAt(i) === '{') {
+        i += 1;
+        parseText();
+        i += 1; // the branch's closing brace
+      }
+    }
+    i += 1; // the argument's closing brace
+  }
+  parseText();
+  return values;
+}
+
+/**
+ * 08-11 (PWA-03, T-08-56) — every message of the real pt-BR catalog compiles. An unbalanced brace
+ * or a broken ICU plural in `admin.json`, `moderation.json` or any other file would otherwise
+ * surface only when that one screen renders in production; here it fails the build. Each leaf is
+ * formatted through next-intl's own `createTranslator` with an `onError` that records instead of
+ * falling back, and with a sample for every argument the message names.
+ */
+describe('08-11 — the pt-BR catalog compiles', () => {
+  it('every message compiles', async () => {
+    const { createTranslator } = await import('next-intl');
+    const messages = loadMessages(catalogDir);
+    const all = leaves(messages);
+    expect(all.length).toBeGreaterThan(500);
+    const failures: string[] = [];
+    for (const { key, message } of all) {
+      const errors: string[] = [];
+      const t = createTranslator({
+        locale: 'pt-BR',
+        messages,
+        onError: (error) => errors.push(`${error.code}: ${error.message}`),
+      }) as unknown as {
+        markup: (key: string, values?: Record<string, SampleValue>) => string;
+      };
+      const out = t.markup(key, sampleValues(message));
+      if (errors.length > 0) failures.push(`${key}: ${errors.join('; ')}`);
+      else if (typeof out !== 'string' || out.includes('{')) {
+        failures.push(`${key}: formatted to ${JSON.stringify(out)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('the parser supplies a sample for nested plural arguments, numbers and rich-text tags', () => {
+    const values = sampleValues(
+      '{count, plural, one {# post de {name}} other {# posts de {name}}} em <b>{place}</b>, {n, number}',
+    );
+    expect(Object.keys(values).sort()).toEqual(['b', 'count', 'n', 'name', 'place']);
+    expect(values.count).toBe(2);
+    expect(values.n).toBe(2);
+    expect(values.name).toBe('Exemplo');
+    expect(typeof values.b).toBe('function');
+  });
+
+  it('a broken message is reported through onError (the check can fail)', async () => {
+    const { createTranslator } = await import('next-intl');
+    const errors: string[] = [];
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages: { x: { broken: '{count, plural, one {# item} other {# itens}' } },
+      onError: (error) => errors.push(error.code),
+    }) as unknown as (key: string, values?: Record<string, SampleValue>) => string;
+    t('x.broken', { count: 2 });
+    expect(errors.length).toBeGreaterThan(0);
   });
 });
 
@@ -678,6 +825,34 @@ describe('scripts/check-ui-literals.sh (UI-SPEC token file rule)', () => {
     const r = run({ 'Foo.tsx': 'export const Foo = () => <p>Configurações</p>;\n' });
     expect(r.status).toBe(1);
     expect(r.out).toContain('Foo.tsx:1');
+  });
+
+  it('08-11 rule (d): fails on a user-facing attribute literal, naming file:line', () => {
+    const r = run({
+      'Foo.tsx': [
+        'export const A = () => <button aria-label="Fechar" />;',
+        "export const B = () => <input placeholder='Buscar membros' />;",
+        'export const C = () => <img alt="Logo" title="Sobre" />;',
+        'export const D = () => <Field label="Nome" />;',
+        '',
+      ].join('\n'),
+    });
+    expect(r.status).toBe(1);
+    for (const line of [1, 2, 3, 4]) expect(r.out).toContain(`Foo.tsx:${line}: user-facing`);
+  });
+
+  it('08-11 rule (d): passes on braced values, decorative alt, glyphs and look-alike attributes', () => {
+    const r = run({
+      'Foo.tsx': [
+        "export const A = () => <button aria-label={t('close')} title={t('close')} />;",
+        'export const B = () => <img alt="" />;',
+        'export const C = () => <span title="/" label="·" />;',
+        'export const D = () => <div data-label="row" subtitle="x" />;',
+        '',
+      ].join('\n'),
+    });
+    expect(r.out).toBe(r.status === 0 ? r.out : `unexpected failure:\n${r.out}`);
+    expect(r.status).toBe(0);
   });
 
   it('passes on catalog-driven text, on a .test.tsx and on tokens.css (excluded by extension)', () => {

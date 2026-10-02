@@ -9,6 +9,9 @@
 #   (b) a legacy prototype brand class: text-gold, bg-gold, bg-emerald, text-emerald, btn-gold,
 #       brand-ig-mark, pill-*, text-gradient-* (UI-03 replaces them with tenant tokens)
 #   (c) JSX text with pt-BR diacritics outside the catalog (`<p>Configurações</p>`; `{t('title')}` passes)
+#   (d) an attribute literal a user reads (08-11): `aria-label`, `placeholder`, `title`, `alt` or `label`
+#       set to a quoted string with two or more consecutive letters (`aria-label="Fechar"`); a value in
+#       braces (`aria-label={t('close')}`) never matches, nor does `data-label=`/`subtitle=`
 # and when any `apps/web/messages/pt-BR/*.json` does not parse or its root key differs from the filename
 # prefix (the loader's contract, apps/web/i18n/messages.ts).
 #
@@ -52,6 +55,12 @@ const RULES = [
     name: 'JSX text with pt-BR diacritics outside the catalog (use t(\'key\') from apps/web/messages/pt-BR)',
     re: />[^<{}]*[ãõçáéíóúâêôàÃÕÇÁÉÍÓÚÂÊÔÀ][^<{}]*</,
   },
+  {
+    name: "user-facing attribute literal (use t('key'))",
+    // the attribute name must not be the tail of a longer one (`data-label=`, `subtitle=`), and the
+    // two letters must sit inside the quotes, so `title={t('x')}` and `alt=""` (decorative) pass
+    re: /(?<![\w-])(?:aria-label|placeholder|title|alt|label)=(?:"[^"\n]*[A-Za-zÀ-ÖØ-öø-ÿ]{2}[^"\n]*"|'[^'\n]*[A-Za-zÀ-ÖØ-öø-ÿ]{2}[^'\n]*')/,
+  },
 ];
 
 function* walk(dir) {
@@ -88,7 +97,7 @@ for (const dir of process.argv.slice(2)) {
 process.exit(hits === 0 ? 0 : 1);
 NODE
 then
-  echo "check-ui-literals: FAILED — hard-coded colours, legacy brand classes or pt-BR literals in .tsx (UI-SPEC token file rule)" >&2
+  echo "check-ui-literals: FAILED — hard-coded colours, legacy brand classes, pt-BR literals or attribute literals in .tsx (UI-SPEC token file rule, PWA-03)" >&2
   STATUS=1
 fi
 
@@ -212,7 +221,7 @@ fi
 if [ "$STATUS" -ne 0 ]; then
   exit 1
 fi
-echo "check-ui-literals: OK — no hex/legacy-class/pt-BR literals in .tsx under ${DIRS[*]}; catalog files valid"
+echo "check-ui-literals: OK — no hex/legacy-class/pt-BR/attribute literals in .tsx under ${DIRS[*]}; catalog files valid"
 if [ "$#" -eq 0 ]; then
   echo "check-ui-literals: OK — Biome noJsxLiterals is at error, glyph-only allow-list, and the canary still fails a word"
 fi
