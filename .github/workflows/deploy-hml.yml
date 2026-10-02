@@ -21,6 +21,17 @@
 #      and the production provider only `refs/heads/master` (docs/DEPLOY.md "Workload Identity
 #      branch restriction (isolation guard)").
 #
+# Supabase mode (GitHub environment variable HML_SUPABASE on `homolog`, 2026-10-02):
+#   isolated                 -> the hml Supabase project; migrations, api_user, config push and the
+#                               worker all run, and every production-value guard applies.
+#   shared-with-production   -> TEMPORARY: hml reads and writes the PRODUCTION database. Migrations,
+#                               the api_user password and `config push` are skipped (only
+#                               deploy-api.yml, behind the reviewer, may change production), and the
+#                               hml worker is NOT deployed (one pg-boss queue in one database: only
+#                               production's worker may consume it). The -hml secrets then hold
+#                               production's values, VAPID included (push subscriptions are shared).
+# Anything else fails the preflight.
+#
 # No seed step: production's never-seed rule does not apply to hml, but a demo seed there is run by
 # hand only, never from a workflow (docs/DEPLOY.md "hml provisioning runbook").
 name: Deploy homolog (hml)
@@ -72,11 +83,21 @@ jobs:
           PLATFORM_HOST: ${{ vars.PLATFORM_HOST }}
           WEB_URL: ${{ vars.WEB_URL }}
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          HML_SUPABASE: ${{ vars.HML_SUPABASE }}
         run: |
           fail() { echo "::error::$1"; exit 1; }
 
+          case "$HML_SUPABASE" in
+            isolated) ;;
+            shared-with-production)
+              echo "::warning::HML_SUPABASE=shared-with-production: hml uses the PRODUCTION database; migrations, config push and the hml worker are skipped." ;;
+            *) fail "HML_SUPABASE must be 'isolated' or 'shared-with-production' on environment 'homolog'." ;;
+          esac
+
           # (a) Every homolog value is present.
-          for name in WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL SUPABASE_PROJECT_ID; do
+          names="WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL"
+          if [ "$HML_SUPABASE" = "isolated" ]; then names="$names SUPABASE_PROJECT_ID"; fi
+          for name in $names; do
             if [ -z "${!name:-}" ]; then
               fail "$name is empty: define it on the GitHub environment 'homolog' (docs/DEPLOY.md)."
             fi
@@ -95,6 +116,12 @@ jobs:
               *@api-dere-social.iam.gserviceaccount.com) fail "$name is a production service account; set the hml one on environment 'homolog'." ;;
             esac
           done
+
+          # (c) and (e) apply only to an isolated hml Supabase project.
+          if [ "$HML_SUPABASE" = "shared-with-production" ]; then
+            echo "Preflight passed (shared-with-production): homolog GCP and web values present, none resolves to production."
+            exit 0
+          fi
 
           # (c) The Supabase ref is not production's.
           if [ "$SUPABASE_PROJECT_ID" = "qjjhtduxquvlfppybpqq" ]; then
@@ -167,13 +194,16 @@ jobs:
       url: ${{ vars.WEB_URL }}
     steps:
       - uses: actions/checkout@v7
+      # The three Supabase steps run only against an isolated hml project (HML_SUPABASE, header).
       - uses: supabase/setup-cli@v3
+        if: vars.HML_SUPABASE == 'isolated'
         with:
           version: 2.117.0
 
       # Every Supabase CLI command validates config.toml's `[auth.hook.send_email]` block, so each
       # step that runs the CLI needs SEND_EMAIL_HOOK_SECRETS (same value as Secret Manager).
       - name: Migrations (roles included)
+        if: vars.HML_SUPABASE == 'isolated'
         env:
           SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -184,6 +214,7 @@ jobs:
           supabase db push --include-roles
 
       - name: Set the api_user password
+        if: vars.HML_SUPABASE == 'isolated'
         env:
           PGPASSWORD_URL: ${{ secrets.SUPABASE_SESSION_POOLER_URL }}
           API_DB_PASSWORD: ${{ secrets.API_DB_PASSWORD }}
@@ -191,6 +222,7 @@ jobs:
         run: echo "alter role api_user with login password :'pw';" | psql "$PGPASSWORD_URL" -v ON_ERROR_STOP=1 -v pw="$API_DB_PASSWORD"
 
       - name: Push auth configuration (Send Email Hook -> API)
+        if: vars.HML_SUPABASE == 'isolated'
         env:
           SEND_EMAIL_HOOK_SECRETS: ${{ secrets.SEND_EMAIL_HOOK_SECRETS }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -243,7 +275,9 @@ jobs:
           # --min-instances=0: hml tolerates a cold start; the deep health check below retries.
           flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=0 --no-invoker-iam-check --port=8080
 
+      # Not while the database is shared: production's worker owns the single pg-boss queue.
       - uses: google-github-actions/deploy-cloudrun@v3
+        if: vars.HML_SUPABASE == 'isolated'
         with:
           service: worker
           region: ${{ env.GCP_REGION }}

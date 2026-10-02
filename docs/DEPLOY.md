@@ -42,6 +42,24 @@ Decisions (2026-09-28) stands.
 - **Seed.** A demo seed on hml is allowed, but only by hand (see "hml provisioning runbook"), never
   from a workflow. Production's never-seed rule is unchanged.
 
+### Temporary: hml shares production's Supabase, Mux and Resend (2026-10-02)
+
+Until Igor provisions them, hml runs with `HML_SUPABASE=shared-with-production` (GitHub environment
+variable on `homolog`): the hml `api` reads and writes the **production database** — anything
+created on `rede-social-hml.vercel.app` is real production data. `deploy-hml.yml` then skips
+migrations, the `api_user` password and `config push` (only `deploy-api.yml`, behind the reviewer,
+changes production) and does **not** deploy the hml `worker` (production's worker alone consumes the
+single pg-boss queue; jobs the hml `api` enqueues run there). The `-hml` secrets hold copies of the
+`-prod` values, VAPID included (push subscriptions live in the shared database); the hml VAPID pair
+generated on 2026-10-02 is kept as version 1 of `vapid-*-hml` for the switch. Mux webhooks keep
+pointing at the production `api`, which updates the shared rows. Production's Supabase Auth
+`site_url`/redirects stay production's, so e-mail confirmation/recovery links open production.
+Code on `homolog` must not need a migration production has not applied yet.
+
+**Switch to isolated:** create the hml Supabase project, add `[remotes.homolog]`, set the
+`homolog` GitHub secrets, add new versions of every `-hml` secret (disable the copied VAPID version
+to fall back to version 1), the hml Mux environment/webhook, then set `HML_SUPABASE=isolated`.
+
 ## Decisions (2026-09-28)
 
 These deviate from the Phase 01.1 roadmap text (two Supabase projects, staging on every pull
