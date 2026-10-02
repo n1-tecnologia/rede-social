@@ -318,7 +318,8 @@ None. There are no migrations. The routes and the screen ship with the next rele
 
 ## Next Phase Readiness
 
-- ADMIN-03 is complete, and the D-339 Administração group is now complete in the UI-D-269 order.
+- ADMIN-03's editor is complete, and the D-339 Administração group is now complete in the UI-D-269 order.
+- `REQUIREMENTS.md` still reads ADMIN-03 Pending, by design. The shared-ID gate (`requirements.ready-ids`) keeps it open because 08-10, 08-11 and 08-12 also declare ADMIN-03, and the last of those to finish flips it. A premature `mark-complete` was reverted before commit.
 - 08-08's CSP covers the rules text on the public sign-up page (T-08-38's second layer).
 - 08-12's D-345 real-device checklist can add one row: edit the rules on a phone and read them on `/cadastro`.
 

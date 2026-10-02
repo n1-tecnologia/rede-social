@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 08
 current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
 status: executing
-stopped_at: Completed 08-09-PLAN.md
-last_updated: "2026-10-02T16:05:37.387Z"
+stopped_at: Completed 08-07-PLAN.md
+last_updated: "2026-10-02T16:25:21.965Z"
 last_activity: 2026-10-02
-last_activity_desc: Completed 08-09 (MOD-05 reuse fixture mounting the events module on the kernel contracts alone, eight READMEs and the README drift test)
-state_head: 4ec2998043624e3872884822d30b5bded20e4f11
+last_activity_desc: Completed 08-07 (Regras da comunidade editor with the change-only rules_version bump and the shared RulesText renderer; the Administração group complete)
+state_head: 26b7e51758924e039c88d5597f851664f6d4d8d5
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 117
+  completed_plans: 118
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 8 of 12
+Plan: 9 of 12
 Status: Ready to execute
-Last activity: 2026-10-02 — Completed 08-09 (packages/reuse-fixture mounts the events module on the kernel contracts alone: route set, 401 without a DB, seeded rede-demo member 200, dependency set asserted; root test:integration chains it; seven module READMEs plus the kernel moderation README kept true by module-readmes.test.ts)
+Last activity: 2026-10-02 — Completed 08-07 (GET/PUT /v1/admin/rules behind tenant.manage with the change-only rules_version bump in the admin lane, consents untouched; /configuracoes/regras editor with the preview through the shared RulesText that /cadastro and /aceitar-convite now use; the Administração group complete in the UI-D-269 order)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -178,6 +178,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P05 | 31 min | 2 tasks | 18 files |
 | Phase 08 P06 | 27 min | 2 tasks | 21 files |
 | Phase 08 P09 | 14 min | 2 tasks | 21 files |
+| Phase 08 P07 | 16 min | 2 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -581,6 +582,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-09: MOD-05 is proven by packages/reuse-fixture (tag app), which mounts the events module on the kernel contracts alone; its dependency set is asserted by its own unit test and turbo boundaries, and its seeded-stack case runs from the root test:integration after the API suite
 - [Phase 08]: 08-09: module READMEs (fixed headings Contracts, Events emitted, Events consumed, Flag key, Kernel dependencies, Navigation, Jobs, Reuse) are kept true by apps/api/tests/unit/module-readmes.test.ts; the check reads ternary emits and fails both ways, and every packages/modules/* package must be in MODULE_REGISTRY
 - [Phase 08]: 08-09: a Vitest config that needs its own include must not be merged with vitestBase (mergeConfig concatenates include arrays)
+- [Phase 08]: 08-07: the tenant rules contract lives in a client-safe @rede-social/contracts/rules (re-exported by legal.ts, which imports node:fs); PUT /v1/admin/rules bumps rules_version only when the normalised text changed (one admin-lane update scoped by id = ctx.tenantId with an is-distinct-from predicate) and never touches consents — D-341 made code: new sign-ups consent to the new version, recorded consents keep theirs, no re-acceptance wall; the editor compares its draft through the API's own normaliser, so the UI cannot cause an empty bump
+- [Phase 08]: 08-07: RulesText (apps/web/components/rules) is the one rules renderer for /cadastro, /aceitar-convite and the Regras preview; single line breaks are now kept (whitespace-pre-line, UI-D-281) — One renderer makes the admin's preview identical to what a newcomer reads, by construction
 
 ### Pending Todos
 
@@ -653,6 +656,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T16:05:12.554Z
-Stopped at: Completed 08-09-PLAN.md
+Last session: 2026-10-02T16:25:15.816Z
+Stopped at: Completed 08-07-PLAN.md
 Resume file: None
