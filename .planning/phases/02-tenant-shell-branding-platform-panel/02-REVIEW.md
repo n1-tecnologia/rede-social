@@ -170,3 +170,22 @@ if (done) { onCompleted(done); toast.show({ tone: 'success', message: t('toasts.
 _Reviewed: 2026-09-17T14:47:57Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+---
+
+## Resolution (Phase 8, 08-08)
+
+Closed on 2026-10-02 by plan 08-08 (D-346: the leftover Phase 2 review items are part of the
+go-live hardening). Each item is either fixed with a test or recorded as superseded by the phase
+that rewrites its code.
+
+| Item | Outcome | Where |
+|---|---|---|
+| IN-01 | **Superseded by 08.1-06.** That plan deletes `identityConflict`, `isOneTenantPerUserViolation` and `NIL_TENANT_ID` and replaces the single-tenant refusal with a membership add, keeping only an `already_accepted` refusal for an identity already active in the inviting tenant (08.1-06-PLAN lines 95, 144, 240). A new same-tenant reason added here would be deleted one phase later. | 08.1-06 |
+| IN-02 | **Superseded by 08.1-06.** The same plan rewrites the invite pre-check (`identityKind`) and moves it into the claim transaction, so the window with a false `sent` disappears with the code that has it. | 08.1-06 |
+| IN-03 | **Fixed.** `/auth/confirm`'s failure path sends a link to `/convite-expirado` when `type === 'invite'` OR the sanitised `next` is `/aceitar-convite`, so a lapsed recovery-type invite link no longer lands on password recovery. Test: `apps/web/app/auth/confirm/route.test.ts`. | `ce29cba` |
+| IN-04 | **Fixed.** `no_verified_primary` maps to the existing `admins.resendHelper` copy; the allow-list moved to `RESEND_REFUSAL_REASONS` / `resendReasonCopy`. Tests: `apps/web/components/platform/ResendInviteButton.test.ts`; `apps/api/tests/integration/invites.test.ts` case 14 (a SENT invite whose tenant lost its verified primary answers 409 `no_verified_primary`). | `ce29cba` |
+| IN-05 | **Fixed.** The Admins tab reads `detail.invites.at(-1)` (the service keeps `asc(createdAt)`); the page and `getTenantDetail` docblocks state the ordering. Test: `invites.test.ts` case 15 (two invites, the newest is the last element). | `ce29cba` |
+| IN-06 | **Fixed.** `LogoUpload` captures the recorded view inside the `try` and calls `onCompleted` and the success toast after it, so a throwing parent callback is never reported as a failed upload. Test: `LogoUpload.test.ts` case 4. | `ce29cba` |
+| IN-07 | **Fixed.** `tenant-host.test.ts` case 2 ("the generic answer is served from the error TTL — no second fetch for the same host") populates its own cache with an immediate failure on its own host; it passes alone (`-t`) and under `--sequence.shuffle`. | `ce29cba` |
+| IN-08 | **Unchanged.** Not in D-346's list. 08.1-06 removes `isOneTenantPerUserViolation` and the R3 case together, which retires the synthetic-only coverage this item describes. | — |
