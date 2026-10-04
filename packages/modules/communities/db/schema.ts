@@ -76,6 +76,12 @@ export const communities = pgTable(
     coverAssetId: uuid('cover_asset_id').references(() => mediaAssets.id),
     /** `'active' | 'archived'` — a status column with a CHECK, never a pile of booleans (§(d).1). */
     status: text().notNull().default('active'),
+    /**
+     * The admin's order on the Comunidades list (2026-10-03), ascending, ties by the last activity.
+     * Every row starts at 0, so the list reads exactly as before until an admin reorders it; the
+     * reorder writes 1..n, so a community created afterwards (0) is listed first.
+     */
+    position: integer().notNull().default(0),
     /** Trigger-owned (05-03). Application code never writes these two. */
     postCount: integer('post_count').notNull().default(0),
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
@@ -84,9 +90,10 @@ export const communities = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [
-    // D-76's list query verbatim, tie-breaker included, so `(last_activity_at, id)` is a TOTAL order
-    // the index carries: a page boundary can neither duplicate nor skip a row, even while somebody
-    // else is publishing.
+    // D-76's list query verbatim until 2026-10-03, tie-breaker included, so `(last_activity_at, id)`
+    // is a TOTAL order the index carries: a page boundary can neither duplicate nor skip a row, even
+    // while somebody else is publishing. Since the admin's order (`position`) the list and the Reels
+    // lanes ride `communities_tenant_position_idx` below; this index stays until a migration drops it.
     //
     // `.nullsFirst()` is NOT decoration (04-03's lesson, caught by `090-feed.sql`'s EXPLAIN
     // assertion): drizzle's `.desc()` alone emits `DESC NULLS LAST`, while SQL's `order by x desc`
@@ -98,6 +105,11 @@ export const communities = pgTable(
     // partial index keeps the archived tail out of the structure the tab pages through.
     index('communities_tenant_activity_idx')
       .on(t.tenantId, t.lastActivityAt.desc().nullsFirst(), t.id.desc().nullsFirst())
+      .where(sql`status = 'active' and deleted_at is null`),
+    // The list's order since 2026-10-03: the admin's position first, then the activity order above
+    // as the tie-breaker, so `(position, last_activity_at, id)` is again a TOTAL order.
+    index('communities_tenant_position_idx')
+      .on(t.tenantId, t.position, t.lastActivityAt.desc().nullsFirst(), t.id.desc().nullsFirst())
       .where(sql`status = 'active' and deleted_at is null`),
     // Two communities may share a display NAME (a repeat create is not a conflict); they may never
     // share a slug inside one tenant, which is what makes the URL segment stable. `createCommunity`

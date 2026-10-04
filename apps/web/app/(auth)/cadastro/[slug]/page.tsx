@@ -2,6 +2,7 @@ import { publicTenantSchema, slugSchema } from '@rede-social/contracts';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { RearmProfileNudge } from '@/components/profile/RearmProfileNudge';
 import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
 import { getHostTenant, signupPath } from '@/lib/tenant-host';
@@ -156,6 +157,9 @@ export default async function CadastroPage({
           }}
         />
 
+        {/* A new member starts a new visit: SUBMITTING makes the "Complete seu perfil" popup due on
+            Início (this page merely shown re-arms nothing). */}
+        <RearmProfileNudge />
         <SubmitButton label={t('submit')} pendingLabel={t('pending')} />
       </form>
 

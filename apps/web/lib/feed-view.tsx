@@ -137,7 +137,8 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
           downloadLabel: tf('attachment.download', { name: filename }),
         };
       }),
-    video: video ? <VideoPlayer assetId={video.assetId} status={video.status} /> : undefined,
+    // Edge to edge inside the post, like its photos (the REINE timeline, 2026-10-02).
+    video: video ? <VideoPlayer assetId={video.assetId} status={video.status} bleed /> : undefined,
     // MEDIA-04. The API projects a preview ONLY once it has resolved, so `post.linkPreview` is
     // already null while one is pending, failed or refused — the card is simply absent and the
     // caption's auto-linked URL is the whole rendering (UI-D-11 / UI-D-13). `imageAssetId` is null

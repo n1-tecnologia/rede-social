@@ -46,7 +46,6 @@ export function SupportSplit({ list, children }: { list: ReactNode; children: Re
           title={t('inbox.title')}
           backHref="/inicio"
           backLabel={t('inbox.back')}
-          stickyTop="0px"
           className="md:static md:px-0 lg:hidden"
         />
         <div className="sticky top-0 z-10 hidden shrink-0 border-b border-border bg-card px-4 py-3 lg:block">

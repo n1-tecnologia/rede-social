@@ -43,8 +43,8 @@
     "nudge": {
       "title": "Complete seu perfil",
       "body": "Adicione uma foto e uma bio para as pessoas te reconhecerem.",
-      "action": "Completar perfil",
-      "dismiss": "Agora não"
+      "action": "Completar agora",
+      "dismiss": "Mais tarde"
     },
     "errors": {
       "title": "Algo deu errado",

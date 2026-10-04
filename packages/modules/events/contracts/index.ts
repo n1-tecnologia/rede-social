@@ -36,6 +36,30 @@ export const EVENT_MAX_VENUE = 120;
 export const EVENT_MAX_ADDRESS = 300;
 export const EVENT_MAX_URL = 2048;
 
+/**
+ * 2026-10-03: the event's kind as the admin words it ("Workshop", "Imersão presencial"), printed
+ * above the title on the list's poster. Mirrored by `events_category_chk` (1..40 after trimming).
+ * The cap counts UTF-16 units here and characters in Postgres; a string within 40 units is within
+ * 40 characters, so a body this schema admits never trips the CHECK.
+ */
+export const EVENT_MAX_CATEGORY = 40;
+
+/**
+ * 2026-10-03, "Últimas N vagas": the most members who may answer Vou. Mirrored by
+ * `events_capacity_chk` (1..100000); null is "no limit". The count it bounds is D-219's confirmed
+ * count (`going + checked_in`), enforced for every writer by the guard trigger's step 7
+ * (`supabase/migrations/*_event_capacity_guard.sql`), never by the service alone.
+ */
+export const EVENT_MIN_CAPACITY = 1;
+export const EVENT_MAX_CAPACITY = 100_000;
+
+/**
+ * 2026-10-03, the event's "Fotos": a page of the 3-column gallery (ten rows), and the most one
+ * request may ask for. The `limit` clamps like the list's.
+ */
+export const EVENT_PHOTO_PAGE_SIZE = 30;
+export const EVENT_PHOTO_MAX_PAGE_SIZE = 60;
+
 /** D-213: the end the form prefills when the admin picks a start. Editable; the API never invents it. */
 export const EVENT_DEFAULT_DURATION_MINUTES = 120;
 
@@ -101,6 +125,12 @@ export type EventPeriod = (typeof EVENT_PERIODS)[number];
  * `COMMUNITY_ISSUES` `archived` precedent). Input problems are `400 VALIDATION_FAILED`, state and
  * time refusals are `409 CONFLICT`. A miss is never in here: it is a bare 404 with no `details`,
  * because a per-cause code over an enumerable uuid space is an existence oracle (D-23).
+ *
+ * 2026-10-03 adds two:
+ *  - `event_full`: a `Vou` on an event whose confirmed count already reached its `capacity`
+ *    (`409`), decided by the guard trigger's step 7 (constraint `event_attendances_capacity`);
+ *  - `photo_invalid`: an asset of THIS tenant that is not the caller's own ready `post` image, or
+ *    one that is already another event's photo (`400`). A foreign or unknown asset stays a bare 404.
  */
 export const EVENT_ISSUES = [
   'name_required',
@@ -118,6 +148,8 @@ export const EVENT_ISSUES = [
   'too_many_attempts',
   'reactivate_started',
   'event_ended',
+  'event_full',
+  'photo_invalid',
 ] as const;
 export type EventIssue = (typeof EVENT_ISSUES)[number];
 
@@ -176,12 +208,32 @@ const filled = (value: string | null | undefined): value is string =>
  *  - `url_invalid`: a URL that is not `https:` (D-217), or longer than `EVENT_MAX_URL`.
  * Refusing the inactive side's fields is what keeps the D-213 XOR honest: only the visible side of
  * the form is ever stored.
+ *
+ * **2026-10-03: `category` and `capacity`**, both optional and both carried by either format. A
+ * category longer than `EVENT_MAX_CATEGORY`, or a capacity outside `1..100000` (or not an integer),
+ * is a generic 400 like an over-long title: the form's own caps keep a person from typing one, so
+ * only a crafted call reaches it. Because the `PUT` is a WHOLE-EVENT replacement, an absent key
+ * clears the stored value, exactly as an absent `coverAssetId` clears the cover.
  */
 export const eventInputSchema = z
   .object({
     title: z.string().trim().max(EVENT_MAX_TITLE).default(''),
     description: z.string().trim().max(EVENT_MAX_DESCRIPTION).default(''),
     coverAssetId: z.uuid().nullable().optional(),
+    /** Trimmed; `''`, null and absent are all stored as "no category" (null, never `''`). */
+    category: z.string().trim().max(EVENT_MAX_CATEGORY).nullable().optional(),
+    /**
+     * The limit of confirmations, an integer (the form converts its digits before sending), or
+     * null/absent for none. Lowering it below the current confirmed count is allowed: the answers
+     * already given stay, and only a NEW Vou is refused (`event_full`).
+     */
+    capacity: z
+      .number()
+      .int()
+      .min(EVENT_MIN_CAPACITY)
+      .max(EVENT_MAX_CAPACITY)
+      .nullable()
+      .optional(),
     format: z.enum(EVENT_FORMATS),
     venueName: z.string().trim().max(EVENT_MAX_VENUE).nullable().optional(),
     address: z.string().trim().max(EVENT_MAX_ADDRESS).nullable().optional(),
@@ -259,13 +311,25 @@ export type EventQuery = z.infer<typeof eventQuerySchema>;
  * organiser's Participantes chip `Confirmados` (`going` only) is a DIFFERENT number with its own name
  * (Pitfall 11), which 06-07 adds as `pendingConfirmedCount`. No key here names, pictures or ids another
  * member.
+ *
+ * **2026-10-03 adds three keys the poster prints**, each null when the event has none:
+ *  - `category`: the line above the title ("Workshop"); the web falls back to the format's own
+ *    words when it is null;
+ *  - `capacity`: the limit of confirmations. With `confirmedCount` beside it, the web computes
+ *    "Últimas N vagas" without another read;
+ *  - `address`: the in-person address (null online), which used to be detail-only. The poster reads
+ *    the city out of a composed one ("São Paulo, SP"); it is the same string every member already
+ *    reads on the detail page, so the list exposes nothing new.
  */
 export const eventSummarySchema = z
   .object({
     id: z.uuid(),
     title: z.string(),
     format: z.enum(EVENT_FORMATS),
+    category: z.string().nullable(),
+    capacity: z.number().int().positive().nullable(),
     venueName: z.string().nullable(),
+    address: z.string().nullable(),
     coverAssetId: z.uuid().nullable(),
     /** The cover's variant ladder; `[]` when there is no cover (the D-69 gradient branch). */
     coverVariantWidths: z.array(z.number().int()),
@@ -292,14 +356,14 @@ export type NextEvent = z.infer<typeof nextEventSchema>;
 
 /**
  * `GET /v1/events/{eventId}` (EVENT-02): the list item plus what only the detail page prints: the
- * description, the address (null for an online event) and when the viewer last answered. Still NO
- * URL and NO code key (D-207, D-208), and still no other member's identity (D-206). `.strict()` so
- * a key added by mistake fails the contract test rather than reaching a member.
+ * description and when the viewer last answered (the address moved into the list item on
+ * 2026-10-03, so it is inherited). Still NO URL and NO code key (D-207, D-208), and still no other
+ * member's identity (D-206). `.strict()` so a key added by mistake fails the contract test rather
+ * than reaching a member.
  */
 export const eventDetailSchema = eventSummarySchema
   .extend({
     description: z.string(),
-    address: z.string().nullable(),
     viewerRespondedAt: z.string().nullable(),
   })
   .strict();
@@ -308,7 +372,8 @@ export type EventDetail = z.infer<typeof eventDetailSchema>;
 /**
  * `PUT /v1/events/{eventId}/rsvp` (EVENT-03, D-205). `.strict()`: a forged `status: 'checked_in'`
  * or `userId` fails loudly. The database is still the authority on WHEN an answer is allowed
- * (D-204): the guard trigger refuses it from `starts_at` on, for every writer.
+ * (D-204): the guard trigger refuses it from `starts_at` on, for every writer, and (2026-10-03) a
+ * NEW Vou once the other members' confirmed count reached the event's `capacity` (`event_full`).
  */
 export const rsvpSchema = z.object({ answer: z.enum(RSVP_ANSWERS) }).strict();
 export type RsvpInput = z.infer<typeof rsvpSchema>;
@@ -410,6 +475,9 @@ export const eventEditSchema = z
     description: z.string(),
     coverAssetId: z.uuid().nullable(),
     coverVariantWidths: z.array(z.number().int()),
+    /** 2026-10-03: the stored category and limit, null for none (the form shows an empty field). */
+    category: z.string().nullable(),
+    capacity: z.number().int().positive().nullable(),
     format: z.enum(EVENT_FORMATS),
     venueName: z.string().nullable(),
     address: z.string().nullable(),
@@ -536,6 +604,60 @@ export type AttendanceSummary = z.infer<typeof attendanceSummarySchema>;
 /** `POST /v1/events/{eventId}/checkin-code` (D-217): the fresh code, and nothing else. */
 export const checkinCodeSchema = z.object({ checkinCode: z.string() }).strict();
 export type CheckinCode = z.infer<typeof checkinCodeSchema>;
+
+/* ── 2026-10-03: the event's "Fotos" (`event_photos`) ─────────────────────────────────────────── */
+
+/**
+ * One photo of an event, as every member of the tenant reads it. `.strict()`, and deliberately
+ * WITHOUT the uploader (`created_by_user_id` is stored for auditing, never projected) and without a
+ * URL: `mediaAssetId` and its variant ladder are what `MediaImage` builds the stable
+ * `/v1/media/{id}/w{width}` paths from, the cover's shape (`coverAssetId` + `coverVariantWidths`).
+ * `id` is the photo row's own id, the one `DELETE` takes, never the asset's.
+ */
+export const eventPhotoSchema = z
+  .object({
+    id: z.uuid(),
+    mediaAssetId: z.uuid(),
+    variantWidths: z.array(z.number().int()),
+  })
+  .strict();
+export type EventPhoto = z.infer<typeof eventPhotoSchema>;
+
+/**
+ * `GET /v1/events/{eventId}/photos?cursor=&limit=`. `.strict()`; `limit` clamps to
+ * `1..EVENT_PHOTO_MAX_PAGE_SIZE` and degrades on garbage (the list's `limit` rule), and a tampered
+ * cursor degrades to page 1.
+ */
+export const eventPhotoQuerySchema = z
+  .object({
+    cursor: z.string().max(EVENT_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .catch(EVENT_PHOTO_PAGE_SIZE)
+      .transform((value) => Math.min(Math.max(value, 1), EVENT_PHOTO_MAX_PAGE_SIZE))
+      .default(EVENT_PHOTO_PAGE_SIZE),
+  })
+  .strict();
+export type EventPhotoQuery = z.infer<typeof eventPhotoQuerySchema>;
+
+/** One keyset page, newest first. `nextCursor` is non-null EXACTLY when another photo exists. */
+export const eventPhotoPageSchema = z
+  .object({
+    items: z.array(eventPhotoSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type EventPhotoPage = z.infer<typeof eventPhotoPageSchema>;
+
+/**
+ * `POST /v1/events/{eventId}/photos { mediaAssetId }` (manage only). `.strict()`: a forged
+ * `eventId`, `tenantId` or `createdByUserId` fails loudly. The asset is the uploader's own `image`
+ * of purpose `post` (the gallery ladder, 320 to 1600), already `ready`: the web uploads it through
+ * the media pipeline and waits for the derivation before it adds the photo.
+ */
+export const eventPhotoInputSchema = z.object({ mediaAssetId: z.uuid() }).strict();
+export type EventPhotoInput = z.infer<typeof eventPhotoInputSchema>;
 
 /**
  * Payload of `event.published` (MOD-03), emitted once per create after the transaction commits.

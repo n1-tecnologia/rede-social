@@ -1,0 +1,299 @@
+{
+  "platform": {
+    "wizard": {
+      "steps": {
+        "label": "Etapas da criação do tenant",
+        "data": "Dados",
+        "brand": "Personalização",
+        "domain": "Domínio",
+        "summary": "Resumo",
+        "invite": "Convite",
+        "completed": "{step}, concluída",
+        "upcoming": "{step}, disponível depois de criar o tenant",
+        "locked": "{step}, disponível depois de preencher os dados",
+        "lockedDomain": "{step}, disponível depois de conferir o domínio",
+        "lockedBrand": "{step}, disponível depois de conferir as cores"
+      },
+      "brand": {
+        "title": "Personalização",
+        "body": "Escolha as cores, a fonte dos títulos, o logo e os módulos de {tenant}. A prévia do app acompanha cada mudança.",
+        "deferred": "Os arquivos ficam só neste navegador até você criar o tenant, no resumo.",
+        "background": {
+          "title": "Cor de fundo",
+          "lightBody": "O fundo das telas do app no modo claro.",
+          "darkBody": "O fundo das telas do app no modo escuro.",
+          "primaryContrast": "Cor primária sobre este fundo"
+        },
+        "contrastSaved": "Estes contrastes medem a cor primária e a secundária nos fundos padrão. O fundo, as cores do modo escuro e os botões têm o contraste medido junto de cada escolha.",
+        "tones": {
+          "default": "{tone} (padrão)",
+          "light": {
+            "cinza": "Cinza claro",
+            "amarelado": "Amarelado",
+            "laranjado": "Laranjado",
+            "avermelhado": "Avermelhado",
+            "lilas": "Lilás",
+            "azulado": "Azulado",
+            "agua": "Verde-água",
+            "esverdeado": "Esverdeado"
+          },
+          "dark": {
+            "grafite": "Grafite",
+            "cafe": "Café",
+            "terracota": "Terracota",
+            "vinho": "Vinho",
+            "berinjela": "Berinjela",
+            "azul-noite": "Azul-noite",
+            "petroleo": "Petróleo",
+            "musgo": "Musgo"
+          }
+        },
+        "dark": {
+          "title": "Cores do modo escuro",
+          "body": "Valem só quando o app está no modo escuro. Sem ajuste, o modo escuro usa as cores acima, com a primária um pouco mais clara.",
+          "primaryPick": "Escolher a cor primária do modo escuro",
+          "secondaryPick": "Escolher a cor secundária do modo escuro",
+          "automatic": "Automática",
+          "reset": "Usar a cor automática",
+          "resetNamed": "Usar a cor automática: {field}",
+          "contrastTitle": "Contraste no modo escuro",
+          "contrastOnPrimary": "Texto sobre a cor primária",
+          "contrastSurface": "Cor primária sobre o fundo"
+        },
+        "buttons": {
+          "title": "Botões",
+          "body": "A cor dos botões de ação do app, como Entrar, Completar agora e os botões de criar, separada da cor primária e da secundária. Sem ajuste, os botões usam a cor primária.",
+          "style": "Estilo do botão",
+          "styleSolid": "Cor sólida",
+          "styleGradient": "Degradê",
+          "gradientBody": "Nos dois modos, o degradê vai da cor inicial à cor final, na diagonal. Sem ajuste, ele começa na cor primária e termina num tom dela, mais claro ou mais escuro, que mantém o texto legível.",
+          "light": "Modo claro",
+          "dark": "Modo escuro",
+          "fill": "Cor do botão",
+          "fillStart": "Cor inicial",
+          "fillEnd": "Cor final",
+          "ink": "Cor do texto",
+          "pick": {
+            "fillLight": "Escolher a cor do botão no modo claro",
+            "inkLight": "Escolher a cor do texto do botão no modo claro",
+            "fillDark": "Escolher a cor do botão no modo escuro",
+            "inkDark": "Escolher a cor do texto do botão no modo escuro",
+            "fillStartLight": "Escolher a cor inicial do botão no modo claro",
+            "fillEndLight": "Escolher a cor final do botão no modo claro",
+            "fillStartDark": "Escolher a cor inicial do botão no modo escuro",
+            "fillEndDark": "Escolher a cor final do botão no modo escuro"
+          },
+          "automatic": "Automática",
+          "inherited": "Igual ao modo claro",
+          "reset": "Usar a cor automática",
+          "resetNamed": "Usar a cor automática: {field}, {mode}",
+          "hexNamed": "{field}, {mode}",
+          "contrast": "Texto sobre o botão"
+        },
+        "font": {
+          "title": "Fonte dos títulos",
+          "body": "Vale para o nome do app no topo e na tela de entrada (só quando não há logo), os títulos Comunidades e Eventos e os nomes nos cards de comunidades e de eventos. O restante do app continua na fonte padrão.",
+          "sampleLight": "Amostra no modo claro",
+          "sampleDark": "Amostra no modo escuro",
+          "sampleRest": "Textos, botões e menus seguem na fonte padrão.",
+          "searchLabel": "Buscar fonte",
+          "searchPlaceholder": "Ex.: Poppins, Lora, Bebas Neue",
+          "categoriesLabel": "Tipo de fonte",
+          "categories": {
+            "all": "Todas",
+            "sans": "Sem serifa",
+            "serif": "Com serifa",
+            "display": "Decorativas",
+            "handwriting": "Manuscritas",
+            "mono": "Monoespaçadas"
+          },
+          "listLabel": "Fontes do Google",
+          "count": "{count, plural, =0 {Nenhuma fonte do Google} one {# fonte do Google} other {# fontes do Google}}",
+          "default": "{font} (padrão)",
+          "empty": "Nenhuma fonte encontrada. Tente outro nome ou outro tipo.",
+          "more": "Mostrar mais fontes",
+          "loading": "Carregando as fontes…",
+          "loadFailed": "Não foi possível carregar a lista de fontes.",
+          "retry": "Tentar de novo",
+          "chosen": "Fonte escolhida",
+          "reset": "Usar a fonte padrão",
+          "edit": "Editar",
+          "done": "Concluir",
+          "editName": "Editar a fonte dos títulos",
+          "doneName": "Concluir a escolha da fonte",
+          "defaultKind": "Padrão",
+          "announceAll": "{count, plural, =0 {Nenhuma fonte encontrada} one {# fonte encontrada} other {# fontes encontradas}}",
+          "announcePage": "Mostrando {shown, number} de {count, number} fontes",
+          "colors": {
+            "titles": "Cor dos títulos",
+            "titlesBody": "Os títulos Comunidades e Eventos e os nomes nos cards. Sobre foto, o nome continua branco.",
+            "appName": "Cor do nome no topo",
+            "appNameBody": "O nome do app no topo e na tela de entrada, que aparece só quando não há logo.",
+            "light": "Modo claro",
+            "dark": "Modo escuro",
+            "pick": {
+              "titlesLight": "Escolher a cor dos títulos no modo claro",
+              "titlesDark": "Escolher a cor dos títulos no modo escuro",
+              "appNameLight": "Escolher a cor do nome do app no modo claro",
+              "appNameDark": "Escolher a cor do nome do app no modo escuro"
+            },
+            "default": "Padrão",
+            "reset": "Usar a cor padrão",
+            "resetNamed": "Usar a cor padrão: {field}, {mode}",
+            "contrast": "Contraste"
+          }
+        }
+      },
+      "domain": {
+        "title": "Domínio",
+        "body": "Informe o endereço em que os membros vão abrir o app de {tenant}. Também dá para conectar depois, na página do tenant.",
+        "helper": "Opcional. Depois de criar, mostramos os registros DNS para configurar no provedor do cliente."
+      },
+      "summary": {
+        "title": "Resumo",
+        "body": "Confira tudo antes de criar {tenant}. Nada é salvo até você confirmar.",
+        "sections": {
+          "data": "Dados",
+          "colors": "Cores",
+          "modules": "Módulos",
+          "brand": "Logo e ícone",
+          "domain": "Domínio",
+          "font": "Fonte dos títulos"
+        },
+        "fields": {
+          "name": "Nome de exibição",
+          "slug": "Slug",
+          "email": "E-mail do primeiro administrador",
+          "logo": "Logo",
+          "icon": "Ícone quadrado",
+          "background": "Cor de fundo",
+          "fontColors": "Cores do texto",
+          "titleColorLight": "Cor dos títulos (claro)",
+          "titleColorDark": "Cor dos títulos (escuro)",
+          "appNameColorLight": "Cor do nome no topo (claro)",
+          "appNameColorDark": "Cor do nome no topo (escuro)",
+          "buttonFillLight": "Cor do botão (claro)",
+          "buttonInkLight": "Cor do texto do botão (claro)",
+          "buttonFillDark": "Cor do botão (escuro)",
+          "buttonInkDark": "Cor do texto do botão (escuro)",
+          "buttonStyle": "Estilo do botão",
+          "buttonFillStartLight": "Cor inicial do botão (claro)",
+          "buttonFillEndLight": "Cor final do botão (claro)",
+          "buttonFillStartDark": "Cor inicial do botão (escuro)",
+          "buttonFillEndDark": "Cor final do botão (escuro)"
+        },
+        "darkTitle": "Modo escuro",
+        "darkParts": {
+          "primary": "primária {hex}",
+          "secondary": "secundária {hex}",
+          "tone": "fundo {tone}"
+        },
+        "fontColorParts": {
+          "titleLight": "títulos {hex} no claro",
+          "titleDark": "títulos {hex} no escuro",
+          "appNameLight": "nome no topo {hex} no claro",
+          "appNameDark": "nome no topo {hex} no escuro"
+        },
+        "buttonsTitle": "Botões",
+        "buttonParts": {
+          "fillLight": "botão {hex} no claro",
+          "inkLight": "texto {hex} no claro",
+          "fillDark": "botão {hex} no escuro",
+          "inkDark": "texto {hex} no escuro",
+          "gradient": "degradê",
+          "fillStartLight": "cor inicial {hex} no claro",
+          "fillEndLight": "cor final {hex} no claro",
+          "fillStartDark": "cor inicial {hex} no escuro",
+          "fillEndDark": "cor final {hex} no escuro"
+        },
+        "edit": "Editar",
+        "editSection": "Editar {section}",
+        "noLogo": "Nenhum logo. O nome de exibição aparece no lugar.",
+        "noLogoShort": "Nenhum",
+        "noIcon": "Nenhum. Os ícones saem do logo.",
+        "noDomain": "Sem domínio. Dá para conectar depois.",
+        "create": "Criar tenant",
+        "noIconNoLogo": "Nenhum. Sem logo, o app usa os ícones neutros da plataforma.",
+        "fontDefault": "Padrão ({font})"
+      },
+      "confirm": {
+        "title": "Criar este tenant?",
+        "body": "Confira o resumo. Depois de criar, o slug não muda mais.",
+        "confirm": "Criar tenant",
+        "cancel": "Voltar e revisar",
+        "progress": {
+          "title": "Criando o tenant",
+          "create": "Criar o tenant",
+          "logo": "Enviar o logo",
+          "icon": "Enviar o ícone",
+          "domain": "Conectar o domínio"
+        },
+        "failed": {
+          "dataTitle": "O tenant não foi criado",
+          "data": "O tenant não foi criado. Alguns dados precisam de ajuste:",
+          "fix": "Corrigir os dados",
+          "genericTitle": "Não foi possível confirmar",
+          "generic": "Não foi possível confirmar a criação. Tente de novo: se o tenant já tiver sido criado, o assistente continua com ele.",
+          "retry": "Tentar de novo",
+          "partialTitle": "Tenant criado com pendências",
+          "partial": "O tenant foi criado, mas o que está marcado acima não foi concluído. Dá para refazer na página do tenant.",
+          "continue": "Continuar"
+        }
+      },
+      "invite": {
+        "title": "Convidar o primeiro administrador",
+        "body": "O tenant {tenant} foi criado. O convite para {email} sai assim que um domínio for verificado.",
+        "bodyNoInvite": "O tenant {tenant} foi criado. Conecte e verifique um domínio para convidar o primeiro administrador."
+      },
+      "done": {
+        "slug": "Slug",
+        "modules": "Módulos ativados",
+        "noModules": "Nenhum módulo ativado",
+        "domain": "Domínio primário"
+      },
+      "documentTitle": "{step} · Novo tenant",
+      "actions": {
+        "next": "Continuar",
+        "back": "Voltar",
+        "openTenant": "Abrir página do tenant",
+        "createAnother": "Criar outro tenant",
+        "checking": "Verificando…"
+      },
+      "errors": {
+        "checkFailed": "Não foi possível verificar agora. Tente de novo.",
+        "invalidDraft": "Alguns dados não passaram na verificação. Revise os campos e tente de novo."
+      }
+    },
+    "devicePreview": {
+      "title": "Prévia do app",
+      "deviceLabel": "Prévia do app de {tenant} em um celular",
+      "screens": "Tela da prévia",
+      "theme": "Tema da prévia",
+      "view": "Visão da prévia",
+      "views": {
+        "member": "Membro",
+        "admin": "Admin"
+      },
+      "sample": {
+        "highlightOne": "Bastidores",
+        "highlightTwo": "Novidades",
+        "eventTitle": "Encontro de boas-vindas",
+        "eventPlace": "Auditório principal",
+        "eventTwoTitle": "Oficina prática",
+        "eventTwoDate": "18 OUT",
+        "eventThreeTitle": "Roda de conversa",
+        "eventThreeDate": "25 OUT",
+        "postCaption": "Boas-vindas! Por aqui chegam as novidades de {tenant}, os eventos e os conteúdos exclusivos para os membros.",
+        "postTime": "há 2 h",
+        "postTimeAbsolute": "Hoje, 10:00",
+        "communityOne": "Avisos",
+        "communityOneBody": "Comunicados oficiais e novidades da equipe.",
+        "communityTwo": "Encontros",
+        "communityTwoBody": "Combine presenças e troque ideias sobre os eventos.",
+        "memberName": "Ana Souza",
+        "memberBio": "Por aqui desde o começo.",
+        "memberEmail": "ana.souza@exemplo.com"
+      }
+    }
+  }
+}

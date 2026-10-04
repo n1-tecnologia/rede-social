@@ -8,3 +8,173 @@
 /* Feature modules ship their own UI (MOD-01). Every class a module's ui directory renders would be
    invisible to Tailwind without this, because the module is reached through node_modules. */
 @source "../../../packages/modules";
+
+/* The tenant wizard's preview phone (`TenantPreviewPanel`, `data-device-column`) at the largest
+   scale the window HEIGHT allows, up to the phone's real size. The column is sticky at the panel's
+   48 px top padding, so its 84 px of controls + 874 px × scale must fit in height − 96 px (that
+   padding and the 48 px at the bottom), or the long creation form would push it and the device
+   would move. CSS only: settled on the first paint, never measured. Steps of 40 px,
+   scale = (step − 180) / 874 rounded down. */
+[data-device-column] {
+  --device-scale: 0.44;
+}
+@media (min-height: 600px) {
+  [data-device-column] {
+    --device-scale: 0.48;
+  }
+}
+@media (min-height: 640px) {
+  [data-device-column] {
+    --device-scale: 0.52;
+  }
+}
+@media (min-height: 680px) {
+  [data-device-column] {
+    --device-scale: 0.57;
+  }
+}
+@media (min-height: 720px) {
+  [data-device-column] {
+    --device-scale: 0.61;
+  }
+}
+@media (min-height: 760px) {
+  [data-device-column] {
+    --device-scale: 0.66;
+  }
+}
+@media (min-height: 800px) {
+  [data-device-column] {
+    --device-scale: 0.7;
+  }
+}
+@media (min-height: 840px) {
+  [data-device-column] {
+    --device-scale: 0.75;
+  }
+}
+@media (min-height: 880px) {
+  [data-device-column] {
+    --device-scale: 0.8;
+  }
+}
+@media (min-height: 920px) {
+  [data-device-column] {
+    --device-scale: 0.84;
+  }
+}
+@media (min-height: 960px) {
+  [data-device-column] {
+    --device-scale: 0.89;
+  }
+}
+@media (min-height: 1000px) {
+  [data-device-column] {
+    --device-scale: 0.93;
+  }
+}
+@media (min-height: 1040px) {
+  [data-device-column] {
+    --device-scale: 0.98;
+  }
+}
+@media (min-height: 1060px) {
+  [data-device-column] {
+    --device-scale: 1;
+  }
+}
+
+/* The tenant's title font in the wizard's preview phone (`TenantPreviewPanel` sets the variable on
+   the screen once the catalogue confirmed the family): only the elements marked
+   `data-preview-title` (the app name in the top bar, drawn only without a logo, the Comunidades and
+   Eventos titles, the names on community and event cards) take it. Without the variable the
+   declaration is invalid at computed-value time and they inherit Manrope like everything else.
+   Unlayered, so it beats preflight's `button { font: inherit }`. No synthesized bold: a family that
+   ships one regular weight shows as it was drawn. */
+[data-device-screen] [data-preview-title] {
+  font-family: var(--preview-title-font);
+  font-synthesis: none;
+}
+
+/* The tenant's title and app-name colours in the same phone, like the font, for the
+   theme the device shows (`previewScreenLook` sets the variable of THAT theme on the screen, with
+   a marker attribute). Keyed on the marker, never on the variable: without a colour there is no
+   rule, so the inks of both themes stay as they are. Two rules that never overlap: the app name
+   in the top bar (`data-preview-app-name`, drawn only without a logo) takes its own colour and
+   never the titles' one. A title drawn white over a photo veil (the community and event cards on
+   their photo branch, `text-white`) stays white: a colour chosen against the ground would sink
+   into the dark veil, and the app draws those names white in both themes. Unlayered, so they beat
+   the titles' `text-text`. */
+[data-device-screen][data-title-color]
+[data-preview-title]:not([data-preview-app-name], .text-white) {
+  color: var(--preview-title-color);
+}
+[data-device-screen][data-app-name-color] [data-preview-app-name] {
+  color: var(--preview-app-name-color);
+}
+
+/* The SAME look in the app itself, from the tenant's saved brand (2026-10-03): the twins of the
+   phone's three rules above, keyed on the markers `appBrandLook` (lib/bg-tone.ts) puts on the brand
+   scope, the AppShell root or the logged-out pages' <main>. The theme flips on the client, so the
+   scope carries BOTH themes' inks, each with its own marker, and each rule matches under its own
+   theme only (a scope under a dark theme for the dark ink, any other for the light one; a title in
+   a nested scope of the other theme, such as the reels stage, is left alone).
+   The phone marks its titles `data-preview-title`; the app's titles belong to other components, so
+   they are reached here by the hooks they already carry, the same places the wizard names:
+   - the app name: the display name the top bar and the rail draw in the home link
+     (`data-shell-brand`) when there is no logo or it failed to load (its text span, never the
+     logo's box, `data-tenant-logo`), and the logged-out pages' name (`auth-brand-name`), drawn only
+     without a logo too: the title font and the app-name ink;
+   - the titles: the Eventos galleries' titles (`data-events-section` h2), the next event's name on
+     its card (`next-event-title`) and any element marked `data-brand-title` (the hook for a
+     heading that should be drawn as a title, the Comunidades list's heading among them): the title
+     font and the titles' ink;
+   - the names on the community and event cards (`community-card`, `event-poster-title`): the title
+     font only, never an ink. Both are drawn over their cover, white over a photo's veil or in the
+     brand gradient's own ink, where a colour chosen against the ground would sink; that is also why
+     every coloured title drawn `text-white` keeps its white, as on the phone.
+   Unlayered, like the phone's rules, so they beat the titles' utilities (`text-text`,
+   `text-brand`); no synthesized bold, as on the phone. */
+[data-title-font]
+:is(
+  [data-shell-brand] > span:not([data-tenant-logo]),
+  [data-testid="auth-brand-name"],
+  [data-brand-title],
+  [data-events-section] h2,
+  [data-testid="next-event-title"],
+  [data-testid="community-card"] p.font-bold,
+  [data-testid="event-poster-title"]
+) {
+  font-family: var(--brand-title-font);
+  font-synthesis: none;
+}
+[data-title-color-light]:not([data-theme="dark"], [data-theme="dark"] *)
+  :is(
+    [data-brand-title],
+    [data-events-section] h2,
+    [data-testid="next-event-title"]
+  ):not(.text-white, [data-theme="dark"] *) {
+  color: var(--brand-title-light);
+}
+[data-theme="dark"]
+  [data-title-color-dark]:not([data-theme="light"], [data-theme="light"] *)
+  :is(
+    [data-brand-title],
+    [data-events-section] h2,
+    [data-testid="next-event-title"]
+  ):not(.text-white, [data-theme="light"] *) {
+  color: var(--brand-title-dark);
+}
+[data-app-name-color-light]:not([data-theme="dark"], [data-theme="dark"] *)
+  :is([data-shell-brand] > span:not([data-tenant-logo]), [data-testid="auth-brand-name"]):not(
+    [data-theme="dark"] *
+  ) {
+  color: var(--brand-app-name-light);
+}
+[data-theme="dark"]
+  [data-app-name-color-dark]:not([data-theme="light"], [data-theme="light"] *)
+  :is([data-shell-brand] > span:not([data-tenant-logo]), [data-testid="auth-brand-name"]):not(
+    [data-theme="light"] *
+  ) {
+  color: var(--brand-app-name-dark);
+}

@@ -26,13 +26,15 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  * ROADMAP success criterion asserted once, and an explicit note wherever the walk deliberately
  * proves nothing.
  *
- *   ENABLED  on the seeded `rede-demo`: a member sees the `Eventos` tab, the Próximos list headed by
- *            the seeded in-progress event, that event's Início card in check-in mode, and an event
- *            detail whose date and times are the tenant's clock.
- *   DISABLED on a throwaway tenant with `events` off: the same member-shaped session sees no tab and
- *            no Início card, gets no error card on `/inicio`, and every events route answers
+ *   ENABLED  on the seeded `rede-demo`: a member sees the `Eventos` tab with its red dot (an event
+ *            to come; since 2026-10-03 it replaces the Início card, which is gone), the two galleries
+ *            (since 2026-10-03: "Meus eventos" headed by the event they said Vou to, "Outros eventos"
+ *            by the seeded in-progress event), and an event detail whose date and times are the
+ *            tenant's clock.
+ *   DISABLED on a throwaway tenant with `events` off: the same member-shaped session sees no tab
+ *            (so no dot), gets no error card on `/inicio`, and every events route answers
  *            404 `MODULE_DISABLED` (never 403: a member must not learn what the tenant did not buy).
- *   FLIP     the flag back on: the tab and the card return within the flags-cache window, with the
+ *   FLIP     the flag back on: the tab and its dot return within the flags-cache window, with the
  *            event row untouched (a flag hides a product; it deletes nothing).
  *
  * Then the four ROADMAP Phase 6 criteria, one test each, on a second throwaway tenant: (1) an admin
@@ -133,6 +135,29 @@ const plural = (message: string, n: number) => {
 /** "Confirmados · 2": a participants chip label with its `{count, number}` filled. */
 const chipLabel = (message: string, n: number) => message.replace('{count, number}', String(n));
 
+/**
+ * PDF item #10: the event form's CEP lookup (`/api/cep/{cep}`, the BFF in front of ViaCEP) answered
+ * here, so the smoke never reaches the network: the route's mapping of ViaCEP's 01310-200.
+ */
+const CEP = {
+  cep: '01310200',
+  street: 'Avenida Paulista',
+  district: 'Bela Vista',
+  city: 'São Paulo',
+  state: 'SP',
+} as const;
+
+async function stubCep(page: Page): Promise<void> {
+  await page.route('**/api/cep/*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'cache-control': 'no-store' },
+      body: JSON.stringify(CEP),
+    }),
+  );
+}
+
 /** Escapes a literal for a `RegExp`. */
 const literal = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -149,8 +174,12 @@ async function navLabels(page: Page): Promise<string[]> {
     );
 }
 
-const posterFor = (page: Page, title: string): Locator =>
-  page.locator('main').getByRole('link', { name: new RegExp(`^${literal(title)}, `) });
+/** One gallery of `/eventos` (2026-10-03): `mine` ("Meus eventos") or `others` ("Outros eventos"). */
+const gallery = (page: Page, section: 'mine' | 'others'): Locator =>
+  page.locator(`main section[data-events-section="${section}"]`);
+/** The poster whose accessible name starts with `title`, inside one gallery. */
+const posterIn = (page: Page, section: 'mine' | 'others', title: string): Locator =>
+  gallery(page, section).getByRole('link', { name: new RegExp(`^${literal(title)}, `) });
 const nextEvent = (page: Page) => page.getByTestId('next-event');
 const infoValues = (page: Page) => page.getByTestId('event-info-value');
 const toast = (page: Page, message: string) =>
@@ -224,7 +253,7 @@ test.afterAll(async ({ browser: _browser }, testInfo) => {
 });
 
 test.describe('Phase 6 smoke — events, in both directions of its flag, and the four criteria', () => {
-  test('1. ENABLED: the Eventos tab, Próximos headed by the in-progress event, its Início card in check-in mode, and a detail on the tenant clock', async ({
+  test('1. ENABLED: the Eventos tab with its dot, no event card on Início, Outros eventos headed by the in-progress event, and a detail on the tenant clock', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -232,29 +261,29 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     // D-55: the tab exists because the module's manifest declares it.
     expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']);
 
-    // D-202: the seeded in-progress in-person event is the next event, and the member (no answer,
-    // inside its window) gets the check-in CTA on the card, beside the row and not inside it.
-    const inProgress = await readEventInstants('rede-demo', SEEDED.inProgress);
-    await expect(page.getByRole('heading', { name: E.home.title, exact: true })).toBeVisible();
-    await expect(nextEvent(page).getByTestId('next-event-title')).toHaveText(SEEDED.inProgress);
-    await expect(page.getByTestId('next-event-checkin')).toHaveAttribute(
-      'href',
-      `/eventos/${inProgress.id}/check-in`,
-    );
+    // 2026-10-03 (replacing the D-202 Início card): the seeded in-progress event is an event to
+    // come, so the Eventos tab carries the red dot, its name unchanged and the state read after it;
+    // Início draws no event card any more.
+    const eventsTab = visibleNav(page).getByRole('link', { name: E.nav, exact: true });
+    await expect(eventsTab.locator('[data-badge-dot]')).toHaveCount(1);
+    await expect(eventsTab).toHaveAccessibleDescription(E.tabDot);
+    await expect(nextEvent(page)).toHaveCount(0);
     await expect(page.getByText(APP.error.title, { exact: true })).toHaveCount(0);
 
     // The tab, tapped. Dispatched AT the element: under `next dev` the issues pill (`<nextjs-portal>`)
     // sits over the phone's BottomNav and intercepts a coordinate click (06-01 deviation 8).
-    await visibleNav(page).getByRole('link', { name: E.nav, exact: true }).dispatchEvent('click');
+    await eventsTab.dispatchEvent('click');
     await expect(page).toHaveURL(/\/eventos$/);
-    await expect(
-      page.getByRole('navigation', { name: E.list.filter.label }).getByRole('link', {
-        name: E.list.filter.upcoming,
-      }),
-    ).toHaveAttribute('aria-current', 'page');
-    await expect(
-      page.locator('main').getByTestId('event-poster').first().getByTestId('event-poster-title'),
-    ).toHaveText(SEEDED.inProgress);
+    // 2026-10-03 (the REINE galleries): no filter chips. member@ never answered the in-progress
+    // event, so it heads "Outros eventos" with "Agora"; the event they said Vou to heads "Meus
+    // eventos" with "Inscrito".
+    await expect(page.getByRole('navigation', { name: E.list.filter.label })).toHaveCount(0);
+    const others = gallery(page, 'others').getByTestId('event-poster').first();
+    await expect(others.getByTestId('event-poster-title')).toHaveText(SEEDED.inProgress);
+    await expect(others.getByTestId('event-poster-pill')).toHaveText(E.when.now);
+    const mine = gallery(page, 'mine').getByTestId('event-poster').first();
+    await expect(mine.getByTestId('event-poster-title')).toHaveText(SEEDED.upcomingInPerson);
+    await expect(mine.getByTestId('event-poster-pill')).toHaveText(E.card.registered);
 
     // A detail on the tenant's clock (UI-D-203): the stored UTC instants, formatted in São Paulo.
     const upcoming = await readEventInstants('rede-demo', SEEDED.upcomingInPerson);
@@ -267,7 +296,7 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     );
   });
 
-  test('2. DISABLED: no Eventos tab, no Início card, no error card, and every events route answers 404 MODULE_DISABLED', async ({
+  test('2. DISABLED: no Eventos tab (so no dot), no event card, no error card, and every events route answers 404 MODULE_DISABLED', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== PHONE, 'one throwaway tenant, on the phone');
@@ -286,8 +315,8 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     // not buy is an absence, never a failure (UI E04). The feed below still renders its region.
     await expect(page.getByText(APP.error.title, { exact: true })).toHaveCount(0);
     expect(await navLabels(page)).not.toContain(E.nav);
+    await expect(visibleNav(page).locator('[data-badge-dot]')).toHaveCount(0);
     await expect(nextEvent(page)).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: E.home.title, exact: true })).toHaveCount(0);
 
     // 404 MODULE_DISABLED on every route a member could reach. A 403 anywhere here would tell a
     // member the feature exists and is being withheld.
@@ -299,7 +328,7 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     }
   });
 
-  test('3. the flag flips ON: the tab and the card return within the cache window, and the event row is untouched', async ({
+  test('3. the flag flips ON: the tab and its dot return within the cache window, and the event row is untouched', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== PHONE, 'one throwaway tenant, on the phone');
@@ -324,8 +353,10 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
 
     await login(page, tenant.memberEmail, SEED_PASSWORD, tenant.origin);
     expect(await navLabels(page)).toContain(E.nav);
-    await expect(nextEvent(page).getByTestId('next-event-title')).toHaveText('Encontro do smoke');
-    await expect(page.getByTestId('next-event-checkin')).toBeVisible();
+    // "Encontro do smoke" has not ended: the tab is back with its dot, and Início has no card.
+    const eventsTab = visibleNav(page).getByRole('link', { name: E.nav, exact: true });
+    await expect(eventsTab.locator('[data-badge-dot]')).toHaveCount(1);
+    await expect(nextEvent(page)).toHaveCount(0);
     await expect(page.getByText(APP.error.title, { exact: true })).toHaveCount(0);
 
     // The row survived both flips exactly as it was written.
@@ -348,6 +379,7 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     const segment = (label: string) =>
       page.getByRole('group', { name: E.form.format.label }).getByRole('button', { name: label });
 
+    await stubCep(page);
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos`);
     await page.locator('[data-events-create]').click();
@@ -362,7 +394,11 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     await page.locator('#event-start-time').fill('19:00');
     await expect(page.locator('#event-end-time')).toHaveValue('21:00');
     await page.locator('#event-venue').fill('Auditorio da sede');
-    await page.locator('#event-address').fill('Rua das Flores, 100');
+    // PDF item #10: the address as parts; the stubbed lookup fills rua, bairro, cidade and UF.
+    await page.locator('#event-cep').fill(CEP.cep);
+    await expect(page.locator('#event-city')).toHaveValue(CEP.city);
+    await page.locator('#event-number').fill('1578');
+    await expect(submit).toBeEnabled();
     await submit.click();
     await expect(page).toHaveURL(/\/eventos\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     await expect(toast(page, E.toasts.created)).toBeVisible();
@@ -376,10 +412,11 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     const memberContext = await phoneContext(page);
     const member = await memberContext.newPage();
     try {
-      // Upcoming: in Próximos, and the detail on the tenant clock.
+      // Upcoming: in "Outros eventos" (the member never answered it), and the detail on the
+      // tenant clock.
       await login(member, tenant.memberEmail, tenant.password, tenant.origin);
       await member.goto(`${tenant.origin}/eventos`);
-      await posterFor(member, TITLE).click();
+      await posterIn(member, 'others', TITLE).click();
       await expect(member).toHaveURL(new RegExp(`/eventos/${eventId}$`));
       await expect(infoValues(member).nth(0)).toHaveText(day(created.startsAt, SAO_PAULO));
       await expect(infoValues(member).nth(1)).toHaveText(
@@ -407,19 +444,25 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
       await expect(page).toHaveURL(new RegExp(`/eventos/${eventId}$`), { timeout: 30_000 });
       await expect(toast(page, E.toasts.cancelled)).toBeVisible();
 
-      // D-201: the member still sees it in Próximos, renamed and marked Cancelado.
+      // D-201: the member still sees it among the "Outros eventos", renamed and marked Cancelado.
+      const renamed = posterIn(member, 'others', RENAMED);
       await member.goto(`${tenant.origin}/eventos`);
-      await expect(posterFor(member, RENAMED).getByTestId('event-poster-pill')).toHaveText(
-        E.state.cancelled,
-      );
+      await expect(renamed.getByTestId('event-poster-pill')).toHaveText(E.state.cancelled);
 
-      // Over time: the event ends (moved to the past through the database's clock), and the
-      // member's Passados lists it.
+      // Over time: the event ends (moved to the past through the database's clock). Since
+      // 2026-10-03 `/eventos` lists the ended events too, after every event still to come, in the
+      // same gallery. It now STARTS before the in-window event, so only the ended half can put it
+      // after that one: that order is the proof it is past. Still "Cancelado" (the pill's first
+      // rule), still not the member's.
       await moveEventWindow(eventId, -180, -60);
-      await member.goto(`${tenant.origin}/eventos?periodo=passados`);
-      await expect(posterFor(member, RENAMED)).toBeVisible();
       await member.goto(`${tenant.origin}/eventos`);
-      await expect(posterFor(member, RENAMED)).toHaveCount(0);
+      await expect(renamed.getByTestId('event-poster-pill')).toHaveText(E.state.cancelled);
+      const titles = await gallery(member, 'others')
+        .getByTestId('event-poster-title')
+        .allTextContents();
+      const order = ['Encontro com check-in do smoke', RENAMED];
+      expect(titles.filter((title) => order.includes(title))).toEqual(order);
+      await expect(member.getByTestId('events-empty-mine')).toBeVisible();
     } finally {
       await memberContext.close();
     }

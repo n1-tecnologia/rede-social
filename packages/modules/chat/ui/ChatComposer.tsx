@@ -160,7 +160,7 @@ export function ChatComposer({
           data-chat-send
           aria-label={sendLabel}
           disabled={!canSend}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand text-on-brand transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-button bg-(image:--button-image) text-on-button transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
         >
           <Send size={20} aria-hidden />
         </button>

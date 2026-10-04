@@ -42,9 +42,161 @@ export const brandIconUrlsSchema = z.object({
 });
 export type BrandIconUrls = z.infer<typeof brandIconUrlsSchema>;
 
+// ── The tenant's look beyond the pair (2026-10-03) ───────────────────────────────────────────────
+//
+// Six settings the tenant wizard used to show in its preview only, persisted since 2026-10-03 in
+// the same `tenants.branding` jsonb, under `look` (no migration: the column is jsonb):
+//
+//  1. the filled action buttons' own colours, the button (`fill`) and its text (`ink`), per theme;
+//  2. their style, one for both themes (`'solid'` or `'gradient'`), and a gradient's last colour
+//     (`fillEnd`), per theme;
+//  3. the ground tone of each theme (`lightTone`, `darkTone`), two CLOSED lists of ids whose
+//     colours live in tokens.css alone (Layers 1c and 1d), never a free colour;
+//  4. the dark theme's own primary and secondary (`darkColors`);
+//  5. the titles' Google Fonts family (`titleFont`);
+//  6. the colours of the titles and of the top bar's app name (`fontColors`), per theme.
+//
+// `null` ALWAYS means the system's own value (the gray and grafite grounds, the derived dark
+// primary, the light secondary, Manrope, the theme's text colour, the automatic button), so a brand
+// stored before any of this (`{}`, or no `look` key) parses into the all-`null` look and renders
+// exactly as before. The rules that turn these values into what a screen paints (which button a
+// theme gets, what a gradient's automatic last colour is) are the web app's (`lib/bg-tone.ts`) and
+// the kernel's (`@rede-social/core/ui` `button-colors.ts`); this module only says what may be kept.
+
+/** The light theme's ground tones (tokens.css Layer 1c), the system's gray first. */
+export const LIGHT_TONES = [
+  'cinza',
+  'amarelado',
+  'laranjado',
+  'avermelhado',
+  'lilas',
+  'azulado',
+  'agua',
+  'esverdeado',
+] as const;
+export type LightTone = (typeof LIGHT_TONES)[number];
+
+/** The dark twins of `LIGHT_TONES` (Layer 1d), in the same order (cinza ↔ grafite, amarelado ↔ cafe, …). */
+export const DARK_TONES = [
+  'grafite',
+  'cafe',
+  'terracota',
+  'vinho',
+  'berinjela',
+  'azul-noite',
+  'petroleo',
+  'musgo',
+] as const;
+export type DarkTone = (typeof DARK_TONES)[number];
+
+/** Today's grounds, the light gray and the dark grafite: kept as `null` (`normalizeBrandLook`). */
+export const DEFAULT_LIGHT_TONE: LightTone = 'cinza';
+export const DEFAULT_DARK_TONE: DarkTone = 'grafite';
+
+/** The filled buttons' two looks, one for both themes: one colour, or a gradient of two. */
+export const BUTTON_STYLES = ['solid', 'gradient'] as const;
+export type ButtonStyle = (typeof BUTTON_STYLES)[number];
+
+/** The app's own typeface (self-hosted by the web app): the titles' default, kept as `null`. */
+export const DEFAULT_TITLE_FONT = 'Manrope';
+
+/**
+ * A title font's family name as it may reach a quoted CSS `font-family` and a Google Fonts URL
+ * parameter: words of ASCII letters and digits joined by single spaces, at most 60 characters
+ * (Google's longest family is 32). No quote, semicolon, `&`, `=`, parenthesis, slash or accent can
+ * pass, so the name can never leave the quoted value or the parameter. Whether it is one of
+ * Google's families is the panel's check (the catalogue lives in the web app, `lib/google-fonts.ts`,
+ * and the member app falls back to Manrope for a family it does not know); the API holds every
+ * name to this shape.
+ */
+export const FONT_FAMILY_NAME_RE = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/;
+export const FONT_FAMILY_NAME_MAX = 60;
+
+export function isFontFamilyName(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= FONT_FAMILY_NAME_MAX &&
+    FONT_FAMILY_NAME_RE.test(value)
+  );
+}
+
+export const fontFamilyNameSchema = z
+  .string()
+  .max(FONT_FAMILY_NAME_MAX)
+  .regex(FONT_FAMILY_NAME_RE, 'expected a font family name (letters, digits, single spaces)');
+
+/** One look colour: a `#rrggbb` (lower-cased like every brand hex) or `null` for the system's own. */
+const lookHexSchema = hexColorSchema.nullable().default(null);
+const lightToneSchema = z.enum(LIGHT_TONES).nullable().default(null);
+const darkToneSchema = z.enum(DARK_TONES).nullable().default(null);
+const titleFontSchema = fontFamilyNameSchema.nullable().default(null);
+const buttonStyleSchema = z.enum(BUTTON_STYLES).default('solid');
+
+/** One colour per theme (the titles, the app name, a button or its text). */
+const themeColorsSchema = z.object({ light: lookHexSchema, dark: lookHexSchema });
+
+/**
+ * The look as STORED and as every answer carries it (the bootstrap, the public by-host answer, the
+ * platform detail): every key optional with its default, so `{}` (or no `look` at all) is the
+ * all-`null` look, and unknown keys are dropped rather than refused. Dropped on purpose: a newer
+ * API adding a key must never fail an older web's parse of the bootstrap (the rule
+ * `bootstrapSchema` states for every additive field). A malformed VALUE (a bad hex, an unknown tone
+ * id, an unsafe family name) still throws, like a malformed brand colour (`resolveBranding`): the
+ * API validates before writing, so only a hand-edited row can hold one.
+ */
+export const brandLookSchema = z.object({
+  lightTone: lightToneSchema,
+  darkTone: darkToneSchema,
+  /** The dark theme's own primary (`null`: derived from the light one) and secondary (`null`: the light one). */
+  darkColors: z.object({ primary: lookHexSchema, secondary: lookHexSchema }).prefault({}),
+  titleFont: titleFontSchema,
+  fontColors: z
+    .object({ title: themeColorsSchema.prefault({}), appName: themeColorsSchema.prefault({}) })
+    .prefault({}),
+  /**
+   * `style` is both themes'; per theme the button (a gradient's first colour), a gradient's last
+   * colour and the text. A solid button ignores `fillEnd` but keeps it, so turning the gradient
+   * back on restores it.
+   */
+  buttonColors: z
+    .object({
+      style: buttonStyleSchema,
+      fill: themeColorsSchema.prefault({}),
+      fillEnd: themeColorsSchema.prefault({}),
+      ink: themeColorsSchema.prefault({}),
+    })
+    .prefault({}),
+});
+/** A complete look: every key present, each `null` (or `'solid'`) where the system's value holds. */
+export type BrandLook = z.output<typeof brandLookSchema>;
+export type BrandThemeColors = BrandLook['fontColors']['title'];
+
+/** The all-default look (a fresh object each call). */
+export function emptyBrandLook(): BrandLook {
+  return brandLookSchema.parse({});
+}
+
+/**
+ * The canonical form of a look: the default ids (`cinza`, `grafite`) and the default family
+ * (`Manrope`) read as `null`, so "the system's own" has ONE spelling in storage and on the wire.
+ */
+export function normalizeBrandLook(look: BrandLook): BrandLook {
+  return {
+    ...look,
+    lightTone: look.lightTone === DEFAULT_LIGHT_TONE ? null : look.lightTone,
+    darkTone: look.darkTone === DEFAULT_DARK_TONE ? null : look.darkTone,
+    titleFont: look.titleFont === DEFAULT_TITLE_FONT ? null : look.titleFont,
+  };
+}
+
 /**
  * The public brand facts carried by `GET /v1/public/tenants/by-host` (T-02-04): logo, favicon, the
- * icon set and the five colors. Strict — nothing beyond brand facts may leak into the public answer.
+ * icon set, the five colors and, since 2026-10-03, the look (so the logged-out pages show the
+ * tenant's grounds, buttons and title font before any session exists). Strict at the top level —
+ * nothing beyond brand facts may leak into the public answer; the look is built by the API from the
+ * resolved brand (`toHostBranding`), so it carries its known keys only. Optional for the reader: an
+ * answer without it (an API older than the web) still parses, and `resolveBranding` reads the
+ * missing look as the all-default one.
  */
 export const hostBrandingSchema = z
   .object({
@@ -52,6 +204,7 @@ export const hostBrandingSchema = z
     faviconUrl: z.string().nullable(),
     iconUrls: brandIconUrlsSchema.nullable(),
     colors: brandColorsSchema,
+    look: brandLookSchema.optional(),
   })
   .strict();
 export type HostBranding = z.infer<typeof hostBrandingSchema>;
@@ -59,7 +212,8 @@ export type HostBranding = z.infer<typeof hostBrandingSchema>;
 /**
  * The `tenants.branding` jsonb. Every field is optional with a default so `{}` (a tenant created
  * before its brand was configured, edge TENANT-02/empty) parses; `iconUrl` is the optional square
- * override (D-28) and `iconVersion` busts icon caches when the set is re-derived.
+ * override (D-28) and `iconVersion` busts icon caches when the set is re-derived. `look` (2026-10-03)
+ * is the all-default look when absent (`brandLookSchema`).
  */
 export const tenantBrandingSchema = z.object({
   logoUrl: z.string().nullable().default(null),
@@ -68,6 +222,7 @@ export const tenantBrandingSchema = z.object({
   iconUrls: brandIconUrlsSchema.nullable().default(null),
   iconVersion: z.number().int().nonnegative().default(0),
   colors: brandColorsSchema.partial().default({}),
+  look: brandLookSchema.prefault({}),
 });
 /** What is stored: loose, anything may be missing. Use `resolveBranding()` before rendering. */
 export type TenantBranding = z.input<typeof tenantBrandingSchema>;
@@ -79,7 +234,13 @@ export type ResolvedBranding = {
   iconUrl: string | null;
   iconUrls: BrandIconUrls | null;
   iconVersion: number;
+  /**
+   * The five colours. `primaryDark` / `onPrimaryDark` are the accent the dark theme paints: the dark
+   * mode's own primary with the ink that reads on it when the look has one, else the derivation.
+   */
   colors: BrandColors;
+  /** The look beyond the pair, canonical (`normalizeBrandLook`); all `null` for an older brand. */
+  look: BrandLook;
 };
 
 /** the platform's neutral fallback — visible only on generic hosts and on tenants with no brand yet. */
@@ -166,6 +327,22 @@ export function deriveBrandColors(source: { primary: string; secondary: string }
   };
 }
 
+/**
+ * `colors` with the dark theme's accent replaced by the tenant's own dark primary (the look's
+ * `darkColors.primary`), with the white or navy that reads on it exactly as for any primary;
+ * `colors` itself when there is none, so the derivation stands. The ONE place the persisted
+ * `primaryDark` / `onPrimaryDark` follow the look: the look's save, a pair save (an own dark primary
+ * survives a new light primary, an automatic one follows it), the creation and `resolveBranding`.
+ */
+export function withDarkPrimary(
+  colors: BrandColors,
+  darkPrimary: string | null | undefined,
+): BrandColors {
+  if (!darkPrimary) return colors;
+  const own = deriveBrandColors({ primary: darkPrimary, secondary: colors.secondary });
+  return { ...colors, primaryDark: own.primary, onPrimaryDark: own.onPrimary };
+}
+
 export type ContrastCheck = { ratio: number; ok: boolean };
 export type ContrastReport = {
   /** Text on the primary CTA (AA normal text, 4.5:1). */
@@ -203,6 +380,10 @@ export function contrastReport(
  * brand for a configured tenant is the one thing the prohibition forbids, so a corrupt row must be
  * loud, not blue. The panel validates with the same schema before saving, so this only fires on
  * hand-edited data.
+ *
+ * The look (2026-10-03) comes out canonical (`normalizeBrandLook`), and its own dark primary wins
+ * over the persisted dark accent (`withDarkPrimary`): the API keeps the two in step on every write,
+ * and a row where they disagree still renders the look it says.
  */
 export function resolveBranding(raw: unknown): ResolvedBranding {
   const parsed = tenantBrandingSchema.parse(raw ?? {});
@@ -211,29 +392,38 @@ export function resolveBranding(raw: unknown): ResolvedBranding {
     primary: stored.primary ?? NEUTRAL_BRAND.primary,
     secondary: stored.secondary ?? NEUTRAL_BRAND.secondary,
   });
+  const look = normalizeBrandLook(parsed.look);
   return {
     logoUrl: parsed.logoUrl,
     faviconUrl: parsed.faviconUrl,
     iconUrl: parsed.iconUrl,
     iconUrls: parsed.iconUrls,
     iconVersion: parsed.iconVersion,
-    colors: {
-      primary: derived.primary,
-      secondary: derived.secondary,
-      onPrimary: stored.onPrimary ?? derived.onPrimary,
-      primaryDark: stored.primaryDark ?? derived.primaryDark,
-      onPrimaryDark: stored.onPrimaryDark ?? derived.onPrimaryDark,
-    },
+    colors: withDarkPrimary(
+      {
+        primary: derived.primary,
+        secondary: derived.secondary,
+        onPrimary: stored.onPrimary ?? derived.onPrimary,
+        primaryDark: stored.primaryDark ?? derived.primaryDark,
+        onPrimaryDark: stored.onPrimaryDark ?? derived.onPrimaryDark,
+      },
+      look.darkColors.primary,
+    ),
+    look,
   };
 }
 
-/** The public subset of a resolved brand (drops `iconUrl`/`iconVersion`, which are panel facts). */
+/**
+ * The public subset of a resolved brand (drops `iconUrl`/`iconVersion`, which are panel facts). The
+ * look goes out whole: every value in it is a brand fact the logged-out pages paint.
+ */
 export function toHostBranding(branding: ResolvedBranding): HostBranding {
   return {
     logoUrl: branding.logoUrl,
     faviconUrl: branding.faviconUrl,
     iconUrls: branding.iconUrls,
     colors: branding.colors,
+    look: branding.look,
   };
 }
 
@@ -366,6 +556,52 @@ export const brandingColorsBodySchema = z
   })
   .strict();
 export type BrandingColorsBody = z.infer<typeof brandingColorsBodySchema>;
+
+/** `themeColorsSchema`, strict: a body naming a third theme is refused, not trimmed. */
+const themeColorsBodySchema = z.object({ light: lookHexSchema, dark: lookHexSchema }).strict();
+
+/**
+ * Body of `PUT /v1/platform/tenants/{id}/branding/look` (2026-10-03) and the optional `look` of
+ * `POST /v1/platform/tenants` (the wizard's "Criar tenant"): the WHOLE look, which replaces the
+ * stored one (PUT semantics). Strict at every level, so a misspelt key is a 400 instead of a value
+ * silently dropped; a key left out takes its default (the system's own value), so `{}` resets the
+ * whole look. The values are checked exactly as `brandLookSchema` reads them back: `#rrggbb`
+ * colours (lower-cased), tone ids from the two closed lists, `'solid'` or `'gradient'`, and a
+ * family name safe for CSS and a URL (`fontFamilyNameSchema`).
+ *
+ * The look never gates on contrast: the pair keeps its own confirmation (`brandingColorsBodySchema`
+ * on `PUT …/branding/colors`), and the look's colours are measured where they are chosen, as in the
+ * wizard. Nothing here touches the logo, the icons or the pair.
+ */
+export const brandingLookBodySchema = z
+  .object({
+    lightTone: lightToneSchema,
+    darkTone: darkToneSchema,
+    darkColors: z
+      .object({ primary: lookHexSchema, secondary: lookHexSchema })
+      .strict()
+      .prefault({}),
+    titleFont: titleFontSchema,
+    fontColors: z
+      .object({
+        title: themeColorsBodySchema.prefault({}),
+        appName: themeColorsBodySchema.prefault({}),
+      })
+      .strict()
+      .prefault({}),
+    buttonColors: z
+      .object({
+        style: buttonStyleSchema,
+        fill: themeColorsBodySchema.prefault({}),
+        fillEnd: themeColorsBodySchema.prefault({}),
+        ink: themeColorsBodySchema.prefault({}),
+      })
+      .strict()
+      .prefault({}),
+  })
+  .strict();
+/** What a client sends (any key may be left out); the route works on the parsed, complete look. */
+export type BrandingLookBody = z.input<typeof brandingLookBodySchema>;
 
 /** True when every check of a `contrastReport()` passes (the API gate and the panel share it). */
 export function contrastPasses(report: ContrastReport): boolean {

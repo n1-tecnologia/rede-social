@@ -26,7 +26,17 @@ export type PageHeaderProps = BackProps & {
    * hierarchy, and the two read as different promises (UI-SPEC §Composer contract, "Chrome").
    */
   backIcon?: LucideIcon;
-  /** CSS `top` of the sticky header — defaults to just below the TopBar. */
+  /**
+   * CSS `top` of the sticky header. The default, `-0.5rem`, pins it flush under the TopBar on every
+   * device. A sticky offset counts from the scroll root's CONTENT edge (Blink and WebKit deflate the
+   * sticky rectangle by the scroller's padding), and the shell's `main.app-scroll` is padded
+   * `safe-top + 3.5rem` while the TopBar ends at `safe-top + 3rem` (plus its 1px hairline, which the
+   * pinned header tucks under). `-0.5rem` is that difference, so `--safe-top` cancels out and no
+   * notch or PWA inset can open a band. At rest the header stays in flow (a negative threshold never
+   * pushes it down) and it pins after 8px of scroll. The old default `calc(var(--safe-top) + 3rem)`
+   * counted the inset and the TopBar twice: a ~67px empty band over the scrolling content, and the
+   * header pushed ~60px down over the page's first block. `0px` leaves a 7px seam instead.
+   */
   stickyTop?: string;
   className?: string;
 };
@@ -34,12 +44,17 @@ export type PageHeaderProps = BackProps & {
 const backClasses =
   'relative inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
-/** Sticky sub-header: optional 44×44 back control, 16/700 title, trailing slot. */
+/**
+ * Sticky sub-header: optional 44×44 back control, 16/700 title, trailing slot. Static from `md` up:
+ * the TopBar is hidden there, so there is nothing to pin under, and the header scrolls away with the
+ * centred column. The screens keep the default `stickyTop` (no per-page override, the 03-05
+ * `stickyTop="0px"` workaround is gone); one that passes its own value owns the geometry it implies.
+ */
 export function PageHeader({
   title,
   trailing,
   backIcon: BackIcon = ChevronLeft,
-  stickyTop = 'calc(var(--safe-top) + 3rem)',
+  stickyTop = '-0.5rem',
   className,
   ...back
 }: PageHeaderProps) {
@@ -48,7 +63,7 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        'sticky z-40 flex items-center gap-1 bg-bg/95 px-2 py-1 backdrop-blur-sm',
+        'sticky z-40 flex items-center gap-1 bg-bg/95 px-2 py-1 backdrop-blur-sm md:static',
         className,
       )}
       style={{ top: stickyTop }}

@@ -6,11 +6,20 @@ import { cn } from '../cn';
 
 /**
  * Brand-bearing button (UI-SPEC §Component Inventory). `brand` merges the prototype's `primary` and
- * `accent` variants and reads the tenant through `bg-brand`/`text-on-brand` — never `text-white`
- * on brand, the on-colour is computed per tenant.
+ * `accent` variants and reads the tenant through `bg-button`/`text-on-button` — never `text-white`
+ * on the fill, the on-colour is computed per tenant. Since 2026-10-03 the filled button has its own
+ * colour, separate from the primary that chips, switches and tabs keep; unset (everywhere but the
+ * wizard's preview, for now) it IS the primary, the same paint as `bg-brand`, hover included. The
+ * focus ring stays on the primary (`ring-brand`). A gradient button paints its image over that
+ * fill (`bg-(image:--button-image)`, and the hover's), `none` unless the gradient is set. A caller
+ * className with its own `bg-*` colour still replaces `bg-button` (tailwind-merge), but the image
+ * and its hover are other utility groups and stay (`bg-none` alone takes the image, never the
+ * hover's): a caller repainting a brand button adds `bg-none hover:bg-none` too, or under a
+ * gradient the tenant's hovered image covers its hover colour.
  */
 const variantStyles = {
-  brand: 'bg-brand text-on-brand hover:bg-brand-hover active:opacity-80',
+  brand:
+    'bg-button bg-(image:--button-image) text-on-button hover:bg-button-hover hover:bg-(image:--button-image-hover) active:opacity-80',
   secondary: 'bg-bg-tertiary text-text hover:bg-bg-active active:bg-bg-tertiary/80',
   outline: 'border border-border-secondary text-text hover:bg-bg-hover active:bg-bg-tertiary',
   ghost: 'bg-transparent text-brand hover:bg-bg-hover active:bg-bg-tertiary',

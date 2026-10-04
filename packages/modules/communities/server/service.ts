@@ -5,13 +5,15 @@ import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { type SQL, sql } from 'drizzle-orm';
-import type {
-  CommunityPage,
-  CommunityQuery,
-  CommunityStatus,
-  CommunitySummary,
-  CreateCommunity,
-  UpdateCommunity,
+import {
+  COMMUNITY_PAGE_SIZE,
+  type CommunityPage,
+  type CommunityQuery,
+  type CommunityStatus,
+  type CommunitySummary,
+  type CreateCommunity,
+  type ReorderCommunities,
+  type UpdateCommunity,
 } from '../contracts/index';
 
 const log = moduleLogger('module-communities');
@@ -50,6 +52,12 @@ type CommunityRow = {
    * so it can never reach the wire (`communitySummarySchema` is `.strict()` and unchanged).
    */
   cursor_at?: string;
+  /**
+   * The ACTIVE list's leading cursor key only (2026-10-03): the admin's `position`, selected through
+   * the same `extra` column. Like `cursor_at` it is never read by `toCommunity`, so the position never
+   * reaches the wire — the array order already IS the answer.
+   */
+  cursor_position?: number;
 };
 
 /**
@@ -64,6 +72,86 @@ type CommunityRow = {
  * total order end to end.
  */
 const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
+
+/**
+ * A cursor's instant must be one this service could have issued BEFORE it reaches a `::timestamptz`
+ * cast — the events/chat rule (T-06-04), restated here because modules cannot import each other.
+ * `decodeCursor` only proves `n` is a string, and a tampered `n` would otherwise be a 500 instead of
+ * the first page. The shape alone is not enough (`2026-02-30` or hour `99` match it and still fail
+ * the cast), so the calendar fields must also survive a UTC round trip.
+ *
+ * It became load-bearing here on 2026-10-03: the two lists now carry DIFFERENT `n` shapes, and a
+ * cursor carries no status (D-88), so an active cursor replayed on the archived branch must degrade
+ * to page 1 rather than reach the cast as `3~2026-…`.
+ */
+const CURSOR_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?Z$/;
+
+function isCursorInstant(value: string): boolean {
+  const match = CURSOR_INSTANT.exec(value);
+  if (!match) return false;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  if (year < 1000) return false;
+  const at = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return (
+    at.getUTCFullYear() === year &&
+    at.getUTCMonth() === month - 1 &&
+    at.getUTCDate() === day &&
+    at.getUTCHours() === hour &&
+    at.getUTCMinutes() === minute &&
+    at.getUTCSeconds() === second
+  );
+}
+
+/** The ARCHIVED list's cursor: `decodeCursor`, then page 1 (null) unless `n` is a real instant. */
+function decodeArchivedCursor(raw: string | undefined) {
+  const decoded = decodeCursor(raw);
+  return decoded && isCursorInstant(decoded.n) ? decoded : null;
+}
+
+/** Postgres `integer` bounds: a position outside them cannot have come from the column. */
+const INT4_MIN = -2_147_483_648;
+const INT4_MAX = 2_147_483_647;
+
+/**
+ * The ACTIVE list's `n` (2026-10-03): `{position}~{last_activity_at}`. The repo has ONE cursor
+ * envelope (`{ v, n, id }`, `core/server/paging`), and its docblock forbids a second one — so the
+ * list's extra leading key rides INSIDE `n` rather than as a new field. `~` cannot occur in either
+ * half (an integer, an ISO instant), so the split is unambiguous.
+ *
+ * A pre-2026-10-03 cursor (a bare instant) has no `~` and degrades to page 1, which is what any
+ * stale cursor does (T-05-05). Nothing parses this outside this file: the web forwards the cursor
+ * verbatim and never reads it.
+ */
+const ACTIVE_KEY = /^(-?\d{1,10})~(.+)$/;
+
+const activeCursorKey = (position: number, lastActivityAt: string): string =>
+  `${position}~${lastActivityAt}`;
+
+/** Where an ACTIVE page resumes: after `(position, at, id)` in the list's mixed-direction order. */
+type ActiveCursor = { position: number; at: string; id: string };
+
+/**
+ * TOTAL, like `decodeCursor`: anything that is not `{int4}~{instant}` over a valid envelope is page
+ * 1 (null), and nothing from the string reaches SQL before it passed every check here.
+ */
+function decodeActiveCursor(raw: string | undefined): ActiveCursor | null {
+  const decoded = decodeCursor(raw);
+  if (!decoded) return null;
+  const match = ACTIVE_KEY.exec(decoded.n);
+  if (!match) return null;
+  const position = Number(match[1]);
+  const at = match[2] ?? '';
+  if (!Number.isInteger(position) || position < INT4_MIN || position > INT4_MAX) return null;
+  if (!isCursorInstant(at)) return null;
+  return { position, at, id: decoded.id };
+}
 
 /**
  * THE projection, written once and shared by the list and the detail read so the two can never
@@ -116,57 +204,82 @@ const toCommunity = (row: CommunityRow): CommunitySummary => ({
 });
 
 /**
- * `GET /v1/communities?limit=&cursor=&status=` (COMM-02, COMM-03, D-76) — one keyset page of the
- * tenant's ACTIVE communities, most recent activity first (or, with `status=archived`, its archived
- * ones — see the two branches below).
+ * THE active-list statement — one page of the tenant's ACTIVE communities in the list's order —
+ * written once and shared by `listCommunities` and by `reorderCommunities`' answer, so the page a
+ * reorder hands back can never be ordered differently from the page the next GET returns.
  *
- * **COMM-02 is a POLICY value, expressed as an absence.** This statement never joins
- * `community_members`: every member of the tenant therefore receives the identical item-id set
- * regardless of role, which is what "all of them" means as a rule rather than as a coincidence. V2's
- * restricted communities add a predicate here and a policy there — not a migration.
+ * **The order is `position asc, last_activity_at desc, id desc`** (2026-10-03), the exact column list
+ * and directions of `communities_tenant_position_idx`, so the index DELIVERS the order and no Sort
+ * node appears (pgTAP 110 cases 17-18). It is TOTAL: `(position, last_activity_at, id)` cannot tie,
+ * so a page boundary can neither duplicate nor skip a row. Every row starts at position 0, so until
+ * an admin reorders, the list is D-76's activity order exactly; a reorder writes 1..n, so a community
+ * created afterwards (0) is listed FIRST, and inside one position — the never-reordered 0s, or a
+ * reactivated community whose old position now coincides with another's — activity still decides.
  *
- * Ordering is `last_activity_at desc, id desc`, which is the ordered pair
- * `communities_tenant_activity_idx` is built on and is TOTAL: two communities whose activity lands in
- * the same microsecond occupy two stable adjacent slots that a page boundary can neither duplicate
- * nor skip. The cursor's `n` is the row's own `last_activity_at`, read back from the projection
- * rather than re-derived in JavaScript, so it can never disagree with the index.
+ * **The keyset runs in MIXED directions**, which is why it is spelled out rather than built from
+ * `keysetComparison` (whose row comparison serves one direction): after `(p, at, id)` comes every row
+ * with a LATER position, or the same position and an EARLIER `(last_activity_at, id)`. It is written
+ * as `position >= p and (position > p or (at, id) < …)` — the same set — because the leading
+ * `position >= p` is a range the index can SEEK to (probed: `Index Cond: … AND position >= p`), so a
+ * later page starts at the cursor's position group instead of filtering every row before it. Inside
+ * that one group the rows before the cursor are still filtered rather than seeked past, which costs
+ * nothing at the size of a tenant's community list (the same trade the `… is null or …` guard already
+ * makes for the generic plan).
  *
- * `decodeCursor` is TOTAL (see its docblock): a tampered, truncated or stale envelope degrades to
- * page 1 instead of raising, and nothing from the string reaches SQL before `cursorSchema` accepted
- * it (T-05-05).
+ * The cursor's leading key is the row's own `position`, read back through the projection's `extra`
+ * column (`cursor_position`), and its instant is the projection's own `last_activity_at` text, so
+ * neither is re-derived in JavaScript (the `ISO_MICROSECONDS` rule).
  *
- * **Two branches, two COMPLETE literal statements (05.1, D-88/D-91).** `query.status` picks one in
- * TypeScript; it is never a bound SQL parameter. The ACTIVE statement is the one above, verbatim:
- * a literal `c.status = 'active'` is provably implied by `communities_tenant_activity_idx`'s partial
- * predicate whatever plan the server caches, which is what pgTAP cases 15, 17 and 18 describe. A
- * bound `status` would make that implication a question of custom-vs-generic planning instead.
- *
- * The ARCHIVED statement (managers only — the route enforces D-89) orders `updated_at desc, id desc`:
- * most recently archived first, because there is no `archived_at` and none is added (D-91). The
- * accepted consequence, pinned by a test: an archived community EDITED afterwards moves to the top.
- * Its cursor `n` is `updated_at` formatted to microseconds by the statement (`cursor_at`, the
- * `ISO_MICROSECONDS` rule above) and never reaches the payload. NO index serves this branch, by
- * decision: the archived set of a tenant is small and only managers read it, and the budget test
- * pins it to ONE statement with the covers hydrated. A later index is a purely additive migration.
- *
- * Each branch is its own keyset, so a cursor never spans two statuses. A cursor carries no status:
- * an active cursor replayed on the archived branch simply pages the archived set from that
- * timestamp, and only a caller already allowed to read that set can send it.
+ * A literal `c.status = 'active'`, never a bound parameter: it is provably implied by the index's
+ * partial predicate whatever plan the server caches (pgTAP 110 cases 15, 17 and 18).
  */
-export async function listCommunities(
+async function activePage(
+  tx: Tx,
   ctx: RequestContext,
-  query: CommunityQuery,
-): Promise<CommunityPage> {
-  const limit = query.limit;
-  const after = decodeCursor(query.cursor);
+  limit: number,
+  after: ActiveCursor | null,
+): Promise<CommunityRow[]> {
+  const afterPosition = after?.position ?? null;
+  const afterAt = after?.at ?? null;
+  const afterId = after?.id ?? null;
+  return tx.execute<CommunityRow>(sql`
+      ${communityProjection(sql`, c.position as cursor_position`)}
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.deleted_at is null
+         and c.status = 'active'
+         and (
+           ${afterPosition}::int is null
+           or (
+             c.position >= ${afterPosition}::int
+             and (
+               c.position > ${afterPosition}::int
+               or (c.last_activity_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+             )
+           )
+         )
+       order by c.position asc, c.last_activity_at desc, c.id desc
+       limit ${limit + 1}`);
+}
+
+/**
+ * The ARCHIVED statement (05.1, D-88/D-91, managers only — the route enforces D-89): `updated_at
+ * desc, id desc`, most recently archived first, because there is no `archived_at` and none is added.
+ * The accepted consequence, pinned by a test: an archived community EDITED afterwards moves to the
+ * top. Its cursor `n` is `updated_at` formatted to microseconds by the statement (`cursor_at`) and
+ * never reaches the payload. NO index serves this branch, by decision: the archived set of a tenant
+ * is small and only managers read it, and the budget test pins it to ONE statement with the covers
+ * hydrated. A later index is a purely additive migration. The admin's `position` plays no part here:
+ * the order an admin chooses is the ACTIVE list's, and archiving does not ask for one.
+ */
+async function archivedPage(
+  tx: Tx,
+  ctx: RequestContext,
+  limit: number,
+  after: { n: string; id: string } | null,
+): Promise<CommunityRow[]> {
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
-
-  const archived = query.status === 'archived';
-
-  const rows = await withTenantTx(ctx, (tx) =>
-    archived
-      ? tx.execute<CommunityRow>(sql`
+  return tx.execute<CommunityRow>(sql`
       ${communityProjection(
         sql`, to_char(c.updated_at at time zone 'utc', ${ISO_MICROSECONDS}) as cursor_at`,
       )}
@@ -178,28 +291,72 @@ export async function listCommunities(
            or (c.updated_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
          )
        order by c.updated_at desc, c.id desc
-       limit ${limit + 1}`)
-      : tx.execute<CommunityRow>(sql`
-      ${communityProjection()}
-       where c.tenant_id = ${ctx.tenantId}::uuid
-         and c.deleted_at is null
-         and c.status = 'active'
-         and (
-           ${afterAt}::timestamptz is null
-           or (c.last_activity_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
-         )
-       order by c.last_activity_at desc, c.id desc
-       limit ${limit + 1}`),
-  );
+       limit ${limit + 1}`);
+}
 
-  // Over-fetch by one: `nextCursor` is non-null EXACTLY when another row exists, so the sentinel
-  // never fires a "load more" that comes back empty. Each branch's `n` is its OWN ordering key, read
-  // back from the statement that ordered by it.
+/** The active list's `n`, from the row the statement ordered: `{position}~{last_activity_at}`. */
+const activeKey = (row: CommunityRow): string | undefined =>
+  row.cursor_position === undefined || row.cursor_position === null
+    ? undefined
+    : activeCursorKey(row.cursor_position, row.last_activity_at);
+
+/** The archived list's `n`: its own `updated_at`, formatted by the statement. */
+const archivedKey = (row: CommunityRow): string | undefined => row.cursor_at;
+
+/**
+ * Over-fetched rows → one published page. `nextCursor` is non-null EXACTLY when another row exists
+ * (the `limit + 1` rule), so the sentinel never fires a "load more" that comes back empty. Each list
+ * passes its OWN key, read back from the statement that ordered by it.
+ */
+function pageOf(
+  rows: CommunityRow[],
+  limit: number,
+  keyOf: (row: CommunityRow) => string | undefined,
+): CommunityPage {
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
-  const lastKey = last ? (archived ? last.cursor_at : last.last_activity_at) : undefined;
+  const lastKey = last ? keyOf(last) : undefined;
   const nextCursor =
     rows.length > limit && last && lastKey ? encodeCursor({ n: lastKey, id: last.id }) : null;
+  return { items: page.map(toCommunity), nextCursor };
+}
+
+/**
+ * `GET /v1/communities?limit=&cursor=&status=` (COMM-02, COMM-03, D-76) — one keyset page of the
+ * tenant's ACTIVE communities in the admin's order, most recent activity first inside it (or, with
+ * `status=archived`, its archived ones — see the two statements above).
+ *
+ * **COMM-02 is a POLICY value, expressed as an absence.** Neither statement joins
+ * `community_members`: every member of the tenant therefore receives the identical item-id set
+ * regardless of role, which is what "all of them" means as a rule rather than as a coincidence. V2's
+ * restricted communities add a predicate here and a policy there — not a migration. The admin's
+ * order is the same kind of value: one `position` per community, so every member reads the same
+ * order an admin chose.
+ *
+ * **Two branches, two COMPLETE literal statements (05.1, D-88/D-91).** `query.status` picks one in
+ * TypeScript; it is never a bound SQL parameter, so each statement's predicate and ordering are fixed
+ * text the planner (and pgTAP's EXPLAIN) can match to an index by name.
+ *
+ * Each branch is its own keyset with its own `n` shape — `{position}~{instant}` for the active list,
+ * a bare instant for the archived one — and each decoder is TOTAL: a tampered, truncated, stale or
+ * other-list cursor degrades to page 1 instead of raising, and nothing from the string reaches SQL
+ * before it passed `cursorSchema` and the shape checks (T-05-05). A cursor carries no status, so a
+ * cursor replayed on the other list is exactly such a stale cursor.
+ */
+export async function listCommunities(
+  ctx: RequestContext,
+  query: CommunityQuery,
+): Promise<CommunityPage> {
+  const limit = query.limit;
+  const archived = query.status === 'archived';
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    archived
+      ? archivedPage(tx, ctx, limit, decodeArchivedCursor(query.cursor))
+      : activePage(tx, ctx, limit, decodeActiveCursor(query.cursor)),
+  );
+
+  const { items, nextCursor } = pageOf(rows, limit, archived ? archivedKey : activeKey);
 
   // The SHAPE of the read — counts, ids and flags. A community NAME is member-facing content and
   // never reaches a log line, an error `details` payload or an OpenAPI example (T-05-06).
@@ -212,13 +369,13 @@ export async function listCommunities(
       // A closed enum value — the shape of the read, never its content.
       status: query.status,
       limit,
-      returned: page.length,
+      returned: items.length,
       hasNext: nextCursor !== null,
     },
     'communities listed',
   );
 
-  return { items: page.map(toCommunity), nextCursor };
+  return { items, nextCursor };
 }
 
 /**
@@ -646,4 +803,100 @@ export async function updateCommunity(
   );
 
   return toCommunity(row);
+}
+
+/**
+ * `PUT /v1/communities/order` (2026-10-03) — the admin's order of the ACTIVE list, written as
+ * `position = 1..n` in the order the request names. The `reorderHighlights` shape, retargeted.
+ *
+ * One `withTenantTx`, three steps:
+ *  1. **Lock.** The tenant's ACTIVE, live rows are locked `for update`, in id order — one fixed
+ *     order, so two reorders racing each other queue instead of deadlocking.
+ *  2. **Compare.** The LOCKED id set must equal the request's: same size and identical members.
+ *     Anything else — a community created, archived or removed since the admin's screen loaded, an
+ *     unknown id, another tenant's id — is ONE `409 { community: 'order_stale' }` and nothing is
+ *     written. Locking first is what makes the comparison mean something: an archive racing this
+ *     reorder either commits before the lock (its row no longer matches `status = 'active'` when the
+ *     lock re-reads it, so the set differs) or waits for it. A create is not blocked by row locks;
+ *     one that commits after the comparison simply lands at position 0, which lists it first — the
+ *     documented place for a new community, and no row of the admin's order moved.
+ *  3. **Renumber.** ONE statement writes `position = 1..n` from `unnest(…) with ordinality`,
+ *     touching only rows whose position really changes, and `updated_at` moves with them — and only
+ *     with them: a repeat of the same order writes nothing and moves nothing (idempotent, observably
+ *     inert, the no-op PATCH rule).
+ *
+ * The answer is page 1 of the active list in the new order, read by `activePage` — the SAME
+ * statement `GET /v1/communities` runs — inside the same transaction, so what the admin sees after
+ * saving is exactly what every member's next read returns.
+ *
+ * **What it never touches.** Archived rows: they are outside the lock, outside the comparison, and
+ * the renumber carries the same `status = 'active'` predicate besides. A reactivated community keeps
+ * the position it had, and where that now coincides with another row's, activity breaks the tie
+ * until the next reorder. `post_count` and `last_activity_at` stay trigger-owned (fact 2 of the
+ * schema docblock): an order is not activity.
+ *
+ * **No event.** Nothing subscribes to an order, and an event nobody reads is a payload shape frozen
+ * for free (the `community.reactivated` precedent in the contracts). The log line below carries the
+ * shape of the write; adding `community.reordered` later is one line in the contracts.
+ *
+ * Duplicates are refused by the contract before this runs (400: a list naming one community twice is
+ * malformed, not stale), and re-stated here for any caller that does not pass through the route.
+ * Ids are compared lower-cased, because two spellings of one uuid are one community.
+ */
+export async function reorderCommunities(
+  ctx: RequestContext,
+  input: ReorderCommunities,
+): Promise<CommunityPage> {
+  const requested = input.ids.map((id) => id.toLowerCase());
+  if (new Set(requested).size !== requested.length) {
+    throw new ApiError(400, 'VALIDATION_FAILED');
+  }
+
+  const { page, moved } = await withTenantTx(ctx, async (tx) => {
+    const locked = await tx.execute<{ id: string }>(sql`
+      select c.id
+        from communities c
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.deleted_at is null
+         and c.status = 'active'
+       order by c.id
+       for update`);
+    const current = new Set(locked.map((row) => row.id));
+    if (requested.length !== current.size || requested.some((id) => !current.has(id))) {
+      throw new ApiError(409, 'CONFLICT', { community: 'order_stale' });
+    }
+
+    // The ids travel as ONE Postgres array literal: drizzle's `sql` would expand a JS array into a
+    // comma-separated parameter list. Every element is a Zod-validated uuid AND a member of the set
+    // just locked, so nothing caller-shaped reaches the literal.
+    const renumbered = await tx.execute<{ id: string }>(sql`
+      update communities c
+         set position = o.ord::int,
+             updated_at = now()
+        from unnest(${`{${requested.join(',')}}`}::uuid[]) with ordinality as o(id, ord)
+       where c.id = o.id
+         and c.tenant_id = ${ctx.tenantId}::uuid
+         and c.deleted_at is null
+         and c.status = 'active'
+         and c.position <> o.ord
+      returning c.id`);
+
+    const rows = await activePage(tx, ctx, COMMUNITY_PAGE_SIZE, null);
+    return { page: pageOf(rows, COMMUNITY_PAGE_SIZE, activeKey), moved: renumbered.length };
+  });
+
+  log.info(
+    {
+      event: 'communities.reordered',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      // Counts only: neither the ids' order nor a name belongs in a log line (T-05-06).
+      count: requested.length,
+      moved,
+    },
+    'communities reordered',
+  );
+
+  return page;
 }

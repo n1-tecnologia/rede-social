@@ -39,9 +39,11 @@ import { useSignedUpload } from '@/components/media/useSignedUpload';
  * STRUCTURAL — the title and submit labels, and a danger archive row that exists on edit only.
  *
  * **The composer's chrome, re-used** (D-57's precedent): a full-screen ROUTE rather than a sheet,
- * `PageHeader stickyTop="0px"` with a 44x44 `X` close, and the brand submit in the trailing slot
- * with its pending label and `aria-busy`. Phase 4 already paid for this chrome and its discard
- * flow; a second form language for three fields would be drift.
+ * the `PageHeader` (its default sticky offset) with a 44x44 `X` close, and the brand submit in the
+ * trailing slot with its pending label and `aria-busy`. Phase 4 already paid for this chrome and its
+ * discard flow; a second form language for three fields would be drift. Like the composer, the form
+ * declares itself a task screen (`data-shell-hide="nav"`), so the shell's floating BottomNav steps
+ * aside and never sits over a field (tokens.css).
  *
  * **ZERO UPLOAD CODE LIVES HERE.** The cover runs the Phase 3 machine — `useSignedUpload` with
  * `purpose: 'cover'` — which picks, re-encodes a phone photo in the browser, brokers a signed
@@ -263,6 +265,7 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
     <form
       data-community-form
       data-mode={mode}
+      data-shell-hide="nav"
       className="mx-auto flex w-full max-w-[680px] flex-col"
       onSubmit={(event) => {
         event.preventDefault();
@@ -274,7 +277,6 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
         backIcon={X}
         backLabel={t('form.close')}
         onBack={close}
-        stickyTop="0px"
         className="md:static md:px-0"
         trailing={
           <Button

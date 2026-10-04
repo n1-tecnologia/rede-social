@@ -217,7 +217,10 @@ export interface HighlightSheetTitleStepLabels {
 
 interface HighlightSheetBaseProps {
   open: boolean;
-  /** Pass a STABLE callback: `BottomSheet`'s focus trap re-arms whenever its identity changes. */
+  /**
+   * Any identity works: `BottomSheet`'s focus trap reads it through a ref and arms once per
+   * opening, so a new callback on every render no longer moves the focus.
+   */
   onClose: () => void;
   title: string;
   helper?: string;

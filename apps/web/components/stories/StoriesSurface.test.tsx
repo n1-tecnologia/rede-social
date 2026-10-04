@@ -86,6 +86,7 @@ function item(n: number, seen: boolean): StoryViewerItemView {
     commentCount: 0,
     viewerLiked: false,
     seen,
+    authorAvatarUrl: null,
   };
 }
 
@@ -135,10 +136,10 @@ const circles: RowCircleView[] = [
   },
 ];
 
-function renderSurface(flags: boolean[]) {
+function renderSurface(flags: boolean[], rowCircles: RowCircleView[] = circles) {
   return render(
     <StoriesSurface
-      circles={circles}
+      circles={rowCircles}
       regionLabel="Stories"
       viewer={{
         groups: groups(flags),
@@ -343,5 +344,49 @@ describe('StoriesSurface — the seen ring and the resume (05.2-10)', () => {
     await settle();
     expect(calls()).toEqual([[id(1)]]);
     expect(beacons()).toHaveLength(1);
+  });
+
+  it('S7. #2b: the tenant circle keeps the author’s FACE through every re-derivation of its ring and name', async () => {
+    const FACE = '/v1/media/0000000f-1111-4111-8111-111111111111/w128';
+    const withFace: RowCircleView[] = [
+      {
+        ...(circles[0] as RowCircleView),
+        disc: { kind: 'photo', src: FACE, fallback: { kind: 'monogram', text: 'D' } },
+      },
+      circles[1] as RowCircleView,
+    ];
+    // happy-dom reports every `<img>` as `complete` with a zero `naturalWidth` (a failed fetch); a
+    // decoded image is forced so the photo stands, and the accessors are restored afterwards.
+    const saved = ['complete', 'naturalWidth'].map(
+      (key) => [key, Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, key)] as const,
+    );
+    Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+      configurable: true,
+      get: () => true,
+    });
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+      configurable: true,
+      get: () => 128,
+    });
+    try {
+      renderSurface([true, false, true], withFace);
+      expect(tenantButton().getAttribute('aria-label')).toBe(UNSEEN_LABEL);
+      expect(tenantButton().querySelector('img')?.getAttribute('src')).toBe(FACE);
+
+      // The surface re-derives the ring and the NAME on close; the disc it was handed survives.
+      openTenant();
+      shown(2);
+      close();
+      await settle();
+      const button = tenantButton();
+      expect(button.getAttribute('aria-label')).toBe(SEEN_LABEL);
+      expect(ringOf(button).className).toContain('border-border');
+      expect(button.querySelector('img')?.getAttribute('src')).toBe(FACE);
+    } finally {
+      for (const [key, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(HTMLImageElement.prototype, key, descriptor);
+        else delete (HTMLImageElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    }
   });
 });

@@ -26,6 +26,10 @@ export interface EditProfileFormProps {
  *
  * The photo is NOT part of the submit: it commits on upload completion with its own toast, so a
  * member who only changes their photo never presses the button.
+ *
+ * A task screen (`data-shell-hide="nav"`, product decision 2026-10-02): the shell's floating
+ * BottomNav steps aside while the form is mounted, so it never sits over "Bio" or the button
+ * (tokens.css); the back chevron in the header is the way out.
  */
 export function EditProfileForm({ displayName, bio, avatarAssetId, save }: EditProfileFormProps) {
   const t = useTranslations('profile');
@@ -62,6 +66,7 @@ export function EditProfileForm({ displayName, bio, avatarAssetId, save }: EditP
 
   return (
     <form
+      data-shell-hide="nav"
       className="flex flex-col gap-6 px-4 py-6"
       onSubmit={(event) => {
         event.preventDefault();

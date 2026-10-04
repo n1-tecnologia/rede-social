@@ -9,18 +9,24 @@ import {
   checkinCodeSchema,
   checkinResultSchema,
   type EnterResult,
+  EVENT_MAX_PAGE_SIZE,
   EVENT_PAGE_SIZE,
+  EVENT_PHOTO_PAGE_SIZE,
   type EventDetail,
   type EventEdit,
   type EventInput,
   type EventPage,
   type EventPeriod,
+  type EventPhoto,
+  type EventPhotoPage,
   type EventStatus,
   type EventSummary,
   enterResultSchema,
   eventDetailSchema,
   eventEditSchema,
   eventPageSchema,
+  eventPhotoPageSchema,
+  eventPhotoSchema,
   eventSummarySchema,
   nextEventSchema,
   type RsvpAnswer,
@@ -33,8 +39,8 @@ import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 
 /**
  * The ONE events fetch implementation (the `getCommunities` rule, D-58). The `/eventos` RSC page and
- * its load-more and refresh actions all read THIS, so the page and its pagination can never disagree
- * about the page size, the period or the tenant the request is scoped to.
+ * its refresh action both read THIS (`getEventSections`), so the page and its refresh can never
+ * disagree about the page size, the periods or the tenant the request is scoped to.
  *
  * The browser never talks to Supabase for event data: every read goes through `apiFetch` to the Hono
  * API, which re-verifies the token and re-reads the membership row on every request.
@@ -74,25 +80,56 @@ export async function getEvents(query: EventQueryInput): Promise<EventPage> {
   return eventPageSchema.parse(await res.json());
 }
 
+/** The two periods `/eventos` splits into its galleries (`splitEventSections`). */
+export type EventSectionsData = { upcoming: EventSummary[]; past: EventSummary[] };
+
+/** How many upcoming pages the galleries read at most: 4 × 25 events to come. */
+const SECTIONS_UPCOMING_PAGES = 4;
+
 /**
- * One page of events, or `null` when the API could not answer — the list then renders its own error
- * state rather than taking the whole tab down. A refusal `bootstrapRedirectPath` knows (401, blocked,
- * suspended, host mismatch, no membership) becomes a navigation, performed OUTSIDE the try/catch:
- * `redirect()` throws in Next 16 and a catch would swallow it.
+ * Both periods of `GET /v1/events` for the `/eventos` galleries (2026-10-03, the REINE prototype):
+ * every event to come (its pages drained, up to `SECTIONS_UPCOMING_PAGES` of the largest page the API
+ * serves, so a "Vou" far down the list still reaches "Meus eventos") and the most recent page of the
+ * ended ones (the past only grows, and a carousel has no end to page from). Read at once, both.
  */
-export async function loadEvents(query: EventQueryInput): Promise<EventPage | null> {
+export async function getEventSections(): Promise<EventSectionsData> {
+  const allUpcoming = async () => {
+    const items: EventSummary[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < SECTIONS_UPCOMING_PAGES; page += 1) {
+      const result = await getEvents({ period: 'upcoming', cursor, limit: EVENT_MAX_PAGE_SIZE });
+      items.push(...result.items);
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+    return items;
+  };
+  const [upcoming, past] = await Promise.all([
+    allUpcoming(),
+    getEvents({ period: 'past', limit: EVENT_MAX_PAGE_SIZE }).then((page) => page.items),
+  ]);
+  return { upcoming, past };
+}
+
+/**
+ * The galleries' events, or `null` when the API could not answer: the page then renders its own
+ * error state rather than taking the whole tab down. A refusal `bootstrapRedirectPath` knows (401,
+ * blocked, suspended, host mismatch, no membership) becomes a navigation, performed OUTSIDE the
+ * try/catch: `redirect()` throws in Next 16 and a catch would swallow it.
+ */
+export async function loadEventSections(): Promise<EventSectionsData | null> {
   let path: string | null = null;
-  let page: EventPage | null = null;
+  let sections: EventSectionsData | null = null;
   try {
-    page = await getEvents(query);
+    sections = await getEventSections();
   } catch (error) {
     if (error instanceof ApiClientError) path = bootstrapRedirectPath(error);
     // Shape only: a title is member-facing content and never reaches a log line.
-    if (!path) console.error('events.list_failed', { period: query.period, error: String(error) });
+    if (!path) console.error('events.list_failed', { error: String(error) });
   }
 
   if (path) redirect(path);
-  return page;
+  return sections;
 }
 
 /** `loadEvent`'s answer: the event, the ONE not-found (D-23), or "we could not reach the server". */
@@ -161,10 +198,10 @@ export async function loadNextEvent(): Promise<EventSummary | null> {
 /**
  * `PUT /v1/events/{eventId}/rsvp` (EVENT-03): the member's `Vou` / `Não vou`. The API writes ONE row
  * per member per event and the database's guard trigger is the only authority on whether the answer
- * is still allowed (D-204), so this call never pre-checks the clock. A refusal is thrown as an
- * `ApiClientError` carrying the envelope's `details` (`{ event: 'rsvp_closed' | 'cancelled' |
- * 'attendance_locked' }` on a 409, nothing on the bare 404), which `rsvpEventAction` maps to a
- * catalog key.
+ * is still allowed (D-204), so this call never pre-checks the clock or the limit. A refusal is
+ * thrown as an `ApiClientError` carrying the envelope's `details` (`{ event: 'rsvp_closed' |
+ * 'cancelled' | 'attendance_locked' | 'event_full' }` on a 409, nothing on the bare 404), which
+ * `rsvpEventAction` maps to a catalog key.
  */
 export async function putRsvp(eventId: string, answer: RsvpAnswer): Promise<RsvpResult> {
   const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/rsvp`, {
@@ -414,4 +451,72 @@ export async function regenerateCode(eventId: string): Promise<CheckinCode> {
   });
   if (!res.ok) throw await apiError(res);
   return checkinCodeSchema.parse(await res.json());
+}
+
+/* ── 2026-10-03: the event's "Fotos" ────────────────────────────────────────────────────────────── */
+
+/**
+ * `GET /v1/events/{eventId}/photos`: one page of the gallery, newest first. Every member reads it.
+ * The cursor is OPAQUE and forwarded verbatim; `limit` is the contract's page size (the API clamps
+ * it anyway). Throws an `ApiClientError` on any refusal, for the callers to map.
+ */
+export async function getEventPhotos(eventId: string, cursor?: string): Promise<EventPhotoPage> {
+  const search = new URLSearchParams();
+  if (cursor) search.set('cursor', cursor);
+  search.set('limit', String(EVENT_PHOTO_PAGE_SIZE));
+  const res = await apiFetch(
+    `/v1/events/${encodeURIComponent(eventId)}/photos?${search.toString()}`,
+  );
+  if (!res.ok) throw await apiError(res);
+  return eventPhotoPageSchema.parse(await res.json());
+}
+
+/**
+ * The detail page's first page of photos, or `null` when it could not be read. It swallows every
+ * failure and NEVER navigates: the page's own `loadEvent` read, made beside it, owns the not-found
+ * screen and the session redirects, so the gallery can never be the reason the page fails (the
+ * `loadNextEvent` rule). Logged with its shape only; a 404 is the page's not-found, not an error.
+ */
+export async function loadEventPhotos(eventId: string): Promise<EventPhotoPage | null> {
+  try {
+    return await getEventPhotos(eventId);
+  } catch (error) {
+    if (error instanceof ApiClientError && (error.status === 404 || error.status === 400)) {
+      return null;
+    }
+    console.error('events.photos_failed', {
+      ...(error instanceof ApiClientError
+        ? { status: error.status, code: error.code }
+        : { error: String(error) }),
+    });
+    return null;
+  }
+}
+
+/**
+ * `POST /v1/events/{eventId}/photos { mediaAssetId }` (manage only): links an uploaded, READY `post`
+ * image of the caller to the event. A retried add of the same asset answers the same photo (200).
+ * Throws an `ApiClientError` carrying `details.event` (`photo_invalid`) or the bare 404.
+ */
+export async function addEventPhoto(eventId: string, mediaAssetId: string): Promise<EventPhoto> {
+  const res = await apiFetch(`/v1/events/${encodeURIComponent(eventId)}/photos`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mediaAssetId }),
+  });
+  if (!res.ok) throw await apiError(res);
+  return eventPhotoSchema.parse(await res.json());
+}
+
+/**
+ * `DELETE /v1/events/{eventId}/photos/{photoId}` (manage only): the photo leaves the event and its
+ * asset is retired by the API. Throws an `ApiClientError` on refusal (a bare 404 for a photo that is
+ * already gone).
+ */
+export async function removeEventPhoto(eventId: string, photoId: string): Promise<void> {
+  const res = await apiFetch(
+    `/v1/events/${encodeURIComponent(eventId)}/photos/${encodeURIComponent(photoId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) throw await apiError(res);
 }

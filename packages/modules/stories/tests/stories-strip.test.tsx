@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StoriesStrip, type StoryStripCircle } from '../ui/StoriesStrip';
-import { StoryCircle, StoryMonogram } from '../ui/StoryCircle';
+import { StoryCircle, StoryMonogram, StoryPhoto } from '../ui/StoryCircle';
 
 /**
  * D-104 / D-105 / D-106 / UI-D-26 / UI-D-59..UI-D-63 — the strip and its circle, asserted as
@@ -53,8 +53,8 @@ const OWN: StoryStripCircle = {
   href: '/stories/publicar',
   label: 'own-label',
   actionLabel: 'own-action',
-  ring: 'neutral',
-  disc: { kind: 'own', avatarUrl: null },
+  ring: 'dashed',
+  disc: { kind: 'own' },
 };
 
 function strip(overrides: Partial<React.ComponentProps<typeof StoriesStrip>> = {}) {
@@ -276,11 +276,11 @@ describe('StoryCircle — 64x64, every disc and ring, one geometry (UI-D-60..UI-
     );
   });
 
-  it('16. the own disc keeps the Plus badge; with an href the circle is an anchor, never a button', () => {
+  it('16. the own disc is a CENTRED Plus on the tertiary ground, no photo and no badge; with an href it is an anchor, never a button', () => {
     const { container } = render(
       <StoryCircle
-        ring="neutral"
-        disc={{ kind: 'own', avatarUrl: null }}
+        ring="dashed"
+        disc={{ kind: 'own' }}
         label="own-label"
         actionLabel="own-action"
         href="/stories/publicar"
@@ -291,7 +291,32 @@ describe('StoryCircle — 64x64, every disc and ring, one geometry (UI-D-60..UI-
       '/stories/publicar',
     );
     expect(screen.queryByRole('button')).toBeNull();
-    expect(container.querySelector('[data-testid="story-own-badge"]')).not.toBeNull();
+
+    // UI-D-28 as amended (2026-10-02): the manage circle's glyph disc, with the module's own Plus
+    // centred in it at the manage Pencil's size.
+    const disc = container.querySelector('[data-testid="story-disc-own"]');
+    expect(disc).not.toBeNull();
+    for (const cls of [
+      'grid',
+      'h-16',
+      'w-16',
+      'place-items-center',
+      'rounded-full',
+      'bg-bg-tertiary',
+      'text-text-secondary',
+    ]) {
+      expect(disc?.className).toContain(cls);
+    }
+    const plus = disc?.querySelector('svg');
+    expect(plus).not.toBeNull();
+    expect(plus).toHaveAttribute('width', '20');
+    expect(plus).toHaveAttribute('aria-hidden', 'true');
+    // The admin's photo and the corner badge are gone, and the disc sits in the same ring geometry.
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('[data-testid="story-own-badge"]')).toBeNull();
+    for (const cls of ['border-dashed', 'border-2', 'p-0.5']) {
+      expect(ringOf(container)).toContain(cls);
+    }
   });
 
   it('17. with onOpen the circle is one button carrying the action label; with neither it is inert', () => {
@@ -307,5 +332,157 @@ describe('StoryCircle — 64x64, every disc and ring, one geometry (UI-D-60..UI-
     );
     expect(screen.getAllByRole('button')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'open-me' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * #2b (2026-10-03, UI-D-60 as amended): the tenant circle wears the FACE of whoever published the
+ * newest live story — and falls back to the tenant identity it wore before (the logo, or the
+ * monogram) whenever that photo cannot be fetched. The claims a later edit could quietly break:
+ *
+ *  - the photo is cover-cropped to the WHOLE 64px disc (a face, not a wordmark), `alt=""`, and the
+ *    control keeps the host's accessible name — the photo adds nothing to it and takes nothing away;
+ *  - a failed photo is REPLACED by the fallback disc, at the identical geometry — never a broken
+ *    image, never an empty ring — including a failure that happened before hydration;
+ *  - the failure is keyed by `src`: a new photo retries instead of inheriting the old failure.
+ */
+describe('the photo disc — a face with the tenant identity behind it (#2b, UI-D-60 amended)', () => {
+  const PHOTO = '/v1/media/0000000f-1111-4111-8111-111111111111/w128';
+
+  /**
+   * happy-dom reports every `<img>` as `complete` with a zero `naturalWidth` — what a failed fetch
+   * looks like — so the photo would take its fallback on mount. A decoded image is forced for the
+   * cases that need the photo itself (case 8's idiom), and happy-dom's accessors are restored after.
+   */
+  function withDecodedImages(run: () => void) {
+    const saved = ['complete', 'naturalWidth'].map(
+      (key) => [key, Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, key)] as const,
+    );
+    Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+      configurable: true,
+      get: () => true,
+    });
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+      configurable: true,
+      get: () => 128,
+    });
+    try {
+      run();
+    } finally {
+      for (const [key, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(HTMLImageElement.prototype, key, descriptor);
+        else delete (HTMLImageElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    }
+  }
+
+  function photoCircle(
+    fallback: { kind: 'logo'; src: string } | { kind: 'monogram'; text: string },
+  ) {
+    return render(
+      <StoryCircle
+        ring="brand"
+        disc={{ kind: 'photo', src: PHOTO, fallback }}
+        label="Rede Demo"
+        actionLabel="open-tenant"
+        onOpen={() => {}}
+      />,
+    );
+  }
+
+  it('18. the photo fills the 64px disc, cover-cropped, alt="", under the SAME accessible name', () => {
+    withDecodedImages(() => {
+      const { container } = photoCircle({ kind: 'logo', src: '/logo.png' });
+
+      const button = screen.getByRole('button', { name: 'open-tenant' });
+      const img = button.querySelector('img');
+      expect(img).toHaveAttribute('src', PHOTO);
+      expect(img).toHaveAttribute('alt', '');
+      for (const cls of ['h-16', 'w-16', 'rounded-full', 'object-cover']) {
+        expect(img?.className).toContain(cls);
+      }
+      const disc = container.querySelector('[data-testid="story-photo"]');
+      for (const cls of ['h-16', 'w-16', 'rounded-full', 'overflow-hidden', 'bg-bg-tertiary']) {
+        expect(disc?.className).toContain(cls);
+      }
+      // A face, not the logo: the fallback is not drawn while the photo stands.
+      expect(container.querySelector('[data-testid="story-disc-logo"]')).toBeNull();
+      expect(container.querySelector('[data-testid="story-monogram"]')).toBeNull();
+      // The label under the circle is the host's string (the tenant), untouched by the photo.
+      expect(screen.getByText('Rede Demo')).toBeInTheDocument();
+      expect(button).toHaveAccessibleName('open-tenant');
+    });
+  });
+
+  it('19. a photo that fails to load is REPLACED by the logo disc — the same 64px geometry, no broken image', () => {
+    withDecodedImages(() => {
+      const { container } = photoCircle({ kind: 'logo', src: '/logo.png' });
+      const photo = container.querySelector(`img[src="${PHOTO}"]`);
+      expect(photo).not.toBeNull();
+      fireEvent.error(photo as HTMLImageElement);
+
+      expect(container.querySelector(`img[src="${PHOTO}"]`)).toBeNull();
+      expect(container.querySelector('[data-testid="story-photo"]')).toBeNull();
+      const logo = container.querySelector('[data-testid="story-disc-logo"]');
+      expect(logo?.className).toContain('h-16');
+      expect(logo?.querySelector('img')).toHaveAttribute('src', '/logo.png');
+      // Still the one control, still the host's name.
+      expect(screen.getByRole('button', { name: 'open-tenant' })).toBeInTheDocument();
+    });
+  });
+
+  it('20. a photo that failed BEFORE hydration (complete, zero width) shows the monogram fallback on mount', () => {
+    // happy-dom's own default IS the failed-fetch signature, so no override here.
+    const { container } = photoCircle({ kind: 'monogram', text: 'rede demo' });
+    expect(container.querySelector(`img[src="${PHOTO}"]`)).toBeNull();
+    expect(container.querySelector('[data-testid="story-monogram"]')?.textContent).toBe('R');
+    expect(screen.getByRole('button', { name: 'open-tenant' })).toBeInTheDocument();
+  });
+
+  it('21. the failure is keyed by src — a NEW photo is tried again instead of inheriting the old failure', () => {
+    withDecodedImages(() => {
+      const fallback = <span data-testid="fallback" />;
+      const { container, rerender } = render(<StoryPhoto src={PHOTO} fallback={fallback} />);
+      fireEvent.error(container.querySelector('img') as HTMLImageElement);
+      expect(screen.getByTestId('fallback')).toBeInTheDocument();
+
+      const next = '/v1/media/0000000f-2222-4222-8222-222222222222/w128';
+      rerender(<StoryPhoto src={next} fallback={fallback} />);
+      expect(screen.queryByTestId('fallback')).toBeNull();
+      expect(container.querySelector('img')).toHaveAttribute('src', next);
+    });
+  });
+
+  it('22. at the viewer header’s 32px slot the photo is h-8 w-8, and eager only when asked', () => {
+    withDecodedImages(() => {
+      const { container, rerender } = render(
+        <StoryPhoto src={PHOTO} size={32} fallback={<span />} />,
+      );
+      const img = container.querySelector('img');
+      expect(img?.className).toContain('h-8');
+      expect(img?.className).toContain('w-8');
+      expect(container.querySelector('[data-testid="story-photo"]')?.className).toContain('h-8');
+      expect(img).toHaveAttribute('loading', 'lazy');
+
+      rerender(<StoryPhoto src={PHOTO} size={32} eager fallback={<span />} />);
+      expect(container.querySelector('img')).toHaveAttribute('loading', 'eager');
+    });
+  });
+
+  it('23. in the strip the tenant circle’s photo is one of the eager first three', () => {
+    withDecodedImages(() => {
+      const tenant: StoryStripCircle = {
+        kind: 'open',
+        key: 'tenant',
+        label: 'Rede Demo',
+        actionLabel: 'open-tenant',
+        ring: 'brand',
+        disc: { kind: 'photo', src: PHOTO, fallback: { kind: 'monogram', text: 'R' } },
+        group: 0,
+        index: 0,
+      };
+      const { container } = strip({ circles: [OWN, tenant] });
+      expect(container.querySelector(`img[src="${PHOTO}"]`)).toHaveAttribute('loading', 'eager');
+    });
   });
 });

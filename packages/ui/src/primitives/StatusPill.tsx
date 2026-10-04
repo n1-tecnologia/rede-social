@@ -1,6 +1,6 @@
 import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '../cn';
-import { chipBase } from './Chip';
+import { chipBase } from './chipBase';
 
 const toneStyles = {
   brand: 'bg-brand/10 text-brand',
@@ -17,7 +17,15 @@ export interface StatusPillProps extends HTMLAttributes<HTMLSpanElement> {
   children: ReactNode;
 }
 
-/** Non-interactive soft pill (tenant status, domain status, invite state, "Primário"). */
+/**
+ * Non-interactive soft pill (tenant status, domain status, invite state, "Primário").
+ *
+ * Deliberately directive-less: Server Components render it (event header, community header,
+ * platform tenant header, AdminsCard), so it must take the geometry from
+ * the directive-less `chipBase.ts`. When it came from the 'use client' Chip.tsx, the geometry
+ * reached the server as a client-reference function that `cn()` dropped, and every server-rendered
+ * pill lost its round, padded shape (PDF item #9).
+ */
 export function StatusPill({ tone = 'neutral', className, children, ...props }: StatusPillProps) {
   return (
     <span className={cn(chipBase, toneStyles[tone], className)} {...props}>

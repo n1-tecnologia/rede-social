@@ -23,10 +23,15 @@ begin;
 --    Each of the three ships with its positive control in the same block, so a globally broken
 --    fixture cannot make any of them pass vacuously.
 --
--- 3. The community list's ordering is an INDEX SCAN on `communities_tenant_activity_idx`, pinned BY
---    NAME on this file's own volume fixture. Naming the index rather than matching `Index Scan` is
---    what makes "D-76's keyset is served by the index 05-01 added" falsifiable: a shape match would
---    also pass on a sequential scan feeding a sort under some other node.
+-- 3. The community list's ordering is an INDEX SCAN on `communities_tenant_position_idx` (since
+--    2026-10-03 the list orders `position asc, last_activity_at desc, id desc`: the admin's order,
+--    then D-76's activity order), pinned BY NAME on this file's own volume fixture. Naming the index
+--    rather than matching `Index Scan` is what makes "the list's keyset is served by its index"
+--    falsifiable: a shape match would also pass on a sequential scan feeding a sort under some other
+--    node. The negative half matches the JSON plan's node types, so a Sort node — the planner
+--    producing the mixed-direction order in memory — fails it as surely as a sequential scan does.
+--    The position column's own facts (default, keyset across positions) live in
+--    `111-community-position.sql`.
 --
 -- 4. STORY-03 IS A READ PREDICATE, proved under a clock the test controls (05-05). `now()` inside a
 --    transaction is the TRANSACTION timestamp, so publishing one story 25 hours ago and one an hour
@@ -270,9 +275,11 @@ select results_eq(
   'the archived list: the archived community is present and the active one is its positive control by absence'
 );
 
--- ── 17-18. D-76's keyset is an index scan on communities_tenant_activity_idx ───────────────────
+-- ── 17-18. the list's keyset is an index scan on communities_tenant_position_idx ───────────────
 -- 400 communities in THIS file's own tenant. `analyze` is what makes the planner act on any of it —
--- without it every estimate is the zero-row default and the plan below proves nothing.
+-- without it every estimate is the zero-row default and the plan below proves nothing. Every row
+-- takes the column default `position = 0` — a tenant whose admin never reordered — so the index has
+-- to deliver the activity order INSIDE one position, which is the list every tenant starts with.
 insert into public.communities (id, tenant_id, created_by_user_id, name, slug, description, created_at, last_activity_at)
 select ('0f00c0' || lpad(to_hex(g), 26, '0'))::uuid,
        '0f000000-0000-4000-8000-000000000001',
@@ -299,22 +306,23 @@ begin
     'explain (format json) select c.id, c.last_activity_at from public.communities c
       where c.tenant_id = ''0f000000-0000-4000-8000-000000000001''
         and c.deleted_at is null and c.status = ''active''
-      order by c.last_activity_at desc, c.id desc limit 10' into v_plan;
+      order by c.position asc, c.last_activity_at desc, c.id desc limit 10' into v_plan;
   insert into community_plans values ('list', v_plan);
 end
 $$;
 
 select matches(
   (select plan from community_plans where name = 'list'),
-  'communities_tenant_activity_idx',
-  'D-76: the community list keyset is served by communities_tenant_activity_idx, BY NAME'
+  'communities_tenant_position_idx',
+  'the community list keyset (position, then D-76''s activity) is served by communities_tenant_position_idx, BY NAME'
 );
 -- The negative half, in the SAME captured plan: without it the assertion above would pass on a plan
--- that merely MENTIONS the index in a subnode while sequentially scanning the table at the top.
+-- that merely MENTIONS the index in a subnode while sequentially scanning the table, or sorting its
+-- rows, at the top. The plan is JSON, so the node types are matched as JSON (`"Node Type": "…"`).
 select doesnt_match(
   (select plan from community_plans where name = 'list'),
-  'Seq Scan on communities',
-  '…and never a sequential scan of communities'
+  '"Node Type": "(Seq Scan|Sort|Incremental Sort)"',
+  '…and never a sequential scan, and never a sort: the index delivers the mixed-direction order'
 );
 
 -- ══ 19-28. STORIES (05-05) ═════════════════════════════════════════════════════════════════════

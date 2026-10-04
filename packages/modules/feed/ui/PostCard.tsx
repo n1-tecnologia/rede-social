@@ -133,9 +133,12 @@ export type PostCardProps = {
 };
 
 /**
- * `[proto]` `feed/PostCard.tsx` minus the mock hooks. The shipped `Card` supplies the surface
- * (`bg-card`, 12px radius, the dark hairline), media is full-bleed inside it and text keeps the
- * `px-4` inner gutter.
+ * `[proto]` `feed/PostCard.tsx` minus the mock hooks. The post is a FLAT full-bleed block (the REINE
+ * timeline, 2026-10-02, over the Phase 4 rounded card): the shipped `Card` supplies the `bg-card`
+ * surface and the `role`, with its 12px radius, shadow and dark hairline turned off, so the white
+ * runs to both sides of the column and the page ground between posts does the separating. Media is
+ * full-bleed inside it and text keeps the `px-4` inner gutter. Its host leaves no side gutter
+ * around it (Início, the community page, the post page).
  *
  * **One toggle, three entry points.** The like button, the double tap on the gallery and the count
  * in the meta row all read and write the SAME optimistic state, because a double tap that took a
@@ -195,7 +198,12 @@ export function PostCard({
   return (
     // `role="article"` on the shipped `Card` surface rather than a nested `<article>`: the card IS
     // the post, and one element with an accessible name reads better than a div wrapping a landmark.
-    <Card role="article" aria-label={post.ariaLabel} className="pb-1">
+    // Flat: no radius, no shadow, no dark hairline (it would draw at the screen's edges).
+    <Card
+      role="article"
+      aria-label={post.ariaLabel}
+      className="rounded-none pb-1 shadow-none dark:border-0"
+    >
       <PostHeader
         displayName={post.author.displayName}
         profileHref={post.author.profileHref}

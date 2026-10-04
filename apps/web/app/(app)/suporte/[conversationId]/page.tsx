@@ -75,7 +75,6 @@ export default async function StaffThreadPage({
         <PageHeader
           backHref="/suporte"
           backLabel={t('staff.back')}
-          stickyTop="0px"
           className="shrink-0 border-b border-border md:static"
         />
         <ThreadPane

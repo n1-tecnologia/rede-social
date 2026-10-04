@@ -110,9 +110,11 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.getByRole('button', { name: 'Cadastrar' }).click();
 
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
-      timeout: 20_000,
-    });
+    // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início",
+    // and the tenant shows in the shell's home link (TopBar on the phone, rail on desktop), named
+    // by the logo's alt (or by the name itself without a logo).
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início', { timeout: 20_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
     // D-42: the new member's own identity lives on the profile page, not on the home — and since
     // 03-05 that screen carries a display name and no role word at all (UI-D-01/D-45), so the name
     // the form supplied is the witness and the role pill is asserted absent.
@@ -146,9 +148,8 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.locator('#password').fill(PASSWORD);
     await page.getByRole('button', { name: 'Entrar' }).click();
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
-      timeout: 20_000,
-    });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início', { timeout: 20_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
   });
 
   test('3. D-04 duplicate: generic message with a link to /entrar, never naming the other tenant', async ({

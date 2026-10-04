@@ -17,6 +17,10 @@ import {
   eventEditSchema,
   eventInputSchema,
   eventPageSchema,
+  eventPhotoInputSchema,
+  eventPhotoPageSchema,
+  eventPhotoQuerySchema,
+  eventPhotoSchema,
   eventQuerySchema,
   eventStatusUpdateSchema,
   eventSummarySchema,
@@ -24,6 +28,7 @@ import {
   rsvpResultSchema,
   rsvpSchema,
 } from '../contracts/index';
+import { addEventPhoto, listEventPhotos, removeEventPhoto } from './photos';
 import {
   checkInEvent,
   createEvent,
@@ -46,8 +51,8 @@ import {
  *
  * Order is the ROLE-06 order: `requireAuth` (401) -> `requireModule('events')` (404 when the tenant
  * does not have events — never 403, so a member cannot tell "not allowed" from "not here") ->
- * `requirePermission` on the create, edit-read, replace, status, RSVP, check-in, enter, attendance
- * and code-regeneration routes (403). The write guard is a PERMISSION, never a role
+ * `requirePermission` on the create, edit-read, replace, status, RSVP, check-in, enter, attendance,
+ * code-regeneration and photo add/remove routes (403). The write guard is a PERMISSION, never a role
  * comparison: granting creation to another role later is a manifest line, not a route edit.
  */
 
@@ -105,12 +110,12 @@ const createEventRoute = createRoute({
   responses: {
     201: {
       description:
-        "The created event, in the shape the list returns. Start and end are wall-clock pairs in the TENANT's timezone and are converted to UTC by the database. Two identical bodies create two events with distinct ids, and neither answers 409.",
+        "The created event, in the shape the list returns. Start and end are wall-clock pairs in the TENANT's timezone and are converted to UTC by the database. `category` (trimmed, up to 40 characters, blank = none) and `capacity` (an integer from 1 to 100000, null = no limit) are optional. Two identical bodies create two events with distinct ids, and neither answers 409.",
       content: { 'application/json': { schema: eventSummarySchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.event` carrying one machine code: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`.',
+        '`VALIDATION_FAILED` with `details.event` carrying one machine code: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`. A category over 40 characters or a capacity outside 1..100000 is a generic `details.issues` list.',
     },
     403: {
       description: 'The caller does not hold `events.event.manage` in this tenant',
@@ -189,7 +194,7 @@ const rsvpRoute = createRoute({
     },
     409: {
       description:
-        '`CONFLICT` with `details.event`, decided by the DATABASE for every writer (D-204): `rsvp_closed` (the event has started), `cancelled` (the event is cancelled, D-201) or `attendance_locked` (the caller has already checked in).',
+        '`CONFLICT` with `details.event`, decided by the DATABASE for every writer (D-204): `rsvp_closed` (the event has started), `cancelled` (the event is cancelled, D-201), `attendance_locked` (the caller has already checked in) or `event_full` (a new `going` on an event whose confirmed count, going + checked_in of the OTHER members, already reached its `capacity`; a caller already `going` is never refused).',
     },
   },
 });
@@ -229,7 +234,7 @@ const updateEventRoute = createRoute({
   responses: {
     200: {
       description:
-        'The event after a WHOLE-EVENT replacement (D-214), in the shape the list returns (no URL). Every field is editable after members answered, and their answers and check-ins are kept. A format switch moves the location and the link together. A body equal to the stored event writes nothing and emits nothing.',
+        'The event after a WHOLE-EVENT replacement (D-214), in the shape the list returns (no URL). Every field is editable after members answered, and their answers and check-ins are kept: a `capacity` lower than the current confirmed count is stored as asked and only refuses NEW confirmations. An absent `category` or `capacity` clears it. A format switch moves the location and the link together. A body equal to the stored event writes nothing and emits nothing.',
       content: { 'application/json': { schema: eventSummarySchema } },
     },
     400: {
@@ -414,6 +419,91 @@ const regenerateCodeRoute = createRoute({
   },
 });
 
+/**
+ * The gallery (2026-10-03). NO permission middleware: every member of the tenant sees an event's
+ * photos, like its detail (EVENT-02).
+ */
+const photosRoute = createRoute({
+  method: 'get',
+  path: '/{eventId}/photos',
+  request: { params: eventParamSchema, query: eventPhotoQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One keyset page of the event's photos, newest first (`created_at desc, id desc`). Each item is the photo's id, its media asset and the asset's variant ladder, never the uploader. Only a `ready` asset is listed; a retired one leaves the gallery. `nextCursor` is non-null exactly when another photo exists, is OPAQUE and must be passed back untouched; `limit` clamps to 1..60.",
+      content: { 'application/json': { schema: eventPhotoPageSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid, or an unknown query key.' },
+    404: {
+      description:
+        'The event is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+/** The photo routes' path parameters: both are uuids, checked before any read. */
+const photoParamSchema = z.object({ eventId: z.uuid(), photoId: z.uuid() });
+
+/**
+ * Adding a photo (2026-10-03): a WRITE, so the literal manage guard, like every admin route here.
+ * The bytes never come through: the web uploads them through the media pipeline (`purpose: 'post'`)
+ * and sends the asset id once its ladder is derived.
+ */
+const addPhotoRoute = createRoute({
+  method: 'post',
+  path: '/{eventId}/photos',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: {
+    params: eventParamSchema,
+    body: { content: { 'application/json': { schema: eventPhotoInputSchema } }, required: true },
+  },
+  responses: {
+    201: {
+      description:
+        "The new photo. The asset must be the caller's own `image` of purpose `post`, already `ready`, of this tenant.",
+      content: { 'application/json': { schema: eventPhotoSchema } },
+    },
+    200: {
+      description:
+        'The asset was ALREADY a photo of this event (a retried add): that photo, unchanged. One asset is never two photos.',
+      content: { 'application/json': { schema: eventPhotoSchema } },
+    },
+    400: {
+      description:
+        "`VALIDATION_FAILED`: a malformed id or body, or `details.event = 'photo_invalid'` for an asset of this tenant that is not the caller's own ready `post` image, or that is already another event's photo.",
+    },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The event, or the asset, is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+/** Removing a photo (2026-10-03): the same literal manage guard. */
+const removePhotoRoute = createRoute({
+  method: 'delete',
+  path: '/{eventId}/photos/{photoId}',
+  middleware: [requirePermission('events.event.manage')] as const,
+  request: { params: photoParamSchema },
+  responses: {
+    204: {
+      description:
+        "The photo left the event, for every member. Its asset is soft-deleted through the media service and swept like any retired upload; the event's answers, check-ins and other photos are untouched.",
+    },
+    400: { description: '`VALIDATION_FAILED`: an id is not a uuid.' },
+    403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
+    404: {
+      description:
+        'The photo is unknown, another event’s, another tenant’s, or already removed (or the event is). One bare code, no details (D-23).',
+    },
+  },
+});
+
+/** A 204 that no cache may keep: the gallery just changed. */
+const noContent = () =>
+  new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+
 export const eventsRoutes = events
   .openapi(listRoute, async (c) =>
     c.json(await listEvents(c.get('ctx'), c.req.valid('query')), 200),
@@ -460,4 +550,24 @@ export const eventsRoutes = events
   )
   .openapi(regenerateCodeRoute, async (c) =>
     c.json(await regenerateCheckinCode(c.get('ctx'), c.req.valid('param').eventId), 200),
-  );
+  )
+  .openapi(photosRoute, async (c) =>
+    c.json(
+      await listEventPhotos(c.get('ctx'), c.req.valid('param').eventId, c.req.valid('query')),
+      200,
+    ),
+  )
+  .openapi(addPhotoRoute, async (c) => {
+    const { photo, created } = await addEventPhoto(
+      c.get('ctx'),
+      c.req.valid('param').eventId,
+      c.req.valid('json'),
+    );
+    if (created) return c.json(photo, 201);
+    return c.json(photo, 200);
+  })
+  .openapi(removePhotoRoute, async (c) => {
+    const { eventId, photoId } = c.req.valid('param');
+    await removeEventPhoto(c.get('ctx'), eventId, photoId);
+    return noContent();
+  });

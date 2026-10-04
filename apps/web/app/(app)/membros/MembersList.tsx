@@ -239,14 +239,15 @@ export function MembersList({
   return (
     <PullToRefresh onRefresh={refresh}>
       <div className="flex flex-col">
-        {/* Sticky UNDER the `PageHeader`, not beside it. The page pins the header at the scroll
-            container's padding edge (`stickyTop="0px"`), and the header is 52px tall (a 44px control
-            plus `py-1`), so the pill pins exactly 3.25rem lower — which is also its natural offset,
-            so nothing moves until the list is actually scrolled. Pinning both at the same offset, as
-            a literal reading of the UI-SPEC's `top-[calc(var(--safe-top)+3rem)]` would, puts the
-            z-40 header ON TOP of the field and "Limpar busca" stops being tappable. On `md:` the
-            header is static, so the pill owns the top of the column. */}
-        <div className="sticky top-[3.25rem] z-30 bg-bg/95 px-4 pt-2 pb-3 backdrop-blur-sm md:top-0">
+        {/* Sticky UNDER the `PageHeader`, not beside it. The header pins 0.5rem above the scroll
+            container's padded content edge (the primitive's default `-0.5rem`, flush under the
+            TopBar) and is 52px tall (a 44px control plus `py-1`), so the pill pins at 2.75rem, right
+            at the pinned header's bottom. Its natural offset is 3.25rem, so both pin after the same
+            8px of scroll and nothing moves before that. Pinning both at the same offset, as a literal
+            reading of the UI-SPEC's `top-[calc(var(--safe-top)+3rem)]` would, puts the z-40 header ON
+            TOP of the field and "Limpar busca" stops being tappable. On `md:` the header is static,
+            so the pill owns the top of the column. */}
+        <div className="sticky top-[2.75rem] z-30 bg-bg/95 px-4 pt-2 pb-3 backdrop-blur-sm md:top-0">
           <SearchBar
             id="members-search"
             value={value}

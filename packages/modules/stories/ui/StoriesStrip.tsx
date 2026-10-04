@@ -18,8 +18,9 @@ import { StoryCircle, type StoryCircleDisc, type StoryCircleRing } from './Story
  *
  * **D-104 / D-106: ONE tenant circle plays every active story, oldest → newest**, followed by the
  * place's highlights in the admin's order (`position, id`). The circle that says who is speaking is
- * the tenant — its logo and name — whatever the number of live stories; a highlight is where a
- * story ALSO stays, never where it is taken from.
+ * the tenant — its name, and its logo or, since #2b (2026-10-03), the face of whoever published the
+ * newest story, with the logo behind it (the `photo` disc) — whatever the number of live stories; a
+ * highlight is where a story ALSO stays, never where it is taken from.
  *
  * **Three descriptor kinds.** `link` is an `<a>` to a host route (the `+` circle; the manage
  * circle and empty highlights later). `open` is a `<button>` that calls `onOpen(group, index)` with

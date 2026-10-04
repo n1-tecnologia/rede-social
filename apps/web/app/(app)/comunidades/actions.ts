@@ -7,6 +7,7 @@ import {
   type CommunitySummary,
   communityQuerySchema,
   createCommunitySchema,
+  reorderCommunitiesSchema,
   updateCommunitySchema,
 } from '@rede-social/module-communities/contracts';
 import { feedQuerySchema } from '@rede-social/module-feed/contracts';
@@ -15,7 +16,14 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
-import { createCommunity, getCommunities, loadCommunity, updateCommunity } from '@/lib/communities';
+import {
+  createCommunity,
+  getCommunities,
+  getOrderableCommunities,
+  loadCommunity,
+  reorderCommunities,
+  updateCommunity,
+} from '@/lib/communities';
 import { getFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
@@ -102,6 +110,93 @@ export async function refreshCommunitiesAction(
 
   if (refusal) redirect(refusal);
   return result;
+}
+
+/* ── The admin's order of the Ativas list (2026-10-03) ───────────────────────────────────────── */
+
+/**
+ * What entering the reorder mode can answer: EVERY active community in the list's order, or why not.
+ * `too_many` is its own code because its words differ ("até {limit}") and because retrying cannot
+ * help, unlike `generic`.
+ */
+export type OrderableCommunitiesResult =
+  | { ok: true; items: CommunitySummary[] }
+  | { ok: false; code: 'too_many' | 'generic' };
+
+/**
+ * The reorder mode's ONE read: the whole active set, walked through `getOrderableCommunities` (the
+ * list's own keyset, never a second endpoint). A read, so it never revalidates. A session refusal is
+ * a navigation taken OUTSIDE the try/catch (Next 16: `redirect()` throws).
+ *
+ * It takes no argument, so there is nothing for a crafted call to widen: the API answers the
+ * caller's own tenant, and the write that follows is the guarded one.
+ */
+export async function loadOrderableCommunitiesAction(): Promise<OrderableCommunitiesResult> {
+  let refusal: string | null = null;
+  let result: OrderableCommunitiesResult = { ok: false, code: 'generic' };
+  try {
+    const items = await getOrderableCommunities();
+    result = items === null ? { ok: false, code: 'too_many' } : { ok: true, items };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) console.error('communities.order_load_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/**
+ * What saving an order can answer. `order_stale` is its own code — the set changed under the admin
+ * (a community created, archived or removed since the mode opened) — because the list's answer to it
+ * is different from a failure: it reloads and says so, rather than keeping the draft for a retry.
+ */
+export type ReorderCommunitiesResult =
+  | { ok: true; items: CommunitySummary[]; nextCursor: string | null }
+  | { ok: false; code: 'order_stale' | 'generic' };
+
+/**
+ * `PUT /v1/communities/order` — "Salvar ordem", in the three conventions every write action here
+ * encodes: the SAME `reorderCommunitiesSchema` the route validates with runs BEFORE the request (a
+ * server action is a public endpoint; a duplicated or oversized list never leaves the BFF), a refusal
+ * is a closed code rather than copy, and `redirect()` runs outside the try/catch.
+ *
+ * The answer carries the first page of the list in the NEW order, so the list re-seeds from it with
+ * no second request; `revalidatePath` keeps the server-rendered `/comunidades` (and the next visit)
+ * on the same order. Only the API decides whether the caller may write it (403 → `generic`).
+ */
+export async function reorderCommunitiesAction(ids: unknown): Promise<ReorderCommunitiesResult> {
+  const body = reorderCommunitiesSchema.safeParse({ ids });
+  if (!body.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: ReorderCommunitiesResult = { ok: false, code: 'generic' };
+  try {
+    const page = await reorderCommunities(body.data);
+    result = { ok: true, items: page.items, nextCursor: page.nextCursor };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) result = orderRefusal(error);
+  }
+
+  if (result.ok) revalidatePath('/comunidades');
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/** `409 { community: 'order_stale' }` is the one closed code; everything else is `generic`. */
+function orderRefusal(error: unknown): ReorderCommunitiesResult {
+  if (
+    error instanceof ApiClientError &&
+    error.status === 409 &&
+    asCommunityIssue((error.details as { community?: unknown } | undefined)?.community) ===
+      'order_stale'
+  ) {
+    return { ok: false, code: 'order_stale' };
+  }
+  // Shape only: neither an order nor a community name belongs in a log line (T-05-06).
+  console.error('communities.reorder_failed', { error: String(error) });
+  return { ok: false, code: 'generic' };
 }
 
 /* ── The community PAGE's post list (COMM-03, 05-04) ──────────────────────────────────────────── */

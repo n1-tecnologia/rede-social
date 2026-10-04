@@ -21,10 +21,10 @@ function poster(overrides: Record<string, unknown> = {}) {
     href: '/eventos/e1',
     ariaLabel: 'aria-label-sentinel',
     title: 'title-sentinel',
-    overline: 'overline-sentinel',
+    category: 'category-sentinel',
     place: 'place-sentinel',
     placeKind: 'venue' as const,
-    pill: { kind: 'relative' as const, label: 'pill-sentinel' },
+    badge: { kind: 'date' as const, label: 'pill-sentinel' },
     coverAssetId: ASSET,
     coverVariantWidths: [640, 1080],
     coverAlt: 'cover-alt',
@@ -42,23 +42,31 @@ describe('EventPoster', () => {
     expect(screen.getAllByRole('link')).toHaveLength(1);
   });
 
-  it('2. renders every string from props: overline, title, place and the pill', () => {
+  it('2. renders every string from props: category, title, place and the pill', () => {
     poster();
-    expect(screen.getByTestId('event-poster-overline')).toHaveTextContent('overline-sentinel');
+    expect(screen.getByTestId('event-poster-category')).toHaveTextContent('category-sentinel');
     expect(screen.getByTestId('event-poster-title')).toHaveTextContent('title-sentinel');
     expect(screen.getByTestId('event-poster-place')).toHaveTextContent('place-sentinel');
     const pill = screen.getByTestId('event-poster-pill');
     expect(pill).toHaveTextContent('pill-sentinel');
-    expect(pill).toHaveAttribute('data-kind', 'relative');
+    expect(pill).toHaveAttribute('data-kind', 'date');
     // Over-media ground, never bg-danger (UI-D-202).
     expect(pill.className).toContain('bg-black/60');
     expect(pill.className).not.toContain('bg-danger');
+    cleanup();
+
+    // No venue: no place line at all, never an icon beside nothing.
+    poster({ place: '' });
+    expect(screen.queryByTestId('event-poster-place')).toBeNull();
   });
 
-  it('3. the title clamps to two lines and the overline and place truncate (CSS only)', () => {
+  it('3. the title clamps to two lines and the category and place truncate (CSS only)', () => {
     poster();
     expect(screen.getByTestId('event-poster-title').className).toContain('line-clamp-2');
-    expect(screen.getByTestId('event-poster-overline').className).toContain('truncate');
+    expect(screen.getByTestId('event-poster-category').className).toContain('truncate');
+    expect(screen.getByTestId('event-poster-place').querySelector('.truncate')).toHaveTextContent(
+      'place-sentinel',
+    );
     expect(screen.getByTestId('event-poster-pill').className).toContain('whitespace-nowrap');
   });
 
@@ -70,7 +78,7 @@ describe('EventPoster', () => {
   });
 
   it('5. grayscale applies to the PHOTO branch only', () => {
-    poster({ grayscale: true, pill: { kind: 'cancelled', label: 'cancelled-sentinel' } });
+    poster({ grayscale: true, badge: { kind: 'cancelled', label: 'cancelled-sentinel' } });
     expect(screen.getByTestId('event-cover-media').className).toContain('grayscale');
     expect(screen.getByTestId('event-poster-pill')).toHaveAttribute('data-kind', 'cancelled');
     cleanup();

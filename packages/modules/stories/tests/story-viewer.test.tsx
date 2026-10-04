@@ -389,6 +389,17 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('9a. while it is open the dialog declares the shell chrome hidden, and the declaration leaves with it', () => {
+    const { unmount } = viewer(2);
+    // 2026-10-02: the shell's own stylesheet hides its TopBar and floating BottomNav while a node
+    // carrying this declaration is mounted, so neither sits over the header or the action row. The
+    // attribute is the whole contract between the module and the shell (MOD-02), so it is pinned.
+    expect(dialog()).toHaveAttribute('data-shell-hide', 'chrome');
+
+    unmount();
+    expect(document.querySelector('[data-shell-hide]')).toBeNull();
+  });
+
   it('10. the keyboard reaches the same three actions: arrows navigate, space toggles pause', () => {
     viewer(3);
     const node = dialog();
@@ -403,6 +414,35 @@ describe('StoryViewer — the pager, the gestures and the boundaries (STORY-02, 
     expect(node).toHaveAttribute('data-paused', 'true');
     fireEvent.keyDown(node, { key: ' ' });
     expect(node).toHaveAttribute('data-paused', 'false');
+  });
+
+  it('10a. a key that starts INSIDE a dialog the viewer hosts (the comment sheet) is that dialog’s', () => {
+    // The comment sheet renders inside this dialog (`overlay`) and opens with the focus on its
+    // title. A Space there toggled the keyboard pause, so the story stayed paused after the sheet
+    // closed; an arrow in its field moved the story underneath it.
+    viewer(3, {
+      overlay: (
+        <div role="dialog" aria-modal="true" aria-label="sheet-label" tabIndex={-1}>
+          <h2 tabIndex={-1}>sheet-title</h2>
+          <input aria-label="sheet-field" />
+        </div>
+      ),
+    });
+    const node = screen.getByRole('dialog', { name: LABELS.dialog });
+    const heading = screen.getByRole('heading', { name: 'sheet-title' });
+    const field = screen.getByRole('textbox', { name: 'sheet-field' });
+
+    fireEvent.keyDown(heading, { key: ' ' });
+    expect(node).toHaveAttribute('data-paused', 'false');
+    fireEvent.keyDown(field, { key: 'ArrowRight' });
+    fireEvent.keyDown(heading, { key: 'ArrowRight' });
+    expect(node).toHaveAttribute('data-story-index', '0');
+
+    // The viewer's own keys are untouched: from the dialog root they still move and pause.
+    fireEvent.keyDown(node, { key: 'ArrowRight' });
+    expect(node).toHaveAttribute('data-story-index', '1');
+    fireEvent.keyDown(node, { key: ' ' });
+    expect(node).toHaveAttribute('data-paused', 'true');
   });
 
   it('11. UI-D-34: canplay without playback leaves the clock PAUSED and renders the play badge', () => {

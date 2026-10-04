@@ -1,4 +1,5 @@
 import type { EventDetail } from '@rede-social/module-events/contracts';
+import { addressOneLine, parseEventAddress } from './event-address';
 
 /**
  * EVENT-06 / D-211 — the calendar export, as pure server-side functions (RESEARCH §Pattern 8).
@@ -102,11 +103,16 @@ const detailUrl = (event: Pick<CalendarEvent, 'id'>, origin: string) =>
 
 /**
  * The place, unescaped: in person `{venue}, {address}` (either half alone when the other is empty);
- * online the app's own `{origin}/eventos/{id}/entrar` — never the meeting URL (D-211).
+ * online the app's own `{origin}/eventos/{id}/entrar` — never the meeting URL (D-211). An address
+ * composed from its parts (PDF item #10) goes on ONE line, `Avenida Paulista, 1578, Sala 12 - Bela
+ * Vista, São Paulo - SP, 01310-200` (`addressOneLine`), the shape a calendar's LOCATION field and
+ * its map search read; a legacy free text goes as it is stored.
  */
 export function calendarLocation(event: CalendarEvent, origin: string): string {
   if (event.format === 'online') return `${detailUrl(event, origin)}/entrar`;
-  return [event.venueName ?? '', event.address ?? '']
+  const address = event.address ?? '';
+  const parts = parseEventAddress(address);
+  return [event.venueName ?? '', parts ? addressOneLine(parts) : address]
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
     .join(', ');

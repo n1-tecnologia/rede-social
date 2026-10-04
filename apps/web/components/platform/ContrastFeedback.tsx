@@ -3,6 +3,7 @@
 import type { ContrastReport } from '@rede-social/contracts/branding';
 import { StatusPill } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
+import { formatContrastRatio } from '@/lib/contrast-ratio';
 
 export interface ContrastFeedbackProps {
   report: ContrastReport;
@@ -12,8 +13,6 @@ export interface ContrastFeedbackProps {
 }
 
 const CHECKS = ['onPrimary', 'lightSurface', 'darkSurface'] as const;
-
-const ratioFormat = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
 
 /** True when at least one WCAG check of the report fails. */
 export function hasLowContrast(report: ContrastReport): boolean {
@@ -39,7 +38,7 @@ export function ContrastFeedback({ report, confirmed, onConfirmedChange }: Contr
       <div className="flex flex-wrap gap-2">
         {CHECKS.map((key) => {
           const check = report[key];
-          const ratio = ratioFormat.format(check.ratio);
+          const ratio = formatContrastRatio(check.ratio, check.ok);
           return (
             <StatusPill
               key={key}
@@ -59,7 +58,7 @@ export function ContrastFeedback({ report, confirmed, onConfirmedChange }: Contr
               {t('new.contrast.warning', {
                 mode:
                   key === 'darkSurface' ? t('new.contrast.modeDark') : t('new.contrast.modeLight'),
-                ratio: ratioFormat.format(report[key].ratio),
+                ratio: formatContrastRatio(report[key].ratio, false),
               })}
             </p>
           ))}

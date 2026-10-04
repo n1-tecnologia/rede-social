@@ -8,20 +8,24 @@ import {
   attendanceListFromParam,
   attendeeView,
   checkedInLine,
+  EVENT_LOW_SPOTS,
   eventActionState,
-  eventCountLine,
+  eventCardBadge,
+  eventCardNote,
+  eventCardView,
+  eventDateBadge,
   eventDetailView,
   eventPhase,
-  eventPill,
-  eventPosterView,
+  eventSectionsView,
   eventTicketView,
   eventWhenLine,
   formatEventDate,
   formatEventTime,
   mapsHref,
-  nextEventCardView,
   participantsHref,
   spelledCode,
+  splitEventSections,
+  spotsLeft,
   tenantDayKey,
   tenantZoneLabel,
 } from './events-view';
@@ -40,7 +44,7 @@ const t = createTranslator({
   locale: 'pt-BR',
   messages: loadMessages(catalogDir),
   namespace: 'events',
-}) as unknown as Parameters<typeof eventPosterView>[1]['t'];
+}) as unknown as Parameters<typeof eventCardView>[1]['t'];
 
 const SP = 'America/Sao_Paulo';
 const MANAUS = 'America/Manaus';
@@ -51,7 +55,10 @@ function event(overrides: Partial<EventSummary> = {}): EventSummary {
     id: '11111111-1111-4111-8111-111111111111',
     title: 'Encontro anual',
     format: 'in_person',
+    category: null,
+    capacity: null,
     venueName: 'Auditório da sede',
+    address: null,
     coverAssetId: null,
     coverVariantWidths: [],
     startsAt: '2026-10-12T22:00:00.000000Z',
@@ -105,41 +112,84 @@ describe('eventPhase — the D-209 boundaries, exactly', () => {
   });
 });
 
-describe('eventPill — tenant-local calendar days, cancelled first', () => {
-  it('5. "Hoje", "Amanhã" and "Em 2 dias" across a UTC-midnight boundary', () => {
-    // 20:30 on 12 Oct in São Paulo, already 13 Oct in UTC.
-    const now = at('2026-10-12T23:30:00Z');
-    // 23:30 local on the 12th — the 13th in UTC, and still TODAY for the tenant.
-    const tonight = event({
+describe('eventCardBadge — the gallery pill (2026-10-03, the REINE poster)', () => {
+  const before = at('2026-10-01T12:00:00Z');
+  const live = at('2026-10-12T23:00:00Z');
+  const after = at('2026-10-20T12:00:00Z');
+  const going = event({ viewerStatus: 'going' });
+  const present = event({
+    viewerStatus: 'checked_in',
+    viewerCheckedInAt: '2026-10-12T21:30:00.000000Z',
+  });
+
+  it('5. an event to come shows its date, "12 OUT", on the tenant calendar', () => {
+    expect(eventCardBadge(event(), SP, before, t)).toEqual({ kind: 'date', label: '12 OUT' });
+    // 23:30 to 23:59 local on the 12th is the 13th in UTC: the TENANT's day is printed.
+    const late = event({
       startsAt: '2026-10-13T02:30:00.000000Z',
-      endsAt: '2026-10-13T04:00:00.000000Z',
+      endsAt: '2026-10-13T02:59:00.000000Z',
     });
-    expect(eventPill(tonight, SP, now, t)).toEqual({ kind: 'relative', label: 'Hoje' });
-    const tomorrow = event({
-      startsAt: '2026-10-13T12:00:00.000000Z',
-      endsAt: '2026-10-13T14:00:00.000000Z',
-    });
-    expect(eventPill(tomorrow, SP, now, t)).toEqual({ kind: 'relative', label: 'Amanhã' });
-    const inTwo = event({
-      startsAt: '2026-10-14T12:00:00.000000Z',
-      endsAt: '2026-10-14T14:00:00.000000Z',
-    });
-    expect(eventPill(inTwo, SP, now, t)).toEqual({ kind: 'relative', label: 'Em 2 dias' });
+    expect(eventCardBadge(late, SP, before, t).label).toBe('12 OUT');
+    expect(eventCardBadge(late, 'UTC', before, t).label).toBe('13 OUT');
+    // Past local midnight it spans two days of the month.
+    const overnight = { ...late, endsAt: '2026-10-13T04:00:00.000000Z' };
+    expect(eventCardBadge(overnight, SP, before, t).label).toBe('12-13 OUT');
   });
 
-  it('6. in progress is "Agora", ended is "Encerrado"', () => {
-    const now = at('2026-10-12T23:00:00Z');
-    expect(eventPill(event(), SP, now, t)).toEqual({ kind: 'relative', label: 'Agora' });
-    expect(eventPill(event(), SP, at('2026-10-13T00:00:00Z'), t)).toEqual({
-      kind: 'relative',
-      label: 'Encerrado',
+  it('6. days of one month read "12-14 OUT", across two months the start alone, every month in capitals', () => {
+    const sameMonth = event({
+      startsAt: '2026-10-12T22:00:00.000000Z',
+      endsAt: '2026-10-14T21:00:00.000000Z',
     });
+    expect(eventDateBadge(sameMonth, SP, t)).toBe('12-14 OUT');
+    const crossMonth = event({
+      startsAt: '2026-10-30T22:00:00.000000Z',
+      endsAt: '2026-11-02T21:00:00.000000Z',
+    });
+    expect(eventDateBadge(crossMonth, SP, t)).toBe('30 OUT');
+    const months = Array.from({ length: 12 }, (_, index) => {
+      const month = String(index + 1).padStart(2, '0');
+      const day = event({
+        startsAt: `2026-${month}-15T15:00:00.000000Z`,
+        endsAt: `2026-${month}-15T17:00:00.000000Z`,
+      });
+      return eventDateBadge(day, SP, t);
+    });
+    expect(months).toEqual([
+      '15 JAN',
+      '15 FEV',
+      '15 MAR',
+      '15 ABR',
+      '15 MAI',
+      '15 JUN',
+      '15 JUL',
+      '15 AGO',
+      '15 SET',
+      '15 OUT',
+      '15 NOV',
+      '15 DEZ',
+    ]);
   });
 
-  it('7. cancelled wins over every relative label, before, during and after', () => {
-    const cancelled = event({ status: 'cancelled' });
-    for (const now of ['2026-10-10T12:00:00Z', '2026-10-12T23:00:00Z', '2026-10-20T12:00:00Z']) {
-      expect(eventPill(cancelled, SP, at(now), t)).toEqual({
+  it('7. priority: Cancelado → Participou or Encerrado → Inscrito → Agora → the date', () => {
+    expect(eventCardBadge(going, SP, before, t)).toEqual({ kind: 'registered', label: 'Inscrito' });
+    expect(eventCardBadge(going, SP, live, t).kind).toBe('registered');
+    expect(eventCardBadge(present, SP, live, t).kind).toBe('registered');
+    // Once ended: a check-in (a walk-in too) took part, a Vou alone did not.
+    expect(eventCardBadge(present, SP, after, t)).toEqual({
+      kind: 'participated',
+      label: 'Participou',
+    });
+    expect(eventCardBadge({ ...present, viewerStatus: 'walk_in' }, SP, after, t).kind).toBe(
+      'participated',
+    );
+    expect(eventCardBadge(going, SP, after, t)).toEqual({ kind: 'ended', label: 'Encerrado' });
+    // Not the viewer's: "Agora" while it runs, the date before; Não vou is not the viewer's.
+    expect(eventCardBadge(event(), SP, live, t)).toEqual({ kind: 'live', label: 'Agora' });
+    expect(eventCardBadge(event({ viewerStatus: 'not_going' }), SP, before, t).kind).toBe('date');
+    // Cancelled wins over everything, before, during and after.
+    for (const now of [before, live, after]) {
+      expect(eventCardBadge({ ...present, status: 'cancelled' }, SP, now, t)).toEqual({
         kind: 'cancelled',
         label: 'Cancelado',
       });
@@ -180,29 +230,38 @@ describe('eventWhenLine — single day, multi-day and live', () => {
   });
 });
 
-describe('eventPosterView — the finished strings a poster renders', () => {
-  it('11. composes href, aria-label, alt, place and grayscale from one request instant', () => {
-    const view = eventPosterView(event(), { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t });
-    expect(view.href).toBe('/eventos/11111111-1111-4111-8111-111111111111');
-    expect(view.overline).toBe('seg., 12 de out. · 19:00');
-    expect(view.ariaLabel).toBe('Encontro anual, seg., 12 de out. · 19:00');
-    expect(view.coverAlt).toBe('Capa do evento Encontro anual');
-    expect(view.place).toBe('Auditório da sede');
-    expect(view.placeKind).toBe('venue');
-    expect(view.grayscale).toBe(false);
+describe('eventCardNote — the countdown on the viewer’s own events', () => {
+  it('11. "É hoje!", "Falta 1 dia", "Faltam N dias" in tenant days, "Acontecendo agora" while it runs', () => {
+    // 20:30 on 12 Oct in São Paulo, already 13 Oct in UTC.
+    const evening = at('2026-10-12T23:30:00Z');
+    // 23:30 local on the 12th: the 13th in UTC, and still TODAY for the tenant.
+    const tonight = event({
+      viewerStatus: 'going',
+      startsAt: '2026-10-13T02:30:00.000000Z',
+      endsAt: '2026-10-13T04:00:00.000000Z',
+    });
+    expect(eventCardNote(tonight, SP, evening, t)).toBe('É hoje!');
+    const tomorrow = {
+      ...tonight,
+      startsAt: '2026-10-13T12:00:00.000000Z',
+      endsAt: '2026-10-13T14:00:00.000000Z',
+    };
+    expect(eventCardNote(tomorrow, SP, evening, t)).toBe('Falta 1 dia');
+    const inFour = {
+      ...tonight,
+      startsAt: '2026-10-16T12:00:00.000000Z',
+      endsAt: '2026-10-16T14:00:00.000000Z',
+    };
+    expect(eventCardNote(inFour, SP, evening, t)).toBe('Faltam 4 dias');
+    const going = event({ viewerStatus: 'going' });
+    expect(eventCardNote(going, SP, at('2026-10-12T23:00:00Z'), t)).toBe('Acontecendo agora');
 
-    const online = eventPosterView(
-      event({ format: 'online', venueName: null, status: 'cancelled' }),
-      {
-        tz: SP,
-        nowMs: at('2026-10-01T12:00:00Z'),
-        t,
-      },
-    );
-    expect(online.place).toBe('Online');
-    expect(online.placeKind).toBe('online');
-    expect(online.grayscale).toBe(true);
-    expect(online.pill).toEqual({ kind: 'cancelled', label: 'Cancelado' });
+    // None once ended, on a cancelled event, or on an event that is not the viewer's.
+    const before = at('2026-10-01T12:00:00Z');
+    expect(eventCardNote(going, SP, at('2026-10-20T12:00:00Z'), t)).toBeUndefined();
+    expect(eventCardNote({ ...going, status: 'cancelled' }, SP, before, t)).toBeUndefined();
+    expect(eventCardNote(event(), SP, before, t)).toBeUndefined();
+    expect(eventCardNote(event({ viewerStatus: 'not_going' }), SP, before, t)).toBeUndefined();
   });
 });
 
@@ -217,45 +276,81 @@ function detail(overrides: Partial<EventDetail> = {}): EventDetail {
   };
 }
 
-describe('06-03 — the viewer pills and the count line', () => {
+describe('the two galleries — "Meus eventos" and "Outros eventos"', () => {
   const before = at('2026-10-01T12:00:00Z');
-  const after = at('2026-10-20T12:00:00Z');
+  const checkedIn = '2026-09-20T21:30:00.000000Z';
 
-  it('12. priority: Cancelado → Presente → Você vai → relative date', () => {
-    const going = event({ viewerStatus: 'going' });
-    expect(eventPill(going, SP, before, t)).toEqual({ kind: 'going', label: 'Você vai' });
-    // A Vou on a PAST event is no longer "Você vai": the relative label takes over.
-    expect(eventPill(going, SP, after, t)).toEqual({ kind: 'relative', label: 'Encerrado' });
-    // A checked-in viewer on a past event is "Presente" (walk-ins too: the instant decides).
-    const present = event({
-      viewerStatus: 'checked_in',
-      viewerCheckedInAt: '2026-10-12T21:30:00.000000Z',
-    });
-    expect(eventPill(present, SP, after, t)).toEqual({ kind: 'present', label: 'Presente' });
-    const walkIn = event({
+  it('12. mine: the viewer’s events to come, then the ended ones they checked in to; others: the rest, in the API order', () => {
+    const going = event({ id: 'going', viewerStatus: 'going' });
+    const open = event({ id: 'open' });
+    const here = event({ id: 'here', viewerStatus: 'checked_in', viewerCheckedInAt: checkedIn });
+    const declined = event({ id: 'declined', viewerStatus: 'not_going' });
+    // A cancelled event the viewer was going to stays theirs: its pill says it was cancelled.
+    const called = event({ id: 'called-off', viewerStatus: 'going', status: 'cancelled' });
+    const attended = event({
+      id: 'attended',
+      startsAt: '2026-09-20T21:00:00.000000Z',
+      endsAt: '2026-09-20T23:00:00.000000Z',
       viewerStatus: 'walk_in',
-      viewerCheckedInAt: '2026-10-12T21:30:00.000000Z',
+      viewerCheckedInAt: checkedIn,
     });
-    expect(eventPill(walkIn, SP, after, t).kind).toBe('present');
-    // Cancelled wins over both.
-    expect(eventPill({ ...present, status: 'cancelled' }, SP, after, t).kind).toBe('cancelled');
-    expect(eventPill({ ...going, status: 'cancelled' }, SP, before, t).kind).toBe('cancelled');
-    // Não vou is not a state pill.
-    expect(eventPill(event({ viewerStatus: 'not_going' }), SP, before, t).kind).toBe('relative');
+    const missed = event({ id: 'missed', viewerStatus: 'going' });
+    const pastOpen = event({ id: 'past-open' });
+
+    const { mine, others } = splitEventSections(
+      [going, open, here, declined, called],
+      [attended, missed, pastOpen],
+    );
+    expect(mine.map((item) => item.id)).toEqual(['going', 'here', 'called-off', 'attended']);
+    expect(others.map((item) => item.id)).toEqual(['open', 'declined', 'missed', 'past-open']);
+
+    const views = eventSectionsView(
+      { upcoming: [going, open], past: [attended] },
+      { tz: SP, nowMs: before, t },
+    );
+    expect(views.mine.map((card) => card.badge.kind)).toEqual(['registered', 'participated']);
+    expect(views.others.map((card) => card.badge)).toEqual([{ kind: 'date', label: '12 OUT' }]);
   });
 
-  it('13. the count line: confirmados while upcoming, presentes once past, none when cancelled', () => {
-    const counted = event({ confirmedCount: 1204, presentCount: 1 });
-    expect(eventCountLine(counted, before, t)).toBe('1.204 confirmados');
-    expect(eventCountLine(counted, after, t)).toBe('1 presente');
-    expect(eventCountLine(event(), before, t)).toBe('Ninguém confirmou ainda');
-    expect(eventCountLine(event(), after, t)).toBe('Ninguém fez check-in');
-    expect(eventCountLine(event({ confirmedCount: 1 }), before, t)).toBe('1 confirmado');
-    expect(eventCountLine(event({ status: 'cancelled', confirmedCount: 3 }), before, t)).toBe(
-      undefined,
+  it('13. a card composes href, name, alt, category, place, pill, note and grayscale from one instant', () => {
+    const view = eventCardView(event(), { tz: SP, nowMs: before, t });
+    expect(view.href).toBe('/eventos/11111111-1111-4111-8111-111111111111');
+    expect(view.category).toBe('Evento presencial');
+    expect(view.place).toBe('Auditório da sede');
+    expect(view.placeKind).toBe('venue');
+    expect(view.badge).toEqual({ kind: 'date', label: '12 OUT' });
+    expect('note' in view).toBe(false);
+    // The card prints no full date: its name carries it, and a date pill is not repeated.
+    expect(view.ariaLabel).toBe('Encontro anual, seg., 12 de out. · 19:00');
+    expect(view.coverAlt).toBe('Capa do evento Encontro anual');
+    expect(view.grayscale).toBe(false);
+
+    const mine = eventCardView(event({ viewerStatus: 'going' }), { tz: SP, nowMs: before, t });
+    expect(mine.badge.label).toBe('Inscrito');
+    expect(mine.note).toBe('Faltam 11 dias');
+    expect(mine.ariaLabel).toBe(
+      'Encontro anual, seg., 12 de out. · 19:00, Inscrito, Faltam 11 dias',
     );
-    const poster = eventPosterView(event({ status: 'cancelled' }), { tz: SP, nowMs: before, t });
-    expect('meta' in poster).toBe(false);
+
+    // In progress the when-line already says it: neither "Agora" nor the note is repeated.
+    const live = at('2026-10-12T23:00:00Z');
+    expect(eventCardView(event(), { tz: SP, nowMs: live, t }).ariaLabel).toBe(
+      'Encontro anual, Acontecendo agora · até 21:00',
+    );
+    expect(
+      eventCardView(event({ viewerStatus: 'going' }), { tz: SP, nowMs: live, t }).ariaLabel,
+    ).toBe('Encontro anual, Acontecendo agora · até 21:00, Inscrito');
+
+    const online = eventCardView(
+      event({ format: 'online', venueName: null, status: 'cancelled' }),
+      { tz: SP, nowMs: before, t },
+    );
+    expect(online.category).toBe('Evento online');
+    expect(online.place).toBe('Online');
+    expect(online.placeKind).toBe('online');
+    expect(online.grayscale).toBe(true);
+    expect(online.badge).toEqual({ kind: 'cancelled', label: 'Cancelado' });
+    expect(online.ariaLabel).toBe('Encontro anual, seg., 12 de out. · 19:00, Cancelado');
   });
 });
 
@@ -373,6 +468,33 @@ describe('06-03 — mapsHref (D-203)', () => {
     );
     expect(decodeURIComponent(query)).toBe('Auditório da sede, Rua São João, 100\nCentro');
   });
+
+  it('37. PDF item #10: a composed address searches its canonical form alone, without the venue', () => {
+    const stored =
+      'Avenida Paulista, 1578\nSala 12, bloco B\nBela Vista, São Paulo - SP\nCEP 01310-200';
+    const href = mapsHref('Auditório da sede', stored);
+    const query = href.slice(href.indexOf('query=') + 'query='.length);
+    expect(decodeURIComponent(query)).toBe(
+      'Avenida Paulista, 1578 - Bela Vista, São Paulo - SP, 01310-200',
+    );
+
+    // The detail prints the block as stored; only the link searches the canonical line.
+    const view = eventDetailView(detail({ address: stored }), {
+      tz: SP,
+      nowMs: at('2026-10-01T12:00:00Z'),
+      t,
+    });
+    expect(view.location?.address).toBe(stored);
+    expect(view.location?.href).toBe(href);
+  });
+
+  it('38. a near miss of the format is legacy text, searched with the venue in front as before', () => {
+    const nearMiss = 'Avenida Paulista, 1578\nBela Vista, São Paulo - SP\n01310-200';
+    const href = mapsHref('Auditório da sede', nearMiss);
+    expect(href).toBe(
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`Auditório da sede, ${nearMiss}`)}`,
+    );
+  });
 });
 
 describe("06-03 — eventActionState (UI-D-207, the island's props)", () => {
@@ -386,6 +508,8 @@ describe("06-03 — eventActionState (UI-D-207, the island's props)", () => {
       phase: 'P0',
       format: 'in_person',
       cancelled: false,
+      // 2026-10-03: no limit, so never full.
+      full: false,
       answer: 'going',
       checkedIn: false,
       checkinOpensAt: '2026-10-12T21:00:00.000Z',
@@ -609,92 +733,115 @@ describe('06-08 — the calendar pair (UI-D-210)', () => {
   });
 });
 
-describe('06-08 — nextEventCardView (UI-D-214, the Início card)', () => {
-  const view = (nowIso: string, overrides: Partial<EventSummary> = {}, tz = SP) =>
-    nextEventCardView(event(overrides), { tz, nowMs: at(nowIso), t });
+describe('2026-10-03 — the category, the city and "Últimas N vagas" on the card', () => {
+  const before = at('2026-10-01T12:00:00Z');
+  /** Inside the check-in window (P1): answers are still open until the start. */
+  const checkinWindow = at('2026-10-12T21:30:00Z');
+  const live = at('2026-10-12T23:00:00Z');
+  const after = at('2026-10-20T12:00:00Z');
+  const composed =
+    'Avenida Paulista, 1578\nSala 12, bloco B\nBela Vista, São Paulo - SP\nCEP 01310-200';
+  const card = (overrides: Partial<EventSummary>, nowMs = before) =>
+    eventCardView(event(overrides), { tz: SP, nowMs, t });
 
-  it('31. the Início when-line: "{date} · {time}", "Amanhã · …", "Hoje · …", then "Acontecendo agora"', () => {
-    expect(view('2026-10-01T12:00:00Z').overline).toBe('seg., 12 de out. · 19:00');
-    expect(view('2026-10-11T15:00:00Z').overline).toBe('Amanhã · 19:00');
-    expect(view('2026-10-12T15:00:00Z').overline).toBe('Hoje · 19:00');
-    expect(view('2026-10-12T21:30:00Z').overline).toBe('Hoje · 19:00');
-    expect(view('2026-10-12T22:30:00Z').overline).toBe('Acontecendo agora');
+  it('39. the category line is the event’s own category, else the format’s words', () => {
+    expect(card({ category: 'Workshop' }).category).toBe('Workshop');
+    expect(card({ category: 'Live', format: 'online', venueName: null }).category).toBe('Live');
+    expect(card({}).category).toBe('Evento presencial');
+    expect(card({ format: 'online', venueName: null }).category).toBe('Evento online');
   });
 
-  it('32. the tenant zone, not the device one, draws the wall clock and the calendar day', () => {
-    // 22:00Z is 19:00 in São Paulo and 18:00 in Manaus: the zone passed in (the tenant's) wins.
-    expect(view('2026-10-12T15:00:00Z', {}, MANAUS).overline).toBe('Hoje · 18:00');
-    // 02:30Z on the 13th is still the 12th, 23:30, in São Paulo: "Hoje" there.
-    expect(
-      view('2026-10-12T15:00:00Z', {
-        startsAt: '2026-10-13T02:30:00.000000Z',
-        endsAt: '2026-10-13T04:00:00.000000Z',
-      }).overline,
-    ).toBe('Hoje · 23:30');
+  it('40. the place line: "Cidade, UF" for a composed address, the venue for a legacy one, Online online', () => {
+    expect(card({ address: composed }).place).toBe('São Paulo, SP');
+    expect(card({ address: composed }).placeKind).toBe('venue');
+    // A legacy free text (the seed's) does not parse: the venue name, as before.
+    expect(card({ address: 'Rua das Flores, 100 - Centro, Sao Paulo - SP' }).place).toBe(
+      'Auditório da sede',
+    );
+    expect(card({ address: null }).place).toBe('Auditório da sede');
+    expect(card({ format: 'online', venueName: null, address: null }).place).toBe('Online');
   });
 
-  it('33. href, label, place, meta and the pill (Você vai / Presente / none)', () => {
-    const v = view('2026-10-01T12:00:00Z', { confirmedCount: 24, viewerStatus: 'going' });
-    expect(v).toMatchObject({
-      href: '/eventos/11111111-1111-4111-8111-111111111111',
-      ariaLabel: 'Ver o evento Encontro anual',
-      title: 'Encontro anual',
-      place: 'Auditório da sede',
-      placeKind: 'venue',
-      meta: '24 confirmados',
-      pill: { tone: 'brand', label: 'Você vai' },
-    });
-    expect(view('2026-10-01T12:00:00Z').pill).toBeNull();
-    expect(view('2026-10-01T12:00:00Z', { viewerStatus: 'not_going' }).pill).toBeNull();
-    expect(
-      view('2026-10-12T21:30:00Z', {
-        viewerStatus: 'walk_in',
-        viewerCheckedInAt: '2026-10-12T21:20:00.000000Z',
-      }).pill,
-    ).toEqual({ tone: 'success', label: 'Presente' });
-    const online = view('2026-10-01T12:00:00Z', { format: 'online', venueName: null });
-    expect(online).toMatchObject({ place: 'Online', placeKind: 'online' });
+  it('41. spotsLeft is the limit minus the confirmed count, never below zero, null without a limit', () => {
+    expect(spotsLeft({ capacity: 50, confirmedCount: 38 })).toBe(12);
+    expect(spotsLeft({ capacity: 50, confirmedCount: 50 })).toBe(0);
+    // A limit lowered under the confirmations reads as full, never as a negative number.
+    expect(spotsLeft({ capacity: 10, confirmedCount: 14 })).toBe(0);
+    expect(spotsLeft({ capacity: null, confirmedCount: 14 })).toBeNull();
+    expect(EVENT_LOW_SPOTS).toBe(10);
   });
 
-  it('34. check-in mode: none before the window; in person the ticket until checked in', () => {
-    expect(view('2026-10-12T20:59:00Z').cta).toBeNull();
-    const ticket = {
-      kind: 'checkin',
-      href: '/eventos/11111111-1111-4111-8111-111111111111/check-in',
+  it('42. not the viewer’s, before the start: "Últimas N vagas" from 10 down to 2, "Última vaga", "Vagas esgotadas"', () => {
+    const note = (confirmedCount: number, capacity: number | null = 50, nowMs = before) =>
+      card({ capacity, confirmedCount }, nowMs).note;
+    expect(note(39)).toBeUndefined(); // 11 left: above the threshold
+    expect(note(40)).toBe('Últimas 10 vagas');
+    expect(note(45)).toBe('Últimas 5 vagas');
+    expect(note(48)).toBe('Últimas 2 vagas');
+    expect(note(49)).toBe('Última vaga');
+    expect(note(50)).toBe('Vagas esgotadas');
+    expect(note(57)).toBe('Vagas esgotadas');
+    expect(note(0, null)).toBeUndefined(); // no limit
+    // Inside the check-in window, answers are still open: the line stays.
+    expect(note(47, 50, checkinWindow)).toBe('Últimas 3 vagas');
+    // From the start (in progress, ended) nobody can confirm: no scarcity line.
+    expect(note(47, 50, live)).toBeUndefined();
+    expect(note(47, 50, after)).toBeUndefined();
+    // A cancelled event says nothing about spots.
+    expect(card({ capacity: 50, confirmedCount: 47, status: 'cancelled' }).note).toBeUndefined();
+    // Não vou is not the viewer's: the line shows.
+    expect(card({ capacity: 50, confirmedCount: 47, viewerStatus: 'not_going' }).note).toBe(
+      'Últimas 3 vagas',
+    );
+  });
+
+  it('43. the viewer’s own event keeps its countdown, and the scarcity line rides the card’s name', () => {
+    const mine = card({ capacity: 50, confirmedCount: 49, viewerStatus: 'going' });
+    expect(mine.note).toBe('Faltam 11 dias');
+    const theirs = card({ capacity: 50, confirmedCount: 47 });
+    expect(theirs.ariaLabel).toBe('Encontro anual, seg., 12 de out. · 19:00, Últimas 3 vagas');
+  });
+});
+
+describe('2026-10-03 — the detail: the hero category, the "Vagas" cell and the full flag', () => {
+  const detailAt = (overrides: Partial<EventDetail>, nowIso = '2026-10-01T12:00:00Z') =>
+    eventDetailView(detail(overrides), { tz: SP, nowMs: at(nowIso), t });
+
+  it('44. the hero carries the category (null for none)', () => {
+    expect(detailAt({ category: 'Imersão presencial' }).hero.category).toBe('Imersão presencial');
+    expect(detailAt({}).hero.category).toBeNull();
+  });
+
+  it('45. a limit adds a fifth cell after the count: spots left while answers are open, the limit after', () => {
+    const cell = (overrides: Partial<EventDetail>, nowIso?: string) => {
+      const view = detailAt(overrides, nowIso);
+      expect(view.countIndex).toBe(3);
+      return view.info[4];
     };
-    expect(view('2026-10-12T21:00:00Z').cta).toEqual(ticket);
-    expect(view('2026-10-12T23:00:00Z', { viewerStatus: 'going' }).cta).toEqual(ticket);
-    expect(
-      view('2026-10-12T21:30:00Z', {
-        viewerStatus: 'checked_in',
-        viewerCheckedInAt: '2026-10-12T21:20:00.000000Z',
-      }).cta,
-    ).toBeNull();
-    // Defensive: the read excludes cancelled events, but a cancelled one never offers a CTA.
-    expect(view('2026-10-12T21:30:00Z', { status: 'cancelled' }).cta).toBeNull();
+    expect(cell({ capacity: 50, confirmedCount: 38 })).toEqual({
+      icon: 'spots',
+      label: 'Vagas',
+      value: 'Restam 12 de 50',
+    });
+    expect(cell({ capacity: 50, confirmedCount: 49 })?.value).toBe('Resta 1 de 50');
+    expect(cell({ capacity: 50, confirmedCount: 50 })?.value).toBe('Esgotadas (50 vagas)');
+    expect(cell({ capacity: 1, confirmedCount: 3 })?.value).toBe('Esgotada (1 vaga)');
+    expect(cell({ capacity: 100_000, confirmedCount: 0 })?.value).toBe('Restam 100.000 de 100.000');
+    // From the start (and when cancelled) nobody can confirm: the limit alone.
+    expect(cell({ capacity: 50, confirmedCount: 12 }, '2026-10-12T23:00:00Z')?.value).toBe(
+      '50 vagas',
+    );
+    expect(cell({ capacity: 50, confirmedCount: 50, status: 'cancelled' })?.value).toBe('50 vagas');
+    // No limit: the four cells of before.
+    expect(detailAt({}).info).toHaveLength(4);
   });
 
-  it('35. check-in mode online: Entrar in the window, and STILL after the check-in (rejoin)', () => {
-    const enter = { kind: 'enter', href: '/eventos/11111111-1111-4111-8111-111111111111/entrar' };
-    const online = { format: 'online' as const, venueName: null };
-    expect(view('2026-10-12T20:00:00Z', online).cta).toBeNull();
-    expect(view('2026-10-12T21:10:00Z', online).cta).toEqual(enter);
-    expect(
-      view('2026-10-12T22:30:00Z', {
-        ...online,
-        viewerStatus: 'walk_in',
-        viewerCheckedInAt: '2026-10-12T22:05:00.000000Z',
-      }).cta,
-    ).toEqual(enter);
-  });
-
-  it('36. the three ISO boundaries the refresh island targets', () => {
-    const v = view('2026-10-01T12:00:00Z');
-    expect(v.phase).toBe('P0');
-    expect(v.boundaries).toEqual([
-      '2026-10-12T21:00:00.000Z',
-      '2026-10-12T22:00:00.000000Z',
-      '2026-10-13T00:00:00.000000Z',
-    ]);
+  it('46. full is "no spot left for a new confirmation", and reaches the action zone', () => {
+    expect(detailAt({ capacity: 50, confirmedCount: 50 }).full).toBe(true);
+    expect(detailAt({ capacity: 50, confirmedCount: 49 }).full).toBe(false);
+    expect(detailAt({ capacity: null, confirmedCount: 999 }).full).toBe(false);
+    const d = detail({ capacity: 2, confirmedCount: 2 });
+    const view = eventDetailView(d, { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t });
+    expect(eventActionState(d, view).full).toBe(true);
   });
 });

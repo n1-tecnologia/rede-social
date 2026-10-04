@@ -38,10 +38,18 @@ const slotLinkClasses =
 
 /**
  * Mobile TopBar ported from the prototype (UI-SPEC §Shell Contract): fixed under the safe area,
- * tenant identity on the left (logo as-is + display name, D-26), registry slots + the avatar link on
- * the right. The right side's geometry is fixed (gap-3, slots then avatar) so the bar never reflows
- * when later modules declare slots; the display name is the only flexible element and truncates.
- * Hidden on desktop (`md:hidden`) — the rail carries the same information there.
+ * tenant identity on the left, registry slots + the avatar link on the right. The identity is the
+ * logo as-is and ALONE (D-26, product decision 2026-10-02: the name is no longer drawn beside it);
+ * the display name shows only without a logo, or when the logo fails to load (`TenantLogo`). Either
+ * way the home link's accessible name is the display name exactly once (the img's alt, or the text).
+ * The right side's geometry is fixed (gap-3, slots then avatar) so the bar never reflows when later
+ * modules declare slots; the brand is the only flexible element (the logo box caps at 120px, the
+ * name truncates). The home link never narrows under 44px (`min-w-11`, the slots' tap target): a
+ * square logo alone is only 28px wide. Hidden on desktop (`md:hidden`) — the rail carries the same
+ * information there.
+ *
+ * `data-shell-topbar` is what tokens.css hides while a full-screen surface declares
+ * `data-shell-hide="chrome"` (the story viewer); `data-shell-brand` marks the home link for tests.
  *
  * Media chrome (UI-D-81): while the active tab's nav entry declares `chrome: 'media'` the bar is not
  * rendered at all, so the video surface owns the top of the screen. The rule is declarative — it reads
@@ -66,15 +74,13 @@ export function TopBar({
   if (tabs && activeTabChrome(tabs, pathname) === 'media') return null;
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-border bg-bg-secondary pt-[var(--safe-top)] md:hidden">
+    <header
+      data-shell-topbar
+      className="fixed inset-x-0 top-0 z-50 border-b border-border bg-bg-secondary pt-[var(--safe-top)] md:hidden"
+    >
       <div className="flex h-12 items-center justify-between px-4">
-        <Link href="/inicio" className="flex min-w-0 items-center gap-2">
+        <Link href="/inicio" data-shell-brand className="flex h-11 min-w-11 items-center">
           <TenantLogo logoUrl={brand.logoUrl} displayName={brand.displayName} size="topbar" />
-          {brand.logoUrl ? (
-            <span className="hidden truncate text-base font-bold tracking-tight text-text min-[360px]:inline">
-              {brand.displayName}
-            </span>
-          ) : null}
         </Link>
 
         <div className="flex shrink-0 items-center gap-3">

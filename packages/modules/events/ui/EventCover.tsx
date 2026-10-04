@@ -60,9 +60,9 @@ const VEIL = {
   thumb: null,
 } as const;
 
-/** `sizes` per geometry: the poster is at most one of two ~340px columns, the others fill 680px. */
+/** `sizes` per geometry: the poster is a gallery's 256px slot, the others fill 680px. */
 const SIZES = {
-  poster: '(min-width: 640px) 340px, 100vw',
+  poster: '256px',
   hero: '(min-width: 680px) 680px, 100vw',
   ticket: '(min-width: 680px) 680px, 100vw',
   thumb: '64px',

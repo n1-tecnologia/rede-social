@@ -17,12 +17,13 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { loadEvent } from '@/lib/events';
+import { loadEvent, loadEventPhotos } from '@/lib/events';
 import { googleCalendarHref } from '@/lib/events-calendar';
 import { type EventDetailView, eventActionState, eventDetailView } from '@/lib/events-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 import { EventActions } from './EventActions';
 import { EventDescription } from './EventDescription';
+import { EventPhotos } from './EventPhotos';
 import { EventRefresh } from './EventRefresh';
 import { ReactivateEventControl } from './ReactivateEventControl';
 
@@ -35,8 +36,8 @@ import { ReactivateEventControl } from './ReactivateEventControl';
  * (in person), then the action zone (`EventActions`: the RSVP pair of sketch 006; in person in
  * P1/P2, the "Fazer check-in" link to `/eventos/{id}/check-in`, 06-05; online, the plain `Entrar`
  * anchor to `/eventos/{id}/entrar`, 06-06 — no render of this page records anything, D-218). Dropped [proto]
- * extras: spots, payment and certificate banners, the embedded map (D-203), `MyEventDetails`, the
- * photos rail.
+ * extras: payment and certificate banners, the embedded map (D-203), `MyEventDetails`. (The spots
+ * and the photos came back on 2026-10-03, as the "Vagas" cell and the "Fotos" section below.)
  *
  * **Every string is built on the server** by `eventDetailView` in the TENANT's timezone from ONE
  * request instant (UI-D-203): no client render reads the clock, and a device in Manaus reads the
@@ -67,13 +68,20 @@ import { ReactivateEventControl } from './ReactivateEventControl';
  * two outline anchors — "Google Agenda" (the template link built HERE, on the server, opened in a
  * new context) and "Arquivo .ics" (`download`, the same-origin `agenda.ics` route). Neither carries
  * the meeting URL: an online event's calendar location is the app's own `/entrar` (D-207).
+ *
+ * **2026-10-03 — category, limit and photos.** The hero wears the event's category as its top-left
+ * pill, the info grid gains "Vagas" for an event with a limit, and the action zone says when no spot
+ * is left. Below the card, "Fotos" (`EventPhotos`): the first page is read HERE, beside the event
+ * (`loadEventPhotos`, which swallows its own failures, so the gallery can never take the page down),
+ * every member views, and `events.event.manage` adds and removes.
  */
 export default async function EventPage({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
-  const [t, bootstrap, result] = await Promise.all([
+  const [t, bootstrap, result, photos] = await Promise.all([
     getTranslations('events'),
     requireBootstrap(),
     loadEvent(eventId),
+    loadEventPhotos(eventId),
   ]);
 
   if (result.status === 'not-found') notFound();
@@ -133,6 +141,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
             <EventHero
               title={view.title}
               overline={view.hero.overline}
+              category={view.hero.category}
               place={view.hero.place}
               placeKind={view.hero.placeKind}
               coverAssetId={view.hero.coverAssetId}
@@ -173,6 +182,14 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
             </div>
           </Card>
         </div>
+        <EventPhotos
+          eventId={result.event.id}
+          eventTitle={view.title}
+          canManage={canManage}
+          initialItems={photos?.items ?? []}
+          initialCursor={photos?.nextCursor ?? null}
+          initialError={photos === null}
+        />
         {canManage || canReadAttendance ? (
           <section aria-labelledby="event-manage-title" data-event-manage>
             <SectionTitle id="event-manage-title" className="mt-6 mb-2 px-4">

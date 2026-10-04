@@ -49,17 +49,13 @@ export default async function MembersPage({
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col">
-      {/* `stickyTop="0px"` pins the header at the TOP of the scroll container's padding box, which
-          is where it already sits in normal flow. The primitive's default
-          `calc(var(--safe-top) + 3rem)` is measured from that SAME padding edge (CSS shrinks a
-          sticky element's constraint rectangle by the scrollport's padding), so the default pushes
-          the header ~60px DOWN over whatever follows it — harmless on a screen that opens with
-          padding, fatal here, where the next element is the sticky search pill. */}
+      {/* The primitive's default offset (`-0.5rem` from the scroll container's padded content edge)
+          leaves the header in flow at rest and pins it flush under the TopBar once scrolled; the
+          sticky search pill below pins right under it (`MembersList`, `top-[2.75rem]`). */}
       <PageHeader
         title={t('title')}
         backHref="/perfil"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
 

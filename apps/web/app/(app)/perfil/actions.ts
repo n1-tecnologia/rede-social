@@ -316,13 +316,15 @@ export async function removeAvatarAction(): Promise<AvatarResult> {
 export type DismissNudgeResult = { ok: true } | { ok: false; code: 'generic' };
 
 /**
- * `POST /v1/me/profile/dismiss-nudge` — "Agora não" on the D-02 card (R-13).
+ * `POST /v1/me/profile/dismiss-nudge` — what "Agora não" posted on the D-02 card (R-13), writing
+ * SERVER state (`member_profiles.nudge_dismissed_at`) so that no device would show the card again.
  *
- * The write is SERVER state (`member_profiles.nudge_dismissed_at`), which is the whole point: an
- * installed PWA whose storage the OS evicts, or the same member on a second device, must not be
- * nagged again. `revalidatePath('/inicio')` is what actually removes the card — the component never
- * removes it optimistically, so a failed dismissal leaves it on screen with an error toast rather
- * than silently pretending it worked and re-nagging on the next load.
+ * No screen calls it since 2026-10-02: the card became the "Complete seu perfil" popup
+ * (`components/profile/ProfileNudgeOnArrival.tsx`), and its "Mais tarde" is session-only, ending
+ * the popup for the visit in `sessionStorage` (`lib/profile-nudge.ts`) and writing nothing here.
+ * The server dismissal is still honoured: a member who said "Agora não" on the card keeps
+ * `needsNudge` false, so Início never mounts the popup for them. The action is kept, unchanged, for
+ * the API route it wraps; `revalidatePath('/inicio')` refreshes the page that reads that flag.
  */
 export async function dismissNudgeAction(): Promise<DismissNudgeResult> {
   let refusal: string | null = null;

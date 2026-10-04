@@ -11,3 +11,9 @@ export {
   CommunityPickerSheet,
   type CommunityPickerSheetProps,
 } from './CommunityPickerSheet';
+export {
+  type CommunityReorderItem,
+  CommunityReorderList,
+  type CommunityReorderListLabels,
+  type CommunityReorderListProps,
+} from './CommunityReorderList';

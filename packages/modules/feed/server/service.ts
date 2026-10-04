@@ -476,8 +476,10 @@ export async function listCommunityFeed(
  * **Which communities.** `c.status = 'active'` is a LITERAL, never a bound parameter, so it is
  * provably implied by `communities_tenant_activity_idx`'s partial predicate (`status = 'active' and
  * deleted_at is null`) — the communities list's own lesson — and an archived or removed community can
- * never be named here, whatever videos it holds (T-05.3-07). The order is `last_activity_at desc,
- * id desc`, exactly the Comunidades list's active ordering (D-76), which that index carries.
+ * never be named here, whatever videos it holds (T-05.3-07). The order is `position asc,
+ * last_activity_at desc, id desc`, exactly the Comunidades list's active ordering (the admin's order
+ * since 2026-10-03, D-76's activity order as its tie-breaker), which
+ * `communities_tenant_position_idx` carries under the same partial predicate.
  *
  * **The tenant predicate is a CONSTANT on BOTH sides of the `exists`** (`${ctx.tenantId}`), never
  * the correlated `p.tenant_id = c.tenant_id`. RLS already scopes both tables; the constant is what
@@ -509,7 +511,7 @@ export async function listVideoCommunities(ctx: RequestContext): Promise<VideoCo
               and p.community_id = c.id
               and p.deleted_at is null
               ${READY_VIDEO_POST})
-       order by c.last_activity_at desc, c.id desc
+       order by c.position asc, c.last_activity_at desc, c.id desc
        limit ${FEED_VIDEO_COMMUNITIES_CAP}`),
       )
     : [];

@@ -1,4 +1,5 @@
 import {
+  COMMUNITY_MAX_ORDER,
   COMMUNITY_MAX_PAGE_SIZE,
   COMMUNITY_PAGE_SIZE,
   type CommunityPage,
@@ -7,6 +8,7 @@ import {
   type CreateCommunity,
   communityPageSchema,
   communitySummarySchema,
+  type ReorderCommunities,
   type UpdateCommunity,
 } from '@rede-social/module-communities/contracts';
 import { redirect } from 'next/navigation';
@@ -100,7 +102,9 @@ export async function loadCommunities(
  * cursor), with a hard page ceiling so a tenant with thousands of containers cannot turn opening a
  * composer into an unbounded server-side loop. A tenant past the ceiling gets the first N and the
  * picker stays usable; a scrolling picker with its own pagination is a real screen 05-08 can design
- * when a tenant needs one, not something to half-build here.
+ * when a tenant needs one, not something to half-build here. Because it is the same keyset, the
+ * picker offers the communities in the order an admin chose for the list (2026-10-03) with no code
+ * of its own.
  *
  * It NEVER throws and never redirects: an unreadable list returns `[]`, the picker then offers only
  * "Feed principal", and the composer still publishes. Losing the destination chooser must not cost
@@ -123,6 +127,57 @@ export async function listAllCommunities(): Promise<CommunitySummary[]> {
     console.error('communities.picker_failed', { error: String(error), loaded: items.length });
   }
   return items;
+}
+
+/**
+ * How many pages the reorder walk may read: enough to hold `COMMUNITY_MAX_ORDER` communities, plus
+ * the one page that proves there are more than that.
+ */
+const ORDER_MAX_PAGES = Math.ceil(COMMUNITY_MAX_ORDER / COMMUNITY_MAX_PAGE_SIZE) + 1;
+
+/**
+ * EVERY active community of the tenant, in the list's order, for the `Comunidades` reorder mode
+ * (2026-10-03) — or `null` when the tenant holds more than `COMMUNITY_MAX_ORDER`.
+ *
+ * The same keyset walk `listAllCommunities` does, with the opposite failure posture, on purpose:
+ * that one degrades to "whatever loaded" because a picker with fewer rows still publishes, but a
+ * reorder is ONE permutation of the whole set — a partial list could never be saved (the API
+ * answers `order_stale` for a set that is not exactly the current one) and would loop the admin
+ * through refusals. So this one THROWS on a failed page and says `null` past the bound, and the
+ * caller tells the admin which of the two happened.
+ */
+export async function getOrderableCommunities(): Promise<CommunitySummary[] | null> {
+  const items: CommunitySummary[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < ORDER_MAX_PAGES; page += 1) {
+    const result = await getCommunities({ cursor, limit: COMMUNITY_MAX_PAGE_SIZE });
+    items.push(...result.items);
+    if (items.length > COMMUNITY_MAX_ORDER) return null;
+    if (result.nextCursor === null) return items;
+    cursor = result.nextCursor;
+  }
+  // Only reachable if pages kept arriving under the bound with a cursor after each — which the
+  // over-fetch rule (`nextCursor` exactly when another row exists) rules out. Treated as too many
+  // rather than as a complete list, because a list that might be partial must not be saved.
+  return null;
+}
+
+/**
+ * `PUT /v1/communities/order` (2026-10-03) — the admin's order of the ACTIVE list, as one full
+ * permutation of ids, through the SAME `apiFetch` every other call here uses. The body is validated
+ * by `reorderCommunitiesSchema` in the action; the API re-validates it, and answers the FIRST PAGE
+ * of the list in the new order, which the list renders without a second request. A set that is not
+ * exactly the current one is `409 { community: 'order_stale' }`, thrown as an `ApiClientError` like
+ * every other refusal.
+ */
+export async function reorderCommunities(input: ReorderCommunities): Promise<CommunityPage> {
+  const res = await apiFetch('/v1/communities/order', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await apiError(res);
+  return communityPageSchema.parse(await res.json());
 }
 
 /** The outcome of reading ONE community: the community, a bare miss, or an answer we could not read. */

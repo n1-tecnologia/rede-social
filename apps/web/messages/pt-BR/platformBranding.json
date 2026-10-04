@@ -8,7 +8,7 @@
       "title": "Logo",
       "upload": "Enviar logo",
       "replace": "Substituir logo",
-      "empty": "Nenhum logo enviado — o nome da comunidade aparece no lugar.",
+      "empty": "Nenhum logo enviado. O nome de exibição aparece no lugar.",
       "hint": "PNG, SVG, WebP ou JPEG até 2 MB.",
       "alt": "Logo de {tenant}"
     },
@@ -45,6 +45,16 @@
       "save": "Salvar alterações",
       "saving": "Salvando…"
     },
+    "look": {
+      "lightTitle": "Fundo do modo claro",
+      "hint": "O fundo, as cores do modo escuro, os botões e a fonte dos títulos valem no app e nas telas de entrada.",
+      "unsaved": "Há alterações na aparência que ainda não foram salvas.",
+      "save": "Salvar aparência",
+      "discard": "Descartar alterações",
+      "errors": {
+        "invalid": "Algum valor da aparência não foi aceito. Confira as cores e a fonte e tente de novo."
+      }
+    },
     "preview": {
       "title": "Prévia",
       "light": "Claro",
@@ -52,7 +62,7 @@
       "lightAria": "Prévia do aplicativo no modo claro",
       "darkAria": "Prévia do aplicativo no modo escuro",
       "login": "Entrar",
-      "namePlaceholder": "Nome da comunidade"
+      "namePlaceholder": "Nome de exibição"
     },
     "icons": {
       "title": "Ícones do aplicativo",

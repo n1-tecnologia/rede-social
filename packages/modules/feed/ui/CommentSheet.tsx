@@ -19,10 +19,19 @@ import { CommentsList, type CommentsListProps } from './CommentsList';
  * across the app is exactly what `@rede-social/ui` exists to hold, and a per-caller override is the drift
  * it exists to prevent — so there is deliberately no height class in this file.
  *
- * **Focus is the primitive's too**: `role="dialog"`, `aria-modal`, the focus trap, Escape and the
- * drag-to-dismiss all come from `BottomSheet`, which moves focus into the panel on open and returns
- * it to the control that opened it on close. Re-implementing any of that here would be a second
- * dialog behaviour for members to learn.
+ * **Only the SCROLL moves, through the primitive's own prop** (`scroll="content"`). The list owns
+ * the scrollport and the composer is the sheet's footer BELOW it, which is the UI-SPEC's geometry
+ * ("the list scrolls with the input pinned at the bottom"). A composer that was `sticky` inside the
+ * primitive's padded body sat 16px above the edge, covering the last row's meta line and letting
+ * rows show through a strip beneath it.
+ *
+ * **Focus is the primitive's too**: `role="dialog"`, `aria-modal`, the focus trap, Escape, the
+ * drag-to-dismiss and the lift above the phone keyboard all come from `BottomSheet`. Here it moves
+ * focus to the sheet's TITLE on open (`initialFocus="title"`, 04-UI-SPEC §Accessibility), not to
+ * the field, which on a phone is the keyboard rising over a sheet that has not finished sliding in;
+ * the member taps the field to write, and "Responder" still focuses it. Closing returns focus to
+ * the control that opened the sheet. Re-implementing any of that here would be a second dialog
+ * behaviour for members to learn.
  */
 export type CommentSheetProps = Omit<CommentsListProps, 'variant'> & {
   open: boolean;
@@ -45,7 +54,7 @@ export function CommentSheet({
   ...list
 }: CommentSheetProps) {
   return (
-    <BottomSheet open={open} onClose={onClose} title={title}>
+    <BottomSheet open={open} onClose={onClose} title={title} scroll="content" initialFocus="title">
       <CommentsList {...list} variant={variant} />
     </BottomSheet>
   );

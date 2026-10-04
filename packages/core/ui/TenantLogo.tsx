@@ -6,13 +6,16 @@ export type TenantLogoSize = 'topbar' | 'rail' | 'auth' | 'home' | 'thread';
 export interface TenantLogoProps {
   /** Public URL of the tenant logo, or null when the tenant has not uploaded one. */
   logoUrl: string | null;
-  /** Tenant display name: the `alt` text of the logo and the visible fallback without one (D-26). */
+  /**
+   * Tenant display name: the `alt` text of the logo and the visible fallback without one, or when the
+   * logo fails to load (D-26).
+   */
   displayName: string;
   /** Fixed box per placement (UI-SPEC Shell / Auth contracts). */
   size: TenantLogoSize;
   /**
-   * Omit the logo when the image fails to load (07-09, E09/media). Always on for `thread`; the
-   * support greeting turns it on for `home`.
+   * Render NOTHING when the image fails to load (07-09, E09/media), instead of the display name.
+   * Always on for `thread`; the support greeting turns it on for `home`.
    */
   hideOnError?: boolean;
   className?: string;
@@ -52,8 +55,14 @@ const TEXT: Record<TenantLogoSize, string> = {
  * tint, no recolouring and no shape applied — the customer's brand asset is shown as-is on both
  * themes. Without a logo the display name renders as text; there is no placeholder image.
  *
+ * A logo that fails to load counts as no logo: `HidingLogoImage` swaps in the same display name, so
+ * a 404 or an expired URL never leaves a broken glyph. That matters most in the TopBar and the rail,
+ * which show the logo ALONE (product decision, 2026-10-02): the name is never drawn beside it, so a
+ * failing logo must not leave the shell nameless.
+ *
  * `thread` (07-09, UI-D-258) is the exception: the member thread header already reads "Equipe
- * {tenant}", so without a logo (or when the image fails to load) it renders NOTHING.
+ * {tenant}", so without a logo (or when the image fails to load) it renders NOTHING. `hideOnError`
+ * asks the same of a failing logo elsewhere (the support greeting's `home`).
  *
  * Client-safe: this file lives under `@rede-social/core/ui` and may not import the kernel's server or
  * database code (Biome override in biome.json).
@@ -65,24 +74,18 @@ export function TenantLogo({
   hideOnError = false,
   className,
 }: TenantLogoProps) {
-  if (!logoUrl && size === 'thread') return null;
-  if (!logoUrl) {
-    return <span className={cn('inline-block min-w-0', TEXT[size], className)}>{displayName}</span>;
-  }
-  if (hideOnError || size === 'thread') {
-    return (
-      <HidingLogoImage
-        src={logoUrl}
-        alt={displayName}
-        boxClassName={cn(BOX[size], className)}
-        imgClassName={IMG[size]}
-      />
+  const name =
+    size === 'thread' ? null : (
+      <span className={cn('inline-block min-w-0', TEXT[size], className)}>{displayName}</span>
     );
-  }
+  if (!logoUrl) return name;
   return (
-    <span className={cn('inline-flex items-center', BOX[size], className)}>
-      {/* biome-ignore lint/performance/noImgElement: D-26 — the customer's logo is served as-is (any format, any origin); next/image would re-encode and constrain it. */}
-      <img src={logoUrl} alt={displayName} className={cn('w-auto object-contain', IMG[size])} />
-    </span>
+    <HidingLogoImage
+      src={logoUrl}
+      alt={displayName}
+      boxClassName={cn(BOX[size], className)}
+      imgClassName={IMG[size]}
+      fallback={hideOnError ? null : name}
+    />
   );
 }

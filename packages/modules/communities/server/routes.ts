@@ -13,9 +13,16 @@ import {
   communityQuerySchema,
   communitySummarySchema,
   createCommunitySchema,
+  reorderCommunitiesSchema,
   updateCommunitySchema,
 } from '../contracts/index';
-import { createCommunity, getCommunity, listCommunities, updateCommunity } from './service';
+import {
+  createCommunity,
+  getCommunity,
+  listCommunities,
+  reorderCommunities,
+  updateCommunity,
+} from './service';
 
 /**
  * The module owns its guard chain: the mount in `apps/api/src/app.ts` is a plain
@@ -66,7 +73,7 @@ const listRoute = createRoute({
   responses: {
     200: {
       description:
-        "One keyset page of the tenant's communities. By default (`status` absent or `active`) the ACTIVE communities, most recent activity first; every member of the tenant receives the same set regardless of role (COMM-02). With `status=archived`, for managers only, the ARCHIVED communities, most recently archived first (`updated_at desc`, so an archived community edited afterwards moves to the top). `nextCursor` is non-null exactly when another community exists; it is OPAQUE, belongs to the status it was issued for, and must be passed back untouched.",
+        "One keyset page of the tenant's communities. By default (`status` absent or `active`) the ACTIVE communities in the order an admin chose (`PUT /v1/communities/order`), most recent activity first inside it — until an admin reorders, that is simply most recent activity first, and a community created after a reorder is listed first; every member of the tenant receives the same set in the same order regardless of role (COMM-02). With `status=archived`, for managers only, the ARCHIVED communities, most recently archived first (`updated_at desc`, so an archived community edited afterwards moves to the top). `nextCursor` is non-null exactly when another community exists; it is OPAQUE, belongs to the status it was issued for, and must be passed back untouched.",
       content: { 'application/json': { schema: communityPageSchema } },
     },
     400: {
@@ -165,6 +172,49 @@ const updateCommunityRoute = createRoute({
   },
 });
 
+/**
+ * 2026-10-03 — the admin's order of the ACTIVE list, as ONE full permutation.
+ *
+ * `PUT` because the body REPLACES the whole order and a repeat of it is a no-op (idempotent). The
+ * path is a literal segment, `/order`, beside `/{communityId}`: no other verb is declared on
+ * `/{communityId}` with `PUT`, and a uuid param could never match the word anyway.
+ *
+ * The guard is the same permission every other community write carries (T-05-03): a member is 403,
+ * before the body is even compared with anything.
+ */
+const reorderCommunitiesRoute = createRoute({
+  method: 'put',
+  path: '/order',
+  // The literal, not `COMMUNITY_PERMISSIONS.manage`: this string is the one thing a reviewer greps
+  // for when asking "what guards reordering the communities?", and an indirection here is the kind
+  // that hides a change.
+  middleware: [requirePermission('communities.community.manage')] as const,
+  request: {
+    body: {
+      content: { 'application/json': { schema: reorderCommunitiesSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'The first page of the ACTIVE list in the new order — the same page `GET /v1/communities` now answers every member. `position` becomes 1..n in the order of `ids`, in ONE statement under a lock on the tenant’s active rows; only rows whose position really changes are written, so repeating the same order changes nothing (not even `updated_at`). Archived communities are never touched.',
+      content: { 'application/json': { schema: communityPageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: `ids` is empty, longer than `COMMUNITY_MAX_ORDER`, holds something that is not a uuid, or names the same community twice; or the body has another key. Nothing is written.',
+    },
+    403: {
+      description: 'The caller does not hold `communities.community.manage` in this tenant',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.community` = `order_stale`: `ids` is not exactly the tenant’s current ACTIVE communities — one was created, archived or removed since the list was loaded, or an id is unknown or another tenant’s (one answer for all of them, so no existence oracle). Nothing is written; reload the list and try again.',
+    },
+  },
+});
+
 export const communitiesRoutes = communities
   .openapi(listRoute, async (c) => {
     const ctx = c.get('ctx');
@@ -190,4 +240,7 @@ export const communitiesRoutes = communities
   .openapi(updateCommunityRoute, async (c) => {
     const { communityId } = c.req.valid('param');
     return c.json(await updateCommunity(c.get('ctx'), communityId, c.req.valid('json')), 200);
-  });
+  })
+  .openapi(reorderCommunitiesRoute, async (c) =>
+    c.json(await reorderCommunities(c.get('ctx'), c.req.valid('json')), 200),
+  );
