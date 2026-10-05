@@ -54,14 +54,12 @@ export default async function StoryHistoryPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col">
-      {/* `stickyTop="0px"` pins the header at the TOP of the scroll container's padding box, which
-          is where it already sits in normal flow — the 03-05 lesson, restated for every
-          `PageHeader` in this phase. */}
+      {/* The primitive's default offset: the header stays where it sits in normal flow and pins
+          flush under the TopBar once the history scrolls (no per-page override any more). */}
       <PageHeader
         title={ts('history.title')}
         backHref="/inicio"
         backLabel={ts('history.back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
 

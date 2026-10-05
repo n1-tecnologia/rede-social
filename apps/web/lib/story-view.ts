@@ -6,7 +6,7 @@ import {
   type StoryComment,
   type StorySummary,
 } from '@rede-social/module-stories/contracts';
-import type { StoryStripCircle } from '@rede-social/module-stories/ui';
+import type { StoryPhotoFallback, StoryStripCircle } from '@rede-social/module-stories/ui';
 import { relativeFrom } from '@/lib/relative-time';
 
 /**
@@ -34,7 +34,10 @@ const absoluteStoryTime = new Intl.DateTimeFormat('pt-BR', {
  * no clock in its render tree, so there is no hydration mismatch and no per-second re-render.
  */
 
-/** One story, exactly as the viewer needs it — ids and already-formatted strings, never a URL. */
+/**
+ * One story, exactly as the viewer needs it — ids and already-formatted strings. The one URL is the
+ * author's photo, the profile's own stable `/v1/media/{id}/w128` path, never a signed one.
+ */
 export type StoryViewerItemView = {
   id: string;
   mediaKind: 'image' | 'video';
@@ -48,6 +51,12 @@ export type StoryViewerItemView = {
   viewerLiked: boolean;
   /** 05.2 (HIGHLIGHT-06): the caller's own server-side seen flag (`viewerSeen`). */
   seen: boolean;
+  /**
+   * 2026-10-03 (#2b): the photo of the member who published THIS story (`authorAvatarUrl`), or null
+   * — no photo, or an author who is no longer an active member. A tenant-headed group shows it in
+   * the viewer header beside the tenant's name; a highlight keeps its cover (UI-D-65).
+   */
+  authorAvatarUrl: string | null;
 };
 
 /**
@@ -92,6 +101,7 @@ export function storyViewerItem(story: StorySummary, now: number): StoryViewerIt
     commentCount: story.commentCount,
     viewerLiked: story.viewerLiked,
     seen: story.viewerSeen,
+    authorAvatarUrl: story.authorAvatarUrl,
   };
 }
 
@@ -320,10 +330,29 @@ export function tenantSequence<T>(page: { items: readonly T[] } | null): T[] {
 }
 
 /**
- * The tenant circle (D-104): the tenant's logo and display name — the same identity the viewer
- * header shows, so the circle and the screen it opens agree. No logo → the display name's monogram
- * (UI-D-60). It opens group 0 at the RESUME index — the first unseen story, else 0 — and wears the
- * seen ring (05.2-10, D-105, UI-D-61; see `tenantSeenState`).
+ * The FACE the tenant circle wears (2026-10-03, the client's item #2b, the author's photo in the
+ * tenant circle): the photo of whoever published the tenant's NEWEST live story — the last
+ * element of the oldest-first sequence (D-106), i.e. the API page's first. In V1 only the
+ * tenant's admins publish, so this is the owner's face. Deliberately that one story's author and
+ * nobody else's: the circle
+ * says who spoke LAST, the way an Instagram ring shows the account that just posted, and an older
+ * story's author is never promoted when the newest one's has no photo — then the circle simply
+ * keeps the tenant identity (`tenantCircleView`). Null for an empty sequence, and when that author
+ * has no photo or is no longer an active member (the API projects both as null).
+ */
+export function tenantCircleFace(
+  sequence: readonly { authorAvatarUrl: string | null }[],
+): string | null {
+  return sequence.at(-1)?.authorAvatarUrl ?? null;
+}
+
+/**
+ * The tenant circle (D-104): the tenant's display name as label, and on the disc the FACE of the
+ * newest story's author when there is one (#2b, `tenantCircleFace`), else the tenant's logo, else the
+ * display name's monogram (UI-D-60). The photo carries the logo/monogram as its fallback, so a photo
+ * that cannot be fetched still shows the tenant. The accessible name never changes with the disc —
+ * it names the tenant (UI-D-61). It opens group 0 at the RESUME index — the first unseen story,
+ * else 0 — and wears the seen ring (05.2-10, D-105, UI-D-61; see `tenantSeenState`).
  */
 /** The tenant circle's seen state (D-105): is anything live unseen, and where does it resume. */
 export type TenantSeenState = { anyUnseen: boolean; resumeIndex: number };
@@ -379,16 +408,18 @@ export function tenantCircleView(
   tenant: { displayName: string; logoUrl: string | null },
   t: RowLabelReader,
   seen: TenantSeenState,
+  face: string | null = null,
 ): Extract<RowCircleView, { kind: 'open' }> {
+  const identity: StoryPhotoFallback =
+    tenant.logoUrl !== null
+      ? { kind: 'logo', src: tenant.logoUrl }
+      : { kind: 'monogram', text: monogramOf(tenant.displayName) };
   return {
     kind: 'open',
     key: 'tenant',
     label: tenant.displayName,
     ...tenantSeenDecoration(seen, tenantSeenLabels(tenant, t)),
-    disc:
-      tenant.logoUrl !== null
-        ? { kind: 'logo', src: tenant.logoUrl }
-        : { kind: 'monogram', text: monogramOf(tenant.displayName) },
+    disc: face !== null ? { kind: 'photo', src: face, fallback: identity } : identity,
     group: 0,
   };
 }
@@ -530,8 +561,11 @@ export function openableHighlights(highlights: readonly HighlightSummary[]): Hig
  * UI-D-59's order and render rule for Início, as one pure function:
  *
  * 1. the admin's `+ Seu story` link — ONLY with `stories.story.publish` (the caller passes the
- *    permission check's result, never a role, UI-D-28);
- * 2. the tenant circle — iff the tenant sequence is non-empty (a circle means something to watch);
+ *    permission check's result, never a role, UI-D-28). Since 2026-10-02 it is a centred `Plus` in
+ *    the dashed "only you see this" ring (UI-D-63), the manage circle's language, and no longer the
+ *    admin's photo, so it needs nothing from the caller's profile;
+ * 2. the tenant circle — iff the tenant sequence is non-empty (a circle means something to watch) —
+ *    wearing `tenantFace`, the photo of the newest story's author (#2b), when there is one;
  * 3. Início's highlights, one circle each, in the order the API returned (`position, id`), each
  *    opening its own viewer group (05.2-05) — and, for a CURATOR (05.2-09), the empty ones as dashed
  *    links to the manage screen;
@@ -544,9 +578,13 @@ export function openableHighlights(highlights: readonly HighlightSummary[]): Hig
 export function inicioRow(
   input: {
     canPublish: boolean;
-    own: { avatarUrl: string | null };
     tenant: { displayName: string; logoUrl: string | null };
     sequenceLength: number;
+    /**
+     * #2b (2026-10-03): the face on the tenant circle — `tenantCircleFace(sequence)`. Absent or null
+     * keeps the tenant's logo (or monogram), as before.
+     */
+    tenantFace?: string | null;
     highlights: readonly HighlightSummary[];
     curator?: CuratorRow;
     /**
@@ -565,8 +603,8 @@ export function inicioRow(
       href: '/stories/publicar',
       label: t('own.label'),
       actionLabel: t('own.action'),
-      ring: 'neutral',
-      disc: { kind: 'own', avatarUrl: input.own.avatarUrl },
+      ring: 'dashed',
+      disc: { kind: 'own' },
     });
   }
   // The openable circles ARE the viewer's groups, in the same order (`inicioGroups`): the tenant's
@@ -574,7 +612,12 @@ export function inicioRow(
   const first = input.sequenceLength > 0 ? 1 : 0;
   if (input.sequenceLength > 0) {
     row.push(
-      tenantCircleView(input.tenant, t, input.tenantSeen ?? { anyUnseen: true, resumeIndex: 0 }),
+      tenantCircleView(
+        input.tenant,
+        t,
+        input.tenantSeen ?? { anyUnseen: true, resumeIndex: 0 },
+        input.tenantFace ?? null,
+      ),
     );
   }
   row.push(...highlightRowCircles(input.highlights, first, t, input.curator));
@@ -609,7 +652,11 @@ export type StoryGroupView = {
 
 /**
  * A group whose stories are the TENANT's — Início's tenant circle and a deep link alike. V1's single publisher is the tenant, so the header is its display name over its
- * logo in the shipped `Avatar` (unchanged from 05-06; see the host's note).
+ * logo in the shipped `Avatar` (unchanged from 05-06; see the host's note). Since #2b
+ * (2026-10-03) the AVATAR of each playing story is its author's photo when there is one
+ * (`StoryViewerItemView.authorAvatarUrl`, drawn by `StoryViewerHost`), so the viewer agrees with the
+ * face on the circle that opened it; this logo is that photo's fallback, and the name stays the
+ * tenant's.
  */
 function tenantHeadedGroup(
   key: string,

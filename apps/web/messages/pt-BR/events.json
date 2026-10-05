@@ -1,6 +1,7 @@
 {
   "events": {
     "nav": "Eventos",
+    "tabDot": "Há eventos por vir",
     "list": {
       "title": "Eventos",
       "subtitle": "Confirme presença e faça check-in no dia.",
@@ -11,6 +12,35 @@
         "upcoming": "Próximos",
         "past": "Passados"
       }
+    },
+    "sections": {
+      "mine": {
+        "title": "Meus eventos",
+        "subtitle": "Inscrições confirmadas e eventos que você já viveu",
+        "emptyTitle": "Nada por aqui ainda",
+        "emptyBody": "Quando você confirmar presença num evento, ele aparece nesta galeria."
+      },
+      "others": {
+        "title": "Outros eventos",
+        "subtitle": "Encontros abertos e eventos que já aconteceram",
+        "emptyTitle": "Nada por aqui ainda",
+        "emptyBody": "Os eventos de {tenant} vão aparecer nesta galeria.",
+        "emptyBodyManager": "Crie o primeiro evento para convidar os membros."
+      }
+    },
+    "card": {
+      "registered": "Inscrito",
+      "participated": "Participou",
+      "inPerson": "Evento presencial",
+      "online": "Evento online",
+      "date": "{day} {month}",
+      "dateRange": "{start}-{end} {month}",
+      "countdown": "{count, plural, one {Falta # dia} other {Faltam # dias}}",
+      "today": "É hoje!",
+      "live": "Acontecendo agora",
+      "spotsLeft": "{count, plural, one {Última vaga} other {Últimas # vagas}}",
+      "soldOut": "Vagas esgotadas",
+      "city": "{city}, {state}"
     },
     "poster": {
       "label": "{title}, {when}"
@@ -33,9 +63,7 @@
       "at": "{date} · {time}",
       "liveUntil": "Acontecendo agora · até {time}",
       "range": "{start} a {end}",
-      "todayAt": "Hoje · {time}",
-      "tomorrowAt": "Amanhã · {time}",
-      "live": "Acontecendo agora"
+      "tomorrowAt": "Amanhã · {time}"
     },
     "place": {
       "online": "Online"
@@ -85,7 +113,11 @@
       "confirmed": "Confirmados",
       "present": "Presentes",
       "timeRange": "{start} às {end}",
-      "timeRangeMultiDay": "Começa {start} · termina {end}"
+      "timeRangeMultiDay": "Começa {start} · termina {end}",
+      "spots": "Vagas",
+      "spotsLeft": "{count, plural, one {Resta # de {capacity, number}} other {Restam # de {capacity, number}}}",
+      "spotsFull": "{capacity, plural, one {Esgotada (# vaga)} other {Esgotadas (# vagas)}}",
+      "spotsLimit": "{capacity, plural, one {# vaga} other {# vagas}}"
     },
     "location": {
       "openMaps": "Abrir no Maps",
@@ -152,9 +184,11 @@
       "windowHint": "O check-in abre 1 hora antes do início.",
       "answeredGoing": "Você confirmou presença.",
       "answeredNotGoing": "Você respondeu que não vai.",
+      "fullHint": "As vagas deste evento estão esgotadas.",
       "errors": {
         "failed": "Não foi possível salvar sua resposta. Tente novamente.",
-        "closed": "As confirmações deste evento encerraram quando ele começou."
+        "closed": "As confirmações deste evento encerraram quando ele começou.",
+        "full": "Este evento está lotado."
       }
     },
     "actions": {
@@ -192,6 +226,16 @@
         "label": "Descrição",
         "placeholder": "Conte o que vai acontecer, para quem é e o que levar."
       },
+      "category": {
+        "label": "Categoria",
+        "placeholder": "Ex.: Workshop, Imersão presencial",
+        "helper": "Opcional. Aparece acima do nome, no cartão do evento."
+      },
+      "capacity": {
+        "label": "Vagas",
+        "placeholder": "Sem limite",
+        "helper": "Deixe em branco para não limitar as confirmações."
+      },
       "when": {
         "title": "Quando",
         "startDate": "Data de início",
@@ -211,7 +255,44 @@
       },
       "address": {
         "label": "Endereço",
-        "placeholder": "Rua, número, bairro e cidade"
+        "placeholder": "Rua, número, bairro e cidade",
+        "legacyHint": "Este endereço foi salvo em texto livre. Para o mapa ficar mais preciso, preencha pelo CEP.",
+        "useCep": "Preencher pelo CEP",
+        "keepLegacy": "Manter endereço anterior"
+      },
+      "cep": {
+        "label": "CEP",
+        "placeholder": "00000-000",
+        "searching": "Buscando endereço…",
+        "found": "Endereço encontrado. Confira e informe o número.",
+        "generic": "Este CEP vale para a cidade toda. Informe a rua e o bairro.",
+        "notFound": "CEP não encontrado. Confira os números ou preencha o endereço.",
+        "failed": "Não foi possível buscar o CEP agora. Preencha o endereço."
+      },
+      "street": {
+        "label": "Rua",
+        "placeholder": "Ex.: Avenida Paulista"
+      },
+      "number": {
+        "label": "Número",
+        "placeholder": "Ex.: 1578",
+        "helper": "Sem número? Deixe em branco."
+      },
+      "complement": {
+        "label": "Complemento (opcional)",
+        "placeholder": "Ex.: Sala 12, bloco B"
+      },
+      "district": {
+        "label": "Bairro",
+        "placeholder": "Ex.: Bela Vista"
+      },
+      "city": {
+        "label": "Cidade",
+        "placeholder": "Ex.: São Paulo"
+      },
+      "state": {
+        "label": "UF",
+        "placeholder": "SP"
       },
       "url": {
         "label": "Link da transmissão",
@@ -229,9 +310,15 @@
         "endBeforeStart": "O término precisa ser depois do início.",
         "venueRequired": "Informe o nome do local.",
         "addressRequired": "Informe o endereço.",
+        "cepInvalid": "Informe um CEP com 8 números.",
+        "streetRequired": "Informe a rua.",
+        "cityRequired": "Informe a cidade.",
+        "stateInvalid": "Informe a UF com 2 letras, como SP.",
+        "addressTooLong": "O endereço ficou longo demais. Abrevie a rua, o bairro ou o complemento.",
         "urlRequired": "Informe o link da transmissão.",
         "urlInvalid": "Use um link que comece com https://.",
-        "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra."
+        "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra.",
+        "capacityInvalid": "Informe um número de vagas de 1 a 100.000, ou deixe em branco."
       }
     },
     "confirm": {
@@ -259,6 +346,12 @@
         "body": "O código atual deixa de funcionar. Os check-ins já feitos continuam valendo.",
         "confirm": "Gerar novo código",
         "dismiss": "Manter código"
+      },
+      "removePhoto": {
+        "title": "Remover foto?",
+        "body": "A foto sai do evento para todos os membros.",
+        "confirm": "Remover",
+        "dismiss": "Manter foto"
       }
     },
     "toasts": {
@@ -266,7 +359,37 @@
       "saved": "Alterações salvas.",
       "cancelled": "Evento cancelado.",
       "reactivated": "Evento reativado.",
-      "codeRegenerated": "Novo código gerado."
+      "codeRegenerated": "Novo código gerado.",
+      "photosAdded": "{count, plural, one {Foto adicionada.} other {# fotos adicionadas.}}",
+      "photoRemoved": "Foto removida."
+    },
+    "photos": {
+      "title": "Fotos",
+      "add": "Adicionar fotos",
+      "open": "Abrir foto {index} de {total}",
+      "alt": "Foto {index} do evento {title}",
+      "remove": "Remover foto {index}",
+      "more": "Ver mais fotos",
+      "uploading": "Enviando foto {current} de {total}…",
+      "preparing": "Preparando as fotos…",
+      "empty": {
+        "title": "Nenhuma foto ainda",
+        "body": "As fotos deste evento vão aparecer aqui.",
+        "bodyManager": "Adicione fotos para os membros reverem o evento."
+      },
+      "viewer": {
+        "label": "Fotos do evento {title}",
+        "close": "Fechar",
+        "previous": "Foto anterior",
+        "next": "Próxima foto",
+        "counter": "{index} de {total}"
+      },
+      "errors": {
+        "load": "Não foi possível carregar as fotos.",
+        "loadMore": "Não foi possível carregar mais fotos.",
+        "add": "{count, plural, one {Não foi possível adicionar 1 foto.} other {Não foi possível adicionar # fotos.}} Tente novamente.",
+        "remove": "Não foi possível remover a foto. Tente novamente."
+      }
     },
     "participants": {
       "title": "Participantes",
@@ -313,10 +436,6 @@
       "label": "Adicionar à agenda",
       "google": "Google Agenda",
       "ics": "Arquivo .ics"
-    },
-    "home": {
-      "title": "Próximo evento",
-      "open": "Ver o evento {title}"
     }
   }
 }

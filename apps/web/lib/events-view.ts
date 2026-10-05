@@ -9,6 +9,7 @@ import {
   type RsvpAnswer,
 } from '@rede-social/module-events/contracts';
 import type { getTranslations } from 'next-intl/server';
+import { addressMapsQuery, parseEventAddress } from './event-address';
 
 /**
  * THE formatter module for events (UI-D-203): every date, time and relative label an events surface
@@ -201,13 +202,7 @@ export function eventWhenLine(
   };
 }
 
-/** The poster's top-left pill: a viewer state, the cancellation, or a relative date (UI-D-201). */
-export type EventPillView = {
-  kind: 'cancelled' | 'present' | 'going' | 'relative';
-  label: string;
-};
-
-/** The viewer-state half of the pill rule, shared by the poster and the detail header. */
+/** The viewer-state half of the pill rule, for the detail header. */
 type ViewerState = 'cancelled' | 'present' | 'going' | null;
 
 function viewerState(
@@ -225,62 +220,185 @@ function viewerState(
   return null;
 }
 
-/**
- * The pill, in priority order: `Cancelado` → `Presente` (the viewer checked in, walk-ins included)
- * → `Você vai` (the viewer answered Vou and the event is not past) → a relative date: `Encerrado`
- * (ended), `Agora` (in progress), `Hoje`, `Amanhã`, `Em {n} dias`.
- */
-export function eventPill(
-  event: Pick<
-    EventSummary,
-    'startsAt' | 'endsAt' | 'status' | 'viewerStatus' | 'viewerCheckedInAt'
-  >,
-  timeZone: string,
-  nowMs: number,
-  t: Translator,
-): EventPillView {
-  const state = viewerState(event, nowMs);
-  if (state === 'cancelled') return { kind: 'cancelled', label: t('state.cancelled') };
-  if (state === 'present') return { kind: 'present', label: t('state.present') };
-  if (state === 'going') return { kind: 'going', label: t('state.going') };
-  const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
-  if (phase === 'P3') return { kind: 'relative', label: t('state.ended') };
-  if (phase === 'P2') return { kind: 'relative', label: t('when.now') };
-  const days = tenantDaysUntil(event.startsAt, timeZone, nowMs);
-  if (days <= 0) return { kind: 'relative', label: t('when.today') };
-  if (days === 1) return { kind: 'relative', label: t('when.tomorrow') };
-  return { kind: 'relative', label: t('when.inDays', { count: days }) };
+/** Whether the viewer counts the event as theirs: a "Vou", or a check-in (a walk-in included). */
+function isViewerIn(event: Pick<EventSummary, 'viewerStatus' | 'viewerCheckedInAt'>): boolean {
+  return event.viewerStatus === 'going' || event.viewerCheckedInAt !== null;
 }
 
 /**
- * The D-219 count line: "N confirmados" (going + checked_in) while the event has not ended, "N
- * presentes" (checked_in + walk_in) once it has, and NONE for a cancelled event (UI-D-202). ICU
- * plurals format the number with pt-BR grouping ("1.204 confirmados"); it is never rounded, capped
- * or abbreviated.
+ * "Últimas N vagas" (2026-10-03, the REINE poster): the scarcity line shows from this many spots
+ * left down to one; above it a limited event reads like any other.
  */
-export function eventCountLine(
-  event: Pick<EventSummary, 'startsAt' | 'endsAt' | 'status' | 'confirmedCount' | 'presentCount'>,
+export const EVENT_LOW_SPOTS = 10;
+
+/**
+ * The spots a NEW confirmation could still take: the limit minus D-219's confirmed count
+ * (`going + checked_in`, the very count the guard trigger bounds), never below zero (a limit lowered
+ * under the confirmations reads as full, not as a negative number). Null for an event with no limit.
+ */
+export function spotsLeft(event: Pick<EventSummary, 'capacity' | 'confirmedCount'>): number | null {
+  if (event.capacity === null) return null;
+  return Math.max(0, event.capacity - event.confirmedCount);
+}
+
+/** Whether a member can still answer, by the clock: before the start (D-204), not cancelled. */
+function rsvpOpen(event: Pick<EventSummary, 'startsAt' | 'endsAt' | 'status'>, nowMs: number) {
+  const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
+  return event.status !== 'cancelled' && (phase === 'P0' || phase === 'P1');
+}
+
+/**
+ * The two galleries of `/eventos` (2026-10-03, the REINE prototype's "Meus eventos" and "Outros
+ * eventos"), from the two periods the API pages:
+ * - `mine`: the events the viewer is in that have not ended (a "Vou" or a check-in), then the ended
+ *   ones they checked in to;
+ * - `others`: every other event, the ones that have not ended first, then the ended ones.
+ * A cancelled event stays where the viewer's answer puts it (D-201): a "Vou" keeps it in `mine`,
+ * where its pill says it was cancelled. The order inside each half is the API's (upcoming by start,
+ * past most recent first), never restated.
+ */
+export function splitEventSections(
+  upcoming: readonly EventSummary[],
+  past: readonly EventSummary[],
+): { mine: EventSummary[]; others: EventSummary[] } {
+  const attended = (event: EventSummary) => event.viewerCheckedInAt !== null;
+  return {
+    mine: [...upcoming.filter(isViewerIn), ...past.filter(attended)],
+    others: [
+      ...upcoming.filter((event) => !isViewerIn(event)),
+      ...past.filter((event) => !attended(event)),
+    ],
+  };
+}
+
+/** The tenant-local day of an instant, as a bare number (`28`). */
+const badgeDay = (iso: string, timeZone: string) =>
+  formatter('pt-BR', timeZone, { day: 'numeric' }).format(new Date(iso));
+
+/** The tenant-local month of an instant, short, in capitals and without its dot (`SET`). */
+const badgeMonth = (iso: string, timeZone: string) =>
+  formatter('pt-BR', timeZone, { month: 'short' })
+    .format(new Date(iso))
+    .replace('.', '')
+    .toLocaleUpperCase('pt-BR');
+
+/**
+ * The card's date pill: `28 SET`, or `12-14 SET` for an event that ends on another tenant-local day
+ * of the same month; across two months, the start alone.
+ */
+export function eventDateBadge(
+  event: Pick<EventSummary, 'startsAt' | 'endsAt'>,
+  timeZone: string,
+  t: Translator,
+): string {
+  const month = badgeMonth(event.startsAt, timeZone);
+  const startKey = tenantDayKey(event.startsAt, timeZone);
+  const endKey = tenantDayKey(event.endsAt, timeZone);
+  if (startKey !== endKey && startKey.slice(0, 7) === endKey.slice(0, 7)) {
+    return t('card.dateRange', {
+      start: badgeDay(event.startsAt, timeZone),
+      end: badgeDay(event.endsAt, timeZone),
+      month,
+    });
+  }
+  return t('card.date', { day: badgeDay(event.startsAt, timeZone), month });
+}
+
+/** The card's top-left pill (2026-10-03, the REINE poster). */
+export type EventCardBadge = {
+  kind: 'registered' | 'participated' | 'date' | 'live' | 'ended' | 'cancelled';
+  label: string;
+};
+
+type CardEvent = Pick<
+  EventSummary,
+  'startsAt' | 'endsAt' | 'status' | 'viewerStatus' | 'viewerCheckedInAt'
+>;
+
+/**
+ * The pill, in priority order: `Cancelado` → once ended, `Participou` (the viewer checked in) or
+ * `Encerrado` → `Inscrito` (the viewer is in: a "Vou" or a check-in) → `Agora` (in progress) → the
+ * date (`28 SET`).
+ */
+export function eventCardBadge(
+  event: CardEvent,
+  timeZone: string,
+  nowMs: number,
+  t: Translator,
+): EventCardBadge {
+  if (event.status === 'cancelled') return { kind: 'cancelled', label: t('state.cancelled') };
+  const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
+  if (phase === 'P3') {
+    return event.viewerCheckedInAt !== null
+      ? { kind: 'participated', label: t('card.participated') }
+      : { kind: 'ended', label: t('state.ended') };
+  }
+  if (isViewerIn(event)) return { kind: 'registered', label: t('card.registered') };
+  if (phase === 'P2') return { kind: 'live', label: t('when.now') };
+  return { kind: 'date', label: eventDateBadge(event, timeZone, t) };
+}
+
+/** What the line under the place reads: the card's own state plus the limit and its count. */
+type CardNoteEvent = CardEvent & Pick<EventSummary, 'capacity' | 'confirmedCount'>;
+
+/**
+ * The line under the place, never on a cancelled event:
+ * - on an event the viewer is in that has not ended: `Acontecendo agora` while it runs, `É hoje!`,
+ *   then `Falta 1 dia` / `Faltam N dias`, in tenant-local calendar days;
+ * - (2026-10-03, the REINE rule) on an event that is NOT the viewer's, while answers are still open
+ *   (before the start, D-204) and it has a limit: `Últimas N vagas` (`Última vaga` for one) when
+ *   1 to `EVENT_LOW_SPOTS` spots are left, `Vagas esgotadas` when none is. The viewer's own events
+ *   keep their countdown: their spot is already theirs.
+ * Undefined otherwise: the card then ends at the place.
+ */
+export function eventCardNote(
+  event: CardNoteEvent,
+  timeZone: string,
   nowMs: number,
   t: Translator,
 ): string | undefined {
   if (event.status === 'cancelled') return undefined;
-  return eventPhase(event.startsAt, event.endsAt, nowMs) === 'P3'
-    ? t('count.present', { count: event.presentCount })
-    : t('count.confirmed', { count: event.confirmedCount });
+  const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
+  if (!isViewerIn(event)) {
+    if (!rsvpOpen(event, nowMs)) return undefined;
+    const left = spotsLeft(event);
+    if (left === null || left > EVENT_LOW_SPOTS) return undefined;
+    return left === 0 ? t('card.soldOut') : t('card.spotsLeft', { count: left });
+  }
+  if (phase === 'P3') return undefined;
+  if (phase === 'P2') return t('card.live');
+  const days = tenantDaysUntil(event.startsAt, timeZone, nowMs);
+  return days <= 0 ? t('card.today') : t('card.countdown', { count: days });
+}
+
+/**
+ * The poster's place line (2026-10-03): `Online` for an online event; for an in-person one, the
+ * city of a composed address as the REINE poster prints it (`São Paulo, SP`, `parseEventAddress`),
+ * or the venue name when the address is a legacy free text the parser cannot read.
+ */
+function cardPlace(event: Pick<EventSummary, 'format' | 'venueName' | 'address'>, t: Translator) {
+  if (event.format === 'online') return t('place.online');
+  const parts = event.address ? parseEventAddress(event.address) : null;
+  if (parts) return t('card.city', { city: parts.city, state: parts.state });
+  return event.venueName ?? '';
 }
 
 /** Everything `EventPoster` renders, as finished strings: no instant crosses to the client. */
-export type EventPosterView = {
+export type EventCardView = {
   id: string;
   href: string;
   title: string;
-  overline: string;
-  overlineLive: boolean;
+  /**
+   * The event's own category ("Workshop", 2026-10-03), or, when it has none, the format's words:
+   * "Evento presencial" or "Evento online".
+   */
+  category: string;
+  /** "São Paulo, SP" for a composed address, else the venue name; "Online" online. */
   place: string;
   placeKind: 'venue' | 'online';
-  pill: EventPillView;
-  /** The count line, or undefined for none (cancelled). */
-  meta?: string;
+  badge: EventCardBadge;
+  /** The countdown or the "Últimas N vagas" line, or undefined for none. */
+  note?: string;
   ariaLabel: string;
   coverAssetId: string | null;
   coverVariantWidths: number[];
@@ -288,45 +406,75 @@ export type EventPosterView = {
   grayscale: boolean;
 };
 
-/** `EventSummary` → `EventPosterView`, in the tenant's timezone, from ONE request instant. */
-export function eventPosterView(
+/**
+ * `EventSummary` → `EventCardView`, in the tenant's timezone, from ONE request instant. The card
+ * prints no full date, so its name carries it: the title, the when-line, then the pill and the
+ * countdown as the card shows them (a date pill, or `Agora` beside the in-progress when-line, would
+ * only repeat it).
+ */
+export function eventCardView(
   event: EventSummary,
   { tz, nowMs, t }: { tz: string; nowMs: number; t: Translator },
-): EventPosterView {
-  const when = eventWhenLine(event, tz, nowMs, t);
+): EventCardView {
   const online = event.format === 'online';
-  const cancelled = event.status === 'cancelled';
-  const meta = eventCountLine(event, nowMs, t);
+  const badge = eventCardBadge(event, tz, nowMs, t);
+  const note = eventCardNote(event, tz, nowMs, t);
+  const whenLine = eventWhenLine(event, tz, nowMs, t);
+  const when = [
+    whenLine.text,
+    ...(badge.kind === 'date' || badge.kind === 'live' ? [] : [badge.label]),
+    ...(note === undefined || whenLine.live ? [] : [note]),
+  ].join(', ');
   return {
     id: event.id,
     href: `/eventos/${event.id}`,
     title: event.title,
-    overline: when.text,
-    overlineLive: when.live,
-    place: online ? t('place.online') : (event.venueName ?? ''),
+    category: event.category ?? t(online ? 'card.online' : 'card.inPerson'),
+    place: cardPlace(event, t),
     placeKind: online ? 'online' : 'venue',
-    pill: eventPill(event, tz, nowMs, t),
-    ...(meta === undefined ? {} : { meta }),
-    ariaLabel: t('poster.label', { title: event.title, when: when.text }),
+    badge,
+    ...(note === undefined ? {} : { note }),
+    ariaLabel: t('poster.label', { title: event.title, when }),
     coverAssetId: event.coverAssetId,
     coverVariantWidths: event.coverVariantWidths,
     coverAlt: t('cover.alt', { title: event.title }),
-    grayscale: cancelled,
+    grayscale: event.status === 'cancelled',
+  };
+}
+
+/** The two galleries, finished. */
+export type EventSectionsView = { mine: EventCardView[]; others: EventCardView[] };
+
+/** Both periods → the two galleries' cards (`splitEventSections`, then `eventCardView`). */
+export function eventSectionsView(
+  { upcoming, past }: { upcoming: readonly EventSummary[]; past: readonly EventSummary[] },
+  ctx: { tz: string; nowMs: number; t: Translator },
+): EventSectionsView {
+  const { mine, others } = splitEventSections(upcoming, past);
+  return {
+    mine: mine.map((event) => eventCardView(event, ctx)),
+    others: others.map((event) => eventCardView(event, ctx)),
   };
 }
 
 /**
  * D-203 / UI-D-205: the universal Google Maps search link, which opens the maps app on iOS and
- * Android. The query is the venue and the address joined by a comma, URI-encoded (accents, commas and
- * line breaks included). An outbound, user-tapped link: no embed, no static map, no SDK.
+ * Android. An outbound, user-tapped link: no embed, no static map, no SDK. The query, URI-encoded
+ * (accents, commas and line breaks included), is:
+ * - for an address composed from its parts (PDF item #10, `parseEventAddress`), the canonical
+ *   address alone, `Avenida Paulista, 1578 - Bela Vista, São Paulo - SP, 01310-200`: the most
+ *   precise search, which a venue name in front would only blur;
+ * - for a legacy free text, the venue and the address joined by a comma, byte for byte as before.
  */
 export function mapsHref(venue: string, address: string): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${venue}, ${address}`)}`;
+  const parts = parseEventAddress(address);
+  const query = parts ? addressMapsQuery(parts) : `${venue}, ${address}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 /** One info cell as `EventInfoGrid` renders it. */
 export type EventInfoCellView = {
-  icon: 'date' | 'time' | 'place' | 'online' | 'people';
+  icon: 'date' | 'time' | 'place' | 'online' | 'people' | 'spots';
   label: string;
   value: string;
 };
@@ -344,6 +492,8 @@ export type EventDetailView = {
   headerPill: { tone: 'brand' | 'success' | 'danger'; label: string } | null;
   hero: {
     overline: string;
+    /** The event's own category, the hero's top-left pill (2026-10-03); null draws none. */
+    category: string | null;
     place: string;
     placeKind: 'venue' | 'online';
     coverAssetId: string | null;
@@ -366,6 +516,11 @@ export type EventDetailView = {
   } | null;
   phase: EventPhase;
   cancelled: boolean;
+  /**
+   * 2026-10-03: the event has a limit and no spot is left for a NEW confirmation. The action zone
+   * says so under the RSVP pair to a viewer who is not already going; the database still decides.
+   */
+  full: boolean;
   format: 'in_person' | 'online';
   /** ISO instants for the client's boundary refresh (UI-D-203). */
   checkinOpensAt: string;
@@ -412,8 +567,31 @@ export function checkedInLine(at: string, tz: string, nowMs: number, t: Translat
 }
 
 /**
- * `EventDetail` → `EventDetailView` (UI-D-204): the header pill, the hero, the banner, the four info
- * cells, the location and the action-zone phase, all in the TENANT's timezone from ONE request instant.
+ * The info grid's "Vagas" cell (2026-10-03), only for an event with a limit: while answers are open
+ * (before the start, not cancelled) the spots a new confirmation could take ("Restam 12 de 50",
+ * "Esgotadas (50 vagas)"); afterwards, or when cancelled, the limit alone ("50 vagas"), since nobody
+ * can confirm any more.
+ */
+function spotsCell(
+  event: Pick<EventDetail, 'capacity' | 'confirmedCount' | 'startsAt' | 'endsAt' | 'status'>,
+  nowMs: number,
+  t: Translator,
+): EventInfoCellView | null {
+  const capacity = event.capacity;
+  const left = spotsLeft(event);
+  if (capacity === null || left === null) return null;
+  const value = !rsvpOpen(event, nowMs)
+    ? t('info.spotsLimit', { capacity })
+    : left === 0
+      ? t('info.spotsFull', { capacity })
+      : t('info.spotsLeft', { count: left, capacity });
+  return { icon: 'spots', label: t('info.spots'), value };
+}
+
+/**
+ * `EventDetail` → `EventDetailView` (UI-D-204): the header pill, the hero, the banner, the info
+ * cells (four, plus "Vagas" for an event with a limit), the location and the action-zone phase, all
+ * in the TENANT's timezone from ONE request instant.
  */
 export function eventDetailView(
   event: EventDetail,
@@ -479,6 +657,9 @@ export function eventDetailView(
           value: t('count.confirmed', { count: event.confirmedCount }),
         },
   ];
+  // After the count cell, so `countIndex` (the polite live region) keeps pointing at the count.
+  const spots = spotsCell(event, nowMs, t);
+  if (spots) info.push(spots);
 
   const venue = event.venueName ?? '';
   const address = event.address ?? '';
@@ -499,6 +680,7 @@ export function eventDetailView(
     headerPill,
     hero: {
       overline: heroOverline(event, tz, nowMs, t),
+      category: event.category,
       place: online ? t('place.online') : venue,
       placeKind: online ? 'online' : 'venue',
       coverAssetId: event.coverAssetId,
@@ -512,6 +694,7 @@ export function eventDetailView(
     location,
     phase,
     cancelled,
+    full: spotsLeft(event) === 0,
     format: event.format,
     checkinOpensAt: new Date(
       Date.parse(event.startsAt) - EVENT_CHECKIN_OPENS_BEFORE_MINUTES * 60_000,
@@ -541,6 +724,11 @@ export type EventActionState = {
   phase: EventPhase;
   format: 'in_person' | 'online';
   cancelled: boolean;
+  /**
+   * 2026-10-03: no spot is left for a NEW confirmation (`EventDetailView.full`). Optional so a host
+   * that predates limits draws the zone exactly as before; the server always sends it.
+   */
+  full?: boolean;
   answer: RsvpAnswer | null;
   checkedIn: boolean;
   checkinOpensAt: string;
@@ -554,7 +742,14 @@ export function eventActionState(
   event: Pick<EventDetail, 'id' | 'viewerStatus' | 'viewerCheckedInAt'>,
   view: Pick<
     EventDetailView,
-    'phase' | 'format' | 'cancelled' | 'checkinOpensAt' | 'startsAt' | 'endsAt' | 'startTime'
+    | 'phase'
+    | 'format'
+    | 'cancelled'
+    | 'full'
+    | 'checkinOpensAt'
+    | 'startsAt'
+    | 'endsAt'
+    | 'startTime'
   >,
 ): EventActionState {
   const answer =
@@ -566,121 +761,13 @@ export function eventActionState(
     phase: view.phase,
     format: view.format,
     cancelled: view.cancelled,
+    full: view.full,
     answer,
     checkedIn: event.viewerCheckedInAt !== null,
     checkinOpensAt: view.checkinOpensAt,
     startsAt: view.startsAt,
     endsAt: view.endsAt,
     startTime: view.startTime,
-  };
-}
-
-/* ── 06-08: the Início "Próximo evento" card (UI-D-214, D-202) ─────────────────────────────────── */
-
-/**
- * The card's check-in mode (P1/P2): the in-person ticket link, the online `Entrar` anchor, or none.
- * Only the KIND and the path cross to the renderer; the anchor's markup is the host's.
- */
-export type NextEventCta =
-  | { kind: 'checkin'; href: string }
-  | { kind: 'enter'; href: string }
-  | null;
-
-/** Everything the Início card renders, as finished strings, plus the ISO boundaries to refresh at. */
-export type NextEventCardView = {
-  id: string;
-  href: string;
-  /** The row's accessible name, "Ver o evento {title}". */
-  ariaLabel: string;
-  title: string;
-  /** "Hoje · 19:00" / "Amanhã · 19:00" / "{date} · {time}" / "Acontecendo agora". */
-  overline: string;
-  place: string;
-  placeKind: 'venue' | 'online';
-  /** "N confirmados" (the event is never past here: the read excludes ended events). */
-  meta: string;
-  pill: { tone: 'brand' | 'success'; label: string } | null;
-  coverAssetId: string | null;
-  coverVariantWidths: number[];
-  phase: EventPhase;
-  cta: NextEventCta;
-  /** `checkinOpensAt`, `startsAt`, `endsAt`: the UI-D-203 refresh targets (ISO). */
-  boundaries: [string, string, string];
-};
-
-/**
- * `EventSummary` → the Início card (UI-D-214), in the TENANT's timezone from ONE request instant.
- *
- * - **Overline** (the Início when-line): "Acontecendo agora" while it runs (P2); otherwise, by
- *   tenant-local calendar day, "Hoje · {time}", "Amanhã · {time}" or "{date} · {time}".
- * - **Pill**: "Presente" (success) once checked in, a walk-in included; "Você vai" (brand) after Vou;
- *   none otherwise.
- * - **Check-in mode** (P1/P2, never cancelled): in person, `checkin` → `/eventos/{id}/check-in` until
- *   the member is checked in (then none); online, `enter` → `/eventos/{id}/entrar`, STILL offered
- *   after the check-in so the member can rejoin (UI E05+E09/partial). Before the window: none.
- */
-export function nextEventCardView(
-  event: EventSummary,
-  { tz, nowMs, t }: { tz: string; nowMs: number; t: Translator },
-): NextEventCardView {
-  const online = event.format === 'online';
-  const cancelled = event.status === 'cancelled';
-  const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
-  const time = formatEventTime(event.startsAt, tz);
-
-  let overline: string;
-  if (phase === 'P2') {
-    overline = t('when.live');
-  } else {
-    const days = tenantDaysUntil(event.startsAt, tz, nowMs);
-    overline =
-      days <= 0
-        ? t('when.todayAt', { time })
-        : days === 1
-          ? t('when.tomorrowAt', { time })
-          : t('when.at', { date: formatEventDate(event.startsAt, tz, nowMs), time });
-  }
-
-  const state = viewerState(event, nowMs);
-  const pill =
-    state === 'present'
-      ? { tone: 'success' as const, label: t('state.present') }
-      : state === 'going'
-        ? { tone: 'brand' as const, label: t('state.going') }
-        : null;
-
-  const inWindow = !cancelled && (phase === 'P1' || phase === 'P2');
-  const base = `/eventos/${encodeURIComponent(event.id)}`;
-  const checkedIn = event.viewerCheckedInAt !== null;
-  const cta: NextEventCta = !inWindow
-    ? null
-    : online
-      ? { kind: 'enter', href: `${base}/entrar` }
-      : checkedIn
-        ? null
-        : { kind: 'checkin', href: `${base}/check-in` };
-
-  return {
-    id: event.id,
-    href: base,
-    ariaLabel: t('home.open', { title: event.title }),
-    title: event.title,
-    overline,
-    place: online ? t('place.online') : (event.venueName ?? ''),
-    placeKind: online ? 'online' : 'venue',
-    meta: t('count.confirmed', { count: event.confirmedCount }),
-    pill,
-    coverAssetId: event.coverAssetId,
-    coverVariantWidths: event.coverVariantWidths,
-    phase,
-    cta,
-    boundaries: [
-      new Date(
-        Date.parse(event.startsAt) - EVENT_CHECKIN_OPENS_BEFORE_MINUTES * 60_000,
-      ).toISOString(),
-      event.startsAt,
-      event.endsAt,
-    ],
   };
 }
 

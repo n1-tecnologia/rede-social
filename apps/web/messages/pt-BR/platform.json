@@ -93,8 +93,7 @@
         "slugTaken": "Este slug já está em uso.",
         "hexInvalid": "Use o formato #RRGGBB.",
         "emailInvalid": "Informe um e-mail válido.",
-        "emailInUse": "Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador.",
-        "generic": "Não foi possível criar o tenant. Revise os campos e tente novamente."
+        "emailInUse": "Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador."
       }
     },
     "tenant": {
@@ -123,7 +122,7 @@
       "inviteSent": "Enviado em {date}",
       "inviteAccepted": "Aceito em {date}",
       "inviteExpired": "Convite expirado",
-      "inviteRefused": "Convite recusado — o e-mail já está em uso",
+      "inviteRefused": "Convite recusado: o e-mail já está em uso",
       "send": "Enviar convite",
       "sendPending": "Enviando…",
       "sent": "Convite enviado.",

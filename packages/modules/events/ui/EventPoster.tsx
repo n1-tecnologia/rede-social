@@ -1,38 +1,41 @@
 'use client';
 
-import { chipBase, cn } from '@rede-social/ui';
+import { cn } from '@rede-social/ui';
 import { CalendarX2, Check, MapPin, Video } from 'lucide-react';
 import { EventCover } from './EventCover';
 
 /**
- * The list poster (UI-D-200, UI-D-201, UI-D-202), ported from the prototype's `EventPoster` onto
- * `EventCover geometry="poster"`.
+ * The gallery poster of `/eventos` (2026-10-03), ported from the REINE prototype's `EventPoster`
+ * onto `EventCover geometry="poster"`: the 4/5 photo under its veil, the pill at the top left, and
+ * at the bottom the category, the title, the place and the note (the countdown on an event the
+ * viewer is in, "Últimas N vagas" on a limited one that is not theirs, 2026-10-03).
+ * It fills the width its host gives it (the gallery's 256px slot).
  *
  * Presentational and props-only: it fetches nothing, formats no date, resolves no URL and **ships no
  * words** (PWA-03). The host passes `href`, every label and the already-formatted strings; relative
  * labels are computed on the server from the request instant, so nothing here reads a clock. A plain
  * `<a>`, never `next/link`: a module must not depend on the framework (MOD-02).
  *
- * **The pill (top-left)** carries a state or a RELATIVE date; the absolute date always sits in the
- * overline, so the card states each fact once (UI-D-201). It is `whitespace-nowrap` alone in its row,
- * so it never wraps into the image. The over-media ground is `bg-black/60 backdrop-blur-sm` for every
- * kind in this plan: `Cancelado` is NOT `bg-danger`, because white on the danger red is 3.8:1, below AA
- * for 12px text (UI-D-202). 06-03 adds the viewer's two states: `going` ("Você vai") on the brand
- * fill `bg-brand text-on-brand` (the per-tenant on-colour, never white), and `present` ("Presente") on
- * the same over-media ground with a leading `Check` 12. The host resolves which one applies
- * (`Cancelado` → `Presente` → `Você vai` → relative date).
- *
- * **The meta line** (06-03, UI-D-201) is the count, 12/700 `tabular-nums`: "N confirmados" while
- * upcoming, "N presentes" once past, and ABSENT when the host passes none (a cancelled event). Its
- * absence leaves no gap: the 4/5 box never reflows either way.
+ * **The pill** says where the viewer stands. `registered` ("Inscrito") is the prototype's gold pill:
+ * the tenant's BUTTON fill under its gradient, with the button's text (the brand until a tenant sets
+ * button colours). Every other kind sits on the over-media ground `bg-black/60 backdrop-blur-sm`:
+ * `participated` with a leading `Check`, `cancelled` with `CalendarX2` (never `bg-danger`: white on
+ * the danger red is 3.8:1, UI-D-202), and the date, `Agora` and `Encerrado` bare. Uppercase by CSS,
+ * `whitespace-nowrap` alone in its row, so it never wraps into the photo.
  *
  * **Truncation is CSS only** (`truncate`, `line-clamp-2`): no `.slice()` of any string here, so a
  * multi-byte grapheme is never split and the 4/5 box never reflows.
  */
-export type EventPosterPillKind = 'cancelled' | 'relative' | 'going' | 'present';
+export type EventPosterBadgeKind =
+  | 'registered'
+  | 'participated'
+  | 'date'
+  | 'live'
+  | 'ended'
+  | 'cancelled';
 
-export interface EventPosterPill {
-  kind: EventPosterPillKind;
+export interface EventPosterBadge {
+  kind: EventPosterBadgeKind;
   label: string;
 }
 
@@ -42,44 +45,45 @@ export interface EventPosterProps {
   /** The whole card's accessible name, composed by the host ("{title}, {when}"). */
   ariaLabel: string;
   title: string;
-  /** The when-line: "{date} · {time}", "{start} a {end}", or "Acontecendo agora · até {time}". */
-  overline: string;
-  /** `true` while the event runs: the overline reads in full white instead of white/75. */
-  overlineLive?: boolean;
-  /** The venue name, or the host's "Online". */
+  /** The line above the title: the event's category ("Workshop"), or the host's fallback. */
+  category: string;
+  /** "São Paulo, SP", the venue name, or the host's "Online"; empty draws no place line. */
   place: string;
   placeKind: 'venue' | 'online';
-  pill: EventPosterPill;
+  badge: EventPosterBadge;
+  /** The countdown ("Faltam 4 dias") or the spots line ("Últimas 3 vagas"); undefined for none. */
+  note?: string;
   coverAssetId: string | null;
   coverVariantWidths: readonly number[];
   coverAlt: string;
-  /** The count line ("3 confirmados"), or undefined for none (a cancelled event). */
-  meta?: string;
   /** A cancelled event's photo is desaturated (UI-D-202). */
   grayscale?: boolean;
-  /** The first two posters of a list load eagerly. */
+  /** The first posters of a gallery load eagerly. */
   eager?: boolean;
 }
 
-/** The pill's over-media ground, shared by every kind except `going`. */
-const PILL_GROUND = 'bg-black/60 backdrop-blur-sm text-white';
+const BADGE = 'inline-flex items-center whitespace-nowrap rounded-full uppercase';
 
-/** `going` is the member's own confirmed answer: the tenant's brand fill and its on-colour. */
-const PILL_GOING = 'bg-brand text-on-brand';
+/** "Inscrito": the prototype's gold pill, which is its button's gold. */
+const BADGE_REGISTERED =
+  'bg-button bg-(image:--button-image) px-3 py-1 text-[11px] font-semibold tracking-[0.5px] text-on-button';
+
+/** Every other state, on the over-media ground. */
+const BADGE_GROUND =
+  'gap-1 bg-black/60 px-2 py-0.5 text-[10px] font-bold tracking-wider text-white backdrop-blur-sm';
 
 export function EventPoster({
   href,
   ariaLabel,
   title,
-  overline,
-  overlineLive = false,
+  category,
   place,
   placeKind,
-  pill,
+  badge,
+  note,
   coverAssetId,
   coverVariantWidths,
   coverAlt,
-  meta,
   grayscale = false,
   eager = false,
 }: EventPosterProps) {
@@ -91,47 +95,43 @@ export function EventPoster({
    * (with opacity for the secondary lines) over the gradient.
    */
   const bottom = (onPhoto: boolean) => (
-    <div className="absolute right-3 bottom-3 left-3">
+    <div className="absolute right-3.5 bottom-3 left-3.5">
       <p
-        data-testid="event-poster-overline"
+        data-testid="event-poster-category"
         className={cn(
-          'truncate text-xs font-bold uppercase tracking-wider',
-          onPhoto
-            ? overlineLive
-              ? 'text-white'
-              : 'text-white/75'
-            : overlineLive
-              ? ''
-              : 'opacity-75',
+          'truncate text-[11px] font-bold uppercase tracking-wider',
+          onPhoto ? 'text-white/75' : 'opacity-75',
         )}
       >
-        {overline}
+        {category}
       </p>
       <h3
         data-testid="event-poster-title"
         className={cn(
-          'mt-1 line-clamp-2 text-base font-bold leading-tight',
+          'mt-1 line-clamp-2 text-[15px] font-bold leading-tight',
           onPhoto && 'text-white',
         )}
       >
         {title}
       </h3>
-      <p
-        data-testid="event-poster-place"
-        className={cn(
-          'mt-1 flex min-w-0 items-center gap-1 text-xs font-normal',
-          onPhoto ? 'text-white/75' : 'opacity-75',
-        )}
-      >
-        <PlaceIcon size={12} aria-hidden className="shrink-0" />
-        <span className="min-w-0 truncate">{place}</span>
-      </p>
-      {meta ? (
+      {place ? (
         <p
-          data-testid="event-poster-meta"
-          className={cn('mt-1 text-xs font-bold tabular-nums', onPhoto && 'text-white')}
+          data-testid="event-poster-place"
+          className={cn(
+            'mt-1.5 flex min-w-0 items-center gap-1 text-[11px] font-semibold',
+            onPhoto ? 'text-white/70' : 'opacity-70',
+          )}
         >
-          {meta}
+          <PlaceIcon size={11} aria-hidden className="shrink-0" />
+          <span className="min-w-0 truncate">{place}</span>
+        </p>
+      ) : null}
+      {note ? (
+        <p
+          data-testid="event-poster-note"
+          className={cn('mt-1.5 text-[11px] font-bold tabular-nums', onPhoto && 'text-white')}
+        >
+          {note}
         </p>
       ) : null}
     </div>
@@ -157,12 +157,14 @@ export function EventPoster({
         <span className="absolute top-3 left-3">
           <span
             data-testid="event-poster-pill"
-            data-kind={pill.kind}
-            className={cn(chipBase, pill.kind === 'going' ? PILL_GOING : PILL_GROUND)}
+            data-kind={badge.kind}
+            className={cn(BADGE, badge.kind === 'registered' ? BADGE_REGISTERED : BADGE_GROUND)}
           >
-            {pill.kind === 'cancelled' ? <CalendarX2 size={12} aria-hidden /> : null}
-            {pill.kind === 'present' ? <Check size={12} strokeWidth={3} aria-hidden /> : null}
-            {pill.label}
+            {badge.kind === 'cancelled' ? (
+              <CalendarX2 size={10} strokeWidth={3} aria-hidden />
+            ) : null}
+            {badge.kind === 'participated' ? <Check size={10} strokeWidth={3} aria-hidden /> : null}
+            {badge.label}
           </span>
         </span>
       </EventCover>

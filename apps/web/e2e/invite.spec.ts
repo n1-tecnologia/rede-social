@@ -429,7 +429,7 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     const page = await panel.newPage();
     await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
-    await expect(page.getByText('Convite recusado — o e-mail já está em uso')).toBeVisible();
+    await expect(page.getByText('Convite recusado: o e-mail já está em uso')).toBeVisible();
     await expect(page.getByText('Convite expirado')).toHaveCount(0);
     const resend = page.getByRole('button', { name: 'Enviar convite' });
     await expect(resend).toBeEnabled();

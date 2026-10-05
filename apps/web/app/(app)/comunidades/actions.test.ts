@@ -1,11 +1,23 @@
+import { COMMUNITY_MAX_ORDER } from '@rede-social/module-communities/contracts';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '@/lib/bootstrap';
-import { createCommunity, getCommunities, loadCommunity, updateCommunity } from '@/lib/communities';
+import {
+  createCommunity,
+  getCommunities,
+  getOrderableCommunities,
+  loadCommunity,
+  reorderCommunities,
+  updateCommunity,
+} from '@/lib/communities';
 import {
   archiveCommunityAction,
   createCommunityAction,
   loadMoreCommunitiesAction,
+  loadOrderableCommunitiesAction,
   refreshCommunitiesAction,
+  reorderCommunitiesAction,
   updateCommunityAction,
 } from './actions';
 
@@ -45,6 +57,8 @@ vi.mock('@/lib/communities', () => ({
   updateCommunity: vi.fn(),
   loadCommunity: vi.fn(),
   getCommunities: vi.fn(),
+  getOrderableCommunities: vi.fn(),
+  reorderCommunities: vi.fn(),
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
@@ -66,6 +80,10 @@ beforeEach(() => {
   vi.mocked(updateCommunity).mockReset();
   vi.mocked(loadCommunity).mockReset();
   vi.mocked(getCommunities).mockReset();
+  vi.mocked(getOrderableCommunities).mockReset();
+  vi.mocked(reorderCommunities).mockReset();
+  vi.mocked(revalidatePath).mockClear();
+  vi.mocked(redirect).mockClear();
 });
 
 describe('createCommunityAction — a 404 on a create can only be the cover (05-09)', () => {
@@ -218,5 +236,105 @@ describe('05.1 — the list status is carried through refresh and load-more (Pit
     expect(await refreshCommunitiesAction(forced)).toEqual({ ok: false, code: 'generic' });
     expect(await loadMoreCommunitiesAction('c', forced)).toEqual({ ok: false, code: 'generic' });
     expect(getCommunities).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 2026-10-03 — the reorder mode's two actions: the read that opens it and the write that saves it.
+ *
+ * A server action is a public endpoint, so the claims worth a test are the ones a crafted call or a
+ * later edit could break: a malformed list never reaches the API (the SAME schema the route uses
+ * runs first), `order_stale` is told apart from every other refusal (the list reloads on one and
+ * keeps the draft on the other), the save revalidates `/comunidades` only when it landed, and a
+ * session refusal is still a navigation.
+ */
+describe('2026-10-03 — the reorder actions', () => {
+  const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+  const summary = (id: string, name: string) => ({
+    id,
+    name,
+    slug: name.toLowerCase(),
+    description: '',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    postCount: 0,
+    status: 'active' as const,
+    lastActivityAt: '2026-10-01T10:00:00.000000Z',
+  });
+
+  it('opening: the whole set is answered as-is; past the bound it is too_many; a failure is generic', async () => {
+    const items = [summary(A, 'Avisos'), summary(B, 'Eventos')];
+    vi.mocked(getOrderableCommunities).mockResolvedValueOnce(items);
+    expect(await loadOrderableCommunitiesAction()).toEqual({ ok: true, items });
+
+    vi.mocked(getOrderableCommunities).mockResolvedValueOnce(null);
+    expect(await loadOrderableCommunitiesAction()).toEqual({ ok: false, code: 'too_many' });
+
+    vi.mocked(getOrderableCommunities).mockRejectedValueOnce(
+      new ApiClientError(500, 'INTERNAL', undefined, 'req-3'),
+    );
+    expect(await loadOrderableCommunitiesAction()).toEqual({ ok: false, code: 'generic' });
+    // A read never revalidates.
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('saving: the API’s first page in the new order comes back, and /comunidades is revalidated', async () => {
+    const page = { items: [summary(B, 'Eventos'), summary(A, 'Avisos')], nextCursor: null };
+    vi.mocked(reorderCommunities).mockResolvedValue(page);
+
+    const result = await reorderCommunitiesAction([B, A]);
+
+    expect(result).toEqual({ ok: true, items: page.items, nextCursor: null });
+    expect(reorderCommunities).toHaveBeenCalledWith({ ids: [B, A] });
+    expect(revalidatePath).toHaveBeenCalledWith('/comunidades');
+  });
+
+  it('a malformed list — duplicated, empty, oversized, not uuids, not an array — never reaches the API', async () => {
+    const oversized = Array.from(
+      { length: COMMUNITY_MAX_ORDER + 1 },
+      (_, index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`,
+    );
+    for (const ids of [[A, A], [A, A.toUpperCase()], [], oversized, ['nope'], A, null]) {
+      expect(await reorderCommunitiesAction(ids)).toEqual({ ok: false, code: 'generic' });
+    }
+    expect(reorderCommunities).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('a 409 order_stale is its own code; any other refusal is generic; neither revalidates', async () => {
+    vi.mocked(reorderCommunities).mockRejectedValueOnce(
+      new ApiClientError(409, 'CONFLICT', { community: 'order_stale' }, 'req-4'),
+    );
+    expect(await reorderCommunitiesAction([A, B])).toEqual({ ok: false, code: 'order_stale' });
+
+    // A member forcing the action: the API's 403 is not a navigation, and not "stale" either.
+    vi.mocked(reorderCommunities).mockRejectedValueOnce(
+      new ApiClientError(403, 'FORBIDDEN', undefined, 'req-5'),
+    );
+    expect(await reorderCommunitiesAction([A, B])).toEqual({ ok: false, code: 'generic' });
+
+    // Another code under 409 is not `order_stale`: only the closed code decides.
+    vi.mocked(reorderCommunities).mockRejectedValueOnce(
+      new ApiClientError(409, 'CONFLICT', { community: 'archived' }, 'req-6'),
+    );
+    expect(await reorderCommunitiesAction([A, B])).toEqual({ ok: false, code: 'generic' });
+
+    vi.mocked(reorderCommunities).mockRejectedValueOnce(new Error('network down'));
+    expect(await reorderCommunitiesAction([A, B])).toEqual({ ok: false, code: 'generic' });
+
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('a lost session is a navigation, taken outside the try/catch', async () => {
+    vi.mocked(reorderCommunities).mockRejectedValueOnce(
+      new ApiClientError(401, 'UNAUTHENTICATED', undefined, 'req-7'),
+    );
+
+    await expect(reorderCommunitiesAction([A, B])).rejects.toThrow(
+      'redirect should not be reached in these cases',
+    );
+    expect(redirect).toHaveBeenCalledWith('/entrar');
   });
 });

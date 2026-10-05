@@ -7,10 +7,7 @@ import type {
   ReactNode,
 } from 'react';
 import { cn } from '../cn';
-
-/** Same geometry for Chip and StatusPill (UI-SPEC: rounded-full px-3.5 py-1.5 text-12/700). */
-export const chipBase =
-  'inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors';
+import { chipBase } from './chipBase';
 
 type ChipBaseProps = {
   active?: boolean;
@@ -37,6 +34,10 @@ export type ChipProps = ChipLinkProps | ChipButtonProps | ChipStaticProps;
 /**
  * Filter / segmented-choice chip. Renders `<a>` with `href`, `<button aria-pressed>` with `onClick`,
  * otherwise a plain `<span>`. Active = brand fill, idle = input surface.
+ *
+ * The geometry comes from `chipBase.ts`, shared with StatusPill. It is not declared (nor
+ * re-exported) here: this is a 'use client' module, and a value exported from it reaches a Server
+ * Component as a client-reference function that `cn()` drops (PDF item #9, see chipBase.ts).
  */
 export function Chip(props: ChipProps) {
   const { active = false, children, className } = props;

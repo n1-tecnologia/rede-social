@@ -6,10 +6,17 @@ import type { AnchorHTMLAttributes, ReactNode } from 'react';
  * A `next/link` anchor that looks like `@rede-social/ui` `Button` (server component — the public pages are
  * server-rendered and a navigation needs an `<a>`, so `getByRole('link', { name })` keeps matching).
  * `@rede-social/ui` exposes no class builder for `Button`, so the geometry is mirrored HERE only; the colours
- * are the same tokens (`bg-brand` / `text-on-brand`, `border-border-secondary`, `text-brand`).
+ * are the same tokens (`bg-button` / `text-on-button`, the button colour that defaults to the
+ * primary, with the gradient button's image over it, `none` unless set; `border-border-secondary`,
+ * `text-brand`). A caller className goes through the same `cn` as `Button`'s: its own `bg-*`
+ * colour replaces `bg-button`, but the image and its hover are other utility groups and stay
+ * (`bg-none` alone takes the image, never the hover's), so a caller repainting a brand link adds
+ * `bg-none hover:bg-none` too, or under a gradient the tenant's hovered image covers its hover
+ * colour.
  */
 const variantStyles = {
-  brand: 'bg-brand text-on-brand hover:bg-brand-hover active:opacity-80',
+  brand:
+    'bg-button bg-(image:--button-image) text-on-button hover:bg-button-hover hover:bg-(image:--button-image-hover) active:opacity-80',
   outline: 'border border-border-secondary text-text hover:bg-bg-hover active:bg-bg-tertiary',
   ghost: 'bg-transparent text-brand hover:bg-bg-hover active:bg-bg-tertiary',
 } as const;

@@ -799,13 +799,23 @@ export function CommentsList({
     <section
       aria-label={labels.region}
       data-comments-list
-      // The sheet's own scroll container already pads by 16; the list draws its own gutters, so it
-      // cancels that padding rather than doubling it. The sheet's HEIGHT is never touched (UI-D-18).
-      className={cn('flex flex-col', variant !== 'inline' && '-mx-4 -my-4')}
+      // In a sheet the list fills the primitive's unpadded `scroll="content"` body and shrinks with
+      // it: the sheet's HEIGHT is the primitive's cap, never set here (UI-D-18).
+      className={cn('flex flex-col', variant !== 'inline' && 'min-h-0 flex-auto')}
     >
       {/* E10/partial: the body and the composer are independent — the composer is rendered OUTSIDE
-          the chain above, so a failed or still-loading list never takes the input away. */}
-      <div className={cn(variant !== 'inline' && 'flex-1')}>{body}</div>
+          the chain above, so a failed or still-loading list never takes the input away. In a sheet
+          the rows are the scrollport and the composer is a footer BELOW it (UI-SPEC §Comment
+          contract): it never covers the last row, and nothing scrolls underneath it. Inline, the
+          page scrolls and this wrapper is a plain block. */}
+      <div
+        data-comments-scroll={variant !== 'inline' ? '' : undefined}
+        className={cn(
+          variant !== 'inline' && 'min-h-0 flex-auto overflow-y-auto overscroll-contain',
+        )}
+      >
+        {body}
+      </div>
 
       <CommentInput
         viewerAvatarUrl={viewer.avatarUrl}

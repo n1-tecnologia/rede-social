@@ -4,7 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EventHero } from '../ui/EventHero';
 import { EventInfoGrid } from '../ui/EventInfoGrid';
-import { EventPoster, type EventPosterPillKind } from '../ui/EventPoster';
+import { EventPoster, type EventPosterBadgeKind } from '../ui/EventPoster';
 
 /**
  * 06-03 — the detail page's module pieces and the poster's new states, as observable contract.
@@ -75,18 +75,18 @@ describe('EventInfoGrid (UI-D-204)', () => {
   });
 });
 
-describe('EventPoster — the viewer pills and the meta line (06-03)', () => {
-  function poster(kind: EventPosterPillKind, meta?: string) {
+describe('EventPoster — the gallery pills and the countdown (2026-10-03, the REINE poster)', () => {
+  function poster(kind: EventPosterBadgeKind, note?: string) {
     return render(
       <EventPoster
         href="/eventos/e1"
         ariaLabel="aria"
         title="t"
-        overline="o"
+        category="c"
         place="p"
         placeKind="venue"
-        pill={{ kind, label: `pill-${kind}` }}
-        meta={meta}
+        badge={{ kind, label: `pill-${kind}` }}
+        note={note}
         coverAssetId={ASSET}
         coverVariantWidths={[640]}
         coverAlt="alt"
@@ -94,34 +94,46 @@ describe('EventPoster — the viewer pills and the meta line (06-03)', () => {
     );
   }
 
-  it('4. the four pill kinds: going on the brand fill, the others on the over-media ground', () => {
-    const grounds: Record<EventPosterPillKind, string> = {
-      going: 'bg-brand',
-      present: 'bg-black/60',
-      cancelled: 'bg-black/60',
-      relative: 'bg-black/60',
-    };
-    for (const kind of Object.keys(grounds) as EventPosterPillKind[]) {
-      const { unmount, container } = poster(kind, 'meta');
+  it('4. the six pill kinds: registered on the button colour, the others on the over-media ground', () => {
+    const kinds: EventPosterBadgeKind[] = [
+      'registered',
+      'participated',
+      'date',
+      'live',
+      'ended',
+      'cancelled',
+    ];
+    for (const kind of kinds) {
+      const { unmount, container } = poster(kind, 'note');
       const pill = screen.getByTestId('event-poster-pill');
       expect(pill).toHaveAttribute('data-kind', kind);
       expect(pill).toHaveTextContent(`pill-${kind}`);
-      expect(pill.className).toContain(grounds[kind]);
-      if (kind === 'going') expect(pill.className).toContain('text-on-brand');
-      // `present` carries its Check glyph, `cancelled` its CalendarX2; the others none.
+      const classes = pill.className.split(/\s+/);
+      expect(classes).toEqual(expect.arrayContaining(['uppercase', 'whitespace-nowrap']));
+      if (kind === 'registered') {
+        // The prototype's gold pill is its button's gold: the tenant's button fill and text.
+        expect(classes).toEqual(
+          expect.arrayContaining(['bg-button', 'bg-(image:--button-image)', 'text-on-button']),
+        );
+        expect(classes).not.toContain('bg-black/60');
+      } else {
+        expect(classes).toEqual(expect.arrayContaining(['bg-black/60', 'text-white']));
+        expect(classes).not.toContain('bg-danger');
+      }
+      // `participated` carries its Check glyph, `cancelled` its CalendarX2; the others none.
       expect(container.querySelector('[data-testid="event-poster-pill"] svg') !== null).toBe(
-        kind === 'present' || kind === 'cancelled',
+        kind === 'participated' || kind === 'cancelled',
       );
       unmount();
     }
   });
 
-  it('5. the meta line renders the count, and is ABSENT when the host passes none', () => {
-    poster('relative', '3 confirmados');
-    expect(screen.getByTestId('event-poster-meta')).toHaveTextContent('3 confirmados');
-    expect(screen.getByTestId('event-poster-meta').className).toContain('tabular-nums');
+  it('5. the countdown renders when the host passes one, and is ABSENT otherwise', () => {
+    poster('registered', 'Faltam 4 dias');
+    expect(screen.getByTestId('event-poster-note')).toHaveTextContent('Faltam 4 dias');
+    expect(screen.getByTestId('event-poster-note').className).toContain('tabular-nums');
     cleanup();
-    poster('cancelled');
-    expect(screen.queryByTestId('event-poster-meta')).toBeNull();
+    poster('date');
+    expect(screen.queryByTestId('event-poster-note')).toBeNull();
   });
 });

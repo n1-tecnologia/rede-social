@@ -50,9 +50,14 @@ const SEEDED_UPCOMING = {
   lab: '0e000000-0000-4000-8000-000000000e01',
 };
 
-/** The one member-facing detail key set (D-206, D-207): no URL, no code, no other member. */
+/**
+ * The one member-facing detail key set (D-206, D-207): no URL, no code, no other member. 2026-10-03
+ * adds `category` and `capacity` (and moves `address` into the list item too).
+ */
 const DETAIL_KEYS = [
   'address',
+  'capacity',
+  'category',
   'confirmedCount',
   'coverAssetId',
   'coverVariantWidths',
@@ -371,10 +376,11 @@ describe('events rsvp', () => {
     expect(others.length).toBeGreaterThan(0);
     const text = JSON.stringify(read);
     for (const row of others) expect(text).not.toContain(row.user_id);
-    // The list item has the same member-facing surface minus the detail-only keys.
+    // The list item has the same member-facing surface minus the detail-only keys (the address is
+    // a list key since 2026-10-03: the poster prints the city).
     const item = (await walk('upcoming')).find((entry) => entry.id === SEEDED_UPCOMING.demo);
     expect(Object.keys(item ?? {}).sort()).toEqual(
-      DETAIL_KEYS.filter((key) => !['address', 'description', 'viewerRespondedAt'].includes(key)),
+      DETAIL_KEYS.filter((key) => !['description', 'viewerRespondedAt'].includes(key)),
     );
   });
 

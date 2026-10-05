@@ -90,7 +90,6 @@ export default async function PostPage({
       title={tf('post.pageTitle')}
       backHref="/inicio"
       backLabel={tf('post.back')}
-      stickyTop="0px"
       className="md:static md:px-0"
     />
   );
@@ -99,20 +98,23 @@ export default async function PostPage({
     return (
       <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
         {header}
-        <EmptyState
-          variant="card"
-          icon={CircleAlert}
-          title={te('title')}
-          body={te('body')}
-          action={
-            <a
-              href={`/post/${encodeURIComponent(postId)}`}
-              className="inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover"
-            >
-              {te('retry')}
-            </a>
-          }
-        />
+        {/* A card, so it keeps the page gutter on a phone (the post itself runs edge to edge). */}
+        <div className="px-4 md:px-0">
+          <EmptyState
+            variant="card"
+            icon={CircleAlert}
+            title={te('title')}
+            body={te('body')}
+            action={
+              <a
+                href={`/post/${encodeURIComponent(postId)}`}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover"
+              >
+                {te('retry')}
+              </a>
+            }
+          />
+        </div>
       </div>
     );
   }

@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TenantLogo } from '../ui';
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe('TenantLogo (D-26: logo as-is, display name fallback)', () => {
@@ -68,5 +69,44 @@ describe('TenantLogo (D-26: logo as-is, display name fallback)', () => {
     );
     fireEvent.error(screen.getByRole('img', { name: 'Rede' }));
     expect(home.container).toBeEmptyDOMElement();
+  });
+
+  // 2026-10-02: the TopBar and the rail show the logo ALONE, so a failing logo counts as no logo and
+  // the display name takes its place; a broken glyph or an empty brand slot is never shown.
+  it.each(['topbar', 'rail', 'auth', 'home'] as const)(
+    'the %s logo that fails to load gives way to the display name',
+    (size) => {
+      render(<TenantLogo logoUrl="/broken.png" displayName="Rede Demo" size={size} />);
+      fireEvent.error(screen.getByRole('img', { name: 'Rede Demo' }));
+      expect(screen.getByText('Rede Demo')).toBeInTheDocument();
+      expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    },
+  );
+
+  it('a logo that failed BEFORE hydration (no error event reaches React) gives way too', async () => {
+    // The element's own record: `complete` with no natural width, and decode() rejects.
+    vi.spyOn(HTMLImageElement.prototype, 'decode').mockRejectedValue(new Error('EncodingError'));
+    render(<TenantLogo logoUrl="/broken.png" displayName="Rede Demo" size="topbar" />);
+    expect(await screen.findByText('Rede Demo')).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('an SVG with no intrinsic size is NOT taken for a broken logo (decode() resolves)', async () => {
+    // happy-dom reports every image `complete` with a zero natural width, the SVG-without-size case.
+    render(<TenantLogo logoUrl="/wordmark.svg" displayName="Rede Demo" size="topbar" />);
+    await act(async () => {});
+    expect(screen.getByRole('img', { name: 'Rede Demo' })).toHaveAttribute('src', '/wordmark.svg');
+    expect(screen.queryByText('Rede Demo')).not.toBeInTheDocument();
+  });
+
+  it('a new logo after a failure is tried again (the failure is keyed by src)', () => {
+    const { rerender } = render(
+      <TenantLogo logoUrl="/broken.png" displayName="Rede Demo" size="topbar" />,
+    );
+    fireEvent.error(screen.getByRole('img', { name: 'Rede Demo' }));
+    expect(screen.getByText('Rede Demo')).toBeInTheDocument();
+    rerender(<TenantLogo logoUrl="/novo.png" displayName="Rede Demo" size="topbar" />);
+    expect(screen.getByRole('img', { name: 'Rede Demo' })).toHaveAttribute('src', '/novo.png');
+    expect(screen.queryByText('Rede Demo')).not.toBeInTheDocument();
   });
 });

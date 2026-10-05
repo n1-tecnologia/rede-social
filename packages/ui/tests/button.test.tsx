@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Chip,
+  cn,
   IconButton,
   Input,
   PageHeader,
@@ -19,10 +20,94 @@ describe('Button', () => {
   it('renders the brand variant with the tenant-bound utilities', () => {
     render(<Button variant="brand">Entrar</Button>);
     const button = screen.getByRole('button', { name: 'Entrar' });
-    expect(button.className).toContain('bg-brand');
-    expect(button.className).toContain('text-on-brand');
-    expect(button.className).toContain('hover:bg-brand-hover');
+    // 2026-10-03: the button colour, its own token (the primary unless one is set)...
+    expect(button.className).toContain('bg-button');
+    expect(button.className).toContain('text-on-button');
+    expect(button.className).toContain('hover:bg-button-hover');
+    expect(button.className).not.toMatch(
+      /(^|\s)(bg-brand|text-on-brand|hover:bg-brand-hover)(\s|$)/,
+    );
+    // ...while the focus ring stays on the primary.
+    expect(button.className).toContain('focus-visible:ring-brand');
     expect(button).toHaveAttribute('type', 'button');
+  });
+
+  it('defaults to the brand variant', () => {
+    render(<Button>Continuar</Button>);
+    const button = screen.getByRole('button', { name: 'Continuar' });
+    expect(button.className).toContain('bg-button');
+    expect(button.className).toContain('text-on-button');
+  });
+
+  /**
+   * The gradient button (2026-10-03, second round): an image over the fill, `none` unless the
+   * tenant's buttons are a gradient (tokens.css), so a solid tenant paints exactly as before.
+   */
+  describe('the gradient button image', () => {
+    const IMAGE = 'bg-(image:--button-image)';
+    const IMAGE_HOVER = 'hover:bg-(image:--button-image-hover)';
+
+    it('the brand variant carries the image and its hover next to the fill and its hover', () => {
+      render(<Button>Entrar</Button>);
+      const button = screen.getByRole('button', { name: 'Entrar' });
+      for (const cls of ['bg-button', IMAGE, 'hover:bg-button-hover', IMAGE_HOVER]) {
+        expect(button.classList.contains(cls), cls).toBe(true);
+      }
+    });
+
+    it('only the filled brand variant: the others never paint the image', () => {
+      for (const variant of ['secondary', 'outline', 'ghost', 'danger'] as const) {
+        const { unmount } = render(<Button variant={variant}>Outro</Button>);
+        const button = screen.getByRole('button', { name: 'Outro' });
+        expect(button.className, variant).not.toContain('--button-image');
+        unmount();
+      }
+    });
+
+    it('tailwind-merge keeps the fill and the image together (two utility groups)', () => {
+      expect(cn('bg-button', IMAGE)).toBe(`bg-button ${IMAGE}`);
+      expect(cn('hover:bg-button-hover', IMAGE_HOVER)).toBe(`hover:bg-button-hover ${IMAGE_HOVER}`);
+      // A caller's layout classes leave all four in place.
+      render(<Button className="w-full md:w-auto">Salvar</Button>);
+      const tokens = screen.getByRole('button', { name: 'Salvar' }).className.split(/\s+/);
+      expect(tokens).toEqual(
+        expect.arrayContaining([
+          'bg-button',
+          IMAGE,
+          'hover:bg-button-hover',
+          IMAGE_HOVER,
+          'w-full',
+        ]),
+      );
+    });
+
+    it('a caller colour still replaces the fill as before; bg-none also takes the image away', () => {
+      // As it did before the image, `bg-danger` wins over `bg-button`. The image is another group
+      // and stays (`none` without a gradient, so the caller's colour shows exactly as before).
+      render(<Button className="bg-danger hover:bg-danger/90">Excluir</Button>);
+      const repainted = screen.getByRole('button', { name: 'Excluir' }).className.split(/\s+/);
+      expect(repainted).toEqual(expect.arrayContaining(['bg-danger', 'hover:bg-danger/90']));
+      expect(repainted).not.toContain('bg-button');
+      expect(repainted).not.toContain('hover:bg-button-hover');
+      expect(repainted).toEqual(expect.arrayContaining([IMAGE, IMAGE_HOVER]));
+      // `bg-none` alone takes the image, never its hover (a variant is a group of its own): under
+      // a gradient the tenant's hovered image would still cover `hover:bg-danger/90`. Hence the
+      // docblock's `bg-none hover:bg-none`.
+      render(<Button className="bg-danger bg-none hover:bg-danger/90">Apagar</Button>);
+      const half = screen.getByRole('button', { name: 'Apagar' }).className.split(/\s+/);
+      expect(half).not.toContain(IMAGE);
+      expect(half).toContain(IMAGE_HOVER);
+      // Under a gradient the image would cover that colour: a caller repainting a brand button
+      // passes `bg-none` (and `hover:bg-none`) too, and the image goes.
+      render(
+        <Button className="bg-danger bg-none hover:bg-danger/90 hover:bg-none">Remover</Button>,
+      );
+      const plain = screen.getByRole('button', { name: 'Remover' }).className.split(/\s+/);
+      expect(plain).toEqual(expect.arrayContaining(['bg-danger', 'bg-none', 'hover:bg-none']));
+      expect(plain).not.toContain(IMAGE);
+      expect(plain).not.toContain(IMAGE_HOVER);
+      expect(plain).not.toContain('bg-button');
+    });
   });
 
   it('exposes aria-busy and disables itself while loading', () => {
@@ -175,6 +260,26 @@ describe('PageHeader', () => {
     render(<PageHeader backHref="/membros" backLabel="Voltar" />);
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Voltar' })).toHaveAttribute('href', '/membros');
+  });
+
+  // 2026-10-02: the offset counts from the scroll root's padded content edge (safe-top + 3.5rem),
+  // so -0.5rem pins the header flush under the TopBar (safe-top + 3rem) on any inset. The old default
+  // calc(var(--safe-top) + 3rem) counted both twice: a ~67px band and the header over the content.
+  it('pins flush under the TopBar by default (-0.5rem) and is static from md up', () => {
+    const { container } = render(
+      <PageHeader title="Evento" backHref="/eventos" backLabel="Voltar" />,
+    );
+    const header = container.querySelector('header') as HTMLElement;
+    expect(header.style.top).toBe('-0.5rem');
+    expect(header.className).toContain('sticky');
+    expect(header.className).toContain('md:static');
+  });
+
+  it('an explicit stickyTop still wins over the default', () => {
+    const { container } = render(
+      <PageHeader title="Evento" backHref="/eventos" backLabel="Voltar" stickyTop="0px" />,
+    );
+    expect((container.querySelector('header') as HTMLElement).style.top).toBe('0px');
   });
 });
 

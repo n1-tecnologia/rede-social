@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
-import { storyWriteIssue } from '@/lib/stories';
+import { loadStories, storyWriteIssue } from '@/lib/stories';
 
 /**
  * `storyWriteIssue` is the ONE place the web reads a story-publish refusal out of the API envelope.
@@ -24,6 +25,9 @@ vi.mock('@/lib/env', () => ({
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test-key',
   },
 }));
+
+// The transport, for the strip read below; `storyWriteIssue` never calls it.
+vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
 
 describe('storyWriteIssue — the publish refusal the composer can switch on', () => {
   it('1. a bare 404 is not_found', () => {
@@ -56,5 +60,69 @@ describe('storyWriteIssue — the publish refusal the composer can switch on', (
     expect(storyWriteIssue(new ApiClientError(400, 'VALIDATION_FAILED'))).toBeNull();
     expect(storyWriteIssue(new Error('boom'))).toBeNull();
     expect(storyWriteIssue('archived')).toBeNull();
+  });
+});
+
+/**
+ * #2b (2026-10-03): the strip's page now carries each story's `authorAvatarUrl` — the face the
+ * tenant circle wears — and the web reads it through the SAME strict contract the API answers with.
+ * What the web side must guarantee: the stable `/v1/media/…` path arrives intact, an answer carrying
+ * anything else is refused as a whole (a failed strip read is `null`, the row's own posture — never a
+ * foreign URL inside an `<img>`), and a page from an API that predates the field still renders.
+ */
+describe('loadStories — the author photo crosses the strict contract (#2b)', () => {
+  const PHOTO = '/v1/media/0b000000-0000-4000-8000-0000000000a1/w128';
+
+  function story(extra: Record<string, unknown> = {}) {
+    return {
+      id: '0d000000-0000-4000-8000-0000000000d1',
+      authorUserId: '0a000000-0000-4000-8000-000000000001',
+      mediaAssetId: '0b000000-0000-4000-8000-000000000001',
+      mediaKind: 'image',
+      mediaVariantWidths: [640, 1080],
+      mediaStatus: 'ready',
+      mediaFailureReason: null,
+      caption: '',
+      publishedAt: '2026-10-03T12:00:00.000000Z',
+      expiresAt: '2026-10-04T12:00:00.000000Z',
+      isActive: true,
+      durationSeconds: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewerLiked: false,
+      highlightCount: 0,
+      viewerSeen: false,
+      ...extra,
+    };
+  }
+
+  function answer(items: unknown[]) {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ items, nextCursor: null }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  }
+
+  it('5. the stable photo path and a null photo both arrive intact', async () => {
+    answer([story({ authorAvatarUrl: PHOTO }), story({ authorAvatarUrl: null })]);
+    const page = await loadStories();
+    expect(page?.items.map((item) => item.authorAvatarUrl)).toEqual([PHOTO, null]);
+  });
+
+  it('6. an answer carrying a foreign photo URL is refused WHOLE — the strip read is null, nothing reaches an <img>', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    answer([story({ authorAvatarUrl: 'https://cdn.example/face.jpg' })]);
+    await expect(loadStories()).resolves.toBeNull();
+    expect(log).toHaveBeenCalledWith('stories.list_failed', expect.anything());
+    log.mockRestore();
+  });
+
+  it('7. a page from an API that predates the field renders, every story photo-less', async () => {
+    answer([story()]);
+    const page = await loadStories();
+    expect(page?.items).toHaveLength(1);
+    expect(page?.items[0]?.authorAvatarUrl).toBeNull();
   });
 });

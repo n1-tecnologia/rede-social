@@ -388,6 +388,96 @@ describe('event.rsvp — after commit, only on a change, the exact six keys (06-
       message: 'Failed query',
     });
   });
+
+  it('9b. event_full (2026-10-03): a new Vou is 409 event_full; a member already going is unchanged; a checked-in one is locked', async () => {
+    const full = () => refusal('23514', 'event_attendances_capacity', 'event_full');
+
+    // The guard refused the upsert; the follow-up read of the caller's OWN row finds nothing.
+    script = [full(), []];
+    const ctx = context();
+    await expect(rsvpEvent(ctx, EVENT_ID, { answer: 'going' })).rejects.toMatchObject({
+      status: 409,
+      code: 'CONFLICT',
+      details: { event: 'event_full' },
+    });
+    expect(statements).toHaveLength(2);
+    expect(statements[1]).toContain('from event_attendances');
+    expect(statements[1]).toContain(USER_ID);
+    expect(ctx.events).toHaveLength(0);
+
+    // A Não vou moving to Vou on a full event is refused the same way.
+    script = [full(), [{ status: 'not_going' }]];
+    await expect(rsvpEvent(context(), EVENT_ID, { answer: 'going' })).rejects.toMatchObject({
+      details: { event: 'event_full' },
+    });
+
+    // Already going, on an event whose limit was lowered under its confirmed count: the repeat
+    // answer it always was (200, nothing written, nothing emitted).
+    script = [full(), [{ status: 'going' }]];
+    const repeat = context();
+    await expect(rsvpEvent(repeat, EVENT_ID, { answer: 'going' })).resolves.toEqual({
+      status: 'going',
+    });
+    await flush(repeat);
+    expect(repeat.events).toHaveLength(0);
+    expect(rsvps).toHaveLength(0);
+
+    // Checked in (or walked in): the lock it is on any event.
+    for (const status of ['checked_in', 'walk_in']) {
+      script = [full(), [{ status }]];
+      await expect(rsvpEvent(context(), EVENT_ID, { answer: 'going' })).rejects.toMatchObject({
+        status: 409,
+        details: { event: 'attendance_locked' },
+      });
+    }
+  });
+});
+
+describe('2026-10-03 — category and capacity on the writes, the poster keys on the read-back', () => {
+  it('9c. create binds the trimmed category (blank stored as null) and the capacity, and maps them back', async () => {
+    script = [
+      [{ id: EVENT_ID }],
+      [],
+      [{ ...row, category: 'Workshop', capacity: 30, address: null }],
+    ];
+    const created = await createEvent(context(), {
+      ...input,
+      category: '  Workshop ',
+      capacity: 30,
+    });
+    expect(created).toMatchObject({ category: 'Workshop', capacity: 30, address: null });
+    expect(statements[0]).toContain('category, capacity');
+    expect(statements[0]).toContain('"Workshop"');
+    expect(statements[0]).not.toContain('  Workshop ');
+    expect(statements[0]).toContain('30');
+
+    // A blank category and an absent capacity are both stored as null, never '' or 0.
+    statements.length = 0;
+    script = [[{ id: EVENT_ID }], [], [row]];
+    const plain = await createEvent(context(), { ...input, category: '   ' });
+    expect(plain).toMatchObject({ category: null, capacity: null, address: null });
+    expect(statements[0]).not.toContain('"   "');
+  });
+
+  it('9d. the replacement writes category and capacity in the same guarded statement', async () => {
+    const locked = [{ cover_asset_id: null, starts_at: STARTS_AT, ends_at: ENDS_AT }];
+    script = [
+      locked,
+      [{ starts_at: STARTS_AT, ends_at: ENDS_AT }],
+      [],
+      [{ ...row, category: 'Imersão', capacity: 12 }],
+    ];
+    const updated = await updateEvent(context(), EVENT_ID, {
+      ...input,
+      category: 'Imersão',
+      capacity: 12,
+    });
+    expect(updated).toMatchObject({ category: 'Imersão', capacity: 12 });
+    expect(statements[1]).toContain('category = n.category');
+    expect(statements[1]).toContain('capacity = n.capacity');
+    // Both are in the `is distinct from` tuple, so a limit-only change is a change.
+    expect(statements[1]).toMatch(/e\.category, e\.capacity[\s\S]*is distinct from/);
+  });
 });
 
 describe('06-04 — event.updated, event.cancelled, event.reactivated: exact keys, once per change', () => {

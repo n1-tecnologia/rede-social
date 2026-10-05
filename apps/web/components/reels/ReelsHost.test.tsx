@@ -699,17 +699,25 @@ describe('ReelsHost — the empty state and the lane row (UI-D-94, D-120)', () =
     renderHost({ initial: { items: [], nextCursor: null }, canPost: true });
     const cta = screen.getByRole('link', { name: f('empty.cta') });
     expect(cta.getAttribute('href')).toBe('/criar');
-    // The shared Button geometry (LinkButton brand/md), with the white ring on the dark surface.
+    // The shared Button geometry (LinkButton brand/md: the button colour, 2026-10-03, and the
+    // gradient button's image over it), with the white ring on the dark surface.
+    // Exact class tokens (review F2): a substring 'bg-button' is also inside 'hover:bg-button-hover'.
     for (const cls of [
-      'bg-brand',
-      'text-on-brand',
+      'bg-button',
+      'bg-(image:--button-image)',
+      'text-on-button',
+      'hover:bg-button-hover',
+      'hover:bg-(image:--button-image-hover)',
       'rounded-xl',
       'h-11',
       'px-5',
       'focus-visible:ring-white',
       'focus-visible:ring-offset-0',
     ]) {
-      expect(cta.className).toContain(cls);
+      expect(cta.classList.contains(cls)).toBe(true);
+    }
+    for (const cls of ['bg-brand', 'text-on-brand', 'hover:bg-brand-hover']) {
+      expect(cta.classList.contains(cls)).toBe(false);
     }
     expect(cta.className).not.toContain('focus-visible:ring-brand');
   });

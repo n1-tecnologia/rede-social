@@ -193,6 +193,8 @@ describe('StoryComposer — the two-state publish screen (UI-D-39, D-81)', () =>
 
   it('3. after a pick the screen becomes the story FRAME: object-contain media + caption + Publicar', async () => {
     const { container } = composer();
+    // 2026-10-02: the picker screen is a task screen, so it hides only the shell's floating nav…
+    expect(screen.getByTestId('story-composer').getAttribute('data-shell-hide')).toBe('nav');
     await completeUpload('image', 'a1111111-1111-4111-8111-111111111111');
 
     expect(container.querySelector('[data-testid="story-preview"]')?.className).toContain(
@@ -202,6 +204,8 @@ describe('StoryComposer — the two-state publish screen (UI-D-39, D-81)', () =>
     expect(screen.getByRole('button', { name: lookup(catalog, 'publish.submit') })).toBeTruthy();
     // The pickers are gone: there is one thing to do on this screen now.
     expect(screen.queryAllByText(lookup(catalog, 'publish.pickPhoto'))).toHaveLength(0);
+    // …and the full-screen frame hides the TopBar too, so neither covers the close or Publicar.
+    expect(screen.getByTestId('story-composer').getAttribute('data-shell-hide')).toBe('chrome');
   });
 
   it('4. publishing an image sends the asset id and the caption, then leaves for /inicio', async () => {

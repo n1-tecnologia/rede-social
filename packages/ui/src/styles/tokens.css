@@ -123,7 +123,23 @@
    custom properties into the `style` attribute). The dark pair applies under or on a dark scope; a
    LIGHT frame nested in a dark page ([data-brand-scope][data-theme="light"]) wins by source order
    against the equal-specificity dark descendant rule. `dark:` utilities inside such a light frame
-   still match the @custom-variant descendant rule — cosmetic, accepted. */
+   still match the @custom-variant descendant rule — cosmetic, accepted.
+   The filled action button has its own colour since 2026-10-03, apart from the primary that chips,
+   switches, tabs and links keep: `--button-fill`, `--button-ink` and `--button-hover` (read by
+   `bg-button`, `text-on-button`, `hover:bg-button-hover`), declared in every rule that declares
+   `--brand-accent` (the three below and the device screen's, at the end of the file). Each one
+   reads its theme's raw key first (`--button-fill-light`, `--button-ink-dark`, ...) and falls back
+   to the brand value, so with no raw key a button paints exactly as `bg-brand` did, its hover
+   included (the light primary's shade, in dark too). No raw key is ever declared in this file: only
+   an inline style sets them (the app's brand scope from the tenant's saved look since 2026-10-03,
+   the wizard's device screen and the BrandPreview frames), because a default here would substitute
+   where it is declared and freeze every tenant's button on the neutral brand.
+   A gradient button lays an image over that fill: `--button-image` and `--button-image-hover`
+   (read by `bg-(image:--button-image)` and `hover:bg-(image:--button-image-hover)` on every filled
+   button), declared next to the trio in the same rules and read the same way, from
+   `--button-image-light`, `--button-image-hover-dark`, ... Their fallback is `none`, since no
+   image is the default: without a raw key nothing covers the fill and every button paints as
+   before. The gradient style sets the image keys of both themes at once, the solid style none. */
 :root,
 [data-brand-root],
 [data-brand-scope],
@@ -133,8 +149,14 @@
   --brand-gradient: linear-gradient(135deg, color-mix(in oklch, var(--brand-primary), black 15%), var(--brand-primary), var(--brand-secondary));
   --brand-accent: var(--brand-primary);
   --brand-on-accent: var(--brand-on-primary);
+  --button-fill: var(--button-fill-light, var(--brand-accent));
+  --button-ink: var(--button-ink-light, var(--brand-on-accent));
+  --button-hover: var(--button-hover-light, var(--brand-primary-hover));
+  --button-image: var(--button-image-light, none);
+  --button-image-hover: var(--button-image-hover-light, none);
 }
-/* the accent pair flips to the dark-surface derivation (D-41) */
+/* the accent pair flips to the dark-surface derivation (D-41), and the button trio and its image
+   read the dark raw keys; the trio's default hover stays today's, the light primary's shade */
 [data-theme="dark"],
 [data-theme="dark"] [data-brand-root],
 [data-theme="dark"] [data-brand-scope],
@@ -143,12 +165,273 @@
   --brand-accent: var(--brand-primary-dark);
   --brand-on-accent: var(--brand-on-primary-dark);
   --brand-primary-soft: color-mix(in oklch, var(--brand-primary-dark), var(--theme-bg) 80%);
+  --button-fill: var(--button-fill-dark, var(--brand-accent));
+  --button-ink: var(--button-ink-dark, var(--brand-on-accent));
+  --button-hover: var(--button-hover-dark, var(--brand-primary-hover));
+  --button-image: var(--button-image-dark, none);
+  --button-image-hover: var(--button-image-hover-dark, none);
 }
-/* a light brand scope nested in a dark page: back to the light pair (source order wins the tie) */
+/* a light brand scope nested in a dark page: back to the light pair and the light button trio and
+   image (source order wins the tie) */
 [data-brand-scope][data-theme="light"] {
   --brand-accent: var(--brand-primary);
   --brand-on-accent: var(--brand-on-primary);
   --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  --button-fill: var(--button-fill-light, var(--brand-accent));
+  --button-ink: var(--button-ink-light, var(--brand-on-accent));
+  --button-hover: var(--button-hover-light, var(--brand-primary-hover));
+  --button-image: var(--button-image-light, none);
+  --button-image-hover: var(--button-image-hover-light, none);
+}
+
+/* ===== Layer 1c — the tenant's light ground tone (a fixed palette, light theme only) =====
+   The tenant picks one of eight PREDEFINED tones, never a free colour, so the choice travels as an
+   id on a scope (`data-bg-tone`, the ids of apps/web/lib/bg-tone.ts), never as a hex: this file
+   stays the only home of the literals. Without the attribute nothing below matches, and no scope
+   ever carries "cinza" (today's gray; its row is there for the picker's swatch), so a screen
+   without a tone renders exactly as before.
+   Each row declares the raw tone on ANY element carrying the key, whatever its theme, so a picker
+   swatch paints itself with `bg-[var(--tone-ground)]` on either panel theme. A tone is a whole
+   background family, as in the reference (REINE's ivory theme), and the rebinding then repaints
+   every light background with it: the ground; the raised surfaces, bg-secondary and card (the top
+   bar, the cards, the stories band), both from `--tone-surface`; the input and tertiary fills
+   (fields, chips, the switch track, neutral status); the card hover; the floating glass bar
+   (`--tone-glass`, the surface at the light block's 0.82 alpha) and the sheet handle.
+   What it leaves as it is, and why: none of it is the background. The translucent tints drawn
+   from the navy ink (hover, active, border, border-secondary, divider, chip, the bar's rims and
+   shadow) are composited over whatever lies under them, so they already sit on the tone; and
+   every text ink stays the theme's, because the inks have controls of their own (the wizard's
+   title and app name colours) and the body inks hold on every family (measured below). The
+   reference also draws its lines, fills and inks in its chocolate: a choice apart from the ground.
+   Recipe, in OKLCH and anchored on the reference's family. Amarelado IS the reference, value for
+   value: ground #f5efe5, surface #fffcf6, input #efe7da, tertiary #ede4d6, card hover #f9f3e9,
+   handle #d8ccbb. Every other tone keeps its ground (L about 0.954, in its own hue) and takes each
+   layer at the reference's lightness offset from its ground and the reference's ratio of chroma to
+   the ground's, in the tone's own hue: surface L+0.0377 at 0.577 of the chroma, input L-0.0233 at
+   1.313, tertiary L-0.0319 at 1.429, card hover L+0.0120 at 0.997, handle L-0.1037 at 1.806. This
+   close to white, sRGB holds less chroma in most hues than in the reference's yellow: where it
+   cannot hold the ratio (the surfaces of laranjado, avermelhado, lilas and azulado, the card
+   hovers of laranjado, avermelhado and azulado) the colour keeps its lightness and hue and takes
+   the most chroma sRGB holds there. On the reference's own ground the recipe lands within one
+   8-bit step of it (surface #fffcf7, handle #d7ccbb: the hue drift of its near-white layers), so
+   amarelado declares the reference itself. Cinza keeps today's gray family, white surfaces and all.
+   Measured WCAG ratios on every toned ground, surface, input and tertiary fill: text #16233b
+   12.29:1 at worst, #51617c 4.90:1 at worst (both on the avermelhado tertiary); a surface stands
+   1.11 to 1.12:1 off its ground (white on the gray, 1.07:1). The tertiary ink #8595ad
+   (placeholders, captions) lands on 2.64 to 2.68:1 on the toned grounds, 2.95 to 2.98 on their
+   surfaces, 2.46 to 2.51 on their inputs and 2.38 to 2.44 on their tertiary fills, against the
+   gray's 2.83 / 3.04 / 2.71 / 2.61: it is under 3:1 on the gray already (3.04 on white only). The
+   tones do not touch it; a darker ink such as #7b8ba3 would reach 3:1 on every toned ground and
+   surface (3.00 and 3.36 at worst), not on the inputs (2.79) nor the tertiary fills (2.71); every
+   light layer takes about #758399 (3.01 at worst).
+   Matching. The first selector takes a toned element outside any dark scope (an app root under a
+   light document); the second one a toned element that declares light itself (the wizard's device
+   screen, the BrandPreview light frame), even inside a dark panel. A toned element on or under a
+   dark theme attribute does not match, so the dark theme is untouched. Specificity (0,2,0) beats
+   the light block's (0,1,0) on the same element; the Tailwind aliases read the variables where
+   they are used, so the whole subtree follows, and a dark scope nested inside it (the media nav,
+   the reels stage) re-declares its own neutrals. The fallbacks are today's light values, so an
+   unknown id keeps the gray family, white surfaces and all. */
+[data-bg-tone="cinza"] {
+  --tone-ground: #f5f7fb;
+  --tone-surface: #ffffff;
+  --tone-input: #eef2f9;
+  --tone-tertiary: #e9eef7;
+  --tone-card-hover: #f8fafd;
+  --tone-glass: rgba(255, 255, 255, 0.82);
+  --tone-handle: #c3cede;
+}
+[data-bg-tone="amarelado"] {
+  --tone-ground: #f5efe5;
+  --tone-surface: #fffcf6;
+  --tone-input: #efe7da;
+  --tone-tertiary: #ede4d6;
+  --tone-card-hover: #f9f3e9;
+  --tone-glass: rgba(255, 252, 246, 0.82);
+  --tone-handle: #d8ccbb;
+}
+[data-bg-tone="laranjado"] {
+  --tone-ground: #feece2;
+  --tone-surface: #fffcfa;
+  --tone-input: #fae3d6;
+  --tone-tertiary: #f9e0d2;
+  --tone-card-hover: #fff1e9;
+  --tone-glass: rgba(255, 252, 250, 0.82);
+  --tone-handle: #e6c7b5;
+}
+[data-bg-tone="avermelhado"] {
+  --tone-ground: #fcebec;
+  --tone-surface: #fffbfb;
+  --tone-input: #f8e2e3;
+  --tone-tertiary: #f6dee0;
+  --tone-card-hover: #ffeff0;
+  --tone-glass: rgba(255, 251, 251, 0.82);
+  --tone-handle: #e3c5c7;
+}
+[data-bg-tone="lilas"] {
+  --tone-ground: #f2edf9;
+  --tone-surface: #fdfbff;
+  --tone-input: #ebe5f4;
+  --tone-tertiary: #e9e1f2;
+  --tone-card-hover: #f6f1fd;
+  --tone-glass: rgba(253, 251, 255, 0.82);
+  --tone-handle: #d2c9de;
+}
+[data-bg-tone="azulado"] {
+  --tone-ground: #e7f1fc;
+  --tone-surface: #fafcff;
+  --tone-input: #ddeaf8;
+  --tone-tertiary: #d9e7f7;
+  --tone-card-hover: #ecf5ff;
+  --tone-glass: rgba(250, 252, 255, 0.82);
+  --tone-handle: #bed0e3;
+}
+[data-bg-tone="agua"] {
+  --tone-ground: #e3f4f3;
+  --tone-surface: #f5fffe;
+  --tone-input: #d7eeec;
+  --tone-tertiary: #d3ebea;
+  --tone-card-hover: #e7f8f7;
+  --tone-glass: rgba(245, 255, 254, 0.82);
+  --tone-handle: #b7d5d3;
+}
+[data-bg-tone="esverdeado"] {
+  --tone-ground: #eaf3e8;
+  --tone-surface: #f9fef8;
+  --tone-input: #e0ecde;
+  --tone-tertiary: #ddeada;
+  --tone-card-hover: #eef7ec;
+  --tone-glass: rgba(249, 254, 248, 0.82);
+  --tone-handle: #c4d3c0;
+}
+[data-bg-tone]:not([data-theme="dark"], [data-theme="dark"] *),
+[data-bg-tone][data-theme="light"] {
+  --theme-bg: var(--tone-ground, #f5f7fb);
+  --theme-bg-secondary: var(--tone-surface, #ffffff);
+  --theme-card: var(--tone-surface, #ffffff);
+  --theme-bg-input: var(--tone-input, #eef2f9);
+  --theme-bg-tertiary: var(--tone-tertiary, #e9eef7);
+  --theme-card-hover: var(--tone-card-hover, #f8fafd);
+  --theme-glass-bar: var(--tone-glass, rgba(255, 255, 255, 0.82));
+  --theme-handle: var(--tone-handle, #c3cede);
+}
+
+/* ===== Layer 1d — the tenant's dark ground tone (a fixed palette, dark theme only) =====
+   The dark twin of Layer 1c, keyed by its own id (`data-dark-tone`): eight predefined tones that
+   mirror the light ones, the first of them ("grafite") today's dark family, which no scope ever
+   carries (its row is there for the swatch).
+   Recipe: every tone keeps the grafite LIGHTNESS of each layer (OKLCH L 0.179 ground, 0.227
+   secondary, 0.2815 tertiary, 0.393 handle) and takes its own hue, at a chroma of 0.026 to 0.036
+   on the ground plus 0.003 / 0.006 / 0.008 on the upper layers (azul-noite sits at the top of that
+   range, or it would read as the bluish grafite). Measured WCAG ratios on ground, secondary and
+   tertiary: --theme-text #f2f5fa 13.09:1 at worst (the petroleo tertiary; grafite 13.31),
+   --theme-text-secondary #a6b1c4 6.61:1 at worst (grafite 6.72); the tertiary ink #64718a lands
+   on 2.91 to 3.86, as on the grafite (2.96 to 3.83).
+   A dark theme stacks OPAQUE surfaces, so this rebinding also takes the raised ones: the ground;
+   bg-secondary and card (the secondary); tertiary, input and card hover (the tertiary, as in the
+   dark block); the glass bar (the secondary at the dark block's 0.82 alpha) and the handle.
+   Matching mirrors Layer 1c, with dark as the side that must be declared (no attribute anywhere
+   reads light): a toned element that declares dark itself (the device screen, the BrandPreview
+   dark frame), or one under a dark scope with no light scope on itself or above it. So a toned
+   element whose nearest theme is light never matches, nested in a dark page or not, and the light
+   theme is untouched; the fallbacks keep an unknown id grafite. */
+[data-dark-tone="grafite"] {
+  --dtone-ground: #0f1118;
+  --dtone-secondary: #181c26;
+  --dtone-tertiary: #232937;
+  --dtone-glass: rgba(24, 28, 38, 0.82);
+  --dtone-handle: #3c4658;
+}
+[data-dark-tone="cafe"] {
+  --dtone-ground: #181004;
+  --dtone-secondary: #241b0c;
+  --dtone-tertiary: #322717;
+  --dtone-glass: rgba(36, 27, 12, 0.82);
+  --dtone-handle: #504431;
+}
+[data-dark-tone="terracota"] {
+  --dtone-ground: #1d0c06;
+  --dtone-secondary: #2a170e;
+  --dtone-tertiary: #39231a;
+  --dtone-glass: rgba(42, 23, 14, 0.82);
+  --dtone-handle: #583f34;
+}
+[data-dark-tone="vinho"] {
+  --dtone-ground: #1c0c10;
+  --dtone-secondary: #29161a;
+  --dtone-tertiary: #382227;
+  --dtone-glass: rgba(41, 22, 26, 0.82);
+  --dtone-handle: #573e43;
+}
+[data-dark-tone="berinjela"] {
+  --dtone-ground: #180d19;
+  --dtone-secondary: #231725;
+  --dtone-tertiary: #322334;
+  --dtone-glass: rgba(35, 23, 37, 0.82);
+  --dtone-handle: #503f52;
+}
+[data-dark-tone="azul-noite"] {
+  --dtone-ground: #061221;
+  --dtone-secondary: #0f1d2e;
+  --dtone-tertiary: #1b2a3e;
+  --dtone-glass: rgba(15, 29, 46, 0.82);
+  --dtone-handle: #36475d;
+}
+[data-dark-tone="petroleo"] {
+  --dtone-ground: #021419;
+  --dtone-secondary: #082025;
+  --dtone-tertiary: #132e34;
+  --dtone-glass: rgba(8, 32, 37, 0.82);
+  --dtone-handle: #2e4b52;
+}
+[data-dark-tone="musgo"] {
+  --dtone-ground: #0e1407;
+  --dtone-secondary: #181f0f;
+  --dtone-tertiary: #242c1b;
+  --dtone-glass: rgba(24, 31, 15, 0.82);
+  --dtone-handle: #404935;
+}
+[data-dark-tone][data-theme="dark"],
+[data-theme="dark"] [data-dark-tone]:not([data-theme="light"], [data-theme="light"] *) {
+  --theme-bg: var(--dtone-ground, #0f1118);
+  --theme-bg-secondary: var(--dtone-secondary, #181c26);
+  --theme-card: var(--dtone-secondary, #181c26);
+  --theme-bg-tertiary: var(--dtone-tertiary, #232937);
+  --theme-bg-input: var(--dtone-tertiary, #232937);
+  --theme-card-hover: var(--dtone-tertiary, #232937);
+  --theme-glass-bar: var(--dtone-glass, rgba(24, 28, 38, 0.82));
+  --theme-handle: var(--dtone-handle, #3c4658);
+}
+
+/* ===== Layer 1e — the dark theme's own primary and secondary (the tenant's saved look) =====
+   Since 2026-10-03 a tenant may give the dark theme a primary and a secondary of its own (the
+   brand contract's `look.darkColors`). The app's brand scope (the AppShell root, the logged-out
+   pages' <main>; apps/web `appBrandLook`) then carries, INLINE and for both themes at once:
+   `--brand-primary-dark` / `--brand-on-primary-dark` set to that primary and the ink that reads on
+   it (the accent the dark theme already paints, Layer 1b) with the `data-dark-primary` marker, and
+   `--brand-secondary-dark` with the `data-dark-secondary` marker. The theme flips on the client
+   (`<html data-theme>`, with no new render), so the swap has to happen here: under a dark theme the
+   marked scope takes that pair for its `--brand-primary`, `--brand-on-primary` and
+   `--brand-secondary` too, exactly as the wizard's phone does in dark (`previewScreenLook`). That is
+   what the dark theme reads through the brand gradient (the coverless community and event cards,
+   the story discs, with `--brand-on-primary` as their ink) and the hover shade, which Layer 1b
+   derives from those keys ON THIS ELEMENT; without the swap they would pair the dark accent with
+   the LIGHT primary's hue.
+   `!important` on purpose, and only here: the five `--brand-*` keys are inline on the same element
+   (`brandStyleVars`), and an inline declaration beats any normal rule; an important one is the only
+   way for the stylesheet to choose per theme. No cycle: each key reads a DIFFERENT, inline one. A
+   scope without the marker (every tenant without its own dark pair, the BrandPreview frames, the
+   wizard's phone, which set the dark values themselves) matches nothing and renders as before; a
+   light scope nested in a dark page keeps its light pair (`:not(...)`, as Layer 1d does). */
+[data-theme="dark"] [data-dark-primary]:not([data-theme="light"], [data-theme="light"] *) {
+  /* biome-ignore lint/complexity/noImportantStyles: the only way to override the inline brand key per theme (see above). */
+  --brand-primary: var(--brand-primary-dark) !important;
+  /* biome-ignore lint/complexity/noImportantStyles: the only way to override the inline brand key per theme (see above). */
+  --brand-on-primary: var(--brand-on-primary-dark) !important;
+}
+[data-theme="dark"] [data-dark-secondary]:not([data-theme="light"], [data-theme="light"] *) {
+  /* biome-ignore lint/complexity/noImportantStyles: the only way to override the inline brand key per theme (see above). */
+  --brand-secondary: var(--brand-secondary-dark) !important;
 }
 
 /* ===== Layer 2 — Tailwind utilities bound to the runtime variables ===== */
@@ -178,6 +461,9 @@
   --color-on-brand: var(--brand-on-accent);
   --color-brand-soft: var(--brand-primary-soft);
   --color-brand-hover: var(--brand-primary-hover);
+  --color-button: var(--button-fill);
+  --color-on-button: var(--button-ink);
+  --color-button-hover: var(--button-hover);
 
   --color-success: #16a34a;
   --color-danger: #ef4444;
@@ -201,16 +487,64 @@
 
 /* ===== Shell helpers ===== */
 
-/* The app's single scroll root (the shell owns it; PullToRefresh reads it via context) */
+/* The app's single scroll root (the shell owns it; PullToRefresh reads it via context).
+   It must NEVER declare `-webkit-overflow-scrolling: touch` again. iOS WebKit still honours that
+   property and turns the scroller into a stacking context (its used z-index becomes 0). Every
+   overlay renders inside this scroller (none is portaled), so on the iPhone the story viewer, the
+   sheets and the dialogs were all painted UNDER the z-50 TopBar and BottomNav, its siblings.
+   Chromium ignores the property, so no e2e could see it. Momentum scrolling has been the default
+   since iOS 13. */
 .app-scroll {
   overflow-y: auto;
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
 .app-scroll::-webkit-scrollbar {
   display: none;
+}
+
+/* The stacking ladder, as literal z-index utilities in the components: 40 the sticky page layer
+   (PageHeader, ComposeFab, ReelsStage, the loading header bars; the /membros search bar sits one
+   rung under, at 30), 50 the shell chrome (TopBar, BottomNav), 52 the full-screen surfaces
+   (StoryViewer, the StoryComposer frame), 55 the sheets and dialogs (BottomSheet, ConfirmDialog),
+   90 the offline banner, 100 the toast. Smaller values inside a component stay local to it.
+   Overlays render INLINE, inside [data-brand-root] (the tenant's --brand-* variables live there),
+   never portaled to the body and never under an ancestor that starts its own stacking context
+   (transform, filter, backdrop-filter, opacity, isolation or a z-index): the ladder would stop at
+   that ancestor. */
+
+/* Shell chrome a screen hides by DECLARATION (the kernel never tests a module's pathname, MOD-02).
+   A full-screen surface (the story viewer; the story composer once a file is picked) marks its
+   root `data-shell-hide="chrome"`: no TopBar and no BottomNav while it is mounted. A task screen
+   (the "X" forms, /perfil/editar) marks its form `data-shell-hide="nav"`. The BottomNav also steps
+   aside while a modal is open (sheets, dialogs and the viewer all carry aria-modal). Unlayered on
+   purpose: `display: none` beats the bars' layered display utilities (the nav's `flex`), and their
+   inline style never sets `display`. Without :has() (iOS before 15.4) the chrome simply stays, as
+   it always did. */
+[data-brand-root]:has([data-shell-hide="chrome"])
+  :is([data-shell-topbar], [data-shell-nav="bottom"]) {
+  display: none;
+}
+[data-brand-root]:has([data-shell-hide="nav"], [aria-modal="true"]) [data-shell-nav="bottom"] {
+  display: none;
+}
+/* ...and while the on-screen keyboard is up, so the floating bar never sits over the field being
+   typed in. The BottomNav sets `data-keyboard-open` on itself from the visual viewport
+   (`useKeyboardInset`: the height the keyboard took, wherever the page was panned; over 100px, so
+   the browser's toolbars collapsing do not count), never from `:focus`: Android's back gesture
+   closes the keyboard WITHOUT blurring the field, and a hardware keyboard opens none, so a focus
+   rule kept the bar hidden with no keyboard on screen. A rule of its own, with no :has(), so an
+   engine without :has() still honours it. Unlayered, as above. */
+[data-shell-nav="bottom"][data-keyboard-open] {
+  display: none;
+}
+/* A task screen has no BottomNav to clear, so its end padding drops the bar's 84px reserve. Phone
+   widths only: unlayered, this rule would also beat the desktop column's `md:pb-16`. */
+@media (max-width: 767px) {
+  [data-brand-root]:has([data-shell-hide="nav"]) .app-scroll {
+    padding-bottom: calc(var(--safe-bottom) + 1rem);
+  }
 }
 
 .pb-safe {
@@ -252,4 +586,35 @@
   .animate-shimmer {
     animation: none;
   }
+}
+
+/* ===== Preview device (platform panel) =====
+   The phone the platform panel draws around its live tenant preview: a near-black body with a faint
+   rim, legible on both panel themes. Its screen carries the tenant brand inline and its own theme
+   attribute, so a light screen inside a dark panel needs the light accent pair back — the same
+   tie-break the brand-scope frames get above, keyed on the screen's own attribute (declared last).
+   The light button trio and image come back with it: the screen also carries the look's
+   button colours inline, the raw keys of BOTH themes at once (its dark islands, such as the reels
+   stage, read the dark ones), so a light screen must read the light keys again.
+   As in those frames, `dark:` utilities inside a light screen in a dark panel still match the
+   descendant variant (a card's dark-only hairline border shows) — cosmetic, accepted.
+   The tenant wizard (`[data-tenant-wizard]`) keeps the document's scrollbar gutter: its steps differ
+   in height, and a classic scrollbar coming and going would move the centred device sideways. */
+:root {
+  --device-bezel: #0b0c10;
+  --device-rim: rgba(255, 255, 255, 0.1);
+  --device-shadow: 0 40px 90px -24px rgba(15, 23, 42, 0.5);
+}
+[data-device-screen][data-theme="light"] {
+  --brand-accent: var(--brand-primary);
+  --brand-on-accent: var(--brand-on-primary);
+  --brand-primary-soft: color-mix(in oklch, var(--brand-primary), white 88%);
+  --button-fill: var(--button-fill-light, var(--brand-accent));
+  --button-ink: var(--button-ink-light, var(--brand-on-accent));
+  --button-hover: var(--button-hover-light, var(--brand-primary-hover));
+  --button-image: var(--button-image-light, none);
+  --button-image-hover: var(--button-image-hover-light, none);
+}
+html:has([data-tenant-wizard]) {
+  scrollbar-gutter: stable;
 }

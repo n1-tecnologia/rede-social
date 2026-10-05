@@ -9,10 +9,10 @@
       "support": "Suporte",
       "theme": "Tema",
       "settings": "Configurações",
-      "openProfile": "Meu perfil"
+      "openProfile": "Meu perfil",
+      "backToTop": "{tab}: voltar ao topo"
     },
     "home": {
-      "welcome": "Bem-vindo(a) à {tenant}",
       "soonTitle": "Em breve",
       "soonBody": "As novidades de {tenant} vão aparecer aqui."
     },

@@ -16,12 +16,21 @@ import {
   EVENT_CHECKIN_MAX_FAILED,
   EVENT_ISSUE_SET,
   EVENT_ISSUES,
+  EVENT_MAX_CAPACITY,
+  EVENT_MAX_CATEGORY,
   EVENT_MAX_PAGE_SIZE,
+  EVENT_MIN_CAPACITY,
   EVENT_PAGE_SIZE,
+  EVENT_PHOTO_MAX_PAGE_SIZE,
+  EVENT_PHOTO_PAGE_SIZE,
   enterResultSchema,
   eventDetailSchema,
   eventEditSchema,
   eventInputSchema,
+  eventPhotoInputSchema,
+  eventPhotoPageSchema,
+  eventPhotoQuerySchema,
+  eventPhotoSchema,
   eventQuerySchema,
   eventStatusUpdateSchema,
   eventSummarySchema,
@@ -169,7 +178,10 @@ describe('eventSummarySchema — no secret key exists (D-207)', () => {
       id: '11111111-1111-4111-8111-111111111111',
       title: 't',
       format: 'online',
+      category: null,
+      capacity: null,
       venueName: null,
+      address: null,
       coverAssetId: null,
       coverVariantWidths: [],
       startsAt: '2026-10-12T22:00:00.000000Z',
@@ -193,7 +205,10 @@ const detail = {
   id: '11111111-1111-4111-8111-111111111111',
   title: 't',
   format: 'in_person',
+  category: 'Workshop',
+  capacity: 50,
   venueName: 'Sede',
+  address: 'Rua das Flores, 100',
   coverAssetId: null,
   coverVariantWidths: [],
   startsAt: '2026-10-12T22:00:00.000000Z',
@@ -204,7 +219,6 @@ const detail = {
   confirmedCount: 1204,
   presentCount: 0,
   description: '',
-  address: 'Rua das Flores, 100',
   viewerRespondedAt: '2026-10-10T12:00:00.000000Z',
 };
 
@@ -245,6 +259,8 @@ describe('06-04 — the edit read and the status write', () => {
     description: '',
     coverAssetId: null,
     coverVariantWidths: [],
+    category: null,
+    capacity: null,
     format: 'online',
     venueName: null,
     address: null,
@@ -446,5 +462,99 @@ describe('06-07 — the attendance contract (Participantes)', () => {
     expect(checkinCodeSchema.safeParse({ checkinCode: 'K7QM', previous: 'ABCD' }).success).toBe(
       false,
     );
+  });
+});
+
+describe('2026-10-03 — category, capacity, the list address and the photos', () => {
+  it('27. category: optional, trimmed, at most 40 units after trimming, carried by either format', () => {
+    expect(EVENT_MAX_CATEGORY).toBe(40);
+    expect(refusal({ ...base, category: 'Workshop' })).toBeNull();
+    expect(eventInputSchema.parse({ ...base, category: '  Imersão presencial  ' }).category).toBe(
+      'Imersão presencial',
+    );
+    // Blank, null and absent all parse: the service stores each as "no category" (null).
+    expect(eventInputSchema.parse({ ...base, category: '   ' }).category).toBe('');
+    expect(refusal({ ...base, category: null })).toBeNull();
+    expect(eventInputSchema.parse(base).category).toBeUndefined();
+    const atCap = 'x'.repeat(EVENT_MAX_CATEGORY);
+    expect(refusal({ ...base, category: atCap })).toBeNull();
+    expect(refusal({ ...base, category: ` ${atCap} ` })).toBeNull();
+    // Over the cap is a generic 400, like an over-long title: the form's maxLength prevents it.
+    expect(refusal({ ...base, category: `${atCap}x` })).toBe('generic');
+    expect(refusal({ ...online, category: 'Live' })).toBeNull();
+  });
+
+  it('28. capacity: an integer from 1 to 100000, or null / absent for no limit', () => {
+    expect(EVENT_MIN_CAPACITY).toBe(1);
+    expect(EVENT_MAX_CAPACITY).toBe(100_000);
+    for (const ok of [1, 50, 100_000, null]) {
+      expect(refusal({ ...base, capacity: ok }), String(ok)).toBeNull();
+    }
+    expect(eventInputSchema.parse(base).capacity).toBeUndefined();
+    for (const bad of [0, -1, 100_001, 1.5, '50', Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(refusal({ ...base, capacity: bad }), String(bad)).toBe('generic');
+    }
+  });
+
+  it('29. the list item carries category, capacity and address; the detail and the edit read too', () => {
+    const keys = Object.keys(eventSummarySchema.shape);
+    for (const key of ['category', 'capacity', 'address']) expect(keys).toContain(key);
+    expect(
+      eventDetailSchema.safeParse({ ...detail, category: null, capacity: null, address: null })
+        .success,
+    ).toBe(true);
+    // A limit on the wire is a positive integer, and the keys are required (null, never absent).
+    expect(eventDetailSchema.safeParse({ ...detail, capacity: 0 }).success).toBe(false);
+    expect(eventDetailSchema.safeParse({ ...detail, capacity: 2.5 }).success).toBe(false);
+    const { category: _category, ...uncategorised } = detail;
+    expect(eventDetailSchema.safeParse(uncategorised).success).toBe(false);
+    expect(Object.keys(eventEditSchema.shape)).toEqual(
+      expect.arrayContaining(['category', 'capacity']),
+    );
+  });
+
+  it('30. event_full and photo_invalid are in the closed vocabulary', () => {
+    expect(EVENT_ISSUE_SET.has('event_full')).toBe(true);
+    expect(EVENT_ISSUE_SET.has('photo_invalid')).toBe(true);
+    expect(new Set(EVENT_ISSUES).size).toBe(EVENT_ISSUES.length);
+  });
+
+  it('31. a photo is its id, its asset and the ladder, never the uploader; strict', () => {
+    const photo = {
+      id: '0e000000-0000-4000-8000-0000000000f1',
+      mediaAssetId: '0e000000-0000-4000-8000-0000000000f2',
+      variantWidths: [320, 640, 1080, 1600],
+    };
+    expect(eventPhotoSchema.safeParse(photo).success).toBe(true);
+    expect(Object.keys(eventPhotoSchema.shape).sort()).toEqual([
+      'id',
+      'mediaAssetId',
+      'variantWidths',
+    ]);
+    for (const extra of ['createdByUserId', 'userId', 'url', 'eventId']) {
+      expect(eventPhotoSchema.safeParse({ ...photo, [extra]: 'x' }).success, extra).toBe(false);
+    }
+    expect(eventPhotoPageSchema.safeParse({ items: [photo], nextCursor: 'c' }).success).toBe(true);
+    expect(eventPhotoPageSchema.safeParse({ items: [], nextCursor: null }).success).toBe(true);
+  });
+
+  it('32. the gallery query clamps 1..60 and degrades; the add body is one uuid, strict', () => {
+    expect(eventPhotoQuerySchema.parse({})).toEqual({ limit: EVENT_PHOTO_PAGE_SIZE });
+    expect(eventPhotoQuerySchema.parse({ limit: '0' }).limit).toBe(1);
+    expect(eventPhotoQuerySchema.parse({ limit: '999' }).limit).toBe(EVENT_PHOTO_MAX_PAGE_SIZE);
+    expect(eventPhotoQuerySchema.parse({ limit: 'abc' }).limit).toBe(EVENT_PHOTO_PAGE_SIZE);
+    expect(eventPhotoQuerySchema.safeParse({ cursor: 'x'.repeat(513) }).success).toBe(false);
+    expect(eventPhotoQuerySchema.safeParse({ period: 'past' }).success).toBe(false);
+
+    const asset = '0e000000-0000-4000-8000-0000000000f2';
+    expect(eventPhotoInputSchema.safeParse({ mediaAssetId: asset }).success).toBe(true);
+    expect(eventPhotoInputSchema.safeParse({ mediaAssetId: 'nota-uuid' }).success).toBe(false);
+    expect(eventPhotoInputSchema.safeParse({}).success).toBe(false);
+    for (const extra of ['eventId', 'tenantId', 'createdByUserId']) {
+      expect(
+        eventPhotoInputSchema.safeParse({ mediaAssetId: asset, [extra]: asset }).success,
+        extra,
+      ).toBe(false);
+    }
   });
 });

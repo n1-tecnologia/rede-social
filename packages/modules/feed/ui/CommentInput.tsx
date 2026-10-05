@@ -58,9 +58,12 @@ export type CommentInputProps = {
    */
   focusKey?: number;
   /**
-   * `sheet` pins the composer to the bottom of the sheet's scrollport and `inline` lets it flow.
-   * `flat` (05-07) is a sheet too — the story surface — so it shares the pinned geometry; it is a
-   * separate value only because the LIST needs to tell the two apart.
+   * `sheet` makes the composer the sheet's FOOTER: `shrink-0`, below the list's own scrollport, so
+   * the rows scroll above it and never under it. Its safe area is the panel's `pb-safe`, directly
+   * beneath it on the same surface, so it carries none of its own (two would double the gap under
+   * the field). `inline` lets it flow at the end of the post page's column. `flat` (05-07) is a
+   * sheet too — the story surface — so it shares the footer geometry; it is a separate value only
+   * because the LIST needs to tell the two apart.
    */
   variant?: 'sheet' | 'inline' | 'flat';
 };
@@ -108,10 +111,7 @@ export function CommentInput({
     <form
       onSubmit={submit}
       data-comment-input
-      className={cn(
-        'border-t border-border bg-bg-secondary',
-        variant !== 'inline' && 'sticky bottom-0 z-10 pb-safe',
-      )}
+      className={cn('border-t border-border bg-bg-secondary', variant !== 'inline' && 'shrink-0')}
     >
       {errorLabel ? (
         <p data-comment-submit-error className="px-4 pt-3 text-sm font-normal text-danger">

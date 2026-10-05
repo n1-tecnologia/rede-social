@@ -24,8 +24,10 @@ import {
 import { PostMenu, type PostMenuLabels, type PostMenuTarget } from './PostMenu';
 
 /**
- * The D-55 home-slot widget: the feed is the main content of `/inicio`, below the branded welcome
- * and the D-02 nudge (UI-D-19), and it adds NO navigation tab.
+ * The D-55 home-slot widget: the feed is the main content of `/inicio`, below the slots ordered
+ * before it (the D-02 nudge no longer sits above it: it rises over Início as a popup since
+ * 2026-10-02), and it adds NO navigation tab. Its posts run edge to edge (the REINE timeline,
+ * 2026-10-02): 24px of page ground between them, and its host leaves no side gutter.
  *
  * Presentational and props-only, the `ExampleWidget` posture: it fetches nothing, imports nothing
  * from the kernel server or db, reads no catalog, and every string arrives as a prop so the module
@@ -172,19 +174,25 @@ export type FeedListProps = {
   suppressCommunity?: boolean;
 };
 
-/** The geometry of a real card: circle + two meta lines, a ratio box, two caption lines. */
+/**
+ * The geometry of a real post: the flat full-bleed block, a circle + two meta lines in the header's
+ * `px-4 py-3`, a full-bleed ratio box, two caption lines in the `px-4` gutter.
+ */
 export function FeedCardSkeleton() {
   return (
-    <Card aria-hidden className="flex flex-col gap-4 overflow-hidden p-4">
-      <div className="flex items-center gap-3">
+    <Card
+      aria-hidden
+      className="flex flex-col overflow-hidden rounded-none pb-4 shadow-none dark:border-0"
+    >
+      <div className="flex items-center gap-3 px-4 py-3">
         <Skeleton variant="circle" />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <Skeleton variant="text" width="40%" className="h-3.5" />
           <Skeleton variant="text" width="20%" className="h-3" />
         </div>
       </div>
-      <Skeleton variant="rect" height={240} className="rounded-xl" />
-      <div className="flex flex-col gap-2">
+      <Skeleton variant="rect" height={240} className="rounded-none" />
+      <div className="flex flex-col gap-2 px-4 pt-3">
         <Skeleton variant="text" width="30%" className="h-3.5" />
         <Skeleton variant="text" width="80%" className="h-3.5" />
       </div>
@@ -222,7 +230,7 @@ const SKELETON_CARDS = [0, 1, 2];
  */
 export function FeedListSkeleton() {
   return (
-    <div aria-busy data-testid="feed-skeleton" className="flex flex-col gap-3">
+    <div aria-busy data-testid="feed-skeleton" className="flex flex-col gap-6">
       {SKELETON_CARDS.map((index) => (
         <FeedCardSkeleton key={index} />
       ))}
@@ -413,7 +421,7 @@ export function FeedList({
     canPost && createHref ? (
       <a
         href={createHref}
-        className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+        className="inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
       >
         {labels.createCta}
       </a>
@@ -426,36 +434,42 @@ export function FeedList({
    */
   const emptyCtaOnScreen = createCta !== null && items.length === 0 && !firstLoadFailed;
 
+  // The posts run edge to edge (their host leaves no side gutter), but the error and empty states stay
+  // cards: they keep the page gutter on a phone and fill the centred column from md up.
   let body: ReactNode;
   if (firstLoadFailed && items.length === 0) {
     body = (
-      <EmptyState
-        variant="card"
-        icon={TriangleAlert}
-        title={labels.errorTitle}
-        body={labels.errorBody}
-        action={
-          <Button variant="outline" onClick={retryFirst}>
-            {labels.errorRetry}
-          </Button>
-        }
-      />
+      <div className="px-4 md:px-0">
+        <EmptyState
+          variant="card"
+          icon={TriangleAlert}
+          title={labels.errorTitle}
+          body={labels.errorBody}
+          action={
+            <Button variant="outline" onClick={retryFirst}>
+              {labels.errorRetry}
+            </Button>
+          }
+        />
+      </div>
     );
   } else if (items.length === 0) {
     // UI-D-20: the feed's OWN empty, with the author variant carrying the create CTA.
     body = (
-      <EmptyState
-        variant="card"
-        icon={Newspaper}
-        title={labels.emptyTitle}
-        body={canPost ? labels.emptyBodyAuthor : labels.emptyBody}
-        action={createCta ?? undefined}
-      />
+      <div className="px-4 md:px-0">
+        <EmptyState
+          variant="card"
+          icon={Newspaper}
+          title={labels.emptyTitle}
+          body={canPost ? labels.emptyBodyAuthor : labels.emptyBody}
+          action={createCta ?? undefined}
+        />
+      </div>
     );
   } else {
     body = (
       <>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-6">
           {items.map((post) => (
             <PostCard
               key={post.id}
@@ -495,13 +509,13 @@ export function FeedList({
           enabled={!pageFailed}
           onLoadMore={loadMore}
           skeleton={<FeedCardSkeleton />}
-          className="mt-3"
+          className="mt-6"
         />
 
         {pageFailed ? (
           <div
             data-feed-page-error
-            className="mt-3 flex flex-col items-center gap-3 px-4 text-center"
+            className="mt-6 flex flex-col items-center gap-3 px-4 text-center"
           >
             <p className="text-sm font-normal text-danger">{labels.loadMoreError}</p>
             <Button variant="outline" onClick={retryPage}>

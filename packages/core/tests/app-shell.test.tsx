@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppShell, buildNav, HomeSlots, type NavLabels, type NavModule } from '../ui';
+import { AppShell, buildNav, HomeSlots, type NavLabels, type NavModule, withTabDots } from '../ui';
 
 // The shell reads the route from Next's app router; outside Next the hook returns nothing useful.
 // The pathname is a hoisted variable each case may set (the mock itself stays top-level — Vitest 5).
@@ -63,6 +63,51 @@ describe('AppShell (UI-03, D-39, D-26)', () => {
     const imgs = container.querySelectorAll('img[alt="Associação São José"]');
     expect(imgs).toHaveLength(2);
     expect(screen.queryByText('Rede Social', { exact: true })).not.toBeInTheDocument();
+  });
+
+  /**
+   * Product decision 2026-10-02 (PDF #1): with a logo the TopBar shows the logo ALONE (no name beside
+   * it on any phone width), and the rail follows the same rule. The home link is named by the img's
+   * alt, so its accessible name is the display name exactly once (it read "X X" with the name beside
+   * the logo). `data-shell-topbar` is what tokens.css hides under a full-screen surface.
+   */
+  it('PDF #1: with a logo the TopBar and the rail show the logo ALONE, named once by its alt', () => {
+    const { container } = render(
+      shell({ brand: { displayName: 'Associação São José', logoUrl: '/logo.svg' } }),
+    );
+    const header = container.querySelector('header') as HTMLElement;
+    expect(header).toHaveAttribute('data-shell-topbar');
+    expect(within(header).queryByText('Associação São José')).not.toBeInTheDocument();
+    const brand = within(header).getByRole('link', { name: 'Associação São José' });
+    expect(brand).toHaveAttribute('href', '/inicio');
+    expect(brand).toHaveAttribute('data-shell-brand');
+    expect(brand.textContent).toBe('');
+    // The logo alone can be 28px wide (a square mark): the link keeps the bar's 44px tap target.
+    // A minimum, not a width: a long fallback name still shrinks the link down to it and truncates.
+    expect(brand).toHaveClass('min-w-11');
+    expect(brand).not.toHaveClass('min-w-0');
+
+    const rail = container.querySelector('aside') as HTMLElement;
+    expect(within(rail).queryByText('Associação São José')).not.toBeInTheDocument();
+    const railBrand = within(rail).getByRole('link', { name: 'Associação São José' });
+    expect(railBrand).toHaveAttribute('data-shell-brand');
+    expect(railBrand.textContent).toBe('');
+  });
+
+  it('PDF #1: a TopBar logo that fails to load gives way to the display name (never an empty bar)', () => {
+    const { container } = render(
+      shell({ brand: { displayName: 'Associação São José', logoUrl: '/broken.svg' } }),
+    );
+    const header = container.querySelector('header') as HTMLElement;
+    fireEvent.error(within(header).getByRole('img', { name: 'Associação São José' }));
+    expect(within(header).getByText('Associação São José')).toBeInTheDocument();
+    expect(
+      within(header).queryByRole('img', { name: 'Associação São José' }),
+    ).not.toBeInTheDocument();
+    expect(within(header).getByRole('link', { name: 'Associação São José' })).toHaveAttribute(
+      'href',
+      '/inicio',
+    );
   });
 
   it('renders the children exactly once and owns the scroll root', () => {
@@ -129,6 +174,53 @@ describe('AppShell (UI-03, D-39, D-26)', () => {
       '/configuracoes',
     );
     expect(screen.getByRole('button', { name: 'Sair' })).toBeInTheDocument();
+  });
+});
+
+describe('tab dot (2026-10-03: Eventos while an event is to come)', () => {
+  const eventsModules: NavModule[] = [
+    {
+      key: 'events',
+      nav: { label: 'Eventos', icon: 'calendar-days', href: '/eventos', order: 40 },
+    },
+  ];
+  const trees = (container: HTMLElement) =>
+    ['bottom', 'rail'].map((tree) => {
+      const link = container.querySelector<HTMLAnchorElement>(
+        `[data-shell-nav="${tree}"] a[href="/eventos"]`,
+      );
+      if (!link) throw new Error(`no Eventos tab in the ${tree} nav`);
+      return link;
+    });
+
+  it('draws the red dot on the marked tab in the BottomNav and the rail, the name unchanged and the state as its description', () => {
+    const nav = withTabDots(buildNav(eventsModules, labels), { events: 'Há eventos por vir' });
+    const { container } = render(shell({ nav }));
+    for (const link of trees(container)) {
+      expect(link.querySelectorAll('[data-badge-dot]')).toHaveLength(1);
+      // Decoration: hidden from assistive tech, which hears the description instead.
+      expect(
+        link.querySelector('[data-badge-dot]')?.closest('[aria-hidden="true"]'),
+      ).not.toBeNull();
+      expect(link).toHaveAccessibleName('Eventos');
+      expect(link).toHaveAccessibleDescription('Há eventos por vir');
+    }
+    // The tab is still found by its name, once per tree, and no other tab has a dot.
+    expect(screen.getAllByRole('link', { name: 'Eventos' })).toHaveLength(2);
+    expect(container.querySelectorAll('[data-badge-dot]')).toHaveLength(2);
+    // The two trees describe it with their own ids: an id never repeats in the document.
+    const ids = trees(container).map((link) => link.getAttribute('aria-describedby'));
+    expect(new Set(ids).size).toBe(2);
+    for (const id of ids) expect(container.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+  });
+
+  it('without a dot the tab has no badge and no description', () => {
+    const { container } = render(shell({ nav: buildNav(eventsModules, labels) }));
+    for (const link of trees(container)) {
+      expect(link.querySelector('[data-badge-dot]')).toBeNull();
+      expect(link.hasAttribute('aria-describedby')).toBe(false);
+      expect(link).toHaveAccessibleName('Eventos');
+    }
   });
 });
 

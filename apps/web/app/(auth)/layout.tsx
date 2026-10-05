@@ -1,7 +1,8 @@
-import { brandStyleVars } from '@rede-social/contracts';
 import type { Metadata, Viewport } from 'next';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
+import { TitleFontSheet } from '@/components/brand/TitleFontSheet';
+import { brandScope } from '@/lib/brand-scope';
 import { getHostBrand } from '@/lib/host-brand';
 import { AuthBrand } from './AuthBrand';
 
@@ -13,6 +14,12 @@ import { AuthBrand } from './AuthBrand';
  *
  * Only token utilities are used (D-41 consumer): under `<html data-theme="dark">` the ground becomes
  * the dark `--theme-bg` and the brand CTA switches to `--brand-primary-dark` without any change here.
+ *
+ * The tenant's saved look (2026-10-03) rides on the same `<main>`, from the public by-host answer
+ * (`brandScope`, as the authenticated shell does from the bootstrap): the ground tones, the dark
+ * theme's own pair, the buttons ("Entrar" takes the tenant's button colours), and the title font and
+ * app-name ink on the display name drawn in place of a missing logo; `TitleFontSheet` loads the
+ * family's stylesheet after hydration. Platform and generic hosts have no look, so nothing changes.
  *
  * The "Comunidade: {tenant}" line is NOT rendered by the layout: it belongs to `/entrar` only, so the
  * host tenant's name never enters `/endereco-invalido`'s body text (D-23 contract).
@@ -35,10 +42,12 @@ export async function generateViewport(): Promise<Viewport> {
 
 export default async function AuthLayout({ children }: { children: ReactNode }) {
   const [tc, brand] = await Promise.all([getTranslations('common'), getHostBrand()]);
+  const scope = brandScope(brand.branding);
 
   return (
     <main
-      style={brandStyleVars(brand.branding)}
+      {...scope.attributes}
+      style={scope.style}
       className="flex min-h-[var(--screen-h)] flex-col items-center justify-center bg-bg p-4"
     >
       <div className="flex w-full max-w-sm flex-col items-center gap-8">
@@ -50,6 +59,7 @@ export default async function AuthLayout({ children }: { children: ReactNode }) 
         </header>
         <div className="flex w-full flex-col gap-6">{children}</div>
       </div>
+      {scope.titleFontHref ? <TitleFontSheet href={scope.titleFontHref} /> : null}
     </main>
   );
 }

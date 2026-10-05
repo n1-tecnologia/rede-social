@@ -10,8 +10,12 @@ import { EventCover } from './EventCover';
  *
  * The bottom overlay sits at `bottom-3 left-4 right-4` [proto]: the overline 12/700 uppercase, the
  * title at **24/700** (`line-clamp-3`, the page's visual anchor; the prototype's `text-lg` is
- * normalised up to the Title role) and the place line 12/400 with `MapPin` / `Video` 12. There is no
- * top-left pill (`typeLabel` is dropped).
+ * normalised up to the Title role) and the place line 12/400 with `MapPin` / `Video` 12.
+ *
+ * **The top-left pill is the event's category** (2026-10-03, the prototype's `typeLabel` back now
+ * that the API has one): the poster's over-media ground (`bg-black/60 backdrop-blur-sm`, white,
+ * 10/700 uppercase), on BOTH branches through `EventCover`'s free slot, one line that truncates
+ * inside the hero (CSS only). No category, no pill: the place line already says in person or online.
  *
  * Presentational and props-only: it formats no date and **ships no words** (PWA-03). The host passes
  * the finished overline (countdown, "É hoje!", "Acontecendo agora", "Aconteceu em …"), the place
@@ -25,6 +29,8 @@ export interface EventHeroProps {
   title: string;
   /** The hero line, already formatted in the tenant's timezone by the host. */
   overline: string;
+  /** The event's own category ("Workshop"), the top-left pill; absent or empty draws none. */
+  category?: string | null;
   /** The venue name, or the host's "Online". */
   place: string;
   placeKind: 'venue' | 'online';
@@ -37,6 +43,7 @@ export interface EventHeroProps {
 export function EventHero({
   title,
   overline,
+  category,
   place,
   placeKind,
   coverAssetId,
@@ -87,6 +94,17 @@ export function EventHero({
       eager
       overlay={bottom(true)}
       fallbackOverlay={bottom(false)}
-    />
+    >
+      {category ? (
+        <span className="absolute top-3 right-4 left-4 flex">
+          <span
+            data-testid="event-hero-category"
+            className="min-w-0 truncate rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur-sm"
+          >
+            {category}
+          </span>
+        </span>
+      ) : null}
+    </EventCover>
   );
 }

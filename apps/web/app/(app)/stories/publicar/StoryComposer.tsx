@@ -41,6 +41,12 @@ import { useSignedUpload } from '@/components/media/useSignedUpload';
  * prevents a cropped or unreadable story, and a story is NOT editable after publishing (D-81), so
  * the caption is part of the publish step rather than something to fix later.
  *
+ * **Each state declares the shell chrome it hides** (`data-shell-hide` on the form, read by the
+ * shell's own stylesheet). Before a pick it is a task screen with its own X, so the floating
+ * BottomNav goes (`nav`); after the pick the black frame is full-screen like the viewer, so the
+ * TopBar goes too (`chrome`). On the iPhone this frame had the viewer's defect of 2026-10-02: the
+ * TopBar over its close button and the floating nav over `Publicar`.
+ *
  * **ZERO UPLOAD CODE LIVES HERE.** Every byte path is the Phase 3 machine: `useSignedUpload` picks,
  * re-encodes a phone photo in the browser, brokers a signed target and sends the bytes STRAIGHT to
  * Storage — or hands a video to the streaming vendor through the branch that skips `complete`
@@ -287,7 +293,10 @@ export function StoryComposer({
         ? t('publish.destination.value', { place: resolved.place.label, title: resolved.title })
         : t('publish.destination.none');
 
-  /** A STABLE close: `BottomSheet`'s focus trap re-arms whenever its identity changes. */
+  /**
+   * Stable by habit: `BottomSheet`'s focus trap reads its `onClose` through a ref and arms once per
+   * opening, so a new identity would no longer move the focus.
+   */
   const closeSheet = useCallback(() => setSheetOpen(false), []);
 
   /** The sheet's one select behaviour — a highlight, a pending one and "Nenhum" alike. */
@@ -417,7 +426,6 @@ export function StoryComposer({
       backIcon={X}
       backLabel={t('publish.close')}
       onBack={close}
-      stickyTop="0px"
       className="md:static md:px-0"
       trailing={
         <a href={historyHref} className="px-2 py-1 text-sm font-bold text-brand">
@@ -483,13 +491,17 @@ export function StoryComposer({
     <>
       <form
         data-testid="story-composer"
+        // The chrome this state hides (see the docblock): the nav on the picker screen, the TopBar
+        // and the nav once the frame is up.
+        data-shell-hide={picked === null ? 'nav' : 'chrome'}
         className={
           picked === null
             ? 'mx-auto flex w-full max-w-[680px] flex-col'
             : // `z-[52]` is a deliberate rung of the shipped ladder, not a magic number: the shell's
               // BottomNav is `z-50` and WOULD intercept the `Publicar` tap (a real e2e failure, not a
-              // hypothesis), while `ConfirmDialog` / `BottomSheet` sit at `z-[55]` so the discard
-              // dialog still opens ABOVE this frame. Above the nav, below the overlays.
+              // hypothesis) wherever `data-shell-hide` above is not honoured (no `:has()`), while
+              // `ConfirmDialog` / `BottomSheet` sit at `z-[55]` so the discard dialog still opens
+              // ABOVE this frame. Above the nav, below the overlays.
               'fixed inset-0 z-[52] flex flex-col overflow-hidden bg-black'
         }
         onSubmit={(event) => {

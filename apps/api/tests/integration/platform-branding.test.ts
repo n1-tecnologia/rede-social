@@ -1,7 +1,11 @@
 import {
   BRANDING_UPLOAD_ID_RE,
+  bootstrapSchema,
+  deriveBrandColors,
+  emptyBrandLook,
   hostTenantSchema,
   iconsUpToDate,
+  NAVY,
   platformTenantDetailSchema,
 } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
@@ -467,6 +471,207 @@ describe('colours — contrast gate in both modes, one persistence path with PAT
     const bad = await putColors(tenantId, { primary: 'blue', secondary: '#60a5fa' });
     expect(bad.status).toBe(400);
     expect((await envelope(bad)).code).toBe('VALIDATION_FAILED');
+  });
+});
+
+const putLook = (tenantId: string, body: unknown, token?: string) =>
+  platform(`/tenants/${tenantId}/branding/look`, { method: 'PUT', body, token });
+
+/**
+ * 2026-10-03 — the look beyond the pair, through its own route: the whole look replaces the stored
+ * one in its canonical form, the persisted dark accent follows the own dark primary, and the write
+ * is a jsonb MERGE (logo, icon set, `iconVersion` and the pair stay exactly as they were; no icon
+ * job). A pair save keeps an own dark primary and re-derives an automatic one; by-host and the
+ * bootstrap carry the look; the body is strict at every level.
+ */
+describe('look — PUT …/branding/look persists the six settings, merged, never clobbering (2026-10-03)', () => {
+  let tenantId = '';
+  let host = '';
+  const LOOK = {
+    lightTone: 'amarelado',
+    darkTone: 'cafe',
+    darkColors: { primary: '#FFB4A8', secondary: '#7dd3fc' },
+    titleFont: 'Playfair Display',
+    fontColors: {
+      title: { light: '#7C2D12', dark: '#ffd27a' },
+      appName: { light: '#0f766e', dark: null },
+    },
+    buttonColors: {
+      style: 'gradient',
+      fill: { light: '#E3AF3F', dark: '#f0cb7a' },
+      fillEnd: { light: '#ffd27a', dark: null },
+      ink: { light: '#382317', dark: null },
+    },
+  } as const;
+  const STORED = {
+    ...LOOK,
+    darkColors: { primary: '#ffb4a8', secondary: '#7dd3fc' },
+    fontColors: {
+      title: { light: '#7c2d12', dark: '#ffd27a' },
+      appName: { light: '#0f766e', dark: null },
+    },
+    buttonColors: { ...LOOK.buttonColors, fill: { light: '#e3af3f', dark: '#f0cb7a' } },
+  };
+
+  it('0. fixture: a tenant with a logo-derived icon set, created on the system look', async () => {
+    const created = await createThrowawayTenant('pb-look');
+    tenantId = created.id;
+    host = created.host;
+    const { res } = await uploadAndComplete(tenantId, 'logo', 'image/png', LOGO_PNG);
+    expect(res.status).toBe(200);
+    await deriveIconsJob.handler({ tenantId, iconVersion: 1, attempt: 0 });
+    const detail = await tenantDetail(tenantId);
+    expect(iconsUpToDate(detail.tenant.branding)).toBe(true);
+    expect(detail.tenant.branding.look).toEqual(emptyBrandLook());
+  });
+
+  it('1. saves the whole look, canonical; the dark accent follows the own primary; logo, icons and pair untouched; no icon job', async () => {
+    const before = (await tenantDetail(tenantId)).tenant.branding;
+    const jobsBefore = (await deriveJobs(tenantId)).length;
+
+    const res = await putLook(tenantId, LOOK);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const b = platformTenantDetailSchema.parse(await res.json()).tenant.branding;
+    expect(b.look).toEqual(STORED);
+    expect(b.colors.primaryDark).toBe('#ffb4a8');
+    expect(b.colors.onPrimaryDark).toBe(NAVY);
+    expect(b.colors.primary).toBe(before.colors.primary);
+    expect(b.colors.secondary).toBe(before.colors.secondary);
+    expect(b.colors.onPrimary).toBe(before.colors.onPrimary);
+    expect(b.logoUrl).toBe(before.logoUrl);
+    expect(b.faviconUrl).toBe(before.faviconUrl);
+    expect(b.iconUrls).toEqual(before.iconUrls);
+    expect(b.iconVersion).toBe(before.iconVersion);
+    expect(await deriveJobs(tenantId)).toHaveLength(jobsBefore);
+
+    // The raw row: the look under `look`, the accent merged into `colors`, the rest as it was.
+    const [row] = await adminSql<
+      { look: Record<string, unknown>; dark: string; logo: string; version: string }[]
+    >`
+      select branding->'look' as look, branding->'colors'->>'primaryDark' as dark,
+             branding->>'logoUrl' as logo, branding->>'iconVersion' as version
+        from public.tenants where id = ${tenantId}::uuid`;
+    expect(row?.look).toEqual(STORED);
+    expect(row?.dark).toBe('#ffb4a8');
+    expect(row?.logo).toBe(before.logoUrl);
+    expect(Number(row?.version)).toBe(before.iconVersion);
+  });
+
+  it('2. the public by-host answer carries the look on the very next request', async () => {
+    const res = await byHost(host);
+    expect(res.status).toBe(200);
+    const body = hostTenantSchema.parse(await res.json());
+    expect(body.branding.look).toEqual(STORED);
+    expect(body.branding.colors.primaryDark).toBe('#ffb4a8');
+  });
+
+  it('3. a pair save keeps the own dark primary and the look', async () => {
+    const res = await putColors(tenantId, { primary: '#1d4ed8', secondary: '#60a5fa' });
+    expect(res.status).toBe(200);
+    const b = platformTenantDetailSchema.parse(await res.json()).tenant.branding;
+    expect(b.colors.primary).toBe('#1d4ed8');
+    expect(b.colors.primaryDark).toBe('#ffb4a8');
+    expect(b.look).toEqual(STORED);
+  });
+
+  it('4. {} resets the system look; the dark accent goes back to the derivation of the current pair', async () => {
+    const res = await putLook(tenantId, {
+      lightTone: 'cinza',
+      darkTone: 'grafite',
+      titleFont: 'Manrope',
+    });
+    expect(res.status).toBe(200);
+    const b = platformTenantDetailSchema.parse(await res.json()).tenant.branding;
+    expect(b.look).toEqual(emptyBrandLook());
+    const derived = deriveBrandColors({ primary: '#1d4ed8', secondary: '#60a5fa' });
+    expect(b.colors.primaryDark).toBe(derived.primaryDark);
+    expect(b.colors.onPrimaryDark).toBe(derived.onPrimaryDark);
+    // The default ids and Manrope have ONE spelling in the row: null.
+    const [row] = await adminSql<{ tone: string | null; font: string | null }[]>`
+      select branding->'look'->>'lightTone' as tone, branding->'look'->>'titleFont' as font
+        from public.tenants where id = ${tenantId}::uuid`;
+    expect(row?.tone).toBeNull();
+    expect(row?.font).toBeNull();
+    // A pair save with no own dark primary re-derives it from the new primary.
+    const pair = await putColors(tenantId, { primary: '#0f766e', secondary: '#14b8a6' });
+    const after = platformTenantDetailSchema.parse(await pair.json()).tenant.branding;
+    expect(after.colors.primaryDark).toBe(
+      deriveBrandColors({ primary: '#0f766e', secondary: '#14b8a6' }).primaryDark,
+    );
+  });
+
+  it('5. 400 on an unknown key, a free colour as a tone or an unsafe family name; 404 unknown tenant', async () => {
+    for (const [body, path] of [
+      [{ background: '#ffffff' }, ''],
+      [{ lightTone: '#f5efe5' }, 'lightTone'],
+      [{ darkTone: 'amarelado' }, 'darkTone'],
+      [{ titleFont: 'Poppins;color:red' }, 'titleFont'],
+      [{ buttonColors: { hover: { light: '#000000' } } }, 'buttonColors'],
+      [{ fontColors: { title: { light: '#fff' } } }, 'fontColors.title.light'],
+    ] as const) {
+      const res = await putLook(tenantId, body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      const err = await envelope(res);
+      expect(err.code).toBe('VALIDATION_FAILED');
+      const issues = (err.details?.issues ?? []) as { path: string }[];
+      const paths = issues.map((issue) => issue.path);
+      expect(paths, JSON.stringify(body)).toContain(path);
+    }
+    const missing = await putLook('00000000-0000-4000-8000-000000000000', {});
+    expect(missing.status).toBe(404);
+    // Nothing above was written.
+    expect((await tenantDetail(tenantId)).tenant.branding.look).toEqual(emptyBrandLook());
+  });
+
+  it('6. a member Bearer is refused (403); the bootstrap carries the look of the member own tenant', async () => {
+    if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
+    const member = await signInAs('member@rede-demo.local', SEED_PASSWORD);
+    const res = await putLook(tenantId, LOOK, member);
+    expect(res.status).toBe(403);
+    expect((await envelope(res)).code).toBe('FORBIDDEN');
+    // Read-only on the seeded tenant: its bootstrap brand answers a complete look.
+    const boot = await api.request('/v1/me/bootstrap', {
+      headers: { authorization: `Bearer ${member}` },
+    });
+    expect(boot.status).toBe(200);
+    const look = bootstrapSchema.parse(await boot.json()).tenant.branding.look;
+    expect(Object.keys(look).sort()).toEqual(
+      ['buttonColors', 'darkColors', 'darkTone', 'fontColors', 'lightTone', 'titleFont'].sort(),
+    );
+  });
+
+  it('7. POST /tenants stores the wizard look (canonical, the dark accent following it); a bad look creates nothing', async () => {
+    const slug = `pb-look-new-${RUN}`.slice(0, 40);
+    const adminEmail = `admin-${slug}@rede-social-test.local`;
+    createdAuthEmails.push(adminEmail);
+    const body = {
+      displayName: `Marca ${slug}`,
+      slug,
+      colors: { primary: PRIMARY, secondary: '#a78bfa' },
+      modules: ['feed'],
+      adminEmail,
+    };
+    const refused = await platform('/tenants', {
+      method: 'POST',
+      body: { ...body, look: { lightTone: 'rosa' } },
+    });
+    expect(refused.status).toBe(400);
+    const [none] = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.tenants where slug = ${slug}`;
+    expect(none?.n).toBe('0');
+
+    const res = await platform('/tenants', {
+      method: 'POST',
+      body: { ...body, look: { ...LOOK, darkTone: 'grafite' } },
+    });
+    expect(res.status).toBe(201);
+    const detail = platformTenantDetailSchema.parse(await res.json());
+    createdTenantIds.push(detail.tenant.id);
+    expect(detail.tenant.branding.look).toEqual({ ...STORED, darkTone: null });
+    expect(detail.tenant.branding.colors.primary).toBe(PRIMARY);
+    expect(detail.tenant.branding.colors.primaryDark).toBe('#ffb4a8');
+    expect(detail.tenant.branding.colors.onPrimaryDark).toBe(NAVY);
   });
 });
 

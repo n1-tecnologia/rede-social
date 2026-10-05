@@ -56,7 +56,9 @@ import type { ComposerDraft } from '@/lib/feed-view';
  *
  * **A full-screen ROUTE, never a bottom sheet** (D-57). Picking several photos, waiting on an
  * upload, watching a link row appear and attaching a PDF do not fit a sheet with the mobile
- * keyboard up — and a long video upload must not live in a layer a stray drag can dismiss.
+ * keyboard up — and a long video upload must not live in a layer a stray drag can dismiss. The form
+ * declares itself a task screen (`data-shell-hide="nav"`): the shell's floating BottomNav steps
+ * aside while it is mounted, so it never sits over the caption or a picker (tokens.css).
  *
  * **ZERO UPLOAD CODE LIVES HERE.** Every byte path is the Phase 3 machine: `useSignedUpload` picks,
  * re-encodes a phone photo in the browser, brokers a signed target and sends the bytes STRAIGHT to
@@ -552,6 +554,7 @@ export function ComposerForm({
   return (
     <form
       data-composer
+      data-shell-hide="nav"
       className="mx-auto flex w-full max-w-[680px] flex-col"
       onSubmit={(event) => {
         event.preventDefault();
@@ -563,7 +566,6 @@ export function ComposerForm({
         backIcon={X}
         backLabel={t('composer.close')}
         onBack={close}
-        stickyTop="0px"
         className="md:static md:px-0"
         trailing={
           <Button

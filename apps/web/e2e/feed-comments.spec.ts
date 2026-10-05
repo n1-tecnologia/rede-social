@@ -10,7 +10,7 @@ const C = F.comments;
 /**
  * FEED-05 / FEED-06 / UI-02 (plan 04-07): the comment surface, driven on a real mobile browser.
  *
- * Six things are proved here that no unit test can prove:
+ * Seven things are proved here that no unit test can prove:
  *  - **D-59.** The sheet opens OVER the feed without navigating away, and the list inside it is the
  *    same one the post page renders inline.
  *  - **D-60, and this is the point of the file.** A reply carries NO reply affordance and NO toggle
@@ -24,6 +24,10 @@ const C = F.comments;
  *  - **D-61.** A member deletes their own comment behind the confirmation and no one else's.
  *  - **The 04-06 long-text backstop, comment-row half.** The 40-character seeded member's name
  *    wraps with the comment text at 320px instead of clipping or pushing the like control off-row.
+ *  - **The sheet's footer and its focus (E10/E12).** The last row ends above the composer, which
+ *    is a footer below the list's scrollport rather than a sticky row over it, and the sheet opens
+ *    on its title rather than on the field (on a phone, the keyboard follows the focus). A sent
+ *    comment leaves the focus in the field, and a deleted one leaves it in the sheet.
  *
  * `serviceWorkers: 'block'` is mandatory here and not a precaution: this file intercepts requests,
  * and a registered Serwist worker can answer one from its own cache — the interception would then
@@ -420,5 +424,113 @@ test.describe('E11/long-text — the 40-character member in a comment row at 320
     expect(bounds.height).toBeGreaterThan(40);
 
     await deleteOwnComment(page, body);
+  });
+});
+
+/**
+ * E10/E12 on the phone viewport. Playwright's Chromium has no software keyboard, so the keyboard
+ * half is asserted through the FOCUS, which is what raises it on a real phone.
+ *
+ * The composer used to be `sticky bottom-0` inside the sheet's padded scroll body. A sticky offset
+ * resolves against the scrollport contracted by its padding, so it sat 16px above the edge and
+ * covered the last row (its meta line lost 4px). The list is now the scrollport and the composer a
+ * footer below it. The sheet used to open with the focus in the field (the only focusable while
+ * page 1 loads), and every comment sent re-armed the focus trap through the feed's new `onClose`
+ * identity, which pulled the focus out of the field. With the trap armed once per opening, a
+ * confirmed delete, which removes the trash control its dialog would return the focus to, hands
+ * the focus to the sheet around the dialog.
+ */
+test.describe('E10/E12 — the composer is the sheet footer, and opening never raises the keyboard', () => {
+  test('the sheet opens on its title, a sent comment keeps the field focused, a deleted one the sheet', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    const meta = cardWith(page, seededComments.firstPost).locator('[data-post-meta]');
+    const metaBefore = (await meta.innerText()).trim();
+
+    await openComments(page, seededComments.firstPost);
+    const input = sheet(page).locator('[data-comment-input] input');
+
+    // UI-SPEC §Accessibility: opening the comment sheet moves focus to the sheet TITLE.
+    await expect(sheet(page).getByRole('heading', { name: C.title, exact: true })).toBeFocused();
+    await expect(input).not.toBeFocused();
+
+    // The member taps the field and sends with Enter, the phone keyboard's own "send".
+    const body = unique();
+    await input.fill(body);
+    await input.press('Enter');
+    await expect(row(page, body)).toBeVisible();
+    await expect(row(page, body)).not.toHaveAttribute('aria-busy', 'true');
+
+    // The card's count moved, so the feed has re-rendered the sheet with a NEW `onClose`: the
+    // render that used to re-arm the trap and leave the focus on the first author link.
+    await expect.poll(async () => (await meta.innerText()).trim()).not.toBe(metaBefore);
+    await expect(input).toBeFocused();
+
+    // The confirmed delete removes the row together with the trash control that opened the
+    // dialog (Chromium focuses a clicked button, so it was the focus to return to). The focus goes
+    // to the sheet around the dialog instead of falling to <body> behind its backdrop, so Escape
+    // still closes the sheet.
+    await deleteOwnComment(page, body);
+    await expect(sheet(page)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(sheet(page)).toHaveCount(0);
+  });
+
+  test('the last row ends above the composer: the list scrolls above it, never under it', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await openComments(page, seededComments.firstPost);
+
+    // A footer OUTSIDE the list's scrollport, not a row pinned inside it.
+    const scroller = sheet(page).locator('[data-comments-scroll]');
+    await expect(scroller).toHaveCount(1);
+    await expect(scroller.locator('[data-comment-input]')).toHaveCount(0);
+    await expect(commentsList(page).locator('article[data-comment-id]').last()).toBeVisible();
+
+    // The sheet SPRINGS in from the bottom, and `openComments` returns as soon as page 1 has
+    // landed, often while the panel is still rising several pixels a frame: a box read then
+    // measures the ANIMATION, not the layout (the media-video lesson). Motion writes
+    // `transform: none` once the panel is at rest, so nothing is read before the panel says so.
+    await expect
+      .poll(() => sheet(page).evaluate((panel) => getComputedStyle(panel).transform))
+      .toBe('none');
+
+    // ONE synchronous read: the scroll to the bottom, the three boxes and the hit test come from
+    // the same layout, so nothing can move between two of them.
+    const geometry = await sheet(page).evaluate((panel) => {
+      const scrollport = panel.querySelector<HTMLElement>('[data-comments-scroll]');
+      const composer = panel.querySelector<HTMLElement>('[data-comment-input]');
+      const rows = panel.querySelectorAll<HTMLElement>(
+        '[data-comments-list] article[data-comment-id]',
+      );
+      const last = rows[rows.length - 1];
+      const time = last?.querySelector('time');
+      if (!scrollport || !composer || !last || !time) return null;
+      scrollport.scrollTop = scrollport.scrollHeight;
+      const row = last.getBoundingClientRect();
+      const meta = time.getBoundingClientRect();
+      const footer = composer.getBoundingClientRect();
+      // 13px up from the row's bottom edge: its last line, just above its 12px bottom padding.
+      const hit = document.elementFromPoint(row.left + row.width / 2, row.bottom - 13);
+      return {
+        rowBottom: row.bottom,
+        metaBottom: meta.bottom,
+        footerTop: footer.top,
+        lastId: last.getAttribute('data-comment-id'),
+        hitId: hit?.closest('article[data-comment-id]')?.getAttribute('data-comment-id') ?? null,
+      };
+    });
+    expect(geometry).not.toBeNull();
+    const box = geometry as NonNullable<typeof geometry>;
+
+    // The meta line ends ABOVE the composer's top border, and so does the whole row, its 12px
+    // bottom padding included (the sticky composer sat 16px into it).
+    expect(box.metaBottom).toBeLessThanOrEqual(box.footerTop);
+    expect(box.rowBottom).toBeLessThanOrEqual(box.footerTop + 0.5);
+
+    // What is drawn on the row's last line is the ROW, not the composer over it.
+    expect(box.hitId).toBe(box.lastId);
   });
 });

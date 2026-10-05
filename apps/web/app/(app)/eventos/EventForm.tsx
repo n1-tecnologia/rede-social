@@ -4,6 +4,8 @@ import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import {
   EVENT_DEFAULT_DURATION_MINUTES,
   EVENT_MAX_ADDRESS,
+  EVENT_MAX_CAPACITY,
+  EVENT_MAX_CATEGORY,
   EVENT_MAX_DESCRIPTION,
   EVENT_MAX_TITLE,
   EVENT_MAX_URL,
@@ -28,20 +30,33 @@ import {
 import { Image as ImageIcon, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useId, useRef, useState, useTransition } from 'react';
+import { useEffect, useId, useRef, useState, useTransition } from 'react';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import {
+  type AddressParts,
+  addressIssues,
+  composeEventAddress,
+  EMPTY_ADDRESS_PARTS,
+  extractCep,
+  isCep,
+  parseEventAddress,
+} from '@/lib/event-address';
 import { CancelEventControl } from './[eventId]/CancelEventControl';
 import { ReactivateEventControl } from './[eventId]/ReactivateEventControl';
 import { createEventAction, type EventWriteResult, updateEventAction } from './actions';
+import { ADDRESS_FIELD_IDS, EventAddressFields } from './EventAddressFields';
+import { useCepLookup } from './useCepLookup';
 
 /**
  * THE event form (EVENT-01, UI-D-212, sketch 006 surface 1): one component, two routes,
  * `/eventos/novo` in `create` mode and `/eventos/[eventId]/editar` in `edit` mode bound to values.
  *
- * **The community form's chrome** (UI-D-38): a full-screen route, `PageHeader stickyTop="0px"` with
- * the `X` "Fechar" (a dirty form confirms the discard first), the title, and the trailing brand submit
- * with its pending label. The cover runs the Phase 3 machine (`useSignedUpload`, `purpose: 'cover'`):
- * this file holds an asset id, never a byte.
+ * **The community form's chrome** (UI-D-38): a full-screen route, the `PageHeader` at its default
+ * sticky offset with the `X` "Fechar" (a dirty form confirms the discard first), the title, and the
+ * trailing brand submit with its pending label. The form root declares `data-shell-hide="nav"`: a
+ * task screen hides the BottomNav (the shell rule in tokens.css), so the floating pill never sits
+ * over a field mid-scroll. The cover runs the Phase 3 machine (`useSignedUpload`,
+ * `purpose: 'cover'`): this file holds an asset id, never a byte.
  *
  * **Wall clock in, nothing converted here** (D-213). The four native inputs hold the TENANT's wall
  * clock as typed and are submitted as `{ date, time }` pairs; the API converts them in SQL with
@@ -54,14 +69,33 @@ import { createEventAction, type EventWriteResult, updateEventAction } from './a
  * Switching keeps the hidden side's values in memory, but ONLY the visible side is submitted, and the
  * same `eventInputSchema` the API uses validates it here first.
  *
- * **Errors wait for the first submit** (the CommunityForm rule, UI E10/empty): the submit is disabled
- * until the name, the four date/time fields and the active format's fields are filled; after the
- * first submit, each field shows its own inline message and a failed save shows the top
- * `role="alert"` card with every value kept.
+ * **The address is parts, stored as one string** (PDF item #10): CEP, rua, número, complemento,
+ * bairro, cidade and UF (`EventAddressFields`), the CEP looked up on its 8th digit
+ * (`useCepLookup`, through `/api/cep/{cep}`), composed into the contract's `address` in the
+ * canonical format of `lib/event-address.ts`. Create mode is always parts. Edit mode opens as parts
+ * when the stored address parses back (or there is none, an online event turning in person);
+ * anything else is a LEGACY free text, kept in today's textarea with a hint, "Preencher pelo CEP"
+ * to switch, and "Manter endereço anterior" to come back: saving an untouched legacy text sends it
+ * unchanged, so nobody re-types an address on an unrelated edit.
+ *
+ * **Errors wait for the first submit** (the CommunityForm rule, UI E10/empty): the submit is
+ * disabled until the name, the four date/time fields and the active format's fields are filled (in
+ * person: the venue and the CEP, rua, cidade and UF, or the legacy text); after the first submit,
+ * each field shows its own inline message (a 7-digit CEP or an unknown UF included: "filled" opens
+ * the submit, the URL rule) and a failed save shows the top `role="alert"` card with every value
+ * kept.
  *
  * Edit mode adds the note under "Quando" and the bottom row: "Cancelar evento" while active and before
  * the end, "Reativar evento" while cancelled and before the start, or the locked note. All three
  * flags are computed by the RSC from ONE request instant (UI-D-14: no clock read in client render).
+ *
+ * **2026-10-03: "Categoria" and "Vagas", both optional and both sent by either format.** The
+ * category sits under the name (the poster prints it above the title), capped at
+ * `EVENT_MAX_CATEGORY` by the field itself; blank is "no category". "Vagas" closes the form: a
+ * digits-only field (`inputMode="numeric"`, up to six digits) whose empty value is "no limit"
+ * (null) and whose number must fall in `1..EVENT_MAX_CAPACITY`, the schema's own rule, spoken after
+ * the first submit like every other field. A limit below the confirmations already given is
+ * accepted: the answers stay (the edit note says so).
  */
 export type EventFormMode = 'create' | 'edit';
 
@@ -70,6 +104,9 @@ export type EventFormInitial = {
   description: string;
   coverAssetId: string | null;
   coverVariantWidths: readonly number[];
+  /** 2026-10-03. Absent (a host that predates it) is "no category" / "no limit". */
+  category?: string;
+  capacity?: number | null;
   format: EventFormat;
   venueName: string;
   address: string;
@@ -105,6 +142,8 @@ const EMPTY: EventFormInitial = {
   description: '',
   coverAssetId: null,
   coverVariantWidths: PURPOSE_WIDTHS.cover,
+  category: '',
+  capacity: null,
   format: 'in_person',
   venueName: '',
   address: '',
@@ -133,7 +172,49 @@ export function wallClockPlus(value: WallClock, minutes: number): WallClock | nu
   };
 }
 
-type FieldKey = 'title' | 'start' | 'end' | 'venue' | 'address' | 'url';
+type FieldKey =
+  | 'title'
+  | 'start'
+  | 'end'
+  | 'venue'
+  | 'address'
+  | 'cep'
+  | 'street'
+  | 'city'
+  | 'state'
+  | 'addressTooLong'
+  | 'url'
+  | 'capacity';
+
+/** `100000` is six digits: the field keeps at most that many, and the schema bounds the value. */
+const CAPACITY_MAX_DIGITS = String(EVENT_MAX_CAPACITY).length;
+
+/** The "Vagas" field's text as the API takes it: nothing is "no limit" (null), else the number. */
+const capacityValue = (text: string): number | null => (text === '' ? null : Number(text));
+
+/** PDF item #10: the address as parts (always in create mode), or a stored free text kept as is. */
+type AddressMode = 'structured' | 'legacy';
+
+/** The legacy side's switch, where focus lands when the admin goes back to the old text. */
+const USE_CEP_ID = 'event-address-use-cep';
+
+/** The parts a CEP lookup fills; número and complemento are the admin's alone. */
+const LOOKUP_PARTS = ['street', 'district', 'city', 'state'] as const;
+
+/** What one lookup wrote: the CEP it answered for, and each part it filled, with what. */
+type LookupWrite = {
+  cep: string;
+  wrote: Partial<Pick<AddressParts, (typeof LOOKUP_PARTS)[number]>>;
+};
+
+/** The parts with each one the lookup wrote, and nobody changed since, empty again. */
+function withoutLookup(parts: AddressParts, wrote: LookupWrite['wrote']): AddressParts {
+  const next = { ...parts };
+  for (const key of LOOKUP_PARTS) {
+    if (parts[key] === wrote[key]) next[key] = '';
+  }
+  return next;
+}
 
 const filled = (value: string) => value.trim().length > 0;
 
@@ -154,13 +235,26 @@ export function EventForm({
   const ids = useId();
 
   const start = initial ?? EMPTY;
+  const initialCategory = start.category ?? '';
+  const initialCapacity =
+    start.capacity === null || start.capacity === undefined ? '' : String(start.capacity);
   const [title, setTitle] = useState(start.title);
   const [description, setDescription] = useState(start.description);
+  const [category, setCategory] = useState(initialCategory);
+  // The digits as typed; `capacityValue` turns them into what the API takes.
+  const [capacityText, setCapacityText] = useState(initialCapacity);
   const [coverAssetId, setCoverAssetId] = useState<string | null>(start.coverAssetId);
   const [coverWidths, setCoverWidths] = useState<readonly number[]>(start.coverVariantWidths);
   const [format, setFormat] = useState<EventFormat>(start.format);
   // Both sides of the XOR live in memory; only the visible one is submitted.
   const [venueName, setVenueName] = useState(start.venueName);
+  // PDF item #10: a stored address that parses back (or none) opens as parts; anything else is the
+  // legacy free text, which `address` keeps verbatim while the parts stay in memory beside it.
+  const initialParts = parseEventAddress(start.address);
+  const initialAddressMode: AddressMode =
+    mode === 'create' || !filled(start.address) || initialParts !== null ? 'structured' : 'legacy';
+  const [addressMode, setAddressMode] = useState<AddressMode>(initialAddressMode);
+  const [parts, setParts] = useState<AddressParts>(initialParts ?? EMPTY_ADDRESS_PARTS);
   const [address, setAddress] = useState(start.address);
   const [meetingUrl, setMeetingUrl] = useState(start.meetingUrl);
   const [startAt, setStartAt] = useState<WallClock>(start.start);
@@ -172,8 +266,37 @@ export function EventForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const [pending, startTransition] = useTransition();
+  // The address switch that was clicked unmounts with its side; focus lands on the other side.
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  /** What the last CEP lookup wrote, so a move to another CEP takes back exactly that. */
+  const lookupRef = useRef<LookupWrite | null>(null);
+
+  /**
+   * The CEP lookup fills what ViaCEP knows and nothing else: rua and bairro only when it returned
+   * them (a city-wide CEP answers neither, and what the admin typed stays), cidade and UF always,
+   * número and complemento never. What it wrote is kept in `lookupRef` for `changeCep`. While the
+   * admin is still in the CEP field, focus moves on to the first field they owe: the número, or
+   * the rua for a city-wide CEP.
+   */
+  const cepLookup = useCepLookup((found) => {
+    const wrote: LookupWrite['wrote'] = { city: found.city, state: found.state };
+    if (found.street !== '') wrote.street = found.street;
+    if (found.district !== '') wrote.district = found.district;
+    lookupRef.current = { cep: found.cep, wrote };
+    setParts((current) => ({ ...current, ...wrote }));
+    if (document.activeElement?.id === ADDRESS_FIELD_IDS.cep) {
+      const next = found.street === '' ? ADDRESS_FIELD_IDS.street : ADDRESS_FIELD_IDS.number;
+      document.getElementById(next)?.focus();
+    }
+  });
+
+  useEffect(() => {
+    if (focusTarget === null) return;
+    document.getElementById(focusTarget)?.focus();
+    setFocusTarget(null);
+  }, [focusTarget]);
 
   const upload = useSignedUpload({
     kind: 'image',
@@ -193,20 +316,57 @@ export function EventForm({
     : '';
   const busy = pending || uploading;
   const inPerson = format === 'in_person';
+  const structured = addressMode === 'structured';
 
-  /** The body the API receives: the VISIBLE side of the XOR only (D-213). */
+  // PDF item #10: complete parts compose the canonical string; incomplete ones send '' and the
+  // schema refuses them, so a half address is never stored. The legacy text goes as it stands.
+  const partIssues = addressIssues(parts);
+  const composedAddress = partIssues.length === 0 ? composeEventAddress(parts) : '';
+  const effectiveAddress = structured ? composedAddress : address;
+
+  /**
+   * The body the API receives: the VISIBLE side of the XOR only (D-213), plus the category and the
+   * limit, which both formats carry. The PUT is a whole-event replacement, so both are always sent:
+   * a cleared field clears the stored value.
+   */
+  const capacity = capacityValue(capacityText);
   const payload = inPerson
-    ? { title, description, coverAssetId, format, venueName, address, start: startAt, end: endAt }
-    : { title, description, coverAssetId, format, meetingUrl, start: startAt, end: endAt };
+    ? {
+        title,
+        description,
+        coverAssetId,
+        category,
+        capacity,
+        format,
+        venueName,
+        address: effectiveAddress,
+        start: startAt,
+        end: endAt,
+      }
+    : {
+        title,
+        description,
+        coverAssetId,
+        category,
+        capacity,
+        format,
+        meetingUrl,
+        start: startAt,
+        end: endAt,
+      };
 
+  // The address side the admin is looking at: the switch itself is a change (X asks first), and
+  // coming back to the untouched legacy text is not.
   const dirty =
     JSON.stringify([
       title,
       description,
       coverAssetId,
+      category,
+      capacityText,
       format,
       venueName,
-      address,
+      structured ? ['structured', parts] : ['legacy', address],
       meetingUrl,
       startAt,
       endAt,
@@ -215,9 +375,13 @@ export function EventForm({
       start.title,
       start.description,
       start.coverAssetId,
+      initialCategory,
+      initialCapacity,
       start.format,
       start.venueName,
-      start.address,
+      initialAddressMode === 'structured'
+        ? ['structured', initialParts ?? EMPTY_ADDRESS_PARTS]
+        : ['legacy', start.address],
       start.meetingUrl,
       start.start,
       start.end,
@@ -230,7 +394,12 @@ export function EventForm({
     filled(startAt.time) &&
     filled(endAt.date) &&
     filled(endAt.time) &&
-    (inPerson ? filled(venueName) && filled(address) : filled(meetingUrl));
+    (inPerson
+      ? filled(venueName) &&
+        (structured
+          ? filled(parts.cep) && filled(parts.street) && filled(parts.city) && filled(parts.state)
+          : filled(address))
+      : filled(meetingUrl));
 
   /**
    * Each field's message, from the SAME schema the API validates with. Computed every render, shown
@@ -251,12 +420,25 @@ export function EventForm({
     }
     if (inPerson) {
       if (!filled(venueName)) errors.venue = t('form.errors.venueRequired');
-      if (!filled(address)) errors.address = t('form.errors.addressRequired');
+      if (structured) {
+        if (partIssues.includes('cep')) errors.cep = t('form.errors.cepInvalid');
+        if (partIssues.includes('street')) errors.street = t('form.errors.streetRequired');
+        if (partIssues.includes('city')) errors.city = t('form.errors.cityRequired');
+        if (partIssues.includes('state')) errors.state = t('form.errors.stateInvalid');
+        // Defensive: the per-part caps keep the worst case at 295 of the contract's 300.
+        if (composedAddress.length > EVENT_MAX_ADDRESS) {
+          errors.addressTooLong = t('form.errors.addressTooLong');
+        }
+      } else if (!filled(address)) {
+        errors.address = t('form.errors.addressRequired');
+      }
     } else if (!filled(meetingUrl)) {
       errors.url = t('form.errors.urlRequired');
     } else if (has('url_invalid') || has('url_required')) {
       errors.url = t('form.errors.urlInvalid');
     }
+    // "Vagas": a number outside 1..100000 (`0` included); empty is "no limit" and never an issue.
+    if (on('capacity')) errors.capacity = t('form.errors.capacityInvalid');
   }
 
   const back = mode === 'edit' && eventId ? `/eventos/${eventId}` : '/eventos';
@@ -280,6 +462,48 @@ export function EventForm({
   const changeEnd = (next: WallClock) => {
     setEndTouched(true);
     setEndAt(next);
+  };
+
+  /**
+   * The CEP's digits from the field. The same digits again (a 9th digit the field drops, the same
+   * CEP pasted again) are no change: nothing is stored and nothing is asked, so a lookup nobody
+   * asked for never overwrites a restored or hand-edited address. Deleting a digit and typing it
+   * back does ask again, on purpose.
+   *
+   * Another full CEP takes back, at once, every part the previous lookup wrote that still reads as
+   * it wrote it: those belong to the old CEP, and a city-wide, unknown or failed answer would
+   * compose them with the new one (a rua of São Paulo in Poconé). What the admin typed or changed
+   * stays, and the same CEP typed back keeps its own answer.
+   */
+  const changeCep = (cep: string) => {
+    if (cep === parts.cep) return;
+    const previous = lookupRef.current;
+    const stale = isCep(cep) && previous !== null && previous.cep !== cep ? previous.wrote : null;
+    if (stale) lookupRef.current = null;
+    setParts((current) => ({ ...(stale ? withoutLookup(current, stale) : current), cep }));
+    cepLookup.request(cep);
+  };
+
+  /**
+   * Legacy text → parts. While rua, bairro, cidade and UF are empty (a lookup has nothing of the
+   * admin's to overwrite there), the CEP is looked up at once: the one the parts hold (a trip back
+   * to the text before the answer came), or else the one the old text carries. Parts the admin
+   * already filled (a round trip through "Manter endereço anterior") stay, and nothing is asked.
+   */
+  const fillByCep = () => {
+    setAddressMode('structured');
+    setFocusTarget(ADDRESS_FIELD_IDS.cep);
+    if (LOOKUP_PARTS.some((key) => filled(parts[key]))) return;
+    const cep = parts.cep === '' ? extractCep(address) : parts.cep;
+    if (cep !== parts.cep) setParts((current) => ({ ...current, cep }));
+    cepLookup.request(cep);
+  };
+
+  /** Parts → the legacy text, exactly as it arrived (or as the admin edited it). */
+  const keepLegacy = () => {
+    cepLookup.reset();
+    setAddressMode('legacy');
+    setFocusTarget(USE_CEP_ID);
   };
 
   /** Exhaustive enough over what the actions answer: anything unmapped is the generic save line. */
@@ -343,6 +567,7 @@ export function EventForm({
     <form
       data-event-form
       data-mode={mode}
+      data-shell-hide="nav"
       noValidate
       className="mx-auto flex w-full max-w-[680px] flex-col"
       onSubmit={(event) => {
@@ -355,7 +580,6 @@ export function EventForm({
         backIcon={X}
         backLabel={t('form.close')}
         onBack={close}
-        stickyTop="0px"
         className="md:static md:px-0"
         trailing={
           <Button
@@ -521,6 +745,24 @@ export function EventForm({
           </span>
         </div>
 
+        {/* ── (2b) Categoria (2026-10-03): optional, printed above the title on the poster. ── */}
+        <div className="flex flex-col gap-2">
+          <Input
+            id="event-category"
+            name="category"
+            autoComplete="off"
+            label={t('form.category.label')}
+            placeholder={t('form.category.placeholder')}
+            value={category}
+            maxLength={EVENT_MAX_CATEGORY}
+            aria-describedby="event-category-helper"
+            onChange={(event) => setCategory(event.target.value)}
+          />
+          <p id="event-category-helper" className="text-xs font-normal text-text-tertiary">
+            {t('form.category.helper')}
+          </p>
+        </div>
+
         {/* ── (3) Descrição. ── */}
         <Textarea
           id="event-description"
@@ -539,12 +781,16 @@ export function EventForm({
           onChange={(event) => setDescription(event.target.value)}
         />
 
-        {/* ── (4) Quando: native date + time, wall clock of the TENANT. ── */}
+        {/* ── (4) Quando: native date + time, wall clock of the TENANT. ──
+            UI-D-212 amended for iOS (PDF item #11): once the Input guard turns WebKit's
+            auto-sizing off, a half track left the pt-BR date ("28 de nov. de 2026") about 139px
+            at 390px, so the date takes the free track beside an 8rem time, and each pair stacks
+            below 360px. */}
         <div className="flex flex-col gap-3">
           <SectionTitle variant="group" as="h3">
             {t('form.when.title')}
           </SectionTitle>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-[minmax(0,1fr)_8rem]">
             <Input
               id="event-start-date"
               type="date"
@@ -574,7 +820,7 @@ export function EventForm({
               {errors.start}
             </p>
           ) : null}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-[minmax(0,1fr)_8rem]">
             <Input
               id="event-end-date"
               type="date"
@@ -636,23 +882,60 @@ export function EventForm({
               error={errors.venue}
               onChange={(event) => setVenueName(event.target.value)}
             />
-            <Textarea
-              id="event-address"
-              name="address"
-              label={t('form.address.label')}
-              placeholder={t('form.address.placeholder')}
-              value={address}
-              rows={2}
-              maxLength={EVENT_MAX_ADDRESS}
-              required
-              error={errors.address}
-              onInput={(event) => {
-                const el = event.currentTarget;
-                el.style.height = 'auto';
-                el.style.height = `${el.scrollHeight}px`;
-              }}
-              onChange={(event) => setAddress(event.target.value)}
-            />
+            {/* ── Endereço (PDF item #10): the parts, or a legacy free text kept as is. ── */}
+            {structured ? (
+              <EventAddressFields
+                parts={parts}
+                status={cepLookup.status}
+                errors={{
+                  cep: errors.cep,
+                  street: errors.street,
+                  city: errors.city,
+                  state: errors.state,
+                  tooLong: errors.addressTooLong,
+                }}
+                onCepChange={changeCep}
+                onPartChange={(key, value) => setParts((current) => ({ ...current, [key]: value }))}
+                onKeepLegacy={initialAddressMode === 'legacy' ? keepLegacy : undefined}
+              />
+            ) : (
+              <div data-event-address="legacy" className="flex flex-col gap-2">
+                <Textarea
+                  id="event-address"
+                  name="address"
+                  label={t('form.address.label')}
+                  placeholder={t('form.address.placeholder')}
+                  value={address}
+                  rows={2}
+                  maxLength={EVENT_MAX_ADDRESS}
+                  required
+                  error={errors.address}
+                  aria-describedby={
+                    errors.address ? 'event-address-error event-address-hint' : 'event-address-hint'
+                  }
+                  onInput={(event) => {
+                    const el = event.currentTarget;
+                    el.style.height = 'auto';
+                    el.style.height = `${el.scrollHeight}px`;
+                  }}
+                  onChange={(event) => setAddress(event.target.value)}
+                />
+                <p id="event-address-hint" className="text-xs font-normal text-text-tertiary">
+                  {t('form.address.legacyHint')}
+                </p>
+                <Button
+                  id={USE_CEP_ID}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  data-event-address-use-cep
+                  onClick={fillByCep}
+                >
+                  {t('form.address.useCep')}
+                </Button>
+              </div>
+            )}
           </>
         ) : (
           <div className="flex flex-col gap-2">
@@ -673,6 +956,34 @@ export function EventForm({
             <p className="text-xs font-normal text-text-tertiary">{t('form.url.helper')}</p>
           </div>
         )}
+
+        {/* ── (6b) Vagas (2026-10-03): digits only, empty = no limit, for either format. ── */}
+        <div className="flex flex-col gap-2">
+          <Input
+            id="event-capacity"
+            name="capacity"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="off"
+            label={t('form.capacity.label')}
+            placeholder={t('form.capacity.placeholder')}
+            value={capacityText}
+            maxLength={CAPACITY_MAX_DIGITS}
+            error={errors.capacity}
+            aria-describedby={
+              errors.capacity
+                ? 'event-capacity-error event-capacity-helper'
+                : 'event-capacity-helper'
+            }
+            onChange={(event) =>
+              setCapacityText(event.target.value.replace(/\D/g, '').slice(0, CAPACITY_MAX_DIGITS))
+            }
+          />
+          <p id="event-capacity-helper" className="text-xs font-normal text-text-tertiary">
+            {t('form.capacity.helper')}
+          </p>
+        </div>
 
         {/* ── (7) Edit only: the status row at the bottom (UI-D-211). ── */}
         {mode === 'edit' && eventId && (canCancel || canReactivate || cancelledLocked) ? (

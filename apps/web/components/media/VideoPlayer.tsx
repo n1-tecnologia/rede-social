@@ -1,7 +1,7 @@
 'use client';
 
 import type { MediaStatus } from '@rede-social/contracts/media';
-import { Button, Card, StatusPill, useToast } from '@rede-social/ui';
+import { Button, Card, cn, StatusPill, useToast } from '@rede-social/ui';
 import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
@@ -23,6 +23,13 @@ export interface VideoPlayerProps {
   assetId: string;
   /** The asset's own status; only `ready` ever mints a token. */
   status: VideoPlayerStatus;
+  /**
+   * Inside a post (the REINE timeline, 2026-10-02): the frame runs edge to edge with square corners,
+   * like a post's photos, instead of sitting in a padded, rounded box; the processing state is that
+   * same bare frame (no card inside the post) and only the copy below keeps the `px-4` gutter. The
+   * media library and the composer keep the padded player.
+   */
+  bleed?: boolean;
 }
 
 /** What the element type exposes that this component reads — its OWN derived poster URL. */
@@ -66,7 +73,7 @@ const POSTER_PROBE_TIMEOUT_MS = 3000;
  * Case 3 is the one a real Mux thumbnail token (`aud: 't'`) can reach, and it is covered by the same
  * `none` outcome. This component never constructs a vendor URL — it only ever asks the element.
  */
-export function VideoPlayer({ assetId, status }: VideoPlayerProps) {
+export function VideoPlayer({ assetId, status, bleed = false }: VideoPlayerProps) {
   const t = useTranslations('media');
   const toast = useToast();
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -181,33 +188,52 @@ export function VideoPlayer({ assetId, status }: VideoPlayerProps) {
   }
 
   if (status !== 'ready') {
-    return (
+    const frame = (
+      <div
+        className={cn(
+          'flex aspect-video w-full flex-col items-center justify-center gap-3 bg-bg-tertiary',
+          bleed ? 'px-4' : 'rounded-xl',
+        )}
+      >
+        <Loader2
+          aria-hidden
+          size={28}
+          className="animate-spin text-brand motion-reduce:animate-none"
+          data-testid="video-processing-spinner"
+        />
+        <p className="text-sm text-text-secondary">{t('player.processing.title')}</p>
+        <p className="max-w-[280px] text-center text-xs text-text-tertiary">
+          {t('player.processing.body')}
+        </p>
+      </div>
+    );
+    return bleed ? (
+      <div data-testid="video-processing">{frame}</div>
+    ) : (
       <Card className="p-4" data-testid="video-processing">
-        <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-xl bg-bg-tertiary">
-          <Loader2
-            aria-hidden
-            size={28}
-            className="animate-spin text-brand motion-reduce:animate-none"
-            data-testid="video-processing-spinner"
-          />
-          <p className="text-sm text-text-secondary">{t('player.processing.title')}</p>
-          <p className="max-w-[280px] text-center text-xs text-text-tertiary">
-            {t('player.processing.body')}
-          </p>
-        </div>
+        {frame}
       </Card>
     );
   }
 
+  const retry = refused ? (
+    <Button type="button" variant="ghost" size="sm" loading={minting} onClick={() => void mint()}>
+      {t('retry')}
+    </Button>
+  ) : null;
+
   return (
     <div
-      className="flex flex-col gap-3 p-4"
+      className={cn('flex flex-col gap-3', !bleed && 'p-4')}
       data-testid="video-ready"
       // The backstop is OBSERVABLE rather than merely "nothing visibly broke" — a shadow-DOM poster
       // would hide the difference from a test.
       data-poster={posterState}
     >
-      <div ref={frameRef} className="aspect-video w-full overflow-hidden rounded-xl bg-bg-tertiary">
+      <div
+        ref={frameRef}
+        className={cn('aspect-video w-full overflow-hidden bg-bg-tertiary', !bleed && 'rounded-xl')}
+      >
         {tokens ? (
           <MuxPlayer
             playbackId={tokens.playbackId}
@@ -227,17 +253,9 @@ export function VideoPlayer({ assetId, status }: VideoPlayerProps) {
         ) : null}
       </div>
 
-      {refused ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          loading={minting}
-          onClick={() => void mint()}
-        >
-          {t('retry')}
-        </Button>
-      ) : null}
+      {/* Edge to edge, only the retry keeps the post's `px-4` gutter (stretched like the padded
+          player's own). */}
+      {retry && bleed ? <div className="flex flex-col px-4">{retry}</div> : retry}
     </div>
   );
 }

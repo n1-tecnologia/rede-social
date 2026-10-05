@@ -1,0 +1,2 @@
+ALTER TABLE "communities" ADD COLUMN "position" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+CREATE INDEX "communities_tenant_position_idx" ON "communities" USING btree ("tenant_id","position","last_activity_at" DESC NULLS FIRST,"id" DESC NULLS FIRST) WHERE status = 'active' and deleted_at is null;

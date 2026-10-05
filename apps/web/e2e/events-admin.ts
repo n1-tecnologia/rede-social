@@ -79,8 +79,8 @@ export type EventsTenant = {
 
 /**
  * Provisions `slug` with `events` enabled, an admin, one member and zero events. Idempotent.
- * `extraModules` (06-08) turns more modules on too — the Início spec needs `feed`, so `/inicio` has
- * its feed below the "Próximo evento" card.
+ * `extraModules` (06-08) turns more modules on too — the tab-dot spec needs `feed`, so `/inicio`
+ * has its feed (and, since 2026-10-03, no "Próximo evento" card above it).
  */
 export async function createEventsTenant(
   slug: string,
@@ -327,14 +327,15 @@ export async function moveEventStart(eventId: string, startsInMinutes: number): 
 }
 
 /**
- * 06-08: moves an event's start to `seconds` from the DATABASE's `now()`, to the second — how the
- * Início spec puts the check-in window's opening (`starts_at − 1 h`) a few seconds ahead and then
- * waits out the REAL boundary (Pitfall 7: the server clock is real).
+ * 2026-10-03: moves an event's END to `seconds` from the DATABASE's `now()`, to the second, leaving
+ * its start alone (it must stay before the end) — how the tab-dot spec puts the last event's end a
+ * few seconds ahead and then waits out the REAL boundary (Pitfall 7: the server clock is real).
+ * It replaced 06-08's `moveEventStartSeconds`, whose only caller was the removed Início card spec.
  */
-export async function moveEventStartSeconds(eventId: string, seconds: number): Promise<void> {
+export async function moveEventEndSeconds(eventId: string, seconds: number): Promise<void> {
   await sql()`
     update public.events
-       set starts_at = now() + make_interval(secs => ${seconds}), updated_at = now()
+       set ends_at = now() + make_interval(secs => ${seconds}), updated_at = now()
      where id = ${eventId}::uuid`;
 }
 

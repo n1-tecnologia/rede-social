@@ -57,12 +57,11 @@ export default async function HomeHighlightsPage({
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col">
-      {/* `stickyTop="0px"`: the `/stories/meus` chrome (the 03-05 lesson). */}
+      {/* The `/stories/meus` chrome: the primitive's default sticky offset. */}
       <PageHeader
         title={ts('highlights.manage.titleHome')}
         backHref="/inicio"
         backLabel={ts('highlights.manage.back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <HighlightManager

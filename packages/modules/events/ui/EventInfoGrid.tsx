@@ -1,11 +1,12 @@
 import { cn } from '@rede-social/ui';
-import { CalendarDays, Clock, MapPin, Users, Video } from 'lucide-react';
+import { CalendarDays, Clock, MapPin, Ticket, Users, Video } from 'lucide-react';
 
 /**
  * The detail page's info grid (UI-D-204), ported from the prototype's `Info` cell.
  *
  * `layout="grid"` is the detail's `grid grid-cols-2 gap-3`: four cells (Data, Horário, Local, and
- * Confirmados, which the host relabels Presentes once the event is past).
+ * Confirmados, which the host relabels Presentes once the event is past), plus a fifth, Vagas, for
+ * an event with a limit (2026-10-03).
  *
  * `layout="ticket"` (06-05, UI-D-208) is the check-in boarding pass's 3-column details row [proto]:
  * `grid grid-cols-3 px-2 py-4`, three CENTRED cells (Data, Horário, Local), the middle one carrying
@@ -21,7 +22,8 @@ import { CalendarDays, Clock, MapPin, Users, Video } from 'lucide-react';
  * `ariaLiveIndex` marks ONE cell `aria-live="polite"`: the count, so a screen reader hears it change
  * after an RSVP refresh. Presentational and props-only; it **ships no words** (PWA-03).
  */
-export type EventInfoIcon = 'date' | 'time' | 'place' | 'online' | 'people';
+/** `spots` (2026-10-03) is the "Vagas" cell of an event with a limit. */
+export type EventInfoIcon = 'date' | 'time' | 'place' | 'online' | 'people' | 'spots';
 
 export interface EventInfoCell {
   icon: EventInfoIcon;
@@ -42,6 +44,7 @@ const ICONS = {
   place: MapPin,
   online: Video,
   people: Users,
+  spots: Ticket,
 } as const;
 
 export function EventInfoGrid({ layout, cells, ariaLiveIndex }: EventInfoGridProps) {

@@ -159,14 +159,16 @@ export default async function CommunityPage({
    * `highlightGroupView`): one circle per highlight in the API's `position, id` order, each OPENING
    * its own viewer group at its first story (D-107). A group's items are NOT carried by this render:
    * the viewer reads them lazily when the member reaches that circle, exactly as on Início. Every
-   * circle wears the neutral archive ring (UI-D-61). There is no tabbed layout here (D-68).
+   * highlight circle wears the neutral archive ring (UI-D-61). There is no tabbed layout (D-68).
    *
    * **The leading `+` is the D-80 door restated for this row (D-92, UI-D-53).** It is the strip's
    * `link` circle with the `own` disc — "Seu story" — pointed at `/stories/publicar?comunidade={id}`,
    * so the composer opens pre-filled with this community's first highlight (or its D-112 gate when it
-   * has none) and the story lands in this row. **Its gate is unchanged**: `stories.story.publish` AND
-   * `stories.story.manage` AND an active community — what the API requires for a publish that names
-   * a destination (T-05.2-32) — so this door never opens onto a composer that cannot choose one.
+   * has none) and the story lands in this row. It is drawn exactly like Início's (UI-D-28, as
+   * amended on 2026-10-02): a centred `Plus` in the dashed "only you see this" ring (UI-D-63), never
+   * the admin's photo. **Its gate is unchanged**: `stories.story.publish` AND `stories.story.manage`
+   * AND an active community — what the API requires for a publish that names a destination
+   * (T-05.2-32) — so this door never opens onto a composer that cannot choose one.
    *
    * **An ARCHIVED community shows its non-empty highlights read-only** (UI-D-64, the D-93 analogue):
    * no `+` at all — not a disabled one — while its circles still open.
@@ -198,11 +200,8 @@ export default async function CommunityPage({
                   href: `/stories/publicar?comunidade=${community.id}`,
                   label: ts('own.label'),
                   actionLabel: ts('own.actionCommunity', { community: community.name }),
-                  ring: 'neutral' as const,
-                  disc: {
-                    kind: 'own' as const,
-                    avatarUrl: bootstrap.membership.profile.avatarUrl,
-                  },
+                  ring: 'dashed' as const,
+                  disc: { kind: 'own' as const },
                 },
               ]
             : []),
@@ -299,7 +298,10 @@ export default async function CommunityPage({
       {/* The prototype's hairline between the container's own chrome and its content. */}
       <div aria-hidden className="h-px bg-border" />
 
-      <div className="px-4 pt-4 pb-6">
+      {/* No side gutter: the posts run edge to edge like Início's timeline (the REINE layout,
+          2026-10-02), 12px of page ground under the hairline; the feed keeps its own empty and
+          error cards inset. */}
+      <div className="pt-3 pb-6">
         <CommunityPosts
           initialItems={
             page === null

@@ -3,8 +3,10 @@ import {
   contrastReport,
   type DomainStatus,
   deriveBrandColors,
+  emptyBrandLook,
   type InviteStatus,
   type ModuleKey,
+  normalizeBrandLook,
   type PlatformTenantDetail,
   type PlatformTenantsQuery,
   REAL_TENANT_DEFAULT_MODULES,
@@ -13,6 +15,7 @@ import {
   type TenantStatus,
   TOGGLEABLE_MODULES,
   type UpdateTenantBody,
+  withDarkPrimary,
 } from '@rede-social/contracts';
 import {
   and,
@@ -179,6 +182,10 @@ export async function listPlatformTenants(
  * super_admin corrects it (instead of provisioning a tenant whose invite can never be delivered).
  * After commit the invites are sent — a no-op until a verified primary host exists, which at
  * creation is never.
+ *
+ * The wizard's look (2026-10-03, `input.look`, already the complete parsed look) is stored in its
+ * canonical form, the persisted dark accent following its own dark primary (`withDarkPrimary`), as
+ * `setBrandingLook` would store it; without one the tenant starts on the system's look.
  */
 export async function createTenant(
   input: CreateTenantBody,
@@ -186,13 +193,15 @@ export async function createTenant(
 ): Promise<{ id: string }> {
   const log = logFor(actor, 'platform.tenants');
   const adminEmail = input.adminEmail.trim().toLowerCase();
+  const look = normalizeBrandLook(input.look ?? emptyBrandLook());
   const branding: TenantBranding = {
     logoUrl: null,
     faviconUrl: null,
     iconUrl: null,
     iconUrls: null,
     iconVersion: 0,
-    colors: deriveBrandColors(input.colors),
+    colors: withDarkPrimary(deriveBrandColors(input.colors), look.darkColors.primary),
+    look,
   };
   const wanted = new Set<ModuleKey>(input.modules);
 
@@ -240,6 +249,7 @@ export async function createTenant(
       tenantId,
       slug: input.slug,
       modules: [...wanted],
+      look: input.look !== undefined,
     },
     'tenant created',
   );

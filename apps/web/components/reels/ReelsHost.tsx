@@ -698,8 +698,9 @@ export function ReelsHost({
   }, []);
 
   /**
-   * STABLE: `BottomSheet`'s focus trap re-arms whenever its `onClose` identity changes. Closing
-   * resumes inside the close gesture when nothing else holds the video (sound stays allowed).
+   * Stable by habit (`BottomSheet`'s focus trap reads `onClose` through a ref and arms once per
+   * opening). Closing resumes inside the close gesture when nothing else holds the video (sound
+   * stays allowed).
    */
   const closeSheet = useCallback(() => {
     const state = latest.current;

@@ -19,7 +19,8 @@ export const COMMUNITY_MAX_PAGE_SIZE = 25;
 /**
  * The longest cursor this endpoint will look at — the `FEED_MAX_CURSOR_LENGTH` rule restated. The
  * envelope (`@rede-social/core/server/paging`) is a base64url JSON object carrying an ISO timestamp and a
- * uuid, so 512 characters is already generous; the bound exists so a megabyte of "cursor" is refused
+ * uuid (the active list's timestamp prefixed by its position since 2026-10-03, a few characters more),
+ * so 512 characters is already generous; the bound exists so a megabyte of "cursor" is refused
  * before it is decoded.
  */
 export const COMMUNITY_MAX_CURSOR_LENGTH = 512;
@@ -50,8 +51,21 @@ export const COMMUNITY_MAX_DESCRIPTION = 280;
  * be an existence oracle (D-23, T-05-02). That paragraph is now load-bearing TWICE — for a missing
  * COMMUNITY and for a missing COVER ASSET — which is why `cover_invalid` covers only the case the
  * caller can see and fix, and never the case that would tell them whose asset it is.
+ *
+ * 2026-10-03 adds one, and it is the only STATE refusal here (the events vocabulary's split: input
+ * problems are `400 VALIDATION_FAILED`, state refusals are `409 CONFLICT`):
+ *  - `order_stale` (`409`): a reorder named a set of ids that is not exactly the tenant's current
+ *    ACTIVE communities. It is one code for every way the set can differ — a community created,
+ *    archived or removed since the admin's screen loaded, and an id that is unknown or another
+ *    tenant's — so it is not an existence oracle either: a foreign id and a random uuid answer the
+ *    same bytes. The client's move is always the same one: reload the list and start again.
  */
-export const COMMUNITY_ISSUES = ['name_required', 'archived', 'cover_invalid'] as const;
+export const COMMUNITY_ISSUES = [
+  'name_required',
+  'archived',
+  'cover_invalid',
+  'order_stale',
+] as const;
 export type CommunityIssue = (typeof COMMUNITY_ISSUES)[number];
 
 /** The route `defaultHook`'s lookup: a Zod issue whose `message` is in here becomes `details.community`. */
@@ -103,6 +117,16 @@ export const communityQuerySchema = z
 export type CommunityQuery = z.infer<typeof communityQuerySchema>;
 
 /**
+ * The most ids one reorder may carry (2026-10-03). Communities have no creation cap, so this bound
+ * exists for the request rather than for the table: a body of 200 uuids is a few kilobytes, and a
+ * crafted body of a million is refused by the contract before any lookup. It also bounds the screen
+ * that sends it: the web loads the WHOLE active set before it offers a reorder (the order is one
+ * permutation of every active community), and a tenant past this bound is told so instead of being
+ * handed a partial list that every save would refuse as `order_stale`.
+ */
+export const COMMUNITY_MAX_ORDER = 200;
+
+/**
  * One community as the list and the detail read project it (COMM-03's four fields plus the two the
  * URL and the ordering need).
  *
@@ -117,9 +141,11 @@ export type CommunityQuery = z.infer<typeof communityQuerySchema>;
  * real one and invent an authorship claim the product does not make. `created_by_user_id` is stored
  * on the row for auditing and never reaches this shape.
  *
- * `lastActivityAt` crosses the wire because it IS the ordering key and the cursor is built from it;
+ * `lastActivityAt` crosses the wire because it is an ordering key and the cursor is built from it;
  * the UI-SPEC forbids printing it (UI-D-42 drops the prototype's timestamp), and no shipped surface
- * renders it.
+ * renders it. Since 2026-10-03 it orders the ACTIVE list INSIDE the admin's `position` (see
+ * `listCommunities`), and the position itself deliberately does not cross: the array order IS the
+ * answer, and a number a client could sort by would be a second, stale copy of it.
  */
 export const communitySummarySchema = z
   .object({
@@ -210,6 +236,38 @@ export const updateCommunitySchema = z
     }
   });
 export type UpdateCommunity = z.infer<typeof updateCommunitySchema>;
+
+/**
+ * `PUT /v1/communities/order` (2026-10-03) — the admin's order of the ACTIVE list, as ONE full
+ * permutation: `ids` is every active community of the tenant, first to last.
+ *
+ * - **The whole set, never a move.** "Put X above Y" would be a second vocabulary to keep in step
+ *   with the list, and two admins' moves would interleave into an order neither of them chose. A
+ *   permutation is checked against the current set under a lock and either lands whole or not at
+ *   all; when the set changed in between it is `409 { community: 'order_stale' }` (the service
+ *   decides that, because only the database knows the current set).
+ * - **Bounded** (`1..COMMUNITY_MAX_ORDER`): an empty body has nothing to order, and an oversized one
+ *   is refused before any lookup.
+ * - **No duplicates — refused HERE, as malformed input (400), not as a stale set (409).** A list
+ *   naming one community twice is not a permutation of anything, whatever the database holds, so
+ *   reloading could never fix it. Compared case-insensitively: `z.uuid()` accepts upper-case hex,
+ *   and two spellings of one uuid are one community (uuid equality is Postgres', integration case
+ *   32). The message is deliberately NOT a `COMMUNITY_ISSUES` code, so the route's `defaultHook`
+ *   answers the plain `issues` list rather than inventing a `details.community` for it.
+ * - `.strict()`: an unknown key fails loudly (the 03-03 rule).
+ */
+export const reorderCommunitiesSchema = z
+  .object({
+    ids: z
+      .array(z.uuid())
+      .min(1)
+      .max(COMMUNITY_MAX_ORDER)
+      .refine((ids) => new Set(ids.map((id) => id.toLowerCase())).size === ids.length, {
+        message: 'Cada comunidade aparece uma vez só.',
+      }),
+  })
+  .strict();
+export type ReorderCommunities = z.infer<typeof reorderCommunitiesSchema>;
 
 /** The permission STRINGS, exported so the manifest and the web tier never retype them. */
 export const COMMUNITY_PERMISSIONS = {

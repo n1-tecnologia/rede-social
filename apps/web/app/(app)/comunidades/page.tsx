@@ -10,8 +10,11 @@ import { loadCommunities } from '@/lib/communities';
 import { CommunitiesList } from './CommunitiesList';
 
 /**
- * `/comunidades` (COMM-02, COMM-03) — the tenant's communities, most recent activity first, reached
- * from the `Comunidades` BottomNav/rail tab the module's manifest declares (D-40).
+ * `/comunidades` (COMM-02, COMM-03) — the tenant's communities in the order an admin chose, most
+ * recent activity first inside it (2026-10-03; with no reorder yet, simply most recent activity
+ * first), reached from the `Comunidades` BottomNav/rail tab the module's manifest declares (D-40).
+ * The "Reordenar" mode lives in `CommunitiesList`, offered from `canManage` on `Ativas` only — this
+ * page decides nothing new for it.
  *
  * Server-rendered from `GET /v1/communities`, so the first paint already carries page 1 and a shared
  * link opens on the same list. Everything the list shows is the API's answer: COMM-02's "every
@@ -65,7 +68,10 @@ export default async function CommunitiesPage({
 
   const heading = (
     <>
-      <h1 className="text-2xl font-bold leading-tight tracking-[-0.02em] text-text">
+      <h1
+        data-brand-title
+        className="text-2xl font-bold leading-tight tracking-[-0.02em] text-text"
+      >
         {t('list.title')}
       </h1>
       <p className="mt-1 text-sm font-normal text-text-secondary">{t('list.subtitle')}</p>
@@ -83,7 +89,7 @@ export default async function CommunitiesPage({
             <a
               href="/comunidades/nova"
               data-communities-create
-              className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-brand text-sm font-bold text-on-brand transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:px-4"
+              className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-button bg-(image:--button-image) text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:px-4"
             >
               <Plus aria-hidden size={20} className="sm:hidden" />
               <Plus aria-hidden size={16} className="hidden sm:block" />

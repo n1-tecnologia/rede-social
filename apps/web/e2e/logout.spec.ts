@@ -21,7 +21,11 @@ test.describe('AUTH-05 — device-local logout', () => {
     const responseB = await pageB.goto(`${baseURL}/inicio`);
     expect(responseB?.status()).toBe(200);
     await expect(pageB).toHaveURL(/\/inicio$/);
-    await expect(pageB.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
+    // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início",
+    // and the tenant shows in the shell's home link (TopBar on the phone, rail on desktop), named
+    // by the logo's alt (or by the name itself without a logo).
+    await expect(pageB.getByRole('heading', { level: 1 })).toHaveText('Início');
+    await expect(pageB.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
 
     await deviceA.close();
     await deviceB.close();

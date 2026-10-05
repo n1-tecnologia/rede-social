@@ -5,7 +5,6 @@ import {
   tenantDomainSchema,
   tenantDomainsListSchema,
 } from '@rede-social/contracts';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import type { DomainActionResult, DomainStatus } from '@/components/platform/DomainCard';
@@ -13,6 +12,7 @@ import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
 import { platformRedirectPath } from '@/lib/platform';
 import { mapDomainActionError } from '@/lib/platform-domains';
+import { revalidateTenantViews } from '@/lib/revalidate-tenant';
 
 /**
  * Server actions of the Domínios tab (TENANT-07, D-34/D-35/D-36) over 02-09's
@@ -43,7 +43,7 @@ async function readEnvelope(res: Response): Promise<ApiClientError> {
 type DomainRow = { status: DomainStatus; lastError: string | null };
 
 function revalidateTenant(tenantId: string): void {
-  revalidatePath(`/plataforma/tenants/${tenantId}`, 'layout');
+  revalidateTenantViews(tenantId);
 }
 
 function domainPath(tenantId: string, domainId: string, suffix = ''): string {

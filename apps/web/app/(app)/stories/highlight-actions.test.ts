@@ -67,6 +67,8 @@ vi.mock('next/navigation', () => ({
 
 const HIGHLIGHT = '0000000a-1111-4111-8111-111111111111';
 const STORY = '0d000000-0000-4000-8000-0000000000d4';
+/** The author's profile photo as the API projects it (`avatarUrlFor`, #2b). */
+const AUTHOR_PHOTO = '/v1/media/0b000000-0000-4000-8000-0000000000a1/w128';
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -94,6 +96,8 @@ function detail() {
       {
         id: STORY,
         authorUserId: '0a000000-0000-4000-8000-000000000001',
+        // #2b: the author's photo rides every story projection, the highlight detail included.
+        authorAvatarUrl: AUTHOR_PHOTO,
         mediaAssetId: '0b000000-0000-4000-8000-000000000001',
         mediaKind: 'image',
         mediaVariantWidths: [640, 1080],
@@ -148,6 +152,8 @@ describe('loadHighlightItemsAction — the lazy highlight group read (T-05.2-23)
       likeCount: 2,
       commentCount: 1,
       viewerLiked: true,
+      // #2b: the strict parse keeps the author's photo, and the item view carries it verbatim.
+      authorAvatarUrl: AUTHOR_PHOTO,
     });
     // The relative time is formatted HERE, on the server (UI-D-14) — a string, never a date.
     expect(typeof result.items[0]?.timeLabel).toBe('string');

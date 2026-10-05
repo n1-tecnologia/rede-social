@@ -2,6 +2,7 @@ import type { PlatformTenantDetail } from '@rede-social/contracts';
 import {
   type BrandColors,
   type BrandIconUrls,
+  type BrandLook,
   type ContrastReport,
   iconsUpToDate,
   resolveBranding,
@@ -12,7 +13,8 @@ import {
  * stored jsonb filled by `resolveBranding`, plus two derived facts the form's states hinge on:
  * `hasSource` (a logo or a square override exists → the app-icons card is shown) and `iconsReady`
  * (the persisted icon set belongs to the CURRENT `iconVersion` → "Ícones gerados", otherwise the
- * honest "Ícones sendo gerados…" while the worker runs, D-28).
+ * honest "Ícones sendo gerados…" while the worker runs, D-28). `look` (2026-10-03) is the saved look
+ * beyond the pair, canonical, all `null` for a tenant that never set one.
  */
 export type BrandingView = {
   displayName: string;
@@ -25,6 +27,7 @@ export type BrandingView = {
   hasSource: boolean;
   colors: BrandColors;
   contrast: ContrastReport;
+  look: BrandLook;
 };
 
 /** Pure mapper: the strict platform detail → the Marca tab's view. */
@@ -41,5 +44,30 @@ export function toBrandingView(detail: PlatformTenantDetail): BrandingView {
     hasSource: branding.logoUrl !== null || branding.iconUrl !== null,
     colors: branding.colors,
     contrast: detail.tenant.contrast,
+    look: branding.look,
   };
+}
+
+/**
+ * The React `key` of a Marca form: a refreshed server view remounts it with fresh state — no
+ * effect-driven state sync (the tenant tab's `BrandingForm` and the wizard's Marca step).
+ */
+export function brandingViewKey(view: BrandingView): string {
+  return [
+    view.iconVersion,
+    view.iconsReady,
+    view.logoUrl,
+    view.iconUrl,
+    view.colors.primary,
+    view.colors.secondary,
+  ].join('|');
+}
+
+/**
+ * The React `key` of the Marca tab's look editor (`BrandLookProvider`): the SAVED look alone, so a
+ * saved look remounts it on what was stored, while a pair save or an upload (which change only
+ * `brandingViewKey`) never throws away a look being edited.
+ */
+export function brandLookKey(view: BrandingView): string {
+  return JSON.stringify(view.look);
 }

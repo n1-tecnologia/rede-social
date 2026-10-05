@@ -285,3 +285,26 @@ describe('ComposerForm — a feed post needs a READY video (quick-260929-ltf)', 
     );
   });
 });
+
+/**
+ * 2026-10-02 (PDF #5): the composer is a TASK screen. The form root declares it, and tokens.css hides
+ * the shell's floating BottomNav (and drops its end-padding reserve) while such a form is mounted, so
+ * the pill never sits over the caption or a picker. Both modes are the same form, so both declare it.
+ */
+describe('ComposerForm — a task screen hides the BottomNav by declaration', () => {
+  it('C7: the form root carries data-shell-hide="nav" in create and in edit mode', () => {
+    const { unmount } = render(<ComposerForm mode="create" tenantName="Rede Demo" />);
+    expect(form().getAttribute('data-shell-hide')).toBe('nav');
+    unmount();
+
+    render(
+      <ComposerForm
+        mode="edit"
+        postId="OLD_POST"
+        tenantName="Rede Demo"
+        initial={draft({ assetId: 'OLD', status: 'ready' })}
+      />,
+    );
+    expect(form().getAttribute('data-shell-hide')).toBe('nav');
+  });
+});

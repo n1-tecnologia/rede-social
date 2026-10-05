@@ -68,8 +68,11 @@ function isCursorInstant(value: string): boolean {
   );
 }
 
-/** `decodeCursor`, and then page 1 (null) unless `n` is a real instant: the one guard both lists use. */
-function decodeInstantCursor(raw: string | undefined) {
+/**
+ * `decodeCursor`, and then page 1 (null) unless `n` is a real instant: the one guard every keyset of
+ * this module uses (exported for `./photos.ts`; not part of the package's published surface).
+ */
+export function decodeInstantCursor(raw: string | undefined) {
   const decoded = decodeCursor(raw);
   return decoded && isCursorInstant(decoded.n) ? decoded : null;
 }
@@ -93,7 +96,11 @@ type EventRow = {
   id: string;
   title: string;
   format: EventFormat;
+  /** 2026-10-03. Optional in the TYPE only so a hand-built test row may omit them (`toEvent`). */
+  category?: string | null;
+  capacity?: number | null;
   venue_name: string | null;
+  address?: string | null;
   cover_asset_id: string | null;
   cover_variant_widths: number[] | null;
   status: EventStatus;
@@ -108,7 +115,6 @@ type EventRow = {
 /** The detail read adds what only the detail page prints. */
 type EventDetailRow = EventRow & {
   description: string;
-  address: string | null;
   viewer_responded_at: string | null;
 };
 
@@ -117,7 +123,7 @@ type EventDetailRow = EventRow & {
  * cursor's `n` is this exact string and is compared back as `::timestamptz`, so a JS `Date` round
  * trip would truncate to milliseconds and move a page boundary.
  */
-const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
+export const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
 
 /**
  * THE projection, shared by the list, the detail and the create read-back so they can never disagree
@@ -133,14 +139,20 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  *    `event_attendances_tenant_event_status_idx`. `confirmed` is `going + checked_in` (every member
  *    whose recorded answer was Vou), `present` is `checked_in + walk_in`. Cast to `int`: a bare
  *    `count(*)` is a bigint, which the driver hands back as a string. The expressions are copied
- *    VERBATIM into `141-event-attendances.sql` fact 10, so edit both together.
+ *    VERBATIM into `141-event-attendances.sql` fact 10, so edit both together;
+ *  - (2026-10-03) the poster's `category`, `capacity` and `address`: plain columns of the same row,
+ *    so a page stays ONE statement (`feed-query-budget.test.ts`). `capacity` with the confirmed
+ *    count beside it is everything "Últimas N vagas" needs.
  * `created_by_user_id`, and everything in `event_secrets`, are deliberately absent.
  */
 const eventColumns = sql`
            e.id,
            e.title,
            e.format,
+           e.category,
+           e.capacity,
            e.venue_name,
+           e.address,
            case when a.id is null then null else e.cover_asset_id end as cover_asset_id,
            a.variant_widths as cover_variant_widths,
            e.status,
@@ -176,7 +188,11 @@ const toEvent = (row: EventRow): EventSummary => ({
   id: row.id,
   title: row.title,
   format: row.format,
+  category: row.category ?? null,
+  // An `int` column, which the driver hands back as a number; `Number` only guards a string driver.
+  capacity: row.capacity === null || row.capacity === undefined ? null : Number(row.capacity),
   venueName: row.venue_name,
+  address: row.address ?? null,
   coverAssetId: row.cover_asset_id,
   coverVariantWidths: row.cover_variant_widths ?? [],
   startsAt: row.starts_at,
@@ -424,6 +440,8 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
   const address = inPerson ? orNull(input.address) : null;
   const meetingUrl = inPerson ? null : orNull(input.meetingUrl);
   const coverAssetId = input.coverAssetId ?? null;
+  const category = orNull(input.category);
+  const capacity = input.capacity ?? null;
 
   let created: EventRow;
   try {
@@ -433,12 +451,14 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
 
       const inserted = await tx.execute<{ id: string }>(sql`
         insert into events (tenant_id, created_by_user_id, title, description, cover_asset_id,
-                            format, venue_name, address, starts_at, ends_at)
+                            category, capacity, format, venue_name, address, starts_at, ends_at)
         select ${ctx.tenantId}::uuid,
                ${ctx.userId}::uuid,
                ${input.title},
                ${input.description},
                ${coverAssetId}::uuid,
+               ${category}::text,
+               ${capacity}::int,
                ${input.format},
                ${venueName},
                ${address},
@@ -496,6 +516,8 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
       titleLength: input.title.length,
       descriptionLength: input.description.length,
       hasCover: created.cover_asset_id !== null,
+      hasCategory: category !== null,
+      capacity,
     },
     'event created',
   );
@@ -504,8 +526,8 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
 }
 
 /**
- * `GET /v1/events/{eventId}` (EVENT-02): the shared projection plus the description, the address and
- * the viewer's `responded_at`. ONE statement.
+ * `GET /v1/events/{eventId}` (EVENT-02): the shared projection (the address is in it since
+ * 2026-10-03) plus the description and the viewer's `responded_at`. ONE statement.
  *
  * A miss is ONE bare 404 with no `details`: an unknown id, another tenant's id (RLS and the explicit
  * `tenant_id` predicate both exclude it) and a moderated one are indistinguishable (D-23, T-06-14).
@@ -515,7 +537,6 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
     tx.execute<EventDetailRow>(sql`
       select ${eventColumns},
              e.description,
-             e.address,
              to_char(me.responded_at at time zone 'utc', ${ISO_MICROSECONDS}) as viewer_responded_at
       ${eventSource(ctx.userId)}
        where e.tenant_id = ${ctx.tenantId}::uuid
@@ -528,7 +549,6 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
   return {
     ...toEvent(row),
     description: row.description,
-    address: row.address,
     viewerRespondedAt: row.viewer_responded_at,
   };
 }
@@ -537,12 +557,16 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
  * The guard trigger's refusals (`20260927154335_event_attendance_guard.sql`), by the constraint name
  * each raise carries, mapped to the closed `EVENT_ISSUES` vocabulary. `event_attendances_immutable`
  * is deliberately absent: no API path moves a row, so reaching it is a bug and stays a 500.
+ *
+ * `event_attendances_capacity` (2026-10-03, `*_event_capacity_guard.sql` step 7) is a NEW Vou on an
+ * event whose other members' confirmed count already reached its `capacity`: `event_full`.
  */
 const GUARD_ISSUES: Readonly<Record<string, EventIssue>> = {
   event_attendances_rsvp_open: 'rsvp_closed',
   event_attendances_event_active: 'cancelled',
   event_attendances_locked: 'attendance_locked',
   event_attendances_checkin_window: 'checkin_not_open',
+  event_attendances_capacity: 'event_full',
 };
 
 /**
@@ -589,6 +613,35 @@ type RsvpRow = {
 };
 
 /**
+ * What an `event_full` refusal means for THIS caller (2026-10-03), read in a fresh transaction
+ * (the refused one is already rolled back). Only a `going` answer can reach it (step 7 judges moves
+ * into `going` alone), so:
+ *  - the caller is already `going`: the repeat answer it always was, unchanged and silent;
+ *  - the caller already checked in (or walked in): `attendance_locked`, as on any event;
+ *  - otherwise (no row, `not_going`): `409 event_full`.
+ */
+async function fullEventAnswer(
+  ctx: RequestContext,
+  eventId: string,
+): Promise<{ status: AttendanceStatus; changed: null }> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ status: AttendanceStatus }>(sql`
+      select status
+        from event_attendances
+       where tenant_id = ${ctx.tenantId}::uuid
+         and event_id = ${eventId}::uuid
+         and user_id = ${ctx.userId}::uuid
+       limit 1`),
+  );
+  const status = rows[0]?.status;
+  if (status === 'going') return { status, changed: null };
+  if (status === 'checked_in' || status === 'walk_in') {
+    throw new ApiError(409, 'CONFLICT', { event: 'attendance_locked' });
+  }
+  throw new ApiError(409, 'CONFLICT', { event: 'event_full' });
+}
+
+/**
  * `PUT /v1/events/{eventId}/rsvp { answer }` (EVENT-03, D-204, D-205).
  *
  * ONE statement inside `withTenantTx`: a data-modifying CTE snapshots the previous status and the
@@ -604,6 +657,15 @@ type RsvpRow = {
  * arbiter, reads the event `FOR SHARE` and raises by constraint name. `guardIssue` maps each refusal:
  * `409 CONFLICT { event: 'rsvp_closed' | 'cancelled' | 'attendance_locked' }`, and an unknown or
  * foreign event is a bare 404 (the guard's 23503 comes first, so the composite FK never answers).
+ *
+ * **A full event (2026-10-03).** The guard's step 7 refuses a NEW Vou once the OTHER members'
+ * confirmed count reached `capacity`, under a per-event advisory lock, so two racing Vou on the last
+ * seat cannot both pass. Because it judges the proposed INSERT tuple, before the arbiter, it also
+ * fires for a member who is ALREADY confirmed and answers Vou again on an event whose limit was
+ * lowered under its confirmed count, and for a checked-in member. `fullEventAnswer` tells them apart
+ * with one read of the caller's own row: an existing `going` is the repeat answer it always was (200,
+ * nothing written, nothing emitted), a check-in is `attendance_locked` as on any event, and anything
+ * else is `409 event_full`.
  *
  * `event.rsvp` is emitted after `withTenantTx` resolved, only when the status changed.
  */
@@ -667,8 +729,13 @@ export async function rsvpEvent(
   } catch (error) {
     const issue = guardIssue(error);
     if (issue === 'not_found') throw new ApiError(404, 'NOT_FOUND');
-    if (issue) throw new ApiError(409, 'CONFLICT', { event: issue });
-    throw error;
+    if (issue === 'event_full') {
+      outcome = await fullEventAnswer(ctx, eventId);
+    } else if (issue) {
+      throw new ApiError(409, 'CONFLICT', { event: issue });
+    } else {
+      throw error;
+    }
   }
 
   const changed = outcome.changed;
@@ -706,6 +773,8 @@ type EventEditRow = {
   description: string;
   cover_asset_id: string | null;
   cover_variant_widths: number[] | null;
+  category: string | null;
+  capacity: number | null;
   format: EventFormat;
   venue_name: string | null;
   address: string | null;
@@ -744,6 +813,8 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
              e.description,
              case when a.id is null then null else e.cover_asset_id end as cover_asset_id,
              a.variant_widths as cover_variant_widths,
+             e.category,
+             e.capacity,
              e.format,
              e.venue_name,
              e.address,
@@ -772,6 +843,8 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
     description: row.description,
     coverAssetId: row.cover_asset_id,
     coverVariantWidths: row.cover_variant_widths ?? [],
+    category: row.category,
+    capacity: row.capacity === null ? null : Number(row.capacity),
     format: row.format,
     venueName: row.venue_name,
     address: row.address,
@@ -791,7 +864,9 @@ type LockedEventRow = { cover_asset_id: string | null; starts_at: string; ends_a
  * `PUT /v1/events/{eventId}` (06-04, D-214): a WHOLE-EVENT REPLACEMENT with the create's own
  * `eventInputSchema` (planning decision 1: format, location and URL move together, so a partial body
  * would have to re-derive the XOR). Every field stays editable after members answered, and nothing
- * here touches `event_attendances`: answers and check-ins are kept.
+ * here touches `event_attendances`: answers and check-ins are kept. That includes `capacity`
+ * (2026-10-03): a limit LOWER than the current confirmed count is stored as asked, every answer
+ * already given stays, and only a new Vou is refused (`event_full`) until someone answers Não vou.
  *
  * ONE `withTenantTx`, in this order:
  *  1. **Lock** the current row (`for update`), keeping its old instants for `timesChanged`. A miss
@@ -827,6 +902,8 @@ export async function updateEvent(
   const address = inPerson ? orNull(input.address) : null;
   const meetingUrl = inPerson ? null : orNull(input.meetingUrl);
   const requestedCover = input.coverAssetId ?? null;
+  const category = orNull(input.category);
+  const capacity = input.capacity ?? null;
 
   let outcome: { row: EventRow; changed: boolean; timesChanged: boolean; healed: boolean };
   try {
@@ -857,6 +934,8 @@ export async function updateEvent(
           select ${input.title}::text as title,
                  ${input.description}::text as description,
                  ${coverAssetId}::uuid as cover_asset_id,
+                 ${category}::text as category,
+                 ${capacity}::int as capacity,
                  ${input.format}::text as format,
                  ${venueName}::text as venue_name,
                  ${address}::text as address,
@@ -869,6 +948,8 @@ export async function updateEvent(
            set title = n.title,
                description = n.description,
                cover_asset_id = n.cover_asset_id,
+               category = n.category,
+               capacity = n.capacity,
                format = n.format,
                venue_name = n.venue_name,
                address = n.address,
@@ -879,11 +960,11 @@ export async function updateEvent(
          where e.tenant_id = ${ctx.tenantId}::uuid
            and e.id = ${eventId}::uuid
            and e.deleted_at is null
-           and (e.title, e.description, e.cover_asset_id, e.format, e.venue_name, e.address,
-                e.starts_at, e.ends_at)
+           and (e.title, e.description, e.cover_asset_id, e.category, e.capacity, e.format,
+                e.venue_name, e.address, e.starts_at, e.ends_at)
                is distinct from
-               (n.title, n.description, n.cover_asset_id, n.format, n.venue_name, n.address,
-                n.starts_at, n.ends_at)
+               (n.title, n.description, n.cover_asset_id, n.category, n.capacity, n.format,
+                n.venue_name, n.address, n.starts_at, n.ends_at)
         returning to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                   to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at`);
 
@@ -960,6 +1041,8 @@ export async function updateEvent(
       format: row.format,
       titleLength: input.title.length,
       hasCover: row.cover_asset_id !== null,
+      hasCategory: category !== null,
+      capacity,
     },
     'event updated',
   );
@@ -1304,8 +1387,15 @@ const toAttendee = (row: AttendeeRow): Attendee => ({
   walkIn: row.status === 'walk_in',
 });
 
-/** A live event of THIS tenant, in this lane: the existence check every attendance read starts with. */
-async function assertEventInLane(tx: Tx, ctx: RequestContext, eventId: string): Promise<void> {
+/**
+ * A live event of THIS tenant, in this lane: the existence check every attendance read (and every
+ * photo route, `./photos.ts`) starts with.
+ */
+export async function assertEventInLane(
+  tx: Tx,
+  ctx: RequestContext,
+  eventId: string,
+): Promise<void> {
   const rows = await tx.execute<{ id: string }>(sql`
     select id
       from events

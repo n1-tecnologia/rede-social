@@ -16,7 +16,8 @@ import type { EventActionState } from '@/lib/events-view';
  *     and no row carries more than one brand fill (the pair itself carries none);
  *  2. a tap moves `aria-pressed` optimistically, marks the group busy, calls the action once, and on
  *     success refreshes with NO toast;
- *  3. a failure reverts and toasts; `rsvp_closed` and `cancelled` toast their own lines and refresh;
+ *  3. a failure reverts and toasts; `rsvp_closed`, `cancelled` and (2026-10-03) `event_full` toast
+ *     their own lines and refresh; a full event shows its quiet line under a still-live pair;
  *  4. tapping the already-pressed answer writes nothing;
  *  5. the boundary refresh: one timer at the next boundary within 24 h, none beyond, cleared on
  *     unmount; a refresh that brings the SAME phase back is retried (2, 5, 15, 30 s), and a phase
@@ -75,7 +76,8 @@ const C = catalog as {
     windowHint: string;
     answeredGoing: string;
     answeredNotGoing: string;
-    errors: { failed: string; closed: string };
+    fullHint: string;
+    errors: { failed: string; closed: string; full: string };
   };
   errors: { cancelled: string };
   checkin: { cta: string };
@@ -115,9 +117,14 @@ afterEach(() => {
 const group = () => screen.getByRole('group', { name: C.rsvp.label });
 const vou = () => screen.getByRole('button', { name: C.rsvp.going });
 const naoVou = () => screen.getByRole('button', { name: C.rsvp.notGoing });
+/**
+ * Every solid brand fill under `root`: the button colour the CTAs paint with (`bg-button`, its own
+ * token since 2026-10-03) or the primary itself (`bg-brand`, which no element of the zone should
+ * spend), so "one fill at most" keeps counting both.
+ */
 const brandFills = (root: Element) =>
   Array.from(root.querySelectorAll('*')).filter((node) =>
-    /(^|\s)bg-brand(\s|$)/.test(node.getAttribute('class') ?? ''),
+    /(^|\s)bg-(button|brand)(\s|$)/.test(node.getAttribute('class') ?? ''),
   );
 
 describe('EventActions — every RSVP row of the action-zone contract (UI-D-207)', () => {
@@ -301,6 +308,45 @@ describe('EventActions — answering (D-204, D-205, UI-D-206)', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('3e. event_full (2026-10-03, the last spot went meanwhile): revert, "Este evento está lotado." and a refresh', async () => {
+    rsvp.mockResolvedValue({ ok: false, error: 'event_full' });
+    render(<EventActions {...state({ answer: 'not_going' })} />);
+    fireEvent.click(vou());
+
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: C.rsvp.errors.full }),
+    );
+    expect(C.rsvp.errors.full).toBe('Este evento está lotado.');
+    expect(naoVou().getAttribute('aria-pressed')).toBe('true');
+    expect(vou().getAttribute('aria-pressed')).toBe('false');
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('3f. a full event: the quiet line under a LIVE pair for a viewer not going; none once going, cancelled or without the flag', () => {
+    render(<EventActions {...state({ full: true, answer: 'not_going' })} />);
+    expect(screen.getByTestId('event-actions-full').textContent).toBe(C.rsvp.fullHint);
+    // The pair stays live: "Não vou" is always an answer, and the database refuses a Vou itself.
+    expect((vou() as HTMLButtonElement).disabled).toBe(false);
+    expect((naoVou() as HTMLButtonElement).disabled).toBe(false);
+    cleanup();
+
+    render(<EventActions {...state({ full: true, phase: 'P1', answer: null })} />);
+    expect(screen.getByTestId('event-actions-full')).toBeTruthy();
+    cleanup();
+
+    for (const extra of [
+      { full: true, answer: 'going' as const },
+      { full: true, cancelled: true },
+      { full: true, phase: 'P2' as const, answer: 'not_going' as const },
+      { full: false },
+      {},
+    ]) {
+      render(<EventActions {...state(extra)} />);
+      expect(screen.queryByTestId('event-actions-full'), JSON.stringify(extra)).toBeNull();
+      cleanup();
+    }
+  });
+
   it('3d. attendance_locked (a check-in landed meanwhile): the generic toast and a refresh into the banner', async () => {
     rsvp.mockResolvedValue({ ok: false, error: 'attendance_locked' });
     render(<EventActions {...state({ phase: 'P1' })} />);
@@ -435,9 +481,24 @@ describe('EventActions — the in-person check-in CTA (06-05, UI-D-207)', () => 
     expect(group()).toBeTruthy();
     expect(cta().tagName).toBe('A');
     expect(cta().getAttribute('href')).toBe(`/eventos/${ID}/check-in`);
-    expect(cta().className).toContain('bg-brand');
-    expect(cta().className).toContain('w-full');
+    // Exact class tokens (review F2): a substring 'bg-button' is also inside 'hover:bg-button-hover'.
+    // The gradient button's image and its hover ride along (`none` unless the gradient is set).
+    const tokens = cta().className.split(/\s+/);
+    expect(tokens).toEqual(
+      expect.arrayContaining([
+        'bg-button',
+        'bg-(image:--button-image)',
+        'text-on-button',
+        'hover:bg-button-hover',
+        'hover:bg-(image:--button-image-hover)',
+        'w-full',
+      ]),
+    );
+    for (const legacy of ['bg-brand', 'text-on-brand', 'hover:bg-brand-hover']) {
+      expect(tokens).not.toContain(legacy);
+    }
     expect(brandFills(container)).toHaveLength(1);
+    expect(container.querySelector('.bg-brand')).toBeNull();
     // Below the pair, in the zone's reading order.
     const zone = screen.getByTestId('event-actions');
     const children = Array.from(zone.children);
@@ -479,6 +540,11 @@ describe('EventActions — the in-person check-in CTA (06-05, UI-D-207)', () => 
       expect(disabled.getAttribute('aria-disabled')).toBe('true');
       expect(disabled.getAttribute('href')).toBeNull();
       expect(disabled.className).toContain('opacity-50');
+      // The same fill and gradient image as the live CTA, with no hover of either.
+      const tokens = disabled.className.split(/\s+/);
+      expect(tokens).toEqual(expect.arrayContaining(['bg-button', 'bg-(image:--button-image)']));
+      expect(tokens).not.toContain('hover:bg-button-hover');
+      expect(tokens).not.toContain('hover:bg-(image:--button-image-hover)');
       expect(disabled.textContent).toBe(C.checkin.cta);
       expect(brandFills(container).length).toBeLessThanOrEqual(1);
       unmount();
@@ -530,7 +596,7 @@ describe('EventActions — the online rows and the whole contract table (06-06, 
     expect(link.tagName).toBe('A');
     expect(link.getAttribute('href')).toBe(`/eventos/${ID}/entrar`);
     expect(link.getAttribute('data-tone')).toBe('outline');
-    expect(link.className).not.toMatch(/(^|\s)bg-brand(\s|$)/);
+    expect(link.className).not.toMatch(/(^|\s)bg-(button|brand)(\s|$)/);
     expect(link.querySelector('svg')).toBeTruthy();
     expect(hint()?.textContent).toBe(C.online.hintBefore.replace('{time}', '19:00'));
     expect(hint()?.querySelector('svg')).toBeNull();
@@ -561,6 +627,15 @@ describe('EventActions — the online rows and the whole contract table (06-06, 
       expect(group()).toBeTruthy();
       expect(enter()?.getAttribute('data-tone')).toBe('brand');
       expect(enter()?.getAttribute('href')).toBe(`/eventos/${ID}/entrar`);
+      // The brand Entrar is a filled button too: the button colour and the gradient's image.
+      expect(enter()?.className.split(/\s+/)).toEqual(
+        expect.arrayContaining([
+          'bg-button',
+          'bg-(image:--button-image)',
+          'hover:bg-button-hover',
+          'hover:bg-(image:--button-image-hover)',
+        ]),
+      );
       expect(brandFills(container)).toHaveLength(1);
       expect(hint()?.textContent).toBe(C.online.hintLive);
       // Below the pair, then the hint: the zone's reading order.

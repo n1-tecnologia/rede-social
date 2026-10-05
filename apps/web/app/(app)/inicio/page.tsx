@@ -1,10 +1,9 @@
-import { resolveBranding } from '@rede-social/contracts';
-import { HomeSlots, TenantLogo } from '@rede-social/core/ui';
+import { HomeSlots } from '@rede-social/core/ui';
 import { EmptyState } from '@rede-social/ui';
 import { Sparkles } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { NoticeToast } from '@/components/feedback/NoticeToast';
-import { ProfileNudgeCard } from '@/components/profile/ProfileNudgeCard';
+import { ProfileNudgeOnArrival } from '@/components/profile/ProfileNudgeOnArrival';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { requirePlatformTenants } from '@/lib/platform';
 import { loadOwnProfile } from '@/lib/profile';
@@ -13,11 +12,15 @@ import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /**
- * `/inicio` — the kernel home (D-42, amends D-07): the branded welcome (logo as-is + "Bem-vindo(a) à
- * {tenant}"), the D-02 profile nudge while the member still owes a photo or a bio (R-13), and the
- * home slots the tenant's ENABLED modules registered, or the "Em breve" card when there is none.
+ * `/inicio` — the kernel home (D-42, amends D-07): the home slots the tenant's ENABLED modules
+ * registered, or the "Em breve" card when there is none, and, while the member still owes a photo
+ * or a bio (R-13), the D-02 profile nudge as the "Complete seu perfil" popup that rises over the
+ * page on arrival (2026-10-02; until then it was a card above the slots). There is no visible
+ * welcome block (removed 2026-10-01: the shell's TopBar/rail already carries the tenant's logo, or
+ * its name without one); the page's h1 is screen-reader only.
  * Server-rendered from the bootstrap (deduped with the layout by React `cache`), so there is no
- * client loading state for the brand, the nudge or the widgets.
+ * client loading state for the brand or the widgets; the popup's host renders nothing until it
+ * rises.
  *
  * On the platform host it renders the D-21 landing (02-12 owns the panel at `/plataforma`).
  *
@@ -72,7 +75,6 @@ export default async function InicioPage({
 
   const bootstrap = await requireBootstrap();
   const { tenant } = bootstrap;
-  const branding = resolveBranding(tenant.branding);
   const [slots, profile, tn] = await Promise.all([
     homeSlotsFor(bootstrap),
     loadOwnProfile(),
@@ -81,41 +83,41 @@ export default async function InicioPage({
   const storyExpired = query.aviso === STORY_EXPIRED_NOTICE;
 
   return (
-    <div className="flex flex-col gap-6 px-4 md:px-0">
-      <div className="flex flex-col items-center gap-4">
-        <TenantLogo
-          logoUrl={branding.logoUrl}
-          displayName={tenant.displayName}
-          size="home"
-          className="mx-auto mt-8"
-        />
-        <h1 className="text-center text-2xl font-bold tracking-[-0.02em] text-text">
-          {t('home.welcome', { tenant: tenant.displayName })}
-        </h1>
-      </div>
-
-      {/* The D-02 nudge sits BETWEEN the welcome block and the home slots, and deliberately NOT
-          inside `HomeSlots`: it is kernel, not a module widget, so it must not compete for slot
-          ordering (D-42). With zero module slots the page reads welcome → nudge → the existing
-          "Em breve" card; the nudge does not suppress that empty state. `needsNudge` is the
-          SERVER's flag (R-13), never a client recomputation and never `localStorage`. */}
-      {profile?.needsNudge ? (
-        <ProfileNudgeCard displayName={profile.displayName} avatarAssetId={profile.avatarAssetId} />
-      ) : null}
+    // The REINE timeline (2026-10-02): no side gutter and no top padding on a phone, so the stories
+    // band and the posts run edge to edge right under the top bar's 7px of page ground; the cards
+    // between them (the empty and error states) keep the `px-4` gutter on their own. The next
+    // event is no card here since 2026-10-03: it is the red dot on the Eventos tab. From md up
+    // everything sits in the centred column, as before.
+    <div className="flex flex-col gap-3">
+      {/* No visible welcome block (product decision, 2026-10-01): the tenant's logo, or its name
+          without one, already heads the shell (TopBar / rail). The page keeps its h1 for assistive
+          tech only. */}
+      <h1 className="sr-only">{t('nav.home')}</h1>
 
       <HomeSlots
         slots={slots}
         empty={
-          <EmptyState
-            variant="card"
-            icon={Sparkles}
-            title={t('home.soonTitle')}
-            body={t('home.soonBody', { tenant: tenant.displayName })}
-          />
+          <div className="px-4 md:px-0">
+            <EmptyState
+              variant="card"
+              icon={Sparkles}
+              title={t('home.soonTitle')}
+              body={t('home.soonBody', { tenant: tenant.displayName })}
+            />
+          </div>
         }
       />
 
       {storyExpired ? <NoticeToast message={tn('fallback.storyExpired')} param="aviso" /> : null}
+
+      {/* The D-02 nudge is the "Complete seu perfil" POPUP since 2026-10-02 (a product decision
+          that amends D-02's "a card, never a modal", after the reference app): Início is where the
+          app is entered (`/entrar` lands here), so it rises over the page on arrival, outside
+          `HomeSlots` (kernel, not a module widget, D-42) and taking no room in the column. WHO sees
+          it is the SERVER's `needsNudge` (R-13), never a client recomputation: the host is mounted
+          only while it holds, so a member who dismissed the old card never sees the popup. WHEN is
+          the host's: 500 ms after the page settles, once per visit (`lib/profile-nudge.ts`). */}
+      {profile?.needsNudge ? <ProfileNudgeOnArrival membershipId={profile.membershipId} /> : null}
     </div>
   );
 }

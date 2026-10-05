@@ -1,7 +1,7 @@
 import type { PlatformTenantDetail } from '@rede-social/contracts';
-import { deriveBrandColors, NEUTRAL_BRAND } from '@rede-social/contracts/branding';
+import { deriveBrandColors, emptyBrandLook, NEUTRAL_BRAND } from '@rede-social/contracts/branding';
 import { describe, expect, it } from 'vitest';
-import { toBrandingView } from './branding-view';
+import { brandingViewKey, brandLookKey, toBrandingView } from './branding-view';
 
 const contrast = {
   onPrimary: { ratio: 5.2, ok: true },
@@ -80,5 +80,38 @@ describe('toBrandingView (02-14)', () => {
     expect(view.hasSource).toBe(true);
     expect(view.logoUrl).toBeNull();
     expect(view.contrast).toBe(contrast);
+  });
+});
+
+/**
+ * 2026-10-03: the view carries the saved look (canonical, all `null` for an older brand), and the
+ * look editor's key follows the look alone, so a pair save never throws away a look being edited.
+ */
+describe('the look in the Marca view', () => {
+  it('reads an older brand as the system look and a saved one canonical', () => {
+    expect(toBrandingView(detail({})).look).toEqual(emptyBrandLook());
+    const view = toBrandingView(
+      detail({ look: { lightTone: 'cinza', darkTone: 'cafe', titleFont: 'Manrope' } }),
+    );
+    expect(view.look.lightTone).toBeNull();
+    expect(view.look.darkTone).toBe('cafe');
+    expect(view.look.titleFont).toBeNull();
+  });
+
+  it('keys the look editor on the look alone, the form on the pair and the assets', () => {
+    const before = toBrandingView(detail({ colors: { primary: '#7c3aed', secondary: '#a78bfa' } }));
+    const pairSaved = toBrandingView(
+      detail({ colors: { primary: '#0f766e', secondary: '#14b8a6' } }),
+    );
+    expect(brandLookKey(pairSaved)).toBe(brandLookKey(before));
+    expect(brandingViewKey(pairSaved)).not.toBe(brandingViewKey(before));
+    const lookSaved = toBrandingView(
+      detail({
+        colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+        look: { lightTone: 'lilas' },
+      }),
+    );
+    expect(brandLookKey(lookSaved)).not.toBe(brandLookKey(before));
+    expect(brandingViewKey(lookSaved)).toBe(brandingViewKey(before));
   });
 });

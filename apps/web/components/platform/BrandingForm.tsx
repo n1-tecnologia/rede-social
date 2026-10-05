@@ -9,9 +9,8 @@ import {
 } from '@rede-social/contracts/branding';
 import { BrandPreview, type BrandPreviewLabels } from '@rede-social/core/ui';
 import { Button, Card, SectionTitle, useToast } from '@rede-social/ui';
-import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { type ReactNode, useMemo, useState, useTransition } from 'react';
 import type {
   completeBrandingUploadAction,
   getBrandingStatusAction,
@@ -19,12 +18,15 @@ import type {
   saveBrandColorsAction,
   startBrandingUploadAction,
 } from '@/app/(platform)/plataforma/tenants/[id]/marca/actions';
+import { resolveButtonPairs } from '@/lib/bg-tone';
 import type { BrandingView } from '@/lib/branding-view';
 import { ColorField } from './ColorField';
 import { ContrastFeedback } from './ContrastFeedback';
-import { DerivedIcons, type IconsStatus } from './DerivedIcons';
+import { DerivedIcons } from './DerivedIcons';
 import { IconOverrideUpload } from './IconOverrideUpload';
 import { LogoUpload } from './LogoUpload';
+import { useBrandingView } from './useBrandingView';
+import { useOptionalBrandLook } from './wizard/brand-look-context';
 
 /**
  * The server actions the form calls. The assets card renders only when the three upload actions
@@ -38,10 +40,6 @@ export type BrandingActions = {
   removeIcon?: typeof removeIconOverrideAction;
 };
 
-/** Icon-derivation poll: every 3 s, at most 20 times (≈ 60 s), then the honest "slow" copy (D-28). */
-const POLL_MS = 3000;
-const pollExhausted = (attempts: number) => attempts >= 20;
-
 export interface BrandingFormProps {
   tenantId: string;
   /** The server-rendered view; the page remounts the form (`key`) whenever it changes. */
@@ -49,6 +47,12 @@ export interface BrandingFormProps {
   /** Strings of the kernel `BrandPreview` (props, never a hook — Phase 8 reuses it as-is). */
   previewLabels: BrandPreviewLabels;
   actions: BrandingActions;
+  /**
+   * The look's cards (2026-10-03, `BrandLookForm`), rendered right after the colours card. Their
+   * state lives in `BrandLookProvider` above this form, so a remount of the form (a pair save or an
+   * upload) never loses a look being edited.
+   */
+  lookSlot?: ReactNode;
 }
 
 /**
@@ -64,21 +68,27 @@ export interface BrandingFormProps {
  * client-component pattern).
  *
  * Assets card (Task 2): `LogoUpload` + `IconOverrideUpload` feed `applyView`; the app-icons card
- * polls `getBrandingStatusAction` every 3 s (at most 20 times) while `iconsReady` is false, drops a
- * stale answer (older `iconVersion`, T-02-117) and refreshes the route once the set is ready.
+ * follows `useBrandingView`, which polls `getBrandingStatusAction` every 3 s (at most 20 times) while
+ * `iconsReady` is false, drops a stale answer (older `iconVersion`, T-02-117) and refreshes the route
+ * once the set is ready — the same hook the tenant wizard's Marca step runs.
+ *
+ * The look (2026-10-03): when `BrandLookProvider` wraps the tab, the two frames also paint the look
+ * as it is being edited (the light ground, the dark mode's colours and ground, each theme's buttons
+ * from `resolveButtonPairs`, over the pair as typed), and its cards render after the colours card
+ * (`lookSlot`). Their save is their own: "Salvar alterações" keeps the pair alone, with its D-41
+ * contrast gate exactly as before.
  */
 export function BrandingForm({
   tenantId,
   view: initialView,
   previewLabels,
   actions,
+  lookSlot,
 }: BrandingFormProps) {
   const t = useTranslations('platformBranding');
   const tp = useTranslations('platform');
   const toast = useToast();
-  const router = useRouter();
-  const [view, setView] = useState(initialView);
-  const [attempts, setAttempts] = useState(0);
+  const { view, adopt, iconStatus } = useBrandingView(tenantId, initialView, actions.status);
   const [primary, setPrimary] = useState(view.colors.primary);
   const [secondary, setSecondary] = useState(view.colors.secondary);
   const [lastValid, setLastValid] = useState({
@@ -89,6 +99,9 @@ export function BrandingForm({
   const [serverReport, setServerReport] = useState<ContrastReport | null>(null);
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
   const [pending, startTransition] = useTransition();
+  // The look being edited, when the tab carries its editor: the frames show it over this pair.
+  const look = useOptionalBrandLook();
+  const lookColors = look?.previewColors ?? null;
 
   const report = useMemo(() => contrastReport(deriveBrandColors(lastValid)), [lastValid]);
   const shownReport = serverReport ?? report;
@@ -117,28 +130,8 @@ export function BrandingForm({
       setSecondary(next.colors.secondary);
       setLastValid({ primary: next.colors.primary, secondary: next.colors.secondary });
     }
-    setView(next);
-    setAttempts(0);
+    adopt(next);
   };
-
-  const iconStatus: IconsStatus = view.iconsReady
-    ? 'ready'
-    : pollExhausted(attempts)
-      ? 'slow'
-      : 'generating';
-
-  useEffect(() => {
-    if (!view.hasSource || view.iconsReady || pollExhausted(attempts)) return;
-    const id = setTimeout(async () => {
-      const result = await actions.status(tenantId);
-      if (result.ok && result.view.iconVersion >= view.iconVersion) {
-        setView(result.view);
-        if (result.view.iconsReady) router.refresh();
-      }
-      setAttempts((n) => n + 1);
-    }, POLL_MS);
-    return () => clearTimeout(id);
-  }, [view.hasSource, view.iconsReady, view.iconVersion, attempts, tenantId, actions, router]);
 
   const uploads =
     actions.start && actions.complete && actions.removeIcon
@@ -153,8 +146,7 @@ export function BrandingForm({
         ...(lowContrast && confirmed ? { confirmLowContrast: true } : {}),
       });
       if (result.ok) {
-        setView(result.view);
-        setAttempts(0);
+        adopt(result.view);
         setServerReport(null);
         setConfirmed(false);
         toast.show({ tone: 'success', message: t('toasts.saved') });
@@ -214,6 +206,17 @@ export function BrandingForm({
           displayName={view.displayName}
           logoUrl={view.logoUrl}
           labels={previewLabels}
+          lightTone={look?.draft.lightTone ?? null}
+          dark={lookColors?.darkColors ?? null}
+          buttons={
+            lookColors
+              ? resolveButtonPairs({
+                  buttonColors: lookColors.buttonColors,
+                  colors: lastValid,
+                  darkColors: lookColors.darkColors,
+                })
+              : null
+          }
         />
         <ContrastFeedback
           report={shownReport}
@@ -235,6 +238,7 @@ export function BrandingForm({
           </Button>
         </div>
       </Card>
+      {lookSlot}
       <DerivedIcons view={view} status={iconStatus} />
     </div>
   );

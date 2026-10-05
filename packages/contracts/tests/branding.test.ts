@@ -1,15 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BUTTON_STYLES,
+  brandingLookBodySchema,
+  brandLookSchema,
   brandStyleVars,
   contrastRatio,
   contrastReport,
+  DARK_TONES,
+  DEFAULT_DARK_TONE,
+  DEFAULT_LIGHT_TONE,
+  DEFAULT_TITLE_FONT,
   deriveBrandColors,
+  emptyBrandLook,
   hostBrandingSchema,
+  isFontFamilyName,
+  LIGHT_TONES,
   NAVY,
   NEUTRAL_BRAND,
+  normalizeBrandLook,
   relativeLuminance,
   resolveBranding,
   toHostBranding,
+  WHITE,
+  withDarkPrimary,
 } from '../src/branding';
 import { hostTenantSchema } from '../src/hosts';
 
@@ -190,11 +203,247 @@ describe('hostTenantSchema / hostBrandingSchema — strict public contract (T-02
     expect(hostTenantSchema.safeParse(withoutPrimary).success).toBe(false);
   });
 
-  it('toHostBranding drops the panel-only facts (iconUrl, iconVersion)', () => {
+  it('toHostBranding drops the panel-only facts (iconUrl, iconVersion) and carries the look', () => {
     const resolved = resolveBranding({ iconUrl: '/x.png', iconVersion: 2 });
     const host = toHostBranding(resolved);
     expect(host).not.toHaveProperty('iconUrl');
     expect(host).not.toHaveProperty('iconVersion');
-    expect(Object.keys(host).sort()).toEqual(['colors', 'faviconUrl', 'iconUrls', 'logoUrl']);
+    expect(Object.keys(host).sort()).toEqual([
+      'colors',
+      'faviconUrl',
+      'iconUrls',
+      'logoUrl',
+      'look',
+    ]);
+    expect(host.look).toEqual(emptyBrandLook());
+  });
+
+  it('carries a saved look through the strict answer; an answer without it reads the default look', () => {
+    const resolved = resolveBranding({
+      colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+      look: { lightTone: 'amarelado', buttonColors: { style: 'gradient' } },
+    });
+    const parsed = hostTenantSchema.parse({ ...body, branding: toHostBranding(resolved) });
+    expect(parsed.branding.look?.lightTone).toBe('amarelado');
+    expect(parsed.branding.look?.buttonColors.style).toBe('gradient');
+    // An API older than the web sends no `look`: the strict answer still parses, and resolves to
+    // the system's look.
+    const { look: _look, ...older } = toHostBranding(resolved);
+    const parsedOlder = hostBrandingSchema.parse(older);
+    expect(parsedOlder.look).toBeUndefined();
+    expect(resolveBranding(parsedOlder).look).toEqual(emptyBrandLook());
+  });
+});
+
+/**
+ * The look beyond the pair (2026-10-03): six settings the wizard used to preview only, persisted in
+ * `tenants.branding.look`. `null` is always the system's own value, so an older brand renders as
+ * before; the stored shape is tolerant of unknown keys (a newer API must not break an older web)
+ * and loud on malformed values; the body of the look's route is strict at every level.
+ */
+describe('brand look — tones, buttons, dark colours, title font and font colours', () => {
+  const ALL_NULL = {
+    lightTone: null,
+    darkTone: null,
+    darkColors: { primary: null, secondary: null },
+    titleFont: null,
+    fontColors: { title: { light: null, dark: null }, appName: { light: null, dark: null } },
+    buttonColors: {
+      style: 'solid',
+      fill: { light: null, dark: null },
+      fillEnd: { light: null, dark: null },
+      ink: { light: null, dark: null },
+    },
+  };
+
+  it('the closed lists: eight tones per theme, the defaults first, two button styles', () => {
+    expect([...LIGHT_TONES]).toEqual([
+      'cinza',
+      'amarelado',
+      'laranjado',
+      'avermelhado',
+      'lilas',
+      'azulado',
+      'agua',
+      'esverdeado',
+    ]);
+    expect([...DARK_TONES]).toEqual([
+      'grafite',
+      'cafe',
+      'terracota',
+      'vinho',
+      'berinjela',
+      'azul-noite',
+      'petroleo',
+      'musgo',
+    ]);
+    expect(LIGHT_TONES[0]).toBe(DEFAULT_LIGHT_TONE);
+    expect(DARK_TONES[0]).toBe(DEFAULT_DARK_TONE);
+    expect([...BUTTON_STYLES]).toEqual(['solid', 'gradient']);
+  });
+
+  it('a stored brand without a look (or with {}) reads the all-null look', () => {
+    expect(emptyBrandLook()).toEqual(ALL_NULL);
+    expect(brandLookSchema.parse({})).toEqual(ALL_NULL);
+    expect(resolveBranding({}).look).toEqual(ALL_NULL);
+    expect(resolveBranding({ look: {} }).look).toEqual(ALL_NULL);
+  });
+
+  it('fills the gaps of a partial look, lower-cases its hexes and drops unknown keys', () => {
+    const look = brandLookSchema.parse({
+      buttonColors: { fill: { light: '#E3AF3F' }, future: true },
+      fontColors: { title: { dark: '#FFD27A' } },
+      somethingNew: 'x',
+    });
+    expect(look.buttonColors.fill).toEqual({ light: '#e3af3f', dark: null });
+    expect(look.buttonColors.style).toBe('solid');
+    expect(look.fontColors.title).toEqual({ light: null, dark: '#ffd27a' });
+    expect(look).not.toHaveProperty('somethingNew');
+    expect(look.buttonColors).not.toHaveProperty('future');
+  });
+
+  it('is loud on a malformed value, like a malformed brand colour', () => {
+    for (const bad of [
+      { lightTone: 'rosa' },
+      { darkTone: 'cinza' },
+      { darkColors: { primary: 'red' } },
+      { titleFont: 'Pop"pins' },
+      { buttonColors: { style: 'outline' } },
+      { fontColors: { appName: { light: '#fff' } } },
+    ]) {
+      expect(() => resolveBranding({ look: bad }), JSON.stringify(bad)).toThrow();
+    }
+  });
+
+  it('normalizeBrandLook: the default tones and Manrope have ONE spelling, null', () => {
+    const look = normalizeBrandLook(
+      brandLookSchema.parse({
+        lightTone: DEFAULT_LIGHT_TONE,
+        darkTone: DEFAULT_DARK_TONE,
+        titleFont: DEFAULT_TITLE_FONT,
+      }),
+    );
+    expect(look.lightTone).toBeNull();
+    expect(look.darkTone).toBeNull();
+    expect(look.titleFont).toBeNull();
+    const kept = normalizeBrandLook(
+      brandLookSchema.parse({ lightTone: 'lilas', darkTone: 'musgo', titleFont: 'Poppins' }),
+    );
+    expect([kept.lightTone, kept.darkTone, kept.titleFont]).toEqual(['lilas', 'musgo', 'Poppins']);
+    expect(resolveBranding({ look: { lightTone: 'cinza' } }).look.lightTone).toBeNull();
+  });
+
+  it('isFontFamilyName: letters, digits and single inner spaces, 60 at most', () => {
+    for (const name of ['Poppins', 'Open Sans', 'M PLUS 1p', 'Source Sans 3', 'a'.repeat(60)]) {
+      expect(isFontFamilyName(name), name).toBe(true);
+    }
+    for (const value of [
+      '',
+      ' Poppins',
+      'Poppins ',
+      'Open  Sans',
+      'Pop"pins',
+      "Pop'pins",
+      'Poppins;color:red',
+      'Poppins&text=x',
+      'Poppins)',
+      'Lóra',
+      'a'.repeat(61),
+      42,
+      null,
+    ]) {
+      expect(isFontFamilyName(value), String(value)).toBe(false);
+    }
+  });
+});
+
+describe('withDarkPrimary — the dark accent follows the look', () => {
+  const pair = deriveBrandColors({ primary: '#7c3aed', secondary: '#a78bfa' });
+
+  it('no own dark primary: the derivation stands (the very same object)', () => {
+    expect(withDarkPrimary(pair, null)).toBe(pair);
+    expect(withDarkPrimary(pair, undefined)).toBe(pair);
+  });
+
+  it('an own dark primary replaces the accent and takes the ink that reads on it', () => {
+    const pale = withDarkPrimary(pair, '#FFB4A8');
+    expect(pale.primaryDark).toBe('#ffb4a8');
+    expect(pale.onPrimaryDark).toBe(NAVY);
+    expect(withDarkPrimary(pair, '#1a237e').onPrimaryDark).toBe(WHITE);
+    // The light half is never touched.
+    expect([pale.primary, pale.secondary, pale.onPrimary]).toEqual([
+      pair.primary,
+      pair.secondary,
+      pair.onPrimary,
+    ]);
+  });
+
+  it('resolveBranding: the look own dark primary wins over the persisted accent', () => {
+    const resolved = resolveBranding({
+      colors: { ...pair, primaryDark: '#000001', onPrimaryDark: '#000002' },
+      look: { darkColors: { primary: '#ffb4a8' } },
+    });
+    expect(resolved.colors.primaryDark).toBe('#ffb4a8');
+    expect(resolved.colors.onPrimaryDark).toBe(NAVY);
+    expect(brandStyleVars(resolved)['--brand-primary-dark']).toBe('#ffb4a8');
+    // A dark secondary of its own never enters the five colours (the CSS reads it apart).
+    expect(
+      resolveBranding({ colors: pair, look: { darkColors: { secondary: '#00ff00' } } }).colors,
+    ).toEqual(pair);
+  });
+});
+
+describe('brandingLookBodySchema — PUT …/branding/look, strict at every level', () => {
+  it('{} is the whole system look (a PUT replaces the look)', () => {
+    expect(brandingLookBodySchema.parse({})).toEqual(emptyBrandLook());
+  });
+
+  it('accepts a complete look and returns it canonical in case', () => {
+    const parsed = brandingLookBodySchema.parse({
+      lightTone: 'amarelado',
+      darkTone: 'cafe',
+      darkColors: { primary: '#FFB4A8', secondary: null },
+      titleFont: 'Playfair Display',
+      fontColors: { title: { light: '#7C2D12', dark: '#FFD27A' }, appName: { light: '#0F766E' } },
+      buttonColors: {
+        style: 'gradient',
+        fill: { light: '#E3AF3F', dark: '#F0CB7A' },
+        fillEnd: { light: '#FFD27A' },
+        ink: { light: '#382317' },
+      },
+    });
+    expect(parsed.darkColors.primary).toBe('#ffb4a8');
+    expect(parsed.fontColors.appName).toEqual({ light: '#0f766e', dark: null });
+    expect(parsed.buttonColors.fillEnd).toEqual({ light: '#ffd27a', dark: null });
+    expect(parsed.titleFont).toBe('Playfair Display');
+  });
+
+  it('refuses an unknown key at the top level and inside every group', () => {
+    for (const bad of [
+      { brand: 'x' },
+      { darkColors: { tone: 'cafe' } },
+      { fontColors: { body: { light: null } } },
+      { fontColors: { title: { sepia: '#000000' } } },
+      { buttonColors: { hover: { light: '#000000' } } },
+      { buttonColors: { fill: { light: '#000000', dim: '#111111' } } },
+    ]) {
+      expect(brandingLookBodySchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('refuses values outside the rules: free colours as tones, short hexes, unsafe names', () => {
+    for (const bad of [
+      { lightTone: '#f5efe5' },
+      { lightTone: 'grafite' },
+      { darkTone: 'amarelado' },
+      { darkColors: { primary: '#fff' } },
+      { titleFont: 'Poppins, serif' },
+      { titleFont: 'Poppins&display=block' },
+      { titleFont: 'a'.repeat(61) },
+      { buttonColors: { style: 'outline' } },
+      { buttonColors: { ink: { dark: 'rgb(0,0,0)' } } },
+    ]) {
+      expect(brandingLookBodySchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
   });
 });

@@ -1,7 +1,11 @@
 'use client';
 
-import type { CommunityStatus, CommunitySummary } from '@rede-social/module-communities/contracts';
-import { CommunityCard } from '@rede-social/module-communities/ui';
+import {
+  COMMUNITY_MAX_ORDER,
+  type CommunityStatus,
+  type CommunitySummary,
+} from '@rede-social/module-communities/contracts';
+import { CommunityCard, CommunityReorderList } from '@rede-social/module-communities/ui';
 import {
   Button,
   Card,
@@ -10,11 +14,19 @@ import {
   PullToRefresh,
   Skeleton,
   StatusPill,
+  useToast,
 } from '@rede-social/ui';
-import { Archive, TriangleAlert, Users } from 'lucide-react';
+import { Archive, ArrowUpDown, TriangleAlert, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, useCallback, useState } from 'react';
-import { loadMoreCommunitiesAction, refreshCommunitiesAction } from './actions';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+  loadMoreCommunitiesAction,
+  loadOrderableCommunitiesAction,
+  type OrderableCommunitiesResult,
+  type ReorderCommunitiesResult,
+  refreshCommunitiesAction,
+  reorderCommunitiesAction,
+} from './actions';
 
 export interface CommunitiesListProps {
   /** The first page the SERVER rendered — the list is seeded from it and owns every page after it. */
@@ -49,6 +61,15 @@ export function CommunityCardSkeleton() {
 
 const SKELETON_CARDS = [0, 1, 2];
 
+/** The reorder mode's draft: the order the mode opened on, and the order the admin is building. */
+type ReorderDraft = { original: CommunitySummary[]; draft: CommunitySummary[] };
+
+/** Where focus goes once the next render has committed (the mode swaps the controls out). */
+type FocusTarget = 'heading' | 'toggle' | 'save';
+
+const sameOrder = (a: readonly CommunitySummary[], b: readonly CommunitySummary[]) =>
+  a.length === b.length && a.every((community, index) => community.id === b[index]?.id);
+
 /**
  * Three cards, shared with `loading.tsx` so the first paint and the skeleton have the SAME geometry
  * and the swap to content does not shift the page (UI-SPEC E10/loading).
@@ -77,8 +98,26 @@ export function CommunitiesSkeleton() {
  * (D-77), which is what makes the empty state the creation entry point; anything else renders the
  * column. A LOAD-MORE failure is the fourth and is deliberately not any of the other three.
  *
- * Ordering is the server's (`last_activity_at desc, id desc`) and is never restated here: nothing in
- * this file sorts, re-sorts or filters what the API answered.
+ * Ordering is the server's (`position asc, last_activity_at desc, id desc` since 2026-10-03: the
+ * admin's order, then activity) and is never restated here: nothing in this file sorts, re-sorts or
+ * filters what the API answered — the reorder mode below only moves rows in a DRAFT, and the list
+ * shows the server's answer to saving it.
+ *
+ * **2026-10-03 — the reorder mode (managers, `Ativas` only).** A "Reordenar" control sits above the
+ * cards when the viewer holds `communities.community.manage`, the list is `Ativas` and there are at
+ * least two communities to order; a member's markup is unchanged. It opens a mode that:
+ *   - first loads EVERY active community (`loadOrderableCommunitiesAction`), because the order is one
+ *     permutation of the whole set and the list on screen may hold only its first page;
+ *   - swaps the cards for `CommunityReorderList` — compact rows with "Mover para cima/baixo" buttons
+ *     named after each community, disabled at the ends, focus following the moved row — under a
+ *     heading that takes focus as the mode opens, with "Cancelar" and "Salvar ordem";
+ *   - saves through `reorderCommunitiesAction` and re-seeds from its answer (page 1 in the new
+ *     order), toasting the success; a draft identical to the opening order saves nothing;
+ *   - on `order_stale` (a community was created, archived or removed meanwhile) closes, toasts why
+ *     and RELOADS the list, because the draft was built on a set that no longer exists; on any other
+ *     failure keeps the draft and the mode, so "Salvar ordem" can simply be tried again.
+ * Closing the mode returns focus to "Reordenar". While it is open the list neither pulls to refresh
+ * nor pages: there is nothing to append to a permutation.
  *
  * **05.1 — the `Arquivadas` list (D-88) is the same machine over a different keyset.** `status`
  * travels with every refresh and load-more, so a pull or a scroll on `Arquivadas` never swaps the
@@ -97,6 +136,7 @@ export function CommunitiesList({
   status = 'active',
 }: CommunitiesListProps) {
   const t = useTranslations('communities');
+  const toast = useToast();
 
   const [items, setItems] = useState(initialItems);
   const [cursor, setCursor] = useState(initialCursor);
@@ -171,12 +211,125 @@ export function CommunitiesList({
     void refresh();
   }, [refresh]);
 
+  /* ── The reorder mode (2026-10-03) ──────────────────────────────────────────────────────────── */
+
+  const [reorder, setReorder] = useState<ReorderDraft | null>(null);
+  /** True while the whole active set is being read to open the mode. */
+  const [entering, setEntering] = useState(false);
+  /** True while "Salvar ordem" is in flight: every control of the mode is inert. */
+  const [saving, setSaving] = useState(false);
+  const headingId = useId();
+  const helperId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // Wrappers of the two `Button`s focus returns to: the primitive does not forward a ref, so focus
+  // goes through these (the `HighlightEditSheet` idiom).
+  const toggleRef = useRef<HTMLSpanElement>(null);
+  const saveRef = useRef<HTMLSpanElement>(null);
+  const focusAfter = useRef<FocusTarget | null>(null);
+
+  useEffect(() => {
+    const target = focusAfter.current;
+    if (target === null) return;
+    focusAfter.current = null;
+    if (target === 'heading') {
+      headingRef.current?.focus();
+      return;
+    }
+    const wrapper = target === 'toggle' ? toggleRef.current : saveRef.current;
+    wrapper?.querySelector('button')?.focus();
+  });
+
+  // Members never get it, `Arquivadas` never gets it, and one community has no order to choose.
+  const canReorder = canManage && status === 'active' && items.length > 1;
+
+  const startReorder = async () => {
+    if (entering) return;
+    setEntering(true);
+    let result: OrderableCommunitiesResult = { ok: false, code: 'generic' };
+    try {
+      result = await loadOrderableCommunitiesAction();
+    } catch (error) {
+      console.error('communities.order_load_failed', { error: String(error) });
+    }
+    setEntering(false);
+    if (!result.ok) {
+      // The toggle was disabled while it loaded, which dropped its focus: give it back.
+      focusAfter.current = 'toggle';
+      toast.show({
+        tone: 'error',
+        message:
+          result.code === 'too_many'
+            ? t('reorder.errors.tooMany', { limit: COMMUNITY_MAX_ORDER })
+            : t('reorder.errors.load'),
+      });
+      return;
+    }
+    focusAfter.current = 'heading';
+    setReorder({ original: result.items, draft: result.items });
+  };
+
+  /** The list's `onChange`: the new permutation, mapped back onto the draft's own rows. */
+  const moveDraft = useCallback((ids: string[]) => {
+    setReorder((current) => {
+      if (current === null) return current;
+      const byId = new Map(current.draft.map((community) => [community.id, community]));
+      const draft = ids
+        .map((id) => byId.get(id))
+        .filter((community): community is CommunitySummary => community !== undefined);
+      return draft.length === current.draft.length ? { ...current, draft } : current;
+    });
+  }, []);
+
+  const closeReorder = () => {
+    focusAfter.current = 'toggle';
+    setReorder(null);
+  };
+
+  const saveOrder = async () => {
+    if (reorder === null || saving) return;
+    // Nothing moved: no request, no write, no revalidation — the mode simply closes.
+    if (sameOrder(reorder.draft, reorder.original)) {
+      closeReorder();
+      return;
+    }
+
+    setSaving(true);
+    let result: ReorderCommunitiesResult = { ok: false, code: 'generic' };
+    try {
+      result = await reorderCommunitiesAction(reorder.draft.map((community) => community.id));
+    } catch (error) {
+      console.error('communities.reorder_failed', { error: String(error) });
+    }
+    setSaving(false);
+
+    if (result.ok) {
+      // The server's answer IS the new first page: the list re-seeds from it, as a refresh would.
+      setItems(result.items);
+      setCursor(result.nextCursor);
+      setFirstLoadFailed(false);
+      setPageFailed(false);
+      closeReorder();
+      toast.show({ tone: 'success', message: t('toasts.reordered') });
+      return;
+    }
+    if (result.code === 'order_stale') {
+      // The draft was built on a set that no longer exists: close, say why, show the real list.
+      closeReorder();
+      toast.show({ tone: 'error', message: t('reorder.errors.stale') });
+      await refresh();
+      return;
+    }
+    // Anything else keeps the draft and the mode, so "Salvar ordem" can simply be tried again.
+    focusAfter.current = 'save';
+    toast.show({ tone: 'error', message: t('reorder.errors.save') });
+  };
+
   // A LINK, not a `Button`: the shipped button is a `<button>` and the form is a route. The brand
   // styling is the button's, read through the tenant tokens exactly as `Button` reads them.
   const createCta = canManage ? (
     <a
       href="/comunidades/nova"
-      className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+      className="inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
     >
       {t('actions.create')}
     </a>
@@ -281,19 +434,94 @@ export function CommunitiesList({
     );
   }
 
+  // `list.region` names the LIST; `communities.region` names one community's post list on its own
+  // page (UI-SPEC §Copywriting Contract). 05-04 moved this key so the spec's own name is free for the
+  // surface the spec gives it to. The reorder mode keeps the same region: it is the same list.
+  const region =
+    status === 'archived'
+      ? t('list.regionArchived', { tenant: tenantName })
+      : t('list.region', { tenant: tenantName });
+
+  if (reorder !== null) {
+    // Outside `PullToRefresh` on purpose: a pull would re-read a list the mode is not showing.
+    return (
+      <section aria-label={region} data-communities-reordering className="flex flex-col pb-6">
+        <div className="flex flex-col gap-3 px-4 pb-3">
+          <div>
+            <h2
+              id={headingId}
+              ref={headingRef}
+              tabIndex={-1}
+              className="text-base font-bold text-text focus:outline-none"
+            >
+              {t('reorder.title')}
+            </h2>
+            <p id={helperId} className="mt-1 text-xs font-normal text-text-tertiary">
+              {t('reorder.helper')}
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={saving}
+              onClick={closeReorder}
+              data-communities-reorder-cancel
+            >
+              {t('reorder.cancel')}
+            </Button>
+            <span ref={saveRef} className="contents">
+              <Button
+                size="sm"
+                loading={saving}
+                onClick={() => void saveOrder()}
+                data-communities-reorder-save
+              >
+                {saving ? t('reorder.saving') : t('reorder.save')}
+              </Button>
+            </span>
+          </div>
+        </div>
+        <div className="px-4">
+          <CommunityReorderList
+            items={reorder.draft}
+            onChange={moveDraft}
+            disabled={saving}
+            labelledBy={headingId}
+            describedBy={helperId}
+            labels={{
+              moveUp: (name) => t('reorder.moveUp', { community: name }),
+              moveDown: (name) => t('reorder.moveDown', { community: name }),
+              moved: (name, position, total) =>
+                t('reorder.moved', { community: name, position, total }),
+            }}
+          />
+        </div>
+      </section>
+    );
+  }
+
   return (
     <PullToRefresh onRefresh={refresh}>
-      {/* `list.region` names the LIST; `communities.region` names one community's post list on its
-          own page (UI-SPEC §Copywriting Contract). 05-04 moved this key so the spec's own name is
-          free for the surface the spec gives it to. */}
-      <section
-        aria-label={
-          status === 'archived'
-            ? t('list.regionArchived', { tenant: tenantName })
-            : t('list.region', { tenant: tenantName })
-        }
-        className="flex flex-col pb-6"
-      >
+      <section aria-label={region} className="flex flex-col pb-6">
+        {canReorder ? (
+          // An outline control above the cards, right-aligned: the title row's brand control stays
+          // the screen's one primary action (D-86), and this one changes how the list behaves.
+          <div className="flex justify-end px-4 pb-3">
+            <span ref={toggleRef} className="contents">
+              <Button
+                variant="outline"
+                size="sm"
+                loading={entering}
+                onClick={() => void startReorder()}
+                data-communities-reorder
+              >
+                {entering ? null : <ArrowUpDown aria-hidden size={14} className="shrink-0" />}
+                {t('reorder.start')}
+              </Button>
+            </span>
+          </div>
+        ) : null}
         {body}
       </section>
     </PullToRefresh>

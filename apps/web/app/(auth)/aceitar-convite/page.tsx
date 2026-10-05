@@ -1,6 +1,7 @@
 import { publicTenantSchema } from '@rede-social/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { RearmProfileNudge } from '@/components/profile/RearmProfileNudge';
 import { acceptInviteRedirectPath, getBootstrap, loadOrRedirect } from '@/lib/bootstrap';
 import { env } from '@/lib/env';
 import { ConsentFields } from '../ConsentFields';
@@ -132,6 +133,9 @@ export default async function AceitarConvitePage({
           }}
         />
 
+        {/* An accepted invite starts a visit: SUBMITTING makes the "Complete seu perfil" popup due
+            on Início (this page merely shown re-arms nothing). */}
+        <RearmProfileNudge />
         <SubmitButton label={t('submit')} pendingLabel={t('pending')} />
       </form>
     </>

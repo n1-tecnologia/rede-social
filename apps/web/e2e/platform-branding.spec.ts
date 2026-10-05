@@ -3,6 +3,7 @@ import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 import { closeAdmin, deleteTenantBySlug, deleteUserByEmail } from './admin';
 import { closeBrandingAdmin, getTenantBranding, insertVerifiedHost } from './branding-admin';
 import { hosts, isRemote } from './fixtures';
+import { continueFromData, fillTenantData, finishWizard } from './wizard';
 import { ensureWorker } from './worker';
 
 /**
@@ -33,9 +34,6 @@ const SUPER_ADMIN_PASSWORD: string = (() => {
 const API_URL = process.env.API_URL ?? 'http://localhost:8787';
 /** Seed lab primary (scripts/seed.ts) — must never appear on the throwaway tenant's page. */
 const LAB_PRIMARY = '#0f766e';
-
-const UUID_PATH =
-  /\/plataforma\/tenants\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
 
 /** Per-run suffix, stable across worker restarts (02-12 pattern), distinct per project. */
 const rand = process.ppid.toString(36);
@@ -142,28 +140,34 @@ test.afterAll(async () => {
 
 test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, host reflection', () => {
   test('1. preview follows the form; low contrast warns; confirmation saves; the tenant host reflects the new primary', async () => {
-    // New tenant form (02-12) now carries the kernel BrandPreview (E12/empty: the typed name).
+    // The new-tenant wizard: Dados (02-12) names the tenant, then its Personalização step carries
+    // the colours and the kernel BrandPreview (E12/empty: the typed name) below xl; from xl up the
+    // wizard's phone previews the draft beside the form and the frames are hidden.
     await page.goto(`${hosts.platform}/plataforma/novo`);
-    await page.locator('#displayName').fill(name);
-    await page.locator('#slug').fill(slug);
+    await fillTenantData(page, { name, slug, email: adminEmail });
+    await continueFromData(page);
     const light = page.locator('[data-brand-scope][data-theme="light"]');
     const dark = page.locator('[data-brand-scope][data-theme="dark"]');
-    await expect(light).toBeVisible();
-    await expect(dark).toBeVisible();
-    await expect(light).toContainText(name);
+    if (test.info().project.name === 'desktop-chromium') {
+      await expect(light).toBeHidden();
+      await expect(dark).toBeHidden();
+      await expect(page.locator('[data-device-screen]')).toContainText(name);
+    } else {
+      await expect(light).toBeVisible();
+      await expect(dark).toBeVisible();
+      await expect(light).toContainText(name);
+    }
 
     await page.locator('#primary').fill('#7c3aed');
     await page.locator('#secondary').fill('#a78bfa');
-    await page.locator('#adminEmail').fill(adminEmail);
     // The alias fix, proven by the RENDERED colour of the brand Button inside each frame.
     await expect.poll(() => brandButtonBg(page, 'light')).toBe('rgb(124, 58, 237)');
     expect(await brandButtonBg(page, 'dark')).not.toBe(await brandButtonBg(page, 'light'));
 
-    await page.getByRole('button', { name: 'Criar tenant' }).click();
-    await expect(page).toHaveURL(new RegExp(`${UUID_PATH.source}/marca`), { timeout: 30_000 });
-    const match = page.url().match(UUID_PATH);
-    if (!match) throw new Error(`no tenant id in ${page.url()}`);
-    tenantId = match[0].slice('/plataforma/tenants/'.length);
+    // The wizard creates the tenant at the summary's confirmation; the Marca TAB asserted below is
+    // the tenant page's.
+    tenantId = await finishWizard(page);
+    await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
 
     await insertVerifiedHost(slug, host);
     expect((await byHost()).branding.colors.primary).toBe('#7c3aed'); // host cache warmed
@@ -207,7 +211,7 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
     await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
     // E14/empty: no logo yet, no app-icons card.
     await expect(
-      page.getByText('Nenhum logo enviado — o nome da comunidade aparece no lugar.'),
+      page.getByText('Nenhum logo enviado. O nome de exibição aparece no lugar.'),
     ).toBeVisible();
     await expect(page.locator('[data-icons-status]')).toHaveCount(0);
     await waitForHydration(page, '[data-upload-zone="logo"] input[type="file"]');
@@ -372,7 +376,14 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
 
   test('5. mobile: the new-tenant preview stacks two 200 px frames', async () => {
     test.skip(test.info().project.name !== 'mobile-chromium', 'phone layout only');
+    // The colours (and their preview) are the wizard's Personalização step, after Dados.
     await page.goto(`${hosts.platform}/plataforma/novo`);
+    await fillTenantData(page, {
+      name: 'E2E Prévia',
+      slug: 'e2e-previa-celular',
+      email: 'previa@e2e.local',
+    });
+    await continueFromData(page);
     const frames = page.locator('[data-brand-scope]');
     await expect(frames).toHaveCount(2);
     const [lightBox, darkBox] = await Promise.all([

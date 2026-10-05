@@ -21,6 +21,7 @@ import {
 import { type ApiFetch, apiSession, closeDomainsAdmin } from './domains-admin';
 import { hosts, isRemote, login, SEED_PASSWORD } from './fixtures';
 import { closeTenantFixtures, setTenantModuleFlag, throwawayOrigin } from './tenant-fixtures';
+import { continueFromData, finishWizard } from './wizard';
 import { ensureWorker } from './worker';
 
 /**
@@ -426,22 +427,20 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
         .toBe('light');
     }
 
-    // (b) D-31 form: name, slug (the suggestion is cleared first), colours, first-admin e-mail.
+    // (b) D-31 form: name, slug (the suggestion is cleared first), first-admin e-mail; the colours
+    // are the next step's (Personalização).
     await page.goto(`${hosts.platform}/plataforma/novo`);
+    await expect(page.locator('form[data-draft-ready]')).toBeVisible();
     await page.locator('#displayName').fill(displayName);
     await page.locator('#slug').clear();
     await page.locator('#slug').fill(slug);
-    await page.locator('#primary').fill(PRIMARY_1);
-    await page.locator('#secondary').fill(SECONDARY_1);
     await page.locator('#adminEmail').fill(adminEmail);
-    await page.getByRole('button', { name: 'Criar tenant' }).click();
-    await expect(page).toHaveURL(/\/plataforma\/tenants\/[0-9a-f-]{36}(\/marca)?$/, {
-      timeout: 30_000,
-    });
-    const idMatch = page.url().match(/\/plataforma\/tenants\/([0-9a-f-]{36})/);
-    if (!idMatch?.[1]) throw new Error(`no tenant id in ${page.url()}`);
-    tenantId = idMatch[1];
+    // The wizard creates the tenant at the summary's confirmation and lands on its invite step;
+    // the tenant page is one navigation away.
+    await continueFromData(page);
+    tenantId = await finishWizard(page, { primary: PRIMARY_1, secondary: SECONDARY_1 });
     expect(tenantId).toMatch(/^[0-9a-f-]{36}$/);
+    await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
     await expect(page.getByRole('heading', { level: 1, name: displayName })).toBeVisible();
 
     // (c) D-36 negative BEFORE verification: by-host 404, the host renders the generic neutral shell.
@@ -632,9 +631,8 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       'href',
       new RegExp(`/m/${slug}/manifest\\.webmanifest$`),
     );
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
-      `Bem-vindo(a) à ${displayName}`,
-    );
+    // The brand name is proven by the logo's alt above; Início's h1 is screen-reader only.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
 
     const html = await page.content();
     for (const hex of [...SEED_PRIMARIES, NEUTRAL, PRIMARY_1]) expect(html).not.toContain(hex);
